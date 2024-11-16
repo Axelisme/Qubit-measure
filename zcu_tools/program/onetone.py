@@ -1,5 +1,4 @@
 import qick as qk  # type: ignore
-from zcu_tools.configuration import parse_res_pulse
 
 from .flux import make_fluxControl
 from .util import create_pulse
@@ -8,11 +7,9 @@ from .util import create_pulse
 class OnetoneProgram(qk.AveragerProgram):
     def initialize(self):
         cfg = self.cfg
-        glb_cfg: dict = cfg["global"]
-        res_cfg = glb_cfg["res_cfgs"][cfg["resonator"]]
-        res_pulse_cfg = parse_res_pulse(cfg)
+        res_cfg = cfg["resonator"]
+        res_pulse_cfg = cfg["res_pulse"]
 
-        self.gbl_cfg = glb_cfg
         self.res_cfg = res_cfg
 
         # declare the resonator channel and readout channels
@@ -20,9 +17,9 @@ class OnetoneProgram(qk.AveragerProgram):
         self.declare_gen(ch=res_ch, nqz=res_cfg["nqz"])
 
         # prepare the flux control
-        flux_cfgs = glb_cfg["flux_cfgs"]
-        self.flux_ctrl = make_fluxControl(self, cfg["flux"]["method"], flux_cfgs)
-        self.flux_ctrl.set_flux(flux=cfg["flux"]["value"])
+        flux_cfg = cfg["flux"]
+        self.flux_ctrl = make_fluxControl(self, flux_cfg["method"], flux_cfg)
+        self.flux_ctrl.set_flux(flux=flux_cfg["value"])
 
         for ro_ch in res_cfg["ro_chs"]:
             self.declare_readout(

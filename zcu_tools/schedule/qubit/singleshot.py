@@ -1,9 +1,9 @@
 import numpy as np
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
+from copy import deepcopy
 
 from zcu_tools.analysis import singleshot_analysis
-from zcu_tools.configuration import parse_res_pulse
 from zcu_tools.program import SingleShotProgram
 
 
@@ -17,10 +17,12 @@ def measure_fid(
 
 
 def scan_pdr_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
     sweep_cfg = cfg["sweep"]
     pdrs = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
 
-    res_pulse = parse_res_pulse(cfg)
+    res_pulse = cfg["res_pulse"]
 
     fids = []
     for pdr in tqdm(pdrs):
@@ -33,10 +35,12 @@ def scan_pdr_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
 
 
 def scan_len_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
     sweep_cfg = cfg["sweep"]
     lens = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 
-    res_pulse = parse_res_pulse(cfg)
+    res_pulse = cfg["res_pulse"]
 
     fids = []
     for length in tqdm(lens):
@@ -50,10 +54,12 @@ def scan_len_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
 
 
 def scan_freq_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
     sweep_cfg = cfg["sweep"]
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 
-    res_pulse = parse_res_pulse(cfg)
+    res_pulse = cfg["res_pulse"]
 
     fids = []
     for fpt in tqdm(fpts):
@@ -66,9 +72,11 @@ def scan_freq_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
 
 
 def scan_style_fid(soc, soccfg, cfg) -> dict:
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
     sweep_list = cfg["sweep"]
 
-    res_pulse = parse_res_pulse(cfg)
+    res_pulse = cfg["res_pulse"]
 
     fids = {}
     for style in sweep_list:

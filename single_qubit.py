@@ -24,10 +24,13 @@ import numpy as np
 
 sys.path.append(os.getcwd())
 
+
 import zcu_tools.analysis as zf
 import zcu_tools.program as zp
 import zcu_tools.schedule as zs
-from zcu_tools import DefaultCfg, make_cfg, make_sweep
+
+# ruff: noqa: I001
+from zcu_tools import DefaultCfg, create_datafolder, make_cfg, make_sweep, save_data
 
 # %% [markdown]
 # # Connect to zcu216
@@ -51,7 +54,7 @@ print(soccfg)
 # print(soc)
 
 # %% [markdown]
-# # Reload
+# # Utility functions
 
 
 # %%
@@ -75,6 +78,13 @@ def reload_zcutools():
     reload(zf)
     reload(zs)
 
+
+# %% [markdown]
+# # Create data folder
+
+# %%
+data_root = os.path.join(os.getcwd(), "Database")
+database_path = create_datafolder(data_root)
 
 # %% [markdown]
 # # Predefine parameters
@@ -117,7 +127,7 @@ exp_cfg = {
 
 
 # %%
-cfg = make_cfg(exp_cfg, reps=10, rounds=20)
+cfg = make_cfg(exp_cfg, reps=10, rounds=2)
 
 Is, Qs = zs.measure_lookback(soc, soccfg, cfg)
 
@@ -132,8 +142,18 @@ plt.title("Averages = " + str(cfg["rounds"]))
 
 # %%
 adc_trig_offset = exp_cfg["adc_trig_offset"]
+DefaultCfg.set_res(res_name, adc_trig_offset=adc_trig_offset)
 
-# TODO: Save the data.
+filename = "lookback"
+ts = soc.cycles2us(1) * np.arange(len(Is))
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Time", "unit": "s", "values": ts * 1e-6},
+    z_info={"name": "Signal", "unit": "a.u.", "values": Is + 1j * Qs},
+    comment=f"adc_trig_offset = {adc_trig_offset}us",
+    tag="Lookback",
+)
+
 
 # %% [markdown]
 # # Resonator Frequency
@@ -150,12 +170,11 @@ exp_cfg = {
         "length": ro_length,  # us
     },
     "flux": {"method": flux_method, "value": 0},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 3.0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(5700, 6150, 11)
+exp_cfg["sweep"] = make_sweep(5700, 6150, 5)
 cfg = make_cfg(exp_cfg, reps=2000, rounds=1)
 
 fpts, signals = zs.measure_res_freq(soc, soccfg, cfg)
@@ -166,7 +185,7 @@ plt.plot(fpts, np.abs(signals))
 # %%
 guess_r = 5990
 
-exp_cfg["sweep"] = make_sweep(guess_r - 20, guess_r + 20, 11)
+exp_cfg["sweep"] = make_sweep(guess_r - 20, guess_r + 20, 5)
 cfg = make_cfg(exp_cfg, res_pulse={"gain": 1000}, reps=2000, rounds=1)
 
 fpts, signals1 = zs.measure_res_freq(soc, soccfg, cfg)
@@ -192,7 +211,23 @@ r_f - r_lf
 # r_lf = 5001
 
 # %%
-# TODO: Save the data.
+filename = "res_freq 1k gain"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals1},
+    comment=f"resonator frequency = {r_f}MHz",
+    tag="OneTone",
+)
+
+filename = "res_freq 30k gain"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals2},
+    comment=f"resonator frequency = {r_lf}MHz",
+    tag="OneTone",
+)
 
 # %% [markdown]
 # # Onetone Dependences
@@ -211,7 +246,6 @@ exp_cfg = {
         "length": ro_length,
     },
     "flux": {"method": flux_method, "value": 0},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 3.0,  # us
 }
 
@@ -251,7 +285,15 @@ plt.pcolormesh(fpts, pdrs, NormalizeData(np.abs(signals2D)).T)
 # %%
 res_gain = 2200
 
-# TODO: Save the data.
+filename = "res_power_dependence"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+    y_info={"name": "Power", "unit": "a.u.", "values": pdrs},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+    comment="power dependence",
+    tag="OneTone",
+)
 
 # %% [markdown]
 # ## Flux dependence
@@ -267,14 +309,13 @@ exp_cfg = {
         "length": ro_length,
     },
     "flux": {"method": flux_method},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 3.0,  # us
 }
 
 # %%
 exp_cfg["sweep"] = {
-    "flux": make_sweep(-30000, 30000, step=5000),
-    "freq": make_sweep(r_f - 3, r_f + 3, 11),
+    "flux": make_sweep(-30000, 30000, step=10000),
+    "freq": make_sweep(r_f - 3, r_f + 3, 5),
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=1)
 
@@ -287,15 +328,23 @@ plt.pcolormesh(fpts, flxs, np.abs(signals2D).T)
 # %%
 sw_spot = 10000
 
-DefaultCfg.set_qubit_cfg(qubit_name, sw_spot=sw_spot)
+DefaultCfg.set_qub(qubit_name, sw_spot={flux_method: sw_spot})
 
-# TODO: Save the data.
+filename = "res_flux_dependence"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+    y_info={"name": "Flux", "unit": "a.u.", "values": flxs},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+    comment="",
+    tag="OneTone",
+)
 
 # %% [markdown]
 # ## Set Readout pulse
 
 # %%
-DefaultCfg.add_res_pulse(
+DefaultCfg.set_res_pulse(
     res_name,
     readout_rf={
         "style": res_style,
@@ -323,12 +372,11 @@ exp_cfg = {
         "length": 4,
     },
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 5.0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(3200, 5000, 11)
+exp_cfg["sweep"] = make_sweep(3200, 5000, 5)
 cfg = make_cfg(exp_cfg, reps=2000, rounds=1)
 
 fpts, signals = zs.measure_qubit_freq(soc, soccfg, cfg)
@@ -346,7 +394,7 @@ print("angle: ", fpts[np.argmax(np.abs(angle - np.mean(angle)))])
 
 # %%
 quess_q = 4658
-exp_cfg["sweep"] = make_sweep(quess_q - 25, quess_q + 25, 11)
+exp_cfg["sweep"] = make_sweep(quess_q - 25, quess_q + 25, 5)
 cfg = make_cfg(exp_cfg, reps=8, rounds=1)
 
 fpts, signals = zs.measure_qubit_freq(soc, soccfg, cfg)
@@ -364,7 +412,14 @@ qub_freq
 # qub_freq = 4900
 
 # %%
-# TODO: Save the data.
+filename = "qub_freq"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+    comment=f"qubit frequency = {qub_freq}MHz",
+    tag="TwoTone",
+)
 
 # %% [markdown]
 # # Amplitude Rabi
@@ -382,7 +437,6 @@ exp_cfg = {
         "length": qub_pulse_len,
     },
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 70.0,  # us
 }
 
@@ -390,12 +444,10 @@ exp_cfg = {
 exp_cfg["sweep"] = make_sweep(0, 30000, step=5000)
 cfg = make_cfg(exp_cfg, reps=500, rounds=1)
 
-fpts, signals = zs.measure_amprabi(soc, soccfg, cfg)
-
-plt.plot(fpts, np.abs(signals))
+pdrs, signals = zs.measure_amprabi(soc, soccfg, cfg)
 
 # %%
-pi_gain, pi2_gain, _ = zf.amprabi_analyze(fpts, signals)
+pi_gain, pi2_gain, _ = zf.amprabi_analyze(pdrs, signals)
 pi_gain = int(pi_gain + 0.5)
 pi2_gain = int(pi2_gain + 0.5)
 pi_gain, pi2_gain
@@ -405,13 +457,20 @@ pi_gain, pi2_gain
 # pi2_gain = 5000
 
 # %%
-# TODO: Save the data.
+filename = "amp_rabi"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Amplitude", "unit": "a.u.", "values": pdrs},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+    comment=f"pi gain = {pi_gain}, pi/2 gain = {pi2_gain}",
+    tag="TimeDomain",
+)
 
 # %% [markdown]
 # ## Set Pi / Pi2 Pulse
 
 # %%
-DefaultCfg.add_qub_pulse(
+DefaultCfg.set_qub_pulse(
     qubit_name,
     pi={
         "style": qub_style,
@@ -442,12 +501,11 @@ exp_cfg = {
     "qubit": qubit_name,
     "qub_pulse": "pi",
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 50.0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(r_f - 5, r_f + 5, 11)
+exp_cfg["sweep"] = make_sweep(r_f - 5, r_f + 5, 5)
 cfg = make_cfg(exp_cfg, reps=1000, rounds=1)
 
 fpts, g_signals, e_signals = zs.measure_dispersive(soc, soccfg, cfg)
@@ -460,14 +518,26 @@ readout_f1, readout_f2
 # readout_f1 = 5700
 
 # %%
-# TODO: Save the data.
+filename = "dispersive shift"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+    z_info={
+        "name": "Signal",
+        "unit": "a.u.",
+        "values": np.array((g_signals, e_signals)),
+    },
+    y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
+    comment=f"SNR1 = {readout_f1}MHz, SNR2 = {readout_f2}MHz",
+    tag="Dispersive",
+)
 
 
 # %% [markdown]
 # ## Set Dispersive readout
 
 # %%
-DefaultCfg.add_res_pulse(
+DefaultCfg.set_res_pulse(
     res_name,
     readout_dp1={
         "style": res_style,
@@ -504,12 +574,11 @@ exp_cfg = {
         "length": qub_pulse_len,
     },
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 50.0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(0, 0.5, 11)  # us
+exp_cfg["sweep"] = make_sweep(0, 0.5, 5)  # us
 cfg = make_cfg(exp_cfg, reps=2000, rounds=1)
 
 Ts1, signals1 = zs.measure_t2ramsey(soc, soccfg, cfg)
@@ -531,7 +600,15 @@ t2d
 
 # %%
 qub_freq = qub_freq + activate_detune - detune
-# TODO: Save the data.
+
+filename = "t2ramsey"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts2)},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals2},
+    comment=f"activate detune = {activate_detune}MHz, detune = {detune}MHz",
+    tag="TimeDomain",
+)
 
 
 # %% [markdown]
@@ -544,7 +621,6 @@ exp_cfg = {
     "qubit": qubit_name,
     "qub_pulse": "pi",
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 50.0,  # us
 }
 
@@ -561,7 +637,14 @@ t1 = zf.T1_analyze(soc.cycles2us(Ts[skip_points:]), signals[skip_points:])
 t1
 
 # %%
-# TODO: Save the data.
+filename = "t1"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts)},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+    comment=f"t1 = {t1}us",
+    tag="TimeDomain",
+)
 
 # %% [markdown]
 # # T2Echo
@@ -571,10 +654,8 @@ exp_cfg = {
     "resonator": res_name,
     "res_pulse": "readout_dp1",
     "qubit": qubit_name,
-    "qub_pi_pulse": "pi",
-    "qub_pi2_pulse": "pi2",
+    "qub_pulse": [("pi", "pi"), ("pi2", "pi2")],
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 50.0,  # us
 }
 
@@ -588,7 +669,14 @@ t2e = zf.T2decay_analyze(soc.cycles2us(Ts * 2), signals)
 t2e
 
 # %%
-# TODO: Save the data.
+filename = "t2echo"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts * 2)},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+    comment=f"t2echo = {t2e}us",
+    tag="TimeDomain",
+)
 
 # %% [markdown]
 # # Single shot
@@ -600,7 +688,6 @@ exp_cfg = {
     "qubit": qubit_name,
     "qub_pulse": "pi",
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 50.0,  # us
 }
 
@@ -623,7 +710,7 @@ best_style = res_style
 best_freq = readout_f1
 best_pdr = res_gain
 best_ro_len = ro_length
-DefaultCfg.add_res_pulse(
+DefaultCfg.set_res_pulse(
     res_name,
     readout_fid={
         "style": best_style,
@@ -645,7 +732,6 @@ exp_cfg = {
     "qubit": qubit_name,
     "qub_pulse": "pi",
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 50.0,  # us
 }
 
@@ -672,7 +758,6 @@ exp_cfg = {
     "qubit": qubit_name,
     "qub_pulse": "pi",
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 50.0,  # us
 }
 
@@ -693,7 +778,6 @@ plt.legend()
 # %% [markdown]
 # ### Scan readout length
 
-
 # %%
 exp_cfg = {
     "resonator": res_name,
@@ -701,7 +785,6 @@ exp_cfg = {
     "qubit": qubit_name,
     "qub_pulse": "pi",
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 50.0,  # us
 }
 
@@ -730,7 +813,6 @@ exp_cfg = {
     "qubit": qubit_name,
     "qub_pulse": "pi",
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 50.0,  # us
 }
 
@@ -764,7 +846,6 @@ exp_cfg = {
     "qubit": qubit_name,
     "qub_pulse": "pi",
     "flux": {"method": flux_method, "value": sw_spot},
-    "adc_trig_offset": adc_trig_offset,  # us
     "relax_delay": 50.0,  # us
 }
 cfg = make_cfg(exp_cfg, shots=5000)
@@ -775,7 +856,18 @@ fid, threshold, angle, signals = zs.measure_fid(
 print("Optimal fidelity after rotation = %.3f" % fid)
 
 # %%
-DefaultCfg.add_res_pulse(
+filename = "single_shot"
+save_data(
+    filepath=os.path.join(database_path, filename),
+    x_info={"name": "shot", "unit": "point", "values": np.arange(cfg["shots"])},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+    y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
+    comment=f"fide {fid:.3f}",
+    tag="SingleShot",
+)
+
+# %%
+DefaultCfg.set_res_pulse(
     res_name,
     readout_fid={
         "style": res_style,

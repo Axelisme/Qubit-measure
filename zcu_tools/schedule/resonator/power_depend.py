@@ -1,18 +1,20 @@
 import numpy as np
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
+from copy import deepcopy
 
-from zcu_tools.configuration import parse_res_pulse
 from zcu_tools.program import OnetoneProgram
 
 
 def measure_power_dependent(soc, soccfg, cfg) -> tuple[NDArray, NDArray, NDArray]:
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
     freq_cfg = cfg["sweep"]["freq"]
     pdr_cfg = cfg["sweep"]["pdr"]
     fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
     pdrs = np.arange(pdr_cfg["start"], pdr_cfg["stop"], pdr_cfg["step"])
 
-    res_pulse = parse_res_pulse(cfg)
+    res_pulse = cfg["res_pulse"]
 
     signals2D = []
     freq_tqdm = tqdm(fpts)

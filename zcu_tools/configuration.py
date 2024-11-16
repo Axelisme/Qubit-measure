@@ -1,5 +1,4 @@
 import time
-from collections.abc import Mapping
 from copy import deepcopy
 
 import yaml
@@ -8,48 +7,77 @@ from .tools import deepupdate
 
 
 def make_cfg(exp_cfg: dict, **kwargs):
+    exp_cfg = deepcopy(exp_cfg)
+    deepupdate(exp_cfg, kwargs, overwrite=True)
+
+    replace_by_default(exp_cfg)
+
+    return exp_cfg
+
+
+def replace_by_default(exp_cfg):
     assert DefaultCfg.is_init_global(), "Configuration is not initialized."
 
-    exp_cfg = deepcopy(exp_cfg)
-    deepupdate(exp_cfg, kwargs)
+    # replace resonator config
+    if "resonator" in exp_cfg:
+        if isinstance(exp_cfg["resonator"], str):
+            # convert string to dict
+            exp_cfg["resonator"] = DefaultCfg.res_cfgs[exp_cfg["resonator"]]
 
-    cfg = {"global": DefaultCfg.dict(), **exp_cfg}
+        res_cfg = exp_cfg["resonator"]
 
-    auto_fill_default(cfg)
+        if isinstance(exp_cfg["res_pulse"], str):
+            # string like "pulse1"
+            exp_cfg["res_pulse"] = res_cfg["pulses"][exp_cfg["res_pulse"]]
+        elif isinstance(exp_cfg["res_pulse"], list):
+            # list of tuples like [("pi", "pulse1"), ("pi2", "pulse2")]
+            pulses = {}
+            for name, pulse in exp_cfg["res_pulse"]:
+                if isinstance(pulse, str):
+                    pulse = res_cfg["pulses"][pulse]
+                pulses[name] = pulse
+            exp_cfg["res_pulse"] = pulses
 
-    return cfg
+    # replace qubit config
+    if "qubit" in exp_cfg:
+        if isinstance(exp_cfg["qubit"], str):
+            # convert string to dict
+            exp_cfg["qubit"] = DefaultCfg.qub_cfgs[exp_cfg["qubit"]]
 
+        qub_cfg = exp_cfg["qubit"]
 
-def auto_fill_default(cfg):
-    res_pulse = parse_res_pulse(cfg)
+        if isinstance(exp_cfg["qub_pulse"], str):
+            # string like "pulse1"
+            exp_cfg["qub_pulse"] = qub_cfg["pulses"][exp_cfg["qub_pulse"]]
+        elif isinstance(exp_cfg["qub_pulse"], list):
+            # list of tuples like [("pi", "pulse1"), ("pi2", "pulse2")]
+            pulses = {}
+            for name, pulse in exp_cfg["qub_pulse"]:
+                if isinstance(pulse, str):
+                    pulse = qub_cfg["pulses"][pulse]
+                pulses[name] = pulse
+            exp_cfg["qub_pulse"] = pulses
 
-    if "readout_length" not in cfg:
-        cfg["readout_length"] = res_pulse["length"]
+    # replace flux config
+    if "flux" in exp_cfg:
+        # add spefic flux config to the experiment
+        deepupdate(exp_cfg["flux"], DefaultCfg.flux_cfgs[exp_cfg["flux"]["method"]])
 
-    if "relax_delay" not in cfg:
-        cfg["relax_delay"] = 0.0
+    res_cfg = exp_cfg["resonator"]
 
-
-def parse_cfg(value: str | dict, fallback: dict) -> dict:
-    """Parse the configuration with one or list of fallback dict."""
-    if isinstance(value, Mapping):
-        return value
-
-    if value in fallback:
-        return fallback[value]
-    raise ValueError(
-        f"Cannot find key {value} in fallback, which has keys: {list(fallback.keys())}"
-    )
-
-
-def parse_res_pulse(cfg: dict, name: str = "res_pulse") -> dict:
-    resonator = cfg["resonator"]
-    return parse_cfg(cfg[name], cfg["global"]["res_cfgs"][resonator].get("pulses", {}))
-
-
-def parse_qub_pulse(cfg: dict, name: str = "qub_pulse") -> dict:
-    qubit = cfg["qubit"]
-    return parse_cfg(cfg[name], cfg["global"]["qub_cfgs"][qubit].get("pulses", {}))
+    # default experiment parameters
+    exp_cfg.setdefault("relax_delay", 0.0)  # relax delay
+    if "readout_length" not in exp_cfg:  # readout length
+        res_pulse = exp_cfg["res_pulse"]
+        if "length" in res_pulse:
+            exp_cfg["readout_length"] = res_pulse["length"]
+        else:
+            raise ValueError("Cannot determine readout length.")
+    if "adc_trig_offset" not in exp_cfg:  # adc_trig_offset
+        if "adc_trig_offset" in res_cfg:
+            exp_cfg["adc_trig_offset"] = res_cfg["adc_trig_offset"]
+        else:
+            raise ValueError("Cannot determine adc_trig_offset.")
 
 
 class DefaultCfg:
@@ -105,34 +133,24 @@ class DefaultCfg:
             yaml.dump(dump_cfg, f)
 
     @classmethod
-    def set_res_cfg(cls, resonator, **cfg):
-        cls.res_cfgs[resonator].update(cfg)
+    def set_res(cls, resonator, overwrite=False, **cfg):
+        deepupdate(cls.res_cfgs[resonator], cfg, overwrite=overwrite)
 
     @classmethod
-    def set_qubit_cfg(cls, qubit, **cfg):
-        cls.qub_cfgs[qubit].update(cfg)
+    def set_qub(cls, qubit, overwrite=False, **cfg):
+        deepupdate(cls.qub_cfgs[qubit], cfg, overwrite=overwrite)
 
     @classmethod
-    def add_res_pulse(cls, resonator: str, overwrite=False, **pulse_cfgs):
+    def set_res_pulse(cls, resonator: str, overwrite=False, **pulse_cfgs):
         res_cfg = cls.res_cfgs[resonator]
         res_cfg.setdefault("pulses", {})
-        if not overwrite:
-            for key in pulse_cfgs:
-                if key in res_cfg["pulses"]:
-                    raise KeyError(
-                        f"Key {key} already exists in resonator {resonator} pulses."
-                    )
-        res_cfg["pulses"].update(pulse_cfgs)
+        deepupdate(res_cfg["pulses"], pulse_cfgs, overwrite=overwrite)
 
     @classmethod
-    def add_qub_pulse(cls, qubit, overwrite=False, **pulse_cfgs):
+    def set_qub_pulse(cls, qubit, overwrite=False, **pulse_cfgs):
         qub_cfg = cls.qub_cfgs[qubit]
         qub_cfg.setdefault("pulses", {})
-        if not overwrite:
-            for key in pulse_cfgs:
-                if key in qub_cfg["pulses"]:
-                    raise KeyError(f"Key {key} already exists in qubit {qubit} pulses.")
-        qub_cfg["pulses"].update(pulse_cfgs)
+        deepupdate(qub_cfg["pulses"], pulse_cfgs, overwrite=overwrite)
 
     @classmethod
     def dict(cls):

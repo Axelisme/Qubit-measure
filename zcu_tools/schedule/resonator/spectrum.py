@@ -1,15 +1,17 @@
 import numpy as np
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
+from copy import deepcopy
 
-from zcu_tools.configuration import parse_res_pulse
 from zcu_tools.program import OnetoneProgram
 
 
 def measure_res_freq(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
     sweep_cfg = cfg["sweep"]
 
-    res_pulse = parse_res_pulse(cfg)
+    res_pulse = cfg["res_pulse"]
 
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 

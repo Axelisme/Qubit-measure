@@ -1,13 +1,15 @@
 from collections.abc import MutableMapping
 
 
-def deepupdate(d: dict, u: dict):
+def deepupdate(d: dict, u: dict, overwrite: bool = False):
     for k, v in u.items():
         if isinstance(v, MutableMapping):
             d.setdefault(k, {})
-            deepupdate(d[k], v)
-        else:
+            deepupdate(d[k], v, overwrite=overwrite)
+        elif k not in d or overwrite:
             d[k] = v
+        else:
+            raise KeyError(f"Key {k} already exists in {d}.")
 
 
 def make_sweep(

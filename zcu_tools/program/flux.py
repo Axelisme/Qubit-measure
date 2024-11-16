@@ -84,11 +84,11 @@ class ZCUFluxControl(FluxControl):
         self.prog.synci(self.prog.us2cycles(self.saturate))
 
 
-def make_fluxControl(prog, method, flux_cfgs) -> FluxControl:
+def make_fluxControl(prog, method, flux_cfg) -> FluxControl:
     match method:
         case "yokogawa":
-            return YokoFluxControl(prog, flux_cfgs[method])
+            return YokoFluxControl(prog, flux_cfg)
         case "zcu216":
-            return ZCUFluxControl(prog, flux_cfgs[method])
+            return ZCUFluxControl(prog, flux_cfg)
         case _:
             raise ValueError(f"Unknown flux control method: {method}")
