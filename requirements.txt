@@ -1,0 +1,4 @@
+matpltlib
+numpy
+scipy
+# qcodes
