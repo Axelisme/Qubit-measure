@@ -101,34 +101,34 @@ class DefaultCfg:
         return cls.res_cfgs is not None
 
     @classmethod
-    def load_global(cls, filepath):
+    def load(cls, filepath):
         assert not DefaultCfg.is_init_global(), "Configuration is already initialized."
 
         with open(filepath, "r") as f:
-            glb_cfg = yaml.safe_load(f)
+            cfg = yaml.safe_load(f)
 
-        cls.res_cfgs = glb_cfg["res_cfgs"]
-        cls.qub_cfgs = glb_cfg["qub_cfgs"]
-        cls.flux_cfgs = glb_cfg["flux_cfgs"]
+        cls.res_cfgs = cfg["res_cfgs"]
+        cls.qub_cfgs = cfg["qub_cfgs"]
+        cls.flux_cfgs = cfg["flux_cfgs"]
 
     @classmethod
-    def dump_global(cls, filepath=None):
+    def dump(cls, filepath=None):
         if filepath is None:
             filepath = f"cfg_{time.strftime('%Y%m%d_%H%M%S')}.yaml"
 
         # type cast all numpy types to python types
-        def recast(obj):
+        def numpy2number(obj):
             if hasattr(obj, "tolist"):
                 obj = obj.tolist()
             if isinstance(obj, dict):
-                return {k: recast(v) for k, v in obj.items()}
+                return {k: numpy2number(v) for k, v in obj.items()}
             if isinstance(obj, list):
-                return [recast(v) for v in obj]
+                return [numpy2number(v) for v in obj]
             if hasattr(obj, "item"):
                 return obj.item()
             return obj
 
-        dump_cfg = recast(cls.dict())
+        dump_cfg = numpy2number(cls.dict())
         with open(filepath, "w") as f:
             yaml.dump(dump_cfg, f)
 

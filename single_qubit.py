@@ -885,6 +885,6 @@ DefaultCfg.set_res_pulse(
 # # Dump Configurations
 
 # %%
-DefaultCfg.dump_global()
+DefaultCfg.dump()
 
 # %%
