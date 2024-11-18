@@ -1,12 +1,12 @@
-import numpy as np
-from numpy.typing import NDArray
-from tqdm.auto import tqdm
 from copy import deepcopy
+
+import numpy as np
+from tqdm.auto import tqdm
 
 from zcu_tools.program import OnetoneProgram
 
 
-def measure_res_freq(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
+def measure_res_freq(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     sweep_cfg = cfg["sweep"]
@@ -18,7 +18,7 @@ def measure_res_freq(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
     signals = []
     for fpt in tqdm(fpts):
         res_pulse["freq"] = fpt
-        prog = OnetoneProgram(soccfg, cfg)
+        prog = OnetoneProgram(soccfg, deepcopy(cfg))
         avgi, avgq = prog.acquire(soc)
         signals.append(avgi[0][0] + 1j * avgq[0][0])
     signals = np.array(signals)

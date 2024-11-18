@@ -22,6 +22,8 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 
+# # %cd /home/xilinx/jupyter_notebooks/nthu/sinica-5q/Axel/Qubit-measure
+print(os.getcwd())
 sys.path.append(os.getcwd())
 
 
@@ -47,11 +49,11 @@ print(soccfg)
 
 
 # %%
-# from qick import QickSoc
+from qick import QickSoc
 
-# soc = QickSoc()
-# soccfg = soc
-# print(soc)
+soc = QickSoc()
+soccfg = soc
+print(soc)
 
 # %% [markdown]
 # # Utility functions
@@ -62,21 +64,30 @@ def reload_zcutools():
     import importlib
     from types import ModuleType
 
-    excluded = ["qick", "numpy", "matplotlib.pyplot"]
+    excluded = ["qick", "numpy", "matplotlib.pyplot", "importlib"]
+    visited = set()
 
-    def reload(module):
-        print("reloaded:")
+    def reload(module, depth=1, level=1):
+        if level > depth:
+            return
+
+        nonlocal visited
+        if module in visited:
+            return
+        visited.add(module)
+
+        print(" "*level + module.__name__)
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
             if isinstance(attr, ModuleType) and attr.__name__ not in excluded:
-                print("\t" + attr.__name__)
-                importlib.reload(attr)
-        print("\t" + module.__name__)
+                reload(attr, depth, level+1)
+
         importlib.reload(module)
 
-    reload(zp)
-    reload(zf)
-    reload(zs)
+    print("reloaded:")
+    reload(zp, 2)
+    reload(zf, 2)
+    reload(zs, 3)
 
 
 # %% [markdown]
@@ -262,13 +273,13 @@ fpts, pdrs, signals2D = zs.measure_power_dependent(soc, soccfg, cfg)
 # %%
 def NormalizeData(signals2D: np.ndarray) -> np.ndarray:
     # normalize on frequency axis
-    mins = np.min(signals2D, axis=0, keepdims=True)
-    maxs = np.max(signals2D, axis=0, keepdims=True)
+    mins = np.min(signals2D, axis=1, keepdims=True)
+    maxs = np.max(signals2D, axis=1, keepdims=True)
     return (signals2D - mins) / (maxs - mins)
 
 
 plt.figure()
-plt.pcolormesh(fpts, pdrs, NormalizeData(np.abs(signals2D)).T)
+plt.pcolormesh(fpts, pdrs, NormalizeData(np.abs(signals2D)))
 
 # %%
 exp_cfg["sweep"] = {
@@ -280,7 +291,7 @@ cfg = make_cfg(exp_cfg, reps=1000, rounds=1)
 fpts, pdrs, signals2D = zs.measure_power_dependent(soc, soccfg, cfg)
 
 plt.figure()
-plt.pcolormesh(fpts, pdrs, NormalizeData(np.abs(signals2D)).T)
+plt.pcolormesh(fpts, pdrs, NormalizeData(np.abs(signals2D)))
 
 # %%
 res_gain = 2200
@@ -323,7 +334,7 @@ fpts, flxs, signals2D = zs.measure_flux_dependent(soc, soccfg, cfg)
 
 # %%
 plt.figure()
-plt.pcolormesh(fpts, flxs, np.abs(signals2D).T)
+plt.pcolormesh(fpts, flxs, np.abs(signals2D))
 
 # %%
 sw_spot = 10000

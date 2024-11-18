@@ -1,12 +1,12 @@
-import numpy as np
-from numpy.typing import NDArray
-from tqdm.auto import tqdm
 from copy import deepcopy
+
+import numpy as np
+from tqdm.auto import tqdm
 
 from zcu_tools.program import OnetoneProgram
 
 
-def measure_flux_dependent(soc, soccfg, cfg) -> tuple[NDArray, NDArray, NDArray]:
+def measure_flux_dependent(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     freq_cfg = cfg["sweep"]["freq"]
@@ -28,13 +28,13 @@ def measure_flux_dependent(soc, soccfg, cfg) -> tuple[NDArray, NDArray, NDArray]
         for flx in flxs:
             cfg["flux"]["value"] = flx
             flux_tqdm.update()
-            prog = OnetoneProgram(soccfg, cfg)
+            prog = OnetoneProgram(soccfg, deepcopy(cfg))
             avgi, avgq = prog.acquire(soc)
             signal = avgi[0][0] + 1j * avgq[0][0]
             signals.append(signal)
         signals2D.append(signals)
         flux_tqdm.refresh()
     freq_tqdm.refresh()
-    signals2D = np.array(signals2D)
+    signals2D = np.array(signals2D).T
 
     return fpts, flxs, signals2D

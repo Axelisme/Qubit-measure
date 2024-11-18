@@ -1,4 +1,5 @@
 from collections.abc import MutableMapping
+from typing import Optional
 
 
 def deepupdate(d: dict, u: dict, overwrite: bool = False):
@@ -14,9 +15,9 @@ def deepupdate(d: dict, u: dict, overwrite: bool = False):
 
 def make_sweep(
     start: float,
-    stop: float | None = None,
-    expts: int | None = None,
-    step: float | None = None,
+    stop: Optional[float] = None,
+    expts: Optional[int] = None,
+    step: Optional[float] = None,
     force_int: bool = False,
 ) -> dict:
     assert (

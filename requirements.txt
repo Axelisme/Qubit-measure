@@ -1,4 +1,5 @@
-matpltlib
+matplotlib
 numpy
 scipy
+jupytext
 # qcodes

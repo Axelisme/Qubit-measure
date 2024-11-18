@@ -1,4 +1,9 @@
 backup
 qick
+.ipynb_checkpoints
+labber_api
+qick
 *.ipynb
 *.yaml
+*.hdf5
+__pycache__

@@ -10,17 +10,16 @@ def create_waveform(program, ch, pulse_cfg):
         wav_style = style
         wavform = f"{style}_{length}"
 
-    match wav_style:
-        case "const":
-            pass
-        case "gauss":
-            sigma = program.us2cycles(pulse_cfg.get("sigma", length / 4))
-            wavform += f"_S{sigma}"
-            program.add_gauss(ch=ch, name=wavform, sigma=sigma, length=length)
-        case "cosine":
-            program.add_cosine(ch=ch, name=wavform, length=length)
-        case _:
-            raise ValueError(f"Unknown waveform style: {wav_style}")
+    if wav_style == "const":
+        pass
+    elif wav_style == "gauss":
+        sigma = program.us2cycles(pulse_cfg.get("sigma", length / 4))
+        wavform += f"_S{sigma}"
+        program.add_gauss(ch=ch, name=wavform, sigma=sigma, length=length)
+    elif wav_style == "cosine":
+        program.add_cosine(ch=ch, name=wavform, length=length)
+    else:
+        raise ValueError(f"Unknown waveform style: {wav_style}")
 
     return wavform
 
@@ -36,27 +35,26 @@ def set_pulse(program, ch, pulse_cfg, waveform=None, for_readout=False, ro=0):
         freq_r = program.freq2reg(pulse_cfg["freq"], gen_ch=ch)
     phase_r = program.deg2reg(pulse_cfg["phase"], gen_ch=ch)
 
-    match style:
-        case "const":
-            program.set_pulse_registers(
-                ch=ch,
-                style=style,
-                freq=freq_r,
-                phase=phase_r,
-                gain=pulse_cfg["gain"],
-                length=length,
-            )
-        case "gauss" | "cosine" | "flat_top":
-            program.set_pulse_registers(
-                ch=ch,
-                style="arb",
-                freq=freq_r,
-                phase=phase_r,
-                gain=pulse_cfg["gain"],
-                waveform=waveform,
-            )
-        case _:
-            raise ValueError(f"Unknown pulse style: {style}")
+    if style == "const":
+        program.set_pulse_registers(
+            ch=ch,
+            style=style,
+            freq=freq_r,
+            phase=phase_r,
+            gain=pulse_cfg["gain"],
+            length=length,
+        )
+    elif style == "gauss" or style == "cosine" or style == "flat_top":
+        program.set_pulse_registers(
+            ch=ch,
+            style="arb",
+            freq=freq_r,
+            phase=phase_r,
+            gain=pulse_cfg["gain"],
+            waveform=waveform,
+        )
+    else:
+        raise ValueError(f"Unknown pulse style: {style}")
 
 
 def create_pulse(program, ch, pulse_cfg, **kwargs):

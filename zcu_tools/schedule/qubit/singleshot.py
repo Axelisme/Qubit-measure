@@ -1,22 +1,20 @@
-import numpy as np
-from numpy.typing import NDArray
-from tqdm.auto import tqdm
 from copy import deepcopy
+
+import numpy as np
+from tqdm.auto import tqdm
 
 from zcu_tools.analysis import singleshot_analysis
 from zcu_tools.program import SingleShotProgram
 
 
-def measure_fid(
-    soc, soccfg, cfg, plot=False, verbose=False
-) -> tuple[float, float, float, NDArray]:
-    prog = SingleShotProgram(soccfg, cfg)
+def measure_fid(soc, soccfg, cfg, plot=False, verbose=False):
+    prog = SingleShotProgram(soccfg, deepcopy(cfg))
     i0, q0 = prog.acquire(soc)
     fid, threhold, angle = singleshot_analysis(i0, q0, plot=plot, verbose=verbose)
     return fid, threhold, angle, (i0 + 1j * q0)
 
 
-def scan_pdr_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
+def scan_pdr_fid(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     sweep_cfg = cfg["sweep"]
@@ -34,7 +32,7 @@ def scan_pdr_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
     return pdrs, fids
 
 
-def scan_len_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
+def scan_len_fid(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     sweep_cfg = cfg["sweep"]
@@ -53,7 +51,7 @@ def scan_len_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
     return lens, fids
 
 
-def scan_freq_fid(soc, soccfg, cfg) -> tuple[NDArray, NDArray]:
+def scan_freq_fid(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     sweep_cfg = cfg["sweep"]

@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Union
 
 import qick as qk
 
@@ -8,7 +9,7 @@ class FluxControl:
         self.prog = program
         self.cfg = flux_cfg
 
-    def set_flux(self, flux: int | float) -> None:
+    def set_flux(self, flux: Union[int,float]) -> None:
         raise NotImplementedError
 
     def trigger(self) -> None:
@@ -85,10 +86,9 @@ class ZCUFluxControl(FluxControl):
 
 
 def make_fluxControl(prog, method, flux_cfg) -> FluxControl:
-    match method:
-        case "yokogawa":
-            return YokoFluxControl(prog, flux_cfg)
-        case "zcu216":
-            return ZCUFluxControl(prog, flux_cfg)
-        case _:
-            raise ValueError(f"Unknown flux control method: {method}")
+    if method == "yokogawa":
+        return YokoFluxControl(prog, flux_cfg)
+    elif method == "zcu216":
+        return ZCUFluxControl(prog, flux_cfg)
+    else:
+        raise ValueError(f"Unknown flux control method: {method}")

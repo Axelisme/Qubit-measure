@@ -1,5 +1,3 @@
-from copy import deepcopy
-
 import qick as qk  # type: ignore
 
 from .flux import make_fluxControl
@@ -8,7 +6,6 @@ from .util import create_pulse
 
 class SingleShotProgram(qk.RAveragerProgram):
     def initialize(self):
-        self.cfg = deepcopy(self.cfg)  # prevent in-place modification
         cfg = self.cfg
         res_cfg = cfg["resonator"]
         qub_cfg = cfg["qubit"]

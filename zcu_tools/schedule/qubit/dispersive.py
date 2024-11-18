@@ -1,12 +1,12 @@
-import numpy as np
-from numpy.typing import NDArray
-from tqdm.auto import tqdm
 from copy import deepcopy
+
+import numpy as np
+from tqdm.auto import tqdm
 
 from zcu_tools.program import DispersiveProgram
 
 
-def measure_dispersive(soc, soccfg, cfg) -> tuple[NDArray, NDArray, NDArray]:
+def measure_dispersive(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
     sweep_cfg = cfg["sweep"]
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
@@ -16,7 +16,7 @@ def measure_dispersive(soc, soccfg, cfg) -> tuple[NDArray, NDArray, NDArray]:
     g_signals = []
     for f in tqdm(fpts):
         res_pulse["freq"] = f
-        prog = DispersiveProgram(soccfg, {**cfg, "pre_pulse": False})
+        prog = DispersiveProgram(soccfg, {**deepcopy(cfg), "pre_pulse": False})
         avgi, avgq = prog.acquire(soc)
         signal = avgi[0][0] + 1j * avgq[0][0]
         g_signals.append(signal)
@@ -25,7 +25,7 @@ def measure_dispersive(soc, soccfg, cfg) -> tuple[NDArray, NDArray, NDArray]:
     e_signals = []
     for f in tqdm(fpts):
         res_pulse["freq"] = f
-        prog = DispersiveProgram(soccfg, {**cfg, "pre_pulse": True})
+        prog = DispersiveProgram(soccfg, {**deepcopy(cfg), "pre_pulse": True})
         avgi, avgq = prog.acquire(soc)
         signal = avgi[0][0] + 1j * avgq[0][0]
         e_signals.append(signal)
