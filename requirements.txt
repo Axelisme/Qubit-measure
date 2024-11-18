@@ -1,6 +1,9 @@
-matplotlib
-numpy
-scipy
+matplotlib==3.6
+numpy==1.19.0
+scipy==1.9
 jupytext
 tqdm
+pyro4
+ipywidgets
+ipykernel
 # qcodes

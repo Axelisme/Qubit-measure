@@ -37,7 +37,7 @@ from zcu_tools import DefaultCfg, create_datafolder, make_cfg, make_sweep, save_
 # %% [markdown]
 # # Connect to zcu216
 # %%
-from qick.pyro import make_proxy
+from qick.pyro import make_proxy  # noqa: E402
 
 # ns_host = "140.114.82.71"
 ns_host = "100.101.250.4"  # tailscale
@@ -753,7 +753,7 @@ cfg = make_cfg(exp_cfg, shots=5000)
 fids = zs.scan_style_fid(soc, soccfg, cfg)
 
 # sort by fid, where fids is a dict
-fids = dict(sorted(fids.items(), key=lambda x: x[1]))
+fids = dict(sorted(fids.items(), key=lambda x: x[1], reverse=True))
 for style, fid in fids.items():
     print(f"Style: {style}, FID: {fid}")
 

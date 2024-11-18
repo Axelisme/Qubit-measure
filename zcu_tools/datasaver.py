@@ -59,3 +59,17 @@ def save_data(
         fObj.setComment(comment)
     if tag:
         fObj.setTags(tag)
+
+    # remove labber tmp directory
+    # check filepath is Database/abcd/ef/Data_wxyz/xxx format
+    # if so, remove the empty abdc/ef/Data_wxyz folder
+    if "Database" in filepath:
+        try:
+            leafpath = os.path.dirname(filepath)
+            leafpath = leafpath.split("Database/")[1]
+            if os.path.exists(leafpath):
+                for _ in range(3):
+                    os.rmdir(leafpath)
+                    leafpath = os.path.dirname(leafpath)
+        except OSError:
+            pass
