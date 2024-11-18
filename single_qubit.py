@@ -27,12 +27,12 @@ print(os.getcwd())
 sys.path.append(os.getcwd())
 
 
-import zcu_tools.analysis as zf
-import zcu_tools.program as zp
-import zcu_tools.schedule as zs
+import zcu_tools.analysis as zf  # noqa: E402
+import zcu_tools.program as zp  # noqa: E402
+import zcu_tools.schedule as zs  # noqa: E402
 
 # ruff: noqa: I001
-from zcu_tools import DefaultCfg, create_datafolder, make_cfg, make_sweep, save_data
+from zcu_tools import DefaultCfg, create_datafolder, make_cfg, make_sweep, save_data  # noqa: E402
 
 # %% [markdown]
 # # Connect to zcu216
@@ -49,7 +49,7 @@ print(soccfg)
 
 
 # %%
-from qick import QickSoc
+from qick import QickSoc  # noqa: E402
 
 soc = QickSoc()
 soccfg = soc
@@ -76,11 +76,11 @@ def reload_zcutools():
             return
         visited.add(module)
 
-        print(" "*level + module.__name__)
+        print(" " * level + module.__name__)
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
             if isinstance(attr, ModuleType) and attr.__name__ not in excluded:
-                reload(attr, depth, level+1)
+                reload(attr, depth, level + 1)
 
         importlib.reload(module)
 
