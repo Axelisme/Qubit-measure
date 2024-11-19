@@ -32,7 +32,14 @@ import zcu_tools.program as zp  # noqa: E402
 import zcu_tools.schedule as zs  # noqa: E402
 
 # ruff: noqa: I001
-from zcu_tools import DefaultCfg, create_datafolder, make_cfg, make_sweep, save_data  # noqa: E402
+from zcu_tools import (  # noqa: E402
+    DefaultCfg,
+    create_datafolder,
+    make_cfg,
+    make_sweep,
+    save_data,
+    save_cfg,
+)
 
 # %% [markdown]
 # # Connect to zcu216
@@ -125,38 +132,52 @@ DefaultCfg.init_global(
 exp_cfg = {
     "resonator": res_name,
     "res_pulse": {
-        "style": "const",
-        "freq": 5700,  # MHz
+        # "style": "const",
+        # "style": "cosine",
+        # "style": "gauss",
+        "style": "flat_top",
+        "raise_pulse": {
+            "style": "cosine",
+            # "style": "gauss",
+            "length": 0.1,  # us
+            # "sigma": 0.25,  # us
+        },
+        "freq": 5000,  # MHz
         "phase": 0,
         "gain": 5000,
-        "length": 0.2,  # us
+        "length": 1,  # us
+        # "sigma": 0.25,  # us
     },
     "flux": {"method": flux_method, "value": 0},
-    "adc_trig_offset": 0.518,  # us
-    "relax_delay": 0.0,  # us
+    # "readout_length": 1,
+    "adc_trig_offset": 0.42,  # us
+    "relax_delay": 10.0,  # us
 }
 
 
 # %%
-cfg = make_cfg(exp_cfg, reps=10, rounds=2)
+cfg = make_cfg(exp_cfg, rounds=100)
 
 Is, Qs = zs.measure_lookback(soc, soccfg, cfg)
 
 # Plot results.
-plt.figure(1)
-plt.plot(Is, label="I value")
-plt.plot(Qs, label="Q value")
-plt.plot(np.abs(Is + 1j * Qs), label="mag")
+Ts = soc.cycles2us(1) * np.arange(len(Is))
+plt.figure()
+plt.plot(Ts, Is, label="I value")
+plt.plot(Ts, Qs, label="Q value")
+plt.plot(Ts, np.abs(Is + 1j * Qs), label="mag")
 plt.ylabel("a.u.")
-plt.xlabel("Clock ticks")
+plt.xlabel("us")
+plt.legend()
 plt.title("Averages = " + str(cfg["rounds"]))
 
 # %%
-adc_trig_offset = exp_cfg["adc_trig_offset"]
-DefaultCfg.set_res(res_name, adc_trig_offset=adc_trig_offset)
+adc_trig_offset = cfg["adc_trig_offset"]
+DefaultCfg.set_res(res_name, adc_trig_offset=adc_trig_offset, overwrite=True)
 
 filename = "lookback"
 ts = soc.cycles2us(1) * np.arange(len(Is))
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": ts * 1e-6},
@@ -170,7 +191,7 @@ save_data(
 # # Resonator Frequency
 
 # %%
-res_style = "const"
+res_style = "flat_top"
 ro_length = 1
 exp_cfg = {
     "resonator": res_name,
@@ -185,12 +206,15 @@ exp_cfg = {
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(5700, 6150, 5)
+exp_cfg["sweep"] = make_sweep(5700, 6150, 11)
 cfg = make_cfg(exp_cfg, reps=2000, rounds=1)
 
 fpts, signals = zs.measure_res_freq(soc, soccfg, cfg)
 
 plt.plot(fpts, np.abs(signals))
+
+# print five lowest frequencies
+print(fpts[np.argsort(np.abs(signals))[:5]])
 
 
 # %%
@@ -222,6 +246,7 @@ r_f - r_lf
 # r_lf = 5001
 
 # %%
+save_cfg(os.path.join(database_path, "res_freq"), cfg)
 filename = "res_freq 1k gain"
 save_data(
     filepath=os.path.join(database_path, filename),
@@ -243,19 +268,26 @@ save_data(
 # %% [markdown]
 # # Onetone Dependences
 
+# %%
+DefaultCfg.set_res_pulse(
+    res_name,
+    readout_rf={
+        "style": res_style,
+        "freq": r_f,
+        "phase": 0,
+        "gain": 5000,
+        "length": ro_length,  # us
+        "desc": "Readout with resonance frequency",
+    },
+)
+
 # %% [markdown]
 # ## Power dependence
 
 # %%
 exp_cfg = {
     "resonator": res_name,
-    "res_pulse": {
-        "style": res_style,
-        "phase": 0,
-        "freq": r_f,
-        "gain": 1000,
-        "length": ro_length,
-    },
+    "res_pulse": "readout_rf",
     "flux": {"method": flux_method, "value": 0},
     "relax_delay": 3.0,  # us
 }
@@ -297,6 +329,7 @@ plt.pcolormesh(fpts, pdrs, NormalizeData(np.abs(signals2D)))
 res_gain = 2200
 
 filename = "res_power_dependence"
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
@@ -307,18 +340,22 @@ save_data(
 )
 
 # %% [markdown]
+# ## Update Readout pulse
+
+# %%
+DefaultCfg.set_res_pulse(
+    res_name,
+    readout_rf={"gain": res_gain},
+    overwrite=True,
+)
+
+# %% [markdown]
 # ## Flux dependence
 
 # %%
 exp_cfg = {
     "resonator": res_name,
-    "res_pulse": {
-        "style": res_style,
-        "phase": 0,
-        "freq": r_f,
-        "gain": res_gain,
-        "length": ro_length,
-    },
+    "res_pulse": "readout_rf",
     "flux": {"method": flux_method},
     "relax_delay": 3.0,  # us
 }
@@ -342,6 +379,7 @@ sw_spot = 10000
 DefaultCfg.set_qub(qubit_name, sw_spot={flux_method: sw_spot})
 
 filename = "res_flux_dependence"
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
@@ -349,22 +387,6 @@ save_data(
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
     comment="",
     tag="OneTone",
-)
-
-# %% [markdown]
-# ## Set Readout pulse
-
-# %%
-DefaultCfg.set_res_pulse(
-    res_name,
-    readout_rf={
-        "style": res_style,
-        "freq": r_f,
-        "phase": 0,
-        "gain": res_gain,
-        "length": ro_length,
-        "desc": "Readout with resonance frequency",
-    },
 )
 
 # %% [markdown]
@@ -424,6 +446,7 @@ qub_freq
 
 # %%
 filename = "qub_freq"
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
@@ -469,6 +492,7 @@ pi_gain, pi2_gain
 
 # %%
 filename = "amp_rabi"
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Amplitude", "unit": "a.u.", "values": pdrs},
@@ -530,6 +554,7 @@ readout_f1, readout_f2
 
 # %%
 filename = "dispersive shift"
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
@@ -551,19 +576,13 @@ save_data(
 DefaultCfg.set_res_pulse(
     res_name,
     readout_dp1={
-        "style": res_style,
+        **DefaultCfg.get_res_pulse(res_name, "readout_rf"),
         "freq": readout_f1,
-        "gain": res_gain,
-        "phase": 0,
-        "length": ro_length,
         "desc": "Readout with largest dispersive shift",
     },
     readout_dp2={
-        "style": res_style,
+        **DefaultCfg.get_res_pulse(res_name, "readout_rf"),
         "freq": readout_f2,
-        "gain": res_gain,
-        "phase": 0,
-        "length": ro_length,
         "desc": "Readout with second largest dispersive shift",
     },
 )
@@ -578,11 +597,8 @@ exp_cfg = {
     "res_pulse": "readout_dp1",
     "qubit": qubit_name,
     "qub_pulse": {
-        "style": qub_style,
+        **DefaultCfg.get_qub_pulse(qubit_name, "pi2"),
         "freq": qub_freq + activate_detune,
-        "phase": 0,
-        "gain": pi2_gain,
-        "length": qub_pulse_len,
     },
     "flux": {"method": flux_method, "value": sw_spot},
     "relax_delay": 50.0,  # us
@@ -613,6 +629,7 @@ t2d
 qub_freq = qub_freq + activate_detune - detune
 
 filename = "t2ramsey"
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts2)},
@@ -649,6 +666,7 @@ t1
 
 # %%
 filename = "t1"
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts)},
@@ -681,6 +699,7 @@ t2e
 
 # %%
 filename = "t2echo"
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts * 2)},
@@ -723,14 +742,7 @@ best_pdr = res_gain
 best_ro_len = ro_length
 DefaultCfg.set_res_pulse(
     res_name,
-    readout_fid={
-        "style": best_style,
-        "freq": best_freq,
-        "gain": best_pdr,
-        "phase": 0,
-        "length": best_ro_len,
-        "desc": "Readout for best fidelity",
-    },
+    readout_fid={**DefaultCfg.get_res_pulse(res_name, "readout_dp1")},
 )
 
 # %% [markdown]
@@ -747,7 +759,7 @@ exp_cfg = {
 }
 
 # %%
-exp_cfg["sweep"] = ["const", "gauss", "cosine"]
+exp_cfg["sweep"] = ["const", "gauss", "cosine", "flat_top"]
 cfg = make_cfg(exp_cfg, shots=5000)
 
 fids = zs.scan_style_fid(soc, soccfg, cfg)
@@ -848,7 +860,7 @@ plt.legend()
 exp_cfg = {
     "resonator": res_name,
     "res_pulse": {
-        "style": res_style,
+        "style": best_style,
         "freq": best_freq,
         "gain": best_pdr,
         "phase": 0,
@@ -868,6 +880,7 @@ print("Optimal fidelity after rotation = %.3f" % fid)
 
 # %%
 filename = "single_shot"
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "shot", "unit": "point", "values": np.arange(cfg["shots"])},
@@ -881,7 +894,7 @@ save_data(
 DefaultCfg.set_res_pulse(
     res_name,
     readout_fid={
-        "style": res_style,
+        "style": best_style,
         "freq": best_freq,
         "gain": best_pdr,
         "phase": -angle,
@@ -896,6 +909,6 @@ DefaultCfg.set_res_pulse(
 # # Dump Configurations
 
 # %%
-DefaultCfg.dump()
+DefaultCfg.dump(os.path.join(database_path, "default_cfg"))
 
 # %%

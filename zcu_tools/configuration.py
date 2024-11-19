@@ -3,7 +3,7 @@ from copy import deepcopy
 
 import yaml
 
-from .tools import deepupdate
+from .tools import deepupdate, numpy2number
 
 
 def make_cfg(exp_cfg: dict, **kwargs):
@@ -70,7 +70,8 @@ def replace_by_default(exp_cfg):
     if "readout_length" not in exp_cfg:  # readout length
         res_pulse = exp_cfg["res_pulse"]
         if "length" in res_pulse:
-            exp_cfg["readout_length"] = res_pulse["length"]
+            # weird factor 1.3 to make the readout pulse same length as the pulse
+            exp_cfg["readout_length"] = res_pulse["length"] / 1.3
         else:
             raise ValueError("Cannot determine readout length.")
     if "adc_trig_offset" not in exp_cfg:  # adc_trig_offset
@@ -116,17 +117,8 @@ class DefaultCfg:
         if filepath is None:
             filepath = f"cfg_{time.strftime('%Y%m%d_%H%M%S')}.yaml"
 
-        # type cast all numpy types to python types
-        def numpy2number(obj):
-            if hasattr(obj, "tolist"):
-                obj = obj.tolist()
-            if isinstance(obj, dict):
-                return {k: numpy2number(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [numpy2number(v) for v in obj]
-            if hasattr(obj, "item"):
-                return obj.item()
-            return obj
+        if not filepath.endswith(".yaml"):
+            filepath += ".yaml"
 
         dump_cfg = numpy2number(cls.dict())
         with open(filepath, "w") as f:
@@ -147,10 +139,18 @@ class DefaultCfg:
         deepupdate(res_cfg["pulses"], pulse_cfgs, overwrite=overwrite)
 
     @classmethod
+    def get_res_pulse(cls, resonator: str, pulse_name: str):
+        return cls.res_cfgs[resonator]["pulses"][pulse_name]
+
+    @classmethod
     def set_qub_pulse(cls, qubit, overwrite=False, **pulse_cfgs):
         qub_cfg = cls.qub_cfgs[qubit]
         qub_cfg.setdefault("pulses", {})
         deepupdate(qub_cfg["pulses"], pulse_cfgs, overwrite=overwrite)
+
+    @classmethod
+    def get_qub_pulse(cls, qubit, pulse_name):
+        return cls.qub_cfgs[qubit]["pulses"][pulse_name]
 
     @classmethod
     def dict(cls):

@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 
-DRY_RUN = False
+from .tools import numpy2number
 
 
 def create_datafolder(root_path: str) -> str:
@@ -10,6 +10,18 @@ def create_datafolder(root_path: str) -> str:
     save_path = os.path.join(root_path, f"{yy}/{mm}/Data_{mm}{dd}")
     os.makedirs(save_path, exist_ok=True)
     return save_path
+
+
+def save_cfg(filepath: str, cfg: dict):
+    import yaml
+
+    if not filepath.endswith(".yaml"):
+        filepath += ".yaml"
+
+    cfg = numpy2number(cfg)
+
+    with open(filepath, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=False)
 
 
 def save_data(
@@ -24,27 +36,6 @@ def save_data(
     z_info.update({"complex": True, "vector": False})
     log_channels = [z_info]
     step_channels = list(filter(None, [x_info, y_info]))
-
-    if DRY_RUN:
-
-        def cast_info(info):
-            def convert2shape(v):
-                if hasattr(v, "shape"):
-                    if callable(v.shape):
-                        return v.shape()
-                    return v.shape
-                return v
-
-            return {k: convert2shape(v) for k, v in info.items()}
-
-        print(f"DRY_RUN: Saving data to {filepath}")
-        print(f"x_info: {cast_info(x_info)}")
-        if y_info:
-            print(f"y_info: {cast_info(y_info)}")
-        print(f"z_info: {cast_info(z_info)}")
-        print(f"comment: {comment}")
-        print(f"tag: {tag}")
-        return
 
     import labber_api.Labber as Labber  # type: ignore
 

@@ -6,11 +6,29 @@ def deepupdate(d: dict, u: dict, overwrite: bool = False):
     for k, v in u.items():
         if isinstance(v, MutableMapping):
             d.setdefault(k, {})
-            deepupdate(d[k], v, overwrite=overwrite)
+            if isinstance(d[k], MutableMapping):
+                deepupdate(d[k], v, overwrite=overwrite)
+            elif overwrite:
+                d[k] = v
+            else:
+                raise KeyError(f"Key {k} already exists in {d}.")
         elif k not in d or overwrite:
             d[k] = v
         else:
             raise KeyError(f"Key {k} already exists in {d}.")
+
+
+# type cast all numpy types to python types
+def numpy2number(obj):
+    if hasattr(obj, "tolist"):
+        obj = obj.tolist()
+    if isinstance(obj, dict):
+        return {k: numpy2number(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [numpy2number(v) for v in obj]
+    if hasattr(obj, "item"):
+        return obj.item()
+    return obj
 
 
 def make_sweep(
