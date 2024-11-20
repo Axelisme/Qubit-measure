@@ -1,41 +1,9 @@
-import qick as qk  # type: ignore
-
-from .flux import make_fluxControl
-from .pulse import create_pulse
+from .base import BaseOneToneProgram
 
 
-class OnetoneProgram(qk.AveragerProgram):
+class OnetoneProgram(BaseOneToneProgram):
     def initialize(self):
-        cfg = self.cfg
-        res_cfg = cfg["resonator"]
-        res_pulse_cfg = cfg["res_pulse"]
-
-        self.res_cfg = res_cfg
-
-        # declare the resonator channel and readout channels
-        res_ch = res_cfg["res_ch"]
-        self.declare_gen(ch=res_ch, nqz=res_cfg["nqz"])
-
-        # prepare the flux control
-        flux_cfg = cfg["flux"]
-        self.flux_ctrl = make_fluxControl(self, flux_cfg["method"], flux_cfg)
-        self.flux_ctrl.set_flux(flux=flux_cfg["value"])
-
-        for ro_ch in res_cfg["ro_chs"]:
-            self.declare_readout(
-                ch=ro_ch,
-                length=self.us2cycles(cfg["readout_length"]),
-                freq=res_pulse_cfg["freq"],
-                gen_ch=res_ch,
-            )
-
-        # set the pulse registers for resonator
-        create_pulse(
-            self,
-            ch=res_ch,
-            pulse_cfg=res_pulse_cfg,
-            for_readout=True,
-        )
+        super().initialize()
 
         self.synci(200)
 

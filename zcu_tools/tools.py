@@ -1,4 +1,4 @@
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 from typing import Literal, Optional
 
 
@@ -16,11 +16,11 @@ def deepupdate(
             raise ValueError(f"Unknown behavior: {behavior}")
 
     assert isinstance(d, MutableMapping), f"d should be dict, got {d}"
-    assert isinstance(u, MutableMapping), f"u should be dict, got {u}"
+    assert isinstance(u, Mapping), f"u should be dict, got {u}"
     for k, v in u.items():
         if k not in d:
             d[k] = v
-        elif isinstance(v, MutableMapping) and isinstance(d[k], MutableMapping):
+        elif isinstance(v, Mapping) and isinstance(d[k], MutableMapping):
             deepupdate(d[k], v, behavior)
         else:
             conflict_handler(d, u, k)

@@ -91,7 +91,7 @@ def reload_zcutools():
         importlib.reload(module)
 
     print("reloaded:")
-    reload(zp, 2)
+    reload(zp, 3)
     reload(zf, 2)
     reload(zs, 3)
 
@@ -221,45 +221,23 @@ guess_r = 5990
 exp_cfg["sweep"] = make_sweep(guess_r - 20, guess_r + 20, 5)
 cfg = make_cfg(exp_cfg, res_pulse={"gain": 1000}, reps=2000, rounds=1)
 
-fpts, signals1 = zs.measure_res_freq(soc, soccfg, cfg)
+fpts, signals = zs.measure_res_freq(soc, soccfg, cfg)
 
 # %%
-r_f, _ = zf.spectrum_analyze(fpts, signals1)
+r_f, _ = zf.spectrum_analyze(fpts, signals)
 r_f
 
 # %%
-cfg = make_cfg(exp_cfg, res_pulse={"gain": 30000}, reps=2000, rounds=1)
-
-fpts, signals2 = zs.measure_res_freq(soc, soccfg, cfg)
-
-# %%
-r_lf, _ = zf.spectrum_analyze(fpts, signals2)
-r_lf
-
-# %%
-r_f - r_lf
-
-# %%
 # r_f = 5000
-# r_lf = 5001
 
 # %%
-save_cfg(os.path.join(database_path, "res_freq"), cfg)
-filename = "res_freq 1k gain"
+filename = "res_freq"
+save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals1},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=f"resonator frequency = {r_f}MHz",
-    tag="OneTone",
-)
-
-filename = "res_freq 30k gain"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals2},
-    comment=f"resonator frequency = {r_lf}MHz",
     tag="OneTone",
 )
 

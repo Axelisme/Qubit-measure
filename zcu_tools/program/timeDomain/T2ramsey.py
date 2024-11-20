@@ -1,17 +1,11 @@
-from .base import BaseTwoToneProgram, create_pulse
+from .base import BaseTimeProgram, create_pulse
 
 
-class DispersiveProgram(BaseTwoToneProgram):
+class T2RamseyProgram(BaseTimeProgram):
     def initialize(self):
         super().initialize()
 
-        qub_pulse_cfg = self.cfg["qub_pulse"]
-
-        # check if have pre-pulse
-        if not self.cfg["pre_pulse"]:
-            qub_pulse_cfg["gain"] = 0
-
-        create_pulse(self, self.qub_cfg["qub_ch"], qub_pulse_cfg)
+        create_pulse(self, self.cfg["qubit"]["qub_ch"], self.cfg["qub_pulse"])
 
         self.synci(200)
 
@@ -22,11 +16,11 @@ class DispersiveProgram(BaseTwoToneProgram):
 
         self.flux_ctrl.trigger()
 
-        # qubit pulse
+        self.pulse(ch=qub_cfg["qub_ch"])
+        self.sync(self.q_rp, self.r_wait)
         self.pulse(ch=qub_cfg["qub_ch"])
         self.sync_all(self.us2cycles(0.05))
 
-        # measure
         self.measure(
             pulse_ch=res_cfg["res_ch"],
             adcs=res_cfg["ro_chs"],

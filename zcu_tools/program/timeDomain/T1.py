@@ -1,7 +1,7 @@
-from .base import BaseTwoToneProgram, create_pulse
+from .base import BaseTimeProgram, create_pulse
 
 
-class TwotoneProgram(BaseTwoToneProgram):
+class T1Program(BaseTimeProgram):
     def initialize(self):
         super().initialize()
 
@@ -10,22 +10,20 @@ class TwotoneProgram(BaseTwoToneProgram):
         self.synci(200)
 
     def body(self):
-        cfg = self.cfg
         res_cfg = self.res_cfg
         qub_cfg = self.qub_cfg
 
         self.flux_ctrl.trigger()
 
-        # qubit pulse
         self.pulse(ch=qub_cfg["qub_ch"])
         self.sync_all(self.us2cycles(0.05))
+        self.sync(self.q_rp, self.r_wait)
 
-        # measure
         self.measure(
             pulse_ch=res_cfg["res_ch"],
             adcs=res_cfg["ro_chs"],
             pins=[res_cfg["ro_chs"][0]],
-            adc_trig_offset=self.us2cycles(cfg["adc_trig_offset"]),
+            adc_trig_offset=self.us2cycles(self.cfg["adc_trig_offset"]),
             wait=True,
-            syncdelay=self.us2cycles(cfg["relax_delay"]),
+            syncdelay=self.us2cycles(self.cfg["relax_delay"]),
         )

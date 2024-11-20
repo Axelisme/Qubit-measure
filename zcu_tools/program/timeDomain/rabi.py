@@ -1,15 +1,14 @@
-from .base import BaseTwoToneProgram, create_pulse
+from .base import BaseTimeProgram, create_pulse
 
 
-class DispersiveProgram(BaseTwoToneProgram):
+class AmpRabiProgram(BaseTimeProgram):
     def initialize(self):
         super().initialize()
 
         qub_pulse_cfg = self.cfg["qub_pulse"]
 
-        # check if have pre-pulse
-        if not self.cfg["pre_pulse"]:
-            qub_pulse_cfg["gain"] = 0
+        # overwrite qubit pulse gain
+        qub_pulse_cfg["gain"] = self.cfg["start"]
 
         create_pulse(self, self.qub_cfg["qub_ch"], qub_pulse_cfg)
 
@@ -24,7 +23,7 @@ class DispersiveProgram(BaseTwoToneProgram):
 
         # qubit pulse
         self.pulse(ch=qub_cfg["qub_ch"])
-        self.sync_all(self.us2cycles(0.05))
+        self.sync_all(self.us2cycles(0.02))
 
         # measure
         self.measure(

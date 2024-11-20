@@ -39,7 +39,7 @@ class YokoFluxControl(FluxControl):
 
     def _init_dev(self):
         try:
-            from qcodes.instrument_drivers.yokogawa import YokogawaGS200
+            from qcodes.instrument_drivers.yokogawa import YokogawaGS200  # type: ignore
         except ImportError:
             raise ImportError(
                 "Please install qcodes to use YokoFluxControl in the program"
