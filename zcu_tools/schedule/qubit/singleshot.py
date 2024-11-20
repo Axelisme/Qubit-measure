@@ -3,6 +3,7 @@ from copy import deepcopy
 import numpy as np
 from tqdm.auto import tqdm
 
+from zcu_tools import make_cfg
 from zcu_tools.analysis import singleshot_analysis
 from zcu_tools.program import SingleShotProgram
 
@@ -25,7 +26,7 @@ def scan_pdr_fid(soc, soccfg, cfg):
     fids = []
     for pdr in tqdm(pdrs):
         res_pulse["gain"] = pdr
-        fid, *_ = measure_fid(soc, soccfg, cfg)
+        fid, *_ = measure_fid(soc, soccfg, make_cfg(cfg))
         fids.append(fid)
     fids = np.array(fids)
 
@@ -34,6 +35,7 @@ def scan_pdr_fid(soc, soccfg, cfg):
 
 def scan_len_fid(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
+    del cfg["readout_length"]
 
     sweep_cfg = cfg["sweep"]
     lens = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
@@ -43,8 +45,7 @@ def scan_len_fid(soc, soccfg, cfg):
     fids = []
     for length in tqdm(lens):
         res_pulse["length"] = length
-        cfg["readout_length"] = length
-        fid, *_ = measure_fid(soc, soccfg, cfg)
+        fid, *_ = measure_fid(soc, soccfg, make_cfg(cfg))
         fids.append(fid)
     fids = np.array(fids)
 
@@ -62,7 +63,7 @@ def scan_freq_fid(soc, soccfg, cfg):
     fids = []
     for fpt in tqdm(fpts):
         res_pulse["freq"] = fpt
-        fid, *_ = measure_fid(soc, soccfg, cfg)
+        fid, *_ = measure_fid(soc, soccfg, make_cfg(cfg))
         fids.append(fid)
     fids = np.array(fids)
 
@@ -79,6 +80,6 @@ def scan_style_fid(soc, soccfg, cfg) -> dict:
     fids = {}
     for style in sweep_list:
         res_pulse["style"] = style
-        fid, *_ = measure_fid(soc, soccfg, cfg)
+        fid, *_ = measure_fid(soc, soccfg, make_cfg(cfg))
         fids[style] = fid
     return fids

@@ -1,12 +1,8 @@
 def create_waveform(prog, ch, pulse_cfg: dict):
     style = pulse_cfg["style"]
     if style == "flat_top":
-        raise_cfg = pulse_cfg.setdefault("raise_pulse", {})
-        # default raise pulse is 10% of the total length
-        raise_cfg.setdefault("length", 0.1 * pulse_cfg["length"])
-        # default raise style is cosine
-        raise_cfg.setdefault("style", "cosine")
-        pulse_cfg = raise_cfg  # use raise pulse for the waveform
+        # use raise pulse for the waveform
+        pulse_cfg = pulse_cfg["raise_pulse"]
 
     wav_style = pulse_cfg["style"]
     length = prog.us2cycles(pulse_cfg["length"])
@@ -22,7 +18,7 @@ def create_waveform(prog, ch, pulse_cfg: dict):
             raise ValueError("Flat top with constant raise style is not supported")
     elif wav_style == "gauss":
         # default sigma is quarter of the length
-        sigma = prog.us2cycles(pulse_cfg.get("sigma", pulse_cfg["length"] / 4))
+        sigma = prog.us2cycles(pulse_cfg["sigma"])
         wavform += f"_S{sigma}"
         prog.add_gauss(ch=ch, name=wavform, sigma=sigma, length=length)
     elif wav_style == "cosine":

@@ -3,6 +3,7 @@ from copy import deepcopy
 import numpy as np
 from tqdm.auto import tqdm
 
+from zcu_tools import make_cfg
 from zcu_tools.program import OnetoneProgram
 
 
@@ -28,7 +29,7 @@ def measure_power_dependent(soc, soccfg, cfg):
         for pdr in pdrs:
             res_pulse["gain"] = pdr
             pdr_tqdm.update()
-            prog = OnetoneProgram(soccfg, deepcopy(cfg))
+            prog = OnetoneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc)
             signals.append(avgi[0][0] + 1j * avgq[0][0])
         signals2D.append(signals)

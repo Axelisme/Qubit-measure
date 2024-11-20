@@ -26,7 +26,6 @@ import numpy as np
 print(os.getcwd())
 sys.path.append(os.getcwd())
 
-
 import zcu_tools.analysis as zf  # noqa: E402
 import zcu_tools.program as zp  # noqa: E402
 import zcu_tools.schedule as zs  # noqa: E402
@@ -116,6 +115,7 @@ DefaultCfg.init_global(
     res_cfgs={res_name: {"res_ch": 0, "ro_chs": [0], "nqz": 2}},
     qub_cfgs={qubit_name: {"qub_ch": 2, "nqz": 2}},
     flux_cfgs={
+        "default_method": "zcu216",
         "yokogawa": {
             "name": "gs200",
             "address": "USB::0x0B21::0x0039::91S522309::INSTR",
@@ -148,7 +148,6 @@ exp_cfg = {
         "length": 1,  # us
         # "sigma": 0.25,  # us
     },
-    "flux": {"method": flux_method, "value": 0},
     # "readout_length": 1,
     "adc_trig_offset": 0.42,  # us
     "relax_delay": 10.0,  # us
@@ -173,7 +172,7 @@ plt.title("Averages = " + str(cfg["rounds"]))
 
 # %%
 adc_trig_offset = cfg["adc_trig_offset"]
-DefaultCfg.set_res(res_name, adc_trig_offset=adc_trig_offset, overwrite=True)
+DefaultCfg.set_res(res_name, adc_trig_offset=adc_trig_offset)
 
 filename = "lookback"
 ts = soc.cycles2us(1) * np.arange(len(Is))
@@ -201,7 +200,6 @@ exp_cfg = {
         "gain": 5000,
         "length": ro_length,  # us
     },
-    "flux": {"method": flux_method, "value": 0},
     "relax_delay": 3.0,  # us
 }
 
@@ -269,6 +267,7 @@ save_data(
 # # Onetone Dependences
 
 # %%
+sw_spot = 0
 DefaultCfg.set_res_pulse(
     res_name,
     readout_rf={
@@ -288,7 +287,7 @@ DefaultCfg.set_res_pulse(
 exp_cfg = {
     "resonator": res_name,
     "res_pulse": "readout_rf",
-    "flux": {"method": flux_method, "value": 0},
+    "flux": sw_spot,
     "relax_delay": 3.0,  # us
 }
 
@@ -343,11 +342,7 @@ save_data(
 # ## Update Readout pulse
 
 # %%
-DefaultCfg.set_res_pulse(
-    res_name,
-    readout_rf={"gain": res_gain},
-    overwrite=True,
-)
+DefaultCfg.set_res_pulse(res_name, readout_rf={"gain": res_gain})
 
 # %% [markdown]
 # ## Flux dependence
@@ -356,7 +351,6 @@ DefaultCfg.set_res_pulse(
 exp_cfg = {
     "resonator": res_name,
     "res_pulse": "readout_rf",
-    "flux": {"method": flux_method},
     "relax_delay": 3.0,  # us
 }
 
@@ -404,7 +398,7 @@ exp_cfg = {
         "phase": 0,
         "length": 4,
     },
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 5.0,  # us
 }
 
@@ -470,7 +464,7 @@ exp_cfg = {
         "phase": 0,
         "length": qub_pulse_len,
     },
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 70.0,  # us
 }
 
@@ -535,7 +529,7 @@ exp_cfg = {
     "res_pulse": "readout_rf",
     "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -600,7 +594,7 @@ exp_cfg = {
         **DefaultCfg.get_qub_pulse(qubit_name, "pi2"),
         "freq": qub_freq + activate_detune,
     },
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -648,7 +642,7 @@ exp_cfg = {
     "res_pulse": "readout_dp1",
     "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -684,7 +678,7 @@ exp_cfg = {
     "res_pulse": "readout_dp1",
     "qubit": qubit_name,
     "qub_pulse": [("pi", "pi"), ("pi2", "pi2")],
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -717,7 +711,7 @@ exp_cfg = {
     "res_pulse": "readout_dp1",
     "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -754,7 +748,7 @@ exp_cfg = {
     "res_pulse": "readout_fid",
     "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -780,7 +774,7 @@ exp_cfg = {
     "res_pulse": "readout_fid",
     "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -807,7 +801,7 @@ exp_cfg = {
     "res_pulse": "readout_fid",
     "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -835,7 +829,7 @@ exp_cfg = {
     "res_pulse": "readout_fid",
     "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -868,7 +862,7 @@ exp_cfg = {
     },
     "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": {"method": flux_method, "value": sw_spot},
+    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 cfg = make_cfg(exp_cfg, shots=5000)
@@ -902,7 +896,6 @@ DefaultCfg.set_res_pulse(
         "threshold": threshold,
         "desc": "Readout with optimal fidelity",
     },
-    overwrite=True,
 )
 
 # %% [markdown]

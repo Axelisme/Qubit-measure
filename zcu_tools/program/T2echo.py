@@ -1,7 +1,7 @@
 import qick as qk  # type: ignore
 
 from .flux import make_fluxControl
-from .util import create_pulse, create_waveform, set_pulse
+from .pulse import create_pulse, create_waveform, set_pulse
 
 
 class T2EchoProgram(qk.RAveragerProgram):

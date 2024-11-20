@@ -1,7 +1,7 @@
 import qick as qk  # type: ignore
 
 from .flux import make_fluxControl
-from .util import create_pulse
+from .pulse import create_pulse
 
 
 class SingleShotProgram(qk.RAveragerProgram):

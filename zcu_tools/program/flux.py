@@ -1,4 +1,3 @@
-import numpy as np
 from typing import Union
 
 import qick as qk
@@ -9,11 +8,22 @@ class FluxControl:
         self.prog = program
         self.cfg = flux_cfg
 
-    def set_flux(self, flux: Union[int,float]) -> None:
+    def set_flux(self, flux: Union[int, float]) -> None:
         raise NotImplementedError
 
     def trigger(self) -> None:
         raise NotImplementedError
+
+
+class NoneFluxControl(FluxControl):
+    def __init__(self):
+        pass
+
+    def set_flux(self, flux):
+        pass
+
+    def trigger(self):
+        pass
 
 
 class YokoFluxControl(FluxControl):
@@ -40,9 +50,18 @@ class YokoFluxControl(FluxControl):
         self.yoko.current_limit(self.limit)
 
     def set_flux(self, flux):
-        assert np.issubdtype(
-            type(flux), np.floating
-        ), f"Flux must be a float in YokoFluxControl, but got {flux}"
+        # cast numpy float to python float
+        if hasattr(flux, "item"):
+            flux = flux.item()
+
+        # if not np.issubdtype(flux, np.floating):
+        if not isinstance(flux, float):
+            # zero is ok
+            if flux != 0:
+                raise ValueError(
+                    f"Flux must be a float in YokoFluxControl, but got {flux}"
+                )
+            flux = 0.0
         assert (
             abs(flux) <= self.limit
         ), f"Flux must be in the range [-0.01, 0.01], but got {flux}"
@@ -65,9 +84,17 @@ class ZCUFluxControl(FluxControl):
         self.first_set = True
 
     def set_flux(self, flux):
-        assert np.issubdtype(
-            type(flux), np.integer
-        ), f"Flux must be an int in ZCUFluxControl, but got {flux}"
+        # cast numpy int to python int
+        if hasattr(flux, "item"):
+            flux = flux.item()
+
+        if not isinstance(flux, int):
+            # zero is ok
+            if flux != 0.0:
+                raise ValueError(
+                    f"Flux must be an int in ZCUFluxControl, but got {flux}"
+                )
+            flux = 0
         assert (
             abs(flux) <= 40000
         ), f"Flux must be in the range [-40000, 40000], but got {flux}"
@@ -87,8 +114,8 @@ class ZCUFluxControl(FluxControl):
 
 def make_fluxControl(prog, method, flux_cfg) -> FluxControl:
     if method == "yokogawa":
-        return YokoFluxControl(prog, flux_cfg)
+        return YokoFluxControl(prog, flux_cfg[method])
     elif method == "zcu216":
-        return ZCUFluxControl(prog, flux_cfg)
+        return ZCUFluxControl(prog, flux_cfg[method])
     else:
         raise ValueError(f"Unknown flux control method: {method}")

@@ -3,6 +3,7 @@ from copy import deepcopy
 import numpy as np
 from tqdm.auto import tqdm
 
+from zcu_tools import make_cfg
 from zcu_tools.program import DispersiveProgram
 
 
@@ -16,7 +17,7 @@ def measure_dispersive(soc, soccfg, cfg):
     g_signals = []
     for f in tqdm(fpts):
         res_pulse["freq"] = f
-        prog = DispersiveProgram(soccfg, {**deepcopy(cfg), "pre_pulse": False})
+        prog = DispersiveProgram(soccfg, make_cfg(cfg, pre_pulse=False))
         avgi, avgq = prog.acquire(soc)
         signal = avgi[0][0] + 1j * avgq[0][0]
         g_signals.append(signal)
@@ -25,7 +26,7 @@ def measure_dispersive(soc, soccfg, cfg):
     e_signals = []
     for f in tqdm(fpts):
         res_pulse["freq"] = f
-        prog = DispersiveProgram(soccfg, {**deepcopy(cfg), "pre_pulse": True})
+        prog = DispersiveProgram(soccfg, make_cfg(cfg, pre_pulse=True))
         avgi, avgq = prog.acquire(soc)
         signal = avgi[0][0] + 1j * avgq[0][0]
         e_signals.append(signal)

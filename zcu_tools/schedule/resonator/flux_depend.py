@@ -3,6 +3,7 @@ from copy import deepcopy
 import numpy as np
 from tqdm.auto import tqdm
 
+from zcu_tools import make_cfg
 from zcu_tools.program import OnetoneProgram
 
 
@@ -28,7 +29,7 @@ def measure_flux_dependent(soc, soccfg, cfg):
         for flx in flxs:
             cfg["flux"]["value"] = flx
             flux_tqdm.update()
-            prog = OnetoneProgram(soccfg, deepcopy(cfg))
+            prog = OnetoneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc)
             signal = avgi[0][0] + 1j * avgq[0][0]
             signals.append(signal)

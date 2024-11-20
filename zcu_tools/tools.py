@@ -1,21 +1,29 @@
 from collections.abc import MutableMapping
-from typing import Optional
+from typing import Literal, Optional
 
 
-def deepupdate(d: dict, u: dict, overwrite: bool = False):
-    for k, v in u.items():
-        if isinstance(v, MutableMapping):
-            d.setdefault(k, {})
-            if isinstance(d[k], MutableMapping):
-                deepupdate(d[k], v, overwrite=overwrite)
-            elif overwrite:
-                d[k] = v
-            else:
-                raise KeyError(f"Key {k} already exists in {d}.")
-        elif k not in d or overwrite:
-            d[k] = v
-        else:
+def deepupdate(
+    d: dict, u: dict, behavior: Literal["error", "force", "ignore"] = "error"
+):
+    def conflict_handler(d, u, k):
+        if behavior == "error":
             raise KeyError(f"Key {k} already exists in {d}.")
+        elif behavior == "force":
+            d[k] = u[k]
+        elif behavior == "ignore":
+            pass
+        else:
+            raise ValueError(f"Unknown behavior: {behavior}")
+
+    assert isinstance(d, MutableMapping), f"d should be dict, got {d}"
+    assert isinstance(u, MutableMapping), f"u should be dict, got {u}"
+    for k, v in u.items():
+        if k not in d:
+            d[k] = v
+        elif isinstance(v, MutableMapping) and isinstance(d[k], MutableMapping):
+            deepupdate(d[k], v, behavior)
+        else:
+            conflict_handler(d, u, k)
 
 
 # type cast all numpy types to python types
