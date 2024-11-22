@@ -1,9 +1,9 @@
-backup
 qick
-.ipynb_checkpoints
 labber_api
-qick
+backup
+.ipynb_checkpoints
+__pycache__
+*.bak
 *.ipynb
 *.yaml
 *.hdf5
-__pycache__

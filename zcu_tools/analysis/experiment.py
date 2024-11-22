@@ -6,6 +6,17 @@ from . import fitting as ft
 figsize = (8, 6)
 
 
+def lookback_analyze(x: np.ndarray, Is: np.ndarray, Qs: np.ndarray):
+    y = np.abs(Is + 1j * Qs)
+
+    max_y, min_y = np.max(y), np.min(y)
+
+    # find first idx where y is larger than 0.1 * max_y
+    idx = np.argmax(y - min_y > 0.05 * (max_y - min_y))
+
+    return x[idx]
+
+
 def spectrum_analyze(x, y, asym=False):
     mag = np.abs(y)
     pha = np.unwrap(np.angle(y))
@@ -177,147 +188,3 @@ def T2decay_analyze(x: float, y: float):
     plt.show()
 
     return decay
-
-
-def singleshot_analysis(Is, Qs, plot=True, verbose=True, title=None):
-    Ig, Ie = Is
-    Qg, Qe = Qs
-
-    numbins = 200
-
-    xg, yg = np.median(Ig), np.median(Qg)
-    xe, ye = np.median(Ie), np.median(Qe)
-
-    def verbose_print(name, Is, Qs):
-        Ig, Ie = Is
-        Qg, Qe = Qs
-        xg, yg = np.median(Ig), np.median(Qg)
-        xe, ye = np.median(Ie), np.median(Qe)
-        print(f"{name}:")
-        print(
-            f"Ig {xg:.2f} +/- {np.std(Ig):.2f} \t Qg {yg:.2f} +/- {np.std(Qg):.2f} \t Amp g {np.abs(xg+1j*yg):.2f} +/- {np.std(np.abs(Ig + 1j*Qg)):.2f}"
-        )
-        print(
-            f"Ie {xe:.2f} +/- {np.std(Ie):.2f} \t Qe {ye:.2f} +/- {np.std(Qe):.2f} \t Amp e {np.abs(xe+1j*ye):.2f} +/- {np.std(np.abs(Ig + 1j*Qe)):.2f}"
-        )
-
-    if verbose:
-        verbose_print("Unrotated", (Ig, Ie), (Qg, Qe))
-
-    def scatter_plot(name, ax, Is, Qs):
-        Ig, Ie = Is
-        Qg, Qe = Qs
-        xg, yg = np.median(Ig), np.median(Qg)
-        xe, ye = np.median(Ie), np.median(Qe)
-
-        if title is not None:
-            plt.suptitle(title)
-        ax.scatter(
-            Ig, Qg, label="g", color="b", marker=".", edgecolor="None", alpha=0.2
-        )
-        ax.scatter(
-            Ie, Qe, label="e", color="r", marker=".", edgecolor="None", alpha=0.2
-        )
-        ax.plot(
-            [xg],
-            [yg],
-            color="k",
-            linestyle=":",
-            marker="o",
-            markerfacecolor="b",
-            markersize=5,
-        )
-        ax.plot(
-            [xe],
-            [ye],
-            color="k",
-            linestyle=":",
-            marker="o",
-            markerfacecolor="r",
-            markersize=5,
-        )
-        ax.set_xlabel("I [ADC levels]")
-        ax.set_ylabel("Q [ADC levels]")
-        ax.legend(loc="upper right")
-        ax.set_title(name, fontsize=14)
-        ax.axis("equal")
-
-    if plot:
-        fig, axs = plt.subplots(2, 2, figsize=(12, 12))
-        scatter_plot("Unrotated", axs[0, 0], (Ig, Ie), (Qg, Qe))
-
-    theta = -np.arctan2((ye - yg), (xe - xg))
-
-    I_tot = np.concatenate((Ie, Ig))
-    span = (np.max(I_tot) - np.min(I_tot)) / 2
-    midpoint = (np.max(I_tot) + np.min(I_tot)) / 2
-    xlims = [midpoint - span, midpoint + span]
-    ng, binsg = np.histogram(Ig, bins=numbins, range=xlims)  # type: ignore
-    ne, binse = np.histogram(Ie, bins=numbins, range=xlims)  # type: ignore
-    contrast = np.abs(
-        ((np.cumsum(ng) - np.cumsum(ne)) / (0.5 * ng.sum() + 0.5 * ne.sum()))
-    )
-
-    # Rotate the IQ data
-    Ig_new = Ig * np.cos(theta) - Qg * np.sin(theta)
-    Qg_new = Ig * np.sin(theta) + Qg * np.cos(theta)
-
-    Ie_new = Ie * np.cos(theta) - Qe * np.sin(theta)
-    Qe_new = Ie * np.sin(theta) + Qe * np.cos(theta)
-
-    # New means of each blob
-    xg, yg = np.median(Ig_new), np.median(Qg_new)
-    xe, ye = np.median(Ie_new), np.median(Qe_new)
-    if verbose:
-        verbose_print("Rotated", (Ig_new, Ie_new), (Qg_new, Qe_new))
-
-    xlims = [(xg + xe) / 2 - span, (xg + xe) / 2 + span]
-
-    if plot:
-        scatter_plot("Rotated", axs[0, 1], (Ig_new, Ie_new), (Qg_new, Qe_new))
-        # X and Y ranges for histogram
-
-        ng, binsg, _ = axs[1, 0].hist(
-            Ig_new, bins=numbins, range=xlims, color="b", label="g", alpha=0.5
-        )
-        ne, binse, _ = axs[1, 0].hist(
-            Ie_new, bins=numbins, range=xlims, color="r", label="e", alpha=0.5
-        )
-        axs[1, 0].set_ylabel("Counts", fontsize=14)
-        axs[1, 0].set_xlabel("I [ADC levels]", fontsize=14)
-        axs[1, 0].legend(loc="upper right")
-
-    else:
-        ng, binsg = np.histogram(Ig_new, bins=numbins, range=xlims)  # type: ignore
-        ne, binse = np.histogram(Ie_new, bins=numbins, range=xlims)  # type: ignore
-
-    """Compute the fidelity using overlap of the histograms"""
-    # this method calculates fidelity as 1-2(Neg + Nge)/N
-    contrast = np.abs(
-        ((np.cumsum(ng) - np.cumsum(ne)) / (0.5 * ng.sum() + 0.5 * ne.sum()))
-    )
-    tind = contrast.argmax()
-    threshold = binsg[tind]
-    # this method calculates fidelity as (Ngg+Nee)/N = Ngg/N + Nee/N=(0.5N-Nge)/N + (0.5N-Neg)/N = 1-(Nge+Neg)/N
-    fid = 0.5 * (1 - ng[tind:].sum() / ng.sum() + 1 - ne[:tind].sum() / ne.sum())
-    if verbose:
-        print(f"g correctly categorized: {100*(1-ng[tind:].sum()/ng.sum()):.3f}%")
-        print(f"e correctly categorized: {100*(1-ne[:tind].sum()/ne.sum()):.3f}%")
-
-    if plot:
-        title = "${F}_{ge}$"
-        axs[1, 0].set_title(f"Histogram ({title}: {100*fid:.3}%)", fontsize=14)
-        axs[1, 0].axvline(threshold, color="0.2", linestyle="--")
-
-        axs[1, 1].set_title("Cumulative Counts", fontsize=14)
-        axs[1, 1].plot(binsg[:-1], np.cumsum(ng), "b", label="g")
-        axs[1, 1].plot(binse[:-1], np.cumsum(ne), "r", label="e")
-        axs[1, 1].axvline(threshold, color="0.2", linestyle="--")
-        axs[1, 1].legend()
-        axs[1, 1].set_xlabel("I [ADC levels]", fontsize=14)
-
-        plt.subplots_adjust(hspace=0.25, wspace=0.15)
-        plt.tight_layout()
-        plt.show()
-
-    return fid, threshold, theta * 180 / np.pi  # fids: ge, gf, ef

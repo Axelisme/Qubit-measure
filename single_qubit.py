@@ -17,14 +17,12 @@
 
 # %%
 import os
-import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 # # %cd /home/xilinx/jupyter_notebooks/nthu/sinica-5q/Axel/Qubit-measure
 print(os.getcwd())
-sys.path.append(os.getcwd())
 
 import zcu_tools.analysis as zf  # noqa: E402
 import zcu_tools.program as zp  # noqa: E402
@@ -92,7 +90,7 @@ def reload_zcutools():
 
     print("reloaded:")
     reload(zp, 3)
-    reload(zf, 2)
+    reload(zf, 3)
     reload(zs, 3)
 
 
@@ -149,29 +147,37 @@ exp_cfg = {
         # "sigma": 0.25,  # us
     },
     # "readout_length": 1,
-    "adc_trig_offset": 0.42,  # us
+    "adc_trig_offset": 0,  # us
     "relax_delay": 10.0,  # us
 }
 
 
 # %%
-cfg = make_cfg(exp_cfg, rounds=100)
+cfg = make_cfg(exp_cfg, rounds=10)
 
 Is, Qs = zs.measure_lookback(soc, soccfg, cfg)
 
-# Plot results.
 Ts = soc.cycles2us(1) * np.arange(len(Is))
+predict_offset = zf.lookback_analyze(Ts, Is, Qs)
+
+# Plot results.
+
 plt.figure()
 plt.plot(Ts, Is, label="I value")
 plt.plot(Ts, Qs, label="Q value")
 plt.plot(Ts, np.abs(Is + 1j * Qs), label="mag")
+plt.axvline(predict_offset, color="r", linestyle="--", label="predict_offset")
 plt.ylabel("a.u.")
 plt.xlabel("us")
 plt.legend()
 plt.title("Averages = " + str(cfg["rounds"]))
 
 # %%
-adc_trig_offset = cfg["adc_trig_offset"]
+# adc_trig_offset = cfg["adc_trig_offset"]
+adc_trig_offset = predict_offset
+adc_trig_offset
+
+# %%
 DefaultCfg.set_res(res_name, adc_trig_offset=adc_trig_offset)
 
 filename = "lookback"
@@ -698,9 +704,7 @@ cfg = make_cfg(exp_cfg, shots=5000)
 
 
 # %%
-fid, threshold, angle, signals = zs.measure_fid(
-    soc, soccfg, cfg, plot=True, verbose=True
-)
+fid, threshold, angle, signals = zs.measure_fid(soc, soccfg, cfg, plot=True)
 print("Optimal fidelity after rotation = %.3f" % fid)
 
 # %% [markdown]
@@ -845,9 +849,7 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, shots=5000)
 
-fid, threshold, angle, signals = zs.measure_fid(
-    soc, soccfg, cfg, plot=True, verbose=True
-)
+fid, threshold, angle, signals = zs.measure_fid(soc, soccfg, cfg, plot=True)
 print("Optimal fidelity after rotation = %.3f" % fid)
 
 # %%

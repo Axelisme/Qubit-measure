@@ -30,7 +30,7 @@ def measure_power_dependent(soc, soccfg, cfg):
             res_pulse["gain"] = pdr
             pdr_tqdm.update()
             prog = OnetoneProgram(soccfg, make_cfg(cfg))
-            avgi, avgq = prog.acquire(soc)
+            avgi, avgq = prog.acquire(soc, progress=False)
             signals.append(avgi[0][0] + 1j * avgq[0][0])
         signals2D.append(signals)
     freq_tqdm.refresh()

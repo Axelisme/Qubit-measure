@@ -30,7 +30,7 @@ def measure_flux_dependent(soc, soccfg, cfg):
             cfg["flux"]["value"] = flx
             flux_tqdm.update()
             prog = OnetoneProgram(soccfg, make_cfg(cfg))
-            avgi, avgq = prog.acquire(soc)
+            avgi, avgq = prog.acquire(soc, progress=False)
             signal = avgi[0][0] + 1j * avgq[0][0]
             signals.append(signal)
         signals2D.append(signals)

@@ -20,7 +20,7 @@ def measure_qubit_freq(soc, soccfg, cfg):
     for fpt in tqdm(fpts):
         qub_pulse["freq"] = fpt
         prog = TwotoneProgram(soccfg, make_cfg(cfg))
-        avgi, avgq = prog.acquire(soc)
+        avgi, avgq = prog.acquire(soc, progress=False)
         signals.append(avgi[0][0] + 1j * avgq[0][0])
     signals = np.array(signals)
 

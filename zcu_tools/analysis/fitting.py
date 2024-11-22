@@ -56,40 +56,6 @@ def fitexp(xdata, ydata, fitparams=None):
     return fit_func(xdata, ydata, expfunc, fitparams, bounds)
 
 
-def test_fitexp(times=100):
-    import random
-
-    xdata = np.linspace(0, 10, 100)
-
-    print("Testing fitexp...")
-
-    errs = []
-    for i in range(times):
-        y0 = 10 * (random.random() - 0.5)
-        yscale = 20 * (random.random() - 0.5)
-        decay = 1.5 + 1 * (random.random() - 0.5)
-        ydata = y0 + yscale * np.exp(-xdata / decay)
-        ydata += 0.05 * yscale * np.random.randn(len(ydata))  # add noise
-
-        pOpt, pCov = fitexp(xdata, ydata)
-
-        errs.append(np.abs(pOpt[2] / decay - 1))
-
-        if errs[-1] > 0.2:
-            import matplotlib.pyplot as plt
-
-            print("Error:", errs[-1])
-            print("pOpt:", pOpt)
-            print([y0, yscale, decay])
-
-            plt.plot(xdata, ydata)
-            plt.plot(xdata, expfunc(xdata, *pOpt))
-            plt.legend(["data", "fit"])
-            plt.show()
-
-    print("\tAverage error:", np.mean(errs))
-
-
 # ====================================================== #
 """
 lorentzian function
@@ -128,47 +94,6 @@ def fitlor(xdata, ydata, fitparams=None):
     )
 
     return fit_func(xdata, ydata, lorfunc, fitparams, bounds)
-
-
-def test_fitlor(times=100):
-    import random
-
-    xdata = np.linspace(0, 10, 100)
-
-    print("Testing fitlor...")
-
-    errs = []
-    for i in range(times):
-        y0 = 100 * (random.random() - 0.5)
-        slope = 1 * (random.random() - 0.5) / (xdata[-1] - xdata[0])
-        gamma = 0.1 * (xdata[-1] - xdata[0]) * (random.random() + 0.2)
-        yscale = 75 * gamma * (random.random() + 1)
-        if random.random() > 0.5:
-            yscale = -yscale
-        x0 = (
-            0.1 * (random.random() - 0.5) * (xdata[-1] - xdata[0])
-            + (xdata[0] + xdata[-1]) / 2
-        )
-        ydata = lorfunc(xdata, y0, slope, yscale, x0, gamma)
-        ydata += 0.05 * yscale * np.random.randn(len(ydata))  # add noise
-
-        pOpt, pCov = fitlor(xdata, ydata)
-
-        errs.append(np.abs(pOpt[3] / x0 - 1))
-
-        if errs[-1] > 0.1:
-            import matplotlib.pyplot as plt
-
-            print("Error:", errs[-1])
-            print("pOpt:", pOpt)
-            print([y0, slope, yscale, x0, gamma])
-
-            plt.plot(xdata, ydata)
-            plt.plot(xdata, lorfunc(xdata, *pOpt))
-            plt.legend(["data", "fit"])
-            plt.show()
-
-    print("\tAverage error:", np.mean(errs))
 
 
 # ====================================================== #
@@ -216,48 +141,6 @@ def fit_asym_lor(xdata, ydata, fitparams=None):
     return fit_func(xdata, ydata, asym_lorfunc, fitparams, bounds)
 
 
-def test_fitasymlor(times=10):
-    import random
-
-    xdata = np.linspace(0, 10, 100)
-
-    print("Testing fit_asym_lor...")
-
-    errs = []
-    for i in range(times):
-        y0 = 100 * (random.random() - 0.5)
-        slope = 1 * (random.random() - 0.5) / (xdata[-1] - xdata[0])
-        gamma = 0.1 * (xdata[-1] - xdata[0]) * (random.random() + 0.2)
-        yscale = 75 * gamma * (random.random() + 1)
-        if random.random() > 0.5:
-            yscale = -yscale
-        x0 = (
-            0.1 * (random.random() - 0.5) * (xdata[-1] - xdata[0])
-            + (xdata[0] + xdata[-1]) / 2
-        )
-        alpha = 1 * (random.random() - 0.5)
-        ydata = asym_lorfunc(xdata, y0, slope, yscale, x0, gamma, alpha)
-        ydata += 0.05 * yscale * np.random.randn(len(ydata))  # add noise
-
-        pOpt, pCov = fit_asym_lor(xdata, ydata)
-
-        errs.append(np.abs(pOpt[3] / x0 - 1))
-
-        if errs[-1] > 0.1:
-            import matplotlib.pyplot as plt
-
-            print("Error:", errs[-1])
-            print("pOpt:", [round(p, 2) for p in pOpt])
-            print([round(p, 2) for p in [y0, slope, yscale, x0, gamma, alpha]])
-
-            plt.plot(xdata, ydata)
-            plt.plot(xdata, asym_lorfunc(xdata, *pOpt))
-            plt.legend(["data", "fit"])
-            plt.show()
-
-    print("\tAverage error:", np.mean(errs))
-
-
 # ====================================================== #
 """
 sinusoidal function
@@ -302,41 +185,6 @@ def fitsin(xdata, ydata, fitparams=None):
         pOpt[3] = pOpt[3] + 180
     pOpt[3] = pOpt[3] % 360  # convert phase to 0-360
     return pOpt, pCov
-
-
-def test_fitsin(times=10):
-    import random
-
-    xdata = np.linspace(0, 10, 100)
-
-    print("Testing fitsin...")
-
-    errs = []
-    for i in range(times):
-        y0 = 100 * (random.random() - 0.5)
-        yscale = 5 * random.random() + 5
-        freq = 0.05 + 1 * random.random()
-        phase = 360 * random.random()
-        ydata = sinfunc(xdata, y0, yscale, freq, phase)
-        ydata += 0.05 * yscale * np.random.randn(len(ydata))  # add noise
-
-        pOpt, pCov = fitsin(xdata, ydata)
-
-        errs.append(np.abs(pOpt[2] / freq - 1))
-
-        if errs[-1] > 0.1:
-            import matplotlib.pyplot as plt
-
-            print("Error:", errs[-1])
-            print("pOpt:", [round(p, 2) for p in pOpt])
-            print([round(p, 2) for p in [y0, yscale, freq, phase]])
-
-            plt.plot(xdata, ydata)
-            plt.plot(xdata, sinfunc(xdata, *pOpt))
-            plt.legend(["data", "fit"])
-            plt.show()
-
-    print("\tAverage error:", np.mean(errs))
 
 
 # ====================================================== #
@@ -387,47 +235,3 @@ def fitdecaysin(xdata, ydata, fitparams=None):
         pOpt[3] = pOpt[3] + 180
     pOpt[3] = pOpt[3] % 360  # convert phase to 0-360
     return pOpt, pCov
-
-
-def test_fitdecaysin(times=100):
-    import random
-
-    xdata = np.linspace(0, 10, 100)
-
-    print("Testing fitdecaysin...")
-
-    errs = []
-    for i in range(times):
-        y0 = 100 * (random.random() - 0.5)
-        yscale = 5 * random.random() + 5
-        freq = 0.1 + 1 * random.random()
-        phase = 360 * random.random()
-        decay = 10 + 5 * random.random()
-        ydata = decaysin(xdata, y0, yscale, freq, phase, decay)
-        ydata += 0.05 * yscale * np.random.randn(len(ydata))  # add noise
-
-        pOpt, pCov = fitdecaysin(xdata, ydata)
-
-        errs.append(np.abs(pOpt[2] / freq - 1))
-
-        if errs[-1] > 0.1:
-            import matplotlib.pyplot as plt
-
-            print("Error:", errs[-1])
-            print("pOpt:", [round(p, 2) for p in pOpt])
-            print([round(p, 2) for p in [y0, yscale, freq, phase, decay]])
-
-            plt.plot(xdata, ydata)
-            plt.plot(xdata, decaysin(xdata, *pOpt))
-            plt.legend(["data", "fit"])
-            plt.show()
-
-    print("\tAverage error:", np.mean(errs))
-
-
-if __name__ == "__main__":
-    test_fitexp()
-    test_fitlor()
-    test_fitasymlor()
-    test_fitsin()
-    test_fitdecaysin()

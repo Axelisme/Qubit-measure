@@ -18,7 +18,7 @@ def measure_dispersive(soc, soccfg, cfg):
     for f in tqdm(fpts):
         res_pulse["freq"] = f
         prog = DispersiveProgram(soccfg, make_cfg(cfg, pre_pulse=False))
-        avgi, avgq = prog.acquire(soc)
+        avgi, avgq = prog.acquire(soc, progress=False)
         signal = avgi[0][0] + 1j * avgq[0][0]
         g_signals.append(signal)
     g_signals = np.array(g_signals)
@@ -27,7 +27,7 @@ def measure_dispersive(soc, soccfg, cfg):
     for f in tqdm(fpts):
         res_pulse["freq"] = f
         prog = DispersiveProgram(soccfg, make_cfg(cfg, pre_pulse=True))
-        avgi, avgq = prog.acquire(soc)
+        avgi, avgq = prog.acquire(soc, progress=False)
         signal = avgi[0][0] + 1j * avgq[0][0]
         e_signals.append(signal)
     e_signals = np.array(e_signals)
