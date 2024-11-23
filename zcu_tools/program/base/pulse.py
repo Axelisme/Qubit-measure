@@ -1,4 +1,9 @@
-def create_waveform(prog, ch, pulse_cfg: dict):
+from typing import Union
+
+from qick.asm_v1 import AcquireProgram
+
+
+def create_waveform(prog: AcquireProgram, ch: int, pulse_cfg: dict) -> str:
     style = pulse_cfg["style"]
     if style == "flat_top":
         # use raise pulse for the waveform
@@ -31,7 +36,14 @@ def create_waveform(prog, ch, pulse_cfg: dict):
     return wavform
 
 
-def set_pulse(prog, ch, pulse_cfg, waveform=None, for_readout=False, ro=0):
+def set_pulse(
+    prog: AcquireProgram,
+    ch: int,
+    pulse_cfg: dict,
+    waveform: str = None,
+    for_readout=False,
+    ro=0,
+):
     style = pulse_cfg["style"]
     length = prog.us2cycles(pulse_cfg["length"])
 
@@ -78,8 +90,26 @@ def set_pulse(prog, ch, pulse_cfg, waveform=None, for_readout=False, ro=0):
         raise ValueError(f"Unknown pulse style: {style}")
 
 
-def create_pulse(program, ch, pulse_cfg, **kwargs):
-    wavform = create_waveform(program, ch, pulse_cfg)
+def is_single_pulse(pulse_cfg: dict):
+    # use gain key to determine if the pulse is single pulse or nested pulse
+    if "gain" in pulse_cfg:
+        # gain should be a number
+        assert not isinstance(pulse_cfg["gain"], dict), "Invalid pulse configuration"
+        return True
+    # only one level of nesting is supported
+    assert all(["gain" in v for v in pulse_cfg.values()]), "Invalid pulse configuration"
+    return False
 
-    # set the pulse registers
-    set_pulse(program, ch, pulse_cfg, waveform=wavform, **kwargs)
+
+def create_pulse(
+    prog: AcquireProgram, ch: int, pulse_cfg: dict, **kwargs
+) -> Union[str, dict]:
+    if is_single_pulse(pulse_cfg):
+        # single pulse
+        wavform = create_waveform(prog, ch, pulse_cfg)
+        set_pulse(prog, ch, pulse_cfg, wavform, **kwargs)
+    else:
+        # nested pulse
+        wavform = {k: create_waveform(prog, ch, v) for k, v in pulse_cfg.items()}
+        # don't need to set pulse for nested pulse
+    return wavform

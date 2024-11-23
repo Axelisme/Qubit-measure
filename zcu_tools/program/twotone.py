@@ -1,31 +1,18 @@
-from .base import BaseTwoToneProgram, create_pulse
+from qick import AveragerProgram
+
+from .base import BaseTwoToneProgram
 
 
-class TwotoneProgram(BaseTwoToneProgram):
+class TwoToneProgram(AveragerProgram, BaseTwoToneProgram):
     def initialize(self):
-        super().initialize()
-
-        create_pulse(self, self.cfg["qubit"]["qub_ch"], self.cfg["qub_pulse"])
-
-        self.synci(200)
+        return BaseTwoToneProgram.initialize(self)
 
     def body(self):
-        cfg = self.cfg
-        res_cfg = self.res_cfg
-        qub_cfg = self.qub_cfg
-
         self.flux_ctrl.trigger()
 
         # qubit pulse
-        self.pulse(ch=qub_cfg["qub_ch"])
+        self.pulse(ch=self.qub_cfg["qub_ch"])
         self.sync_all(self.us2cycles(0.05))
 
         # measure
-        self.measure(
-            pulse_ch=res_cfg["res_ch"],
-            adcs=res_cfg["ro_chs"],
-            pins=[res_cfg["ro_chs"][0]],
-            adc_trig_offset=self.us2cycles(cfg["adc_trig_offset"]),
-            wait=True,
-            syncdelay=self.us2cycles(cfg["relax_delay"]),
-        )
+        self.measure_pulse()

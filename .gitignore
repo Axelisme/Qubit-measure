@@ -1,6 +1,7 @@
 qick
 labber_api
 backup
+.env
 .ipynb_checkpoints
 __pycache__
 *.bak

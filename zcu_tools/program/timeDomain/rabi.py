@@ -1,36 +1,18 @@
-from .base import BaseTimeProgram, create_pulse
+from .base import BaseTimeProgram
 
 
 class AmpRabiProgram(BaseTimeProgram):
     def initialize(self):
-        super().initialize()
-
-        qub_pulse_cfg = self.cfg["qub_pulse"]
-
-        # overwrite qubit pulse gain
-        qub_pulse_cfg["gain"] = self.cfg["start"]
-
-        create_pulse(self, self.qub_cfg["qub_ch"], qub_pulse_cfg)
-
-        self.synci(200)
+        # initialize qubit pulse gain
+        self.cfg["qub_pulse"]["gain"] = self.cfg["sweep"]["start"]
+        return super().initialize()
 
     def body(self):
-        cfg = self.cfg
-        res_cfg = self.res_cfg
-        qub_cfg = self.qub_cfg
-
         self.flux_ctrl.trigger()
 
         # qubit pulse
-        self.pulse(ch=qub_cfg["qub_ch"])
-        self.sync_all(self.us2cycles(0.02))
+        self.pulse(ch=self.qub_cfg["qub_ch"])
+        self.sync_all(self.us2cycles(0.05))
 
         # measure
-        self.measure(
-            pulse_ch=res_cfg["res_ch"],
-            adcs=res_cfg["ro_chs"],
-            pins=[res_cfg["ro_chs"][0]],
-            adc_trig_offset=self.us2cycles(cfg["adc_trig_offset"]),
-            wait=True,
-            syncdelay=self.us2cycles(cfg["relax_delay"]),
-        )
+        self.measure_pulse()

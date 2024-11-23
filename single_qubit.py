@@ -17,15 +17,16 @@
 
 # %%
 import os
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 # # %cd /home/xilinx/jupyter_notebooks/nthu/sinica-5q/Axel/Qubit-measure
 print(os.getcwd())
+sys.path.append(os.getcwd())
 
 import zcu_tools.analysis as zf  # noqa: E402
-import zcu_tools.program as zp  # noqa: E402
 import zcu_tools.schedule as zs  # noqa: E402
 
 # ruff: noqa: I001
@@ -89,7 +90,6 @@ def reload_zcutools():
         importlib.reload(module)
 
     print("reloaded:")
-    reload(zp, 3)
     reload(zf, 3)
     reload(zs, 3)
 
@@ -174,7 +174,7 @@ plt.title("Averages = " + str(cfg["rounds"]))
 
 # %%
 # adc_trig_offset = cfg["adc_trig_offset"]
-adc_trig_offset = predict_offset
+adc_trig_offset = float(predict_offset)
 adc_trig_offset
 
 # %%
