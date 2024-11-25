@@ -1,4 +1,5 @@
-from .configuration import DefaultCfg, make_cfg
+from .configuration import DefaultCfg
+from .auto import make_cfg
 from .datasaver import save_cfg, save_data, create_datafolder
 from .tools import make_sweep
 
