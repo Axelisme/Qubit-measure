@@ -27,6 +27,7 @@ print(os.getcwd())
 sys.path.append(os.getcwd())
 
 import zcu_tools.analysis as zf  # noqa: E402
+import zcu_tools.program as zp  # noqa: E402
 import zcu_tools.schedule as zs  # noqa: E402
 
 # ruff: noqa: I001
@@ -91,6 +92,7 @@ def reload_zcutools():
 
     print("reloaded:")
     reload(zf, 3)
+    reload(zp, 3)
     reload(zs, 3)
 
 
