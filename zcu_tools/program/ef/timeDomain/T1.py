@@ -1,7 +1,7 @@
-from .base import EFBaseTimeProgram
+from .base import BaseEFTimeProgram
 
 
-class EFT1Program(EFBaseTimeProgram):
+class EFT1Program(BaseEFTimeProgram):
     def body(self):
         self.flux_ctrl.trigger()
 

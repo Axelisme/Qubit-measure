@@ -1,5 +1,5 @@
 import qick as qk
-from ..base import BaseOneToneProgram, create_waveform, set_pulse  # noqa
+from ..base import BaseOneToneProgram, create_waveform, set_pulse
 
 
 class BaseEFProgram(BaseOneToneProgram):
