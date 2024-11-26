@@ -27,11 +27,11 @@ print(os.getcwd())
 sys.path.append(os.getcwd())
 
 import zcu_tools.analysis as zf  # noqa: E402
-import zcu_tools.program as zp  # noqa: E402
 import zcu_tools.schedule as zs  # noqa: E402
 
 # ruff: noqa: I001
 from zcu_tools import (  # noqa: E402
+    # reload_zcutools,
     DefaultCfg,
     create_datafolder,
     make_cfg,
@@ -55,46 +55,11 @@ print(soccfg)
 
 
 # %%
-from qick import QickSoc  # noqa: E402
+# from qick import QickSoc  # noqa: E402
 
-soc = QickSoc()
-soccfg = soc
-print(soc)
-
-# %% [markdown]
-# # Utility functions
-
-
-# %%
-def reload_zcutools():
-    import importlib
-    from types import ModuleType
-
-    excluded = ["qick", "numpy", "matplotlib.pyplot", "importlib"]
-    visited = set()
-
-    def reload(module, depth=1, level=1):
-        if level > depth:
-            return
-
-        nonlocal visited
-        if module in visited:
-            return
-        visited.add(module)
-
-        print(" " * level + module.__name__)
-        for attr_name in dir(module):
-            attr = getattr(module, attr_name)
-            if isinstance(attr, ModuleType) and attr.__name__ not in excluded:
-                reload(attr, depth, level + 1)
-
-        importlib.reload(module)
-
-    print("reloaded:")
-    reload(zf, 3)
-    reload(zp, 3)
-    reload(zs, 3)
-
+# soc = QickSoc()
+# soccfg = soc
+# print(soc)
 
 # %% [markdown]
 # # Create data folder
@@ -115,7 +80,7 @@ DefaultCfg.init_global(
     res_cfgs={res_name: {"res_ch": 0, "ro_chs": [0], "nqz": 2}},
     qub_cfgs={qubit_name: {"qub_ch": 2, "nqz": 2}},
     flux_cfgs={
-        "default_method": "zcu216",
+        "default_method": flux_method,
         "yokogawa": {
             "name": "gs200",
             "address": "USB::0x0B21::0x0039::91S522309::INSTR",
@@ -125,12 +90,14 @@ DefaultCfg.init_global(
 )
 
 
+# %%
+DefaultCfg.set_default(resonator=res_name)
+
 # %% [markdown]
 # # Lookback
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": {
         # "style": "const",
         # "style": "cosine",
@@ -201,7 +168,6 @@ save_data(
 res_style = "flat_top"
 ro_length = 1
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": {
         "style": res_style,
         "phase": 0,
@@ -237,6 +203,7 @@ r_f
 
 # %%
 # r_f = 5000
+DefaultCfg.set_res(res_name, freq=r_f)
 
 # %%
 filename = "res_freq"
@@ -253,7 +220,6 @@ save_data(
 # # Onetone Dependences
 
 # %%
-sw_spot = 0
 DefaultCfg.set_res_pulse(
     res_name,
     readout_rf={
@@ -265,15 +231,13 @@ DefaultCfg.set_res_pulse(
         "desc": "Readout with resonance frequency",
     },
 )
+DefaultCfg.set_default(res_pulse="readout_rf", flux="none")
 
 # %% [markdown]
 # ## Power dependence
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
-    "res_pulse": "readout_rf",
-    "flux": sw_spot,
     "relax_delay": 3.0,  # us
 }
 
@@ -329,14 +293,14 @@ save_data(
 
 # %%
 DefaultCfg.set_res_pulse(res_name, readout_rf={"gain": res_gain})
+DefaultCfg.set_res(res_name, max_gain=res_gain)
 
 # %% [markdown]
 # ## Flux dependence
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
-    "res_pulse": "readout_rf",
+    "flux": {"method": flux_method},
     "relax_delay": 3.0,  # us
 }
 
@@ -357,7 +321,9 @@ plt.pcolormesh(fpts, flxs, np.abs(signals2D))
 sw_spot = 10000
 
 DefaultCfg.set_qub(qubit_name, sw_spot={flux_method: sw_spot})
+DefaultCfg.set_default(flux="sw_spot")
 
+# %%
 filename = "res_flux_dependence"
 save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
@@ -373,18 +339,18 @@ save_data(
 # # Qubit Frequency
 
 # %%
+DefaultCfg.set_default(qubit=qubit_name)
+
+# %%
 qub_style = "cosine"
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_rf",
-    "qubit": qubit_name,
     "qub_pulse": {
         "style": qub_style,
         "gain": 5000,
         "phase": 0,
         "length": 4,
     },
-    "flux": sw_spot,
     "relax_delay": 5.0,  # us
 }
 
@@ -417,12 +383,13 @@ f_amp, f_pha = zf.spectrum_analyze(fpts, signals)
 f_amp, f_pha
 
 # %%
-qub_freq = f_amp
+q_f = f_amp
 # qub_freq = f_pha
-qub_freq
+q_f
 
 # %%
 # qub_freq = 4900
+DefaultCfg.set_qub(qubit_name, freq=q_f)
 
 # %%
 filename = "qub_freq"
@@ -431,7 +398,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=f"qubit frequency = {qub_freq}MHz",
+    comment=f"qubit frequency = {q_f}MHz",
     tag="TwoTone",
 )
 
@@ -441,16 +408,13 @@ save_data(
 # %%
 qub_pulse_len = 0.07
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_rf",
-    "qubit": qubit_name,
     "qub_pulse": {
         "style": qub_style,
-        "freq": qub_freq,
+        "freq": q_f,
         "phase": 0,
         "length": qub_pulse_len,
     },
-    "flux": sw_spot,
     "relax_delay": 70.0,  # us
 }
 
@@ -489,7 +453,7 @@ DefaultCfg.set_qub_pulse(
     qubit_name,
     pi={
         "style": qub_style,
-        "freq": qub_freq,
+        "freq": q_f,
         "gain": pi_gain,
         "phase": 0,
         "length": qub_pulse_len,
@@ -497,7 +461,7 @@ DefaultCfg.set_qub_pulse(
     },
     pi2={
         "style": qub_style,
-        "freq": qub_freq,
+        "freq": q_f,
         "gain": pi2_gain,
         "phase": 0,
         "length": qub_pulse_len,
@@ -511,11 +475,8 @@ DefaultCfg.set_qub_pulse(
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_rf",
-    "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -572,15 +533,13 @@ DefaultCfg.set_res_pulse(
 
 # %%
 activate_detune = 3.0
+orig_q_f = q_f
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_dp1",
-    "qubit": qubit_name,
     "qub_pulse": {
         **DefaultCfg.get_qub_pulse(qubit_name, "pi2"),
-        "freq": qub_freq + activate_detune,
+        "freq": orig_q_f + activate_detune,
     },
-    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -606,7 +565,11 @@ t2d = zf.T2decay_analyze(soc.cycles2us(Ts2), signals2)
 t2d
 
 # %%
-qub_freq = qub_freq + activate_detune - detune
+q_f = orig_q_f + activate_detune - detune
+DefaultCfg.set_qub(qubit_name, freq=q_f)
+
+# %%
+
 
 filename = "t2ramsey"
 save_cfg(os.path.join(database_path, filename), cfg)
@@ -624,11 +587,8 @@ save_data(
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_dp1",
-    "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -660,11 +620,8 @@ save_data(
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_dp1",
-    "qubit": qubit_name,
     "qub_pulse": [("pi", "pi"), ("pi2", "pi2")],
-    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -693,11 +650,8 @@ save_data(
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_dp1",
-    "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -728,11 +682,8 @@ DefaultCfg.set_res_pulse(
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_fid",
-    "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -754,11 +705,8 @@ best_style = list(fids.keys())[0]
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_fid",
-    "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -781,11 +729,8 @@ plt.legend()
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_fid",
-    "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -809,11 +754,8 @@ plt.legend()
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": "readout_fid",
-    "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 
@@ -836,7 +778,6 @@ plt.legend()
 
 # %%
 exp_cfg = {
-    "resonator": res_name,
     "res_pulse": {
         "style": best_style,
         "freq": best_freq,
@@ -844,9 +785,7 @@ exp_cfg = {
         "phase": 0,
         "length": best_len,
     },
-    "qubit": qubit_name,
     "qub_pulse": "pi",
-    "flux": sw_spot,
     "relax_delay": 50.0,  # us
 }
 cfg = make_cfg(exp_cfg, shots=5000)
@@ -885,5 +824,3 @@ DefaultCfg.set_res_pulse(
 
 # %%
 DefaultCfg.dump(os.path.join(database_path, "default_cfg"))
-
-# %%

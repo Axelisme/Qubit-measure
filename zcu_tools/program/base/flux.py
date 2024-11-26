@@ -56,12 +56,7 @@ class YokoFluxControl(FluxControl):
 
         # if not np.issubdtype(flux, np.floating):
         if not isinstance(flux, float):
-            # zero is ok
-            if flux != 0:
-                raise ValueError(
-                    f"Flux must be a float in YokoFluxControl, but got {flux}"
-                )
-            flux = 0.0
+            raise ValueError(f"Flux must be a float in YokoFluxControl, but got {flux}")
         assert (
             abs(flux) <= self.limit
         ), f"Flux must be in the range [-0.01, 0.01], but got {flux}"
@@ -89,12 +84,7 @@ class ZCUFluxControl(FluxControl):
             flux = flux.item()
 
         if not isinstance(flux, int):
-            # zero is ok
-            if flux != 0.0:
-                raise ValueError(
-                    f"Flux must be an int in ZCUFluxControl, but got {flux}"
-                )
-            flux = 0
+            raise ValueError(f"Flux must be an int in ZCUFluxControl, but got {flux}")
         assert (
             abs(flux) <= 40000
         ), f"Flux must be in the range [-40000, 40000], but got {flux}"
@@ -117,5 +107,7 @@ def make_fluxControl(prog, method, flux_cfg) -> FluxControl:
         return YokoFluxControl(prog, flux_cfg[method])
     elif method == "zcu216":
         return ZCUFluxControl(prog, flux_cfg[method])
+    elif method == "none":
+        return NoneFluxControl()
     else:
         raise ValueError(f"Unknown flux control method: {method}")

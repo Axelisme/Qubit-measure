@@ -1,39 +1,54 @@
-from typing import Union
-
 from qick.asm_v1 import AcquireProgram
 
 
+def is_single_pulse(pulse_cfg: dict):
+    # use gain key to determine if the pulse is single pulse or nested pulse
+    if "gain" in pulse_cfg:
+        # gain should be a number
+        assert not isinstance(pulse_cfg["gain"], dict), "Invalid pulse configuration"
+        return True
+    # only one level of nesting is supported
+    assert all(["gain" in v for v in pulse_cfg.values()]), "Invalid pulse configuration"
+    return False
+
+
 def create_waveform(prog: AcquireProgram, ch: int, pulse_cfg: dict) -> str:
-    style = pulse_cfg["style"]
-    if style == "flat_top":
-        # use raise pulse for the waveform
-        pulse_cfg = pulse_cfg["raise_pulse"]
-
-    wav_style = pulse_cfg["style"]
-    length = prog.us2cycles(pulse_cfg["length"])
-
-    if style == "flat_top":
-        length = 2 * (length // 2)  # make length even
-        wavform = f"flatTop_{wav_style}_L{length}"
-    else:
-        wavform = f"{wav_style}_L{length}"
-
-    if wav_style == "const":
+    def create_one(prog: AcquireProgram, ch: int, pulse_cfg: dict):
+        style = pulse_cfg["style"]
         if style == "flat_top":
-            raise ValueError("Flat top with constant raise style is not supported")
-    elif wav_style == "gauss":
-        # default sigma is quarter of the length
-        sigma = prog.us2cycles(pulse_cfg["sigma"])
-        wavform += f"_S{sigma}"
-        prog.add_gauss(ch=ch, name=wavform, sigma=sigma, length=length)
-    elif wav_style == "cosine":
-        prog.add_cosine(ch=ch, name=wavform, length=length)
-    elif wav_style == "flat_top":
-        raise ValueError("Nested flat top pulses are not supported")
-    else:
-        raise ValueError(f"Unknown waveform style: {wav_style}")
+            # use raise pulse for the waveform
+            pulse_cfg = pulse_cfg["raise_pulse"]
 
-    return wavform
+        wav_style = pulse_cfg["style"]
+        length = prog.us2cycles(pulse_cfg["length"])
+
+        if style == "flat_top":
+            length = 2 * (length // 2)  # make length even
+            wavform = f"flatTop_{wav_style}_L{length}"
+        else:
+            wavform = f"{wav_style}_L{length}"
+
+        if wav_style == "const":
+            if style == "flat_top":
+                raise ValueError("Flat top with constant raise style is not supported")
+        elif wav_style == "gauss":
+            # default sigma is quarter of the length
+            sigma = prog.us2cycles(pulse_cfg["sigma"])
+            wavform += f"_S{sigma}"
+            prog.add_gauss(ch=ch, name=wavform, sigma=sigma, length=length)
+        elif wav_style == "cosine":
+            prog.add_cosine(ch=ch, name=wavform, length=length)
+        elif wav_style == "flat_top":
+            raise ValueError("Nested flat top pulses are not supported")
+        else:
+            raise ValueError(f"Unknown waveform style: {wav_style}")
+
+        return wavform
+
+    if is_single_pulse(pulse_cfg):  # single pulse
+        return create_one(prog, ch, pulse_cfg)
+    # nested pulse
+    return {k: create_one(prog, ch, v) for k, v in pulse_cfg.items()}
 
 
 def set_pulse(
@@ -88,28 +103,3 @@ def set_pulse(
         )
     else:
         raise ValueError(f"Unknown pulse style: {style}")
-
-
-def is_single_pulse(pulse_cfg: dict):
-    # use gain key to determine if the pulse is single pulse or nested pulse
-    if "gain" in pulse_cfg:
-        # gain should be a number
-        assert not isinstance(pulse_cfg["gain"], dict), "Invalid pulse configuration"
-        return True
-    # only one level of nesting is supported
-    assert all(["gain" in v for v in pulse_cfg.values()]), "Invalid pulse configuration"
-    return False
-
-
-def create_pulse(
-    prog: AcquireProgram, ch: int, pulse_cfg: dict, **kwargs
-) -> Union[str, dict]:
-    if is_single_pulse(pulse_cfg):
-        # single pulse
-        wavform = create_waveform(prog, ch, pulse_cfg)
-        set_pulse(prog, ch, pulse_cfg, wavform, **kwargs)
-    else:
-        # nested pulse
-        wavform = {k: create_waveform(prog, ch, v) for k, v in pulse_cfg.items()}
-        # don't need to set pulse for nested pulse
-    return wavform

@@ -1,15 +1,20 @@
 from qick.asm_v1 import AcquireProgram
+
 from .flux import make_fluxControl
-from .pulse import create_pulse
+from .pulse import create_waveform, is_single_pulse, set_pulse
 
 
 class BaseOneToneProgram(AcquireProgram):
     def parse_cfg(self):
+        assert isinstance(self.cfg, dict), "cfg is not a dict"
+
         self.flux_cfg = self.cfg["flux"]
         self.res_cfg = self.cfg["resonator"]
         self.res_pulse = self.cfg["res_pulse"]
 
     def setup_readout(self):
+        assert is_single_pulse(self.res_pulse), "Currently only support one pulse cfg"
+
         # declare the resonator channel and readout channels
         res_ch = self.res_cfg["res_ch"]
         self.declare_gen(ch=res_ch, nqz=self.res_cfg["nqz"])
@@ -21,9 +26,8 @@ class BaseOneToneProgram(AcquireProgram):
                 gen_ch=res_ch,
             )
         # create the resonator pulse
-        self.res_wavform = create_pulse(
-            self, self.res_cfg["res_ch"], self.res_pulse, for_readout=True
-        )
+        self.res_wavform = create_waveform(self, res_ch, self.res_pulse)
+        set_pulse(self, res_ch, self.res_pulse, self.res_wavform, for_readout=True)
 
     def setup_flux(self):
         flux_cfg = self.flux_cfg
@@ -58,8 +62,11 @@ class BaseTwoToneProgram(BaseOneToneProgram):
         self.qub_pulse = self.cfg["qub_pulse"]
 
     def setup_qubit(self):
-        self.declare_gen(ch=self.qub_cfg["qub_ch"], nqz=self.qub_cfg["nqz"])
-        self.qub_wavform = create_pulse(self, self.qub_cfg["qub_ch"], self.qub_pulse)
+        qub_ch = self.qub_cfg["qub_ch"]
+        self.declare_gen(ch=qub_ch, nqz=self.qub_cfg["nqz"])
+        self.qub_wavform = create_waveform(self, qub_ch, self.qub_pulse)
+        if isinstance(self.qub_wavform, str):
+            set_pulse(self, qub_ch, self.qub_pulse, self.qub_wavform)
 
     def initialize(self):
         self.parse_cfg()

@@ -1,4 +1,5 @@
 import time
+from typing import Union
 
 import yaml
 
@@ -9,6 +10,7 @@ class DefaultCfg:
     res_cfgs = None
     qub_cfgs = None
     flux_cfgs = None
+    exp_default = {}
 
     @classmethod
     def init_global(
@@ -74,15 +76,29 @@ class DefaultCfg:
         return res_cfg["pulses"][pulse_name]
 
     @classmethod
-    def set_qub_pulse(cls, qubit, behavior="force", **pulse_cfgs):
+    def set_qub_pulse(cls, qubit: str, behavior="force", **pulse_cfgs):
         qub_cfg = cls.qub_cfgs[qubit]
         qub_cfg.setdefault("pulses", {})
         deepupdate(qub_cfg["pulses"], pulse_cfgs, behavior=behavior)
 
     @classmethod
-    def get_qub_pulse(cls, qubit, pulse_name):
+    def get_qub_pulse(cls, qubit: str, pulse_name: str):
         qub_cfg = cls.qub_cfgs[qubit]
         return qub_cfg["pulses"][pulse_name]
+
+    @classmethod
+    def get_sw_spot(cls, qubit: Union[str, dict]) -> dict:
+        if isinstance(qubit, dict):
+            return qubit.get("sw_spot", {})
+        elif isinstance(qubit, str):
+            assert qubit in cls.qub_cfgs, f"Qubit {qubit} not found in qub_cfgs"
+            return cls.qub_cfgs[qubit].get("sw_spot", {})
+        else:
+            raise TypeError(f"Invalid qubit type: {type(qubit)}")
+
+    @classmethod
+    def set_default(cls, **kwargs):
+        deepupdate(cls.exp_default, kwargs, behavior="force")
 
     @classmethod
     def dict(cls):
