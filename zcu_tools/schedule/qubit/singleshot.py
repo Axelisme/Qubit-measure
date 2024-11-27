@@ -12,7 +12,7 @@ def measure_fid(soc, soccfg, cfg, plot=False, progress=False):
     prog = SingleShotProgram(soccfg, deepcopy(cfg))
     i0, q0 = prog.acquire(soc, progress=progress)
     fid, threhold, angle = singleshot_analysis(i0, q0, plot=plot)
-    return fid, threhold, angle, (i0 + 1j * q0)
+    return fid, threhold, angle, np.array(i0 + 1j * q0)
 
 
 def scan_pdr_fid(soc, soccfg, cfg):

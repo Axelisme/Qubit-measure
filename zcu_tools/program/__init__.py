@@ -2,7 +2,7 @@ from . import ef
 from .onetone import OnetoneProgram
 from .rabi import AmpRabiProgram
 from .singleshot import SingleShotProgram
-from .timeDomain import T1Program, T2EchoProgram, T2RamseyProgram
+from .time_exp import T1Program, T2EchoProgram, T2RamseyProgram
 from .twotone import TwoToneProgram
 
 __all__ = [

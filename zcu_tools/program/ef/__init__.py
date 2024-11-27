@@ -1,5 +1,5 @@
 from .rabi import EFAmpRabiProgram
-from .timeDomain import (
+from .time_exp import (
     EFT1Program,
     EFT2EchoProgram,
     EFT2RamseyProgram,

@@ -65,8 +65,11 @@ print(soccfg)
 # # Create data folder
 
 # %%
-data_root = os.path.join(os.getcwd(), "Database")
-database_path = create_datafolder(data_root)
+database_path = create_datafolder(os.getcwd(), "Axel")
+
+# data_host = "192.168.10.252"  # cmd-> ipconfig -> ipv4 #controling computer
+data_host = "100.76.229.37" # tailscale
+# data_host = None
 
 # %% [markdown]
 # # Predefine parameters
@@ -92,9 +95,6 @@ DefaultCfg.init_global(
         },
     },
 )
-
-
-# %%
 DefaultCfg.set_default(resonator=res_name, flux_dev=flux_dev)
 
 # %% [markdown]
@@ -162,6 +162,7 @@ save_data(
     z_info={"name": "Signal", "unit": "a.u.", "values": Is + 1j * Qs},
     comment=f"adc_trig_offset = {adc_trig_offset}us",
     tag="Lookback",
+    server_ip=data_host,
 )
 
 
@@ -218,6 +219,7 @@ save_data(
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=f"resonator frequency = {r_f}MHz",
     tag="OneTone",
+    server_ip=data_host,
 )
 
 # %% [markdown]
@@ -290,6 +292,7 @@ save_data(
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
     comment="power dependence",
     tag="OneTone",
+    server_ip=data_host,
 )
 
 # %% [markdown]
@@ -336,6 +339,7 @@ save_data(
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
     comment="",
     tag="OneTone",
+    server_ip=data_host,
 )
 
 # %% [markdown]
@@ -403,6 +407,7 @@ save_data(
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=f"qubit frequency = {q_f}MHz",
     tag="TwoTone",
+    server_ip=data_host,
 )
 
 # %% [markdown]
@@ -446,6 +451,7 @@ save_data(
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=f"pi gain = {pi_gain}, pi/2 gain = {pi2_gain}",
     tag="TimeDomain",
+    server_ip=data_host,
 )
 
 # %% [markdown]
@@ -510,6 +516,7 @@ save_data(
     y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
     comment=f"SNR1 = {readout_f1}MHz, SNR2 = {readout_f2}MHz",
     tag="Dispersive",
+    server_ip=data_host,
 )
 
 
@@ -582,6 +589,7 @@ save_data(
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2},
     comment=f"activate detune = {activate_detune}MHz, detune = {detune}MHz",
     tag="TimeDomain",
+    server_ip=data_host,
 )
 
 
@@ -616,6 +624,7 @@ save_data(
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=f"t1 = {t1}us",
     tag="TimeDomain",
+    server_ip=data_host,
 )
 
 # %% [markdown]
@@ -646,6 +655,7 @@ save_data(
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=f"t2echo = {t2e}us",
     tag="TimeDomain",
+    server_ip=data_host,
 )
 
 # %% [markdown]
@@ -806,6 +816,7 @@ save_data(
     y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
     comment=f"fide {fid:.3f}",
     tag="SingleShot",
+    server_ip=data_host,
 )
 
 # %%
