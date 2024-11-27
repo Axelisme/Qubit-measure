@@ -1,4 +1,5 @@
-from .base import BaseEFTimeProgram, set_pulse
+from .base import BaseEFTimeProgram
+from ..base import set_pulse
 
 
 class EFT2EchoProgram(BaseEFTimeProgram):

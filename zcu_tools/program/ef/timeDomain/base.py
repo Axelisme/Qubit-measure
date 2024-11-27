@@ -1,9 +1,8 @@
-import qick as qk
+from qick import RAveragerProgram
+from ..base import BaseEFProgram
 
-from ..base import BaseEFProgram, set_pulse  # noqa: F401
 
-
-class BaseEFTimeProgram(qk.RAveragerProgram, BaseEFProgram):
+class BaseEFTimeProgram(RAveragerProgram, BaseEFProgram):
     def parse_cfg(self):
         BaseEFProgram.parse_cfg(self)
 

@@ -74,24 +74,28 @@ database_path = create_datafolder(data_root)
 # %%
 res_name = "r1"
 qubit_name = "q1"
-flux_method = "zcu216"
+flux_dev = "zcu216"
 
 DefaultCfg.init_global(
     res_cfgs={res_name: {"res_ch": 0, "ro_chs": [0], "nqz": 2}},
     qub_cfgs={qubit_name: {"qub_ch": 2, "nqz": 2}},
     flux_cfgs={
-        "default_method": flux_method,
+        "zcu216": {
+            "ch": 4,
+            "saturate": 0.1,  # us
+        },
         "yokogawa": {
             "name": "gs200",
             "address": "USB::0x0B21::0x0039::91S522309::INSTR",
+            "limit": [-0.01, 0.01],
+            "sweep_rate": 5e-6,
         },
-        "zcu216": {"ch": 4},
     },
 )
 
 
 # %%
-DefaultCfg.set_default(resonator=res_name)
+DefaultCfg.set_default(resonator=res_name, flux_dev=flux_dev)
 
 # %% [markdown]
 # # Lookback
@@ -231,7 +235,7 @@ DefaultCfg.set_res_pulse(
         "desc": "Readout with resonance frequency",
     },
 )
-DefaultCfg.set_default(res_pulse="readout_rf", flux="none")
+DefaultCfg.set_default(res_pulse="readout_rf")
 
 # %% [markdown]
 # ## Power dependence
@@ -275,7 +279,7 @@ plt.figure()
 plt.pcolormesh(fpts, pdrs, NormalizeData(np.abs(signals2D)))
 
 # %%
-res_gain = 2200
+max_gain = 2200
 
 filename = "res_power_dependence"
 save_cfg(os.path.join(database_path, filename), cfg)
@@ -292,15 +296,14 @@ save_data(
 # ## Update Readout pulse
 
 # %%
-DefaultCfg.set_res_pulse(res_name, readout_rf={"gain": res_gain})
-DefaultCfg.set_res(res_name, max_gain=res_gain)
+DefaultCfg.set_res_pulse(res_name, readout_rf={"gain": max_gain})
+DefaultCfg.set_res(res_name, max_gain=max_gain)
 
 # %% [markdown]
 # ## Flux dependence
 
 # %%
 exp_cfg = {
-    "flux": {"method": flux_method},
     "relax_delay": 3.0,  # us
 }
 
@@ -320,7 +323,7 @@ plt.pcolormesh(fpts, flxs, np.abs(signals2D))
 # %%
 sw_spot = 10000
 
-DefaultCfg.set_qub(qubit_name, sw_spot={flux_method: sw_spot})
+DefaultCfg.set_qub(qubit_name, sw_spot={flux_dev: sw_spot})
 DefaultCfg.set_default(flux="sw_spot")
 
 # %%
@@ -670,7 +673,7 @@ print("Optimal fidelity after rotation = %.3f" % fid)
 # initial parameters
 best_style = res_style
 best_freq = readout_f1
-best_pdr = res_gain
+best_pdr = max_gain
 best_ro_len = ro_length
 DefaultCfg.set_res_pulse(
     res_name,
@@ -711,7 +714,7 @@ exp_cfg = {
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(res_gain - 500, res_gain + 2000, step=500)
+exp_cfg["sweep"] = make_sweep(max_gain - 500, max_gain + 2000, step=500)
 cfg = make_cfg(exp_cfg, shots=5000)
 
 fpts, fids = zs.scan_pdr_fid(soc, soccfg, cfg)

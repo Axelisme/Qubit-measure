@@ -1,4 +1,5 @@
-from .base import BaseTimeProgram, set_pulse
+from .base import BaseTimeProgram
+from ..base import set_pulse
 
 
 class T2EchoProgram(BaseTimeProgram):

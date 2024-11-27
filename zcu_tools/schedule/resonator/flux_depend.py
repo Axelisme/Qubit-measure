@@ -16,7 +16,6 @@ def measure_flux_dependent(soc, soccfg, cfg):
     flxs = np.arange(flux_cfg["start"], flux_cfg["stop"], flux_cfg["step"])
 
     res_pulse = cfg["res_pulse"]
-    flux_cfg = cfg["flux"]
 
     signals2D = []
     freq_tqdm = tqdm(fpts)
@@ -28,7 +27,7 @@ def measure_flux_dependent(soc, soccfg, cfg):
         flux_tqdm.reset()
         freq_tqdm.update()
         for flx in flxs:
-            flux_cfg["value"] = flx
+            cfg["flux"] = flx
             flux_tqdm.update()
             prog = OnetoneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc, progress=False)

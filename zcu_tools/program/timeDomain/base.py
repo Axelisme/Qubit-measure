@@ -1,9 +1,9 @@
-import qick as qk
+from qick import RAveragerProgram
 
-from ..base import BaseTwoToneProgram, set_pulse  # noqa: F401
+from ..base import BaseTwoToneProgram
 
 
-class BaseTimeProgram(qk.RAveragerProgram, BaseTwoToneProgram):
+class BaseTimeProgram(RAveragerProgram, BaseTwoToneProgram):
     def parse_cfg(self):
         super().parse_cfg()
 

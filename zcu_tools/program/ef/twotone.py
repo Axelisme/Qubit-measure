@@ -1,7 +1,11 @@
-from .base import EFProgram
+from qick import AveragerProgram
+from .base import BaseEFProgram
 
 
-class EFTwoToneProgram(EFProgram):
+class EFTwoToneProgram(AveragerProgram, BaseEFProgram):
+    def initialize(self):
+        return BaseEFProgram.initialize(self)
+
     def body(self):
         self.flux_ctrl.trigger()
 

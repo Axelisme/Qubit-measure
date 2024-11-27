@@ -2,13 +2,15 @@ from qick.asm_v1 import AcquireProgram
 
 
 def is_single_pulse(pulse_cfg: dict):
-    # use gain key to determine if the pulse is single pulse or nested pulse
-    if "gain" in pulse_cfg:
-        # gain should be a number
-        assert not isinstance(pulse_cfg["gain"], dict), "Invalid pulse configuration"
+    # use style key to determine if the pulse is single pulse or nested pulse
+    if "style" in pulse_cfg:
+        # style should be a string
+        assert not isinstance(pulse_cfg["style"], dict), "Invalid pulse configuration"
         return True
     # only one level of nesting is supported
-    assert all(["gain" in v for v in pulse_cfg.values()]), "Invalid pulse configuration"
+    assert all(
+        ["style" in v for v in pulse_cfg.values()]
+    ), "Invalid pulse configuration"
     return False
 
 
@@ -91,6 +93,7 @@ def set_pulse(
         raise_length = prog.us2cycles(pulse_cfg["raise_pulse"]["length"])
         raise_length = 2 * (raise_length // 2)  # make length even
         flat_length = length - raise_length
+        assert flat_length >= 0, "Raise pulse length is longer than the total length"
         prog.set_pulse_registers(
             ch=ch,
             style="flat_top",

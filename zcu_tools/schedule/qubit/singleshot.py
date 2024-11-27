@@ -35,7 +35,7 @@ def scan_pdr_fid(soc, soccfg, cfg):
 
 def scan_len_fid(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
-    del cfg["readout_length"]
+    del cfg["readout_length"]  # let it be auto derived
 
     sweep_cfg = cfg["sweep"]
     lens = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])

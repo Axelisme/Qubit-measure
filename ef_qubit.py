@@ -76,6 +76,7 @@ database_path = create_datafolder(data_root)
 # %%
 res_name = "r1"
 qubit_name = "q1"
+flux_dev = "zcu216"
 
 defaultcfg_path = os.path.join(database_path, "default_cfg.yaml")
 DefaultCfg.load(defaultcfg_path)
@@ -89,6 +90,7 @@ DefaultCfg.set_default(
     resonator=res_name,
     qubit=qubit_name,
     ge_pulse="pi",
+    flux_dev=flux_dev,
     flux="sw_spot",
 )
 

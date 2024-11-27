@@ -1,5 +1,3 @@
-import qick as qk
-
 from ..base import BaseOneToneProgram, create_waveform, set_pulse
 
 
@@ -36,9 +34,3 @@ class BaseEFProgram(BaseOneToneProgram):
 
         set_pulse(self, qub_ch, self.ef_pulse, self.ef_wavform)
         self.pulse(ch=qub_ch)
-
-
-class EFProgram(qk.AveragerProgram, BaseEFProgram):
-    def initialize(self):
-        # use BaseEFProgram to parse the configuration
-        return BaseEFProgram.initialize(self)

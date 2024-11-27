@@ -24,7 +24,8 @@ def auto_derive_pulse(pulse_cfg: dict, pulses: dict) -> dict:
             # default raise style is cosine
             raise_cfg.setdefault("style", "cosine")
             # default raise pulse is 10% of the total length
-            raise_cfg.setdefault("length", 0.1 * length)
+            # the minimum length is 15 ns
+            raise_cfg.setdefault("length", 0.1 * max(length, 0.15))
 
             # derive raise pulse parameters
             auto_derive_waveform(raise_cfg)
@@ -72,6 +73,10 @@ def auto_derive_res(exp_cfg: dict):
 def auto_derive_qub(exp_cfg: dict):
     qub_cfgs = deepcopy(DefaultCfg.qub_cfgs)
 
+    # if not provided
+    if "qubit" not in exp_cfg:
+        return
+
     # replace qubit name with qubit config
     if isinstance(exp_cfg["qubit"], str):
         qub_name = exp_cfg["qubit"]
@@ -96,49 +101,26 @@ def auto_derive_qub(exp_cfg: dict):
 
 def auto_derive_flux(exp_cfg: dict):
     flux_cfgs: dict = deepcopy(DefaultCfg.flux_cfgs)
-    default_method = flux_cfgs.get("default_method")
 
-    # if not flux provided, don't use flux
-    if "flux" not in exp_cfg or exp_cfg["flux"] == "none":
-        exp_cfg["flux"] = {"method": "none", "value": 0.0}
+    # if not provided
+    if "flux_dev" not in exp_cfg:
+        exp_cfg["flux_dev"] = "none"
 
-    flux_cfg = exp_cfg["flux"]
+    # replace flux_dev with flux config
+    if isinstance(exp_cfg["flux_dev"], str):
+        method = exp_cfg["flux_dev"]
+        exp_cfg["flux_dev"] = flux_cfgs.get(method, {})
+        exp_cfg["flux_dev"]["name"] = method
+    method = exp_cfg["flux_dev"]["name"]
 
-    # if set to sw_spot, use the sw_spot config from qubit config
-    if flux_cfg == "sw_spot":
+    if method == "none" or "flux" not in exp_cfg:
+        return
+
+    if exp_cfg["flux"] == "sw_spot":
         assert "qubit" in exp_cfg, "No qubit provided for sw_spot."
-        assert "default_method" in flux_cfgs, "No default method for derive flux"
         sw_spot = DefaultCfg.get_sw_spot(exp_cfg["qubit"])
-        default_method = flux_cfgs["default_method"]
-        assert default_method in sw_spot, f"No sw_spot for {default_method}."
-        flux_cfg = {"method": default_method, "value": sw_spot[default_method]}
-
-    # if only value provided, convert to dict
-    if not isinstance(flux_cfg, dict):
-        flux_cfg = {"value": exp_cfg["flux"]}
-
-    # if not method provided, use default method
-    if "method" not in flux_cfg:
-        assert "default_method" in flux_cfgs, "No default method for derive flux"
-        flux_cfg["method"] = flux_cfgs["default_method"]
-
-    exp_cfg["flux"] = flux_cfg
-
-    method = flux_cfg["method"]
-    if method == "none":
-        return  # no need to derive flux
-
-    if isinstance(method, str):
-        # single method
-        method = [method]
-
-    # add flux config for each method if not provided
-    assert isinstance(method, list), "Invalid method type. Must be str or list."
-    update_cfgs = {}
-    for m in method:
-        assert m != "none", "none method is not allowed in method list."
-        update_cfgs[m] = flux_cfgs.get(m, {})
-    deepupdate(flux_cfg, update_cfgs, behavior="ignore")
+        assert method in sw_spot, f"No sw_spot for {method}"
+        exp_cfg["flux"] = sw_spot[method]
 
 
 def auto_derive_exp(exp_cfg: dict):
@@ -175,8 +157,7 @@ def auto_derive(exp_cfg):
 
     # derive other parameters
     auto_derive_res(exp_cfg)
-    if "qubit" in exp_cfg:
-        auto_derive_qub(exp_cfg)
+    auto_derive_qub(exp_cfg)
     auto_derive_flux(exp_cfg)
 
     auto_derive_exp(exp_cfg)

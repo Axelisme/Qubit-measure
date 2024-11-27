@@ -8,7 +8,7 @@ class BaseOneToneProgram(AcquireProgram):
     def parse_cfg(self):
         assert isinstance(self.cfg, dict), "cfg is not a dict"
 
-        self.flux_cfg = self.cfg["flux"]
+        self.flux_cfg = self.cfg["flux_dev"]
         self.res_cfg = self.cfg["resonator"]
         self.res_pulse = self.cfg["res_pulse"]
 
@@ -30,9 +30,8 @@ class BaseOneToneProgram(AcquireProgram):
         set_pulse(self, res_ch, self.res_pulse, self.res_wavform, for_readout=True)
 
     def setup_flux(self):
-        flux_cfg = self.flux_cfg
-        self.flux_ctrl = make_fluxControl(self, flux_cfg["method"], flux_cfg)
-        self.flux_ctrl.set_flux(flux=flux_cfg["value"])
+        self.flux_ctrl = make_fluxControl(self, self.flux_cfg)
+        self.flux_ctrl.set_flux(self.cfg.get("flux"))
 
     def initialize(self):
         self.parse_cfg()

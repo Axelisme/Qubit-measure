@@ -1,14 +1,15 @@
-from typing import Union
+from numbers import Number
+from typing import Optional
 
-import qick as qk
+from qick.asm_v1 import AcquireProgram
 
 
 class FluxControl:
-    def __init__(self, program: qk.AveragerProgram, flux_cfg: dict):
+    def __init__(self, program: AcquireProgram, flux_cfg: dict):
         self.prog = program
         self.cfg = flux_cfg
 
-    def set_flux(self, flux: Union[int, float]) -> None:
+    def set_flux(self, flux: Optional[Number]) -> None:
         raise NotImplementedError
 
     def trigger(self) -> None:
@@ -27,13 +28,13 @@ class NoneFluxControl(FluxControl):
 
 
 class YokoFluxControl(FluxControl):
-    def __init__(self, program, flux_cfg):
-        super().__init__(program, flux_cfg)
+    def __init__(self, program, cfg):
+        super().__init__(program, cfg)
 
-        self.name = self.cfg["name"]
-        self.address = self.cfg["address"]
-        self.limit = 10e-3
-        self.rate = 5e-6
+        self.name = cfg["name"]
+        self.address = cfg["address"]
+        self.limit = cfg["limit"]
+        self.rate = cfg["rate"]
 
         self.yoko = None
 
@@ -49,7 +50,10 @@ class YokoFluxControl(FluxControl):
         self.source_mode("CURR")
         self.yoko.current_limit(self.limit)
 
-    def set_flux(self, flux):
+    def set_flux(self, flux: Optional[Number]) -> None:
+        if flux is None:
+            flux = 0.0  # default to zero
+
         # cast numpy float to python float
         if hasattr(flux, "item"):
             flux = flux.item()
@@ -58,8 +62,8 @@ class YokoFluxControl(FluxControl):
         if not isinstance(flux, float):
             raise ValueError(f"Flux must be a float in YokoFluxControl, but got {flux}")
         assert (
-            abs(flux) <= self.limit
-        ), f"Flux must be in the range [-0.01, 0.01], but got {flux}"
+            self.limit[0] <= flux < self.limit[1]
+        ), f"Flux must be in the range {self.limit}, but got {flux}"
 
         if self.yoko is None:
             self._init_dev()
@@ -75,10 +79,13 @@ class ZCUFluxControl(FluxControl):
         super().__init__(program, flux_cfg)
 
         self.ch = self.cfg["ch"]
-        self.saturate = 0.1
+        self.saturate = self.cfg["saturate"]
         self.first_set = True
 
-    def set_flux(self, flux):
+    def set_flux(self, flux: Optional[Number]) -> None:
+        if flux is None:
+            flux = 0  # default to zero
+
         # cast numpy int to python int
         if hasattr(flux, "item"):
             flux = flux.item()
@@ -86,8 +93,8 @@ class ZCUFluxControl(FluxControl):
         if not isinstance(flux, int):
             raise ValueError(f"Flux must be an int in ZCUFluxControl, but got {flux}")
         assert (
-            abs(flux) <= 40000
-        ), f"Flux must be in the range [-40000, 40000], but got {flux}"
+            -30000 <= flux <= 30000
+        ), f"Flux must be in the range [-30000, 30000], but got {flux}"
 
         self.prog.declare_gen(ch=self.ch, nqz=1)
         if self.first_set:
@@ -102,12 +109,13 @@ class ZCUFluxControl(FluxControl):
         self.prog.synci(self.prog.us2cycles(self.saturate))
 
 
-def make_fluxControl(prog, method, flux_cfg) -> FluxControl:
-    if method == "yokogawa":
-        return YokoFluxControl(prog, flux_cfg[method])
-    elif method == "zcu216":
-        return ZCUFluxControl(prog, flux_cfg[method])
-    elif method == "none":
+def make_fluxControl(prog, flux_cfg) -> FluxControl:
+    dev_name = flux_cfg["name"]
+    if dev_name == "yokogawa":
+        return YokoFluxControl(prog, flux_cfg)
+    elif dev_name == "zcu216":
+        return ZCUFluxControl(prog, flux_cfg)
+    elif dev_name == "none":
         return NoneFluxControl()
     else:
-        raise ValueError(f"Unknown flux control method: {method}")
+        raise ValueError(f"Unknown flux control method: {dev_name}")
