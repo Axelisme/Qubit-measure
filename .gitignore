@@ -4,6 +4,7 @@ backup
 .env
 .ipynb_checkpoints
 __pycache__
+assembler.log
 *.bak
 *.ipynb
 *.yaml

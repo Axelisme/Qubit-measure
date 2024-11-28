@@ -1,8 +1,9 @@
 import os
+from os.path import abspath, dirname, join
 
 from flask import Flask, request
 
-ROOT_DIR = r"C:\Users\SQC\Desktop\QICK\Database"
+ROOT_DIR = abspath(join(dirname(dirname(__file__)), "Database"))
 
 
 def is_allowed_file(filename: str):
@@ -53,4 +54,6 @@ if __name__ == "__main__":
     # localPC_ip = "192.168.10.252"
     localPC_ip = "100.76.229.37"
     port = 4999
+    print(f"Save data to {ROOT_DIR}")
     app.run(host=localPC_ip, port=port)
+
