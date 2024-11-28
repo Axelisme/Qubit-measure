@@ -49,14 +49,17 @@ class SingleShotProgram(RAveragerProgram, BaseTwoToneProgram):
         # update the gain to pi pulse
         self.mathi(self.q_rp, self.r_gain, self.r_gain, "+", self.pi_gain)
 
-    def acquire(self, soc, progress=False):
-        super().acquire(soc, progress=progress)
+    def acquire_orig(self, *args, **kwargs):
+        return super().acquire(*args, **kwargs)
+
+    def acquire(self, *args, **kwargs):
+        super().acquire(*args, **kwargs)
         return self.collect_shots()
 
     def collect_shots(self):
         cfg = self.cfg
         expts, reps = cfg["expts"], cfg["reps"]
-        readout_length = cfg["readout_length"]
+        readout_length = self.us2cycles(cfg["readout_length"])
         i0 = self.di_buf[0].reshape((expts, reps)) / readout_length
         q0 = self.dq_buf[0].reshape((expts, reps)) / readout_length
         return i0, q0

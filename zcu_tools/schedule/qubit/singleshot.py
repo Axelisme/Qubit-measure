@@ -8,7 +8,17 @@ from zcu_tools.analysis import singleshot_analysis
 from zcu_tools.program import SingleShotProgram
 
 
-def measure_fid(soc, soccfg, cfg, plot=False, progress=False):
+def measure_fid(soc, soccfg, cfg, threshold, angle, progress=False):
+    """return: fidelity, (tp, fp, tn, fn)"""
+    prog = SingleShotProgram(soccfg, deepcopy(cfg))
+    result = prog.acquire_orig(soc, threshold=threshold, angle=angle, progress=progress)
+    fp, tp = result[1][0][0]
+    fn, tn = 1 - fp, 1 - tp
+    # fidelity as (Ngg+Nee)/N = 1-(Nge+Neg)/N
+    return (tp + fn) / (tp + fp + tn + fn), (tp, fp, tn, fn)
+
+
+def measure_fid_auto(soc, soccfg, cfg, plot=False, progress=False):
     prog = SingleShotProgram(soccfg, deepcopy(cfg))
     i0, q0 = prog.acquire(soc, progress=progress)
     fid, threhold, angle = singleshot_analysis(i0, q0, plot=plot)
@@ -26,7 +36,7 @@ def scan_pdr_fid(soc, soccfg, cfg):
     fids = []
     for pdr in tqdm(pdrs):
         res_pulse["gain"] = pdr
-        fid, *_ = measure_fid(soc, soccfg, make_cfg(cfg), progress=False)
+        fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
         fids.append(fid)
     fids = np.array(fids)
 
@@ -45,7 +55,7 @@ def scan_len_fid(soc, soccfg, cfg):
     fids = []
     for length in tqdm(lens):
         res_pulse["length"] = length
-        fid, *_ = measure_fid(soc, soccfg, make_cfg(cfg), progress=False)
+        fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
         fids.append(fid)
     fids = np.array(fids)
 
@@ -63,7 +73,7 @@ def scan_freq_fid(soc, soccfg, cfg):
     fids = []
     for fpt in tqdm(fpts):
         res_pulse["freq"] = fpt
-        fid, *_ = measure_fid(soc, soccfg, make_cfg(cfg), progress=False)
+        fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
         fids.append(fid)
     fids = np.array(fids)
 
@@ -80,6 +90,6 @@ def scan_style_fid(soc, soccfg, cfg) -> dict:
     fids = {}
     for style in sweep_list:
         res_pulse["style"] = style
-        fid, *_ = measure_fid(soc, soccfg, make_cfg(cfg), progress=False)
+        fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
         fids[style] = fid
     return fids

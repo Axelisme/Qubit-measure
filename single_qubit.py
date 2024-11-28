@@ -68,7 +68,7 @@ print(soccfg)
 database_path = create_datafolder(os.getcwd(), "Axel")
 
 # data_host = "192.168.10.252"  # cmd-> ipconfig -> ipv4 #controling computer
-data_host = "100.76.229.37" # tailscale
+data_host = "100.76.229.37"  # tailscale
 # data_host = None
 
 # %% [markdown]
@@ -673,7 +673,7 @@ cfg = make_cfg(exp_cfg, shots=5000)
 
 
 # %%
-fid, threshold, angle, signals = zs.measure_fid(soc, soccfg, cfg, plot=True)
+fid, threshold, angle, signals = zs.measure_fid_auto(soc, soccfg, cfg, plot=True)
 print("Optimal fidelity after rotation = %.3f" % fid)
 
 # %% [markdown]
@@ -803,7 +803,7 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, shots=5000)
 
-fid, threshold, angle, signals = zs.measure_fid(soc, soccfg, cfg, plot=True)
+fid, threshold, angle, signals = zs.measure_fid_auto(soc, soccfg, cfg, plot=True)
 print("Optimal fidelity after rotation = %.3f" % fid)
 
 # %%
