@@ -11,21 +11,43 @@ def is_allowed_file(filename: str):
     return "." in filename and filename.split(".")[-1].lower() in allowed_ls
 
 
+def safe_filepath(filepath: str):
+    filepath = os.path.abspath(filepath)
+
+    def parse_filepath(filepath):
+        filename, ext = os.path.splitext(filepath)
+        count = filename.split("_")[-1]
+        if count.isdigit():
+            filename = "_".join(filename.split("_")[:-1])  # remove number
+            return filename, int(count), ext
+        else:
+            return filename, 1, ext
+
+    filename, count, ext = parse_filepath(filepath)
+
+    filepath = filename + f"_{count}" + ext
+    while os.path.exists(filepath):
+        count += 1
+        filepath = filename + f"_{count}" + ext
+
+    return filepath
+
+
 def save_file(file):
-    filepath = file.filename
+    remote_path = file.filename
 
     # convert to windows path
-    filepath = filepath.replace("/", "\\")
+    remote_path = remote_path.replace("/", "\\")
 
     # check root directory
-    if "Database\\" not in filepath:
+    if "Database\\" not in remote_path:
         return "Cannot find root directory in given path", 400
 
     # remove path before root directory
-    filepath = filepath.split("Database\\")[1]
+    relpath = remote_path.split("Database\\")[1]
 
     # save file
-    filepath = os.path.join(ROOT_DIR, filepath)
+    filepath = safe_filepath(os.path.join(ROOT_DIR, relpath))
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     file.save(filepath)
 
@@ -56,4 +78,3 @@ if __name__ == "__main__":
     port = 4999
     print(f"Save data to {ROOT_DIR}")
     app.run(host=localPC_ip, port=port)
-

@@ -30,7 +30,6 @@ def reload_zcutools():
 
     import zcu_tools.analysis as zf
     import zcu_tools.auto as za
-    import zcu_tools.configuration as zc
     import zcu_tools.datasaver as zd
     import zcu_tools.program as zp
     import zcu_tools.schedule as zs
@@ -40,7 +39,6 @@ def reload_zcutools():
 
     reload(zt)
     reload(zd)
-    reload(zc)
     reload(za)
     reload(zp, 4)
     reload(zs, 4)

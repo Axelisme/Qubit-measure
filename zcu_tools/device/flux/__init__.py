@@ -1,7 +1,7 @@
 from .base import NoneFluxControl, FluxControl
 from .zcu216 import ZCUFluxControl
-from .qcodes import Qcodes_YokoFluxControl
-from .labber import Labber_YokoFluxControl
+from .yoko import Labber_YokoFluxControl, Qcodes_YokoFluxControl
+
 
 def make_fluxControl(prog, flux_cfg) -> FluxControl:
     dev_name = flux_cfg["name"]
@@ -15,3 +15,4 @@ def make_fluxControl(prog, flux_cfg) -> FluxControl:
         return NoneFluxControl()
     else:
         raise ValueError(f"Unknown flux control method: {dev_name}")
+

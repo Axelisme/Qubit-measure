@@ -1,7 +1,7 @@
 from copy import deepcopy
 
 from .configuration import DefaultCfg
-from .tools import deepupdate
+from .tools import deepupdate, numpy2number
 
 
 def make_cfg(exp_cfg: dict, **kwargs):
@@ -9,6 +9,8 @@ def make_cfg(exp_cfg: dict, **kwargs):
     deepupdate(exp_cfg, kwargs, behavior="force")
 
     auto_derive(exp_cfg)
+
+    exp_cfg = numpy2number(exp_cfg)
 
     return exp_cfg
 
@@ -133,9 +135,8 @@ def auto_derive_exp(exp_cfg: dict):
 
     # readout length
     if "readout_length" not in exp_cfg:
-        # factor 1.3 to make the readout length same length as the readout pulse
         assert "length" in res_pulse, "Cannot auto derive readout_length."
-        exp_cfg["readout_length"] = res_pulse["length"] / 1.3
+        exp_cfg["readout_length"] = res_pulse["length"]
 
     # adc_trig_offset
     if "adc_trig_offset" not in exp_cfg:

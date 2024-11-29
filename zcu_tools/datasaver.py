@@ -27,6 +27,28 @@ def save_cfg(filepath: str, cfg: dict):
         yaml.dump(cfg, f, default_flow_style=False)
 
 
+def safe_filepath(filepath: str):
+    filepath = os.path.abspath(filepath)
+
+    def parse_filepath(filepath):
+        filename, ext = os.path.splitext(filepath)
+        count = filename.split("_")[-1]
+        if count.isdigit():
+            filename = "_".join(filename.split("_")[:-1])  # remove number
+            return filename, int(count), ext
+        else:
+            return filename, 1, ext
+
+    filename, count, ext = parse_filepath(filepath)
+
+    filepath = filename + f"_{count}" + ext
+    while os.path.exists(filepath):
+        count += 1
+        filepath = filename + f"_{count}" + ext
+
+    return filepath
+
+
 def save_data_local(
     filepath: str,
     x_info: dict,
@@ -59,11 +81,12 @@ def save_data_local(
     # if so, remove the empty empty folder
     try:
         yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
-        os.rmdir(f"{yy}/{mm}/Data_{mm}{dd}")
-        os.rmdir(f"{yy}/{mm}")
-        os.rmdir(yy)
-    except OSError:
-        print("Fail to remove empty folder")
+        if os.path.exists(yy):
+            os.rmdir(f"{yy}/{mm}/Data_{mm}{dd}")
+            os.rmdir(f"{yy}/{mm}")
+            os.rmdir(yy)
+    except OSError as e:
+        print("Fail to remove empty folder: ", e)
         pass
 
 
@@ -97,6 +120,7 @@ def save_data(
     server_ip: str = None,
     port: int = 4999,
 ):
+    filepath = safe_filepath(filepath)
     if server_ip is not None:
         save_data_local(filepath, x_info, z_info, y_info, comment, tag)
         filepath = filepath + ".hdf5"  # labber save data as hdf5

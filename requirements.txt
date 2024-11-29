@@ -6,5 +6,8 @@ tqdm
 pyro4
 ipywidgets
 ipykernel
+scikit-learn
 # qcodes
-# scikit-learn
+# labber
+attrDict
+pyQt5

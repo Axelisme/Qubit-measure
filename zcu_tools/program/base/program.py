@@ -1,6 +1,6 @@
 from qick.asm_v1 import AcquireProgram
 
-from .flux import make_fluxControl
+from zcu_tools.device.flux import make_fluxControl
 from .pulse import create_waveform, is_single_pulse, set_pulse
 
 
