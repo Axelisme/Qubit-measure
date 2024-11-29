@@ -197,8 +197,10 @@ fpts, signals = zs.measure_res_freq(soc, soccfg, cfg)
 
 plt.plot(fpts, np.abs(signals))
 
-# print five lowest frequencies
-print(fpts[np.argsort(np.diff(np.abs(signals)))[:5]])
+# %%
+sorted_fpts = fpts[np.argsort(np.abs(signals))]
+print("Max Amp: ", sorted_fpts[-2:])
+print("Min Amp: ", sorted_fpts[:2])
 
 
 # %%
