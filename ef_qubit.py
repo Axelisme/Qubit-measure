@@ -36,6 +36,7 @@ from zcu_tools import (  # noqa: E402
     make_sweep,
     save_data,
     save_cfg,
+    make_comment,
 )
 
 # %% [markdown]
@@ -145,7 +146,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=f"qubit ef frequency = {ef_freq}MHz",
+    comment=make_comment(cfg, f"qubit ef frequency = {ef_freq}MHz"),
     tag="EF TwoTone",
     server_ip=data_host,
 )
@@ -188,7 +189,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Amplitude", "unit": "a.u.", "values": pdrs},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=f"pi gain = {pi_gain}, pi2 gain = {pi2_gain}",
+    comment=make_comment(cfg, f"pi gain = {pi_gain}\npi2 gain = {pi2_gain}"),
     tag="EF TimeDomain",
     server_ip=data_host,
 )
@@ -253,7 +254,7 @@ save_data(
         "values": np.array((g_signals, e_signals)),
     },
     y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
-    comment=f"SNR1 = {readout_f1}MHz, SNR2 = {readout_f2}MHz",
+    comment=make_comment(cfg, f"SNR1 = {readout_f1}MHz\nSNR2 = {readout_f2}MHz"),
     tag="EF Dispersive",
     server_ip=data_host,
 )
@@ -283,6 +284,7 @@ ro_pulse = "readout_ef_dp1"
 
 # %%
 activate_detune = 3.0
+orig_ef_freq = ef_freq
 exp_cfg = {
     "res_pulse": ro_pulse,
     "ef_pulse": {
@@ -314,7 +316,7 @@ t2d = zf.T2decay_analyze(soc.cycles2us(Ts2), signals2)
 t2d
 
 # %%
-ef_freq = ef_freq + activate_detune - detune
+ef_freq = orig_ef_freq + activate_detune - detune
 
 filename = "ef_t2ramsey"
 save_cfg(os.path.join(database_path, filename), cfg)
@@ -322,7 +324,12 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts2)},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2},
-    comment=f"activate detune = {activate_detune}MHz, detune = {detune}MHz",
+    comment=make_comment(
+        cfg,
+        f"activate detune = {activate_detune}MHz\n \
+        detune = {detune}MHz\n \
+        ef t2f = {t2f}us",
+    ),
     tag="EF TimeDomain",
     server_ip=data_host,
 )
@@ -357,7 +364,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts)},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=f"ef t1 = {t1}us",
+    comment=make_comment(cfg, f"ef t1 = {t1}us"),
     tag="EF TimeDomain",
     server_ip=data_host,
 )
@@ -388,7 +395,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts * 2)},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=f"ef t2echo = {t2e}us",
+    comment=make_comment(cfg, f"ef t2echo = {t2e}us"),
     tag="EF TimeDomain",
     server_ip=data_host,
 )

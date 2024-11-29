@@ -38,6 +38,7 @@ from zcu_tools import (  # noqa: E402
     make_sweep,
     save_data,
     save_cfg,
+    make_comment,
 )
 
 # %% [markdown]
@@ -160,7 +161,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": ts * 1e-6},
     z_info={"name": "Signal", "unit": "a.u.", "values": Is + 1j * Qs},
-    comment=f"adc_trig_offset = {adc_trig_offset}us",
+    comment=make_comment(cfg, f"adc_trig_offset = {adc_trig_offset}us"),
     tag="Lookback",
     server_ip=data_host,
 )
@@ -217,7 +218,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=f"resonator frequency = {r_f}MHz",
+    comment=make_comment(cfg, f"resonator frequency = {r_f}MHz"),
     tag="OneTone",
     server_ip=data_host,
 )
@@ -281,8 +282,6 @@ plt.figure()
 plt.pcolormesh(fpts, pdrs, NormalizeData(np.abs(signals2D)))
 
 # %%
-max_gain = 2200
-
 filename = "res_power_dependence"
 save_cfg(os.path.join(database_path, filename), cfg)
 save_data(
@@ -290,10 +289,13 @@ save_data(
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
     y_info={"name": "Power", "unit": "a.u.", "values": pdrs},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
-    comment="power dependence",
+    comment=make_comment(cfg),
     tag="OneTone",
     server_ip=data_host,
 )
+
+# %%
+max_gain = 2200
 
 # %% [markdown]
 # ## Update Readout pulse
@@ -337,7 +339,7 @@ save_data(
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
     y_info={"name": "Flux", "unit": "a.u.", "values": flxs},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
-    comment="",
+    comment=make_comment(cfg),
     tag="OneTone",
     server_ip=data_host,
 )
@@ -405,7 +407,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=f"qubit frequency = {q_f}MHz",
+    comment=make_comment(cfg, f"qubit frequency = {q_f}MHz"),
     tag="TwoTone",
     server_ip=data_host,
 )
@@ -449,7 +451,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Amplitude", "unit": "a.u.", "values": pdrs},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=f"pi gain = {pi_gain}, pi/2 gain = {pi2_gain}",
+    comment=make_comment(cfg, f"pi gain = {pi_gain}\npi/2 gain = {pi2_gain}"),
     tag="TimeDomain",
     server_ip=data_host,
 )
@@ -514,7 +516,7 @@ save_data(
         "values": np.array((g_signals, e_signals)),
     },
     y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
-    comment=f"SNR1 = {readout_f1}MHz, SNR2 = {readout_f2}MHz",
+    comment=make_comment(cfg, f"SNR1 = {readout_f1}MHz\nSNR2 = {readout_f2}MHz"),
     tag="Dispersive",
     server_ip=data_host,
 )
@@ -587,7 +589,12 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts2)},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2},
-    comment=f"activate detune = {activate_detune}MHz, detune = {detune}MHz",
+    comment=make_comment(
+        cfg,
+        f"activate detune = {activate_detune}MHz\n \
+        detune = {detune}MHz\n \
+        t2f = {t2f}us",
+    ),
     tag="TimeDomain",
     server_ip=data_host,
 )
@@ -622,7 +629,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts)},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=f"t1 = {t1}us",
+    comment=make_comment(cfg, f"t1 = {t1}us"),
     tag="TimeDomain",
     server_ip=data_host,
 )
@@ -653,7 +660,7 @@ save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": soc.cycles2us(Ts * 2)},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=f"t2echo = {t2e}us",
+    comment=make_comment(cfg, f"t2echo = {t2e}us"),
     tag="TimeDomain",
     server_ip=data_host,
 )
@@ -814,7 +821,7 @@ save_data(
     x_info={"name": "shot", "unit": "point", "values": np.arange(cfg["shots"])},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
-    comment=f"fide {fid:.3f}",
+    comment=make_comment(cfg, f"fide {fid:.1%}"),
     tag="SingleShot",
     server_ip=data_host,
 )

@@ -77,6 +77,16 @@ def upload_file2server(filepath: str, server_ip: str, port: int):
     print(response.text)
 
 
+def make_comment(cfg: dict, append: str = "") -> str:
+    # pretty convert cfg to string
+    import json
+
+    comment = json.dumps(cfg, indent=2)
+    comment += "\n" + append
+
+    return comment
+
+
 def save_data(
     filepath: str,
     x_info: dict,

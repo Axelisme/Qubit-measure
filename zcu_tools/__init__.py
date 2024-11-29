@@ -1,6 +1,6 @@
 from .auto import make_cfg
 from .configuration import DefaultCfg
-from .datasaver import create_datafolder, save_cfg, save_data
+from .datasaver import create_datafolder, save_cfg, save_data, make_comment
 from .tools import make_sweep
 
 
@@ -53,6 +53,7 @@ __all__ = [
     "make_cfg",
     "save_cfg",
     "save_data",
+    "make_comment",
     "create_datafolder",
     "make_sweep",
 ]
