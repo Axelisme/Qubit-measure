@@ -145,7 +145,7 @@ def auto_derive_exp(exp_cfg: dict):
         exp_cfg["adc_trig_offset"] = res_cfg["adc_trig_offset"]
 
 
-def fill_default_str(exp_cfg: dict):
+def fill_default(exp_cfg: dict):
     for key, value in DefaultCfg.exp_default.items():
         exp_cfg.setdefault(key, value)
 
@@ -154,7 +154,7 @@ def auto_derive(exp_cfg):
     assert DefaultCfg.is_init_global(), "Configuration is not initialized."
 
     # add some user specified parameters
-    fill_default_str(exp_cfg)
+    fill_default(exp_cfg)
 
     # derive other parameters
     auto_derive_res(exp_cfg)

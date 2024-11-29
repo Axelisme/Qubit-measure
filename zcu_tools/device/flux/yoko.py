@@ -29,7 +29,8 @@ class Qcodes_YokoFluxControl(FluxControl):
 
     def set_flux(self, flux: Optional[Number]) -> None:
         if flux is None:
-            flux = 0.0  # default to zero
+            # flux = 0.0  # default to zero
+            return  # default do nothing
 
         # cast numpy float to python float
         if hasattr(flux, "item"):
@@ -83,7 +84,7 @@ class Labber_YokoFluxControl(FluxControl):
 
     def set_flux(self, flux: Optional[Number]) -> None:
         if flux is None:
-            flux = 0.0  # default to zero
+            return  # default do nothing
 
         # cast numpy float to python float
         if hasattr(flux, "item"):
