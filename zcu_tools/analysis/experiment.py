@@ -9,10 +9,8 @@ figsize = (8, 6)
 def lookback_analyze(x: np.ndarray, Is: np.ndarray, Qs: np.ndarray):
     y = np.abs(Is + 1j * Qs)
 
-    max_y, min_y = np.max(y), np.min(y)
-
-    # find first idx where y is larger than 0.1 * max_y
-    idx = np.argmax(y - min_y > 0.05 * (max_y - min_y))
+    # find first idx where y is larger than 0.05 * max_y
+    idx = np.argmax(y > 0.05 * np.max(y))
 
     return x[idx]
 
