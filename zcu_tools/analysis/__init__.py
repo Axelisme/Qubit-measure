@@ -7,7 +7,7 @@ from .experiment import (
     lookback_analyze,
     spectrum_analyze,
 )
-from .single_shot import singleshot_analysis
+from .single_shot import singleshot_analysis, fidelity_func
 
 __all__ = [
     "spectrum_analyze",
@@ -17,5 +17,6 @@ __all__ = [
     "T2decay_analyze",
     "T2fringe_analyze",
     "singleshot_analysis",
+    "fidelity_func",
     "lookback_analyze",
 ]

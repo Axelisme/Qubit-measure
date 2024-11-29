@@ -57,6 +57,11 @@ def cumulate_plot(ng, ne, bins, ax, title=None):
     ax.set_xlabel("I [ADC levels]", fontsize=14)
 
 
+def fidelity_func(tp, tn, fp, fn):
+    # this method calculates fidelity as (Ngg+Nee)/N = Ngg/N + Nee/N=(0.5N-Nge)/N + (0.5N-Neg)/N = 1-(Nge+Neg)/N
+    return (tp + fn) / (tp + tn + fp + fn)
+
+
 def calculate_fidelity(ng, ne, bins, threshold=None):
     cum_ng, cum_ne = np.cumsum(ng), np.cumsum(ne)
 
@@ -66,8 +71,10 @@ def calculate_fidelity(ng, ne, bins, threshold=None):
         contrast = np.abs(2 * (cum_ng - cum_ne) / (ng.sum() + ne.sum()))
         tind = contrast.argmax()
 
-    # this method calculates fidelity as (Ngg+Nee)/N = Ngg/N + Nee/N=(0.5N-Nge)/N + (0.5N-Neg)/N = 1-(Nge+Neg)/N
-    fid = 0.5 * (1 - ng[tind:].sum() / ng.sum() + 1 - ne[:tind].sum() / ne.sum())
+    # fid = 0.5 * (1 - ng[tind:].sum() / ng.sum() + 1 - ne[:tind].sum() / ne.sum())
+    tp, fp = ng[tind:].sum(), ne[tind:].sum()
+    tn, fn = ne[:tind].sum(), ng[:tind].sum()
+    fid = fidelity_func(tp, tn, fp, fn)
 
     return fid, bins[tind]
 

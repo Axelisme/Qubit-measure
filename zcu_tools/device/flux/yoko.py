@@ -76,7 +76,9 @@ class Labber_YokoFluxControl(FluxControl):
         from .labber import InstrManager
 
         self.yoko = InstrManager(server_ip=self.server_ip)
-        self.yoko.add_instrument(sHardware=self.sHardware, dComCfg=self.dev_cfg)
+        self.yoko.add_instrument(
+            sHardware=self.sHardware, dComCfg=self.dev_cfg, silent=True
+        )
         self.yoko.ctrl.globalFlux.setInstrConfig(self.flux_cfg)
 
     def set_flux(self, flux: Optional[Number]) -> None:

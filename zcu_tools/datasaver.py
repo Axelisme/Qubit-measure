@@ -28,6 +28,9 @@ def save_cfg(filepath: str, cfg: dict):
 
 
 def safe_filepath(filepath: str):
+    if not filepath.endswith(".hdf5"):
+        filepath += ".hdf5"  # labber save data as hdf5
+
     filepath = os.path.abspath(filepath)
 
     def parse_filepath(filepath):
@@ -45,6 +48,9 @@ def safe_filepath(filepath: str):
     while os.path.exists(filepath):
         count += 1
         filepath = filename + f"_{count}" + ext
+
+    if filepath.endswith(".hdf5"):
+        filepath = filepath[:-5]  # remove .hdf5
 
     return filepath
 

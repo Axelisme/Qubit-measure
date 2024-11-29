@@ -4,7 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import singleshot_analysis
+from zcu_tools.analysis import singleshot_analysis, fidelity_func
 from zcu_tools.program import SingleShotProgram
 
 
@@ -14,8 +14,7 @@ def measure_fid(soc, soccfg, cfg, threshold, angle, progress=False):
     result = prog.acquire_orig(soc, threshold=threshold, angle=angle, progress=progress)
     fp, tp = result[1][0][0]
     fn, tn = 1 - fp, 1 - tp
-    # fidelity as (Ngg+Nee)/N = 1-(Nge+Neg)/N
-    return (tp + fn) / (tp + fp + tn + fn), (tp, fp, tn, fn)
+    return fidelity_func(tp, tn, fp, fn)
 
 
 def measure_fid_auto(soc, soccfg, cfg, plot=False, progress=False):
