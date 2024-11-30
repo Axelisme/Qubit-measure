@@ -7,7 +7,7 @@ from zcu_tools import make_cfg
 from zcu_tools.program import OnetoneProgram
 
 
-def measure_power_dependent(soc, soccfg, cfg):
+def measure_power_dependent(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     freq_cfg = cfg["sweep"]["freq"]
@@ -17,23 +17,37 @@ def measure_power_dependent(soc, soccfg, cfg):
 
     res_pulse = cfg["res_pulse"]
 
-    signals2D = []
     freq_tqdm = tqdm(fpts)
     pdr_tqdm = tqdm(pdrs)
-    for fpt in fpts:
+    signals2D = np.zeros((len(pdrs), len(fpts)), dtype=np.complex128)
+    if instant_show:
+        import matplotlib.pyplot as plt
+        from IPython.display import display
+
+        fig, ax = plt.subplots()
+        ax.set_xlabel("Frequency (MHz)")
+        ax.set_ylabel("Power (a.u.)")
+        ax.set_title("Power-dependent measurement")
+        ax.pcolormesh(fpts, pdrs, np.abs(signals2D))
+        dh = display(fig, display_id=True)
+
+    for i, fpt in enumerate(fpts):
         res_pulse["freq"] = fpt
-        signals = []
-        pdr_tqdm.refresh()
+
         pdr_tqdm.reset()
-        freq_tqdm.update()
-        for pdr in pdrs:
+        pdr_tqdm.refresh()
+        for j, pdr in enumerate(pdrs):
             res_pulse["gain"] = pdr
-            pdr_tqdm.update()
             prog = OnetoneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc, progress=False)
-            signals.append(avgi[0][0] + 1j * avgq[0][0])
-        signals2D.append(signals)
-    freq_tqdm.refresh()
-    signals2D = np.array(signals2D).T  # shape: (fpts, pdrs)
+            signals2D[j, i] = avgi[0][0] + 1j * avgq[0][0]
+            pdr_tqdm.update()
+        freq_tqdm.update()
 
-    return fpts, pdrs, signals2D
+        if instant_show:
+            ax.pcolormesh(fpts, pdrs, np.abs(signals2D))
+            dh.update(fig)
+    freq_tqdm.close()
+    pdr_tqdm.close()
+
+    return fpts, pdrs, signals2D  # (pdrs, freqs)

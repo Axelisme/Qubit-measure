@@ -100,11 +100,14 @@ class Labber_YokoFluxControl(FluxControl):
         if self.yoko is None:
             self._init_dev()
 
-        for _ in range(3):
+        for _ in range(5):
             try:
                 self.yoko.ctrl.globalFlux.setValue(
                     "Current", flux, rate=self.sweep_rate
                 )
+                self.yoko.ctrl.globalFlux.setValue(
+                    "Current", flux, rate=self.sweep_rate
+                )  # again to make sure it is set
                 break
             except Exception as e:
                 print(f"Error setting flux: {e}, retrying...")
