@@ -15,7 +15,7 @@ def lookback_analyze(x: np.ndarray, Is: np.ndarray, Qs: np.ndarray):
     return x[idx]
 
 
-def spectrum_analyze(x, y, asym=False):
+def freq_analyze(x, y, asym=False):
     mag = np.abs(y)
     pha = np.unwrap(np.angle(y))
     if asym:
@@ -48,6 +48,29 @@ def spectrum_analyze(x, y, asym=False):
     plt.show()
 
     return round(res_mag, 2), round(res_pha, 2)
+
+
+def NormalizeData(signals2D: np.ndarray) -> np.ndarray:
+    # normalize on frequency axis
+    mins = np.min(signals2D, axis=1, keepdims=True)
+    maxs = np.max(signals2D, axis=1, keepdims=True)
+    return (signals2D - mins) / (maxs - mins)
+
+
+def spectrum_analyze(
+    fpts: np.ndarray, ypts: np.ndarray, signal2D: np.ndarray, **kwargs
+):
+    signal2D = NormalizeData(np.abs(signal2D))
+    freqs = np.array(
+        [freq_analyze(fpts, signal2D[i], **kwargs) for i in range(len(ypts))]
+    )
+
+    plt.figure(figsize=figsize)
+    plt.pcolormesh(fpts, ypts, signal2D, shading="auto")
+    plt.plot(freqs, ypts, color="r", marker="o", markersize=3)
+    plt.show()
+
+    return freqs
 
 
 def dispersive_analyze(x: np.ndarray, y1: np.ndarray, y2: np.ndarray, asym=False):

@@ -212,7 +212,7 @@ cfg = make_cfg(exp_cfg, res_pulse={"gain": 1000}, reps=2000, rounds=1)
 fpts, signals = zs.measure_res_freq(soc, soccfg, cfg)
 
 # %%
-r_f, _ = zf.spectrum_analyze(fpts, signals)
+r_f, _ = zf.freq_analyze(fpts, signals)
 r_f
 
 # %%
@@ -266,16 +266,7 @@ fpts, pdrs, signals2D = zs.measure_power_dependent(soc, soccfg, cfg)
 
 
 # %%
-def NormalizeData(signals2D: np.ndarray) -> np.ndarray:
-    # normalize on frequency axis
-    mins = np.min(signals2D, axis=1, keepdims=True)
-    maxs = np.max(signals2D, axis=1, keepdims=True)
-    return (signals2D - mins) / (maxs - mins)
-
-
-plt.figure()
-plt.pcolormesh(fpts, pdrs, NormalizeData(np.abs(signals2D)))
-
+peak_freqs = zf.spectrum_analyze(fpts, pdrs, signals2D)
 
 # %%
 filename = "res_power_dep"
@@ -315,8 +306,7 @@ cfg = make_cfg(exp_cfg, reps=1000, rounds=1)
 fpts, flxs, signals2D = zs.measure_flux_dependent(soc, soccfg, cfg)
 
 # %%
-plt.figure()
-plt.pcolormesh(fpts, flxs, np.abs(signals2D))
+peak_freqs = zf.spectrum_analyze(fpts, flxs, signals2D)
 
 
 # %%
@@ -364,7 +354,7 @@ cfg = make_cfg(exp_cfg, reps=8, rounds=1)
 fpts, signals = zs.measure_qubit_freq(soc, soccfg, cfg)
 
 # %%
-f_amp, f_pha = zf.spectrum_analyze(fpts, signals)
+f_amp, f_pha = zf.freq_analyze(fpts, signals)
 f_amp, f_pha
 
 # %%

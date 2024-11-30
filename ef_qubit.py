@@ -128,7 +128,7 @@ cfg = make_cfg(exp_cfg, reps=8, rounds=1)
 fpts, signals = zs.measure_ef_freq(soc, soccfg, cfg)
 
 # %%
-f_amp, f_pha = zf.spectrum_analyze(fpts, signals)
+f_amp, f_pha = zf.freq_analyze(fpts, signals)
 f_amp, f_pha
 
 # %%

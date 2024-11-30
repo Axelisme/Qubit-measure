@@ -5,11 +5,13 @@ from .experiment import (
     amprabi_analyze,
     dispersive_analyze,
     lookback_analyze,
+    freq_analyze,
     spectrum_analyze,
 )
 from .single_shot import singleshot_analysis, fidelity_func
 
 __all__ = [
+    "freq_analyze",
     "spectrum_analyze",
     "dispersive_analyze",
     "amprabi_analyze",
