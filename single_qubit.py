@@ -334,7 +334,7 @@ save_data(
 # %%
 sw_spot = 10000
 
-DefaultCfg.set_qub(qubit_name, sw_spot={flux_dev: sw_spot})
+DefaultCfg.set_labeled_flux(qubit_name, flux_dev, sw_spot=sw_spot)
 DefaultCfg.set_default(flux="sw_spot")
 
 # %% [markdown]

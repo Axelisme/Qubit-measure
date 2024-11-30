@@ -71,7 +71,7 @@ class DefaultCfg:
         deepupdate(res_cfg["pulses"], pulse_cfgs, behavior=behavior)
 
     @classmethod
-    def get_res_pulse(cls, resonator: str, pulse_name: str):
+    def get_res_pulse(cls, resonator: str, pulse_name: str) -> dict:
         res_cfg = cls.res_cfgs[resonator]
         return res_cfg["pulses"][pulse_name]
 
@@ -82,19 +82,22 @@ class DefaultCfg:
         deepupdate(qub_cfg["pulses"], pulse_cfgs, behavior=behavior)
 
     @classmethod
-    def get_qub_pulse(cls, qubit: str, pulse_name: str):
+    def get_qub_pulse(cls, qubit: str, pulse_name: str) -> dict:
         qub_cfg = cls.qub_cfgs[qubit]
         return qub_cfg["pulses"][pulse_name]
 
     @classmethod
-    def get_sw_spot(cls, qubit: Union[str, dict]) -> dict:
-        if isinstance(qubit, dict):
-            return qubit.get("sw_spot", {})
-        elif isinstance(qubit, str):
-            assert qubit in cls.qub_cfgs, f"Qubit {qubit} not found in qub_cfgs"
-            return cls.qub_cfgs[qubit].get("sw_spot", {})
-        else:
-            raise TypeError(f"Invalid qubit type: {type(qubit)}")
+    def set_labeled_flux(cls, qubit: Union[str, dict], method: str, **lbd_flux):
+        if isinstance(qubit, str):
+            qubit = cls.qub_cfgs.setdefault(qubit, {})
+        labeled_flux = qubit.setdefault("labeled_flux", {})
+        labeled_flux.set_default(method, {}).update(lbd_flux)
+
+    @classmethod
+    def get_labeled_flux(cls, qubit: Union[str, dict], method: str) -> dict:
+        if isinstance(qubit, str):
+            qubit = cls.qub_cfgs.get(qubit, {})
+        return qubit["labeled_flux"].get(method, {})
 
     @classmethod
     def set_default(cls, **kwargs):

@@ -118,11 +118,12 @@ def auto_derive_flux(exp_cfg: dict):
     if method == "none" or "flux" not in exp_cfg:
         return
 
-    if exp_cfg["flux"] == "sw_spot":
-        assert "qubit" in exp_cfg, "No qubit provided for sw_spot."
-        sw_spot = DefaultCfg.get_sw_spot(exp_cfg["qubit"])
-        assert method in sw_spot, f"No sw_spot for {method}"
-        exp_cfg["flux"] = sw_spot[method]
+    # replace labeled flux with flux value
+    flux = exp_cfg["flux"]
+    if isinstance(flux, str):
+        lbd_flux = DefaultCfg.get_labeled_flux(exp_cfg["qubit"], method)
+        assert flux in lbd_flux, f"Cannot find {flux} for {method}."
+        exp_cfg["flux"] = lbd_flux[flux]
 
 
 def auto_derive_exp(exp_cfg: dict):
