@@ -27,7 +27,7 @@ def save_cfg(filepath: str, cfg: dict):
         yaml.dump(cfg, f, default_flow_style=False)
 
 
-def safe_filepath(filepath: str):
+def safe_labber_filepath(filepath: str):
     if not filepath.endswith(".hdf5"):
         filepath += ".hdf5"  # labber save data as hdf5
 
@@ -126,7 +126,7 @@ def save_data(
     server_ip: str = None,
     port: int = 4999,
 ):
-    filepath = safe_filepath(filepath)
+    filepath = safe_labber_filepath(filepath)
     if server_ip is not None:
         save_data_local(filepath, x_info, z_info, y_info, comment, tag)
         filepath = filepath + ".hdf5"  # labber save data as hdf5
