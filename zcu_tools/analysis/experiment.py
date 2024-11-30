@@ -1,3 +1,5 @@
+from typing import Literal
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -58,7 +60,11 @@ def NormalizeData(signals2D: np.ndarray) -> np.ndarray:
 
 
 def spectrum_analyze(
-    fpts: np.ndarray, ypts: np.ndarray, signal2D: np.ndarray, **kwargs
+    fpts: np.ndarray,
+    ypts: np.ndarray,
+    signal2D: np.ndarray,
+    f_axis: Literal["x-axis", "y-axis"] = "x-axis",
+    **kwargs,
 ):
     signal2D = NormalizeData(np.abs(signal2D))
     freqs = np.array(
@@ -66,8 +72,16 @@ def spectrum_analyze(
     )
 
     plt.figure(figsize=figsize)
-    plt.pcolormesh(fpts, ypts, signal2D, shading="auto")
-    plt.plot(freqs, ypts, color="r", marker="o", markersize=3)
+    if f_axis == "y-axis":
+        # let frequency be y-axis
+        plt.pcolormesh(ypts, fpts, signal2D.T, shading="auto")
+        plt.plot(ypts, freqs, color="r", marker="o", markersize=3)
+    elif f_axis == "x-axis":
+        # let frequency be x-axis
+        plt.pcolormesh(fpts, ypts, signal2D, shading="auto")
+        plt.plot(freqs, ypts, color="r", marker="o", markersize=3)
+    else:
+        raise ValueError("f_axis must be 'x-axis' or 'y-axis'")
     plt.show()
 
     return freqs
