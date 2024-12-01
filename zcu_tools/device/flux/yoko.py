@@ -1,3 +1,4 @@
+import time
 from numbers import Number
 from typing import Optional
 
@@ -100,7 +101,7 @@ class Labber_YokoFluxControl(FluxControl):
         if self.yoko is None:
             self._init_dev()
 
-        for _ in range(5):
+        for _ in range(10):
             try:
                 self.yoko.ctrl.globalFlux.setValue(
                     "Current", flux, rate=self.sweep_rate
@@ -111,6 +112,7 @@ class Labber_YokoFluxControl(FluxControl):
                 break
             except Exception as e:
                 print(f"Error setting flux: {e}, retrying...")
+                time.sleep(5)
                 self._init_dev()
         else:
             print("Failed to set flux")
