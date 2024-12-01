@@ -72,9 +72,17 @@ class Labber_YokoFluxControl(FluxControl):
             except Exception as e:
                 print(f"Error setting flux: {e}, retrying...")
                 time.sleep(5)  # wait for 5 seconds
-                type(self)._init_dev()
+                for _ in range(10):
+                    try:
+                        type(self)._init_dev()
+                        break
+                    except Exception as e:
+                        print("Error init yoko device: ", e)
+                        time.sleep(60) # wait 1 minute
+                else:
+                    raise RuntimeError("Failed to set flux")
         else:
-            print("Failed to set flux")
+            raise RuntimeError("Failed to set flux")
 
     def trigger(self):
         pass

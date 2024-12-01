@@ -30,7 +30,7 @@ class BaseOneToneProgram(AcquireProgram):
         set_pulse(self, res_ch, self.res_pulse, self.res_wavform, for_readout=True)
 
     def setup_flux(self):
-        flux_cls = get_fluxControl(self, self.flux_cfg)
+        flux_cls = get_fluxControl(self.flux_cfg)
         self.flux_ctrl = flux_cls(self)
         self.flux_ctrl.set_flux(self.cfg.get("flux"))
 
