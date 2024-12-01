@@ -89,8 +89,8 @@ def fitlor(xdata, ydata, fitparams=None):
     # bounds
     yscale = fitparams[2]
     bounds = (
-        [np.min(ydata), -np.inf, -2 * np.abs(yscale), xdata[0], 0],
-        [np.max(ydata), np.inf, 2 * np.abs(yscale), xdata[-1], np.inf],
+        [np.min(ydata), -np.inf, -2 * np.abs(yscale), -np.inf, 0],
+        [np.max(ydata), np.inf, 2 * np.abs(yscale), np.inf, np.inf],
     )
 
     return fit_func(xdata, ydata, lorfunc, fitparams, bounds)
@@ -134,8 +134,8 @@ def fit_asym_lor(xdata, ydata, fitparams=None):
     # bounds
     yscale = fitparams[2]
     bounds = (
-        [np.min(ydata), -np.inf, -2 * np.abs(yscale), xdata[0], 0, -np.inf],
-        [np.max(ydata), np.inf, 2 * np.abs(yscale), xdata[-1], np.inf, np.inf],
+        [np.min(ydata), -np.inf, -2 * np.abs(yscale), -np.inf, 0, -np.inf],
+        [np.max(ydata), np.inf, 2 * np.abs(yscale), np.inf, np.inf, np.inf],
     )
 
     return fit_func(xdata, ydata, asym_lorfunc, fitparams, bounds)
