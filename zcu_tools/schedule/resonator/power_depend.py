@@ -5,10 +5,10 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.program import OnetoneProgram
+from zcu_tools.program import OnetoneProgram, RGainOnetoneProgram
 
 
-def measure_power_dependent(soc, soccfg, cfg, instant_show=False):
+def measure_power_dependent(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     freq_cfg = cfg["sweep"]["freq"]
@@ -19,7 +19,8 @@ def measure_power_dependent(soc, soccfg, cfg, instant_show=False):
     res_pulse = cfg["res_pulse"]
 
     freq_tqdm = tqdm(fpts)
-    pdr_tqdm = tqdm(pdrs)
+    if soft_loop:
+        pdr_tqdm = tqdm(pdrs)
     signals2D = np.zeros((len(pdrs), len(fpts)), dtype=np.complex128)
     if instant_show:
         import matplotlib.pyplot as plt
@@ -35,14 +36,20 @@ def measure_power_dependent(soc, soccfg, cfg, instant_show=False):
     for i, fpt in enumerate(fpts):
         res_pulse["freq"] = fpt
 
-        pdr_tqdm.reset()
-        pdr_tqdm.refresh()
-        for j, pdr in enumerate(pdrs):
-            res_pulse["gain"] = pdr
-            prog = OnetoneProgram(soccfg, make_cfg(cfg))
-            avgi, avgq = prog.acquire(soc, progress=False)
-            signals2D[j, i] = avgi[0][0] + 1j * avgq[0][0]
-            pdr_tqdm.update()
+        if soft_loop:
+            pdr_tqdm.reset()
+            pdr_tqdm.refresh()
+            for j, pdr in enumerate(pdrs):
+                res_pulse["gain"] = pdr
+                prog = OnetoneProgram(soccfg, make_cfg(cfg))
+                avgi, avgq = prog.acquire(soc, progress=False)
+                signals2D[j, i] = avgi[0][0] + 1j * avgq[0][0]
+                pdr_tqdm.update()
+        else:
+            prog = RGainOnetoneProgram(soccfg, make_cfg(cfg))
+            pdrs, avgi, avgq = prog.acquire(soc, progress=True)
+            signals2D[:, i] = avgi[0][0] + 1j * avgq[0][0]
+
         freq_tqdm.update()
 
         if instant_show:

@@ -71,14 +71,13 @@ class Labber_YokoFluxControl(FluxControl):
                 break
             except Exception as e:
                 print(f"Error setting flux: {e}, retrying...")
-                time.sleep(5)  # wait for 5 seconds
                 for _ in range(10):
                     try:
+                        time.sleep(60)  # wait for 1 min
                         type(self)._init_dev()
                         break
                     except Exception as e:
                         print("Error init yoko device: ", e)
-                        time.sleep(60) # wait 1 minute
                 else:
                     raise RuntimeError("Failed to set flux")
         else:

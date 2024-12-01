@@ -9,7 +9,7 @@ from .singleshot import (
     scan_pdr_fid,
     scan_style_fid,
 )
-from .spectrum import measure_qubit_freq
+from .spectrum import measure_qubit_freq, measure_qub_spectrum
 from .time_domain import measure_t2ramsey, measure_t1, measure_t2echo
 
 __all__ = [
@@ -23,6 +23,7 @@ __all__ = [
     "scan_pdr_fid",
     "scan_style_fid",
     "measure_qubit_freq",
+    "measure_qub_spectrum",
     "measure_t2ramsey",
     "measure_t1",
     "measure_t2echo",

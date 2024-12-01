@@ -89,9 +89,9 @@ class DefaultCfg:
     @classmethod
     def set_labeled_flux(cls, qubit: Union[str, dict], method: str, **lbd_flux):
         if isinstance(qubit, str):
-            qubit = cls.qub_cfgs.setdefault(qubit, {})
+            qubit: dict = cls.qub_cfgs.setdefault(qubit, {})
         labeled_flux = qubit.setdefault("labeled_flux", {})
-        labeled_flux.set_default(method, {}).update(lbd_flux)
+        labeled_flux.setdefault(method, {}).update(lbd_flux)
 
     @classmethod
     def get_labeled_flux(cls, qubit: Union[str, dict], method: str) -> dict:
