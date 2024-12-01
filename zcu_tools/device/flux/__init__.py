@@ -1,18 +1,19 @@
-from .base import NoneFluxControl, FluxControl
+from .base import NoneFluxControl
 from .zcu216 import ZCUFluxControl
-from .yoko import Labber_YokoFluxControl, Qcodes_YokoFluxControl
+from .yoko import Labber_YokoFluxControl
 
 
-def make_fluxControl(prog, flux_cfg) -> FluxControl:
-    dev_name = flux_cfg["name"]
-    if dev_name == "qcodes_yoko":
-        return Qcodes_YokoFluxControl(prog, flux_cfg)
-    elif dev_name == "labber_yoko":
-        return Labber_YokoFluxControl(prog, flux_cfg)
+def get_fluxControl(flux_dev: dict) -> type:
+    dev_name = flux_dev["name"]
+    if dev_name == "labber_yoko":
+        dev_cls = Labber_YokoFluxControl
     elif dev_name == "zcu216":
-        return ZCUFluxControl(prog, flux_cfg)
+        dev_cls = ZCUFluxControl
     elif dev_name == "none":
-        return NoneFluxControl()
+        dev_cls = NoneFluxControl
     else:
         raise ValueError(f"Unknown flux control method: {dev_name}")
 
+    dev_cls.register(flux_dev)
+
+    return dev_cls

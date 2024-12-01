@@ -5,11 +5,14 @@ from qick.asm_v1 import AcquireProgram
 
 
 class FluxControl:
-    def __init__(self, program: AcquireProgram, flux_cfg: dict):
-        self.prog = program
-        self.cfg = flux_cfg
+    @classmethod
+    def register(cls, flux_dev: dict, force=False):
+        raise NotImplementedError
 
-    def set_flux(self, flux: Optional[Number]) -> None:
+    def __init__(self, prog: AcquireProgram):
+        raise NotImplementedError
+
+    def set_flux(self, value: Optional[Number]) -> None:
         raise NotImplementedError
 
     def trigger(self) -> None:
@@ -17,19 +20,15 @@ class FluxControl:
 
 
 class NoneFluxControl(FluxControl):
-    def __init__(self):
+    @classmethod
+    def register(cls, flux_dev: dict, force=False):
         pass
 
-    def set_flux(self, flux):
+    def __init__(self, prog: AcquireProgram):
+        pass
+
+    def set_flux(self, value: Optional[Number]) -> None:
         pass
 
     def trigger(self):
         pass
-
-
-
-
-
-
-
-

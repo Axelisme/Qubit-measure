@@ -5,66 +5,21 @@ from typing import Optional
 from .base import FluxControl
 
 
-class Qcodes_YokoFluxControl(FluxControl):
-    def __init__(self, program, cfg):
-        super().__init__(program, cfg)
-
-        self.name = cfg["name"]
-        self.address = cfg["address"]
-        self.limit = cfg["limit"]
-        self.rate = cfg["rate"]
-
-        self.yoko = None
-
-    def _init_dev(self):
-        try:
-            from qcodes.instrument_drivers.yokogawa import YokogawaGS200  # type: ignore
-        except ImportError:
-            raise ImportError(
-                "Please install qcodes to use YokoFluxControl in the program"
-            )
-
-        self.yoko = YokogawaGS200(self.name, address=self.address, terminator="n")
-        self.source_mode("CURR")
-        self.yoko.current_limit(self.limit)
-
-    def set_flux(self, flux: Optional[Number]) -> None:
-        if flux is None:
-            # flux = 0.0  # default to zero
-            return  # default do nothing
-
-        # cast numpy float to python float
-        if hasattr(flux, "item"):
-            flux = flux.item()
-
-        # if not np.issubdtype(flux, np.floating):
-        if not isinstance(flux, float):
-            raise ValueError(f"Flux must be a float in YokoFluxControl, but got {flux}")
-        assert (
-            self.limit[0] <= flux < self.limit[1]
-        ), f"Flux must be in the range {self.limit}, but got {flux}"
-
-        if self.yoko is None:
-            self._init_dev()
-
-        self.yoko.ramp_current(flux, self.rate, 0.01)
-
-    def trigger(self):
-        pass
-
-
 class Labber_YokoFluxControl(FluxControl):
-    def __init__(self, program, cfg):
-        super().__init__(program, cfg)
+    yoko = None
 
-        self.sHardware = cfg["sHardware"]
-        self.dev_cfg = cfg["dev_cfg"]
-        self.flux_cfg = cfg["flux_cfg"]
-        self.sweep_rate = self.flux_cfg["Current - Sweep rate"]
-        self.server_ip = cfg["server_ip"]
+    @classmethod
+    def register(cls, flux_dev: dict, force=False):
+        if not force and cls.yoko is not None:
+            return  # only register once if not forced
 
-        self.dev_cfg["name"] = "globalFlux"
-        self.flux_cfg.update(
+        cls.cfg = flux_dev
+        cls.sweep_rate = flux_dev["sweep_rate"]
+        cls.server_ip = flux_dev["server_ip"]
+
+        # overwrite the cfg
+        cls.cfg["dev_cfg"]["name"] = "globalFlux"
+        cls.cfg["flux_cfg"].update(
             {
                 "Output": True,
                 "Function": "Current",
@@ -72,48 +27,52 @@ class Labber_YokoFluxControl(FluxControl):
             }
         )
 
-        self.yoko = None
+        cls._init_dev()
 
-    def _init_dev(self):
+    @classmethod
+    def _init_dev(cls):
         from .labber import InstrManager
 
-        self.yoko = InstrManager(server_ip=self.server_ip)
-        self.yoko.add_instrument(
-            sHardware=self.sHardware, dComCfg=self.dev_cfg, silent=True
-        )
-        self.yoko.ctrl.globalFlux.setInstrConfig(self.flux_cfg)
+        sHardware = cls.cfg["sHardware"]
+        dev_cfg = cls.cfg["dev_cfg"]
+        flux_cfg = cls.cfg["flux_cfg"]
 
-    def set_flux(self, flux: Optional[Number]) -> None:
-        if flux is None:
+        cls.yoko = InstrManager(server_ip=cls.server_ip)
+        cls.yoko.add_instrument(sHardware, dev_cfg, silent=True)
+        cls.yoko.ctrl.globalFlux.setInstrConfig(flux_cfg)
+
+    def __init__(self, prog):
+        pass
+
+    def set_flux(self, value: Optional[Number]) -> None:
+        if value is None:
             return  # default do nothing
 
         # cast numpy float to python float
-        if hasattr(flux, "item"):
-            flux = flux.item()
+        if hasattr(value, "item"):
+            value = value.item()
 
         # if not np.issubdtype(flux, np.floating):
-        if not isinstance(flux, float):
-            raise ValueError(f"Flux must be a float in YokoFluxControl, but got {flux}")
+        if not isinstance(value, float):
+            raise ValueError(
+                f"Flux must be a float in YokoFluxControl, but got {value}"
+            )
         assert (
-            -0.01 <= flux < 0.01
-        ), f"Flux must be in the range [-0.01, 0.01], but got {flux}"
+            -0.01 <= value < 0.01
+        ), f"Flux must be in the range [-0.01, 0.01], but got {value}"
 
-        if self.yoko is None:
-            self._init_dev()
+        yoko = type(self).yoko
 
-        for _ in range(10):
+        for _ in range(5):
             try:
-                self.yoko.ctrl.globalFlux.setValue(
-                    "Current", flux, rate=self.sweep_rate
-                )
-                self.yoko.ctrl.globalFlux.setValue(
-                    "Current", flux, rate=self.sweep_rate
-                )  # again to make sure it is set
+                # run twice to make sure it is set
+                yoko.ctrl.globalFlux.setValue("Current", value, rate=self.sweep_rate)
+                yoko.ctrl.globalFlux.setValue("Current", value, rate=self.sweep_rate)
                 break
             except Exception as e:
                 print(f"Error setting flux: {e}, retrying...")
-                time.sleep(5)
-                self._init_dev()
+                time.sleep(5)  # wait for 5 seconds
+                type(self)._init_dev()
         else:
             print("Failed to set flux")
 
