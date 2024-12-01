@@ -4,6 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
+from zcu_tools.analysis import NormalizeData
 from zcu_tools.program import OnetoneProgram
 
 
@@ -22,13 +23,13 @@ def measure_flux_dependent(soc, soccfg, cfg, instant_show=False):
     signals2D = np.zeros((len(flxs), len(fpts)), dtype=np.complex128)
     if instant_show:
         import matplotlib.pyplot as plt
-        from IPython.display import display
+        from IPython.display import clear_output, display
 
         fig, ax = plt.subplots()
-        ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("Flux")
+        ax.set_xlabel("Flux")
+        ax.set_ylabel("Frequency (MHz)")
         ax.set_title("Flux-dependent measurement")
-        ax.pcolormesh(fpts, flxs, np.abs(signals2D))
+        ax.pcolormesh(flxs, fpts, np.abs(signals2D).T)
         dh = display(fig, display_id=True)
 
     for i, flx in enumerate(flxs):
@@ -45,9 +46,11 @@ def measure_flux_dependent(soc, soccfg, cfg, instant_show=False):
         flux_tqdm.update()
 
         if instant_show:
-            ax.pcolormesh(fpts, flxs, np.abs(signals2D))
+            amps = np.abs(signals2D)
+            amps = NormalizeData(np.ma.masked_where(amps == 0, amps))
+            ax.pcolormesh(flxs, fpts, amps.T)
             dh.update(fig)
-    freq_tqdm.close()
-    flux_tqdm.close()
+    if instant_show:
+        clear_output()
 
     return fpts, flxs, signals2D

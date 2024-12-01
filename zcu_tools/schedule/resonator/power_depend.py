@@ -4,8 +4,8 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program import OnetoneProgram
 from zcu_tools.analysis import NormalizeData
+from zcu_tools.program import OnetoneProgram
 
 
 def measure_power_dependent(soc, soccfg, cfg, instant_show=False):
@@ -23,7 +23,7 @@ def measure_power_dependent(soc, soccfg, cfg, instant_show=False):
     signals2D = np.zeros((len(pdrs), len(fpts)), dtype=np.complex128)
     if instant_show:
         import matplotlib.pyplot as plt
-        from IPython.display import display
+        from IPython.display import clear_output, display
 
         fig, ax = plt.subplots()
         ax.set_xlabel("Frequency (MHz)")
@@ -46,10 +46,11 @@ def measure_power_dependent(soc, soccfg, cfg, instant_show=False):
         freq_tqdm.update()
 
         if instant_show:
-            norm_signals2D = NormalizeData(np.abs(signals2D))
-            ax.pcolormesh(fpts, pdrs, norm_signals2D)
+            amps = np.abs(signals2D)
+            amps = NormalizeData(np.ma.masked_where(amps == 0, amps))
+            ax.pcolormesh(fpts, pdrs, amps)
             dh.update(fig)
-    freq_tqdm.close()
-    pdr_tqdm.close()
+    if instant_show:
+        clear_output()
 
     return fpts, pdrs, signals2D  # (pdrs, freqs)
