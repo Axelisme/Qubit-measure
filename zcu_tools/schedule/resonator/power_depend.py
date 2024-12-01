@@ -5,6 +5,7 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.program import OnetoneProgram
+from zcu_tools.analysis import NormalizeData
 
 
 def measure_power_dependent(soc, soccfg, cfg, instant_show=False):
@@ -45,7 +46,8 @@ def measure_power_dependent(soc, soccfg, cfg, instant_show=False):
         freq_tqdm.update()
 
         if instant_show:
-            ax.pcolormesh(fpts, pdrs, np.abs(signals2D))
+            norm_signals2D = NormalizeData(np.abs(signals2D))
+            ax.pcolormesh(fpts, pdrs, norm_signals2D)
             dh.update(fig)
     freq_tqdm.close()
     pdr_tqdm.close()

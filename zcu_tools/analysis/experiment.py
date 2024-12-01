@@ -57,7 +57,8 @@ def NormalizeData(signals2D: np.ndarray) -> np.ndarray:
     # normalize on frequency axis
     mins = np.min(signals2D, axis=1, keepdims=True)
     maxs = np.max(signals2D, axis=1, keepdims=True)
-    return (signals2D - mins) / (maxs - mins)
+    norm_const = np.clip(maxs - mins, 1e-10, None)
+    return (signals2D - mins) / norm_const
 
 
 def spectrum_analyze(
@@ -65,14 +66,14 @@ def spectrum_analyze(
     ypts: np.ndarray,
     signal2D: np.ndarray,
     f_axis: Literal["x-axis", "y-axis"] = "x-axis",
-    plot_peak = True
+    plot_peak=True,
 ):
     signal2D = NormalizeData(np.abs(signal2D))
 
     freqs = np.zeros_like(ypts)
     pOpt = None
     for i in range(len(freqs)):
-        pOpt, _ = ft.fitlor(fpts, np.abs(signal2D[i]), pOpt)
+        pOpt, _ = ft.fitlor(fpts, signal2D[i], pOpt)
         freqs[i] = pOpt[3]
     freqs = np.array(freqs)
 

@@ -1,4 +1,5 @@
 from .experiment import (
+    NormalizeData,
     T1_analyze,
     T2decay_analyze,
     T2fringe_analyze,
@@ -11,6 +12,7 @@ from .experiment import (
 from .single_shot import singleshot_analysis, fidelity_func
 
 __all__ = [
+    "NormalizeData",
     "freq_analyze",
     "spectrum_analyze",
     "dispersive_analyze",
