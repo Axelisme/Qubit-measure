@@ -14,7 +14,7 @@ class Labber_YokoFluxControl(FluxControl):
             return  # only register once if not forced
 
         cls.cfg = flux_dev
-        cls.sweep_rate = flux_dev["sweep_rate"]
+        cls.sweep_rate = cls.cfg["flux_cfg"]["sweep_rate"]
         cls.server_ip = flux_dev["server_ip"]
 
         # overwrite the cfg
