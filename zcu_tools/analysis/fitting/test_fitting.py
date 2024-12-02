@@ -1,19 +1,20 @@
-import numpy as np
+import random
 import unittest
 
+import numpy as np
+
 from .fitting import (
+    asym_lorfunc,
+    decaysin,
+    expfunc,
+    fit_asym_lor,
+    fitdecaysin,
     fitexp,
     fitlor,
-    fit_asym_lor,
     fitsin,
-    fitdecaysin,
-    expfunc,
     lorfunc,
-    asym_lorfunc,
     sinfunc,
-    decaysin,
 )
-import random
 
 
 class TestFitting(unittest.TestCase):
