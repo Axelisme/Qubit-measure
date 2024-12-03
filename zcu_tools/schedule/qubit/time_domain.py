@@ -7,6 +7,7 @@ def measure_t2ramsey(soc, soccfg, cfg):
     prog = T2RamseyProgram(soccfg, deepcopy(cfg))
     ts, avgi, avgq = prog.acquire(soc, progress=True)
     signals = avgi[0][0] + 1j * avgq[0][0]
+    ts = prog.cycles2us(ts)
 
     return ts, signals
 
@@ -15,6 +16,7 @@ def measure_t1(soc, soccfg, cfg):
     prog = T1Program(soccfg, deepcopy(cfg))
     ts, avgi, avgq = prog.acquire(soc, progress=True)
     signals = avgi[0][0] + 1j * avgq[0][0]
+    ts = prog.cycles2us(ts)
 
     return ts, signals
 
@@ -23,5 +25,6 @@ def measure_t2echo(soc, soccfg, cfg):
     prog = T2EchoProgram(soccfg, deepcopy(cfg))
     ts, avgi, avgq = prog.acquire(soc, progress=True)
     signals = avgi[0][0] + 1j * avgq[0][0]
+    ts = prog.cycles2us(ts) * 2
 
     return ts, signals

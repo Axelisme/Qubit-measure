@@ -8,6 +8,7 @@ from .resonator import (
 )
 from .qubit import (
     measure_dispersive,
+    measure_lenrabi,
     measure_amprabi,
     measure_fid,
     measure_fid_auto,
@@ -32,6 +33,7 @@ __all__ = [
     "measure_res_pdr_dep",
     "measure_res_flux_dep",
     "measure_dispersive",
+    "measure_lenrabi",
     "measure_amprabi",
     "measure_fid",
     "measure_fid_auto",
