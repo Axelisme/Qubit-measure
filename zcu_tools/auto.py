@@ -15,11 +15,16 @@ def make_cfg(exp_cfg: dict, **kwargs):
     return exp_cfg
 
 
-def auto_derive_pulse(pulse_cfg: dict, pulses: dict) -> dict:
-    def auto_derive_waveform(pulse_cfg: dict):
+def auto_derive_pulse(pulse_cfg: dict, pulses: dict, nqz: int = None) -> dict:
+    def auto_derive_waveform(pulse_cfg: dict, only_shape=False):
         # style and length are required
         style = pulse_cfg["style"]
         length = pulse_cfg["length"]
+
+        if not only_shape:
+            pulse_cfg.setdefault("phase", 0)
+            if nqz is not None:
+                pulse_cfg.setdefault("nqz", nqz)
 
         if style == "flat_top":
             raise_cfg = pulse_cfg.setdefault("raise_pulse", {})
@@ -30,12 +35,9 @@ def auto_derive_pulse(pulse_cfg: dict, pulses: dict) -> dict:
             raise_cfg.setdefault("length", 0.1 * max(length, 0.15))
 
             # derive raise pulse parameters
-            auto_derive_waveform(raise_cfg)
-        else:
-            pulse_cfg.setdefault("phase", 0)
-
-            if style == "gauss":
-                pulse_cfg.setdefault("sigma", length / 4)
+            auto_derive_waveform(raise_cfg, only_shape=True)
+        elif style == "gauss":
+            pulse_cfg.setdefault("sigma", length / 4)
 
     # derive pulse config
     if isinstance(pulse_cfg, str):
@@ -65,8 +67,9 @@ def auto_derive_res(exp_cfg: dict):
     res_cfg: dict = exp_cfg["resonator"]
 
     # replace pulses with pulse config
+    nqz = res_cfg.get("nqz")
     pulse_cfgs: dict = res_cfg.get("pulses", {})
-    exp_cfg["res_pulse"] = auto_derive_pulse(exp_cfg["res_pulse"], pulse_cfgs)
+    exp_cfg["res_pulse"] = auto_derive_pulse(exp_cfg["res_pulse"], pulse_cfgs, nqz)
 
     # remove pulses from resonator config for clarity
     res_cfg.pop("pulses", None)
@@ -89,13 +92,14 @@ def auto_derive_qub(exp_cfg: dict):
     # replace pulses with pulse config
     pulse_cfgs: dict = qub_cfg.get("pulses", {})
     # for single qubit experiment
+    nqz = qub_cfg.get("nqz")
     if "qub_pulse" in exp_cfg:
-        exp_cfg["qub_pulse"] = auto_derive_pulse(exp_cfg["qub_pulse"], pulse_cfgs)
+        exp_cfg["qub_pulse"] = auto_derive_pulse(exp_cfg["qub_pulse"], pulse_cfgs, nqz)
     # for ef experiment
     if "ef_pulse" in exp_cfg:
-        exp_cfg["ef_pulse"] = auto_derive_pulse(exp_cfg["ef_pulse"], pulse_cfgs)
+        exp_cfg["ef_pulse"] = auto_derive_pulse(exp_cfg["ef_pulse"], pulse_cfgs, nqz)
     if "ge_pulse" in exp_cfg:
-        exp_cfg["ge_pulse"] = auto_derive_pulse(exp_cfg["ge_pulse"], pulse_cfgs)
+        exp_cfg["ge_pulse"] = auto_derive_pulse(exp_cfg["ge_pulse"], pulse_cfgs, nqz)
 
     # remove pulses from qubit config for clarity
     qub_cfg.pop("pulses", None)

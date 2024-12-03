@@ -64,7 +64,7 @@ class BaseTwoToneProgram(BaseOneToneProgram):
 
     def setup_qubit(self):
         qub_ch = self.qub_cfg["qub_ch"]
-        self.declare_gen(ch=qub_ch, nqz=self.qub_cfg["nqz"])
+        self.declare_gen(ch=qub_ch, nqz=self.qub_pulse["nqz"])
         self.qub_wavform = create_waveform(self, qub_ch, self.qub_pulse)
         if isinstance(self.qub_wavform, str):
             set_pulse(self, self.qub_pulse, qub_ch, waveform=self.qub_wavform)
