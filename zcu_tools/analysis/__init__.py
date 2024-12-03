@@ -1,15 +1,13 @@
-from .experiment import (
+from .general import (
     NormalizeData,
-    T1_analyze,
-    T2decay_analyze,
-    T2fringe_analyze,
     amprabi_analyze,
     dispersive_analyze,
-    lookback_analyze,
     freq_analyze,
+    lookback_analyze,
     spectrum_analyze,
 )
-from .single_shot import singleshot_analysis, fidelity_func
+from .single_shot import fidelity_func, singleshot_analysis
+from .time_exp import T1_analyze, T2decay_analyze, T2fringe_analyze
 
 __all__ = [
     "NormalizeData",

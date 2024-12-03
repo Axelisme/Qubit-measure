@@ -37,7 +37,7 @@ class Labber_YokoFluxControl(FluxControl):
         dev_cfg = cls.cfg["dev_cfg"]
         flux_cfg = cls.cfg["flux_cfg"]
 
-        cls.yoko = InstrManager(server_ip=cls.server_ip)
+        cls.yoko = InstrManager(server_ip=cls.server_ip, timeout=25*60)
         cls.yoko.add_instrument(sHardware, dev_cfg, silent=True)
         cls.yoko.ctrl.globalFlux.setInstrConfig(flux_cfg)
 
