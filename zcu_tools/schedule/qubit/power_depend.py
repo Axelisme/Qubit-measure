@@ -5,10 +5,10 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.program import OneToneProgram, RGainOnetoneProgram
+from zcu_tools.program import TwoToneProgram, RGainTwoToneProgram
 
 
-def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
+def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     freq_cfg = cfg["sweep"]["freq"]
@@ -16,7 +16,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
     pdrs = np.arange(pdr_cfg["start"], pdr_cfg["stop"], pdr_cfg["step"])
 
-    res_pulse = cfg["res_pulse"]
+    qub_pulse = cfg["qub_pulse"]
 
     freq_tqdm = tqdm(fpts)
     if soft_loop:
@@ -38,19 +38,19 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         dh = display(fig, display_id=True)
 
     for i, fpt in enumerate(fpts):
-        res_pulse["freq"] = fpt
+        qub_pulse["freq"] = fpt
 
         if soft_loop:
             pdr_tqdm.reset()
             pdr_tqdm.refresh()
             for j, pdr in enumerate(pdrs):
-                res_pulse["gain"] = pdr
-                prog = OneToneProgram(soccfg, make_cfg(cfg))
+                qub_pulse["gain"] = pdr
+                prog = TwoToneProgram(soccfg, make_cfg(cfg))
                 avgi, avgq = prog.acquire(soc, progress=False)
                 signals2D[j, i] = avgi[0][0] + 1j * avgq[0][0]
                 pdr_tqdm.update()
         else:
-            prog = RGainOnetoneProgram(soccfg, make_cfg(cfg))
+            prog = RGainTwoToneProgram(soccfg, make_cfg(cfg))
             pdrs, avgi, avgq = prog.acquire(soc, progress=False)
             signals2D[:, i] = avgi[0][0] + 1j * avgq[0][0]
 

@@ -42,13 +42,17 @@ def freq_analyze(x, y, asym=False, plot=True, fit_phase=False):
             fig, axs = plt.subplots(2, 1, figsize=figsize)
             axs[0].plot(x, mag, label="mag", marker="o", markersize=3)
             axs[0].plot(x, curve_mag, label=f"fit, $kappa$={kappa_mag:.2f}")
-            axs[0].axvline(res_mag, color="r", ls="--", label=f"$f_res$ = {res_mag:.2f}")
+            axs[0].axvline(
+                res_mag, color="r", ls="--", label=f"$f_res$ = {res_mag:.2f}"
+            )
             axs[0].set_title("mag.", fontsize=15)
             axs[0].legend()
 
             axs[1].plot(x, pha, label="pha", marker="o", markersize=3)
             axs[1].plot(x, curve_pha, label=f"fit, $kappa$={kappa_pha:.2f}")
-            axs[1].axvline(res_pha, color="r", ls="--", label=f"$f_res$ = {res_pha:.2f}")
+            axs[1].axvline(
+                res_pha, color="r", ls="--", label=f"$f_res$ = {res_pha:.2f}"
+            )
             axs[1].set_title("pha.", fontsize=15)
             axs[1].legend()
         else:
@@ -170,28 +174,27 @@ def dispersive_analyze(x: np.ndarray, y1: np.ndarray, y2: np.ndarray, asym=False
         return x[min_id], x[max_id]
 
 
-def amprabi_analyze(x: int, y: float):
+def rabi_analyze(x: int, y: float):
     y = np.abs(y)
     pOpt, _ = ft.fitsin(x, y)
 
     freq = pOpt[2]
     phase = pOpt[3] % 360 - 180
     if phase < 0:
-        pi_gain = (0.25 - phase / 360) / freq
-        pi2_gain = -phase / 360 / freq
+        pi_x = (0.25 - phase / 360) / freq
+        pi2_x = -phase / 360 / freq
     else:
-        pi_gain = (0.75 - phase / 360) / freq
-        pi2_gain = (0.5 - phase / 360) / freq
+        pi_x = (0.75 - phase / 360) / freq
+        pi2_x = (0.5 - phase / 360) / freq
 
     plt.figure(figsize=figsize)
     plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
     plt.plot(x, ft.sinfunc(x, *pOpt), label="fit")
-    plt.title("Amplitude Rabi", fontsize=15)
-    plt.xlabel("$gain$", fontsize=15)
-    plt.axvline(pi_gain, ls="--", c="red", label=f"$\pi$ gain={pi_gain:.1f}")
-    plt.axvline(pi2_gain, ls="--", c="red", label=f"$\pi/2$ gain={(pi2_gain):.1f}")
+    plt.title("Rabi", fontsize=15)
+    plt.axvline(pi_x, ls="--", c="red", label=f"$\pi$={pi_x:.1f}")
+    plt.axvline(pi2_x, ls="--", c="red", label=f"$\pi/2$={(pi2_x):.1f}")
     plt.legend(loc=4)
     plt.tight_layout()
     plt.show()
 
-    return pi_gain, pi2_gain, np.max(y) - np.min(y)
+    return pi_x, pi2_x, np.max(y) - np.min(y)

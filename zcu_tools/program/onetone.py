@@ -4,7 +4,7 @@ from .base import BaseOneToneProgram
 from zcu_tools.device.flux.zcu216 import ZCUFluxControl
 
 
-class OnetoneProgram(AveragerProgram, BaseOneToneProgram):
+class OneToneProgram(AveragerProgram, BaseOneToneProgram):
     def initialize(self):
         BaseOneToneProgram.initialize(self)
 

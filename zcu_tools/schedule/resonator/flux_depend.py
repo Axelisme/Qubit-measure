@@ -5,10 +5,10 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.program import OnetoneProgram
+from zcu_tools.program import OneToneProgram
 
 
-def measure_flux_dependent(soc, soccfg, cfg, instant_show=False):
+def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     freq_cfg = cfg["sweep"]["freq"]
@@ -39,7 +39,7 @@ def measure_flux_dependent(soc, soccfg, cfg, instant_show=False):
         freq_tqdm.refresh()
         for j, f in enumerate(fpts):
             res_pulse["freq"] = f
-            prog = OnetoneProgram(soccfg, make_cfg(cfg))
+            prog = OneToneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc, progress=False)
             signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]
             freq_tqdm.update()
