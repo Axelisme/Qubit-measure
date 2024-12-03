@@ -65,7 +65,7 @@ def set_pulse(
 
     # convert frequency and phase to DAC registers
     freq_r = prog.freq2reg(pulse_cfg["freq"], gen_ch=gen_ch, ro_ch=ro_ch)
-    phase_r = prog.deg2reg(pulse_cfg["phase"], gen_ch=gen_ch, ro_ch=ro_ch)
+    phase_r = prog.deg2reg(pulse_cfg["phase"], gen_ch=gen_ch)
 
     if style == "const":
         prog.set_pulse_registers(
