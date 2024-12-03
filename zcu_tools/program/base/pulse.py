@@ -22,7 +22,7 @@ def create_waveform(prog: AcquireProgram, ch: int, pulse_cfg: dict) -> str:
             pulse_cfg = pulse_cfg["raise_pulse"]
 
         wav_style = pulse_cfg["style"]
-        length = prog.us2cycles(pulse_cfg["length"])
+        length = prog.us2cycles(pulse_cfg["length"], gen_ch=ch)
 
         if style == "flat_top":
             length = 2 * (length // 2)  # make length even
@@ -35,7 +35,7 @@ def create_waveform(prog: AcquireProgram, ch: int, pulse_cfg: dict) -> str:
                 raise ValueError("Flat top with constant raise style is not supported")
         elif wav_style == "gauss":
             # default sigma is quarter of the length
-            sigma = prog.us2cycles(pulse_cfg["sigma"])
+            sigma = prog.us2cycles(pulse_cfg["sigma"], gen_ch=ch)
             wavform += f"_S{sigma}"
             prog.add_gauss(ch=ch, name=wavform, sigma=sigma, length=length)
         elif wav_style == "cosine":
@@ -61,7 +61,7 @@ def set_pulse(
     waveform: str = None,
 ):
     style = pulse_cfg["style"]
-    length = prog.us2cycles(pulse_cfg["length"], gen_ch=gen_ch, ro_ch=ro_ch)
+    length = prog.us2cycles(pulse_cfg["length"], gen_ch=gen_ch)
 
     # convert frequency and phase to DAC registers
     freq_r = prog.freq2reg(pulse_cfg["freq"], gen_ch=gen_ch, ro_ch=ro_ch)
@@ -87,7 +87,7 @@ def set_pulse(
         )
     elif style == "flat_top":
         raise_length = pulse_cfg["raise_pulse"]["length"]
-        raise_length = prog.us2cycles(raise_length, gen_ch=gen_ch, ro_ch=ro_ch)
+        raise_length = prog.us2cycles(raise_length, gen_ch=gen_ch)
         raise_length = 2 * (raise_length // 2)  # make length even
         flat_length = length - raise_length
         assert flat_length >= 0, "Raise pulse length is longer than the total length"

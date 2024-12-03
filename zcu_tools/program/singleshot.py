@@ -59,7 +59,7 @@ class SingleShotProgram(RAveragerProgram, BaseTwoToneProgram):
     def collect_shots(self):
         cfg = self.cfg
         expts, reps = cfg["expts"], cfg["reps"]
-        readout_length = self.us2cycles(cfg["readout_length"])
+        readout_length = self.us2cycles(cfg["readout_length"], ro_ch=self.ro_chs[0])
         i0 = self.di_buf[0].reshape((expts, reps)) / readout_length
         q0 = self.dq_buf[0].reshape((expts, reps)) / readout_length
         return i0, q0
