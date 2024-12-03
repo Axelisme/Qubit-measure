@@ -33,7 +33,7 @@ class EFAmpRabiProgram(RAveragerProgram, BaseEFProgram):
     def pulse_ef(self):
         qub_ch = self.qub_cfg["qub_ch"]
 
-        set_pulse(self, qub_ch, self.ef_pulse, self.ef_wavform)
+        set_pulse(self, self.ef_pulse, qub_ch, waveform=self.ef_wavform)
         self.mathi(self.q_rp, self.r_gain, self.r_ef_gain, "+", 0)  # overwrite ef gain
         self.pulse(ch=qub_ch)
 

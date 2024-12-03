@@ -26,11 +26,11 @@ class BaseEFProgram(BaseOneToneProgram):
     def pulse_ge(self):
         qub_ch = self.qub_cfg["qub_ch"]
 
-        set_pulse(self, qub_ch, self.ge_pulse, self.ge_wavform)
+        set_pulse(self, self.ge_pulse, qub_ch, waveform=self.ge_wavform)
         self.pulse(ch=qub_ch)
 
     def pulse_ef(self):
         qub_ch = self.qub_cfg["qub_ch"]
 
-        set_pulse(self, qub_ch, self.ef_pulse, self.ef_wavform)
+        set_pulse(self, self.ef_pulse, qub_ch, waveform=self.ef_wavform)
         self.pulse(ch=qub_ch)

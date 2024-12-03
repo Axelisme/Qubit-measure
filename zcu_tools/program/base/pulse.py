@@ -55,25 +55,21 @@ def create_waveform(prog: AcquireProgram, ch: int, pulse_cfg: dict) -> str:
 
 def set_pulse(
     prog: AcquireProgram,
-    ch: int,
     pulse_cfg: dict,
+    gen_ch: int,
+    ro_ch: int = None,
     waveform: str = None,
-    for_readout=False,
-    ro=0,
 ):
     style = pulse_cfg["style"]
-    length = prog.us2cycles(pulse_cfg["length"])
+    length = prog.us2cycles(pulse_cfg["length"], gen_ch=gen_ch, ro_ch=ro_ch)
 
     # convert frequency and phase to DAC registers
-    if for_readout:
-        freq_r = prog.freq2reg(pulse_cfg["freq"], gen_ch=ch, ro_ch=ro)
-    else:
-        freq_r = prog.freq2reg(pulse_cfg["freq"], gen_ch=ch)
-    phase_r = prog.deg2reg(pulse_cfg["phase"], gen_ch=ch)
+    freq_r = prog.freq2reg(pulse_cfg["freq"], gen_ch=gen_ch, ro_ch=ro_ch)
+    phase_r = prog.deg2reg(pulse_cfg["phase"], gen_ch=gen_ch, ro_ch=ro_ch)
 
     if style == "const":
         prog.set_pulse_registers(
-            ch=ch,
+            ch=gen_ch,
             style=style,
             freq=freq_r,
             phase=phase_r,
@@ -82,7 +78,7 @@ def set_pulse(
         )
     elif style == "gauss" or style == "cosine":
         prog.set_pulse_registers(
-            ch=ch,
+            ch=gen_ch,
             style="arb",
             freq=freq_r,
             phase=phase_r,
@@ -90,12 +86,13 @@ def set_pulse(
             waveform=waveform,
         )
     elif style == "flat_top":
-        raise_length = prog.us2cycles(pulse_cfg["raise_pulse"]["length"])
+        raise_length = pulse_cfg["raise_pulse"]["length"]
+        raise_length = prog.us2cycles(raise_length, gen_ch=gen_ch, ro_ch=ro_ch)
         raise_length = 2 * (raise_length // 2)  # make length even
         flat_length = length - raise_length
         assert flat_length >= 0, "Raise pulse length is longer than the total length"
         prog.set_pulse_registers(
-            ch=ch,
+            ch=gen_ch,
             style="flat_top",
             freq=freq_r,
             phase=phase_r,

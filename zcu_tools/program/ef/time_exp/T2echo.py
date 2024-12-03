@@ -5,12 +5,12 @@ from ..base import set_pulse
 class EFT2EchoProgram(BaseEFTimeProgram):
     def pulse_efpi(self):
         qub_ch = self.qub_cfg["qub_ch"]
-        set_pulse(self, qub_ch, self.ef_pulse["pi"], self.ef_wavform["pi"])
+        set_pulse(self, self.ef_pulse["pi"], qub_ch, waveform=self.ef_wavform["pi"])
         self.pulse(ch=qub_ch)
 
     def pulse_efpi2(self):
         qub_ch = self.qub_cfg["qub_ch"]
-        set_pulse(self, qub_ch, self.ef_pulse["pi2"], self.ef_wavform["pi2"])
+        set_pulse(self, self.ef_pulse["pi2"], qub_ch, waveform=self.ef_wavform["pi2"])
         self.pulse(ch=qub_ch)
 
     def body(self):

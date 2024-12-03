@@ -17,8 +17,9 @@ class BaseOneToneProgram(AcquireProgram):
 
         # declare the resonator channel and readout channels
         res_ch = self.res_cfg["res_ch"]
-        self.declare_gen(ch=res_ch, nqz=self.res_cfg["nqz"])
-        for ro_ch in self.res_cfg["ro_chs"]:
+        ro_chs = self.res_cfg["ro_chs"]
+        self.declare_gen(ch=res_ch, nqz=self.res_pulse["nqz"])
+        for ro_ch in ro_chs:
             self.declare_readout(
                 ch=ro_ch,
                 length=self.us2cycles(self.cfg["readout_length"]),
@@ -27,7 +28,7 @@ class BaseOneToneProgram(AcquireProgram):
             )
         # create the resonator pulse
         self.res_wavform = create_waveform(self, res_ch, self.res_pulse)
-        set_pulse(self, res_ch, self.res_pulse, self.res_wavform, for_readout=True)
+        set_pulse(self, self.res_pulse, res_ch, ro_chs[0], self.res_wavform)
 
     def setup_flux(self):
         flux_cls = get_fluxControl(self.flux_dev)
@@ -66,7 +67,7 @@ class BaseTwoToneProgram(BaseOneToneProgram):
         self.declare_gen(ch=qub_ch, nqz=self.qub_cfg["nqz"])
         self.qub_wavform = create_waveform(self, qub_ch, self.qub_pulse)
         if isinstance(self.qub_wavform, str):
-            set_pulse(self, qub_ch, self.qub_pulse, self.qub_wavform)
+            set_pulse(self, self.qub_pulse, qub_ch, waveform=self.qub_wavform)
 
     def initialize(self):
         self.parse_cfg()
