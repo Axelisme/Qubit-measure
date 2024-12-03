@@ -8,11 +8,11 @@ from . import fitting as ft
 figsize = (8, 6)
 
 
-def lookback_analyze(x: np.ndarray, Is: np.ndarray, Qs: np.ndarray):
+def lookback_analyze(x: np.ndarray, Is: np.ndarray, Qs: np.ndarray, ratio: float = 0.3):
     y = np.abs(Is + 1j * Qs)
 
     # find first idx where y is larger than 0.05 * max_y
-    idx = np.argmax(y > 0.05 * np.max(y))
+    idx = np.argmax(y > ratio * np.max(y))
 
     return x[idx]
 
