@@ -6,6 +6,7 @@ from .pulse import create_waveform, is_single_pulse, set_pulse
 
 class BaseOneToneProgram(AcquireProgram):
     def parse_cfg(self):
+        assert hasattr(self, "cfg"), "cfg is not defined"
         assert isinstance(self.cfg, dict), "cfg is not a dict"
 
         self.flux_dev = self.cfg["flux_dev"]
