@@ -121,7 +121,9 @@ def spectrum_analyze(
     return freqs
 
 
-def dispersive_analyze(x: np.ndarray, y1: np.ndarray, y2: np.ndarray, asym=False):
+def dispersive_analyze(
+    x: np.ndarray, y1: np.ndarray, y2: np.ndarray, use_fit=True, asym=False
+):
     y1 = np.abs(y1)  # type: ignore
     y2 = np.abs(y2)  # type: ignore
     if asym:
@@ -149,22 +151,15 @@ def dispersive_analyze(x: np.ndarray, y1: np.ndarray, y2: np.ndarray, asym=False
 
     plt.figure(figsize=figsize)
     plt.plot(x, y1 - y2)
-    diff_curve = curve1 - curve2
+    plt.plot(x, curve1 - curve2)
+    if use_fit:
+        diff_curve = curve1 - curve2
+    else:
+        diff_curve = y1 - y2
     max_id = np.argmax(diff_curve)
     min_id = np.argmin(diff_curve)
-    plt.plot(x, diff_curve)
-    plt.axvline(
-        x[np.argmax(diff_curve)],  # type: ignore
-        color="r",
-        ls="--",
-        label=f"max SNR1 = {x[max_id]:.2f}",  # type: ignore
-    )
-    plt.axvline(
-        x[np.argmin(curve1 - curve2)],  # type: ignore
-        color="g",
-        ls="--",
-        label=f"max SNR2 = {x[max_id]:.2f}",
-    )
+    plt.axvline(x[max_id], color="r", ls="--", label=f"max SNR1 = {x[max_id]:.2f}")
+    plt.axvline(x[min_id], color="g", ls="--", label=f"max SNR2 = {x[max_id]:.2f}")
     plt.legend()
     plt.show()
 
