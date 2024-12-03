@@ -17,40 +17,55 @@ def lookback_analyze(x: np.ndarray, Is: np.ndarray, Qs: np.ndarray):
     return x[idx]
 
 
-def freq_analyze(x, y, asym=False, plot=True):
+def freq_analyze(x, y, asym=False, plot=True, fit_phase=False):
     mag = np.abs(y)
-    pha = np.unwrap(np.angle(y))
     if asym:
         pOpt_mag, _ = ft.fit_asym_lor(x, mag)
-        pOpt_pha, _ = ft.fit_asym_lor(x, pha)
         curve_mag = ft.asym_lorfunc(x, *pOpt_mag)
-        curve_pha = ft.asym_lorfunc(x, *pOpt_pha)
     else:
         pOpt_mag, _ = ft.fitlor(x, mag)
-        pOpt_pha, _ = ft.fitlor(x, pha)
         curve_mag = ft.lorfunc(x, *pOpt_mag)
-        curve_pha = ft.lorfunc(x, *pOpt_pha)
     res_mag, kappa_mag = pOpt_mag[3], 2 * pOpt_mag[4]
-    res_pha, kappa_pha = pOpt_pha[3], 2 * pOpt_pha[4]
+
+    if fit_phase:
+        pha = np.unwrap(np.angle(y))
+        if asym:
+            pOpt_pha, _ = ft.fit_asym_lor(x, pha)
+            curve_pha = ft.asym_lorfunc(x, *pOpt_pha)
+        else:
+            pOpt_pha, _ = ft.fitlor(x, pha)
+            curve_pha = ft.lorfunc(x, *pOpt_pha)
+        res_pha, kappa_pha = pOpt_pha[3], 2 * pOpt_pha[4]
 
     if plot:
-        fig, axs = plt.subplots(2, 1, figsize=figsize)
-        axs[0].plot(x, mag, label="mag", marker="o", markersize=3)
-        axs[0].plot(x, curve_mag, label=f"fit, $kappa$={kappa_mag:.2f}")
-        axs[0].axvline(res_mag, color="r", ls="--", label=f"$f_res$ = {res_mag:.2f}")
-        axs[0].set_title("mag.", fontsize=15)
-        axs[0].legend()
+        if fit_phase:
+            fig, axs = plt.subplots(2, 1, figsize=figsize)
+            axs[0].plot(x, mag, label="mag", marker="o", markersize=3)
+            axs[0].plot(x, curve_mag, label=f"fit, $kappa$={kappa_mag:.2f}")
+            axs[0].axvline(res_mag, color="r", ls="--", label=f"$f_res$ = {res_mag:.2f}")
+            axs[0].set_title("mag.", fontsize=15)
+            axs[0].legend()
 
-        axs[1].plot(x, pha, label="pha", marker="o", markersize=3)
-        axs[1].plot(x, curve_pha, label=f"fit, $kappa$={kappa_pha:.2f}")
-        axs[1].axvline(res_pha, color="r", ls="--", label=f"$f_res$ = {res_pha:.2f}")
-        axs[1].set_title("pha.", fontsize=15)
-        axs[1].legend()
+            axs[1].plot(x, pha, label="pha", marker="o", markersize=3)
+            axs[1].plot(x, curve_pha, label=f"fit, $kappa$={kappa_pha:.2f}")
+            axs[1].axvline(res_pha, color="r", ls="--", label=f"$f_res$ = {res_pha:.2f}")
+            axs[1].set_title("pha.", fontsize=15)
+            axs[1].legend()
+        else:
+            plt.figure(figsize=figsize)
+            plt.plot(x, mag, label="mag", marker="o", markersize=3)
+            plt.plot(x, curve_mag, label=f"fit, $kappa$={kappa_mag:.2f}")
+            plt.axvline(res_mag, color="r", ls="--", label=f"$f_res$ = {res_mag:.2f}")
+            plt.title("mag.", fontsize=15)
+            plt.legend()
 
         plt.tight_layout()
         plt.show()
 
-    return round(res_mag, 2), round(res_pha, 2)
+    if fit_phase:
+        return round(res_mag, 2), round(res_pha, 2)
+    else:
+        return round(res_mag, 2), None
 
 
 def NormalizeData(signals2D: np.ndarray) -> np.ndarray:
@@ -67,15 +82,22 @@ def spectrum_analyze(
     signal2D: np.ndarray,
     f_axis: Literal["x-axis", "y-axis"] = "x-axis",
     plot_peak=True,
+    normalize=True,
 ):
-    signal2D = NormalizeData(np.abs(signal2D))
+    if normalize:
+        signal2D = NormalizeData(np.abs(signal2D))
+    else:
+        signal2D = np.abs(signal2D)
 
-    freqs = np.zeros_like(ypts)
-    pOpt = None
-    for i in range(len(freqs)):
-        pOpt, _ = ft.fitlor(fpts, signal2D[i], pOpt)
-        freqs[i] = pOpt[3]
-    freqs = np.array(freqs)
+    if plot_peak:
+        freqs = np.zeros_like(ypts)
+        pOpt = None
+        for i in range(len(freqs)):
+            pOpt, _ = ft.fitlor(fpts, signal2D[i], pOpt)
+            freqs[i] = pOpt[3]
+        freqs = np.array(freqs)
+    else:
+        freqs = None
 
     plt.figure(figsize=figsize)
     if f_axis == "y-axis":

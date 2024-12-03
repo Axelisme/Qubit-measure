@@ -20,7 +20,10 @@ def measure_power_dependent(soc, soccfg, cfg, instant_show=False, soft_loop=Fals
 
     freq_tqdm = tqdm(fpts)
     if soft_loop:
+        print("Use soft loop")
         pdr_tqdm = tqdm(pdrs)
+    else:
+        print("use hard loop")
     signals2D = np.zeros((len(pdrs), len(fpts)), dtype=np.complex128)
     if instant_show:
         import matplotlib.pyplot as plt
