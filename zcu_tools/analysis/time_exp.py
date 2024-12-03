@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from . import fitting as ft
-from .experiment import figsize
+from .general import figsize
 
 
 def T1_analyze(x: float, y: float):

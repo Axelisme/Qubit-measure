@@ -21,6 +21,8 @@ def measure_power_dependent(soc, soccfg, cfg, instant_show=False, soft_loop=Fals
     freq_tqdm = tqdm(fpts)
     if soft_loop:
         pdr_tqdm = tqdm(pdrs)
+    else:
+        cfg['sweep'] = pdr_cfg
     signals2D = np.zeros((len(pdrs), len(fpts)), dtype=np.complex128)
     if instant_show:
         import matplotlib.pyplot as plt
@@ -47,7 +49,7 @@ def measure_power_dependent(soc, soccfg, cfg, instant_show=False, soft_loop=Fals
                 pdr_tqdm.update()
         else:
             prog = RGainOnetoneProgram(soccfg, make_cfg(cfg))
-            pdrs, avgi, avgq = prog.acquire(soc, progress=True)
+            pdrs, avgi, avgq = prog.acquire(soc, progress=False)
             signals2D[:, i] = avgi[0][0] + 1j * avgq[0][0]
 
         freq_tqdm.update()
