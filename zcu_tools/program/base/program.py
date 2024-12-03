@@ -16,12 +16,9 @@ class BaseOneToneProgram(AcquireProgram):
     def setup_readout(self):
         assert is_single_pulse(self.res_pulse), "Currently only support one pulse cfg"
 
-        self.res_ch = self.res_cfg["res_ch"]
-        self.ro_chs = self.res_cfg["ro_chs"]
-
         # declare the resonator channel and readout channels
-        res_ch = self.res_ch
-        ro_chs = self.ro_chs
+        res_ch = self.res_cfg["res_ch"]
+        ro_chs = self.res_cfg["ro_chs"]
         self.declare_gen(ch=res_ch, nqz=self.res_pulse["nqz"])
         for ro_ch in ro_chs:
             self.declare_readout(
