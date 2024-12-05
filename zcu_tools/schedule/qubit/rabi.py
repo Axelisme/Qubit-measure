@@ -3,6 +3,7 @@ from copy import deepcopy
 from tqdm.auto import tqdm
 
 from zcu_tools.program import AmpRabiProgram, TwoToneProgram
+from zcu_tools.auto import make_cfg
 
 
 def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
@@ -27,7 +28,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
 
     for i, length in enumerate(lens):
         qub_pulse["length"] = length
-        prog = TwoToneProgram(soccfg, cfg)
+        prog = TwoToneProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
         signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
@@ -70,7 +71,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
         for i, pdr in enumerate(tqdm(pdrs)):
             qub_pulse["gain"] = pdr
-            prog = TwoToneProgram(soccfg, cfg)
+            prog = TwoToneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc, progress=False)
             signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
