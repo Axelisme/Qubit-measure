@@ -26,7 +26,6 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         ax.set_ylabel("Amplitude")
         ax.set_title("Dispersive measurement")
         curve_g = ax.plot(fpts, np.zeros_like(fpts))[0]
-        curve_e = ax.plot(fpts, np.zeros_like(fpts))[0]
         dh = display(fig, display_id=True)
 
     qub_pulse["gain"] = 0
@@ -44,6 +43,10 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
             ax.set_xlim(fpts[0], fpts[-1])
             ax.autoscale_view()
             dh.update(fig)
+
+    if instant_show:
+        curve_e = ax.plot(fpts, np.zeros_like(fpts))[0]
+        dh.update(fig)
 
     qub_pulse["gain"] = pi_gain
     e_signals = np.full(len(fpts), np.nan, dtype=np.complex128)
