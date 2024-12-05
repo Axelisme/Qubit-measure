@@ -20,10 +20,10 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
     freq_tqdm = tqdm(fpts)
     if soft_loop:
-        print("Use soft loop")
+        print("Use OneToneProgram for soft loop")
         pdr_tqdm = tqdm(pdrs)
     else:
-        print("use hard loop")
+        print("Use RGainOnetoneProgram for hard loop")
         cfg["sweep"] = pdr_cfg
     signals2D = np.zeros((len(pdrs), len(fpts)), dtype=np.complex128)
     if instant_show:
@@ -50,6 +50,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
                 signals2D[j, i] = avgi[0][0] + 1j * avgq[0][0]
                 pdr_tqdm.update()
         else:
+            res_pulse["gain"] = pdrs[0]  # initial gain
             prog = RGainOnetoneProgram(soccfg, make_cfg(cfg))
             pdrs, avgi, avgq = prog.acquire(soc, progress=False)
             signals2D[:, i] = avgi[0][0] + 1j * avgq[0][0]
