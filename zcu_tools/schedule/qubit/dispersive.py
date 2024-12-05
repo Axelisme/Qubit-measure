@@ -25,8 +25,8 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         ax.set_xlabel("Frequency (MHz)")
         ax.set_ylabel("Amplitude")
         ax.set_title("Dispersive measurement")
-        curve_g = ax.plot(fpts, np.ma.masked_all_like(fpts))[0]
-        curve_e = ax.plot(fpts, np.ma.masked_all_like(fpts))[0]
+        curve_g = ax.plot(fpts, np.zeros_like(fpts))[0]
+        curve_e = ax.plot(fpts, np.zeros_like(fpts))[0]
         dh = display(fig, display_id=True)
 
     qub_pulse["gain"] = 0
@@ -39,8 +39,10 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         g_signals[i] = signal
 
         if instant_show:
-            amps_g = np.ma.masked_equal(np.abs(g_signals), 0.0, copy=False)
-            curve_g.set_ydata(amps_g)
+            curve_g.set_ydata(np.abs(g_signals))
+            ax.relim()
+            ax.set_xlim(fpts[0], fpts[-1])
+            ax.autoscale_view()
             dh.update(fig)
 
     qub_pulse["gain"] = pi_gain
@@ -53,8 +55,10 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         e_signals[i] = signal
 
         if instant_show:
-            amps_e = np.ma.masked_equal(np.abs(e_signals), 0.0, copy=False)
-            curve_e.set_ydata(amps_e)
+            curve_e.set_ydata(np.abs(e_signals))
+            ax.relim()
+            ax.set_xlim(fpts[0], fpts[-1])
+            ax.autoscale_view()
             dh.update(fig)
 
     if instant_show:

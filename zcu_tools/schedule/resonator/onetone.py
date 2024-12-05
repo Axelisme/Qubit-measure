@@ -13,7 +13,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 
-    signals = np.zeros(len(fpts), dtype=np.complex128)
+    signals = np.full(len(fpts), np.nan, dtype=np.complex128)
 
     if instant_show:
         import matplotlib.pyplot as plt
@@ -23,7 +23,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         ax.set_xlabel("Frequency (MHz)")
         ax.set_ylabel("Amplitude")
         ax.set_title("Resonator frequency measurement")
-        curve = ax.plot(fpts, np.ma.masked_all_like(fpts))[0]
+        curve = ax.plot(fpts, np.zeros_like(fpts))[0]
         dh = display(fig, display_id=True)
 
     res_pulse = cfg["res_pulse"]
@@ -34,8 +34,10 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
         if instant_show:
-            amps = np.ma.masked_equal(np.abs(signals), 0.0, copy=False)
-            curve.set_ydata(amps)
+            curve.set_data(fpts, np.abs(signals))
+            ax.relim()
+            ax.set_xlim(fpts[0], fpts[-1])
+            ax.autoscale_view()
             dh.update(fig)
 
     if instant_show:
