@@ -1,6 +1,6 @@
 from qick.asm_v1 import AcquireProgram
 
-from zcu_tools.device.flux import get_fluxControl
+from .flux import make_fluxControl
 from .pulse import create_waveform, is_single_pulse, set_pulse
 
 
@@ -32,8 +32,7 @@ class BaseOneToneProgram(AcquireProgram):
         set_pulse(self, self.res_pulse, res_ch, ro_chs[0], self.res_wavform)
 
     def setup_flux(self):
-        flux_cls = get_fluxControl(self.flux_dev)
-        self.flux_ctrl = flux_cls(self)
+        self.flux_ctrl = make_fluxControl(self, self.flux_dev)
         self.flux_ctrl.set_flux(self.cfg.get("flux"))
 
     def initialize(self):
@@ -56,6 +55,11 @@ class BaseOneToneProgram(AcquireProgram):
             syncdelay=self.us2cycles(cfg["relax_delay"]),
         )
 
+    def body(self):
+        self.flux_ctrl.trigger()
+
+        self.measure_pulse()
+
 
 class BaseTwoToneProgram(BaseOneToneProgram):
     def parse_cfg(self):
@@ -77,3 +81,13 @@ class BaseTwoToneProgram(BaseOneToneProgram):
         self.setup_qubit()
 
         self.synci(200)
+
+    def body(self):
+        self.flux_ctrl.trigger()
+
+        # qubit pulse
+        self.pulse(ch=self.qub_cfg["qub_ch"])
+        self.sync_all(self.us2cycles(0.05))
+
+        # measure
+        self.measure_pulse()

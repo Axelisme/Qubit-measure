@@ -35,16 +35,6 @@ class SingleShotProgram(RAveragerProgram, BaseTwoToneProgram):
 
         self.synci(200)
 
-    def body(self):
-        self.flux_ctrl.trigger()
-
-        # qubit pulse
-        self.pulse(ch=self.qub_cfg["qub_ch"])
-        self.sync_all(self.us2cycles(0.05))
-
-        # measure
-        self.measure_pulse()
-
     def update(self):
         # update the gain to pi pulse
         self.mathi(self.q_rp, self.r_gain, self.r_gain, "+", self.pi_gain)

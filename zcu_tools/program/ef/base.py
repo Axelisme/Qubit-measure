@@ -34,3 +34,17 @@ class BaseEFProgram(BaseOneToneProgram):
 
         set_pulse(self, self.ef_pulse, qub_ch, waveform=self.ef_wavform)
         self.pulse(ch=qub_ch)
+
+    def body(self):
+        self.flux_ctrl.trigger()
+
+        # ge pi pulse
+        self.pulse_ge()
+        self.sync_all()
+
+        # qubit pulse
+        self.pulse_ef()
+        self.sync_all(self.us2cycles(0.05))
+
+        # measure
+        self.measure_pulse()

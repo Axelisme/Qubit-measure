@@ -30,16 +30,6 @@ class LenRabiProgram(RAveragerProgram, BaseTwoToneProgram):
 
         self.synci(200)
 
-    def body(self):
-        self.flux_ctrl.trigger()
-
-        # qubit pulse
-        self.pulse(ch=self.qub_cfg["qub_ch"])
-        self.sync_all(self.us2cycles(0.05))
-
-        # measure
-        self.measure_pulse()
-
     def update(self):
         # update wait time
         self.mathi(self.q_rp, self.r_length, self.r_length, "+", self.cfg["step"])
@@ -71,16 +61,6 @@ class AmpRabiProgram(RAveragerProgram, BaseTwoToneProgram):
         self.setup_gain()
 
         self.synci(200)
-
-    def body(self):
-        self.flux_ctrl.trigger()
-
-        # qubit pulse
-        self.pulse(ch=self.qub_cfg["qub_ch"])
-        self.sync_all(self.us2cycles(0.05))
-
-        # measure
-        self.measure_pulse()
 
     def update(self):
         # update wait time

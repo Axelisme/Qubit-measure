@@ -37,20 +37,6 @@ class EFAmpRabiProgram(RAveragerProgram, BaseEFProgram):
         self.mathi(self.q_rp, self.r_gain, self.r_ef_gain, "+", 0)  # overwrite ef gain
         self.pulse(ch=qub_ch)
 
-    def body(self):
-        self.flux_ctrl.trigger()
-
-        # ge pulse
-        self.pulse_ge()
-        self.sync_all()
-
-        # ef pulse
-        self.pulse_ef()
-        self.sync_all(self.us2cycles(0.05))
-
-        # measure
-        self.measure_pulse()
-
     def update(self):
         # update ef gain
         self.mathi(self.q_rp, self.r_ef_gain, self.r_ef_gain, "+", self.cfg["step"])

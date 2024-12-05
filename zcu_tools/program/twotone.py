@@ -7,16 +7,6 @@ class TwoToneProgram(AveragerProgram, BaseTwoToneProgram):
     def initialize(self):
         return BaseTwoToneProgram.initialize(self)
 
-    def body(self):
-        self.flux_ctrl.trigger()
-
-        # qubit pulse
-        self.pulse(ch=self.qub_cfg["qub_ch"])
-        self.sync_all(self.us2cycles(0.05))
-
-        # measure
-        self.measure_pulse()
-
 
 class RGainTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
     def parse_cfg(self):
@@ -41,16 +31,6 @@ class RGainTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
         self.setup_gain_reg()
 
         self.synci(200)
-
-    def body(self):
-        self.flux_ctrl.trigger()
-
-        # qubit pulse
-        self.pulse(ch=self.qub_cfg["qub_ch"])
-        self.sync_all(self.us2cycles(0.05))
-
-        # measure
-        self.measure_pulse()
 
     def update(self):
         self.mathi(self.q_rp, self.q_gain, self.q_gain, "+", self.cfg["step"])

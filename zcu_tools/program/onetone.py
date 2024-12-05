@@ -1,17 +1,12 @@
 from qick import AveragerProgram, RAveragerProgram
 
 from .base import BaseOneToneProgram
-from zcu_tools.device.flux.zcu216 import ZCUFluxControl
+from .base.flux.zcu216 import ZCUFluxControl
 
 
 class OneToneProgram(AveragerProgram, BaseOneToneProgram):
     def initialize(self):
         BaseOneToneProgram.initialize(self)
-
-    def body(self):
-        self.flux_ctrl.trigger()
-
-        self.measure_pulse()
 
 
 class RGainOnetoneProgram(RAveragerProgram, BaseOneToneProgram):
@@ -38,11 +33,6 @@ class RGainOnetoneProgram(RAveragerProgram, BaseOneToneProgram):
 
         self.synci(200)
 
-    def body(self):
-        self.flux_ctrl.trigger()
-
-        self.measure_pulse()
-
     def update(self):
         self.mathi(self.r_rp, self.r_gain, self.r_gain, "+", self.cfg["step"])
 
@@ -58,8 +48,7 @@ class RFluxOnetoneProgram(RAveragerProgram, BaseOneToneProgram):
 
     def setup_flux(self):
         assert self.flux_dev["name"] == "zcu216", "Only support zcu216 flux control"
-        ZCUFluxControl.register(self.flux_dev)
-        self.flux_ctrl = ZCUFluxControl(self)
+        self.flux_ctrl = ZCUFluxControl(self, self.flux_dev)
         self.flux_ctrl.set_flux(self.cfg.get("flux"))
 
     def setup_flux_reg(self):
@@ -75,11 +64,6 @@ class RFluxOnetoneProgram(RAveragerProgram, BaseOneToneProgram):
         self.setup_readout()
 
         self.synci(200)
-
-    def body(self):
-        self.flux_ctrl.trigger()
-
-        self.measure_pulse()
 
     def update(self):
         self.mathi(self.f_rp, self.r_flux, self.r_flux, "+", self.cfg["step"])

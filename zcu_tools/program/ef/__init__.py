@@ -4,10 +4,10 @@ from .time_exp import (
     EFT2EchoProgram,
     EFT2RamseyProgram,
 )
-from .twotone import EFTwoToneProgram
+from .twotone import EFProgram
 
 __all__ = [
-    "EFTwoToneProgram",
+    "EFProgram",
     "EFT1Program",
     "EFT2RamseyProgram",
     "EFT2EchoProgram",
