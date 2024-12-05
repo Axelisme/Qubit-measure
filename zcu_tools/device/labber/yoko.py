@@ -9,9 +9,11 @@ class YokoDevControl:
 
     @classmethod
     def connect_server(cls, flux_dev: dict, reinit=False):
-        if not reinit and cls.yoko is not None:
-            print("YokoDevControl already registered, do nothing")
-            return  # only register once if not reinit
+        if cls.yoko is not None:
+            if reinit:
+                print("Reinit YokoDevControl")
+            else:
+                return  # only register once if not reinit
 
         cls.flux_dev = flux_dev
         cls.sweep_rate = cls.flux_dev["flux_cfg"]["Current - Sweep rate"]
