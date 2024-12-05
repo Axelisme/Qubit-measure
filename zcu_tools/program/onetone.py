@@ -8,6 +8,9 @@ class OneToneProgram(AveragerProgram, BaseOneToneProgram):
     def initialize(self):
         BaseOneToneProgram.initialize(self)
 
+    def body(self):
+        BaseOneToneProgram.body(self)
+
 
 class RGainOnetoneProgram(RAveragerProgram, BaseOneToneProgram):
     def parse_cfg(self):
@@ -32,6 +35,9 @@ class RGainOnetoneProgram(RAveragerProgram, BaseOneToneProgram):
         self.setup_gain_reg()
 
         self.synci(200)
+
+    def body(self):
+        BaseOneToneProgram.body(self)
 
     def update(self):
         self.mathi(self.r_rp, self.r_gain, self.r_gain, "+", self.cfg["step"])
@@ -64,6 +70,9 @@ class RFluxOnetoneProgram(RAveragerProgram, BaseOneToneProgram):
         self.setup_readout()
 
         self.synci(200)
+
+    def body(self):
+        BaseOneToneProgram.body(self)
 
     def update(self):
         self.mathi(self.f_rp, self.r_flux, self.r_flux, "+", self.cfg["step"])

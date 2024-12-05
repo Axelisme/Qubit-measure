@@ -7,6 +7,9 @@ class TwoToneProgram(AveragerProgram, BaseTwoToneProgram):
     def initialize(self):
         return BaseTwoToneProgram.initialize(self)
 
+    def body(self):
+        BaseTwoToneProgram.body(self)
+
 
 class RGainTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
     def parse_cfg(self):
@@ -31,6 +34,9 @@ class RGainTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
         self.setup_gain_reg()
 
         self.synci(200)
+
+    def body(self):
+        BaseTwoToneProgram.body(self)
 
     def update(self):
         self.mathi(self.q_rp, self.q_gain, self.q_gain, "+", self.cfg["step"])

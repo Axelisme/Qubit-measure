@@ -30,6 +30,9 @@ class AmpRabiProgram(RAveragerProgram, BaseTwoToneProgram):
 
         self.synci(200)
 
+    def body(self):
+        BaseTwoToneProgram.body(self)
+
     def update(self):
         # update wait time
         self.mathi(self.q_rp, self.r_gain, self.r_gain, "+", self.cfg["step"])

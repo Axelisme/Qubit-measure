@@ -35,6 +35,9 @@ class SingleShotProgram(RAveragerProgram, BaseTwoToneProgram):
 
         self.synci(200)
 
+    def body(self):
+        BaseTwoToneProgram.body(self)
+
     def update(self):
         # update the gain to pi pulse
         self.mathi(self.q_rp, self.r_gain, self.r_gain, "+", self.pi_gain)
