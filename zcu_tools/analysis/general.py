@@ -122,7 +122,7 @@ def spectrum_analyze(
 
 
 def dispersive_analyze(
-    x: np.ndarray, y1: np.ndarray, y2: np.ndarray, use_fit=True, asym=False
+    x: np.ndarray, y1: np.ndarray, y2: np.ndarray, use_fit=True, asym=False, plot=True
 ):
     y1 = np.abs(y1)  # type: ignore
     y2 = np.abs(y2)  # type: ignore
@@ -139,29 +139,31 @@ def dispersive_analyze(
     res1, kappa1 = pOpt1[3], 2 * pOpt1[4]
     res2, kappa2 = pOpt2[3], 2 * pOpt2[4]
 
-    plt.figure(figsize=figsize)
-    plt.title(f"$chi=${(res2-res1):.3f}, unit = MHz", fontsize=15)
-    plt.plot(x, y1, label="e", marker="o", markersize=3)
-    plt.plot(x, y2, label="g", marker="o", markersize=3)
-    plt.plot(x, curve1, label=f"fite, $kappa$ = {kappa1:.2f}MHz")
-    plt.plot(x, curve2, label=f"fitg, $kappa$ = {kappa2:.2f}MHz")
-    plt.axvline(res1, color="r", ls="--", label=f"$f_res$ = {res1:.2f}")
-    plt.axvline(res2, color="g", ls="--", label=f"$f_res$ = {res2:.2f}")
-    plt.legend()
-
-    plt.figure(figsize=figsize)
-    plt.plot(x, y1 - y2)
-    plt.plot(x, curve1 - curve2)
     if use_fit:
         diff_curve = curve1 - curve2
     else:
         diff_curve = y1 - y2
     max_id = np.argmax(diff_curve)
     min_id = np.argmin(diff_curve)
-    plt.axvline(x[max_id], color="r", ls="--", label=f"max SNR1 = {x[max_id]:.2f}")
-    plt.axvline(x[min_id], color="g", ls="--", label=f"max SNR2 = {x[max_id]:.2f}")
-    plt.legend()
-    plt.show()
+
+    if plot:
+        plt.figure(figsize=figsize)
+        plt.title(f"$chi=${(res2-res1):.3f}, unit = MHz", fontsize=15)
+        plt.plot(x, y1, label="e", marker="o", markersize=3)
+        plt.plot(x, y2, label="g", marker="o", markersize=3)
+        plt.plot(x, curve1, label=f"fite, $kappa$ = {kappa1:.2f}MHz")
+        plt.plot(x, curve2, label=f"fitg, $kappa$ = {kappa2:.2f}MHz")
+        plt.axvline(res1, color="r", ls="--", label=f"$f_res$ = {res1:.2f}")
+        plt.axvline(res2, color="g", ls="--", label=f"$f_res$ = {res2:.2f}")
+        plt.legend()
+
+        plt.figure(figsize=figsize)
+        plt.plot(x, y1 - y2)
+        plt.plot(x, curve1 - curve2)
+        plt.axvline(x[max_id], color="r", ls="--", label=f"max SNR1 = {x[max_id]:.2f}")
+        plt.axvline(x[min_id], color="g", ls="--", label=f"max SNR2 = {x[max_id]:.2f}")
+        plt.legend()
+        plt.show()
 
     if np.abs(diff_curve[max_id]) >= np.abs(diff_curve[min_id]):
         return x[max_id], x[min_id]
@@ -169,7 +171,7 @@ def dispersive_analyze(
         return x[min_id], x[max_id]
 
 
-def rabi_analyze(x: int, y: float):
+def rabi_analyze(x: int, y: float, plot=True):
     y = np.abs(y)
     pOpt, _ = ft.fitsin(x, y)
 
@@ -182,14 +184,15 @@ def rabi_analyze(x: int, y: float):
         pi_x = (0.75 - phase / 360) / freq
         pi2_x = (0.5 - phase / 360) / freq
 
-    plt.figure(figsize=figsize)
-    plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
-    plt.plot(x, ft.sinfunc(x, *pOpt), label="fit")
-    plt.title("Rabi", fontsize=15)
-    plt.axvline(pi_x, ls="--", c="red", label=f"$\pi$={pi_x:.1f}")
-    plt.axvline(pi2_x, ls="--", c="red", label=f"$\pi/2$={(pi2_x):.1f}")
-    plt.legend(loc=4)
-    plt.tight_layout()
-    plt.show()
+    if plot:
+        plt.figure(figsize=figsize)
+        plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
+        plt.plot(x, ft.sinfunc(x, *pOpt), label="fit")
+        plt.title("Rabi", fontsize=15)
+        plt.axvline(pi_x, ls="--", c="red", label=f"$\pi$={pi_x:.1f}")
+        plt.axvline(pi2_x, ls="--", c="red", label=f"$\pi/2$={(pi2_x):.1f}")
+        plt.legend(loc=4)
+        plt.tight_layout()
+        plt.show()
 
     return pi_x, pi2_x, np.max(y) - np.min(y)
