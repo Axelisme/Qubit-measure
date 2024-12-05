@@ -4,7 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program.ef import EFTwoToneProgram
+from zcu_tools.program.ef import EFProgram
 
 
 def measure_ef_dispersive(soc, soccfg, cfg):
@@ -21,7 +21,7 @@ def measure_ef_dispersive(soc, soccfg, cfg):
     ef_pulse["gain"] = 0
     for f in tqdm(fpts):
         res_pulse["freq"] = f
-        prog = EFTwoToneProgram(soccfg, make_cfg(cfg))
+        prog = EFProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
         signal = avgi[0][0] + 1j * avgq[0][0]
         g_signals.append(signal)
@@ -31,7 +31,7 @@ def measure_ef_dispersive(soc, soccfg, cfg):
     ef_pulse["gain"] = pi_gain
     for f in tqdm(fpts):
         res_pulse["freq"] = f
-        prog = EFTwoToneProgram(soccfg, make_cfg(cfg))
+        prog = EFProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
         signal = avgi[0][0] + 1j * avgq[0][0]
         e_signals.append(signal)

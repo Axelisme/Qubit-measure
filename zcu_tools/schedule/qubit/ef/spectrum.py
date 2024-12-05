@@ -4,7 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program.ef import EFTwoToneProgram
+from zcu_tools.program.ef import EFProgram
 
 
 def measure_ef_freq(soc, soccfg, cfg):
@@ -19,7 +19,7 @@ def measure_ef_freq(soc, soccfg, cfg):
     signals = []
     for fpt in tqdm(fpts):
         ef_pulse["freq"] = fpt
-        prog = EFTwoToneProgram(soccfg, make_cfg(cfg))
+        prog = EFProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
         signals.append(avgi[0][0] + 1j * avgq[0][0])
     signals = np.array(signals)
