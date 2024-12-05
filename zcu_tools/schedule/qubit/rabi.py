@@ -27,7 +27,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
     qub_pulse = cfg["qub_pulse"]
 
     signals = np.full(len(lens), np.nan, dtype=np.complex128)
-    for i, length in enumerate(lens):
+    for i, length in enumerate(tqdm(lens)):
         qub_pulse["length"] = length
         prog = TwoToneProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
