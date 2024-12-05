@@ -17,15 +17,17 @@ def make_cfg(exp_cfg: dict, **kwargs):
 
 def auto_derive_pulse(pulse_cfg: dict, pulses: dict, nqz: int = None) -> dict:
     def auto_derive_waveform(pulse_cfg: dict, only_shape=False):
-        # style and length are required
-        style = pulse_cfg["style"]
-        length = pulse_cfg["length"]
-
         if not only_shape:
             pulse_cfg.setdefault("phase", 0)
             if nqz is not None:
                 pulse_cfg.setdefault("nqz", nqz)
 
+        # style and length are required to derive waveform
+        if "style" not in pulse_cfg or "length" not in pulse_cfg:
+            return  # do nothing
+
+        style = pulse_cfg["style"]
+        length = pulse_cfg["length"]
         if style == "flat_top":
             raise_cfg = pulse_cfg.setdefault("raise_pulse", {})
             # default raise style is cosine
