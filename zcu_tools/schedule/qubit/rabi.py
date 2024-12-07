@@ -6,9 +6,13 @@ from tqdm.auto import tqdm
 from zcu_tools.auto import make_cfg
 from zcu_tools.program import AmpRabiProgram, TwoToneProgram
 
+from ..flux import set_flux
+
 
 def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)
+
+    set_flux(cfg["flux_dev"], cfg["flux"])
 
     sweep_cfg = cfg["sweep"]
     lens = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
@@ -24,7 +28,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
         curve = ax.plot(lens, np.zeros_like(lens))[0]
         dh = display(fig, display_id=True)
 
-    qub_pulse = cfg["qub_pulse"]
+    qub_pulse = cfg["dac"]["qub_pulse"]
 
     signals = np.full(len(lens), np.nan, dtype=np.complex128)
     for i, length in enumerate(tqdm(lens)):
@@ -54,7 +58,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         sweep_cfg = cfg["sweep"]
         pdrs = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
 
-        qub_pulse = cfg["qub_pulse"]
+        qub_pulse = cfg["dac"]["qub_pulse"]
 
         if instant_show:
             import matplotlib.pyplot as plt

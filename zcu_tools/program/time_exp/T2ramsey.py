@@ -1,11 +1,9 @@
-from .base import BaseTimeProgram
+from .base import TimeProgram
 
 
-class T2RamseyProgram(BaseTimeProgram):
+class T2RamseyProgram(TimeProgram):
     def body(self):
         qub_ch = self.qub_pulse["ch"]
-
-        self.flux_ctrl.trigger()
 
         # pi/2 - wait - pi/2 sequence
         self.pulse(ch=qub_ch)

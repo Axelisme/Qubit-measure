@@ -27,7 +27,7 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             curve = ax.plot(fpts, np.zeros_like(fpts))[0]
             dh = display(fig, display_id=True)
 
-        qub_pulse = cfg["qub_pulse"]
+        qub_pulse = cfg["dac"]["qub_pulse"]
         signals = np.full(len(fpts), np.nan, dtype=np.complex128)
         for i, fpt in enumerate(tqdm(fpts)):
             qub_pulse["freq"] = fpt

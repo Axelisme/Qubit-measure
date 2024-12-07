@@ -20,8 +20,8 @@
 import os
 import sys
 
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
 
 # # %cd /home/xilinx/jupyter_notebooks/nthu/sinica-5q/Axel/Qubit-measure
 print(os.getcwd())
@@ -76,53 +76,49 @@ data_host = "192.168.10.232"  # cmd-> ipconfig -> ipv4 #controling computer
 # # Predefine parameters
 
 # %%
-res_name = "res"
-qubit_name = "qub"
-# flux_dev = "none"
-flux_dev = "yoko"
-# flux_dev = "zcu216"
-
-flux_host = data_host
-# flux_host = "127.0.0.1"
+DefaultCfg.set_dac(res_ch=0, qub_ch=3, res_nqz=2, qub_nqz=1)
+DefaultCfg.set_adc(ro_chs=[0])
 
 # %%
-DefaultCfg.init_global(
-    res_cfgs={res_name: {"ch": 0, "ro_chs": [0], "nqz": 2}},
-    qub_cfgs={qubit_name: {"ch": 6, "nqz": 2}},
-    flux_cfgs={
-        # "zcu216": {
-        #     "ch": 4,
-        #     "saturate": 0.1,  # us
-        # },
-        "yoko": {
-            "server_ip": flux_host,
-            # "dev_cfg": {"address": "0x0B21::0x0039::91WB18861", "interface": "USB"},
-            "dev_cfg": {"address": "0x0B21::0x0039::90ZB35281", "interface": "USB"},
-            "flux_cfg": {"Current - Sweep rate": 10e-6},
-        },
-    },
-    # overwrite=True,
+# DefaultCfg.load("default_cfg.yaml")
+
+# %% [markdown]
+# Initialize the flux
+
+# %%
+from zcu_tools.device import YokoDevControl  # noqa: E402
+
+YokoDevControl.connect_server(
+    {
+        "host_ip": data_host,
+        # "host_ip": "127.0.0.1",
+        "dComCfg": {"address": "0x0B21::0x0039::90ZB35281", "interface": "USB"},
+        "outputCfg": {"Current - Sweep rate": 10e-6},
+    }
 )
+DefaultCfg.set_default(flux_dev="yoko")
 
 # %%
-# DefaultCfg.load("default_cfg.yaml", overwrite=True)
+cur_flux = 0
+YokoDevControl.set_current(cur_flux)
+DefaultCfg.set_default(flux=cur_flux)
 
-# %%
-DefaultCfg.set_default(resonator=res_name, flux_dev=flux_dev)
 
 # %% [markdown]
 # # Lookback
 
 # %%
 exp_cfg = {
-    "res_pulse": {
-        "style": "const",
-        "freq": 5892,  # MHz
-        "gain": 8000,
-        "length": 1,  # us
+    "dac": {
+        "res_pulse": {
+            "style": "const",
+            "freq": 5892,  # MHz
+            "gain": 8000,
+            "length": 1,  # us
+        },
     },
     "adc": {
-        "readout_length": 3,  # us
+        "ro_length": 3,  # us
         # "trig_offset": 0,  # us
         # "trig_offset": 0.470,  # us
     },
@@ -156,7 +152,7 @@ save_data(
 )
 
 # %%
-DefaultCfg.set_ro(trig_offset=trig_offset)
+DefaultCfg.set_adc(trig_offset=trig_offset)
 
 
 # %% [markdown]
@@ -165,10 +161,12 @@ DefaultCfg.set_ro(trig_offset=trig_offset)
 # %%
 res_style = "const"
 exp_cfg = {
-    "res_pulse": {
-        "style": res_style,
-        "gain": 1000,
-        "length": 5,
+    "dac": {
+        "res_pulse": {
+            "style": res_style,
+            "gain": 1000,
+            "length": 5,
+        },
     },
     "relax_delay": 0,  # us
 }
@@ -222,10 +220,12 @@ res_length = 5
 
 # %%
 exp_cfg = {
-    "res_pulse": {
-        "style": res_style,
-        "freq": r_f,
-        "length": res_length,  # us
+    "dac": {
+        "res_pulse": {
+            "style": res_style,
+            "freq": r_f,
+            "length": res_length,  # us
+        },
     },
     "relax_delay": 3.0,  # us
 }
@@ -259,31 +259,31 @@ save_data(
 
 # %%
 max_res_gain = 2000
-DefaultCfg.set_res(res_name, max_gain=max_res_gain)
+DefaultCfg.set_dac(max_res_gain=max_res_gain)
 
 # %% [markdown]
 # ## Flux dependence
 
 # %%
-from zcu_tools.device.labber.yoko import YokoDevControl  # noqa: E402
-
-YokoDevControl.connect_server(DefaultCfg.flux_cfgs["yoko"])
-YokoDevControl.set_current(0)
+cur_flux = 0
+YokoDevControl.set_current(cur_flux)
+DefaultCfg.set_default(flux=cur_flux)
 
 # %%
 exp_cfg = {
-    "res_pulse": {
-        "style": res_style,
-        "freq": r_f,
-        "gain": max_res_gain,
-        "length": res_length,  # us
+    "dac": {
+        "res_pulse": {
+            "style": res_style,
+            "freq": r_f,
+            "gain": max_res_gain,
+            "length": res_length,  # us
+        },
     },
     "relax_delay": 3.0,  # us
 }
 
 # %%
 exp_cfg["sweep"] = {
-    #     "flux": make_sweep(-30000, 30000, step=10000),
     "flux": make_sweep(-2.40e-3, -2.30e-3, 50),
     "freq": make_sweep(r_f - 10, r_f + 10, 50),
 }
@@ -312,31 +312,29 @@ save_data(
 
 # %%
 ro_length = 5
-DefaultCfg.set_res_pulse(
-    res_name,
+DefaultCfg.set_pulse(
     readout_rf={
         "style": res_style,
         "freq": r_f,
         "gain": max_res_gain,
         "length": ro_length,
         "desc": "Readout with resonator freq",
-    },
+    }
 )
 
 # %% [markdown]
 # # Qubit Frequency
 
 # %%
-DefaultCfg.set_default(qubit=qubit_name)
-
-# %%
 qub_style = "cosine"
 exp_cfg = {
-    "res_pulse": "readout_rf",
-    "qub_pulse": {
-        "style": qub_style,
-        "gain": 5000,
-        "length": 4,
+    "dac": {
+        "res_pulse": "readout_rf",
+        "qub_pulse": {
+            "style": qub_style,
+            "gain": 5000,
+            "length": 4,
+        },
     },
     "relax_delay": 0.0,  # us
 }
@@ -378,11 +376,13 @@ save_data(
 
 # %%
 exp_cfg = {
-    "res_pulse": "readout_rf",
-    "qub_pulse": {
-        "style": qub_style,
-        "freq": q_f,
-        "length": 4,  # us
+    "dac": {
+        "res_pulse": "readout_rf",
+        "qub_pulse": {
+            "style": qub_style,
+            "freq": q_f,
+            "length": 4,  # us
+        },
     },
     "relax_delay": 3.0,  # us
 }
@@ -415,25 +415,26 @@ save_data(
 
 # %%
 max_qub_gain = 2000
-DefaultCfg.set_qub(qubit_name, max_gain=max_qub_gain)
+DefaultCfg.set_dac(max_qub_gain=max_qub_gain)
 
 # %% [markdown]
 # ## Flux Dependence
 
 # %%
-from zcu_tools.device.labber.yoko import YokoDevControl  # noqa: E402
-
-YokoDevControl.connect_server(DefaultCfg.flux_cfgs["yoko"])
-YokoDevControl.set_current(0)
+cur_flux = 0
+YokoDevControl.set_current(cur_flux)
+DefaultCfg.set_default(flux=cur_flux)
 
 # %%
 exp_cfg = {
-    "res_pulse": "readout_rf",
-    "qub_pulse": {
-        "style": qub_style,
-        "freq": q_f,
-        "gain": max_qub_gain,
-        "length": 4,  # us
+    "dac": {
+        "res_pulse": "readout_rf",
+        "qub_pulse": {
+            "style": qub_style,
+            "freq": q_f,
+            "gain": max_qub_gain,
+            "length": 4,  # us
+        },
     },
     "relax_delay": 3.0,  # us
 }
@@ -464,8 +465,9 @@ save_data(
 )
 
 # %%
-sw_spot = 10000
-DefaultCfg.set_labeled_flux(qubit_name, flux_dev, sw_spot=sw_spot)
+cur_flux = 0
+YokoDevControl.set_current(cur_flux)
+DefaultCfg.set_default(flux=cur_flux)
 
 # %% [markdown]
 # # Rabi
@@ -475,11 +477,13 @@ DefaultCfg.set_labeled_flux(qubit_name, flux_dev, sw_spot=sw_spot)
 
 # %%
 exp_cfg = {
-    "res_pulse": "readout_rf",
-    "qub_pulse": {
-        "style": qub_style,
-        "freq": q_f,
-        "gain": max_qub_gain,
+    "dac": {
+        "res_pulse": "readout_rf",
+        "qub_pulse": {
+            "style": qub_style,
+            "freq": q_f,
+            "gain": max_qub_gain,
+        },
     },
     "relax_delay": 20.0,  # us
 }
@@ -513,13 +517,15 @@ save_data(
 # ## Amplitude Rabi
 
 # %%
-qub_pulse_len = pi_len
+qub_len = pi_len
 exp_cfg = {
-    "res_pulse": "readout_rf",
-    "qub_pulse": {
-        "style": qub_style,
-        "freq": q_f,
-        "length": qub_pulse_len,
+    "dac": {
+        "res_pulse": "readout_rf",
+        "qub_pulse": {
+            "style": qub_style,
+            "freq": q_f,
+            "length": qub_len,
+        },
     },
     "relax_delay": 20.0,  # us
 }
@@ -555,14 +561,13 @@ save_data(
 # ## Set Pi / Pi2 Pulse
 
 # %%
-DefaultCfg.set_qub_pulse(
-    qubit_name,
+DefaultCfg.set_pulse(
     pi={
         "style": qub_style,
         "freq": q_f,
         "gain": pi_gain,
         "phase": 0,
-        "length": qub_pulse_len,
+        "length": qub_len,
         "desc": "pi pulse",
     },
     pi2={
@@ -570,7 +575,7 @@ DefaultCfg.set_qub_pulse(
         "freq": q_f,
         "gain": pi2_gain,
         "phase": 0,
-        "length": qub_pulse_len,
+        "length": qub_len,
         "desc": "pi/2 pulse",
     },
 )
@@ -581,8 +586,10 @@ DefaultCfg.set_qub_pulse(
 
 # %%
 exp_cfg = {
-    "res_pulse": "readout_rf",
-    "qub_pulse": "pi",
+    "dac": {
+        "res_pulse": "readout_rf",
+        "qub_pulse": "pi",
+    },
     "relax_delay": 20.0,  # us
 }
 
@@ -620,15 +627,14 @@ save_data(
 # ## Set Dispersive readout
 
 # %%
-DefaultCfg.set_res_pulse(
-    res_name,
+DefaultCfg.set_pulse(
     readout_dp1={
-        **DefaultCfg.get_res_pulse(res_name, "readout_rf"),
+        **DefaultCfg.get_pulse("readout_rf"),
         "freq": readout_f1,
         "desc": "Readout with largest dispersive shift",
     },
     readout_dp2={
-        **DefaultCfg.get_res_pulse(res_name, "readout_rf"),
+        **DefaultCfg.get_pulse("readout_rf"),
         "freq": readout_f2,
         "desc": "Readout with second largest dispersive shift",
     },
@@ -642,10 +648,12 @@ DefaultCfg.set_res_pulse(
 activate_detune = 0.0
 orig_q_f = q_f
 exp_cfg = {
-    "res_pulse": "readout_dp1",
-    "qub_pulse": {
-        **DefaultCfg.get_qub_pulse(qubit_name, "pi2"),
-        "freq": orig_q_f + activate_detune,
+    "dac": {
+        "res_pulse": "readout_dp1",
+        "qub_pulse": {
+            **DefaultCfg.get_pulse("pi2"),
+            "freq": orig_q_f + activate_detune,
+        },
     },
     "relax_delay": 20.0,  # us
 }
@@ -680,8 +688,10 @@ q_f = orig_q_f + activate_detune - detune
 
 # %%
 exp_cfg = {
-    "res_pulse": "readout_dp1",
-    "qub_pulse": "pi",
+    "dac": {
+        "res_pulse": "readout_dp1",
+        "qub_pulse": "pi",
+    },
     "relax_delay": 50.0,  # us
 }
 
@@ -714,8 +724,11 @@ save_data(
 
 # %%
 exp_cfg = {
-    "res_pulse": "readout_dp1",
-    "qub_pulse": [("pi", "pi"), ("pi2", "pi2")],
+    "dac": {
+        "res_pulse": "readout_dp1",
+        "pi_pulse": "pi",
+        "pi2_pulse": "pi2",
+    },
     "relax_delay": 50.0,  # us
 }
 
@@ -745,8 +758,10 @@ save_data(
 
 # %%
 exp_cfg = {
-    "res_pulse": "readout_dp1",
-    "qub_pulse": "pi",
+    "dac": {
+        "res_pulse": "readout_dp1",
+        "qub_pulse": "pi",
+    },
     "relax_delay": 50.0,  # us
 }
 
@@ -775,54 +790,18 @@ save_data(
 
 # %%
 # initial parameters
-best_style = res_style
 best_freq = readout_f1
 best_pdr = max_res_gain
-best_res_len = res_length
-DefaultCfg.set_res_pulse(
-    res_name,
+best_len = res_length
+DefaultCfg.set_pulse(
     readout_fid={
-        **DefaultCfg.get_res_pulse(res_name, "readout_dp1"),
-        "style": best_style,
+        "style": res_style,
         "freq": best_freq,
         "gain": best_pdr,
-        "length": best_res_len,
+        "phase": 0,
+        "length": best_len,
+        "desc": "Readout with best fidelity",
     },
-)
-
-# %% [markdown]
-# ### Scan readout style
-
-# %%
-exp_cfg = {
-    "res_pulse": "readout_fid",
-    "qub_pulse": "pi",
-    "relax_delay": 50.0,  # us
-}
-
-# %%
-exp_cfg["sweep"] = ["const", "gauss", "cosine", "flat_top"]
-cfg = make_cfg(exp_cfg, shots=5000)
-
-fids = zs.scan_style_fid(soc, soccfg, cfg)
-
-# sort by fid, where fids is a dict
-fid_dict = dict(sorted(fids.items(), key=lambda x: x[1], reverse=True))
-for style, fid in fid_dict.items():
-    print(f"Style: {style}, FID: {fid}")
-
-best_style, best_fid = list(fid_dict.items())[0]
-
-
-# %%
-filename = "scan_style"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "shot", "unit": "style", "values": np.arange(len(fids))},
-    z_info={"name": "Fidelity", "unit": "%", "values": np.array(list(fids.values()))},
-    comment=make_comment(cfg, f"best style = {best_style}, best fide = {best_fid:.1%}"),
-    tag="SingleShot/style",
-    server_ip=data_host,
 )
 
 # %% [markdown]
@@ -830,13 +809,19 @@ save_data(
 
 # %%
 exp_cfg = {
-    "res_pulse": "readout_fid",
-    "qub_pulse": "pi",
+    "dac": {
+        "res_pulse": {
+            "style": res_style,
+            "freq": best_freq,
+            "length": best_len,
+        },
+        "qub_pulse": "pi",
+    },
     "relax_delay": 50.0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(max_res_gain - 500, max_res_gain + 2000, step=500)
+exp_cfg["sweep"] = make_sweep(best_pdr - 500, best_pdr + 2000, step=500)
 cfg = make_cfg(exp_cfg, shots=5000)
 
 pdrs, fids = zs.qubit.scan_pdr_fid(soc, soccfg, cfg, instant_show=True)
@@ -866,13 +851,19 @@ save_data(
 
 # %%
 exp_cfg = {
-    "res_pulse": "readout_fid",
-    "qub_pulse": "pi",
+    "dac": {
+        "res_pulse": {
+            "style": res_style,
+            "freq": best_freq,
+            "gain": best_pdr,
+        },
+        "qub_pulse": "pi",
+    },
     "relax_delay": 50.0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(res_length / 2, 3 * res_length, 5)
+exp_cfg["sweep"] = make_sweep(best_len / 2, 3 * best_len, 5)
 cfg = make_cfg(exp_cfg, shots=5000)
 
 # lens, fids = zs.scan_len_fid(soc, soccfg, cfg)
@@ -903,13 +894,19 @@ save_data(
 
 # %%
 exp_cfg = {
-    "res_pulse": "readout_fid",
-    "qub_pulse": "pi",
+    "dac": {
+        "res_pulse": {
+            "style": res_style,
+            "gain": best_pdr,
+            "length": best_len,
+        },
+        "qub_pulse": "pi",
+    },
     "relax_delay": 50.0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(r_f - 5, r_f + 5, 5)
+exp_cfg["sweep"] = make_sweep(best_freq - 5, best_freq + 5, 5)
 cfg = make_cfg(exp_cfg, shots=5000)
 
 fpts, fids = zs.qubit.scan_freq_fid(soc, soccfg, cfg, instant_show=True)
@@ -939,13 +936,15 @@ save_data(
 
 # %%
 exp_cfg = {
-    "res_pulse": {
-        "style": best_style,
-        "freq": best_freq,
-        "gain": best_pdr,
-        "length": best_len,
+    "dac": {
+        "res_pulse": {
+            "style": res_style,
+            "freq": best_freq,
+            "gain": best_pdr,
+            "length": best_len,
+        },
+        "qub_pulse": "pi",
     },
-    "qub_pulse": "pi",
     "relax_delay": 50.0,  # us
 }
 cfg = make_cfg(exp_cfg, shots=5000)
@@ -966,16 +965,14 @@ save_data(
 )
 
 # %%
-DefaultCfg.set_res_pulse(
-    res_name,
+DefaultCfg.set_pulse(
     readout_fid={
-        "style": best_style,
+        "style": res_style,
         "freq": best_freq,
         "gain": best_pdr,
         "phase": -angle,
         "length": best_len,
         "threshold": threshold,
-        "desc": "Readout with optimal fidelity",
     },
 )
 

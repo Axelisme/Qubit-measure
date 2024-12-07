@@ -7,16 +7,21 @@ from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
 from zcu_tools.program import TwoToneProgram
 
+from ..flux import set_flux
+
 
 def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
+
+    if cfg["flux_dev"] == "none":
+        raise NotImplementedError("Flux sweep but get flux_dev == 'none'")
 
     freq_cfg = cfg["sweep"]["freq"]
     flux_cfg = cfg["sweep"]["flux"]
     fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
     flxs = np.arange(flux_cfg["start"], flux_cfg["stop"], flux_cfg["step"])
 
-    qub_pulse = cfg["qub_pulse"]
+    qub_pulse = cfg["dac"]["qub_pulse"]
 
     freq_tqdm = tqdm(fpts)
     flux_tqdm = tqdm(flxs)
@@ -34,6 +39,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False):
     signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
     for i, flx in enumerate(flxs):
         cfg["flux"] = flx
+        set_flux(cfg["flux_dev"], cfg["flux"])
 
         freq_tqdm.reset()
         freq_tqdm.refresh()

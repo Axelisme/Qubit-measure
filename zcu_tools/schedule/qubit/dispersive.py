@@ -6,14 +6,18 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program import TwoToneProgram
 
+from ..flux import set_flux
+
 
 def measure_dispersive(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
     sweep_cfg = cfg["sweep"]
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 
-    res_pulse = cfg["res_pulse"]
-    qub_pulse = cfg["qub_pulse"]
+    set_flux(cfg["flux_dev"], cfg["flux"])
+
+    res_pulse = cfg["dac"]["res_pulse"]
+    qub_pulse = cfg["dac"]["qub_pulse"]
 
     pi_gain = qub_pulse["gain"]
 

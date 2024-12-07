@@ -6,9 +6,13 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program import OneToneProgram
 
+from ..flux import set_flux
+
 
 def measure_res_freq(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
+
+    set_flux(cfg["flux_dev"], cfg["flux"])
 
     sweep_cfg = cfg["sweep"]
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
@@ -24,7 +28,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         curve = ax.plot(fpts, np.zeros_like(fpts))[0]
         dh = display(fig, display_id=True)
 
-    res_pulse = cfg["res_pulse"]
+    res_pulse = cfg["dac"]["res_pulse"]
 
     signals = np.full(len(fpts), np.nan, dtype=np.complex128)
     for i, fpt in enumerate(tqdm(fpts)):

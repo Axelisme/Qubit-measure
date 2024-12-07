@@ -3,9 +3,13 @@ import numpy as np
 from zcu_tools import make_cfg
 from zcu_tools.program import OneToneProgram
 
+from ..flux import set_flux
+
 
 def measure_lookback(soc, soccfg, cfg):
     assert cfg.get("reps", 1) == 1, "Only one rep is allowed for lookback"
+
+    set_flux(cfg["flux_dev"], cfg["flux"])
 
     prog = OneToneProgram(soccfg, make_cfg(cfg, reps=1))
     IQlist = prog.acquire_decimated(soc, progress=True)

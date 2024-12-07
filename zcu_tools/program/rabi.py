@@ -12,7 +12,7 @@ class AmpRabiProgram(RAveragerProgram, BaseTwoToneProgram):
         self.cfg["step"] = sweep_cfg["step"]
         self.cfg["expts"] = sweep_cfg["expts"]
 
-    def setup_gain(self):
+    def setup_gain_reg(self):
         qub_ch = self.qub_pulse["ch"]
         self.q_rp = self.ch_page(qub_ch)
         self.r_gain = self.sreg(qub_ch, "gain")
@@ -20,10 +20,9 @@ class AmpRabiProgram(RAveragerProgram, BaseTwoToneProgram):
 
     def initialize(self):
         self.parse_cfg()
-        self.setup_flux()
         self.setup_readout()
         self.setup_qubit()
-        self.setup_gain()
+        self.setup_gain_reg()
 
         self.synci(200)
 
@@ -31,5 +30,4 @@ class AmpRabiProgram(RAveragerProgram, BaseTwoToneProgram):
         BaseTwoToneProgram.body(self)
 
     def update(self):
-        # update wait time
         self.mathi(self.q_rp, self.r_gain, self.r_gain, "+", self.cfg["step"])

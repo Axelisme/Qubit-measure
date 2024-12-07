@@ -1,13 +1,10 @@
 matplotlib==3.6
 numpy==1.19.5
 scipy==1.10
-jupytext
 tqdm
-pyro4
-ipywidgets
-ipykernel
-scikit-learn
-# qcodes
-# labber
-attrDict
-pyQt5
+
+# for fitting
+# scikit-learn
+
+# for labber
+# attrDict

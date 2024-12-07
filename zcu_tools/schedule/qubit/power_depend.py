@@ -5,18 +5,22 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.program import TwoToneProgram, RGainTwoToneProgram
+from zcu_tools.program import RGainTwoToneProgram, TwoToneProgram
+
+from ..flux import set_flux
 
 
 def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
+
+    set_flux(cfg["flux_dev"], cfg["flux"])
 
     freq_cfg = cfg["sweep"]["freq"]
     pdr_cfg = cfg["sweep"]["pdr"]
     fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
     pdrs = np.arange(pdr_cfg["start"], pdr_cfg["stop"], pdr_cfg["step"])
 
-    qub_pulse = cfg["qub_pulse"]
+    qub_pulse = cfg["dac"]["qub_pulse"]
 
     freq_tqdm = tqdm(fpts)
     if soft_loop:
@@ -25,7 +29,6 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     else:
         print("Use RGainTwoToneProgram for hard loop")
         cfg["sweep"] = pdr_cfg
-        qub_pulse["gain"] = pdrs[0]  # initial gain
 
     if instant_show:
         import matplotlib.pyplot as plt

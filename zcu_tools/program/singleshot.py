@@ -4,10 +4,8 @@ from .base import BaseTwoToneProgram
 
 
 class SingleShotProgram(RAveragerProgram, BaseTwoToneProgram):
-    def initialize(self):
-        self.parse_cfg()
-        self.setup_flux()
-        self.setup_readout()
+    def parse_cfg(self):
+        BaseTwoToneProgram.parse_cfg(self)
 
         cfg = self.cfg
 
@@ -23,15 +21,17 @@ class SingleShotProgram(RAveragerProgram, BaseTwoToneProgram):
         cfg["expts"] = 2
         cfg["reps"] = cfg["shots"]
 
-        # set intial gain to 0
-        self.pi_gain = self.qub_pulse["gain"]
-        self.qub_pulse["gain"] = 0
-        self.setup_qubit()
-
-        # find the gain register
+    def setup_gain_reg(self):
         qub_ch = self.qub_pulse["ch"]
         self.q_rp = self.ch_page(qub_ch)
         self.r_gain = self.sreg(qub_ch, "gain")
+        self.regwi(self.q_rp, self.r_gain, 0)
+
+    def initialize(self):
+        self.parse_cfg()
+        self.setup_readout()
+        self.setup_qubit()
+        self.setup_gain_reg()
 
         self.synci(200)
 
@@ -39,8 +39,7 @@ class SingleShotProgram(RAveragerProgram, BaseTwoToneProgram):
         BaseTwoToneProgram.body(self)
 
     def update(self):
-        # update the gain to pi pulse
-        self.mathi(self.q_rp, self.r_gain, self.r_gain, "+", self.pi_gain)
+        self.mathi(self.q_rp, self.r_gain, self.r_gain, "+", self.cfg["step"])
 
     def acquire_orig(self, *args, **kwargs):
         return super().acquire(*args, **kwargs)

@@ -5,7 +5,7 @@ from .base import BaseTwoToneProgram
 
 class TwoToneProgram(AveragerProgram, BaseTwoToneProgram):
     def initialize(self):
-        return BaseTwoToneProgram.initialize(self)
+        BaseTwoToneProgram.initialize(self)
 
     def body(self):
         BaseTwoToneProgram.body(self)
@@ -20,8 +20,9 @@ class RGainTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
         self.cfg["step"] = sweep_cfg["step"]
         self.cfg["expts"] = sweep_cfg["expts"]
 
+        self.qub_pulse["gain"] = self.cfg["start"]
+
     def setup_gain_reg(self):
-        # setup gain register
         qub_ch = self.qub_pulse["ch"]
         self.q_rp = self.ch_page(qub_ch)
         self.q_gain = self.sreg(qub_ch, "gain")
@@ -29,8 +30,8 @@ class RGainTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
 
     def initialize(self):
         self.parse_cfg()
-        self.setup_flux()
         self.setup_readout()
+        self.setup_qubit()
         self.setup_gain_reg()
 
         self.synci(200)
@@ -51,8 +52,9 @@ class RFreqTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
         self.cfg["step"] = sweep_cfg["step"]
         self.cfg["expts"] = sweep_cfg["expts"]
 
+        self.qub_pulse["freq"] = self.cfg["start"]
+
     def setup_freq_reg(self):
-        # setup freq register
         qub_ch = self.qub_pulse["ch"]
         self.q_rp = self.ch_page(qub_ch)
         self.q_freq = self.sreg(qub_ch, "freq")
@@ -60,8 +62,8 @@ class RFreqTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
 
     def initialize(self):
         self.parse_cfg()
-        self.setup_flux()
         self.setup_readout()
+        self.setup_qubit()
         self.setup_freq_reg()
 
         self.synci(200)

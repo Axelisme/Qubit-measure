@@ -4,12 +4,15 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import singleshot_analysis, fidelity_func
+from zcu_tools.analysis import fidelity_func, singleshot_analysis
 from zcu_tools.program import SingleShotProgram
+
+from ..flux import set_flux
 
 
 def measure_fid(soc, soccfg, cfg, threshold, angle, progress=False):
     """return: fidelity, (tp, fp, tn, fn)"""
+    set_flux(cfg["flux_dev"], cfg["flux"])
     prog = SingleShotProgram(soccfg, deepcopy(cfg))
     result = prog.acquire_orig(soc, threshold=threshold, angle=angle, progress=progress)
     fp, tp = result[1][0][0]
@@ -18,6 +21,7 @@ def measure_fid(soc, soccfg, cfg, threshold, angle, progress=False):
 
 
 def measure_fid_auto(soc, soccfg, cfg, plot=False, progress=False):
+    set_flux(cfg["flux_dev"], cfg["flux"])
     prog = SingleShotProgram(soccfg, deepcopy(cfg))
     i0, q0 = prog.acquire(soc, progress=progress)
     fid, threhold, angle = singleshot_analysis(i0, q0, plot=plot)
@@ -27,10 +31,12 @@ def measure_fid_auto(soc, soccfg, cfg, plot=False, progress=False):
 def scan_pdr_fid(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
+    set_flux(cfg["flux_dev"], cfg["flux"])
+
     sweep_cfg = cfg["sweep"]
     pdrs = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
 
-    res_pulse = cfg["res_pulse"]
+    res_pulse = cfg["dac"]["res_pulse"]
 
     if instant_show:
         import matplotlib.pyplot as plt
@@ -63,12 +69,14 @@ def scan_pdr_fid(soc, soccfg, cfg, instant_show=False):
 
 def scan_len_fid(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
-    del cfg["ro_cfg"]["ro_length"]  # let it be auto derived
+    del cfg["adc_cfg"]["ro_length"]  # let it be auto derived
+
+    set_flux(cfg["flux_dev"], cfg["flux"])
 
     sweep_cfg = cfg["sweep"]
     lens = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 
-    res_pulse = cfg["res_pulse"]
+    res_pulse = cfg["dac"]["res_pulse"]
 
     if instant_show:
         import matplotlib.pyplot as plt
@@ -102,10 +110,12 @@ def scan_len_fid(soc, soccfg, cfg, instant_show=False):
 def scan_freq_fid(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
+    set_flux(cfg["flux_dev"], cfg["flux"])
+
     sweep_cfg = cfg["sweep"]
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 
-    res_pulse = cfg["res_pulse"]
+    res_pulse = cfg["dac"]["res_pulse"]
 
     if instant_show:
         import matplotlib.pyplot as plt
@@ -134,18 +144,3 @@ def scan_freq_fid(soc, soccfg, cfg, instant_show=False):
         clear_output()
 
     return fpts, fids
-
-
-def scan_style_fid(soc, soccfg, cfg) -> dict:
-    cfg = deepcopy(cfg)  # prevent in-place modification
-
-    sweep_list = cfg["sweep"]
-
-    res_pulse = cfg["res_pulse"]
-
-    fids = {}
-    for style in sweep_list:
-        res_pulse["style"] = style
-        fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
-        fids[style] = fid
-    return fids

@@ -1,4 +1,5 @@
 from copy import deepcopy
+from typing import Union
 
 from .configuration import DefaultCfg
 from .tools import deepupdate, numpy2number
@@ -15,172 +16,94 @@ def make_cfg(exp_cfg: dict, **kwargs):
     return exp_cfg
 
 
-def auto_derive_pulse(
-    pulse_cfg: dict, pulses: dict, ch: int = None, nqz: int = None
-) -> dict:
-    def auto_derive_waveform(pulse_cfg: dict, only_shape=False):
-        if not only_shape:
-            pulse_cfg.setdefault("phase", 0)
-            if ch is not None:
-                pulse_cfg.setdefault("ch", ch)
-            if nqz is not None:
-                pulse_cfg.setdefault("nqz", nqz)
+def auto_derive_waveform(pulse_cfg: dict):
+    # style and length are required to derive waveform
+    if "style" not in pulse_cfg:
+        return  # do nothing
 
-        # style and length are required to derive waveform
-        if "style" not in pulse_cfg or "length" not in pulse_cfg:
-            return  # do nothing
-
-        style = pulse_cfg["style"]
-        length = pulse_cfg["length"]
-        if style == "flat_top":
-            raise_cfg = pulse_cfg.setdefault("raise_pulse", {})
-            # default raise style is cosine
-            raise_cfg.setdefault("style", "cosine")
+    style = pulse_cfg["style"]
+    length = pulse_cfg.get("length")
+    if style == "flat_top":
+        raise_cfg = pulse_cfg.setdefault("raise_pulse", {})
+        raise_cfg.setdefault("style", "cosine")
+        if length:
             # default raise pulse is 10% of the total length
             # the minimum length is 15 ns
             raise_cfg.setdefault("length", 0.1 * max(length, 0.15))
 
-            # derive raise pulse parameters
-            auto_derive_waveform(raise_cfg, only_shape=True)
-        elif style == "gauss":
+        # derive raise pulse parameters
+        auto_derive_waveform(raise_cfg)
+    elif style == "gauss":
+        if length:
+            # default sigma is 1/4 of the total length
             pulse_cfg.setdefault("sigma", length / 4)
 
-    # derive pulse config
+
+KNOWN_RES_PULSE = ["res_pulse"]
+
+
+def auto_derive_pulse(name: str, pulse_cfg: Union[str, dict]) -> dict:
+    # load pulse configuration if it is a string
     if isinstance(pulse_cfg, str):
-        # string like "pulse1"
-        pulse_cfg: dict = deepcopy(pulses[pulse_cfg])
-        auto_derive_waveform(pulse_cfg)
-    elif isinstance(pulse_cfg, list):
-        # list of tuples like [("pi", "pulse1"), ("pi2", "pulse2")]
-        pulse_cfg = dict(pulse_cfg)
-        for name, pulse in pulse_cfg.items():
-            if isinstance(pulse, str):
-                pulse_cfg[name] = deepcopy(pulses[pulse])
-            auto_derive_waveform(pulse_cfg[name])
-    elif isinstance(pulse_cfg, dict):
-        auto_derive_waveform(pulse_cfg)
+        pulse_cfg = DefaultCfg.get_pulse(pulse_cfg)
+
+    ch = None
+    nqz = None
+    if name in KNOWN_RES_PULSE:
+        ch = DefaultCfg.get_dac("res_ch")
+        nqz = DefaultCfg.get_dac("res_nqz")
+    else:
+        ch = DefaultCfg.get_dac("qub_ch")
+        nqz = DefaultCfg.get_dac("qub_nqz")
+
+    # fill ch if not provided
+    if ch is not None:
+        pulse_cfg.setdefault("ch", ch)
+
+    # fill nqz if not provided
+    if nqz is not None:
+        pulse_cfg.setdefault("nqz", nqz)
+
+    # phase
+    pulse_cfg.setdefault("phase", 0.0)
+
+    # derive waveform
+    auto_derive_waveform(pulse_cfg)
 
     return pulse_cfg
 
 
-def auto_derive_res(exp_cfg: dict):
-    res_cfgs = deepcopy(DefaultCfg.res_cfgs)
+def auto_derive(exp_cfg):
+    # fill default parameters if not provided
+    deepupdate(exp_cfg, DefaultCfg.exp_default, behavior="ignore")
 
-    # replace resonator name with resonator config
-    if isinstance(exp_cfg["resonator"], str):
-        exp_cfg["resonator"] = res_cfgs[exp_cfg["resonator"]]
+    dac_cfg = exp_cfg.setdefault("dac", {})
+    adc_cfg = exp_cfg.setdefault("adc", {})
 
-    res_cfg: dict = exp_cfg["resonator"]
-
-    # replace pulses with pulse config
-    ch = res_cfg.get("ch")
-    nqz = res_cfg.get("nqz")
-    pulse_cfgs: dict = res_cfg.get("pulses", {})
-    exp_cfg["res_pulse"] = auto_derive_pulse(exp_cfg["res_pulse"], pulse_cfgs, ch, nqz)
-
-    # remove pulses from resonator config for clarity
-    res_cfg.pop("pulses", None)
-
-
-def auto_derive_qub(exp_cfg: dict):
-    qub_cfgs = deepcopy(DefaultCfg.qub_cfgs)
-
-    # if not provided
-    if "qubit" not in exp_cfg:
-        return
-
-    # replace qubit name with qubit config
-    if isinstance(exp_cfg["qubit"], str):
-        qub_name = exp_cfg["qubit"]
-        exp_cfg["qubit"] = qub_cfgs[qub_name]
-        exp_cfg["qubit"]["name"] = qub_name
-    qub_cfg: dict = exp_cfg["qubit"]
-
-    # replace pulses with pulse config
-    pulse_cfgs: dict = qub_cfg.get("pulses", {})
-    # for single qubit experiment
-    ch = qub_cfg.get("ch")
-    nqz = qub_cfg.get("nqz")
-    if "qub_pulse" in exp_cfg:
-        exp_cfg["qub_pulse"] = auto_derive_pulse(
-            exp_cfg["qub_pulse"], pulse_cfgs, ch, nqz
-        )
-    # for ef experiment
-    if "ef_pulse" in exp_cfg:
-        exp_cfg["ef_pulse"] = auto_derive_pulse(
-            exp_cfg["ef_pulse"], pulse_cfgs, ch, nqz
-        )
-    if "ge_pulse" in exp_cfg:
-        exp_cfg["ge_pulse"] = auto_derive_pulse(
-            exp_cfg["ge_pulse"], pulse_cfgs, ch, nqz
-        )
-
-    # remove pulses from qubit config for clarity
-    qub_cfg.pop("pulses", None)
-
-
-def auto_derive_flux(exp_cfg: dict):
-    flux_cfgs: dict = deepcopy(DefaultCfg.flux_cfgs)
-
-    # if not provided
-    if "flux_dev" not in exp_cfg:
-        exp_cfg["flux_dev"] = "none"
-
-    # replace flux_dev with flux config
-    if isinstance(exp_cfg["flux_dev"], str):
-        method = exp_cfg["flux_dev"]
-        exp_cfg["flux_dev"] = flux_cfgs.get(method, {})
-        exp_cfg["flux_dev"]["name"] = method
-    method = exp_cfg["flux_dev"]["name"]
-
-    if method == "none" or "flux" not in exp_cfg:
-        return
-
-    # replace labeled flux with flux value
-    flux = exp_cfg["flux"]
-    if isinstance(flux, str):
-        lbd_flux = DefaultCfg.get_labeled_flux(exp_cfg["qubit"], method)
-        assert flux in lbd_flux, f"Cannot find {flux} for {method}."
-        exp_cfg["flux"] = lbd_flux[flux]
-
-
-def auto_derive_readout(exp_cfg: dict):
-    ro_cfg = exp_cfg["adc"]
-    res_cfg = exp_cfg["resonator"]
-    res_pulse = exp_cfg["res_pulse"]
+    # derive each pulse
+    for name, pulse_cfg in dac_cfg.items():
+        dac_cfg[name] = auto_derive_pulse(name, pulse_cfg)
 
     # readout channel
-    if "ro_chs" in res_cfg:
-        ro_cfg.setdefault("chs", res_cfg["ro_chs"])
+    ro_chs = DefaultCfg.get_adc("ro_chs")
+    if ro_chs:
+        adc_cfg.setdefault("chs", ro_chs)
+
+    # trig_offset
+    trig_offset = DefaultCfg.get_adc("trig_offset")
+    if trig_offset:
+        adc_cfg.setdefault("trig_offset", trig_offset)
+    else:
+        adc_cfg.setdefault("trig_offset", 0.0)
 
     # readout length
-    if "length" in res_pulse:
-        ro_cfg.setdefault("ro_length", res_pulse["length"])
+    # find the res pulse length
+    # if only one res pulse is defined, use its length as the default ro_length
+    res_pulses = list(p for n, p in dac_cfg.items() if n in KNOWN_RES_PULSE)
+    if len(res_pulses) == 1:
+        length = res_pulses[0].get("length")
+        if length:
+            adc_cfg.setdefault("ro_length", length)
 
-    # adc_trig_offset
-    ro_cfg.setdefault("trig_offset", 0)
-
-
-def auto_derive_exp(exp_cfg: dict):
-    # default experiment parameters
+    # relax delay
     exp_cfg.setdefault("relax_delay", 0.0)
-
-
-def fill_default(exp_cfg: dict):
-    for key, value in DefaultCfg.exp_default.items():
-        exp_cfg.setdefault(key, value)
-
-
-def auto_derive(exp_cfg):
-    assert DefaultCfg.is_init_global(), "Configuration is not initialized."
-
-    # add some user specified parameters
-    fill_default(exp_cfg)
-
-    # derive other parameters
-    auto_derive_res(exp_cfg)
-    auto_derive_qub(exp_cfg)
-    auto_derive_flux(exp_cfg)
-    auto_derive_readout(exp_cfg)
-
-    auto_derive_exp(exp_cfg)

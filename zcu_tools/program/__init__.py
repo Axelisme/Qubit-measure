@@ -1,14 +1,12 @@
-from . import ef
-from .onetone import OneToneProgram, RGainOnetoneProgram, RFluxOnetoneProgram
+from .onetone import OneToneProgram, RGainOnetoneProgram
 from .rabi import AmpRabiProgram
 from .singleshot import SingleShotProgram
 from .time_exp import T1Program, T2EchoProgram, T2RamseyProgram
-from .twotone import TwoToneProgram, RGainTwoToneProgram, RFreqTwoToneProgram
+from .twotone import RFreqTwoToneProgram, RGainTwoToneProgram, TwoToneProgram
 
 __all__ = [
     "OneToneProgram",
     "RGainOnetoneProgram",
-    "RFluxOnetoneProgram",
     "TwoToneProgram",
     "RGainTwoToneProgram",
     "RFreqTwoToneProgram",
@@ -17,5 +15,4 @@ __all__ = [
     "T2RamseyProgram",
     "T2EchoProgram",
     "SingleShotProgram",
-    "ef",
 ]

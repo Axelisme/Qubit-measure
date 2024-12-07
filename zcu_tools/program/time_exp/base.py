@@ -3,9 +3,9 @@ from qick import RAveragerProgram
 from ..base import BaseTwoToneProgram
 
 
-class BaseTimeProgram(RAveragerProgram, BaseTwoToneProgram):
+class TimeProgram(RAveragerProgram, BaseTwoToneProgram):
     def parse_cfg(self):
-        super().parse_cfg()
+        BaseTwoToneProgram.parse_cfg()
 
         sweep_cfg = self.cfg["sweep"]
         self.cfg["start"] = self.us2cycles(sweep_cfg["start"])
@@ -13,14 +13,12 @@ class BaseTimeProgram(RAveragerProgram, BaseTwoToneProgram):
         self.cfg["expts"] = sweep_cfg["expts"]
 
     def setup_waittime(self):
-        # setup wait time register
         self.q_rp = self.ch_page(self.qub_pulse["ch"])
         self.r_wait = 3
         self.regwi(self.q_rp, self.r_wait, self.cfg["start"])
 
     def initialize(self):
         self.parse_cfg()
-        self.setup_flux()
         self.setup_readout()
         self.setup_qubit()
         self.setup_waittime()
@@ -28,5 +26,4 @@ class BaseTimeProgram(RAveragerProgram, BaseTwoToneProgram):
         self.synci(200)
 
     def update(self):
-        # update wait time
         self.mathi(self.q_rp, self.r_wait, self.r_wait, "+", self.cfg["step"])

@@ -1,10 +1,8 @@
-from .base import BaseTimeProgram
+from .base import TimeProgram
 
 
-class T1Program(BaseTimeProgram):
+class T1Program(TimeProgram):
     def body(self):
-        self.flux_ctrl.trigger()
-
         # pi pulse
         self.pulse(ch=self.qub_pulse["ch"])
         self.sync_all()

@@ -7,16 +7,20 @@ from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
 from zcu_tools.program import OneToneProgram, RGainOnetoneProgram
 
+from ..flux import set_flux
+
 
 def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
+
+    set_flux(cfg["flux_dev"], cfg["flux"])
 
     freq_cfg = cfg["sweep"]["freq"]
     pdr_cfg = cfg["sweep"]["pdr"]
     fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
     pdrs = np.arange(pdr_cfg["start"], pdr_cfg["stop"], pdr_cfg["step"])
 
-    res_pulse = cfg["res_pulse"]
+    res_pulse = cfg["dac"]["res_pulse"]
 
     freq_tqdm = tqdm(fpts)
     if soft_loop:
@@ -25,7 +29,6 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     else:
         print("Use RGainOnetoneProgram for hard loop")
         cfg["sweep"] = pdr_cfg
-        res_pulse["gain"] = pdrs[0]  # initial gain
 
     if instant_show:
         import matplotlib.pyplot as plt
