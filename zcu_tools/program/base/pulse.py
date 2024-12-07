@@ -14,8 +14,9 @@ def is_single_pulse(pulse_cfg: dict):
     return False
 
 
-def create_waveform(prog: AcquireProgram, ch: int, pulse_cfg: dict) -> str:
-    def create_one(prog: AcquireProgram, ch: int, pulse_cfg: dict):
+def create_waveform(prog: AcquireProgram, pulse_cfg: dict) -> str:
+    def create_one(prog: AcquireProgram, pulse_cfg: dict):
+        ch = pulse_cfg["ch"]
         style = pulse_cfg["style"]
         if style == "flat_top":
             # use raise pulse for the waveform
@@ -48,28 +49,28 @@ def create_waveform(prog: AcquireProgram, ch: int, pulse_cfg: dict) -> str:
         return wavform
 
     if is_single_pulse(pulse_cfg):  # single pulse
-        return create_one(prog, ch, pulse_cfg)
+        return create_one(prog, pulse_cfg)
     # nested pulse
-    return {k: create_one(prog, ch, v) for k, v in pulse_cfg.items()}
+    return {k: create_one(prog, v) for k, v in pulse_cfg.items()}
 
 
 def set_pulse(
     prog: AcquireProgram,
     pulse_cfg: dict,
-    gen_ch: int,
     ro_ch: int = None,
     waveform: str = None,
 ):
+    ch = pulse_cfg["ch"]
     style = pulse_cfg["style"]
-    length = prog.us2cycles(pulse_cfg["length"], gen_ch=gen_ch)
+    length = prog.us2cycles(pulse_cfg["length"], gen_ch=ch)
 
     # convert frequency and phase to DAC registers
-    freq_r = prog.freq2reg(pulse_cfg["freq"], gen_ch=gen_ch, ro_ch=ro_ch)
-    phase_r = prog.deg2reg(pulse_cfg["phase"], gen_ch=gen_ch)
+    freq_r = prog.freq2reg(pulse_cfg["freq"], gen_ch=ch, ro_ch=ro_ch)
+    phase_r = prog.deg2reg(pulse_cfg["phase"], gen_ch=ch)
 
     if style == "const":
         prog.set_pulse_registers(
-            ch=gen_ch,
+            ch=ch,
             style=style,
             freq=freq_r,
             phase=phase_r,
@@ -78,7 +79,7 @@ def set_pulse(
         )
     elif style == "gauss" or style == "cosine":
         prog.set_pulse_registers(
-            ch=gen_ch,
+            ch=ch,
             style="arb",
             freq=freq_r,
             phase=phase_r,
@@ -87,12 +88,12 @@ def set_pulse(
         )
     elif style == "flat_top":
         raise_length = pulse_cfg["raise_pulse"]["length"]
-        raise_length = prog.us2cycles(raise_length, gen_ch=gen_ch)
+        raise_length = prog.us2cycles(raise_length, gen_ch=ch)
         raise_length = 2 * (raise_length // 2)  # make length even
         flat_length = length - raise_length
         assert flat_length >= 0, "Raise pulse length is longer than the total length"
         prog.set_pulse_registers(
-            ch=gen_ch,
+            ch=ch,
             style="flat_top",
             freq=freq_r,
             phase=phase_r,

@@ -20,7 +20,6 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False):
 
     freq_tqdm = tqdm(fpts)
     flux_tqdm = tqdm(flxs)
-    signals2D = np.zeros((len(flxs), len(fpts)), dtype=np.complex128)
     if instant_show:
         import matplotlib.pyplot as plt
         from IPython.display import clear_output, display
@@ -29,9 +28,10 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False):
         ax.set_xlabel("Flux")
         ax.set_ylabel("Frequency (MHz)")
         ax.set_title("Flux-dependent measurement")
-        ax.pcolormesh(flxs, fpts, np.abs(signals2D).T)
+        matric = ax.pcolormesh(flxs, fpts, np.zeros((len(fpts), len(flxs))))
         dh = display(fig, display_id=True)
 
+    signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
     for i, flx in enumerate(flxs):
         cfg["flux"] = flx
 
@@ -46,9 +46,9 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False):
         flux_tqdm.update()
 
         if instant_show:
-            amps = np.abs(signals2D)
-            amps = NormalizeData(np.ma.masked_where(amps == 0, amps))
-            ax.pcolormesh(flxs, fpts, amps.T)
+            amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)))
+            matric.set_array(amps.T)
+            matric.autoscale()
             dh.update(fig)
     if instant_show:
         clear_output()

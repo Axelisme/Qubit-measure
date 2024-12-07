@@ -36,8 +36,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
         if instant_show:
             curve.set_ydata(np.abs(signals))
             ax.relim()
-            ax.set_xlim(lens[0], lens[-1])
-            ax.autoscale_view()
+            ax.autoscale(axis="y")
             dh.update(fig)
 
     if instant_show:
@@ -77,9 +76,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
             if instant_show:
                 curve.set_ydata(np.abs(signals))
-                ax.relim()
-                ax.set_xlim(pdrs[0], pdrs[-1])
-                ax.autoscale_view()
+                ax.autoscale(axis="y")
                 dh.update(fig)
 
         if instant_show:

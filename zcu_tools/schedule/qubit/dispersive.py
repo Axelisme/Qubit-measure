@@ -29,42 +29,40 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         dh = display(fig, display_id=True)
 
     qub_pulse["gain"] = 0
-    g_signals = np.full(len(fpts), np.nan, dtype=np.complex128)
+    signals_g = np.full(len(fpts), np.nan, dtype=np.complex128)
     for i, f in enumerate(tqdm(fpts)):
         res_pulse["freq"] = f
         prog = TwoToneProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
         signal = avgi[0][0] + 1j * avgq[0][0]
-        g_signals[i] = signal
+        signals_g[i] = signal
 
         if instant_show:
-            curve_g.set_ydata(np.abs(g_signals))
+            curve_g.set_ydata(np.abs(signals_g))
             ax.relim()
-            ax.set_xlim(fpts[0], fpts[-1])
-            ax.autoscale_view()
+            ax.autoscale(axis="y")
             dh.update(fig)
 
     if instant_show:
-        curve_e = ax.plot(fpts, np.zeros_like(fpts))[0]
+        curve_e = ax.plot(fpts, np.abs(signals_g))[0]
         dh.update(fig)
 
     qub_pulse["gain"] = pi_gain
-    e_signals = np.full(len(fpts), np.nan, dtype=np.complex128)
+    signals_e = np.full(len(fpts), np.nan, dtype=np.complex128)
     for i, f in enumerate(tqdm(fpts)):
         res_pulse["freq"] = f
         prog = TwoToneProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
         signal = avgi[0][0] + 1j * avgq[0][0]
-        e_signals[i] = signal
+        signals_e[i] = signal
 
         if instant_show:
-            curve_e.set_ydata(np.abs(e_signals))
+            curve_e.set_ydata(np.abs(signals_e))
             ax.relim()
-            ax.set_xlim(fpts[0], fpts[-1])
-            ax.autoscale_view()
+            ax.autoscale(axis="y")
             dh.update(fig)
 
     if instant_show:
         clear_output()
 
-    return fpts, g_signals, e_signals
+    return fpts, signals_g, signals_e

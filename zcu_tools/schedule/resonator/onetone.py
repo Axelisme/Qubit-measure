@@ -13,8 +13,6 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 
-    signals = np.full(len(fpts), np.nan, dtype=np.complex128)
-
     if instant_show:
         import matplotlib.pyplot as plt
         from IPython.display import clear_output, display
@@ -27,6 +25,8 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         dh = display(fig, display_id=True)
 
     res_pulse = cfg["res_pulse"]
+
+    signals = np.full(len(fpts), np.nan, dtype=np.complex128)
     for i, fpt in enumerate(tqdm(fpts)):
         res_pulse["freq"] = fpt
         prog = OneToneProgram(soccfg, make_cfg(cfg))
@@ -36,8 +36,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         if instant_show:
             curve.set_data(fpts, np.abs(signals))
             ax.relim()
-            ax.set_xlim(fpts[0], fpts[-1])
-            ax.autoscale_view()
+            ax.autoscale(axis="y")
             dh.update(fig)
 
     if instant_show:

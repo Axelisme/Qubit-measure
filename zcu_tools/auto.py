@@ -15,10 +15,14 @@ def make_cfg(exp_cfg: dict, **kwargs):
     return exp_cfg
 
 
-def auto_derive_pulse(pulse_cfg: dict, pulses: dict, nqz: int = None) -> dict:
+def auto_derive_pulse(
+    pulse_cfg: dict, pulses: dict, ch: int = None, nqz: int = None
+) -> dict:
     def auto_derive_waveform(pulse_cfg: dict, only_shape=False):
         if not only_shape:
             pulse_cfg.setdefault("phase", 0)
+            if ch is not None:
+                pulse_cfg.setdefault("ch", ch)
             if nqz is not None:
                 pulse_cfg.setdefault("nqz", nqz)
 
@@ -69,9 +73,10 @@ def auto_derive_res(exp_cfg: dict):
     res_cfg: dict = exp_cfg["resonator"]
 
     # replace pulses with pulse config
+    ch = res_cfg.get("ch")
     nqz = res_cfg.get("nqz")
     pulse_cfgs: dict = res_cfg.get("pulses", {})
-    exp_cfg["res_pulse"] = auto_derive_pulse(exp_cfg["res_pulse"], pulse_cfgs, nqz)
+    exp_cfg["res_pulse"] = auto_derive_pulse(exp_cfg["res_pulse"], pulse_cfgs, ch, nqz)
 
     # remove pulses from resonator config for clarity
     res_cfg.pop("pulses", None)
@@ -94,14 +99,21 @@ def auto_derive_qub(exp_cfg: dict):
     # replace pulses with pulse config
     pulse_cfgs: dict = qub_cfg.get("pulses", {})
     # for single qubit experiment
+    ch = qub_cfg.get("ch")
     nqz = qub_cfg.get("nqz")
     if "qub_pulse" in exp_cfg:
-        exp_cfg["qub_pulse"] = auto_derive_pulse(exp_cfg["qub_pulse"], pulse_cfgs, nqz)
+        exp_cfg["qub_pulse"] = auto_derive_pulse(
+            exp_cfg["qub_pulse"], pulse_cfgs, ch, nqz
+        )
     # for ef experiment
     if "ef_pulse" in exp_cfg:
-        exp_cfg["ef_pulse"] = auto_derive_pulse(exp_cfg["ef_pulse"], pulse_cfgs, nqz)
+        exp_cfg["ef_pulse"] = auto_derive_pulse(
+            exp_cfg["ef_pulse"], pulse_cfgs, ch, nqz
+        )
     if "ge_pulse" in exp_cfg:
-        exp_cfg["ge_pulse"] = auto_derive_pulse(exp_cfg["ge_pulse"], pulse_cfgs, nqz)
+        exp_cfg["ge_pulse"] = auto_derive_pulse(
+            exp_cfg["ge_pulse"], pulse_cfgs, ch, nqz
+        )
 
     # remove pulses from qubit config for clarity
     qub_cfg.pop("pulses", None)
@@ -132,24 +144,26 @@ def auto_derive_flux(exp_cfg: dict):
         exp_cfg["flux"] = lbd_flux[flux]
 
 
-def auto_derive_exp(exp_cfg: dict):
+def auto_derive_readout(exp_cfg: dict):
+    ro_cfg = exp_cfg["adc"]
     res_cfg = exp_cfg["resonator"]
     res_pulse = exp_cfg["res_pulse"]
 
-    # default experiment parameters
-    # 0.0 by default
-    exp_cfg.setdefault("relax_delay", 0.0)
+    # readout channel
+    if "ro_chs" in res_cfg:
+        ro_cfg.setdefault("chs", res_cfg["ro_chs"])
 
     # readout length
-    if "readout_length" not in exp_cfg:
-        assert "length" in res_pulse, "Cannot auto derive readout_length."
-        exp_cfg["readout_length"] = res_pulse["length"]
+    if "length" in res_pulse:
+        ro_cfg.setdefault("ro_length", res_pulse["length"])
 
     # adc_trig_offset
-    if "adc_trig_offset" not in exp_cfg:
-        # use the adc_trig_offset from resonator config
-        assert "adc_trig_offset" in res_cfg, "Cannot auto derive adc_trig_offset."
-        exp_cfg["adc_trig_offset"] = res_cfg["adc_trig_offset"]
+    ro_cfg.setdefault("trig_offset", 0)
+
+
+def auto_derive_exp(exp_cfg: dict):
+    # default experiment parameters
+    exp_cfg.setdefault("relax_delay", 0.0)
 
 
 def fill_default(exp_cfg: dict):
@@ -167,5 +181,6 @@ def auto_derive(exp_cfg):
     auto_derive_res(exp_cfg)
     auto_derive_qub(exp_cfg)
     auto_derive_flux(exp_cfg)
+    auto_derive_readout(exp_cfg)
 
     auto_derive_exp(exp_cfg)

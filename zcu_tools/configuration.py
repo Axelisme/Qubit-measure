@@ -9,21 +9,29 @@ from .tools import deepupdate, numpy2number
 class DefaultCfg:
     res_cfgs = None
     qub_cfgs = None
+    adc_cfgs = None
     flux_cfgs = None
     exp_default = {}
 
     @classmethod
     def init_global(
-        cls, res_cfgs: dict, qub_cfgs: dict, flux_cfgs: dict, overwrite=False
+        cls,
+        res_cfgs: dict,
+        qub_cfgs: dict,
+        adc_cfgs: dict,
+        flux_cfgs: dict,
+        overwrite=False,
     ):
         if not overwrite:
             assert not cls.is_init_global(), "Configuration is already initialized."
         assert isinstance(res_cfgs, dict), f"res_cfgs should be dict, got {res_cfgs}"
         assert isinstance(qub_cfgs, dict), f"qub_cfgs should be dict, got {qub_cfgs}"
+        assert isinstance(adc_cfgs, dict), f"adc_cfgs should be dict, got {adc_cfgs}"
         assert isinstance(flux_cfgs, dict), f"flux_cfgs should be dict, got {flux_cfgs}"
 
         cls.res_cfgs = res_cfgs
         cls.qub_cfgs = qub_cfgs
+        cls.adc_cfgs = adc_cfgs
         cls.flux_cfgs = flux_cfgs
 
     @classmethod
@@ -40,9 +48,10 @@ class DefaultCfg:
         with open(filepath, "r") as f:
             cfg = yaml.safe_load(f)
 
-        cls.res_cfgs = cfg["res_cfgs"]
-        cls.qub_cfgs = cfg["qub_cfgs"]
-        cls.flux_cfgs = cfg["flux_cfgs"]
+        cls.res_cfgs = cfg.get("res_cfgs", {})
+        cls.qub_cfgs = cfg.get("qub_cfgs", {})
+        cls.adc_cfgs = cfg.get("adc_cfgs", {})
+        cls.flux_cfgs = cfg.get("flux_cfgs", {})
 
     @classmethod
     def dump(cls, filepath=None):
@@ -63,6 +72,10 @@ class DefaultCfg:
     @classmethod
     def set_qub(cls, qubit, behavior="force", **cfg):
         deepupdate(cls.qub_cfgs[qubit], cfg, behavior=behavior)
+
+    @classmethod
+    def set_adc(cls, behavior="force", **cfg):
+        deepupdate(cls.adc_cfgs, cfg, behavior=behavior)
 
     @classmethod
     def set_res_pulse(cls, resonator: str, behavior="force", **pulse_cfgs):
@@ -108,5 +121,6 @@ class DefaultCfg:
         return {
             "res_cfgs": cls.res_cfgs,
             "qub_cfgs": cls.qub_cfgs,
+            "adc_cfgs": cls.adc_cfgs,
             "flux_cfgs": cls.flux_cfgs,
         }

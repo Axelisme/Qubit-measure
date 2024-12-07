@@ -23,7 +23,7 @@ class RGainOnetoneProgram(RAveragerProgram, BaseOneToneProgram):
 
     def setup_gain_reg(self):
         # setup gain register
-        ch = self.res_cfg["res_ch"]
+        ch = self.res_pulse["ch"]
         self.r_rp = self.ch_page(ch)
         self.r_gain = self.sreg(ch, "gain")
         self.regwi(self.r_rp, self.r_gain, self.cfg["start"])

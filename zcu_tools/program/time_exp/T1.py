@@ -6,7 +6,7 @@ class T1Program(BaseTimeProgram):
         self.flux_ctrl.trigger()
 
         # pi pulse
-        self.pulse(ch=self.qub_cfg["qub_ch"])
+        self.pulse(ch=self.qub_pulse["ch"])
         self.sync_all()
 
         # wait for specified time

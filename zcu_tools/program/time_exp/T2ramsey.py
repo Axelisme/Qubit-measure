@@ -3,8 +3,7 @@ from .base import BaseTimeProgram
 
 class T2RamseyProgram(BaseTimeProgram):
     def body(self):
-        # qub_cfg = self.qub_cfg
-        qub_ch = self.qub_cfg["qub_ch"]
+        qub_ch = self.qub_pulse["ch"]
 
         self.flux_ctrl.trigger()
 

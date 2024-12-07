@@ -10,6 +10,6 @@ def measure_lookback(soc, soccfg, cfg):
     prog = OneToneProgram(soccfg, make_cfg(cfg, reps=1))
     IQlist = prog.acquire_decimated(soc, progress=True)
     Is, Qs = IQlist[0]
-    Ts = prog.cycles2us(1, ro_ch=cfg["resonator"]["ro_chs"][0]) * np.arange(len(Is))
+    Ts = prog.cycles2us(1, ro_ch=cfg["ro_cfg"]["chs"][0]) * np.arange(len(Is))
 
     return Ts, Is, Qs

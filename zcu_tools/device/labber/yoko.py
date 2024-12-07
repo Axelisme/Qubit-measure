@@ -33,7 +33,7 @@ class YokoDevControl:
 
     @classmethod
     def _init_dev(cls):
-        sHardware = cls.flux_dev["sHardware"]
+        sHardware = "Yokogawa GS200 DC Source"
         dev_cfg = cls.flux_dev["dev_cfg"]
         flux_cfg = cls.flux_dev["flux_cfg"]
 

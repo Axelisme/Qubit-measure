@@ -25,7 +25,8 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     else:
         print("Use RGainOnetoneProgram for hard loop")
         cfg["sweep"] = pdr_cfg
-    signals2D = np.zeros((len(pdrs), len(fpts)), dtype=np.complex128)
+        res_pulse["gain"] = pdrs[0]  # initial gain
+
     if instant_show:
         import matplotlib.pyplot as plt
         from IPython.display import clear_output, display
@@ -34,9 +35,10 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         ax.set_xlabel("Frequency (MHz)")
         ax.set_ylabel("Power (a.u.)")
         ax.set_title("Power-dependent measurement")
-        ax.pcolormesh(fpts, pdrs, np.abs(signals2D))
+        matric = ax.pcolormesh(fpts, pdrs, np.zeros((len(pdrs), len(fpts))))
         dh = display(fig, display_id=True)
 
+    signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     for i, fpt in enumerate(fpts):
         res_pulse["freq"] = fpt
 
@@ -50,7 +52,6 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
                 signals2D[j, i] = avgi[0][0] + 1j * avgq[0][0]
                 pdr_tqdm.update()
         else:
-            res_pulse["gain"] = pdrs[0]  # initial gain
             prog = RGainOnetoneProgram(soccfg, make_cfg(cfg))
             pdrs, avgi, avgq = prog.acquire(soc, progress=False)
             signals2D[:, i] = avgi[0][0] + 1j * avgq[0][0]
@@ -58,9 +59,9 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         freq_tqdm.update()
 
         if instant_show:
-            amps = np.abs(signals2D)
-            amps = NormalizeData(np.ma.masked_where(amps == 0, amps))
-            ax.pcolormesh(fpts, pdrs, amps)
+            amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)))
+            matric.set_array(amps.T)
+            matric.autoscale()
             dh.update(fig)
     if instant_show:
         clear_output()

@@ -22,9 +22,9 @@ class RGainTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
 
     def setup_gain_reg(self):
         # setup gain register
-        ch = self.res_cfg["qub_ch"]
-        self.q_rp = self.ch_page(ch)
-        self.q_gain = self.sreg(ch, "gain")
+        qub_ch = self.qub_pulse["ch"]
+        self.q_rp = self.ch_page(qub_ch)
+        self.q_gain = self.sreg(qub_ch, "gain")
         self.regwi(self.q_rp, self.q_gain, self.cfg["start"])
 
     def initialize(self):
@@ -53,9 +53,9 @@ class RFreqTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
 
     def setup_freq_reg(self):
         # setup freq register
-        ch = self.res_cfg["qub_ch"]
-        self.q_rp = self.ch_page(ch)
-        self.q_freq = self.sreg(ch, "freq")
+        qub_ch = self.qub_pulse["ch"]
+        self.q_rp = self.ch_page(qub_ch)
+        self.q_freq = self.sreg(qub_ch, "freq")
         self.regwi(self.q_rp, self.q_freq, self.cfg["start"])
 
     def initialize(self):

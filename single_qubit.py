@@ -78,27 +78,25 @@ data_host = "192.168.10.232"  # cmd-> ipconfig -> ipv4 #controling computer
 # %%
 res_name = "res"
 qubit_name = "qub"
-# flux_dev = "zcu216"
-flux_dev = "labber_yoko"
 # flux_dev = "none"
-# flux_dev = "qcodes_yoko"
+flux_dev = "yoko"
+# flux_dev = "zcu216"
 
 flux_host = data_host
 # flux_host = "127.0.0.1"
 
 # %%
 DefaultCfg.init_global(
-    res_cfgs={res_name: {"res_ch": 0, "ro_chs": [0], "nqz": 2}},
-    qub_cfgs={qubit_name: {"qub_ch": 6, "nqz": 2}},
+    res_cfgs={res_name: {"ch": 0, "ro_chs": [0], "nqz": 2}},
+    qub_cfgs={qubit_name: {"ch": 6, "nqz": 2}},
     flux_cfgs={
-#         "zcu216": {
-#             "ch": 4,
-#             "saturate": 0.1,  # us
-#         },
-        "labber_yoko": {
+        # "zcu216": {
+        #     "ch": 4,
+        #     "saturate": 0.1,  # us
+        # },
+        "yoko": {
             "server_ip": flux_host,
-            "sHardware": "Yokogawa GS200 DC Source",
-#             "dev_cfg": {"address": "0x0B21::0x0039::91WB18861", "interface": "USB"},
+            # "dev_cfg": {"address": "0x0B21::0x0039::91WB18861", "interface": "USB"},
             "dev_cfg": {"address": "0x0B21::0x0039::90ZB35281", "interface": "USB"},
             "flux_cfg": {"Current - Sweep rate": 10e-6},
         },
@@ -107,7 +105,7 @@ DefaultCfg.init_global(
 )
 
 # %%
-DefaultCfg.load("defaault_cfg.yaml", overwrite=True)
+# DefaultCfg.load("default_cfg.yaml", overwrite=True)
 
 # %%
 DefaultCfg.set_default(resonator=res_name, flux_dev=flux_dev)
@@ -123,9 +121,11 @@ exp_cfg = {
         "gain": 8000,
         "length": 1,  # us
     },
-    "readout_length": 3,  # us
-#     "adc_trig_offset": 0,  # us
-    # "adc_trig_offset": 0.470,  # us
+    "adc": {
+        "readout_length": 3,  # us
+        # "trig_offset": 0,  # us
+        # "trig_offset": 0.470,  # us
+    },
     "relax_delay": 10.0,  # us
 }
 
@@ -138,34 +138,25 @@ Ts, Is, Qs = zs.measure_lookback(soc, soccfg, cfg)
 # %%
 predict_offset = zf.lookback_analyze(Ts, Is, Qs, ratio=0.5)
 
-# Plot results.
-plt.figure()
-plt.plot(Ts, Is, label="I value")
-plt.plot(Ts, Qs, label="Q value")
-plt.plot(Ts, np.abs(Is + 1j * Qs), label="mag")
-plt.axvline(predict_offset, color="r", linestyle="--", label="predict_offset")
-plt.ylabel("a.u.")
-plt.xlabel("us")
-plt.legend()
-plt.title("Averages = " + str(cfg["rounds"]))
 
 # %%
-# adc_trig_offset = cfg["adc_trig_offset"]
-adc_trig_offset = float(predict_offset) + cfg["adc_trig_offset"]
-adc_trig_offset
+# trig_offset = cfg["adc"]["trig_offset"]
+trig_offset = float(predict_offset) + cfg["adc"]["trig_offset"]
+trig_offset
 
 # %%
-DefaultCfg.set_res(res_name, adc_trig_offset=adc_trig_offset)
-
 filename = "lookback"
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
     z_info={"name": "Signal", "unit": "a.u.", "values": Is + 1j * Qs},
-    comment=make_comment(cfg, f"adc_trig_offset = {adc_trig_offset}us"),
+    comment=make_comment(cfg, f"adc_trig_offset = {trig_offset}us"),
     tag="Lookback",
     server_ip=data_host,
 )
+
+# %%
+DefaultCfg.set_ro(trig_offset=trig_offset)
 
 
 # %% [markdown]
@@ -209,18 +200,14 @@ r_f, _ = zf.freq_analyze(fpts, signals, asym=True)
 r_f
 
 # %%
-r_f = 5885.1
-DefaultCfg.set_res(res_name, freq=r_f)
-
-# %%
 filename = "res_freq"
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=make_comment(cfg, f"resonator frequency = {r_f}MHz"),
-#     comment=make_comment(cfg),
-    tag="OneTone",
+    #     comment=make_comment(cfg),
+    tag="OneTone/freq",
     server_ip=data_host,
 )
 
@@ -250,7 +237,9 @@ exp_cfg["sweep"] = {
 }
 cfg = make_cfg(exp_cfg, reps=20000, rounds=1)
 
-fpts, pdrs, signals2D = zs.measure_res_pdr_dep(soc, soccfg, cfg, instant_show=True, soft_loop=False)
+fpts, pdrs, signals2D = zs.measure_res_pdr_dep(
+    soc, soccfg, cfg, instant_show=True, soft_loop=False
+)
 
 
 # %%
@@ -264,7 +253,7 @@ save_data(
     y_info={"name": "Power", "unit": "a.u.", "values": pdrs},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
     comment=make_comment(cfg),
-    tag="OneTone",
+    tag="OneTone/pdr",
     server_ip=data_host,
 )
 
@@ -276,13 +265,10 @@ DefaultCfg.set_res(res_name, max_gain=max_res_gain)
 # ## Flux dependence
 
 # %%
-from zcu_tools.device.flux.yoko import Labber_YokoFluxControl
+from zcu_tools.device.labber.yoko import YokoDevControl  # noqa: E402
 
-Labber_YokoFluxControl.register(DefaultCfg.flux_cfgs["labber_yoko"])
-
-# %%
-flux_crtl = Labber_YokoFluxControl(None)
-flux_crtl.set_flux(-2.35e-3)
+YokoDevControl.connect_server(DefaultCfg.flux_cfgs["yoko"])
+YokoDevControl.set_current(0)
 
 # %%
 exp_cfg = {
@@ -297,7 +283,7 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = {
-#     "flux": make_sweep(-30000, 30000, step=10000),
+    #     "flux": make_sweep(-30000, 30000, step=10000),
     "flux": make_sweep(-2.40e-3, -2.30e-3, 50),
     "freq": make_sweep(r_f - 10, r_f + 10, 50),
 }
@@ -317,7 +303,7 @@ save_data(
     y_info={"name": "Flux", "unit": "a.u.", "values": flxs},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
     comment=make_comment(cfg),
-    tag="OneTone",
+    tag="OneTone/flux",
     server_ip=data_host,
 )
 
@@ -328,13 +314,13 @@ save_data(
 ro_length = 5
 DefaultCfg.set_res_pulse(
     res_name,
-    readout_rf = {
+    readout_rf={
         "style": res_style,
         "freq": r_f,
         "gain": max_res_gain,
         "length": ro_length,
-        "desc": "Readout with resonator freq"
-    }
+        "desc": "Readout with resonator freq",
+    },
 )
 
 # %% [markdown]
@@ -358,7 +344,7 @@ exp_cfg = {
 # %%
 quess_q = 4658
 # exp_cfg["sweep"] = make_sweep(quess_q - 25, quess_q + 25, 5)
-exp_cfg["sweep"] = make_sweep(6000,7000,501)
+exp_cfg["sweep"] = make_sweep(6000, 7000, 501)
 cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
 
 fpts, signals = zs.measure_qubit_freq(soc, soccfg, cfg)
@@ -368,6 +354,7 @@ f_amp, f_pha = zf.freq_analyze(fpts, signals)
 f_amp, f_pha
 
 # %%
+# q_f = 1500
 q_f = f_amp
 # q_f = f_pha
 q_f
@@ -379,13 +366,9 @@ save_data(
     x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=make_comment(cfg, f"qubit frequency = {q_f}MHz"),
-    tag="TwoTone",
+    tag="TwoTone/freq",
     server_ip=data_host,
 )
-
-# %%
-# qub_freq = 4900
-DefaultCfg.set_qub(qubit_name, freq=q_f)
 
 # %% [markdown]
 # # Twotone Dependences
@@ -411,7 +394,9 @@ exp_cfg["sweep"] = {
 }
 cfg = make_cfg(exp_cfg, reps=20000, rounds=1)
 
-fpts, pdrs, signals2D = zs.measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=True, soft_loop=False)
+fpts, pdrs, signals2D = zs.measure_qub_pdr_dep(
+    soc, soccfg, cfg, instant_show=True, soft_loop=False
+)
 
 # %%
 peak_freqs = zf.spectrum_analyze(fpts, pdrs, signals2D)
@@ -424,7 +409,7 @@ save_data(
     y_info={"name": "Power", "unit": "a.u.", "values": pdrs},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
     comment=make_comment(cfg),
-    tag="TwoTone",
+    tag="TwoTone/pdr",
     server_ip=data_host,
 )
 
@@ -436,13 +421,10 @@ DefaultCfg.set_qub(qubit_name, max_gain=max_qub_gain)
 # ## Flux Dependence
 
 # %%
-from zcu_tools.device.flux.yoko import Labber_YokoFluxControl
+from zcu_tools.device.labber.yoko import YokoDevControl  # noqa: E402
 
-Labber_YokoFluxControl.register(DefaultCfg.flux_cfgs["labber_yoko"])
-
-# %%
-flux_crtl = Labber_YokoFluxControl(None)
-flux_crtl.set_flux(-2.35e-3)
+YokoDevControl.connect_server(DefaultCfg.flux_cfgs["yoko"])
+YokoDevControl.set_current(0)
 
 # %%
 exp_cfg = {
@@ -458,7 +440,7 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = {
-#     "flux": make_sweep(-30000, 30000, step=10000),
+    #     "flux": make_sweep(-30000, 30000, step=10000),
     "flux": make_sweep(-2.40e-3, -2.30e-3, 50),
     "freq": make_sweep(r_f - 10, r_f + 10, 50),
 }
@@ -477,13 +459,12 @@ save_data(
     y_info={"name": "Flux", "unit": "a.u.", "values": flxs},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
     comment=make_comment(cfg),
-    tag="TwoTone",
+    tag="TwoTone/flux",
     server_ip=data_host,
 )
 
 # %%
 sw_spot = 10000
-
 DefaultCfg.set_labeled_flux(qubit_name, flux_dev, sw_spot=sw_spot)
 
 # %% [markdown]
@@ -520,7 +501,7 @@ save_data(
     x_info={"name": "Pulse Length", "unit": "s", "values": Ts * 1e-6},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=make_comment(cfg, f"pi len = {pi_len}us\npi/2 len = {pi2_len}us"),
-    tag="TimeDomain",
+    tag="TimeDomain/rabi",
     server_ip=data_host,
 )
 
@@ -562,7 +543,7 @@ save_data(
     x_info={"name": "Amplitude", "unit": "a.u.", "values": pdrs},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=make_comment(cfg, f"pi gain = {pi_gain}\npi/2 gain = {pi2_gain}"),
-    tag="TimeDomain",
+    tag="TimeDomain/rabi",
     server_ip=data_host,
 )
 
@@ -630,7 +611,7 @@ save_data(
     },
     y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
     comment=make_comment(cfg, f"SNR1 = {readout_f1}MHz\nSNR2 = {readout_f2}MHz"),
-    tag="Dispersive",
+    tag="TwoTone/dispersive",
     server_ip=data_host,
 )
 
@@ -687,14 +668,12 @@ save_data(
     x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=make_comment(cfg, f"detune = {detune}MHz\nt2f = {t2f}us\nt2d = {t2d}us"),
-    tag="TimeDomain",
+    tag="TimeDomain/t2ramsey",
     server_ip=data_host,
 )
 
 # %%
 q_f = orig_q_f + activate_detune - detune
-DefaultCfg.set_qub(qubit_name, freq=q_f)
-
 
 # %% [markdown]
 # # T1
@@ -725,39 +704,10 @@ save_data(
     x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=make_comment(cfg, f"t1 = {t1}us"),
-    tag="TimeDomain",
+    tag="TimeDomain/t1",
     server_ip=data_host,
 )
 
-# %%
-# do t1 experiment multiple times
-exp_cfg = {
-    "res_pulse": "readout_dp1",
-    "qub_pulse": "pi",
-    "relax_delay": 50.0,  # us
-}
-exp_cfg["sweep"] = make_sweep(0, 10, 200)
-cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
-
-times = 50
-t1s = []
-errs = []
-for i in range(times):
-    Ts, signals = zs.measure_t1(soc, soccfg, cfg)
-    t1, err = zf.T1_analyze(Ts, signals, return_err=True)
-    t1s.append(t1)
-    errs.append(err)
-
-
-# %%
-import matplotlib.pyplot as plt
-
-# plot t1 and show error bar
-plt.errorbar(range(times), t1s, yerr=errs, fmt="o")
-plt.xlabel("rounds")
-plt.ylabel("t1 (us)")
-plt.title("t1 experiment")
-plt.show()
 
 # %% [markdown]
 # # T2Echo
@@ -786,7 +736,7 @@ save_data(
     x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=make_comment(cfg, f"t2echo = {t2e}us"),
-    tag="TimeDomain",
+    tag="TimeDomain/t2echo",
     server_ip=data_host,
 )
 
@@ -871,7 +821,7 @@ save_data(
     x_info={"name": "shot", "unit": "style", "values": np.arange(len(fids))},
     z_info={"name": "Fidelity", "unit": "%", "values": np.array(list(fids.values()))},
     comment=make_comment(cfg, f"best style = {best_style}, best fide = {best_fid:.1%}"),
-    tag="SingleShot",
+    tag="SingleShot/style",
     server_ip=data_host,
 )
 
@@ -889,7 +839,7 @@ exp_cfg = {
 exp_cfg["sweep"] = make_sweep(max_res_gain - 500, max_res_gain + 2000, step=500)
 cfg = make_cfg(exp_cfg, shots=5000)
 
-pdrs, fids = zs.scan_pdr_fid(soc, soccfg, cfg)
+pdrs, fids = zs.qubit.scan_pdr_fid(soc, soccfg, cfg, instant_show=True)
 
 max_id = np.argmax(fids)
 best_pdr, best_fid = pdrs[max_id], fids[max_id]
@@ -907,7 +857,7 @@ save_data(
     x_info={"name": "gain", "unit": "a. u.", "values": pdrs},
     z_info={"name": "Fidelity", "unit": "%", "values": fids},
     comment=make_comment(cfg, f"best gain = {best_pdr}, best fide = {best_fid:.1%}"),
-    tag="SingleShot",
+    tag="SingleShot/pdr",
     server_ip=data_host,
 )
 
@@ -925,7 +875,8 @@ exp_cfg = {
 exp_cfg["sweep"] = make_sweep(res_length / 2, 3 * res_length, 5)
 cfg = make_cfg(exp_cfg, shots=5000)
 
-lens, fids = zs.scan_len_fid(soc, soccfg, cfg)
+# lens, fids = zs.scan_len_fid(soc, soccfg, cfg)
+lens, fids = zs.qubit.scan_len_fid(soc, soccfg, cfg, instant_show=True)
 
 max_id = np.argmax(fids)
 best_len, best_fid = lens[max_id], fids[max_id]
@@ -943,7 +894,7 @@ save_data(
     x_info={"name": "Pulse length", "unit": "us", "values": lens},
     z_info={"name": "Fidelity", "unit": "%", "values": fids},
     comment=make_comment(cfg, f"best length = {best_len}, best fide = {best_fid:.1%}"),
-    tag="SingleShot",
+    tag="SingleShot/length",
     server_ip=data_host,
 )
 
@@ -961,7 +912,7 @@ exp_cfg = {
 exp_cfg["sweep"] = make_sweep(r_f - 5, r_f + 5, 5)
 cfg = make_cfg(exp_cfg, shots=5000)
 
-fpts, fids = zs.scan_freq_fid(soc, soccfg, cfg)
+fpts, fids = zs.qubit.scan_freq_fid(soc, soccfg, cfg, instant_show=True)
 
 max_id = np.argmax(fids)
 best_freq, best_fid = fpts[max_id], fids[max_id]
@@ -979,7 +930,7 @@ save_data(
     x_info={"name": "Pulse freq", "unit": "Hz", "values": fpts * 1e6},
     z_info={"name": "Fidelity", "unit": "%", "values": fids},
     comment=make_comment(cfg, f"best freq = {best_freq}, best fide = {best_fid:.1%}"),
-    tag="SingleShot",
+    tag="SingleShot/freq",
     server_ip=data_host,
 )
 
@@ -1032,5 +983,4 @@ DefaultCfg.set_res_pulse(
 # # Dump Configurations
 
 # %%
-# DefaultCfg.dump(os.path.join(database_path, "default_cfg"))
-DefaultCfg.dump("default_cfg")
+DefaultCfg.dump("default_cfg.yaml")

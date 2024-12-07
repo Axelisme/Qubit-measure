@@ -29,7 +29,7 @@ class SingleShotProgram(RAveragerProgram, BaseTwoToneProgram):
         self.setup_qubit()
 
         # find the gain register
-        qub_ch = self.qub_cfg["qub_ch"]
+        qub_ch = self.qub_pulse["ch"]
         self.q_rp = self.ch_page(qub_ch)
         self.r_gain = self.sreg(qub_ch, "gain")
 
@@ -51,9 +51,9 @@ class SingleShotProgram(RAveragerProgram, BaseTwoToneProgram):
 
     def collect_shots(self):
         cfg = self.cfg
-        ro_ch = cfg["resonator"]["ro_chs"][0]
+        adc_cfg = self.adc_cfg
+        ro_length = self.us2cycles(adc_cfg["ro_length"], ro_ch=adc_cfg["chs"][0])
         expts, reps = cfg["expts"], cfg["reps"]
-        readout_length = self.us2cycles(cfg["readout_length"], ro_ch=ro_ch)
-        i0 = self.di_buf[0].reshape((expts, reps)) / readout_length
-        q0 = self.dq_buf[0].reshape((expts, reps)) / readout_length
+        i0 = self.di_buf[0].reshape((expts, reps)) / ro_length
+        q0 = self.dq_buf[0].reshape((expts, reps)) / ro_length
         return i0, q0

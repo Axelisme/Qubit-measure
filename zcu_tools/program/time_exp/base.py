@@ -14,7 +14,7 @@ class BaseTimeProgram(RAveragerProgram, BaseTwoToneProgram):
 
     def setup_waittime(self):
         # setup wait time register
-        self.q_rp = self.ch_page(self.qub_cfg["qub_ch"])
+        self.q_rp = self.ch_page(self.qub_pulse["ch"])
         self.r_wait = 3
         self.regwi(self.q_rp, self.r_wait, self.cfg["start"])
 

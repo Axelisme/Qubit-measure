@@ -8,13 +8,23 @@ from . import fitting as ft
 figsize = (8, 6)
 
 
-def lookback_analyze(x: np.ndarray, Is: np.ndarray, Qs: np.ndarray, ratio: float = 0.3):
+def lookback_analyze(Ts, Is, Qs, plot=True, ratio: float = 0.3):
     y = np.abs(Is + 1j * Qs)
 
     # find first idx where y is larger than 0.05 * max_y
-    idx = np.argmax(y > ratio * np.max(y))
+    offset = Ts[np.argmax(y > ratio * np.max(y))]
 
-    return x[idx]
+    if plot:
+        plt.figure(figsize=figsize)
+        plt.plot(Ts, Is, label="I value")
+        plt.plot(Ts, Qs, label="Q value")
+        plt.plot(Ts, y, label="mag")
+        plt.axvline(offset, color="r", linestyle="--", label="predict_offset")
+        plt.ylabel("a.u.")
+        plt.xlabel("us")
+        plt.legend()
+
+    return offset
 
 
 def freq_analyze(x, y, asym=False, plot=True, fit_phase=False):
@@ -76,8 +86,7 @@ def NormalizeData(signals2D: np.ndarray) -> np.ndarray:
     # normalize on frequency axis
     mins = np.min(signals2D, axis=1, keepdims=True)
     maxs = np.max(signals2D, axis=1, keepdims=True)
-    norm_const = np.clip(maxs - mins, 1e-10, None)
-    return (signals2D - mins) / norm_const
+    return (signals2D - mins) / (maxs - mins)
 
 
 def spectrum_analyze(

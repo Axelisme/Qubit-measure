@@ -38,8 +38,7 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             if instant_show:
                 curve.set_ydata(np.abs(signals))
                 ax.relim()
-                ax.set_xlim(fpts[0], fpts[-1])
-                ax.autoscale_view()
+                ax.autoscale(axis="y")
                 dh.update(fig)
 
         if instant_show:
