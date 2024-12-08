@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from . import fitting as ft
-from .tools import convert2max_contrast
+from .tools import convert2max_contrast, rotate_phase
 
 figsize = (8, 6)
 
@@ -26,7 +26,30 @@ def lookback_analyze(Ts, Is, Qs, plot=True, ratio: float = 0.3):
     return offset
 
 
-def freq_analyze(x, y, asym=False, plot=True, show_center=True, max_contrast=False):
+def phase_analyze(x, y, plot=True):
+    phase = np.angle(y, deg=True)
+    phase = np.unwrap(phase)
+
+    pOpt, err = ft.fitline(x, phase)
+    slope, offset = pOpt
+
+    if plot:
+        plt.figure(figsize=figsize)
+        plt.plot(x, phase, label="phase")
+        plt.plot(x, ft.linefunc(x, *pOpt), label="fit")
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    return slope, offset
+
+
+def freq_analyze(
+    x, y, asym=False, plot=True, show_center=True, phase_slope=None, max_contrast=False
+):
+    if phase_slope is not None:
+        y = rotate_phase(y, phase_slope)
+
     if max_contrast:
         signal, _ = convert2max_contrast(y.real, y.imag)
     else:
@@ -62,8 +85,13 @@ def dispersive_analyze(
     use_fit=True,
     asym=False,
     plot=True,
+    phase_slope=None,
     max_contrast=False,
 ):
+    if phase_slope is not None:
+        y1 = rotate_phase(y1, phase_slope)
+        y2 = rotate_phase(y2, phase_slope)
+
     if max_contrast:
         y1, _ = convert2max_contrast(y1.real, y1.imag)
         y2, _ = convert2max_contrast(y2.real, y2.imag)
