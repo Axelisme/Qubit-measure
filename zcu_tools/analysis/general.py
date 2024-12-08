@@ -139,7 +139,7 @@ def dispersive_analyze(
         plt.plot(x, y1 - y2)
         plt.plot(x, curve1 - curve2)
         plt.axvline(x[max_id], color="r", ls="--", label=f"max SNR1 = {x[max_id]:.2f}")
-        plt.axvline(x[min_id], color="g", ls="--", label=f"max SNR2 = {x[max_id]:.2f}")
+        plt.axvline(x[min_id], color="g", ls="--", label=f"max SNR2 = {x[min_id]:.2f}")
         plt.legend()
         plt.show()
 
