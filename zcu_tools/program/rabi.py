@@ -11,6 +11,8 @@ class AmpRabiProgram(RAveragerProgram, BaseTwoToneProgram):
         self.cfg["start"] = sweep_cfg["start"]
         self.cfg["step"] = sweep_cfg["step"]
         self.cfg["expts"] = sweep_cfg["expts"]
+        
+        self.qub_pulse['gain'] = self.cfg['start']
 
     def setup_gain_reg(self):
         qub_ch = self.qub_pulse["ch"]

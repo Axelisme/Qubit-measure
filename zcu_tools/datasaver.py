@@ -68,7 +68,7 @@ def save_data_local(
     log_channels = [z_info]
     step_channels = list(filter(None, [x_info, y_info]))
 
-    import labber_api.Labber as Labber  # type: ignore
+    import Labber  # type: ignore
 
     fObj = Labber.createLogFile_ForData(filepath, log_channels, step_channels)
     if y_info:

@@ -57,7 +57,7 @@ class BaseOneToneProgram(AcquireProgram):
 
 class BaseTwoToneProgram(BaseOneToneProgram):
     def parse_cfg(self):
-        BaseOneToneProgram.parse_cfg()
+        BaseOneToneProgram.parse_cfg(self)
 
         self.qub_pulse = self.dac_cfg.get("qub_pulse")
 

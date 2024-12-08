@@ -7,20 +7,22 @@ def create_waveform(prog: AcquireProgram, name: str, pulse_cfg: dict) -> str:
 
     make_even = False
     if style == "flat_top":
-        make_even = True
         pulse_cfg = pulse_cfg["raise_pulse"]
 
     wav_style = pulse_cfg["style"]
-    length = float(pulse_cfg["length"])
+    length = prog.us2cycles(pulse_cfg["length"], gen_ch=ch)
+    
+    if style == "flat_top":
+        length = int(2 * (length // 2)) # make even
 
     if wav_style == "const":
         if style == "flat_top":
             raise ValueError("Flat top with constant raise style is not supported")
     elif wav_style == "gauss":
-        sigma = float(pulse_cfg["sigma"])
-        prog.add_gauss(ch, name, sigma, length, even_length=make_even)
+        sigma = prog.us2cycles(pulse_cfg["sigma"], gen_ch=ch)
+        prog.add_gauss(ch, name, sigma=sigma, length=length)
     elif wav_style == "cosine":
-        prog.add_cosine(ch, name, length, even_length=make_even)
+        prog.add_cosine(ch, name, length=length)
     elif wav_style == "flat_top":
         raise ValueError("Nested flat top pulses are not supported")
     else:
@@ -44,23 +46,25 @@ def set_pulse(
     # convert length to cycles
     length = prog.us2cycles(pulse_cfg["length"], gen_ch=ch)
 
-    if style == "gauss" or style == "cosine":
-        assert waveform is not None, "Waveform is required for gauss and cosine pulses"
-        style = "arb"
-        length = None  # already set in waveform
-    elif style == "flat_top":
-        # the length register for flat_top only contain the flat part
-        length = pulse_cfg["length"] - pulse_cfg["raise_pulse"]["length"]
-        length = prog.us2cycles(length, gen_ch=ch)
-    else:
-        raise ValueError(f"Unknown pulse style: {style}")
-
-    prog.set_pulse_registers(
-        ch,
+    kwargs = dict(
         style=style,
         freq=freq,
         phase=phase,
-        gain=gain,
-        length=length,
-        waveform=waveform,
+        gain=gain
     )
+
+    if style == "const":
+        kwargs['length'] = length
+    elif style == "gauss" or style == "cosine":
+        assert waveform is not None, "Waveform is required for gauss and cosine pulses"
+        kwargs['style'] = "arb"
+        kwargs['waveform'] = waveform
+    elif style == "flat_top":
+        # the length register for flat_top only contain the flat part
+        length = pulse_cfg["length"] - pulse_cfg["raise_pulse"]["length"]
+        kwargs['length'] = prog.us2cycles(length, gen_ch=ch)
+        kwargs['waveform'] = waveform
+    else:
+        raise ValueError(f"Unknown pulse style: {style}")
+
+    prog.set_pulse_registers(ch, **kwargs)

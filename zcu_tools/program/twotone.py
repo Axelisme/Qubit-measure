@@ -16,8 +16,8 @@ class RGainTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
         BaseTwoToneProgram.parse_cfg(self)
 
         sweep_cfg = self.cfg["sweep"]
-        self.cfg["start"] = sweep_cfg["start"]
-        self.cfg["step"] = sweep_cfg["step"]
+        self.cfg["start"] = int(sweep_cfg["start"])
+        self.cfg["step"] = int(sweep_cfg["step"])
         self.cfg["expts"] = sweep_cfg["expts"]
 
         self.qub_pulse["gain"] = self.cfg["start"]
@@ -47,9 +47,10 @@ class RFreqTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
     def parse_cfg(self):
         BaseTwoToneProgram.parse_cfg(self)
 
+        ch = self.qub_pulse['ch']
         sweep_cfg = self.cfg["sweep"]
-        self.cfg["start"] = sweep_cfg["start"]
-        self.cfg["step"] = sweep_cfg["step"]
+        self.cfg["start"] = self.freq2reg(sweep_cfg["start"], gen_ch=ch)
+        self.cfg["step"] = self.freq2reg(sweep_cfg["step"], gen_ch=ch)
         self.cfg["expts"] = sweep_cfg["expts"]
 
         self.qub_pulse["freq"] = self.cfg["start"]

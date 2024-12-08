@@ -33,7 +33,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
         ax.set_xlabel("Flux")
         ax.set_ylabel("Frequency (MHz)")
         ax.set_title("Flux-dependent measurement")
-        matric = ax.pcolormesh(flxs, fpts, np.zeros((len(fpts), len(flxs))))
+        ax.pcolormesh(flxs, fpts, np.zeros((len(fpts), len(flxs))))
         dh = display(fig, display_id=True)
 
     signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
@@ -53,8 +53,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
 
         if instant_show:
             amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)))
-            matric.set_array(amps.T)
-            matric.autoscale()
+            ax.pcolormesh(fpts, pdrs, amps.T)
             dh.update(fig)
     if instant_show:
         clear_output()

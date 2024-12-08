@@ -10,6 +10,7 @@ from zcu_tools.program import TwoToneProgram, RFreqTwoToneProgram
 def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
+    qub_pulse = cfg["dac"]["qub_pulse"]
     if soft_loop:
         print("Use TwoToneProgram for soft loop")
 
@@ -27,10 +28,9 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             curve = ax.plot(fpts, np.zeros_like(fpts))[0]
             dh = display(fig, display_id=True)
 
-        qub_pulse = cfg["dac"]["qub_pulse"]
         signals = np.full(len(fpts), np.nan, dtype=np.complex128)
         for i, fpt in enumerate(tqdm(fpts)):
-            qub_pulse["freq"] = fpt
+            qub_pulse["freq"] = float(fpt)
             prog = TwoToneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc, progress=False)
             signals[i] = avgi[0][0] + 1j * avgq[0][0]
@@ -51,6 +51,7 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
         prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
         fpts, avgi, avgq = prog.acquire(soc, progress=True)
+        fpts = prog.reg2freq(1, gen_ch=qub_pulse['ch']) * fpts
         signals = avgi[0][0] + 1j * avgq[0][0]
 
     return fpts, signals

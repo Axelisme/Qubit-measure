@@ -16,7 +16,7 @@ class YokoDevControl:
             print("Reinit YokoDevControl")
 
         cls.host_ip = dev_cfg["host_ip"]
-        cls.sweep_rate = dev_cfg["output_cfg"]["Current - Sweep rate"]
+        cls.sweep_rate = dev_cfg["outputCfg"]["Current - Sweep rate"]
 
         # overwrite the cfg
         dev_cfg["dComCfg"]["name"] = "globalFlux"

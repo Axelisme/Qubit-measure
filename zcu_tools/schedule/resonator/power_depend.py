@@ -63,8 +63,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
         if instant_show:
             amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)))
-            matric.set_array(amps.T)
-            matric.autoscale()
+            ax.pcolormesh(fpts, pdrs, amps)
             dh.update(fig)
     if instant_show:
         clear_output()

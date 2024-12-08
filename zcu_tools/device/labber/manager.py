@@ -165,7 +165,7 @@ class InstrManager:
             self._server_ip = self._cfg.server_ip
         # Connect to Labber Instrument server
         # and return a Labber client object.
-        from labber_api import Labber
+        import Labber
 
         self._client = Labber.connectToServer(
             address=self._server_ip, timeout=self._timeout

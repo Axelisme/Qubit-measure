@@ -10,7 +10,7 @@
 #       format_version: '1.3'
 #       jupytext_version: 1.16.4
 #   kernelspec:
-#     display_name: Python 3 (ipykernel)
+#     display_name: Python 3
 #     language: python
 #     name: python3
 # ---
@@ -83,7 +83,12 @@ DefaultCfg.set_adc(ro_chs=[0])
 # DefaultCfg.load("default_cfg.yaml")
 
 # %% [markdown]
-# Initialize the flux
+# ## Initialize the flux
+
+# %%
+import importlib
+import zcu_tools.device as zdev
+importlib.reload(zdev)
 
 # %%
 from zcu_tools.device import YokoDevControl  # noqa: E402
@@ -99,7 +104,7 @@ YokoDevControl.connect_server(
 DefaultCfg.set_default(flux_dev="yoko")
 
 # %%
-cur_flux = 0
+cur_flux = -2.53e-3
 YokoDevControl.set_current(cur_flux)
 DefaultCfg.set_default(flux=cur_flux)
 
@@ -112,15 +117,15 @@ exp_cfg = {
     "dac": {
         "res_pulse": {
             "style": "const",
-            "freq": 5892,  # MHz
-            "gain": 8000,
+            "freq": 5879,  # MHz
+            "gain": 30000,
             "length": 1,  # us
         },
     },
     "adc": {
-        "ro_length": 3,  # us
-        # "trig_offset": 0,  # us
-        # "trig_offset": 0.470,  # us
+        "ro_length": 2,  # us
+        "trig_offset": 0,  # us
+#         "trig_offset": 0.61,  # us
     },
     "relax_delay": 10.0,  # us
 }
@@ -152,7 +157,7 @@ save_data(
 )
 
 # %%
-DefaultCfg.set_adc(trig_offset=trig_offset)
+DefaultCfg.set_adc(trig_offset=trig_offset, ro_length=0.9)
 
 
 # %% [markdown]
@@ -168,30 +173,18 @@ exp_cfg = {
             "length": 5,
         },
     },
+#     "adc": { "ro_length": 5, "trig_offset": 0.52 },
     "relax_delay": 0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(5400, 6300, 901)
-cfg = make_cfg(exp_cfg, reps=5000, rounds=1)
-
-fpts, signals = zs.measure_res_freq(soc, soccfg, cfg)
-
-plt.plot(fpts, np.abs(signals))
-
-# %%
-sorted_fpts = fpts[np.argsort(np.abs(signals))]
-print("Max Amp: ", np.sort(sorted_fpts[-6:]))
-print("Min Amp: ", np.sort(sorted_fpts[:6]))
-
-
-# %%
 guess_r = 5882
 
-exp_cfg["sweep"] = make_sweep(guess_r - 35, guess_r + 35, 121)
-cfg = make_cfg(exp_cfg, res_pulse={"gain": 1000}, reps=100000, rounds=1)
+# exp_cfg["sweep"] = make_sweep(5400, 6300, 901)
+exp_cfg["sweep"] = make_sweep(guess_r - 50, guess_r + 35, 121)
+cfg = make_cfg(exp_cfg, reps=100000, rounds=1)
 
-fpts, signals = zs.measure_res_freq(soc, soccfg, cfg)
+fpts, signals = zs.measure_res_freq(soc, soccfg, cfg, instant_show=True)
 
 # %%
 r_f, _ = zf.freq_analyze(fpts, signals, asym=True)
@@ -208,6 +201,9 @@ save_data(
     tag="OneTone/freq",
     server_ip=data_host,
 )
+
+# %%
+# r_f = 5882.6
 
 # %% [markdown]
 # # Onetone Dependences
@@ -227,13 +223,13 @@ exp_cfg = {
             "length": res_length,  # us
         },
     },
-    "relax_delay": 3.0,  # us
+    "relax_delay": 0.0,  # us
 }
 
 # %%
 exp_cfg["sweep"] = {
-    "pdr": make_sweep(100, 6000, 50, force_int=True),
-    "freq": make_sweep(r_f - 15, r_f + 15, 60),
+    "pdr": make_sweep(100, 6000, 30, force_int=True),
+    "freq": make_sweep(r_f - 50, r_f + 35, 86),
 }
 cfg = make_cfg(exp_cfg, reps=20000, rounds=1)
 
@@ -258,7 +254,7 @@ save_data(
 )
 
 # %%
-max_res_gain = 2000
+max_res_gain = 3000
 DefaultCfg.set_dac(max_res_gain=max_res_gain)
 
 # %% [markdown]
@@ -317,10 +313,12 @@ DefaultCfg.set_pulse(
         "style": res_style,
         "freq": r_f,
         "gain": max_res_gain,
+        "phase": 90,
         "length": ro_length,
         "desc": "Readout with resonator freq",
     }
 )
+DefaultCfg.set_default(adc={"ro_length": ro_length - 0.1})
 
 # %% [markdown]
 # # Qubit Frequency
@@ -334,6 +332,7 @@ exp_cfg = {
             "style": qub_style,
             "gain": 5000,
             "length": 4,
+            
         },
     },
     "relax_delay": 0.0,  # us
@@ -342,17 +341,17 @@ exp_cfg = {
 # %%
 quess_q = 4658
 # exp_cfg["sweep"] = make_sweep(quess_q - 25, quess_q + 25, 5)
-exp_cfg["sweep"] = make_sweep(6000, 7000, 501)
-cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
+exp_cfg["sweep"] = make_sweep(1540, 1655, 101)
+cfg = make_cfg(exp_cfg, reps=100, rounds=1000)
 
-fpts, signals = zs.measure_qubit_freq(soc, soccfg, cfg)
+fpts, signals = zs.measure_qub_freq(soc, soccfg, cfg, instant_show=True, soft_loop=False)
 
 # %%
 f_amp, f_pha = zf.freq_analyze(fpts, signals)
 f_amp, f_pha
 
 # %%
-# q_f = 1500
+# q_f = 1598
 q_f = f_amp
 # q_f = f_pha
 q_f
@@ -384,15 +383,15 @@ exp_cfg = {
             "length": 4,  # us
         },
     },
-    "relax_delay": 3.0,  # us
+    "relax_delay": 0.0,  # us
 }
 
 # %%
 exp_cfg["sweep"] = {
-    "pdr": make_sweep(100, 6000, 50, force_int=True),
-    "freq": make_sweep(r_f - 15, r_f + 15, 60),
+    "pdr": make_sweep(100, 15000, 40, force_int=True),
+    "freq": make_sweep(q_f - 20, q_f + 20, 41),
 }
-cfg = make_cfg(exp_cfg, reps=20000, rounds=1)
+cfg = make_cfg(exp_cfg, reps=100, rounds=1000)
 
 fpts, pdrs, signals2D = zs.measure_qub_pdr_dep(
     soc, soccfg, cfg, instant_show=True, soft_loop=False
@@ -414,7 +413,7 @@ save_data(
 )
 
 # %%
-max_qub_gain = 2000
+max_qub_gain = 30000
 DefaultCfg.set_dac(max_qub_gain=max_qub_gain)
 
 # %% [markdown]
@@ -482,17 +481,17 @@ exp_cfg = {
         "qub_pulse": {
             "style": qub_style,
             "freq": q_f,
-            "gain": max_qub_gain,
+            "gain": 20000
         },
     },
-    "relax_delay": 20.0,  # us
+    "relax_delay": 150.0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(0, 10, 50)
-cfg = make_cfg(exp_cfg, reps=100, rounds=500)
+exp_cfg["sweep"] = make_sweep(0.01, 0.5, 40)
+cfg = make_cfg(exp_cfg, reps=80, rounds=1000)
 
-Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg)
+Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg, instant_show=True)
 
 # %%
 pi_len, pi2_len, _ = zf.rabi_analyze(Ts, signals)
@@ -517,24 +516,24 @@ save_data(
 # ## Amplitude Rabi
 
 # %%
-qub_len = pi_len
+qub_len = pi_len * 2
 exp_cfg = {
     "dac": {
-        "res_pulse": "readout_rf",
+        "res_pulse": "readout_dp1",
         "qub_pulse": {
             "style": qub_style,
             "freq": q_f,
             "length": qub_len,
         },
     },
-    "relax_delay": 20.0,  # us
+    "relax_delay": 150.0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(0, 30000, step=500)
+exp_cfg["sweep"] = make_sweep(0, 30000, step=1000)
 cfg = make_cfg(exp_cfg, reps=100, rounds=500)
 
-pdrs, signals = zs.measure_amprabi(soc, soccfg, cfg)
+pdrs, signals = zs.measure_amprabi(soc, soccfg, cfg, instant_show=True)
 
 # %%
 pi_gain, pi2_gain, _ = zf.rabi_analyze(pdrs, signals)
@@ -590,14 +589,14 @@ exp_cfg = {
         "res_pulse": "readout_rf",
         "qub_pulse": "pi",
     },
-    "relax_delay": 20.0,  # us
+    "relax_delay": 150.0,  # us
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(r_f - 10, r_f + 10, 100)
-cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
+exp_cfg["sweep"] = make_sweep(r_f - 40, r_f + 20, 60)
+cfg = make_cfg(exp_cfg, reps=80, rounds=50)
 
-fpts, g_signals, e_signals = zs.measure_dispersive(soc, soccfg, cfg)
+fpts, g_signals, e_signals = zs.measure_dispersive(soc, soccfg, cfg, instant_show=True)
 
 # %%
 readout_f1, readout_f2 = zf.dispersive_analyze(fpts, g_signals, e_signals, asym=True)

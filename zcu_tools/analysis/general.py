@@ -69,7 +69,7 @@ def freq_analyze(x, y, asym=False, plot=True, fit_phase=False):
             plt.figure(figsize=figsize)
             plt.plot(x, mag, label="mag", marker="o", markersize=3)
             plt.plot(x, curve_mag, label=f"fit, $kappa$={kappa_mag:.2f}")
-            plt.axvline(res_mag, color="r", ls="--", label=f"$f_res$ = {res_mag:.2f}")
+#             plt.axvline(res_mag, color="r", ls="--", label=f"$f_res$ = {res_mag:.2f}")
             plt.title("mag.", fontsize=15)
             plt.legend()
 

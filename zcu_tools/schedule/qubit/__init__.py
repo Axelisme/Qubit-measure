@@ -1,4 +1,4 @@
-from . import ef, singleshot
+from . import singleshot
 from .dispersive import measure_dispersive
 from .flux_depend import measure_qub_flux_dep
 from .power_depend import measure_qub_pdr_dep
@@ -14,7 +14,6 @@ from .time_domain import measure_t1, measure_t2echo, measure_t2ramsey
 from .twotone import measure_qub_freq
 
 __all__ = [
-    "ef",
     "singleshot",
     "measure_qub_freq",
     "measure_qub_pdr_dep",
