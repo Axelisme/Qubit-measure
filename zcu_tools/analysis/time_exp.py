@@ -3,10 +3,15 @@ import numpy as np
 
 from . import fitting as ft
 from .general import figsize
+from .tools import convert2max_contrast
 
 
-def T1_analyze(x: float, y: float, return_err=False, plot=True):
-    y = np.abs(y)
+def T1_analyze(x: float, y: float, return_err=False, plot=True, max_contrast=False):
+    if max_contrast:
+        y, _ = convert2max_contrast(y.real, y.imag)
+    else:
+        y = np.abs(y)
+
     pOpt, pCov = ft.fitexp(x, y)
     t1 = pOpt[2]
     sim = ft.expfunc(x, *pOpt)
@@ -29,8 +34,14 @@ def T1_analyze(x: float, y: float, return_err=False, plot=True):
     return t1
 
 
-def T2fringe_analyze(x: float, y: float, return_err=False, plot=True):
-    y = np.abs(y)
+def T2fringe_analyze(
+    x: float, y: float, return_err=False, plot=True, max_contrast=False
+):
+    if max_contrast:
+        y, _ = convert2max_contrast(y.real, y.imag)
+    else:
+        y = np.abs(y)
+
     pOpt, pCov = ft.fitdecaysin(x, y)
     t2f, detune = pOpt[4], pOpt[2]
     sim = ft.decaysin(x, *pOpt)
@@ -55,8 +66,14 @@ def T2fringe_analyze(x: float, y: float, return_err=False, plot=True):
     return t2f, detune
 
 
-def T2decay_analyze(x: float, y: float, return_err=False, plot=True):
-    y = np.abs(y)
+def T2decay_analyze(
+    x: float, y: float, return_err=False, plot=True, max_contrast=False
+):
+    if max_contrast:
+        y, _ = convert2max_contrast(y.real, y.imag)
+    else:
+        y = np.abs(y)
+
     pOpt, pCov = ft.fitexp(x, y)
     t2e = pOpt[2]
     err = np.sqrt(np.diag(pCov))

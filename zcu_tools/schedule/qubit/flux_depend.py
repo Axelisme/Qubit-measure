@@ -52,8 +52,8 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False):
         flux_tqdm.update()
 
         if instant_show:
-            amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)))
-            ax.pcolormesh(fpts, pdrs, amps.T)
+            amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
+            ax.pcolormesh(flxs, fpts, amps)
             dh.update(fig)
     if instant_show:
         clear_output()

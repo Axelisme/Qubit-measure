@@ -62,7 +62,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         freq_tqdm.update()
 
         if instant_show:
-            amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)))
+            amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
             ax.pcolormesh(fpts, pdrs, amps)
             dh.update(fig)
     if instant_show:

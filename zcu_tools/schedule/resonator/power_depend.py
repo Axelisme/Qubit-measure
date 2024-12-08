@@ -38,7 +38,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         ax.set_xlabel("Frequency (MHz)")
         ax.set_ylabel("Power (a.u.)")
         ax.set_title("Power-dependent measurement")
-        matric = ax.pcolormesh(fpts, pdrs, np.zeros((len(pdrs), len(fpts))))
+        ax.pcolormesh(fpts, pdrs, np.zeros((len(pdrs), len(fpts))))
         dh = display(fig, display_id=True)
 
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
@@ -62,8 +62,8 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         freq_tqdm.update()
 
         if instant_show:
-            amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)))
-            ax.pcolormesh(fpts, pdrs, amps)
+            amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
+            ax.pcolormesh(fpts, pdrs, amps.T)
             dh.update(fig)
     if instant_show:
         clear_output()
