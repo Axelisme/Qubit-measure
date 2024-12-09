@@ -7,6 +7,7 @@ from zcu_tools import make_cfg
 from zcu_tools.program import OneToneProgram
 
 from ..flux import set_flux
+from ..instant_show import init_show, update_show, clear_show
 
 
 def measure_res_freq(soc, soccfg, cfg, instant_show=False):
@@ -17,33 +18,22 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 
-    if instant_show:
-        import matplotlib.pyplot as plt
-        from IPython.display import clear_output, display
-
-        fig, ax = plt.subplots()
-        ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("Amplitude")
-        ax.set_title("Resonator frequency measurement")
-        curve = ax.plot(fpts, np.zeros_like(fpts))[0]
-        dh = display(fig, display_id=True)
-
     res_pulse = cfg["dac"]["res_pulse"]
 
+    if instant_show:
+        fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
+
     signals = np.full(len(fpts), np.nan, dtype=np.complex128)
-    for i, fpt in enumerate(tqdm(fpts, smoothing=0)):
+    for i, fpt in enumerate(tqdm(fpts, desc="Frequency", smoothing=0)):
         res_pulse["freq"] = fpt
         prog = OneToneProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
         signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
         if instant_show:
-            curve.set_data(fpts, np.abs(signals))
-            ax.relim()
-            ax.autoscale(axis="y")
-            dh.update(fig)
+            update_show(fig, ax, dh, curve, fpts, np.abs(signals))
 
     if instant_show:
-        clear_output()
+        clear_show()
 
     return fpts, signals

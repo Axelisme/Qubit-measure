@@ -7,6 +7,7 @@ from zcu_tools.auto import make_cfg
 from zcu_tools.program import AmpRabiProgram, TwoToneProgram
 
 from ..flux import set_flux
+from ..instant_show import init_show, update_show, clear_show
 
 
 def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
@@ -17,34 +18,23 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]
     lens = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
 
-    if instant_show:
-        import matplotlib.pyplot as plt
-        from IPython.display import clear_output, display
-
-        fig, ax = plt.subplots()
-        ax.set_xlabel("Length (ns)")
-        ax.set_ylabel("Signal (a.u.)")
-        ax.set_title("Length-dependent measurement")
-        curve = ax.plot(lens, np.zeros_like(lens))[0]
-        dh = display(fig, display_id=True)
-
     qub_pulse = cfg["dac"]["qub_pulse"]
 
+    if instant_show:
+        fig, ax, dh, curve = init_show(lens, "Length (us)", "Amplitude (a.u.)")
+
     signals = np.full(len(lens), np.nan, dtype=np.complex128)
-    for i, length in enumerate(tqdm(lens, smoothing=0)):
+    for i, length in enumerate(tqdm(lens, desc="Length", smoothing=0)):
         qub_pulse["length"] = length
         prog = TwoToneProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
         signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
         if instant_show:
-            curve.set_ydata(np.abs(signals))
-            ax.relim()
-            ax.autoscale(axis="y")
-            dh.update(fig)
+            update_show(fig, ax, dh, curve, lens, np.abs(signals))
 
     if instant_show:
-        clear_output()
+        clear_show()
 
     return lens, signals
 
@@ -61,15 +51,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         qub_pulse = cfg["dac"]["qub_pulse"]
 
         if instant_show:
-            import matplotlib.pyplot as plt
-            from IPython.display import clear_output, display
-
-            fig, ax = plt.subplots()
-            ax.set_xlabel("Power (a.u.)")
-            ax.set_ylabel("Signal (a.u.)")
-            ax.set_title("Power-dependent measurement")
-            curve = ax.plot(pdrs, np.zeros_like(pdrs))[0]
-            dh = display(fig, display_id=True)
+            fig, ax, dh, curve = init_show(pdrs, "Power (a.u.)", "Signal (a.u.)")
 
         signals = np.full(len(pdrs), np.nan, dtype=np.complex128)
         for i, pdr in enumerate(tqdm(pdrs, smoothing=0)):
@@ -79,12 +61,10 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
             if instant_show:
-                curve.set_ydata(np.abs(signals))
-                ax.autoscale(axis="y")
-                dh.update(fig)
+                update_show(fig, ax, dh, curve, pdrs, np.abs(signals))
 
         if instant_show:
-            clear_output()
+            clear_show()
 
     else:
         print("Use AmpRabiProgram for hard loop")

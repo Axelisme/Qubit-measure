@@ -7,30 +7,22 @@ from zcu_tools import make_cfg
 from zcu_tools.program import TwoToneProgram
 
 from ..flux import set_flux
+from ..instant_show import init_show, update_show, clear_show
 
 
 def measure_dispersive(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
-    sweep_cfg = cfg["sweep"]
-    fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
     res_pulse = cfg["dac"]["res_pulse"]
     qub_pulse = cfg["dac"]["qub_pulse"]
-
     pi_gain = qub_pulse["gain"]
 
+    sweep_cfg = cfg["sweep"]
+    fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
     if instant_show:
-        import matplotlib.pyplot as plt
-        from IPython.display import clear_output, display
-
-        fig, ax = plt.subplots()
-        ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("Amplitude")
-        ax.set_title("Dispersive measurement")
-        curve_g = ax.plot(fpts, np.zeros_like(fpts))[0]
-        dh = display(fig, display_id=True)
+        fig, ax, dh, curve_g = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
     qub_pulse["gain"] = 0
     signals_g = np.full(len(fpts), np.nan, dtype=np.complex128)
@@ -42,10 +34,7 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         signals_g[i] = signal
 
         if instant_show:
-            curve_g.set_ydata(np.abs(signals_g))
-            ax.relim()
-            ax.autoscale(axis="y")
-            dh.update(fig)
+            update_show(fig, ax, dh, curve_g, fpts, np.abs(signals_g))
 
     if instant_show:
         curve_e = ax.plot(fpts, np.abs(signals_g))[0]
@@ -61,12 +50,9 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         signals_e[i] = signal
 
         if instant_show:
-            curve_e.set_ydata(np.abs(signals_e))
-            ax.relim()
-            ax.autoscale(axis="y")
-            dh.update(fig)
+            update_show(fig, ax, dh, curve_e, fpts, np.abs(signals_e))
 
     if instant_show:
-        clear_output()
+        clear_show()
 
     return fpts, signals_g, signals_e

@@ -8,6 +8,7 @@ from zcu_tools.analysis import NormalizeData
 from zcu_tools.program import OneToneProgram
 
 from ..flux import set_flux
+from ..instant_show import init_show2d, update_show2d, clear_show
 
 
 def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
@@ -23,18 +24,10 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
 
     res_pulse = cfg["dac"]["res_pulse"]
 
-    freq_tqdm = tqdm(fpts, smoothing=0)
-    flux_tqdm = tqdm(flxs, smoothing=0)
+    freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
+    flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
     if instant_show:
-        import matplotlib.pyplot as plt
-        from IPython.display import clear_output, display
-
-        fig, ax = plt.subplots()
-        ax.set_xlabel("Flux")
-        ax.set_ylabel("Frequency (MHz)")
-        ax.set_title("Flux-dependent measurement")
-        ax.pcolormesh(flxs, fpts, np.zeros((len(fpts), len(flxs))))
-        dh = display(fig, display_id=True)
+        fig, ax, dh = init_show2d(fpts, flxs, "Frequency (MHz)", "Flux")
 
     signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
     for i, flx in enumerate(flxs):
@@ -53,9 +46,9 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
 
         if instant_show:
             amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
-            ax.pcolormesh(flxs, fpts, amps)
-            dh.update(fig)
+            update_show2d(fig, ax, dh, fpts, flxs, amps)
+
     if instant_show:
-        clear_output()
+        clear_show()
 
     return fpts, flxs, signals2D
