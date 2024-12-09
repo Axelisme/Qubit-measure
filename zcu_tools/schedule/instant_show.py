@@ -37,5 +37,5 @@ def update_show2d(fig, ax, dh, X, Y, Z):
     dh.update(fig)
 
 
-def clear_show(dh):
+def clear_show():
     clear_output()
