@@ -4,13 +4,15 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program import PowerDepProgram, TwoToneProgram
+from zcu_tools.program import PowerDepProgram, TwoToneProgram, RGainTwoToneProgram
 
 from ..flux import set_flux
 from ..instant_show import init_show2d, update_show2d, clear_show
 
 
-def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
+def measure_qub_pdr_dep(
+    soc, soccfg, cfg, instant_show=False, soft_freq=False, soft_pdr=True
+):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     set_flux(cfg["flux_dev"], cfg["flux"])
@@ -26,7 +28,9 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         fig, ax, dh = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
 
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
-    if soft_loop:
+    if soft_freq:
+        assert soft_pdr, "Currently only support soft_freq=True for soft_pdr=True"
+
         print("Use TwoToneProgram for soft loop")
         pdr_tqdm = tqdm(pdrs, desc="Power", smoothing=0)
         freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
@@ -51,11 +55,28 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         if instant_show:
             clear_show()
     else:
-        print("Use QubitSpectrumProgram for hard loop")
+        if soft_pdr:
+            print("Use RGainTwoToneProgram for soft loop")
+            cfg["sweep"] = pdr_cfg
 
-        prog = PowerDepProgram(soccfg, make_cfg(cfg))
-        fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True)
-        signals2D = avgi + 1j * avgq
-        fpts, pdrs = fpt_pdr[0], fpt_pdr[1]
+            for i, pdr in enumerate(tqdm(pdrs, desc="Power", smoothing=0)):
+                qub_pulse["gain"] = pdr
+                prog = RGainTwoToneProgram(soccfg, make_cfg(cfg))
+                fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True)
+                signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
+                fpts = fpt_pdr[0]
+
+                if instant_show:
+                    update_show2d(fig, ax, dh, fpts, pdrs, np.abs(signals2D))
+
+            if instant_show:
+                clear_show()
+        else:
+            print("Use QubitSpectrumProgram for hard loop")
+
+            prog = PowerDepProgram(soccfg, make_cfg(cfg))
+            fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True)
+            signals2D = avgi[0][0] + 1j * avgq[0][0]
+            fpts, pdrs = fpt_pdr[0], fpt_pdr[1]
 
     return fpts, pdrs, signals2D  # (pdrs, freqs)
