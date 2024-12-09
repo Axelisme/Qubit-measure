@@ -68,7 +68,7 @@ def measure_qub_pdr_dep(
                     update_show2d(fig, ax, dh, fpts, pdrs, np.abs(signals2D))
 
         else:
-            print("Use QubitSpectrumProgram for hard loop")
+            print("Use PowerDepProgram for hard loop")
 
             prog = PowerDepProgram(soccfg, make_cfg(cfg))
             fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True)
