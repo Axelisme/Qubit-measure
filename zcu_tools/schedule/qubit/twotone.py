@@ -43,6 +43,9 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         fpts = prog.reg2freq(1, gen_ch=qub_pulse["ch"]) * fpts
         signals = avgi[0][0] + 1j * avgq[0][0]
 
+        if instant_show:
+            update_show(fig, ax, dh, curve, fpts, np.abs(signals))
+
     if instant_show:
         clear_show()
 
