@@ -2,6 +2,7 @@ from copy import deepcopy
 
 import numpy as np
 from tqdm.auto import tqdm
+from Ipython.display import clear_output
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
@@ -23,22 +24,24 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     flxs = np.arange(flux_cfg["start"], flux_cfg["stop"], flux_cfg["step"])
 
     qub_pulse = cfg["dac"]["qub_pulse"]
-    
+
+    flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
+
+    if instant_show:
+        fig, ax, dh = init_show2d(fpts, flxs, "Frequency (MHz)", "Flux")
+
     if soft_loop:
         print("Use TwoToneProgram for soft loop")
         freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
     else:
         print("Use RFreqTwoToneProgram for hard loop")
         cfg["sweep"] = cfg["sweep"]["freq"]
-    flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
-    if instant_show:
-        fig, ax, dh = init_show2d(fpts, flxs, "Frequency (MHz)", "Flux")
 
     signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
     for i, flx in enumerate(flxs):
         cfg["flux"] = flx
         set_flux(cfg["flux_dev"], cfg["flux"])
-        
+
         if soft_loop:
             freq_tqdm.reset()
             freq_tqdm.refresh()
@@ -53,12 +56,14 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             fpts, avgi, avgq = prog.acquire(soc, progress=True)
             fpts = prog.reg2freq(1, gen_ch=qub_pulse["ch"]) * fpts
             signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
+            clear_output(wait=True)
 
         flux_tqdm.update()
 
         if instant_show:
             amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
             update_show2d(fig, ax, dh, fpts, flxs, amps)
+
     if instant_show:
         clear_show()
 
