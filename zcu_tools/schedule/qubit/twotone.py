@@ -15,15 +15,15 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
+    sweep_cfg = cfg["sweep"]
+    fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
+
+    if instant_show:
+        fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
+
     qub_pulse = cfg["dac"]["qub_pulse"]
     if soft_loop:
         print("Use TwoToneProgram for soft loop")
-
-        sweep_cfg = cfg["sweep"]
-        fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
-
-        if instant_show:
-            fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
         signals = np.full(len(fpts), np.nan, dtype=np.complex128)
         for i, fpt in enumerate(tqdm(fpts, desc="Frequency", smoothing=0)):
@@ -35,17 +35,15 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             if instant_show:
                 update_show(fig, ax, dh, curve, fpts, np.abs(signals))
 
-        if instant_show:
-            clear_show()
     else:
         print("Use RFreqTwoToneProgram for hard loop")
-
-        if instant_show:
-            print("Instant show is not supported for hard loop, ignored.")
 
         prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
         fpts, avgi, avgq = prog.acquire(soc, progress=True)
         fpts = prog.reg2freq(1, gen_ch=qub_pulse["ch"]) * fpts
         signals = avgi[0][0] + 1j * avgq[0][0]
+
+    if instant_show:
+        clear_show()
 
     return fpts, signals
