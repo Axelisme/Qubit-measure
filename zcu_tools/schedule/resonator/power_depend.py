@@ -48,7 +48,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
             if instant_show:
                 amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
-                update_show2d(fig, ax, dh, fpts, pdrs, amps.T)
+                update_show2d(fig, ax, dh, fpts, pdrs, amps)
 
     else:
         print("Use RGainOnetoneProgram for hard loop")
@@ -62,7 +62,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
             if instant_show:
                 amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
-                update_show2d(fig, ax, dh, fpts, pdrs, amps.T)
+                update_show2d(fig, ax, dh, fpts, pdrs, amps)
 
     if instant_show:
         clear_show()

@@ -26,7 +26,7 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
 
     qub_pulse["gain"] = 0
     signals_g = np.full(len(fpts), np.nan, dtype=np.complex128)
-    for i, f in enumerate(tqdm(fpts, smoothing=0)):
+    for i, f in enumerate(tqdm(fpts, desc="Ground", smoothing=0)):
         res_pulse["freq"] = f
         prog = TwoToneProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
@@ -42,7 +42,7 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
 
     qub_pulse["gain"] = pi_gain
     signals_e = np.full(len(fpts), np.nan, dtype=np.complex128)
-    for i, f in enumerate(tqdm(fpts, smoothing=0)):
+    for i, f in enumerate(tqdm(fpts, desc="Excited", smoothing=0)):
         res_pulse["freq"] = f
         prog = TwoToneProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)

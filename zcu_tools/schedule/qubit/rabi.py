@@ -54,7 +54,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             fig, ax, dh, curve = init_show(pdrs, "Power (a.u.)", "Signal (a.u.)")
 
         signals = np.full(len(pdrs), np.nan, dtype=np.complex128)
-        for i, pdr in enumerate(tqdm(pdrs, smoothing=0)):
+        for i, pdr in enumerate(tqdm(pdrs, desc="Amplitude", smoothing=0)):
             qub_pulse["gain"] = pdr
             prog = TwoToneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc, progress=False)
