@@ -77,7 +77,7 @@ class RFreqTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
         self.mathi(self.q_rp, self.q_freq, self.q_freq, "+", self.cfg["step"])
 
 
-class QubitSpectrumProgram(NDAveragerProgram, BaseTwoToneProgram):
+class PowerDepProgram(NDAveragerProgram, BaseTwoToneProgram):
     def parse_cfg(self):
         BaseTwoToneProgram.parse_cfg(self)
 

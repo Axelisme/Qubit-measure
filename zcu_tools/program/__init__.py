@@ -6,7 +6,7 @@ from .twotone import (
     RFreqTwoToneProgram,
     RGainTwoToneProgram,
     TwoToneProgram,
-    QubitSpectrumProgram,
+    PowerDepProgram,
 )
 
 __all__ = [
@@ -15,7 +15,7 @@ __all__ = [
     "TwoToneProgram",
     "RGainTwoToneProgram",
     "RFreqTwoToneProgram",
-    "QubitSpectrumProgram",
+    "PowerDepProgram",
     "AmpRabiProgram",
     "T1Program",
     "T2RamseyProgram",

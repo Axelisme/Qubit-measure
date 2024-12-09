@@ -4,7 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program import QubitSpectrumProgram, TwoToneProgram
+from zcu_tools.program import PowerDepProgram, TwoToneProgram
 
 from ..flux import set_flux
 from ..instant_show import init_show2d, update_show2d, clear_show
@@ -53,7 +53,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     else:
         print("Use QubitSpectrumProgram for hard loop")
 
-        prog = QubitSpectrumProgram(soccfg, make_cfg(cfg))
+        prog = PowerDepProgram(soccfg, make_cfg(cfg))
         fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True)
         signals2D = avgi + 1j * avgq
         fpts, pdrs = fpt_pdr[0], fpt_pdr[1]
