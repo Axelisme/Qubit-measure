@@ -29,8 +29,8 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     if soft_loop:
         print("Use OneToneProgram for soft loop")
-        pdr_tqdm = tqdm(pdrs, desc="Power")
-        freq_tqdm = tqdm(fpts, desc="Frequency")
+        pdr_tqdm = tqdm(pdrs, desc="Power", smoothing=0)
+        freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
 
         for i, pdr in enumerate(pdr_tqdm):
             res_pulse["gain"] = pdr
