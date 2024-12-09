@@ -50,7 +50,7 @@ def scan_pdr_fid(soc, soccfg, cfg, instant_show=False):
         dh = display(fig, display_id=True)
 
     fids = np.full(len(pdrs), np.nan)
-    for i, pdr in enumerate(tqdm(pdrs)):
+    for i, pdr in enumerate(tqdm(pdrs, smoothing=0)):
         res_pulse["gain"] = pdr
         fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
         fids[i] = fid
@@ -90,7 +90,7 @@ def scan_len_fid(soc, soccfg, cfg, instant_show=False):
         dh = display(fig, display_id=True)
 
     fids = np.full(len(lens), np.nan)
-    for i, length in enumerate(tqdm(lens)):
+    for i, length in enumerate(tqdm(lens, smoothing=0)):
         res_pulse["length"] = length
         fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
         fids[i] = fid
@@ -129,7 +129,7 @@ def scan_freq_fid(soc, soccfg, cfg, instant_show=False):
         dh = display(fig, display_id=True)
 
     fids = np.full(len(fpts), np.nan)
-    for i, fpt in enumerate(tqdm(fpts)):
+    for i, fpt in enumerate(tqdm(fpts, smoothing=0)):
         res_pulse["freq"] = fpt
         fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
         fids[i] = fid

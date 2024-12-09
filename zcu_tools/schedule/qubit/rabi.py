@@ -31,7 +31,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
     qub_pulse = cfg["dac"]["qub_pulse"]
 
     signals = np.full(len(lens), np.nan, dtype=np.complex128)
-    for i, length in enumerate(tqdm(lens)):
+    for i, length in enumerate(tqdm(lens, smoothing=0)):
         qub_pulse["length"] = length
         prog = TwoToneProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)
@@ -72,7 +72,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             dh = display(fig, display_id=True)
 
         signals = np.full(len(pdrs), np.nan, dtype=np.complex128)
-        for i, pdr in enumerate(tqdm(pdrs)):
+        for i, pdr in enumerate(tqdm(pdrs, smoothing=0)):
             qub_pulse["gain"] = pdr
             prog = TwoToneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc, progress=False)

@@ -5,7 +5,7 @@ from ..base import BaseTwoToneProgram
 
 class TimeProgram(RAveragerProgram, BaseTwoToneProgram):
     def parse_cfg(self):
-        BaseTwoToneProgram.parse_cfg()
+        BaseTwoToneProgram.parse_cfg(self)
 
         sweep_cfg = self.cfg["sweep"]
         self.cfg["start"] = self.us2cycles(sweep_cfg["start"])

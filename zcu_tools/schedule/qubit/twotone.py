@@ -29,7 +29,7 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             dh = display(fig, display_id=True)
 
         signals = np.full(len(fpts), np.nan, dtype=np.complex128)
-        for i, fpt in enumerate(tqdm(fpts)):
+        for i, fpt in enumerate(tqdm(fpts, smoothing=0)):
             qub_pulse["freq"] = float(fpt)
             prog = TwoToneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc, progress=False)

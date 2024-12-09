@@ -22,10 +22,10 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
     qub_pulse = cfg["dac"]["qub_pulse"]
 
-    freq_tqdm = tqdm(fpts)
+    freq_tqdm = tqdm(fpts, smoothing=0)
     if soft_loop:
         print("Use TwoToneProgram for soft loop")
-        pdr_tqdm = tqdm(pdrs)
+        pdr_tqdm = tqdm(pdrs, smoothing=0)
     else:
         print("Use RGainTwoToneProgram for hard loop")
         cfg["sweep"] = pdr_cfg

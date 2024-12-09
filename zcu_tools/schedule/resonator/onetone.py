@@ -31,7 +31,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
     res_pulse = cfg["dac"]["res_pulse"]
 
     signals = np.full(len(fpts), np.nan, dtype=np.complex128)
-    for i, fpt in enumerate(tqdm(fpts)):
+    for i, fpt in enumerate(tqdm(fpts, smoothing=0)):
         res_pulse["freq"] = fpt
         prog = OneToneProgram(soccfg, make_cfg(cfg))
         avgi, avgq = prog.acquire(soc, progress=False)

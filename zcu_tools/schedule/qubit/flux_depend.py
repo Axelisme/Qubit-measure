@@ -23,8 +23,8 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False):
 
     qub_pulse = cfg["dac"]["qub_pulse"]
 
-    freq_tqdm = tqdm(fpts)
-    flux_tqdm = tqdm(flxs)
+    freq_tqdm = tqdm(fpts, smoothing=0)
+    flux_tqdm = tqdm(flxs, smoothing=0)
     if instant_show:
         import matplotlib.pyplot as plt
         from IPython.display import clear_output, display

@@ -22,10 +22,10 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
     res_pulse = cfg["dac"]["res_pulse"]
 
-    freq_tqdm = tqdm(fpts)
+    freq_tqdm = tqdm(fpts, smoothing=0)
     if soft_loop:
         print("Use OneToneProgram for soft loop")
-        pdr_tqdm = tqdm(pdrs)
+        pdr_tqdm = tqdm(pdrs, smoothing=0)
     else:
         print("Use RGainOnetoneProgram for hard loop")
         cfg["sweep"] = pdr_cfg
@@ -63,7 +63,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
         if instant_show:
             amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
-            ax.pcolormesh(fpts, pdrs, amps.T)
+            ax.pcolormesh(fpts, pdrs, amps)
             dh.update(fig)
     if instant_show:
         clear_output()

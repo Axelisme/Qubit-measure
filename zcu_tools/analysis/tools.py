@@ -32,9 +32,9 @@ def NormalizeData(signals2D: np.ndarray, axis=1) -> np.ndarray:
 
 
 def rotate_phase(fpts, y, phase_slope):
-    Is, Qs = fpts.real, fpts.imag
+    Is, Qs = y.real, y.imag
 
-    angles = fpts * phase_slope
+    angles = fpts * phase_slope * np.pi / 180
     Is_rot = Is * np.cos(angles) - Qs * np.sin(angles)
     Qs_rot = Is * np.sin(angles) + Qs * np.cos(angles)
 

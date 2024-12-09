@@ -1,4 +1,4 @@
-from .tools import NormalizeData
+from .tools import NormalizeData, rotate_phase
 from .general import (
     lookback_analyze,
     phase_analyze,
@@ -11,6 +11,7 @@ from .time_exp import T1_analyze, T2decay_analyze, T2fringe_analyze
 
 __all__ = [
     "NormalizeData",
+    "rotate_phase",
     "lookback_analyze",
     "phase_analyze",
     "freq_analyze",

@@ -49,7 +49,7 @@ def T2fringe_analyze(
 
     if plot:
         t2f_str = f"{t2f:.2f}us +/- {err[4]:.2f}us"
-        detune_str = f"{detune:.2f}MHz \pm {err[2]*1e3:.2f}kHz"
+        detune_str = f"{detune:.2f}MHz +/- {err[2]*1e3:.2f}kHz"
 
         plt.figure(figsize=figsize)
         plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
