@@ -4,7 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program import RGainTwoToneProgram, TwoToneProgram
+from zcu_tools.program import QubitSpectrumProgram, TwoToneProgram
 
 from ..flux import set_flux
 from ..instant_show import init_show2d, update_show2d, clear_show
@@ -48,20 +48,14 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             if instant_show:
                 update_show2d(fig, ax, dh, fpts, pdrs, np.abs(signals2D))
 
+        if instant_show:
+            clear_show()
     else:
-        print("Use RGainTwoToneProgram for hard loop")
-        cfg["sweep"] = pdr_cfg
+        print("Use QubitSpectrumProgram for hard loop")
 
-        for i, fpt in enumerate(tqdm(fpts, desc="Frequency", smoothing=0)):
-            qub_pulse["freq"] = fpt
-            prog = RGainTwoToneProgram(soccfg, make_cfg(cfg))
-            pdrs, avgi, avgq = prog.acquire(soc, progress=False)
-            signals2D[:, i] = avgi[0][0] + 1j * avgq[0][0]
-
-            if instant_show:
-                update_show2d(fig, ax, dh, fpts, pdrs, np.abs(signals2D))
-
-    if instant_show:
-        clear_show()
+        prog = QubitSpectrumProgram(soccfg, make_cfg(cfg))
+        fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True)
+        signals2D = avgi + 1j * avgq
+        fpts, pdrs = fpt_pdr[0], fpt_pdr[1]
 
     return fpts, pdrs, signals2D  # (pdrs, freqs)

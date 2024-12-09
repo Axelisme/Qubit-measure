@@ -1,4 +1,5 @@
-from qick import AveragerProgram, RAveragerProgram
+from qick import AveragerProgram, RAveragerProgram, NDAveragerProgram
+from qick.averager_program import QickSweep
 
 from .base import BaseTwoToneProgram
 
@@ -47,7 +48,7 @@ class RFreqTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
     def parse_cfg(self):
         BaseTwoToneProgram.parse_cfg(self)
 
-        ch = self.qub_pulse['ch']
+        ch = self.qub_pulse["ch"]
         sweep_cfg = self.cfg["sweep"]
         self.cfg["start"] = self.freq2reg(sweep_cfg["start"], gen_ch=ch)
         self.cfg["step"] = self.freq2reg(sweep_cfg["step"], gen_ch=ch)
@@ -74,3 +75,43 @@ class RFreqTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
 
     def update(self):
         self.mathi(self.q_rp, self.q_freq, self.q_freq, "+", self.cfg["step"])
+
+
+class QubitSpectrumProgram(NDAveragerProgram, BaseTwoToneProgram):
+    def parse_cfg(self):
+        BaseTwoToneProgram.parse_cfg(self)
+
+        self.qub_pulse["freq"] = self.cfg["sweep"]["freq"]["start"]
+        self.qub_pulse["gain"] = self.cfg["sweep"]["gain"]["start"]
+
+    def add_freq_sweep(self):
+        qub_ch = self.qub_pulse["ch"]
+        r_freq = self.get_gen_reg(qub_ch, "freq")
+        sweep_cfg = self.cfg["sweep"]["freq"]
+        self.add_sweep(
+            QickSweep(
+                self, r_freq, sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"]
+            )
+        )
+
+    def add_gain_sweep(self):
+        qub_ch = self.qub_pulse["ch"]
+        r_gain = self.get_gen_reg(qub_ch, "gain")
+        sweep_cfg = self.cfg["sweep"]["gain"]
+        self.add_sweep(
+            QickSweep(
+                self, r_gain, sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"]
+            )
+        )
+
+    def initialize(self):
+        self.parse_cfg()
+        self.setup_readout()
+        self.setup_qubit()
+        self.add_freq_sweep()
+        self.add_gain_sweep()
+
+        self.synci(200)
+
+    def body(self):
+        BaseTwoToneProgram.body(self)
