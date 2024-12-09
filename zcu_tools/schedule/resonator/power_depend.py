@@ -17,7 +17,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     set_flux(cfg["flux_dev"], cfg["flux"])
 
     freq_cfg = cfg["sweep"]["freq"]
-    pdr_cfg = cfg["sweep"]["pdr"]
+    pdr_cfg = cfg["sweep"]["gain"]
     fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
     pdrs = np.arange(pdr_cfg["start"], pdr_cfg["stop"], pdr_cfg["step"])
 
