@@ -54,13 +54,12 @@ class RFreqTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
         self.cfg["step"] = self.freq2reg(sweep_cfg["step"], gen_ch=ch)
         self.cfg["expts"] = sweep_cfg["expts"]
 
-        self.qub_pulse["freq"] = self.cfg["start"]
+        self.qub_pulse["freq"] = sweep_cfg["start"]
 
     def setup_freq_reg(self):
         qub_ch = self.qub_pulse["ch"]
         self.q_rp = self.ch_page(qub_ch)
         self.q_freq = self.sreg(qub_ch, "freq")
-        self.regwi(self.q_rp, self.q_freq, self.cfg["start"])
 
     def initialize(self):
         self.parse_cfg()

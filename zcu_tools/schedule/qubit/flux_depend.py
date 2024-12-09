@@ -5,13 +5,13 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.program import TwoToneProgram
+from zcu_tools.program import TwoToneProgram, RFreqTwoToneProgram
 
 from ..flux import set_flux
 from ..instant_show import init_show2d, update_show2d, clear_show
 
 
-def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False):
+def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     if cfg["flux_dev"] == "none":
@@ -23,8 +23,13 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False):
     flxs = np.arange(flux_cfg["start"], flux_cfg["stop"], flux_cfg["step"])
 
     qub_pulse = cfg["dac"]["qub_pulse"]
-
-    freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
+    
+    if soft_loop:
+        print("Use TwoToneProgram for soft loop")
+        freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
+    else:
+        print("Use RFreqTwoToneProgram for hard loop")
+        cfg["sweep"] = cfg["sweep"]["freq"]
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
     if instant_show:
         fig, ax, dh = init_show2d(fpts, flxs, "Frequency (MHz)", "Flux")
@@ -33,15 +38,22 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False):
     for i, flx in enumerate(flxs):
         cfg["flux"] = flx
         set_flux(cfg["flux_dev"], cfg["flux"])
+        
+        if soft_loop:
+            freq_tqdm.reset()
+            freq_tqdm.refresh()
+            for j, f in enumerate(fpts):
+                qub_pulse["freq"] = f
+                prog = TwoToneProgram(soccfg, make_cfg(cfg))
+                avgi, avgq = prog.acquire(soc, progress=False)
+                signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]
+                freq_tqdm.update()
+        else:
+            prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
+            fpts, avgi, avgq = prog.acquire(soc, progress=True)
+            fpts = prog.reg2freq(1, gen_ch=qub_pulse["ch"]) * fpts
+            signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
 
-        freq_tqdm.reset()
-        freq_tqdm.refresh()
-        for j, f in enumerate(fpts):
-            qub_pulse["freq"] = f
-            prog = TwoToneProgram(soccfg, make_cfg(cfg))
-            avgi, avgq = prog.acquire(soc, progress=False)
-            signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]
-            freq_tqdm.update()
         flux_tqdm.update()
 
         if instant_show:
