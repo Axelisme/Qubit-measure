@@ -52,8 +52,6 @@ def measure_qub_pdr_dep(
             if instant_show:
                 update_show2d(fig, ax, dh, fpts, pdrs, np.abs(signals2D))
 
-        if instant_show:
-            clear_show()
     else:
         if soft_pdr:
             print("Use RGainTwoToneProgram for soft loop")
@@ -69,8 +67,6 @@ def measure_qub_pdr_dep(
                 if instant_show:
                     update_show2d(fig, ax, dh, fpts, pdrs, np.abs(signals2D))
 
-            if instant_show:
-                clear_show()
         else:
             print("Use QubitSpectrumProgram for hard loop")
 
@@ -78,5 +74,8 @@ def measure_qub_pdr_dep(
             fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True)
             signals2D = avgi[0][0] + 1j * avgq[0][0]
             fpts, pdrs = fpt_pdr[0], fpt_pdr[1]
+
+    if instant_show:
+        clear_show()
 
     return fpts, pdrs, signals2D  # (pdrs, freqs)
