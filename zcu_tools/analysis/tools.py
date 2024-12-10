@@ -29,7 +29,8 @@ def NormalizeData(signals2D: np.ndarray, axis=None) -> np.ndarray:
     # normalize on given axis
     mins = np.min(signals2D, axis=axis, keepdims=True)
     maxs = np.max(signals2D, axis=axis, keepdims=True)
-    return (signals2D - mins) / (maxs - mins)
+    meds = np.median(signals2D, axis=axis, keepdims=True)
+    return (signals2D - meds) / (maxs - mins)
 
 
 def rotate_phase(fpts, y, phase_slope):
