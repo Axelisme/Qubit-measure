@@ -27,7 +27,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
     if instant_show:
-        fig, ax, dh = init_show2d(fpts, flxs, "Frequency (MHz)", "Flux")
+        fig, ax, dh = init_show2d(flxs, fpts, "Flux", "Frequency (MHz)")
 
     signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
     try:
@@ -46,8 +46,8 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
             flux_tqdm.update()
 
             if instant_show:
-                amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
-                update_show2d(fig, ax, dh, fpts, flxs, amps)
+                amps = NormalizeData(np.abs(signals2D), axis=1)
+                update_show2d(fig, ax, dh, flxs, fpts, amps.T)
 
         if instant_show:
             clear_show()

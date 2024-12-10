@@ -24,7 +24,8 @@ def convert2max_contrast(Is: np.ndarray, Qs: np.ndarray):
     return data_rot[0], data_rot[1]
 
 
-def NormalizeData(signals2D: np.ndarray, axis=1) -> np.ndarray:
+def NormalizeData(signals2D: np.ndarray, axis=None) -> np.ndarray:
+    signals2D = np.ma.masked_invalid(signals2D)
     # normalize on given axis
     mins = np.min(signals2D, axis=axis, keepdims=True)
     maxs = np.max(signals2D, axis=axis, keepdims=True)

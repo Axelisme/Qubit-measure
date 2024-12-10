@@ -48,9 +48,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
                 pdr_tqdm.update()
 
                 if instant_show:
-                    amps = NormalizeData(
-                        np.ma.masked_invalid(np.abs(signals2D)), axis=1
-                    )
+                    amps = NormalizeData(np.abs(signals2D), axis=1)
                     update_show2d(fig, ax, dh, fpts, pdrs, amps)
 
         else:
@@ -64,9 +62,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
                 signals2D[:, i] = avgi[0][0] + 1j * avgq[0][0]
 
                 if instant_show:
-                    amps = NormalizeData(
-                        np.ma.masked_invalid(np.abs(signals2D)), axis=1
-                    )
+                    amps = NormalizeData(np.abs(signals2D), axis=1)
                     update_show2d(fig, ax, dh, fpts, pdrs, amps)
 
         if instant_show:

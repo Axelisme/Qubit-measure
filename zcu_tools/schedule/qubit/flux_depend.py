@@ -27,7 +27,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
 
     if instant_show:
-        fig, ax, dh = init_show2d(fpts, flxs, "Frequency (MHz)", "Flux")
+        fig, ax, dh = init_show2d(flxs, fpts, "Flux", "Frequency (MHz)")
 
     if soft_loop:
         print("Use TwoToneProgram for soft loop")
@@ -59,8 +59,8 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             flux_tqdm.update()
 
             if instant_show:
-                amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
-                update_show2d(fig, ax, dh, fpts, flxs, amps)
+                amps = NormalizeData(np.abs(signals2D), axis=1)
+                update_show2d(fig, ax, dh, flxs, fpts, amps.T)
 
         if instant_show:
             clear_show()
