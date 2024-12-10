@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from . import fitting as ft
-from .tools import convert2max_contrast
+from .tools import convert2max_contrast, NormalizeData
 
 figsize = (8, 6)
 
@@ -22,6 +22,7 @@ def lookback_analyze(Ts, Is, Qs, plot=True, ratio: float = 0.3):
         plt.ylabel("a.u.")
         plt.xlabel("us")
         plt.legend()
+        plt.show()
 
     return offset
 
@@ -37,7 +38,7 @@ def phase_analyze(x, y, plot=True, plot_fit=True):
         plt.figure(figsize=figsize)
         plt.plot(x, phase, label="phase")
         if plot_fit:
-            plt.plot(x, slope*x+offset, label="fit")
+            plt.plot(x, slope * x + offset, label="fit")
         plt.legend()
         plt.tight_layout()
         plt.show()
@@ -45,9 +46,7 @@ def phase_analyze(x, y, plot=True, plot_fit=True):
     return slope, offset
 
 
-def freq_analyze(
-    x, y, asym=False, plot=True, show_center=True, max_contrast=False
-):
+def freq_analyze(x, y, asym=False, plot=True, show_center=True, max_contrast=False):
     if max_contrast:
         signal, _ = convert2max_contrast(y.real, y.imag)
     else:
@@ -74,6 +73,18 @@ def freq_analyze(
         plt.show()
 
     return freq
+
+
+def dependent_analyze(X, Y, Z, normalize=True, n_axis=1, contour=False):
+    if normalize:
+        Z = NormalizeData(Z, n_axis)
+
+    plt.figure(figsize=figsize)
+    plt.pcolormesh(X, Y, Z)
+    if contour:
+        plt.contour(X, Y, Z, levels=[0.5])
+
+    plt.show()
 
 
 def dispersive_analyze(
