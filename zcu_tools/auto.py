@@ -105,5 +105,8 @@ def auto_derive(exp_cfg):
         if length:
             adc_cfg.setdefault("ro_length", length)
 
+    # flux_dev
+    exp_cfg.setdefault("flux_dev", "none")
+
     # relax delay
     exp_cfg.setdefault("relax_delay", 0.0)

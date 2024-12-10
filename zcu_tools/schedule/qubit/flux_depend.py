@@ -2,7 +2,6 @@ from copy import deepcopy
 
 import numpy as np
 from tqdm.auto import tqdm
-from Ipython.display import clear_output
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
@@ -38,33 +37,34 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         cfg["sweep"] = cfg["sweep"]["freq"]
 
     signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
-    for i, flx in enumerate(flxs):
-        cfg["flux"] = flx
-        set_flux(cfg["flux_dev"], cfg["flux"])
+    try:
+        for i, flx in enumerate(flxs):
+            cfg["flux"] = flx
+            set_flux(cfg["flux_dev"], cfg["flux"])
 
-        if soft_loop:
-            freq_tqdm.reset()
-            freq_tqdm.refresh()
-            for j, f in enumerate(fpts):
-                qub_pulse["freq"] = f
-                prog = TwoToneProgram(soccfg, make_cfg(cfg))
-                avgi, avgq = prog.acquire(soc, progress=False)
-                signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]
-                freq_tqdm.update()
-        else:
-            prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
-            fpts, avgi, avgq = prog.acquire(soc, progress=True)
-            fpts = prog.reg2freq(1, gen_ch=qub_pulse["ch"]) * fpts
-            signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
-            clear_output(wait=True)
+            if soft_loop:
+                freq_tqdm.reset()
+                freq_tqdm.refresh()
+                for j, f in enumerate(fpts):
+                    qub_pulse["freq"] = f
+                    prog = TwoToneProgram(soccfg, make_cfg(cfg))
+                    avgi, avgq = prog.acquire(soc, progress=False)
+                    signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]
+                    freq_tqdm.update()
+            else:
+                prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
+                _, avgi, avgq = prog.acquire(soc, progress=False)
+                signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
 
-        flux_tqdm.update()
+            flux_tqdm.update()
+
+            if instant_show:
+                amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
+                update_show2d(fig, ax, dh, fpts, flxs, amps)
 
         if instant_show:
-            amps = NormalizeData(np.ma.masked_invalid(np.abs(signals2D)), axis=1)
-            update_show2d(fig, ax, dh, fpts, flxs, amps)
-
-    if instant_show:
-        clear_show()
+            clear_show()
+    except Exception as e:
+        print("Error during measurement:", e)
 
     return fpts, flxs, signals2D

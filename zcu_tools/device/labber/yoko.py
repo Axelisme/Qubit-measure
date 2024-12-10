@@ -1,4 +1,3 @@
-import time
 from numbers import Number
 
 from .manager import InstrManager
@@ -6,7 +5,7 @@ from .manager import InstrManager
 
 class YokoDevControl:
     yoko = None
-    TIMEOUT = 25 * 60 * 1000
+    TIMEOUT = 1 * 60 * 60 * 1000  # 1 hour
 
     @classmethod
     def connect_server(cls, dev_cfg: dict, reinit=False):
@@ -59,18 +58,6 @@ class YokoDevControl:
         if cls.yoko is None:
             raise RuntimeError("YokoDevControl not initialized")
 
-        for _ in range(5):
-            try:
-                # run twice to make sure it is set
-                cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.sweep_rate)
-                cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.sweep_rate)
-                break
-            except Exception as e:
-                print(f"Error setting flux: {e}...")
-                time.sleep(60)  # wait for 1 min
-                try:
-                    cls._init_dev()
-                except Exception as e:
-                    raise RuntimeError(f"Failed to reinit YokoDevControl: {e}")
-        else:
-            raise RuntimeError("Failed to set flux")
+        # run twice to make sure it is set
+        cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.sweep_rate)
+        cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.sweep_rate)
