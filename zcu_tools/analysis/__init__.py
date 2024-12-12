@@ -3,7 +3,7 @@ from .general import (
     lookback_analyze,
     phase_analyze,
     freq_analyze,
-    dependent_analyze,
+    spectrum_analyze,
     rabi_analyze,
     dispersive_analyze,
 )
@@ -16,7 +16,7 @@ __all__ = [
     "lookback_analyze",
     "phase_analyze",
     "freq_analyze",
-    "dependent_analyze",
+    "spectrum_analyze",
     "rabi_analyze",
     "dispersive_analyze",
     "T1_analyze",

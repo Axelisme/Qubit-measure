@@ -7,101 +7,146 @@ from .tools import convert2max_contrast, NormalizeData
 figsize = (8, 6)
 
 
-def lookback_analyze(Ts, Is, Qs, plot=True, ratio: float = 0.3):
+def lookback_analyze(Ts, Is, Qs, plot_fit=True, ratio: float = 0.3):
+    """
+    Ts: 1D array, time points
+    Is: 1D array, I values
+    Qs: 1D array, Q values
+    """
     y = np.abs(Is + 1j * Qs)
 
     # find first idx where y is larger than 0.05 * max_y
     offset = Ts[np.argmax(y > ratio * np.max(y))]
 
-    if plot:
-        plt.figure(figsize=figsize)
-        plt.plot(Ts, Is, label="I value")
-        plt.plot(Ts, Qs, label="Q value")
-        plt.plot(Ts, y, label="mag")
+    plt.figure(figsize=figsize)
+    plt.plot(Ts, Is, label="I value")
+    plt.plot(Ts, Qs, label="Q value")
+    plt.plot(Ts, y, label="mag")
+    if plot_fit:
         plt.axvline(offset, color="r", linestyle="--", label="predict_offset")
-        plt.ylabel("a.u.")
-        plt.xlabel("us")
-        plt.legend()
-        plt.show()
+    plt.ylabel("a.u.")
+    plt.xlabel("us")
+    plt.legend()
+    plt.show()
 
     return offset
 
 
-def phase_analyze(x, y, plot=True, plot_fit=True):
-    phase = np.angle(y)
+def phase_analyze(fpts, signals, plot_fit=True):
+    """
+    fpts: 1D array, frequency points
+    signals: 1D array, signal points
+    """
+    phase = np.angle(signals)
     phase = np.unwrap(phase) * 180 / np.pi
 
-    pOpt, err = ft.fit_line(x, phase)
+    pOpt, err = ft.fit_line(fpts, phase)
     slope, offset = pOpt
 
-    if plot:
-        plt.figure(figsize=figsize)
-        plt.plot(x, phase, label="phase")
-        if plot_fit:
-            plt.plot(x, slope * x + offset, label="fit")
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+    plt.figure(figsize=figsize)
+    plt.plot(fpts, phase, label="phase")
+    if plot_fit:
+        plt.plot(fpts, slope * fpts + offset, label="fit")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
     return slope, offset
 
 
-def freq_analyze(x, y, asym=False, plot=True, show_center=True, max_contrast=False):
+def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False):
+    """
+    fpts: 1D array, frequency points
+    signals: 1D array, signal points
+    """
     if max_contrast:
-        signal, _ = convert2max_contrast(y.real, y.imag)
+        y, _ = convert2max_contrast(signals.real, signals.imag)
     else:
-        signal = np.abs(y)
+        y = np.abs(signals)
 
     if asym:
-        pOpt, err = ft.fit_asym_lor(x, signal)
-        curve = ft.asym_lorfunc(x, *pOpt)
+        pOpt, err = ft.fit_asym_lor(fpts, y)
+        curve = ft.asym_lorfunc(fpts, *pOpt)
     else:
-        pOpt, err = ft.fitlor(x, signal)
-        curve = ft.lorfunc(x, *pOpt)
+        pOpt, err = ft.fitlor(fpts, y)
+        curve = ft.lorfunc(fpts, *pOpt)
     freq, kappa = pOpt[3], 2 * pOpt[4]
     freq_err = np.sqrt(np.diag(err))[3]
 
-    if plot:
-        plt.figure(figsize=figsize)
-        plt.plot(x, signal, label="signal", marker="o", markersize=3)
-        plt.plot(x, curve, label=f"fit, $kappa$={kappa:.2f}")
-        if show_center:
-            label = f"$f_res$ = {freq:.2f} +/- {freq_err:.2f}"
-            plt.axvline(freq, color="r", ls="--", label=label)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+    plt.figure(figsize=figsize)
+    plt.plot(fpts, y, label="signal", marker="o", markersize=3)
+    if plot_fit:
+        plt.plot(fpts, curve, label=f"fit, $kappa$={kappa:.2f}")
+        label = f"$f_res$ = {freq:.2f} +/- {freq_err:.2f}"
+        plt.axvline(freq, color="r", ls="--", label=label)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
 
     return freq
 
 
-def dependent_analyze(X, Y, Z, normalize=True, n_axis=1, contour=False):
-    if normalize:
-        Z = NormalizeData(Z, n_axis)
+def spectrum_analyze(flxs, fpts, amps, ratio=None):
+    """
+    flxs: 1D array, flux points
+    fpts: 1D array, frequency points
+    amps: 2D array, shape: (len(fpts), len(flxs))
+    """
+    amps = NormalizeData(amps, 0)  # normalize on frequency axis
 
     plt.figure(figsize=figsize)
-    plt.pcolormesh(X, Y, Z)
-    if contour:
-        plt.contour(X, Y, Z, levels=[0.5])
+    plt.pcolormesh(flxs, fpts, amps)
 
-    plt.show()
+    if ratio is None:
+        return None, None, None, None
+
+    # plot max point and min point of each row
+    max_ids = np.argmax(amps, axis=0)
+    min_ids = np.argmin(amps, axis=0)
+    maxs = amps[np.arange(amps.shape[0]), max_ids]
+    mins = amps[np.arange(amps.shape[0]), min_ids]
+    # contrast = ratio * (np.max(maxs) - np.min(mins))
+    thresholds = ratio * (maxs - mins)
+
+    # plt max points
+    max_masks = maxs >= thresholds
+    max_flxs = flxs[max_masks]
+    max_fpts = fpts[max_ids[max_masks]]
+    plt.plot(max_flxs, max_fpts, "bo", markersize=3)
+
+    # plt min points
+    min_masks = mins <= -thresholds
+    min_flxs = flxs[min_masks]
+    min_fpts = fpts[min_ids[min_masks]]
+    plt.plot(min_flxs, min_fpts, "yo", markersize=3)
+
+    return max_flxs, max_fpts, min_flxs, min_fpts
+
+
+def pdr_dep_analyze(fpts, pdrs, amps, contour=None):
+    """
+    fpts: 1D array, frequency points
+    pdrs: 1D array, pdr values
+    amps: 2D array, shape: (len(pdrs), len(fpts))
+    """
+    amps = NormalizeData(amps, 1)
+
+    plt.figure(figsize=figsize)
+    plt.pcolormesh(fpts, pdrs, amps)
+    if contour is not None:
+        plt.contour(fpts, pdrs, amps, levels=[contour])
 
 
 def dispersive_analyze(
-    x: np.ndarray,
-    y1: np.ndarray,
-    y2: np.ndarray,
+    fpts: np.ndarray,
+    signals_g: np.ndarray,
+    signals_e: np.ndarray,
     use_fit=True,
     asym=False,
-    plot=True,
-    max_contrast=False,
+    plot_fit=True,
 ):
-    if max_contrast:
-        y1, _ = convert2max_contrast(y1.real, y1.imag)
-        y2, _ = convert2max_contrast(y2.real, y2.imag)
-    else:
-        y1 = np.abs(y1)
-        y2 = np.abs(y2)
+    amps_g = np.abs(signals_g)
+    amps_e = np.abs(signals_e)
 
     if asym:
         fit_func = ft.fit_asym_lor
@@ -110,54 +155,63 @@ def dispersive_analyze(
         fit_func = ft.fitlor
         lor_func = ft.lorfunc
 
-    pOpt1, err1 = fit_func(x, y1)
-    pOpt2, err2 = fit_func(x, y2)
+    pOpt1, err1 = fit_func(fpts, amps_g)
+    pOpt2, err2 = fit_func(fpts, amps_e)
     freq1, kappa1 = pOpt1[3], 2 * pOpt1[4]
     freq2, kappa2 = pOpt2[3], 2 * pOpt2[4]
     err1 = np.sqrt(np.diag(err1))
     err2 = np.sqrt(np.diag(err2))
 
-    curve1 = lor_func(x, *pOpt1)
-    curve2 = lor_func(x, *pOpt2)
+    curve1 = lor_func(fpts, *pOpt1)
+    curve2 = lor_func(fpts, *pOpt2)
     if use_fit:
         diff_curve = curve1 - curve2
     else:
-        diff_curve = y1 - y2
+        diff_curve = amps_g - amps_e
     max_id = np.argmax(diff_curve)
     min_id = np.argmin(diff_curve)
 
-    if plot:
-        plt.figure(figsize=figsize)
-        plt.title(f"$chi=${(freq2-freq1):.3f}, unit = MHz", fontsize=15)
-        plt.plot(x, y1, label="e", marker="o", markersize=3)
-        plt.plot(x, y2, label="g", marker="o", markersize=3)
-        plt.plot(x, curve1, label=f"fite, $kappa$ = {kappa1:.2f}MHz")
-        plt.plot(x, curve2, label=f"fitg, $kappa$ = {kappa2:.2f}MHz")
+    fig, ax = plt.subplots(2, 1, figsize=figsize)
+    ax[0].plot(fpts, amps_g, label="e", marker="o", markersize=3)
+    ax[0].plot(fpts, amps_e, label="g", marker="o", markersize=3)
+    if plot_fit:
+        ax[0].plot(fpts, curve1, label=f"excited, $kappa$ = {kappa1:.2f}MHz")
+        ax[0].plot(fpts, curve2, label=f"ground, $kappa$ = {kappa2:.2f}MHz")
         label1 = f"$f_res$ = {freq1:.2f} +/- {err1[3]:.2f}MHz"
-        plt.axvline(freq1, color="r", ls="--", label=label1)
+        ax[0].axvline(freq1, color="r", ls="--", label=label1)
         label2 = f"$f_res$ = {freq2:.2f} +/- {err2[3]:.2f}MHz"
-        plt.axvline(freq2, color="g", ls="--", label=label2)
-        plt.legend()
+        ax[0].axvline(freq2, color="g", ls="--", label=label2)
+    ax[0].legend()
 
-        plt.figure(figsize=figsize)
-        plt.plot(x, y1 - y2)
-        plt.plot(x, curve1 - curve2)
-        plt.axvline(x[max_id], color="r", ls="--", label=f"max SNR1 = {x[max_id]:.2f}")
-        plt.axvline(x[min_id], color="g", ls="--", label=f"max SNR2 = {x[min_id]:.2f}")
-        plt.legend()
-        plt.show()
+    ax[1].plot(fpts, amps_g - amps_e)
+    max_fpt = fpts[max_id]
+    min_fpt = fpts[min_id]
+    if plot_fit:
+        ax[1].plot(fpts, curve1 - curve2)
+        ax[1].axvline(max_fpt, color="r", ls="--", label=f"max SNR1 = {max_fpt:.2f}")
+        ax[1].axvline(min_fpt, color="g", ls="--", label=f"max SNR2 = {min_fpt:.2f}")
+    ax[1].legend()
+
+    plt.tight_layout()
+    plt.show()
 
     if np.abs(diff_curve[max_id]) >= np.abs(diff_curve[min_id]):
-        return x[max_id], x[min_id]
+        return max_fpt, min_fpt
     else:
-        return x[min_id], x[max_id]
+        return min_fpt, max_fpt
 
 
-def rabi_analyze(x: int, y: float, plot=True, decay=False, max_contrast=False):
+def rabi_analyze(
+    x: int, signals: float, plot_fit=True, decay=False, max_contrast=False
+):
+    """
+    x: 1D array, sweep points
+    signals: 1D array, signal points
+    """
     if max_contrast:
-        y, _ = convert2max_contrast(y.real, y.imag)
+        y, _ = convert2max_contrast(signals.real, signals.imag)
     else:
-        y = np.abs(y)
+        y = np.abs(signals)
 
     if decay:
         fit_func = ft.fitdecaysin
@@ -178,15 +232,15 @@ def rabi_analyze(x: int, y: float, plot=True, decay=False, max_contrast=False):
         pi_x = (0.75 - phase / 360) / freq
         pi2_x = (0.5 - phase / 360) / freq
 
-    if plot:
-        plt.figure(figsize=figsize)
-        plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
+    plt.figure(figsize=figsize)
+    plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
+    if plot_fit:
         plt.plot(x, curve, label="fit")
-        plt.title("Rabi", fontsize=15)
         plt.axvline(pi_x, ls="--", c="red", label=f"$\pi$={pi_x:.1f}")
         plt.axvline(pi2_x, ls="--", c="red", label=f"$\pi/2$={(pi2_x):.1f}")
-        plt.legend(loc=4)
-        plt.tight_layout()
-        plt.show()
+    plt.title("Rabi", fontsize=15)
+    plt.legend(loc=4)
+    plt.tight_layout()
+    plt.show()
 
     return pi_x, pi2_x
