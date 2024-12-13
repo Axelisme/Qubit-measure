@@ -137,16 +137,46 @@ def pdr_dep_analyze(fpts, pdrs, amps, contour=None):
         plt.contour(fpts, pdrs, amps, levels=[contour])
 
 
+def dispersive_analyze2(fpts, signals_g, signals_e):
+    signals_ge = np.concatenate((signals_g, signals_e))
+    y_ge, _ = convert2max_contrast(signals_ge.real, signals_ge.imag)
+    y_g = y_ge[: len(signals_g)]
+    y_e = y_ge[len(signals_g) :]
+
+    # plot signals
+    fig, ax = plt.subplots(2, 1, figsize=figsize)
+    ax[0].plot(fpts, y_g, label="e", marker="o", markersize=3)
+    ax[0].plot(fpts, y_e, label="g", marker="o", markersize=3)
+    ax[0].legend()
+
+    # plot difference and max/min points
+    diff_curve = y_g - y_e
+    max_id, min_id = np.argmax(diff_curve), np.argmin(diff_curve)
+    max, max_fpt = diff_curve[max_id], fpts[max_id]
+    min, min_fpt = diff_curve[min_id], fpts[min_id]
+    ax[1].plot(fpts, diff_curve)
+    ax[1].axvline(max_fpt, color="r", ls="--", label=f"max SNR1 = {max_fpt:.2f}")
+    ax[1].axvline(min_fpt, color="g", ls="--", label=f"max SNR2 = {min_fpt:.2f}")
+
+    plt.tight_layout()
+    plt.show()
+
+    if np.abs(max) >= np.abs(min):
+        return max_fpt, min_fpt
+    else:
+        return min_fpt, max_fpt
+
+
 def dispersive_analyze(
     fpts: np.ndarray,
     signals_g: np.ndarray,
     signals_e: np.ndarray,
-    use_fit=True,
     asym=False,
     plot_fit=True,
+    use_fit=True,
 ):
-    amps_g = np.abs(signals_g)
-    amps_e = np.abs(signals_e)
+    y_g = np.abs(signals_g)
+    y_e = np.abs(signals_e)
 
     if asym:
         fit_func = ft.fit_asym_lor
@@ -155,8 +185,8 @@ def dispersive_analyze(
         fit_func = ft.fitlor
         lor_func = ft.lorfunc
 
-    pOpt1, err1 = fit_func(fpts, amps_g)
-    pOpt2, err2 = fit_func(fpts, amps_e)
+    pOpt1, err1 = fit_func(fpts, y_g)
+    pOpt2, err2 = fit_func(fpts, y_e)
     freq1, kappa1 = pOpt1[3], 2 * pOpt1[4]
     freq2, kappa2 = pOpt2[3], 2 * pOpt2[4]
     err1 = np.sqrt(np.diag(err1))
@@ -167,13 +197,13 @@ def dispersive_analyze(
     if use_fit:
         diff_curve = curve1 - curve2
     else:
-        diff_curve = amps_g - amps_e
+        diff_curve = y_g - y_e
     max_id = np.argmax(diff_curve)
     min_id = np.argmin(diff_curve)
 
     fig, ax = plt.subplots(2, 1, figsize=figsize)
-    ax[0].plot(fpts, amps_g, label="e", marker="o", markersize=3)
-    ax[0].plot(fpts, amps_e, label="g", marker="o", markersize=3)
+    ax[0].plot(fpts, y_g, label="e", marker="o", markersize=3)
+    ax[0].plot(fpts, y_e, label="g", marker="o", markersize=3)
     if plot_fit:
         ax[0].plot(fpts, curve1, label=f"excited, $kappa$ = {kappa1:.2f}MHz")
         ax[0].plot(fpts, curve2, label=f"ground, $kappa$ = {kappa2:.2f}MHz")
@@ -183,7 +213,7 @@ def dispersive_analyze(
         ax[0].axvline(freq2, color="g", ls="--", label=label2)
     ax[0].legend()
 
-    ax[1].plot(fpts, amps_g - amps_e)
+    ax[1].plot(fpts, y_g - y_e)
     max_fpt = fpts[max_id]
     min_fpt = fpts[min_id]
     if plot_fit:

@@ -6,6 +6,7 @@ from .general import (
     spectrum_analyze,
     rabi_analyze,
     dispersive_analyze,
+    dispersive_analyze2,
 )
 from .single_shot import fidelity_func, singleshot_analysis
 from .time_exp import T1_analyze, T2decay_analyze, T2fringe_analyze
@@ -19,6 +20,7 @@ __all__ = [
     "spectrum_analyze",
     "rabi_analyze",
     "dispersive_analyze",
+    "dispersive_analyze2",
     "T1_analyze",
     "T2decay_analyze",
     "T2fringe_analyze",
