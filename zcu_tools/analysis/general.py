@@ -75,16 +75,32 @@ def freq_analyze(x, y, asym=False, plot=True, show_center=True, max_contrast=Fal
     return freq
 
 
-def dependent_analyze(X, Y, Z, normalize=True, n_axis=1, contour=False):
-    if normalize:
-        Z = NormalizeData(Z, n_axis)
+def dependent_analyze(X, Y, Z, n_axis=1, contour=None, ratio=None):
+    Z = NormalizeData(Z, n_axis, rescale=False)
 
     plt.figure(figsize=figsize)
     plt.pcolormesh(X, Y, Z)
-    if contour:
-        plt.contour(X, Y, Z, levels=[0.5])
+    if contour is not None:
+        plt.contour(X, Y, Z, levels=[contour])
+
+    if ratio is not None:
+        # plot max point and min point of each row
+        max_ids, min_ids = np.argmax(Z, axis=n_axis), np.argmin(Z, axis=n_axis)
+        maxs, mins = np.max(Z, axis=n_axis), np.min(Z, axis=n_axis)
+        contrast = np.max(Z) - np.min(Z)
+        if n_axis == 0:
+            points_max = np.ma.masked_where(maxs < ratio * contrast, Y[max_ids])
+            points_min = np.ma.masked_where(mins > -ratio * contrast, Y[min_ids])
+            plt.plot(X, points_max, "bo", markersize=3)
+            plt.plot(X, points_min, "yo", markersize=3)
+        else:
+            points_max = np.ma.masked_where(maxs < ratio * contrast, X[max_ids])
+            points_min = np.ma.masked_where(mins > -ratio * contrast, X[min_ids])
+            plt.plot(points_max, Y, "bo", markersize=3)
+            plt.plot(points_min, Y, "yo", markersize=3)
 
     plt.show()
+
 
 
 def dispersive_analyze(

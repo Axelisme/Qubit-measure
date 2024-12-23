@@ -24,13 +24,14 @@ def convert2max_contrast(Is: np.ndarray, Qs: np.ndarray):
     return data_rot[0], data_rot[1]
 
 
-def NormalizeData(signals2D: np.ndarray, axis=None) -> np.ndarray:
+def NormalizeData(signals2D: np.ndarray, axis=None, rescale=True) -> np.ndarray:
     signals2D = np.ma.masked_invalid(signals2D)
-    # normalize on given axis
-    mins = np.min(signals2D, axis=axis, keepdims=True)
-    maxs = np.max(signals2D, axis=axis, keepdims=True)
-    meds = np.median(signals2D, axis=axis, keepdims=True)
-    return (signals2D - meds) / (maxs - mins)
+    signals2D = signals2D - np.median(signals2D, axis=axis, keepdims=True)
+    if rescale:
+        mins = np.min(signals2D, axis=axis, keepdims=True)
+        maxs = np.max(signals2D, axis=axis, keepdims=True)
+        signals2D /= (maxs - mins)
+    return signals2D
 
 
 def rotate_phase(fpts, y, phase_slope):
