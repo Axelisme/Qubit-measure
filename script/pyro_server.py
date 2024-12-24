@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """This file starts a pyro nameserver and the proxying server."""
 
+import atexit
 import subprocess
 import sys
 import time
@@ -29,12 +30,24 @@ iface = "tailscale0"
 ############
 
 # start the nameserver process
+
 ns_proc = subprocess.Popen(
     [
         f"PYRO_SERIALIZERS_ACCEPTED=pickle PYRO_PICKLE_PROTOCOL_VERSION=4 pyro4-ns -n {ns_host} -p {ns_port}"
     ],
     shell=True,
 )
+
+
+# cleanup the nameserver process on exit
+def cleanup():
+    ns_proc.terminate()
+    ns_proc.wait(timeout=2)
+
+
+# register the cleanup function
+atexit.register(cleanup)
+
 
 # wait for the nameserver to start up
 time.sleep(5)

@@ -4,10 +4,10 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program import PowerDepProgram, TwoToneProgram, RGainTwoToneProgram
+from zcu_tools.program import PowerDepProgram, RGainTwoToneProgram, TwoToneProgram
 
 from ..flux import set_flux
-from ..instant_show import init_show2d, update_show2d, clear_show
+from ..instant_show import clear_show, init_show2d, update_show2d
 
 
 def measure_qub_pdr_dep(
@@ -25,7 +25,7 @@ def measure_qub_pdr_dep(
     qub_pulse = cfg["dac"]["qub_pulse"]
 
     if instant_show:
-        fig, ax, dh = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
+        fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
 
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     try:
@@ -51,7 +51,7 @@ def measure_qub_pdr_dep(
                 pdr_tqdm.update()
 
                 if instant_show:
-                    update_show2d(fig, ax, dh, fpts, pdrs, np.abs(signals2D))
+                    update_show2d(fig, ax, dh, im, np.abs(signals2D))
 
         else:
             if soft_pdr:
@@ -66,7 +66,7 @@ def measure_qub_pdr_dep(
                     fpts = fpt_pdr[0]
 
                     if instant_show:
-                        update_show2d(fig, ax, dh, fpts, pdrs, np.abs(signals2D))
+                        update_show2d(fig, ax, dh, im, np.abs(signals2D))
 
             else:
                 print("Use PowerDepProgram for hard loop")
@@ -77,7 +77,7 @@ def measure_qub_pdr_dep(
                 fpts, pdrs = fpt_pdr[0], fpt_pdr[1]
 
                 if instant_show:
-                    update_show2d(fig, ax, dh, fpts, pdrs, np.abs(signals2D))
+                    update_show2d(fig, ax, dh, im, np.abs(signals2D))
 
         if instant_show:
             clear_show()

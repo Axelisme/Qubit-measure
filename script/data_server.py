@@ -1,7 +1,7 @@
 import os
 from os.path import abspath, dirname, join
 
-from flask import Flask, request
+from flask import Flask, request, send_file
 
 ROOT_DIR = abspath(join(dirname(dirname(__file__)), "Database"))
 
@@ -54,11 +54,31 @@ def save_file(file):
     return f"{filepath} uploaded successfully", 200
 
 
+def load_file(remote_path):
+    # convert to windows path
+    remote_path = remote_path.replace("/", "\\")
+
+    # check root directory
+    if "Database\\" not in remote_path:
+        return "Cannot find root directory in given path", 400
+
+    # remove path before root directory
+    relpath = remote_path.split("Database\\")[1]
+
+    # load file
+    filepath = os.path.join(ROOT_DIR, relpath)
+    if not os.path.exists(filepath):
+        return "File not found", 404
+
+    # send file to client
+    return send_file(filepath, as_attachment=True)
+
+
 app = Flask(__name__)
 
 
 @app.route("/upload", methods=["POST"])
-def upload_file():
+def remote2server():
     if "file" not in request.files:
         return "No file part", 400
 
@@ -69,6 +89,18 @@ def upload_file():
         return "Invalid file format", 400
     if file:
         return save_file(file)
+
+
+@app.route("/download", methods=["GET"])
+def server2remote():
+    filepath = request.args.get("path")
+    if not filepath:
+        return "No file path", 400
+
+    if not os.path.exists(filepath):
+        return "File not found", 404
+
+    return load_file(filepath)
 
 
 if __name__ == "__main__":

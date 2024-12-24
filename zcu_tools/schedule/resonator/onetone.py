@@ -7,7 +7,7 @@ from zcu_tools import make_cfg
 from zcu_tools.program import OneToneProgram
 
 from ..flux import set_flux
-from ..instant_show import init_show, update_show, clear_show
+from ..instant_show import clear_show, init_show, update_show
 
 
 def measure_res_freq(soc, soccfg, cfg, instant_show=False):
@@ -31,7 +31,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
         if instant_show:
-            update_show(fig, ax, dh, curve, fpts, np.abs(signals))
+            update_show(fig, ax, dh, curve, np.abs(signals))
 
     if instant_show:
         clear_show()

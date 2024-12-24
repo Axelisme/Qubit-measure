@@ -3,8 +3,6 @@ from datetime import datetime
 
 import requests
 
-from .tools import numpy2number
-
 
 def create_datafolder(root_dir: str, prefix: str = "") -> str:
     root_dir = os.path.abspath(os.path.join(root_dir, "Database"))
@@ -14,21 +12,18 @@ def create_datafolder(root_dir: str, prefix: str = "") -> str:
     return save_dir
 
 
-def save_cfg(filepath: str, cfg: dict):
-    import yaml
+def make_comment(cfg: dict, append: str = "") -> str:
+    # pretty convert cfg to string
+    import json
 
-    if not filepath.endswith(".yaml"):
-        filepath += ".yaml"
+    comment = json.dumps(cfg, indent=2)
+    comment += "\n" + append
 
-    cfg = numpy2number(cfg)
-
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, "w") as f:
-        yaml.dump(cfg, f, default_flow_style=False)
+    return comment
 
 
 def safe_labber_filepath(filepath: str):
-    if not filepath.endswith(".hdf5"):
+    if not filepath.endswith(".hdf5") or not filepath.endswith(".h5"):
         filepath += ".hdf5"  # labber save data as hdf5
 
     filepath = os.path.abspath(filepath)
@@ -96,6 +91,22 @@ def save_data_local(
         pass
 
 
+def load_data_local(file_path):
+    import h5py
+
+    with h5py.File(file_path, "r") as file:
+        data = file["Data"]["Data"]
+        if data.shape[2] == 1:  # 1D data,
+            x_data = data[:, 0, 0][:]
+            y_data = None
+            z_data = data[:, 1, 0][:] + 1j * data[:, 2, 0][:]
+        else:
+            x_data = data[:, 0, 0][:]
+            y_data = data[0, 1, :][:]
+            z_data = data[:, 2, :][:] + 1j * data[:, 3, :][:]
+    return z_data, x_data, y_data
+
+
 def upload_file2server(filepath: str, server_ip: str, port: int):
     filepath = os.path.abspath(filepath)
     url = f"http://{server_ip}:{port}/upload"
@@ -106,14 +117,20 @@ def upload_file2server(filepath: str, server_ip: str, port: int):
     print(response.text)
 
 
-def make_comment(cfg: dict, append: str = "") -> str:
-    # pretty convert cfg to string
-    import json
+def download_file2server(filepath: str, server_ip: str, port: int):
+    if os.path.exists(filepath):
+        print(f"File already exists: {filepath}, ignore download")
+        return
 
-    comment = json.dumps(cfg, indent=2)
-    comment += "\n" + append
+    url = f"http://{server_ip}:{port}/download?path={filepath}"
+    response = requests.get(url)
+    assert response.status_code == 200, f"Fail to download file: {filepath}"
 
-    return comment
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, "wb") as file:
+        file.write(response.content)
+
+    print(response.text)
 
 
 def save_data(
@@ -129,8 +146,22 @@ def save_data(
     filepath = safe_labber_filepath(filepath)
     if server_ip is not None:
         save_data_local(filepath, x_info, z_info, y_info, comment, tag)
-        filepath = filepath + ".hdf5"  # labber save data as hdf5
+        if not filepath.endswith(".hdf5") or not filepath.endswith(".h5"):
+            filepath += ".hdf5"
         upload_file2server(filepath, server_ip, port)
         os.remove(filepath)
     else:
         save_data_local(filepath, x_info, z_info, y_info, comment, tag)
+
+
+def load_data(
+    filepath: str,
+    server_ip: str = None,
+    port: int = 4999,
+):
+    if not filepath.endswith(".hdf5") or not filepath.endswith(".h5"):
+        filepath += ".hdf5"
+    if server_ip is not None:
+        download_file2server(filepath, server_ip, port)
+    z_data, x_data, y_data = load_data_local(filepath)
+    return z_data, x_data, y_data

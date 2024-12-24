@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from . import fitting as ft
-from .tools import convert2max_contrast, NormalizeData
+from .tools import NormalizeData, convert2max_contrast
 
 figsize = (8, 6)
 
@@ -86,41 +86,45 @@ def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False):
     return freq
 
 
-def spectrum_analyze(flxs, fpts, amps, ratio=None):
+def spectrum_analyze(flxs, fpts, amps, ratio):
     """
     flxs: 1D array, flux points
     fpts: 1D array, frequency points
     amps: 2D array, shape: (len(fpts), len(flxs))
+    ratio: float, threshold to filter max points
     """
-    amps = NormalizeData(amps, 0)  # normalize on frequency axis
+    from scipy.ndimage import gaussian_filter1d
+
+    # use guassian filter to smooth the spectrum
+    amps = gaussian_filter1d(amps, 1, axis=0)
+    amps = amps - np.median(amps, axis=0, keepdims=True)
+    amps = amps - np.median(amps, axis=1, keepdims=True)
+    amps = np.abs(amps)
+
+    norm_factor = np.std(amps, axis=0)
+    threshold = 1.5 * np.mean(norm_factor)
+    norm_factor = np.where(norm_factor > threshold, norm_factor, threshold)
+    amps /= norm_factor  # (len(fpts), len(flxs))
+
+    # find peaks
+    max_ids = np.argmax(amps, axis=0)  # (len(flxs),)
+    maxs = amps[max_ids, np.arange(amps.shape[1])]  # (len(flxs),)
+
+    # select points with large contrast
+    max_masks = maxs >= ratio  # (len(flxs),)
+    s_flxs = flxs[max_masks]
+    s_fpts = fpts[max_ids][max_masks]
 
     plt.figure(figsize=figsize)
-    plt.pcolormesh(flxs, fpts, amps)
+    plt.imshow(
+        amps,
+        aspect="auto",
+        origin="lower",
+        extent=[flxs[0], flxs[-1], fpts[0], fpts[-1]],
+    )
+    plt.scatter(s_flxs, s_fpts, c="r", s=3)
 
-    if ratio is None:
-        return None, None, None, None
-
-    # plot max point and min point of each row
-    max_ids = np.argmax(amps, axis=0)
-    min_ids = np.argmin(amps, axis=0)
-    maxs = amps[np.arange(amps.shape[0]), max_ids]
-    mins = amps[np.arange(amps.shape[0]), min_ids]
-    # contrast = ratio * (np.max(maxs) - np.min(mins))
-    thresholds = ratio * (maxs - mins)
-
-    # plt max points
-    max_masks = maxs >= thresholds
-    max_flxs = flxs[max_masks]
-    max_fpts = fpts[max_ids[max_masks]]
-    plt.plot(max_flxs, max_fpts, "bo", markersize=3)
-
-    # plt min points
-    min_masks = mins <= -thresholds
-    min_flxs = flxs[min_masks]
-    min_fpts = fpts[min_ids[min_masks]]
-    plt.plot(min_flxs, min_fpts, "yo", markersize=3)
-
-    return max_flxs, max_fpts, min_flxs, min_fpts
+    return s_flxs, s_fpts
 
 
 def pdr_dep_analyze(fpts, pdrs, amps, contour=None):
@@ -135,6 +139,68 @@ def pdr_dep_analyze(fpts, pdrs, amps, contour=None):
     plt.pcolormesh(fpts, pdrs, amps)
     if contour is not None:
         plt.contour(fpts, pdrs, amps, levels=[contour])
+
+
+def dispersive_analyze(
+    fpts: np.ndarray,
+    signals_g: np.ndarray,
+    signals_e: np.ndarray,
+    asym=False,
+    plot_fit=True,
+    use_fit=True,
+):
+    y_g = np.abs(signals_g)
+    y_e = np.abs(signals_e)
+
+    fig, ax = plt.subplots(2, 1, figsize=figsize)
+    ax[0].plot(fpts, y_g, label="e", marker="o", markersize=3)
+    ax[0].plot(fpts, y_e, label="g", marker="o", markersize=3)
+    ax[1].plot(fpts, y_g - y_e)
+
+    if asym:
+        fit_func = ft.fit_asym_lor
+        lor_func = ft.asym_lorfunc
+    else:
+        fit_func = ft.fitlor
+        lor_func = ft.lorfunc
+
+    pOpt1, err1 = fit_func(fpts, y_g)
+    pOpt2, err2 = fit_func(fpts, y_e)
+    freq1, kappa1 = pOpt1[3], 2 * pOpt1[4]
+    freq2, kappa2 = pOpt2[3], 2 * pOpt2[4]
+    err1 = np.sqrt(np.diag(err1))
+    err2 = np.sqrt(np.diag(err2))
+
+    curve1 = lor_func(fpts, *pOpt1)
+    curve2 = lor_func(fpts, *pOpt2)
+
+    if plot_fit:
+        ax[0].plot(fpts, curve1, label=f"excited, $kappa$ = {kappa1:.2f}MHz")
+        ax[0].plot(fpts, curve2, label=f"ground, $kappa$ = {kappa2:.2f}MHz")
+        label1 = f"$f_res$ = {freq1:.2f} +/- {err1[3]:.2f}MHz"
+        ax[0].axvline(freq1, color="r", ls="--", label=label1)
+        label2 = f"$f_res$ = {freq2:.2f} +/- {err2[3]:.2f}MHz"
+        ax[0].axvline(freq2, color="g", ls="--", label=label2)
+
+    diff_curve = curve1 - curve2 if use_fit else y_g - y_e
+    max_id = np.argmax(diff_curve)
+    min_id = np.argmin(diff_curve)
+
+    max_fpt = fpts[max_id]
+    min_fpt = fpts[min_id]
+    if plot_fit:
+        ax[1].plot(fpts, curve1 - curve2)
+        ax[1].axvline(max_fpt, color="r", ls="--", label=f"max SNR1 = {max_fpt:.2f}")
+        ax[1].axvline(min_fpt, color="g", ls="--", label=f"max SNR2 = {min_fpt:.2f}")
+
+    ax[0].legend()
+    ax[1].legend()
+    plt.tight_layout()
+    plt.show()
+
+    max_diff = np.abs(diff_curve[max_id])
+    min_diff = np.abs(diff_curve[min_id])
+    return max_fpt, min_fpt if max_diff >= min_diff else min_fpt, max_fpt
 
 
 def dispersive_analyze2(fpts, signals_g, signals_e):
@@ -161,75 +227,7 @@ def dispersive_analyze2(fpts, signals_g, signals_e):
     plt.tight_layout()
     plt.show()
 
-    if np.abs(max) >= np.abs(min):
-        return max_fpt, min_fpt
-    else:
-        return min_fpt, max_fpt
-
-
-
-def dispersive_analyze(
-    fpts: np.ndarray,
-    signals_g: np.ndarray,
-    signals_e: np.ndarray,
-    asym=False,
-    plot_fit=True,
-    use_fit=True,
-):
-    y_g = np.abs(signals_g)
-    y_e = np.abs(signals_e)
-
-    if asym:
-        fit_func = ft.fit_asym_lor
-        lor_func = ft.asym_lorfunc
-    else:
-        fit_func = ft.fitlor
-        lor_func = ft.lorfunc
-
-    pOpt1, err1 = fit_func(fpts, y_g)
-    pOpt2, err2 = fit_func(fpts, y_e)
-    freq1, kappa1 = pOpt1[3], 2 * pOpt1[4]
-    freq2, kappa2 = pOpt2[3], 2 * pOpt2[4]
-    err1 = np.sqrt(np.diag(err1))
-    err2 = np.sqrt(np.diag(err2))
-
-    curve1 = lor_func(fpts, *pOpt1)
-    curve2 = lor_func(fpts, *pOpt2)
-    if use_fit:
-        diff_curve = curve1 - curve2
-    else:
-        diff_curve = y_g - y_e
-    max_id = np.argmax(diff_curve)
-    min_id = np.argmin(diff_curve)
-
-    fig, ax = plt.subplots(2, 1, figsize=figsize)
-    ax[0].plot(fpts, y_g, label="e", marker="o", markersize=3)
-    ax[0].plot(fpts, y_e, label="g", marker="o", markersize=3)
-    if plot_fit:
-        ax[0].plot(fpts, curve1, label=f"excited, $kappa$ = {kappa1:.2f}MHz")
-        ax[0].plot(fpts, curve2, label=f"ground, $kappa$ = {kappa2:.2f}MHz")
-        label1 = f"$f_res$ = {freq1:.2f} +/- {err1[3]:.2f}MHz"
-        ax[0].axvline(freq1, color="r", ls="--", label=label1)
-        label2 = f"$f_res$ = {freq2:.2f} +/- {err2[3]:.2f}MHz"
-        ax[0].axvline(freq2, color="g", ls="--", label=label2)
-    ax[0].legend()
-
-    ax[1].plot(fpts, y_g - y_e)
-    max_fpt = fpts[max_id]
-    min_fpt = fpts[min_id]
-    if plot_fit:
-        ax[1].plot(fpts, curve1 - curve2)
-        ax[1].axvline(max_fpt, color="r", ls="--", label=f"max SNR1 = {max_fpt:.2f}")
-        ax[1].axvline(min_fpt, color="g", ls="--", label=f"max SNR2 = {min_fpt:.2f}")
-    ax[1].legend()
-
-    plt.tight_layout()
-    plt.show()
-
-    if np.abs(diff_curve[max_id]) >= np.abs(diff_curve[min_id]):
-        return max_fpt, min_fpt
-    else:
-        return min_fpt, max_fpt
+    return max_fpt, min_fpt if np.abs(max) >= np.abs(min) else min_fpt, max_fpt
 
 
 def rabi_analyze(

@@ -14,6 +14,11 @@ class YokoDevControl:
                 return  # only register once if not reinit
             print("Reinit YokoDevControl")
 
+        cls._init_cfg(dev_cfg)
+        cls._init_dev()
+
+    @classmethod
+    def _init_cfg(cls, dev_cfg: dict):
         cls.host_ip = dev_cfg["host_ip"]
         cls.sweep_rate = dev_cfg["outputCfg"]["Current - Sweep rate"]
 
@@ -28,7 +33,6 @@ class YokoDevControl:
         )
 
         cls.dev_cfg = dev_cfg
-        cls._init_dev()
 
     @classmethod
     def _init_dev(cls):
@@ -52,7 +56,7 @@ class YokoDevControl:
                 f"Flux must be a float in YokoFluxControl, but got {value}"
             )
         assert (
-            -0.01 <= value < 0.01
+            -0.01 <= value <= 0.01
         ), f"Flux must be in the range [-0.01, 0.01], but got {value}"
 
         if cls.yoko is None:

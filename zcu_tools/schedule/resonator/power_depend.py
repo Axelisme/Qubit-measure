@@ -8,7 +8,7 @@ from zcu_tools.analysis import NormalizeData
 from zcu_tools.program import OneToneProgram, RGainOnetoneProgram
 
 from ..flux import set_flux
-from ..instant_show import init_show2d, update_show2d, clear_show
+from ..instant_show import clear_show, init_show2d, update_show2d
 
 
 def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
@@ -24,7 +24,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     res_pulse = cfg["dac"]["res_pulse"]
 
     if instant_show:
-        fig, ax, dh = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
+        fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
 
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     try:
@@ -49,7 +49,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
                 if instant_show:
                     amps = NormalizeData(np.abs(signals2D), axis=1)
-                    update_show2d(fig, ax, dh, fpts, pdrs, amps)
+                    update_show2d(fig, ax, dh, im, amps)
 
         else:
             print("Use RGainOnetoneProgram for hard loop")
@@ -63,7 +63,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
                 if instant_show:
                     amps = NormalizeData(np.abs(signals2D), axis=1)
-                    update_show2d(fig, ax, dh, fpts, pdrs, amps)
+                    update_show2d(fig, ax, dh, im, amps)
 
         if instant_show:
             clear_show()

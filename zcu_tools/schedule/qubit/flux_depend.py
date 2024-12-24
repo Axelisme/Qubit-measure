@@ -5,10 +5,10 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.program import TwoToneProgram, RFreqTwoToneProgram
+from zcu_tools.program import RFreqTwoToneProgram, TwoToneProgram
 
 from ..flux import set_flux
-from ..instant_show import init_show2d, update_show2d, clear_show
+from ..instant_show import clear_show, init_show2d, update_show2d
 
 
 def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
@@ -27,7 +27,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
 
     if instant_show:
-        fig, ax, dh = init_show2d(flxs, fpts, "Flux", "Frequency (MHz)")
+        fig, ax, dh, im = init_show2d(flxs, fpts, "Flux", "Frequency (MHz)")
 
     if soft_loop:
         print("Use TwoToneProgram for soft loop")
@@ -59,8 +59,8 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             flux_tqdm.update()
 
             if instant_show:
-                amps = NormalizeData(np.abs(signals2D), axis=1)
-                update_show2d(fig, ax, dh, flxs, fpts, amps.T)
+                amps = NormalizeData(np.abs(signals2D), axis=1, rescale=False)
+                update_show2d(fig, ax, dh, im, amps.T)
 
         if instant_show:
             clear_show()

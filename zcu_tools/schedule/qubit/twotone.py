@@ -4,10 +4,10 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program import TwoToneProgram, RFreqTwoToneProgram
+from zcu_tools.program import RFreqTwoToneProgram, TwoToneProgram
 
 from ..flux import set_flux
-from ..instant_show import init_show, update_show, clear_show
+from ..instant_show import clear_show, init_show, update_show
 
 
 def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
@@ -33,7 +33,7 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
             if instant_show:
-                update_show(fig, ax, dh, curve, fpts, np.abs(signals))
+                update_show(fig, ax, dh, curve, np.abs(signals))
 
     else:
         print("Use RFreqTwoToneProgram for hard loop")
@@ -44,7 +44,7 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         signals = avgi[0][0] + 1j * avgq[0][0]
 
         if instant_show:
-            update_show(fig, ax, dh, curve, fpts, np.abs(signals))
+            update_show(fig, ax, dh, curve, np.abs(signals))
 
     if instant_show:
         clear_show()

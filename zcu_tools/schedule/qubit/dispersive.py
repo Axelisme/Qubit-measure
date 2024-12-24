@@ -7,7 +7,7 @@ from zcu_tools import make_cfg
 from zcu_tools.program import TwoToneProgram
 
 from ..flux import set_flux
-from ..instant_show import init_show, update_show, clear_show
+from ..instant_show import clear_show, init_show, update_show
 
 
 def measure_dispersive(soc, soccfg, cfg, instant_show=False):
@@ -34,7 +34,7 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         signals_g[i] = signal
 
         if instant_show:
-            update_show(fig, ax, dh, curve_g, fpts, np.abs(signals_g))
+            update_show(fig, ax, dh, curve_g, np.abs(signals_g))
 
     if instant_show:
         curve_e = ax.plot(fpts, np.abs(signals_g))[0]
@@ -50,7 +50,7 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         signals_e[i] = signal
 
         if instant_show:
-            update_show(fig, ax, dh, curve_e, fpts, np.abs(signals_e))
+            update_show(fig, ax, dh, curve_e, np.abs(signals_e))
 
     if instant_show:
         clear_show()

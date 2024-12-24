@@ -7,7 +7,7 @@ from zcu_tools.auto import make_cfg
 from zcu_tools.program import AmpRabiProgram, TwoToneProgram
 
 from ..flux import set_flux
-from ..instant_show import init_show, update_show, clear_show
+from ..instant_show import clear_show, init_show, update_show
 
 
 def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
@@ -31,7 +31,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
         signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
         if instant_show:
-            update_show(fig, ax, dh, curve, lens, np.abs(signals))
+            update_show(fig, ax, dh, curve, np.abs(signals))
 
     if instant_show:
         clear_show()
@@ -61,7 +61,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
             if instant_show:
-                update_show(fig, ax, dh, curve, pdrs, np.abs(signals))
+                update_show(fig, ax, dh, curve, np.abs(signals))
 
     else:
         print("Use AmpRabiProgram for hard loop")
@@ -71,7 +71,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         signals = avgi[0][0] + 1j * avgq[0][0]
 
         if instant_show:
-            update_show(fig, ax, dh, curve, pdrs, np.abs(signals))
+            update_show(fig, ax, dh, curve, np.abs(signals))
 
     if instant_show:
         clear_show()

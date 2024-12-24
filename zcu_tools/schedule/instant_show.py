@@ -1,6 +1,6 @@
-import numpy as np
 import matplotlib.pyplot as plt
-from IPython.display import display, clear_output
+import numpy as np
+from IPython.display import clear_output, display
 
 
 def init_show(X, x_label, y_label, title=None):
@@ -14,7 +14,7 @@ def init_show(X, x_label, y_label, title=None):
     return fig, ax, dh, curve
 
 
-def update_show(fig, ax, dh, curve, X, Y):
+def update_show(fig, ax, dh, curve, Y):
     curve.set_ydata(Y)
     ax.relim()
     ax.autoscale(axis="y")
@@ -27,13 +27,19 @@ def init_show2d(X, Y, x_label, y_label, title=None):
     ax.set_ylabel(y_label)
     if title:
         ax.set_title(title)
-    ax.pcolormesh(X, Y, np.zeros((len(Y), len(X))))
+    im = ax.imshow(
+        np.zeros((len(Y), len(X))),
+        aspect="auto",
+        origin="lower",
+        extent=[X[0], X[-1], Y[0], Y[-1]],
+    )
     dh = display(fig, display_id=True)
-    return fig, ax, dh
+    return fig, ax, dh, im
 
 
-def update_show2d(fig, ax, dh, X, Y, Z):
-    ax.pcolormesh(X, Y, Z)
+def update_show2d(fig, ax, dh, im, Z):
+    im.set_data(Z)
+    im.autoscale()
     dh.update(fig)
 
 

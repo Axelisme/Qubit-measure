@@ -25,12 +25,11 @@ def convert2max_contrast(Is: np.ndarray, Qs: np.ndarray):
 
 
 def NormalizeData(signals2D: np.ndarray, axis=None, rescale=True) -> np.ndarray:
-    signals2D = np.ma.masked_invalid(signals2D)
-    signals2D = signals2D - np.median(signals2D, axis=axis, keepdims=True)
+    signals2D = signals2D - np.nanmedian(signals2D, axis=axis, keepdims=True)
     if rescale:
-        mins = np.min(signals2D, axis=axis, keepdims=True)
-        maxs = np.max(signals2D, axis=axis, keepdims=True)
-        signals2D /= (maxs - mins)
+        mins = np.nanmin(signals2D, axis=axis, keepdims=True)
+        maxs = np.nanmax(signals2D, axis=axis, keepdims=True)
+        signals2D /= maxs - mins
     return signals2D
 
 

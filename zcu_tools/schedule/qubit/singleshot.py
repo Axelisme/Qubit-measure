@@ -8,7 +8,7 @@ from zcu_tools.analysis import fidelity_func, singleshot_analysis
 from zcu_tools.program import SingleShotProgram
 
 from ..flux import set_flux
-from ..instant_show import init_show, update_show, clear_show
+from ..instant_show import clear_show, init_show, update_show
 
 
 def measure_fid(soc, soccfg, cfg, threshold, angle, progress=False):
@@ -50,7 +50,7 @@ def scan_pdr_fid(soc, soccfg, cfg, instant_show=False):
         fids[i] = fid
 
         if instant_show:
-            update_show(fig, ax, dh, curve, pdrs, fids)
+            update_show(fig, ax, dh, curve, fids)
 
     if instant_show:
         clear_show()
@@ -79,7 +79,7 @@ def scan_len_fid(soc, soccfg, cfg, instant_show=False):
         fids[i] = fid
 
         if instant_show:
-            update_show(fig, ax, dh, curve, lens, fids)
+            update_show(fig, ax, dh, curve, fids)
 
     if instant_show:
         clear_show()
@@ -107,7 +107,7 @@ def scan_freq_fid(soc, soccfg, cfg, instant_show=False):
         fids[i] = fid
 
         if instant_show:
-            update_show(fig, ax, dh, curve, fpts, fids)
+            update_show(fig, ax, dh, curve, fids)
 
     if instant_show:
         clear_show()
