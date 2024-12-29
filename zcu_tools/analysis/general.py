@@ -32,7 +32,7 @@ def lookback_analyze(Ts, Is, Qs, plot_fit=True, ratio: float = 0.3):
     return offset
 
 
-def phase_analyze(fpts, signals, plot_fit=True):
+def phase_analyze(fpts, signals, plot=True, plot_fit=True):
     """
     fpts: 1D array, frequency points
     signals: 1D array, signal points
@@ -43,13 +43,14 @@ def phase_analyze(fpts, signals, plot_fit=True):
     pOpt, err = ft.fit_line(fpts, phase)
     slope, offset = pOpt
 
-    plt.figure(figsize=figsize)
-    plt.plot(fpts, phase, label="phase")
-    if plot_fit:
-        plt.plot(fpts, slope * fpts + offset, label="fit")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    if plot:
+        plt.figure(figsize=figsize)
+        plt.plot(fpts, phase, label="phase")
+        if plot_fit:
+            plt.plot(fpts, slope * fpts + offset, label="fit")
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
 
     return slope, offset
 
@@ -204,10 +205,9 @@ def dispersive_analyze(
 
 
 def dispersive_analyze2(fpts, signals_g, signals_e):
-    signals_ge = np.concatenate((signals_g, signals_e))
-    y_ge, _ = convert2max_contrast(signals_ge.real, signals_ge.imag)
-    y_g = y_ge[: len(signals_g)]
-    y_e = y_ge[len(signals_g) :]
+    y_g = np.abs(signals_g)
+    y_e = np.abs(signals_e)
+    y_d = np.abs(signals_g - signals_e)
 
     # plot signals
     fig, ax = plt.subplots(2, 1, figsize=figsize)
@@ -217,17 +217,19 @@ def dispersive_analyze2(fpts, signals_g, signals_e):
 
     # plot difference and max/min points
     diff_curve = y_g - y_e
-    max_id, min_id = np.argmax(diff_curve), np.argmin(diff_curve)
-    max, max_fpt = diff_curve[max_id], fpts[max_id]
-    min, min_fpt = diff_curve[min_id], fpts[min_id]
-    ax[1].plot(fpts, diff_curve)
+    max_fpt = fpts[np.argmax(diff_curve)]
+    min_fpt = fpts[np.argmin(diff_curve)]
+    abs_fpt = fpts[np.argmax(y_d)]
+    ax[1].plot(fpts, diff_curve, label="abs", marker="o", markersize=3)
+    ax[1].plot(fpts, y_d, label="iq", marker="o", markersize=3)
     ax[1].axvline(max_fpt, color="r", ls="--", label=f"max SNR1 = {max_fpt:.2f}")
     ax[1].axvline(min_fpt, color="g", ls="--", label=f"max SNR2 = {min_fpt:.2f}")
+    ax[1].axvline(abs_fpt, color="b", ls="--", label=f"max Max IQ = {abs_fpt:.2f}")
 
     plt.tight_layout()
     plt.show()
 
-    return max_fpt, min_fpt if np.abs(max) >= np.abs(min) else min_fpt, max_fpt
+    return abs_fpt, max_fpt, min_fpt
 
 
 def rabi_analyze(
@@ -265,8 +267,8 @@ def rabi_analyze(
     plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
     if plot_fit:
         plt.plot(x, curve, label="fit")
-        plt.axvline(pi_x, ls="--", c="red", label=f"$\pi$={pi_x:.1f}")
-        plt.axvline(pi2_x, ls="--", c="red", label=f"$\pi/2$={(pi2_x):.1f}")
+        plt.axvline(pi_x, ls="--", c="red", label=f"pi={pi_x:.1f}")
+        plt.axvline(pi2_x, ls="--", c="red", label=f"pi/2={(pi2_x):.1f}")
     plt.title("Rabi", fontsize=15)
     plt.legend(loc=4)
     plt.tight_layout()

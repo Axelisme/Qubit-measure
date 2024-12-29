@@ -1,8 +1,6 @@
 import os
 from datetime import datetime
 
-import requests
-
 
 def create_datafolder(root_dir: str, prefix: str = "") -> str:
     root_dir = os.path.abspath(os.path.join(root_dir, "Database"))
@@ -108,6 +106,8 @@ def load_data_local(file_path):
 
 
 def upload_file2server(filepath: str, server_ip: str, port: int):
+    import requests
+
     filepath = os.path.abspath(filepath)
     url = f"http://{server_ip}:{port}/upload"
     with open(filepath, "rb") as file:
@@ -118,6 +118,8 @@ def upload_file2server(filepath: str, server_ip: str, port: int):
 
 
 def download_file2server(filepath: str, server_ip: str, port: int):
+    import requests
+
     if os.path.exists(filepath):
         print(f"File already exists: {filepath}, ignore download")
         return

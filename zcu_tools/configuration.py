@@ -1,5 +1,3 @@
-import yaml
-
 from .tools import deepupdate, numpy2number
 
 
@@ -10,6 +8,8 @@ class DefaultCfg:
 
     @classmethod
     def load(cls, filepath: str):
+        import yaml
+
         with open(filepath, "r") as f:
             cfg = yaml.safe_load(f)
 
@@ -23,6 +23,8 @@ class DefaultCfg:
 
     @classmethod
     def dump(cls, filepath=None):
+        import yaml
+
         if filepath is None:
             import time
 
