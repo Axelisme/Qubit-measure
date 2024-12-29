@@ -161,7 +161,7 @@ def load_data(
     server_ip: str = None,
     port: int = 4999,
 ):
-    if not filepath.endswith(".hdf5") or not filepath.endswith(".h5"):
+    if not filepath.endswith(".hdf5") and not filepath.endswith(".h5"):
         filepath += ".hdf5"
     if server_ip is not None:
         download_file2server(filepath, server_ip, port)
