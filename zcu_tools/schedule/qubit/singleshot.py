@@ -62,7 +62,7 @@ def measure_fid_score(soc, soccfg, cfg):
     return contrast
 
 
-def scan_pdr_fid(soc, soccfg, cfg, instant_show=False):
+def scan_pdr_fid(soc, soccfg, cfg, instant_show=False, reps=5):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     set_flux(cfg["flux_dev"], cfg["flux"])
@@ -75,22 +75,24 @@ def scan_pdr_fid(soc, soccfg, cfg, instant_show=False):
     if instant_show:
         fig, ax, dh, curve = init_show(pdrs, "Power (a.u.)", "Fidelity")
 
-    fids = np.full(len(pdrs), np.nan)
-    for i, pdr in enumerate(tqdm(pdrs, desc="Amplitude", smoothing=0)):
-        res_pulse["gain"] = pdr
-        fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
-        fids[i] = fid
+    fids = np.full(len(pdrs), reps, np.nan)
+    for j in range(reps):
+        for i, pdr in enumerate(tqdm(pdrs, desc="Amplitude", smoothing=0)):
+            res_pulse["gain"] = pdr
+            fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
+            fids[i, j] = fid
 
-        if instant_show:
-            update_show(fig, ax, dh, curve, fids)
+            if instant_show:
+                avg_fids = np.nanmean(fids, axis=1)
+                update_show(fig, ax, dh, curve, avg_fids)
 
     if instant_show:
         clear_show()
 
-    return pdrs, fids
+    return pdrs, np.nanmean(fids, axis=1)
 
 
-def scan_len_fid(soc, soccfg, cfg, instant_show=False):
+def scan_len_fid(soc, soccfg, cfg, instant_show=False, reps=5):
     cfg = deepcopy(cfg)  # prevent in-place modification
     del cfg["adc"]["ro_length"]  # let it be auto derived
 
@@ -105,21 +107,23 @@ def scan_len_fid(soc, soccfg, cfg, instant_show=False):
         fig, ax, dh, curve = init_show(lens, "Length (ns)", "Fidelity")
 
     fids = np.full(len(lens), np.nan)
-    for i, length in enumerate(tqdm(lens, desc="Length", smoothing=0)):
-        res_pulse["length"] = length
-        fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
-        fids[i] = fid
+    for j in range(reps):
+        for i, length in enumerate(tqdm(lens, desc="Length", smoothing=0)):
+            res_pulse["length"] = length
+            fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
+            fids[i, j] = fid
 
-        if instant_show:
-            update_show(fig, ax, dh, curve, fids)
+            if instant_show:
+                avg_fids = np.nanmean(fids, axis=1)
+                update_show(fig, ax, dh, curve, avg_fids)
 
     if instant_show:
         clear_show()
 
-    return lens, fids
+    return lens, np.nanmean(fids, axis=1)
 
 
-def scan_freq_fid(soc, soccfg, cfg, instant_show=False):
+def scan_freq_fid(soc, soccfg, cfg, instant_show=False, reps=5):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     set_flux(cfg["flux_dev"], cfg["flux"])
@@ -133,15 +137,17 @@ def scan_freq_fid(soc, soccfg, cfg, instant_show=False):
         fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Fidelity")
 
     fids = np.full(len(fpts), np.nan)
-    for i, fpt in enumerate(tqdm(fpts, desc="Frequency", smoothing=0)):
-        res_pulse["freq"] = fpt
-        fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
-        fids[i] = fid
+    for j in range(reps):
+        for i, fpt in enumerate(tqdm(fpts, desc="Frequency", smoothing=0)):
+            res_pulse["freq"] = fpt
+            fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
+            fids[i, j] = fid
 
-        if instant_show:
-            update_show(fig, ax, dh, curve, fids)
+            if instant_show:
+                avg_fids = np.nanmean(fids, axis=1)
+                update_show(fig, ax, dh, curve, avg_fids)
 
     if instant_show:
         clear_show()
 
-    return fpts, fids
+    return fpts, np.nanmean(fids, axis=1)
