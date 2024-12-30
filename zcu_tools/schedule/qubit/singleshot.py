@@ -32,7 +32,7 @@ def measure_fid_auto(soc, soccfg, cfg, plot=False, progress=False):
     return fid, threhold, angle, np.array(i0 + 1j * q0)
 
 
-def measure_fid_loss(soc, soccfg, cfg):
+def measure_fid_score(soc, soccfg, cfg):
     set_flux(cfg["flux_dev"], cfg["flux"])
     prog = SingleShotProgram(soccfg, deepcopy(cfg))
     i0, q0 = prog.acquire(soc, progress=False)
@@ -53,7 +53,8 @@ def measure_fid_loss(soc, soccfg, cfg):
     Itot = np.concatenate((Ig, Ie))
     xlims = (Itot.min(), Itot.max())
     bins = np.linspace(*xlims, numbins)
-    ng, ne, _ = singleshot_analysis.hist(Ig, Ie, bins)
+    ng, *_ = np.histogram(Ig, bins=bins, range=xlims)
+    ne, *_ = np.histogram(Ie, bins=bins, range=xlims)
 
     # calculate the total dist between g and e
     contrast = np.sum(np.abs(ng - ne))
@@ -77,7 +78,7 @@ def scan_pdr_fid(soc, soccfg, cfg, instant_show=False):
     fids = np.full(len(pdrs), np.nan)
     for i, pdr in enumerate(tqdm(pdrs, desc="Amplitude", smoothing=0)):
         res_pulse["gain"] = pdr
-        fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
+        fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
         fids[i] = fid
 
         if instant_show:
@@ -106,7 +107,7 @@ def scan_len_fid(soc, soccfg, cfg, instant_show=False):
     fids = np.full(len(lens), np.nan)
     for i, length in enumerate(tqdm(lens, desc="Length", smoothing=0)):
         res_pulse["length"] = length
-        fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
+        fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
         fids[i] = fid
 
         if instant_show:
@@ -134,7 +135,7 @@ def scan_freq_fid(soc, soccfg, cfg, instant_show=False):
     fids = np.full(len(fpts), np.nan)
     for i, fpt in enumerate(tqdm(fpts, desc="Frequency", smoothing=0)):
         res_pulse["freq"] = fpt
-        fid, *_ = measure_fid_auto(soc, soccfg, make_cfg(cfg), progress=False)
+        fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
         fids[i] = fid
 
         if instant_show:
