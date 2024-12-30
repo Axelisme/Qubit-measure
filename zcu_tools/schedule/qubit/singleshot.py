@@ -62,6 +62,16 @@ def measure_fid_score(soc, soccfg, cfg):
     return contrast
 
 
+def get_avg_score(fids):
+    avg_fids = fids.copy()
+    for i in range(avg_fids.shape[0]):
+        if np.sum(~np.isnan(avg_fids[i])) > 2:
+            # remove max and min value
+            avg_fids[i, np.argmax(avg_fids[i])] = np.nan
+            avg_fids[i, np.argmin(avg_fids[i])] = np.nan
+    return np.nanmean(avg_fids, axis=1)
+
+
 def scan_pdr_fid(soc, soccfg, cfg, instant_show=False, reps=5):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -85,7 +95,7 @@ def scan_pdr_fid(soc, soccfg, cfg, instant_show=False, reps=5):
                 fids[i, j] = fid
 
                 if instant_show:
-                    avg_fids = np.nanmean(fids, axis=1)
+                    avg_fids = get_avg_score(fids)
                     update_show(fig, ax, dh, curve, avg_fids)
     except KeyboardInterrupt:
         print("KeyboardInterrupt")
@@ -121,7 +131,7 @@ def scan_len_fid(soc, soccfg, cfg, instant_show=False, reps=5):
                 fids[i, j] = fid
 
                 if instant_show:
-                    avg_fids = np.nanmean(fids, axis=1)
+                    avg_fids = get_avg_score(fids)
                     update_show(fig, ax, dh, curve, avg_fids)
     except KeyboardInterrupt:
         print("KeyboardInterrupt")
@@ -156,7 +166,7 @@ def scan_freq_fid(soc, soccfg, cfg, instant_show=False, reps=5):
                 fids[i, j] = fid
 
                 if instant_show:
-                    avg_fids = np.nanmean(fids, axis=1)
+                    avg_fids = get_avg_score(fids)
                     update_show(fig, ax, dh, curve, avg_fids)
     except KeyboardInterrupt:
         print("KeyboardInterrupt")

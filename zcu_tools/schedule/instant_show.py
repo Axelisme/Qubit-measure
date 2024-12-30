@@ -9,7 +9,7 @@ def init_show(X, x_label, y_label, title=None):
     ax.set_ylabel(y_label)
     if title:
         ax.set_title(title)
-    curve = ax.plot(X, np.zeros_like(X))[0]
+    curve = ax.plot(X, np.zeros_like(X), "-o")[0]
     dh = display(fig, display_id=True)
     return fig, ax, dh, curve
 
