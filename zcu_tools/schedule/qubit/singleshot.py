@@ -1,7 +1,7 @@
 from copy import deepcopy
 
 import numpy as np
-from tqdm.auto import tqdm
+from tqdm.auto import trange
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import fidelity_func, singleshot_analysis
@@ -75,16 +75,21 @@ def scan_pdr_fid(soc, soccfg, cfg, instant_show=False, reps=5):
     if instant_show:
         fig, ax, dh, curve = init_show(pdrs, "Power (a.u.)", "Fidelity")
 
-    fids = np.full(len(pdrs), reps, np.nan)
-    for j in range(reps):
-        for i, pdr in enumerate(tqdm(pdrs, desc="Amplitude", smoothing=0)):
-            res_pulse["gain"] = pdr
-            fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
-            fids[i, j] = fid
+    fids = np.full((len(pdrs), reps), np.nan)
+    fids[:, 0] = 0
+    try:
+        for j in trange(reps):
+            for i, pdr in enumerate(pdrs):
+                res_pulse["gain"] = pdr
+                fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
+                fids[i, j] = fid
 
-            if instant_show:
-                avg_fids = np.nanmean(fids, axis=1)
-                update_show(fig, ax, dh, curve, avg_fids)
+                if instant_show:
+                    avg_fids = np.nanmean(fids, axis=1)
+                    update_show(fig, ax, dh, curve, avg_fids)
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt")
+        pass
 
     if instant_show:
         clear_show()
@@ -106,16 +111,21 @@ def scan_len_fid(soc, soccfg, cfg, instant_show=False, reps=5):
     if instant_show:
         fig, ax, dh, curve = init_show(lens, "Length (ns)", "Fidelity")
 
-    fids = np.full(len(lens), np.nan)
-    for j in range(reps):
-        for i, length in enumerate(tqdm(lens, desc="Length", smoothing=0)):
-            res_pulse["length"] = length
-            fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
-            fids[i, j] = fid
+    fids = np.full((len(lens), reps), np.nan)
+    fids[:, 0] = 0
+    try:
+        for j in trange(reps):
+            for i, length in enumerate(lens):
+                res_pulse["length"] = length
+                fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
+                fids[i, j] = fid
 
-            if instant_show:
-                avg_fids = np.nanmean(fids, axis=1)
-                update_show(fig, ax, dh, curve, avg_fids)
+                if instant_show:
+                    avg_fids = np.nanmean(fids, axis=1)
+                    update_show(fig, ax, dh, curve, avg_fids)
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt")
+        pass
 
     if instant_show:
         clear_show()
@@ -136,16 +146,21 @@ def scan_freq_fid(soc, soccfg, cfg, instant_show=False, reps=5):
     if instant_show:
         fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Fidelity")
 
-    fids = np.full(len(fpts), np.nan)
-    for j in range(reps):
-        for i, fpt in enumerate(tqdm(fpts, desc="Frequency", smoothing=0)):
-            res_pulse["freq"] = fpt
-            fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
-            fids[i, j] = fid
+    fids = np.full((len(fpts), reps), np.nan)
+    fids[:, 0] = 0
+    try:
+        for j in trange(reps):
+            for i, fpt in enumerate(fpts):
+                res_pulse["freq"] = fpt
+                fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
+                fids[i, j] = fid
 
-            if instant_show:
-                avg_fids = np.nanmean(fids, axis=1)
-                update_show(fig, ax, dh, curve, avg_fids)
+                if instant_show:
+                    avg_fids = np.nanmean(fids, axis=1)
+                    update_show(fig, ax, dh, curve, avg_fids)
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt")
+        pass
 
     if instant_show:
         clear_show()
