@@ -40,6 +40,7 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
         prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
         fpts, avgi, avgq = prog.acquire(soc, progress=True)
+        fpts = np.array([prog.reg2freq(f, gen_ch=qub_pulse["ch"]) for f in fpts])
         signals = avgi[0][0] + 1j * avgq[0][0]
 
         if instant_show:

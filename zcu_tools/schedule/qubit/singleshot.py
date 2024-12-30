@@ -5,6 +5,8 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import fidelity_func, singleshot_analysis
+from zcu_tools.analysis.single_shot.base import rotate
+from zcu_tools.analysis.single_shot.regression import get_rotate_angle
 from zcu_tools.program import SingleShotProgram
 
 from ..flux import set_flux
@@ -28,6 +30,35 @@ def measure_fid_auto(soc, soccfg, cfg, plot=False, progress=False):
     i0, q0 = prog.acquire(soc, progress=progress)
     fid, threhold, angle = singleshot_analysis(i0, q0, plot=plot)
     return fid, threhold, angle, np.array(i0 + 1j * q0)
+
+
+def measure_fid_loss(soc, soccfg, cfg):
+    set_flux(cfg["flux_dev"], cfg["flux"])
+    prog = SingleShotProgram(soccfg, deepcopy(cfg))
+    i0, q0 = prog.acquire(soc, progress=False)
+
+    numbins = 200
+    Ig, Ie = i0
+    Qg, Qe = q0
+
+    # Calculate the angle of rotation
+    out_dict = get_rotate_angle(Ig, Qg, Ie, Qe)
+    theta = out_dict["theta"]
+
+    # Rotate the IQ data
+    Ig, _ = rotate(Ig, Qg, theta)
+    Ie, _ = rotate(Ie, Qe, theta)
+
+    # calculate histogram
+    Itot = np.concatenate((Ig, Ie))
+    xlims = (Itot.min(), Itot.max())
+    bins = np.linspace(*xlims, numbins)
+    ng, ne, _ = singleshot_analysis.hist(Ig, Ie, bins)
+
+    # calculate the total dist between g and e
+    contrast = np.sum(np.abs(ng - ne))
+
+    return contrast
 
 
 def scan_pdr_fid(soc, soccfg, cfg, instant_show=False):
@@ -60,7 +91,7 @@ def scan_pdr_fid(soc, soccfg, cfg, instant_show=False):
 
 def scan_len_fid(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
-    del cfg["adc_cfg"]["ro_length"]  # let it be auto derived
+    del cfg["adc"]["ro_length"]  # let it be auto derived
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 

@@ -206,7 +206,7 @@ def dispersive_analyze(
 
     max_diff = np.abs(diff_curve[max_id])
     min_diff = np.abs(diff_curve[min_id])
-    return max_fpt, min_fpt if max_diff >= min_diff else min_fpt, max_fpt
+    return (max_fpt, min_fpt) if max_diff >= min_diff else (min_fpt, max_fpt)
 
 
 def dispersive_analyze2(fpts, signals_g, signals_e):
@@ -231,6 +231,7 @@ def dispersive_analyze2(fpts, signals_g, signals_e):
     ax[1].axvline(min_fpt, color="g", ls="--", label=f"max SNR2 = {min_fpt:.2f}")
     ax[1].axvline(abs_fpt, color="b", ls="--", label=f"max Max IQ = {abs_fpt:.2f}")
 
+    plt.legend()
     plt.tight_layout()
     plt.show()
 

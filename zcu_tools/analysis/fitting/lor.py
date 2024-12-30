@@ -43,7 +43,7 @@ def asym_lorfunc(x, *p):
     y0, slope, yscale, x0, gamma, alpha = p
     return (
         y0
-        - yscale / (1 + 1 / (gamma * alpha) ** 2)
+        # - yscale / (1 + 1 / (gamma * alpha) ** 2)
         + slope * (x - x0)
         + yscale / (1 + ((x - x0) / (gamma * (1 + alpha * (x - x0)))) ** 2)
     )
@@ -66,13 +66,15 @@ def fit_asym_lor(xdata, ydata, fitparams=None):
             x0 = xdata[np.argmax(ydata)]
         # gamma = (xdata[-1] - xdata[0]) / 100
         # calculate gamma from variance
-        weights = np.abs(ydata - np.median(ydata))
-        weights = np.where(weights > 0.7 * np.max(weights), 0, weights)
-        weights = weights / np.sum(weights)
-        gamma = np.sqrt(np.sum(weights * (xdata - x0) ** 2)) / 10
+        # weights = np.abs(ydata - np.median(ydata))
+        # weights = np.where(weights > 0.7 * np.max(weights), 0, weights)
+        # weights = weights / np.sum(weights)
+        # gamma = np.sqrt(np.sum(weights * (xdata - x0) ** 2)) / 10
         # calculate alpha from skewness
-        skewness = np.sum(weights * (xdata - x0) ** 3) / gamma**3
-        alpha = -skewness / 5
+        # skewness = np.sum(weights * (xdata - x0) ** 3) / gamma**3
+        # alpha = -skewness / 5
+        gamma = np.abs(yscale) / 10
+        alpha = 0
 
         assign_init_p(fitparams, [y0, slope, yscale, x0, gamma, alpha])
 
