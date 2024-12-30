@@ -137,7 +137,12 @@ def pdr_dep_analyze(fpts, pdrs, amps, contour=None):
     amps = NormalizeData(amps, 1)
 
     plt.figure(figsize=figsize)
-    plt.pcolormesh(fpts, pdrs, amps)
+    plt.imshow(
+        amps,
+        aspect="auto",
+        origin="lower",
+        extent=[fpts[0], fpts[-1], pdrs[0], pdrs[-1]],
+    )
     if contour is not None:
         plt.contour(fpts, pdrs, amps, levels=[contour])
 

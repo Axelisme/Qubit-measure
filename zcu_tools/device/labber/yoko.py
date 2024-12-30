@@ -5,7 +5,7 @@ from .manager import InstrManager
 
 class YokoDevControl:
     yoko = None
-    TIMEOUT = 1 * 60 * 60 * 1000  # 1 hour
+    TIMEOUT = 2 * 60 * 60  # 1 hour
 
     @classmethod
     def connect_server(cls, dev_cfg: dict, reinit=False):
