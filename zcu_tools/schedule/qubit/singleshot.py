@@ -66,7 +66,7 @@ def perform_fid_scan(
     soc, soccfg, cfg, instant_show, reps, scan_points, update_func=None
 ):
     if instant_show:
-        fig, ax, dh, curve = init_show([], "Iteration", "Fidelity")
+        fig, ax, dh, curve = init_show(scan_points, "Iteration", "Fidelity")
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
@@ -74,7 +74,10 @@ def perform_fid_scan(
     scores[:, 0] = 0
     try:
         for j in trange(reps):
-            for i, point in enumerate(scan_points):
+            # instead of scan one by one, randomize the order
+            order = np.random.permutation(len(scan_points))
+            for i in order:
+                point = scan_points[i]
                 if update_func:
                     update_func(cfg, point)
                 fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
@@ -152,7 +155,7 @@ def scan_res_len(soc, soccfg, cfg, instant_show=False, reps=5):
 
     sweep_cfg = cfg["sweep"]
     res_lengths = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
-    res_length0 = res_lengths[0]
+    res_length0 = cfg["dac"]["res_pulse"]["length"]
     post_offset = cfg["adc"]["ro_length"] - res_length0
 
     assert np.all(res_lengths > 0), "res_length should be positive"
