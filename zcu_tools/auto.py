@@ -39,9 +39,6 @@ def auto_derive_waveform(pulse_cfg: dict):
             pulse_cfg.setdefault("sigma", length / 4)
 
 
-KNOWN_RES_PULSE = ["res_pulse"]
-
-
 def auto_derive_pulse(name: str, pulse_cfg: Union[str, dict]) -> dict:
     # load pulse configuration if it is a string
     if isinstance(pulse_cfg, str):
@@ -49,7 +46,7 @@ def auto_derive_pulse(name: str, pulse_cfg: Union[str, dict]) -> dict:
 
     ch = None
     nqz = None
-    if name in KNOWN_RES_PULSE:
+    if name == "res_pulse":
         ch = DefaultCfg.get_dac("res_ch")
         nqz = DefaultCfg.get_dac("res_nqz")
     else:
@@ -89,21 +86,16 @@ def auto_derive(exp_cfg):
     if ro_chs:
         adc_cfg.setdefault("chs", ro_chs)
 
+    # readout length
+    if "res_pulse" in dac_cfg:
+        res_pulse = dac_cfg["res_pulse"]
+        if "length" in res_pulse:
+            adc_cfg.setdefault("ro_length", res_pulse["length"])
+
     # trig_offset
     trig_offset = DefaultCfg.get_adc("trig_offset")
     if trig_offset:
         adc_cfg.setdefault("trig_offset", trig_offset)
-    else:
-        adc_cfg.setdefault("trig_offset", 0.0)
-
-    # readout length
-    # find the res pulse length
-    # if only one res pulse is defined, use its length as the default ro_length
-    res_pulses = list(p for n, p in dac_cfg.items() if n in KNOWN_RES_PULSE)
-    if len(res_pulses) == 1:
-        length = res_pulses[0].get("length")
-        if length:
-            adc_cfg.setdefault("ro_length", length)
 
     # flux_dev
     exp_cfg.setdefault("flux_dev", "none")

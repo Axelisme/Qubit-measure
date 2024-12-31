@@ -62,88 +62,114 @@ def measure_fid_score(soc, soccfg, cfg):
     return contrast
 
 
-def get_avg_score(fids):
-    avg_fids = fids.copy()
-    for i in range(avg_fids.shape[0]):
-        if np.sum(~np.isnan(avg_fids[i])) > 2:
-            # remove max and min value
-            avg_fids[i, np.argmax(avg_fids[i])] = np.nan
-            avg_fids[i, np.argmin(avg_fids[i])] = np.nan
-    return np.nanmean(avg_fids, axis=1)
-
-
-def scan_pdr_fid(soc, soccfg, cfg, instant_show=False, reps=5):
-    cfg = deepcopy(cfg)  # prevent in-place modification
+def perform_fid_scan(
+    soc, soccfg, cfg, instant_show, reps, scan_points, update_func=None
+):
+    if instant_show:
+        fig, ax, dh, curve = init_show([], "Iteration", "Fidelity")
 
     set_flux(cfg["flux_dev"], cfg["flux"])
+
+    scores = np.full((len(scan_points), reps), np.nan)
+    scores[:, 0] = 0
+    try:
+        for j in trange(reps):
+            for i, point in enumerate(scan_points):
+                if update_func:
+                    update_func(cfg, point)
+                fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
+                scores[i, j] = fid
+
+                if instant_show:
+                    avg_score = scores.copy()
+                    for i in range(avg_score.shape[0]):
+                        if np.sum(~np.isnan(avg_score[i])) > 2:
+                            # remove max and min value
+                            avg_score[i, np.argmax(avg_score[i])] = np.nan
+                            avg_score[i, np.argmin(avg_score[i])] = np.nan
+                    avg_score = np.nanmean(avg_score, axis=1)
+                    update_show(fig, ax, dh, curve, avg_score)
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt")
+        pass
+
+    if instant_show:
+        clear_show()
+
+    return np.nanmean(scores, axis=1)
+
+
+def scan_pdr(soc, soccfg, cfg, instant_show=False, reps=5):
+    cfg = deepcopy(cfg)  # prevent in-place modification
 
     sweep_cfg = cfg["sweep"]
     pdrs = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
 
-    res_pulse = cfg["dac"]["res_pulse"]
+    def update_pdr(cfg, pdr):
+        cfg["dac"]["res_pulse"]["gain"] = pdr
 
-    if instant_show:
-        fig, ax, dh, curve = init_show(pdrs, "Power (a.u.)", "Fidelity")
-
-    fids = np.full((len(pdrs), reps), np.nan)
-    fids[:, 0] = 0
-    try:
-        for j in trange(reps):
-            for i, pdr in enumerate(pdrs):
-                res_pulse["gain"] = pdr
-                fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
-                fids[i, j] = fid
-
-                if instant_show:
-                    avg_fids = get_avg_score(fids)
-                    update_show(fig, ax, dh, curve, avg_fids)
-    except KeyboardInterrupt:
-        print("KeyboardInterrupt")
-        pass
-
-    if instant_show:
-        clear_show()
-
-    return pdrs, np.nanmean(fids, axis=1)
+    return pdrs, perform_fid_scan(
+        soc, soccfg, cfg, instant_show, reps, pdrs, update_pdr
+    )
 
 
-def scan_len_fid(soc, soccfg, cfg, instant_show=False, reps=5):
+def scan_offset(soc, soccfg, cfg, instant_show=False, reps=5):
     cfg = deepcopy(cfg)  # prevent in-place modification
-    del cfg["adc"]["ro_length"]  # let it be auto derived
-
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    ro_end = cfg["adc"]["trig_offset"] + cfg["adc"]["ro_length"]
 
     sweep_cfg = cfg["sweep"]
-    lens = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
+    offsets = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
 
-    res_pulse = cfg["dac"]["res_pulse"]
+    assert np.all(offsets < ro_end), "offset should be less than ro_end"
 
-    if instant_show:
-        fig, ax, dh, curve = init_show(lens, "Length (ns)", "Fidelity")
+    def update_ro_start(cfg, offset):
+        cfg["adc"]["trig_offset"] = offset
+        cfg["adc"]["ro_length"] = ro_end - offset
 
-    fids = np.full((len(lens), reps), np.nan)
-    fids[:, 0] = 0
-    try:
-        for j in trange(reps):
-            for i, length in enumerate(lens):
-                res_pulse["length"] = length
-                fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
-                fids[i, j] = fid
-
-                if instant_show:
-                    avg_fids = get_avg_score(fids)
-                    update_show(fig, ax, dh, curve, avg_fids)
-    except KeyboardInterrupt:
-        print("KeyboardInterrupt")
-        pass
-
-    if instant_show:
-        clear_show()
-
-    return lens, np.nanmean(fids, axis=1)
+    return offsets, perform_fid_scan(
+        soc, soccfg, cfg, instant_show, reps, offsets, update_ro_start
+    )
 
 
-def scan_freq_fid(soc, soccfg, cfg, instant_show=False, reps=5):
+def scan_ro_len(soc, soccfg, cfg, instant_show=False, reps=5):
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
+    sweep_cfg = cfg["sweep"]
+    ro_lengths = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
+
+    assert np.all(ro_lengths > 0), "ro_length should be positive"
+
+    def update_ro_length(cfg, ro_length):
+        cfg["adc"]["ro_length"] = ro_length
+
+    return ro_lengths, perform_fid_scan(
+        soc, soccfg, cfg, instant_show, reps, ro_lengths, update_ro_length
+    )
+
+
+def scan_res_len(soc, soccfg, cfg, instant_show=False, reps=5):
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
+    sweep_cfg = cfg["sweep"]
+    res_lengths = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
+    res_length0 = res_lengths[0]
+    post_offset = cfg["adc"]["ro_length"] - res_length0
+
+    assert np.all(res_lengths > 0), "res_length should be positive"
+    assert np.all(
+        res_lengths + post_offset > 0
+    ), "negative ro_length detected, please adjust the sweep range"
+
+    def update_res_length(cfg, res_length):
+        cfg["dac"]["res_pulse"]["length"] = res_length
+        cfg["adc"]["ro_length"] = res_length + post_offset
+
+    return res_lengths, perform_fid_scan(
+        soc, soccfg, cfg, instant_show, reps, res_lengths, update_res_length
+    )
+
+
+def scan_freq(soc, soccfg, cfg, instant_show=False, reps=5):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     set_flux(cfg["flux_dev"], cfg["flux"])
@@ -151,28 +177,9 @@ def scan_freq_fid(soc, soccfg, cfg, instant_show=False, reps=5):
     sweep_cfg = cfg["sweep"]
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
 
-    res_pulse = cfg["dac"]["res_pulse"]
+    def update_freq(cfg, freq):
+        cfg["dac"]["res_pulse"]["freq"] = freq
 
-    if instant_show:
-        fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Fidelity")
-
-    fids = np.full((len(fpts), reps), np.nan)
-    fids[:, 0] = 0
-    try:
-        for j in trange(reps):
-            for i, fpt in enumerate(fpts):
-                res_pulse["freq"] = fpt
-                fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
-                fids[i, j] = fid
-
-                if instant_show:
-                    avg_fids = get_avg_score(fids)
-                    update_show(fig, ax, dh, curve, avg_fids)
-    except KeyboardInterrupt:
-        print("KeyboardInterrupt")
-        pass
-
-    if instant_show:
-        clear_show()
-
-    return fpts, np.nanmean(fids, axis=1)
+    return fpts, perform_fid_scan(
+        soc, soccfg, cfg, instant_show, reps, fpts, update_freq
+    )
