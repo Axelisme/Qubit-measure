@@ -89,8 +89,13 @@ def auto_derive(exp_cfg):
     # readout length
     if "res_pulse" in dac_cfg:
         res_pulse = dac_cfg["res_pulse"]
+        if "ro_length" in res_pulse:
+            adc_cfg.setdefault("ro_length", res_pulse["ro_length"])
         if "length" in res_pulse:
             adc_cfg.setdefault("ro_length", res_pulse["length"])
+
+        if "trig_offset" in res_pulse:
+            adc_cfg.setdefault("trig_offset", res_pulse["trig_offset"])
 
     # trig_offset
     trig_offset = DefaultCfg.get_adc("trig_offset")
