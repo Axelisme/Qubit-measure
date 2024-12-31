@@ -3,23 +3,14 @@
 
 import atexit
 import subprocess
-import sys
 import time
-from pathlib import Path
 
-HERE = Path(__file__).parent.parent.absolute()
-
-print(HERE)
-sys.path.append(HERE.as_posix())
-
-from qick.pyro import start_server  # noqa
-
+from ..zcu_tools.remote.pyro import start_server
 
 ############
 # parameters
 ############
 
-bitfile = "qick/qick_216.bit"
 proxy_name = "myqick"
 ns_port = 8887
 # set to 0.0.0.0 to allow access from outside systems
@@ -54,7 +45,6 @@ time.sleep(5)
 
 # start the qick proxy server
 start_server(
-    bitfile=str(HERE / bitfile),
     proxy_name=proxy_name,
     ns_host=ns_host,
     ns_port=ns_port,
