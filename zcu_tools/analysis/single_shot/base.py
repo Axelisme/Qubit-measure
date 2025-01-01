@@ -73,7 +73,7 @@ def calculate_fidelity(ng, ne, bins, threshold=None):
 
     # fid = 0.5 * (1 - ng[tind:].sum() / ng.sum() + 1 - ne[:tind].sum() / ne.sum())
     tp, fp = ng[tind:].sum(), ne[tind:].sum()
-    tn, fn = ne[:tind].sum(), ng[:tind].sum()
+    tn, fn = ng[:tind].sum(), ne[:tind].sum()
     fid = fidelity_func(tp, tn, fp, fn)
 
     return fid, bins[tind]
