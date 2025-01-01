@@ -24,11 +24,13 @@ def measure_fid(soc, soccfg, cfg, threshold, angle, progress=False):
     return fidelity_func(tp, tn, fp, fn)
 
 
-def measure_fid_auto(soc, soccfg, cfg, plot=False, progress=False):
+def measure_fid_auto(
+    soc, soccfg, cfg, plot=False, progress=False, backend="regression"
+):
     set_flux(cfg["flux_dev"], cfg["flux"])
     prog = SingleShotProgram(soccfg, deepcopy(cfg))
     i0, q0 = prog.acquire(soc, progress=progress)
-    fid, threhold, angle = singleshot_analysis(i0, q0, plot=plot)
+    fid, threhold, angle = singleshot_analysis(i0, q0, plot=plot, backend=backend)
     return fid, threhold, angle, np.array(i0 + 1j * q0)
 
 
@@ -63,7 +65,14 @@ def measure_fid_score(soc, soccfg, cfg):
 
 
 def perform_fid_scan(
-    soc, soccfg, cfg, instant_show, reps, scan_points, update_func=None
+    soc,
+    soccfg,
+    cfg,
+    instant_show,
+    reps,
+    scan_points,
+    update_func=None,
+    backend="regression",
 ):
     if instant_show:
         fig, ax, dh, curve = init_show(scan_points, "Iteration", "Fidelity")
@@ -80,7 +89,7 @@ def perform_fid_scan(
                 point = scan_points[i]
                 if update_func:
                     update_func(cfg, point)
-                fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
+                fid = measure_fid_score(soc, soccfg, make_cfg(cfg), backend=backend)
                 scores[i, j] = fid
 
                 if instant_show:
@@ -102,7 +111,7 @@ def perform_fid_scan(
     return np.nanmean(scores, axis=1)
 
 
-def scan_pdr(soc, soccfg, cfg, instant_show=False, reps=5):
+def scan_pdr(soc, soccfg, cfg, instant_show=False, reps=5, backend="regression"):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     sweep_cfg = cfg["sweep"]
@@ -112,11 +121,11 @@ def scan_pdr(soc, soccfg, cfg, instant_show=False, reps=5):
         cfg["dac"]["res_pulse"]["gain"] = pdr
 
     return pdrs, perform_fid_scan(
-        soc, soccfg, cfg, instant_show, reps, pdrs, update_pdr
+        soc, soccfg, cfg, instant_show, reps, pdrs, update_pdr, backend=backend
     )
 
 
-def scan_offset(soc, soccfg, cfg, instant_show=False, reps=5):
+def scan_offset(soc, soccfg, cfg, instant_show=False, reps=5, backend="regression"):
     cfg = deepcopy(cfg)  # prevent in-place modification
     ro_end = cfg["adc"]["trig_offset"] + cfg["adc"]["ro_length"]
 
@@ -130,11 +139,11 @@ def scan_offset(soc, soccfg, cfg, instant_show=False, reps=5):
         cfg["adc"]["ro_length"] = ro_end - offset
 
     return offsets, perform_fid_scan(
-        soc, soccfg, cfg, instant_show, reps, offsets, update_ro_start
+        soc, soccfg, cfg, instant_show, reps, offsets, update_ro_start, backend=backend
     )
 
 
-def scan_ro_len(soc, soccfg, cfg, instant_show=False, reps=5):
+def scan_ro_len(soc, soccfg, cfg, instant_show=False, reps=5, backend="regression"):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     sweep_cfg = cfg["sweep"]
@@ -142,15 +151,22 @@ def scan_ro_len(soc, soccfg, cfg, instant_show=False, reps=5):
 
     assert np.all(ro_lengths > 0), "ro_length should be positive"
 
-    def update_ro_length(cfg, ro_length):
+    def update_ro_len(cfg, ro_length):
         cfg["adc"]["ro_length"] = ro_length
 
     return ro_lengths, perform_fid_scan(
-        soc, soccfg, cfg, instant_show, reps, ro_lengths, update_ro_length
+        soc,
+        soccfg,
+        cfg,
+        instant_show,
+        reps,
+        ro_lengths,
+        update_ro_len,
+        backend=backend,
     )
 
 
-def scan_res_len(soc, soccfg, cfg, instant_show=False, reps=5):
+def scan_res_len(soc, soccfg, cfg, instant_show=False, reps=5, backend="regression"):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     sweep_cfg = cfg["sweep"]
@@ -163,16 +179,23 @@ def scan_res_len(soc, soccfg, cfg, instant_show=False, reps=5):
         res_lengths + post_offset > 0
     ), "negative ro_length detected, please adjust the sweep range"
 
-    def update_res_length(cfg, res_length):
+    def update_res_len(cfg, res_length):
         cfg["dac"]["res_pulse"]["length"] = res_length
         cfg["adc"]["ro_length"] = res_length + post_offset
 
     return res_lengths, perform_fid_scan(
-        soc, soccfg, cfg, instant_show, reps, res_lengths, update_res_length
+        soc,
+        soccfg,
+        cfg,
+        instant_show,
+        reps,
+        res_lengths,
+        update_res_len,
+        backend=backend,
     )
 
 
-def scan_freq(soc, soccfg, cfg, instant_show=False, reps=5):
+def scan_freq(soc, soccfg, cfg, instant_show=False, reps=5, backend="regression"):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     set_flux(cfg["flux_dev"], cfg["flux"])
@@ -184,5 +207,5 @@ def scan_freq(soc, soccfg, cfg, instant_show=False, reps=5):
         cfg["dac"]["res_pulse"]["freq"] = freq
 
     return fpts, perform_fid_scan(
-        soc, soccfg, cfg, instant_show, reps, fpts, update_freq
+        soc, soccfg, cfg, instant_show, reps, fpts, update_freq, backend=backend
     )
