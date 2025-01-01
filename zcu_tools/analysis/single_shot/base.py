@@ -62,14 +62,11 @@ def fidelity_func(tp, tn, fp, fn):
     return (tp + fn) / (tp + tn + fp + fn)
 
 
-def calculate_fidelity(ng, ne, bins, threshold=None):
+def calculate_fidelity(ng, ne, bins):
     cum_ng, cum_ne = np.cumsum(ng), np.cumsum(ne)
 
-    if threshold is not None:
-        tind = np.searchsorted(bins, threshold)
-    else:
-        contrast = np.abs(2 * (cum_ng - cum_ne) / (ng.sum() + ne.sum()))
-        tind = contrast.argmax()
+    contrast = np.abs(2 * (cum_ng - cum_ne) / (ng.sum() + ne.sum()))
+    tind = contrast.argmax()
 
     # fid = 0.5 * (1 - ng[tind:].sum() / ng.sum() + 1 - ne[:tind].sum() / ne.sum())
     tp, fp = ng[tind:].sum(), ne[tind:].sum()
@@ -101,7 +98,7 @@ def fitting_and_plot(Is, Qs, classify_func, plot=True, numbins=200):
     else:
         ng, ne, bins = hist(Ig, Ie, numbins)
 
-    fid, threshold = calculate_fidelity(ng, ne, bins, out_dict.get("threshold"))
+    fid, threshold = calculate_fidelity(ng, ne, bins)
 
     if plot:
         axs[0, 1].axvline(threshold, color="0.2", linestyle="--")
