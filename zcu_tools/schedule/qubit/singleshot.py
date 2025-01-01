@@ -89,7 +89,7 @@ def perform_fid_scan(
                 point = scan_points[i]
                 if update_func:
                     update_func(cfg, point)
-                fid = measure_fid_score(soc, soccfg, make_cfg(cfg), backend=backend)
+                fid = measure_fid_score(soc, soccfg, make_cfg(cfg))
                 scores[i, j] = fid
 
                 if instant_show:
