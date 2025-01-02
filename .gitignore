@@ -14,3 +14,4 @@ test.py
 *.ipynb
 *.yaml
 *.hdf5
+*.h5

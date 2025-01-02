@@ -120,12 +120,8 @@ def upload_file2server(filepath: str, server_ip: str, port: int):
 def download_file2server(filepath: str, server_ip: str, port: int):
     import requests
 
-    if os.path.exists(filepath):
-        print(f"File already exists: {filepath}, ignore download")
-        return
-
-    url = f"http://{server_ip}:{port}/download?path={filepath}"
-    response = requests.get(url)
+    url = f"http://{server_ip}:{port}/download"
+    response = requests.post(url, json={"path": filepath})
     assert response.status_code == 200, f"Fail to download file: {filepath}"
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -164,6 +160,7 @@ def load_data(
     if not filepath.endswith(".hdf5") and not filepath.endswith(".h5"):
         filepath += ".hdf5"
     if server_ip is not None:
-        download_file2server(filepath, server_ip, port)
+        if not os.path.exists(filepath):
+            download_file2server(filepath, server_ip, port)
     z_data, x_data, y_data = load_data_local(filepath)
     return z_data, x_data, y_data

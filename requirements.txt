@@ -5,6 +5,7 @@ tqdm
 
 # for fitting
 # scikit-learn
+# scqubits
 
 # for labber
 # attrDict

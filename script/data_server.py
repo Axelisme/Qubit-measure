@@ -91,9 +91,9 @@ def remote2server():
         return save_file(file)
 
 
-@app.route("/download", methods=["GET"])
+@app.route("/download", methods=["POST"])
 def server2remote():
-    filepath = request.args.get("path")
+    filepath = request.json.get("path")
     if not filepath:
         return "No file path", 400
 
