@@ -128,7 +128,7 @@ def download_file2server(filepath: str, server_ip: str, port: int):
     with open(filepath, "wb") as file:
         file.write(response.content)
 
-    print(response.text)
+    print(f"Download file to {filepath}")
 
 
 def save_data(
