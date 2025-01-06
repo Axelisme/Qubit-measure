@@ -5,7 +5,7 @@ import os
 
 import h5py as h5
 import numpy as np
-from scqubits import Fluxonium  # type: ignore
+import scqubits as scq
 from tqdm.auto import tqdm
 
 # parameters
@@ -19,17 +19,22 @@ ELb = (0.1, 2.0)
 # ELb = (0.5, 3.5)
 
 DRY_RUN = False
+scq.settings.PROGRESSBAR_DISABLED = True
 
 level_num = 10
 cutoff = 40
 flxs = np.linspace(0.0, 0.5, 120)
 
 
-def calculate_spectrum(flxs, EJ, EC, EL, evals_count=4, cutoff=50):
-    fluxonium = Fluxonium(EJ, EC, EL, flux=0.0, cutoff=cutoff)
-    spectrumData = fluxonium.get_spectrum_vs_paramvals(
-        "flux", flxs, evals_count=evals_count
-    )
+fluxonium = scq.Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=40)
+
+
+def calculate_spectrum(flxs, EJ, EC, EL):
+    global fluxonium
+    fluxonium.EJ = EJ
+    fluxonium.EC = EC
+    fluxonium.EL = EL
+    spectrumData = fluxonium.get_spectrum_vs_paramvals("flux", flxs, evals_count=4)
 
     return spectrumData.energy_table
 
@@ -54,7 +59,7 @@ for EC in tqdm(np.linspace(ECb[0], ECb[1], num_per + 1)):
         if DRY_RUN:
             energy = np.random.randn(len(flxs), level_num)
         else:
-            energy = calculate_spectrum(flxs, EJc, EC, EL, level_num, cutoff)
+            energy = calculate_spectrum(flxs, EJc, EC, EL)
 
         # since energy is proportional to EJ, we can just use the energy
         for EJ in np.linspace(EJb[0], EJb[1], num_per + 1):
@@ -71,7 +76,7 @@ for EJ in tqdm(np.linspace(EJb[0], EJb[1], num_per + 1)):
         if DRY_RUN:
             energy = np.random.randn(len(flxs), level_num)
         else:
-            energy = calculate_spectrum(flxs, EJ, ECc, EL, level_num, cutoff)
+            energy = calculate_spectrum(flxs, EJ, ECc, EL)
 
         for EC in np.linspace(ECb[0], ECb[1], num_per + 1):
             ratio = EC / ECc
@@ -87,7 +92,7 @@ for EJ in tqdm(np.linspace(EJb[0], EJb[1], num_per + 1)):
         if DRY_RUN:
             energy = np.random.randn(len(flxs), level_num)
         else:
-            energy = calculate_spectrum(flxs, EJ, EC, ELc, level_num, cutoff)
+            energy = calculate_spectrum(flxs, EJ, EC, ELc)
 
         for EL in np.linspace(ELb[0], ELb[1], num_per + 1):
             ratio = EL / ELc
@@ -98,6 +103,8 @@ for EJ in tqdm(np.linspace(EJb[0], EJb[1], num_per + 1)):
             energies.append(energy * ratio)
 
 print("Total data points:", len(params))
+
+scq.settings.PROGRESSBAR_DISABLED = False
 
 # we can flip the data around 0.5 to make the other half
 # since the fluxonium is symmetric

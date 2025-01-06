@@ -105,8 +105,7 @@ def server2remote():
 
 if __name__ == "__main__":
     # localPC_ip check by cmd > ipconfig
-    # localPC_ip = "192.168.10.252"
-    localPC_ip = "100.76.229.37"
+    localPC_ip = "0.0.0.0"
     port = 4999
     print(f"Save data to {ROOT_DIR}")
     app.run(host=localPC_ip, port=port)
