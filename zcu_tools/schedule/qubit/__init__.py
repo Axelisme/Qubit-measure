@@ -1,6 +1,7 @@
 from . import singleshot
 from .dispersive import measure_dispersive
 from .flux_depend import measure_qub_flux_dep
+from .ge_different import measure_ge_contrast
 from .lookback import measure_excited_lookback
 from .power_depend import measure_qub_pdr_dep
 from .rabi import measure_amprabi, measure_lenrabi
@@ -30,6 +31,7 @@ __all__ = [
     "measure_fid",
     "measure_fid_auto",
     "measure_excited_lookback",
+    "measure_ge_contrast",
     "scan_pdr",
     "scan_offset",
     "scan_ro_len",

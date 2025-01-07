@@ -21,6 +21,8 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
 
     sweep_cfg = cfg["sweep"]
     fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
+
+    show_period = int(len(fpts) / 10 + 0.99)
     if instant_show:
         fig, ax, dh, curve_g = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
@@ -33,6 +35,9 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         signal = avgi[0][0] + 1j * avgq[0][0]
         signals_g[i] = signal
 
+        if instant_show and i % show_period == 0:
+            update_show(fig, ax, dh, curve_g, np.abs(signals_g))
+    else:
         if instant_show:
             update_show(fig, ax, dh, curve_g, np.abs(signals_g))
 
@@ -49,6 +54,9 @@ def measure_dispersive(soc, soccfg, cfg, instant_show=False):
         signal = avgi[0][0] + 1j * avgq[0][0]
         signals_e[i] = signal
 
+        if instant_show and i % show_period == 0:
+            update_show(fig, ax, dh, curve_e, np.abs(signals_e))
+    else:
         if instant_show:
             update_show(fig, ax, dh, curve_e, np.abs(signals_e))
 

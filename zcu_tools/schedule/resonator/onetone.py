@@ -20,6 +20,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
 
     res_pulse = cfg["dac"]["res_pulse"]
 
+    show_period = int(len(fpts) / 10 + 0.99)
     if instant_show:
         fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
@@ -30,6 +31,9 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         avgi, avgq = prog.acquire(soc, progress=False)
         signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
+        if instant_show and i % show_period == 0:
+            update_show(fig, ax, dh, curve, np.abs(signals))
+    else:
         if instant_show:
             update_show(fig, ax, dh, curve, np.abs(signals))
 

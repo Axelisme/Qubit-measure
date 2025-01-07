@@ -20,6 +20,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
 
     qub_pulse = cfg["dac"]["qub_pulse"]
 
+    show_period = int(len(lens) / 10 + 0.99)
     if instant_show:
         fig, ax, dh, curve = init_show(lens, "Length (us)", "Amplitude (a.u.)")
 
@@ -30,6 +31,9 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
         avgi, avgq = prog.acquire(soc, progress=False)
         signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
+        if instant_show and i % show_period == 0:
+            update_show(fig, ax, dh, curve, np.abs(signals))
+    else:
         if instant_show:
             update_show(fig, ax, dh, curve, np.abs(signals))
 
@@ -45,13 +49,14 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     sweep_cfg = cfg["sweep"]
     pdrs = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
 
-    if instant_show:
-        fig, ax, dh, curve = init_show(pdrs, "Power (a.u.)", "Signal (a.u.)")
-
     if soft_loop:
         print("Use TwoToneProgram for soft loop")
 
         qub_pulse = cfg["dac"]["qub_pulse"]
+
+        show_period = int(len(pdrs) / 10 + 0.99)
+        if instant_show:
+            fig, ax, dh, curve = init_show(pdrs, "Power (a.u.)", "Signal (a.u.)")
 
         signals = np.full(len(pdrs), np.nan, dtype=np.complex128)
         for i, pdr in enumerate(tqdm(pdrs, desc="Amplitude", smoothing=0)):
@@ -60,8 +65,14 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             avgi, avgq = prog.acquire(soc, progress=False)
             signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
+            if instant_show and i % show_period == 0:
+                update_show(fig, ax, dh, curve, np.abs(signals))
+        else:
             if instant_show:
                 update_show(fig, ax, dh, curve, np.abs(signals))
+
+        if instant_show:
+            clear_show()
 
     else:
         print("Use AmpRabiProgram for hard loop")
@@ -69,11 +80,5 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         prog = AmpRabiProgram(soccfg, cfg)
         pdrs, avgi, avgq = prog.acquire(soc, progress=True)
         signals = avgi[0][0] + 1j * avgq[0][0]
-
-        if instant_show:
-            update_show(fig, ax, dh, curve, np.abs(signals))
-
-    if instant_show:
-        clear_show()
 
     return pdrs, signals
