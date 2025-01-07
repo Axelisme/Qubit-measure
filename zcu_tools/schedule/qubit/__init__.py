@@ -1,6 +1,7 @@
 from . import singleshot
 from .dispersive import measure_dispersive
 from .flux_depend import measure_qub_flux_dep
+from .lookback import measure_excited_lookback
 from .power_depend import measure_qub_pdr_dep
 from .rabi import measure_amprabi, measure_lenrabi
 from .singleshot import (
@@ -8,9 +9,9 @@ from .singleshot import (
     measure_fid_auto,
     scan_freq,
     scan_offset,
-    scan_ro_len,
-    scan_res_len,
     scan_pdr,
+    scan_res_len,
+    scan_ro_len,
 )
 from .time_domain import measure_t1, measure_t2echo, measure_t2ramsey
 from .twotone import measure_qub_freq
@@ -28,6 +29,7 @@ __all__ = [
     "measure_t2echo",
     "measure_fid",
     "measure_fid_auto",
+    "measure_excited_lookback",
     "scan_pdr",
     "scan_offset",
     "scan_ro_len",

@@ -1,13 +1,17 @@
+from ..base import create_waveform, set_pulse
 from .base import TimeProgram
-from ..base import set_pulse, create_waveform
 
 
 class T2EchoProgram(TimeProgram):
     def parse_cfg(self):
-        TimeProgram.parse_cfg()
+        TimeProgram.parse_cfg(self)
 
         self.pi_pulse = self.dac_cfg["pi_pulse"]
         self.pi2_pulse = self.dac_cfg["pi2_pulse"]
+
+        assert (
+            self.pi_pulse["ch"] == self.pi2_pulse["ch"]
+        ), "pi and pi/2 pulse must be on the same channel"
 
     def setup_qubit(self):
         pi_pulse = self.pi_pulse
@@ -26,6 +30,11 @@ class T2EchoProgram(TimeProgram):
 
         create_waveform(self, "pi2_pulse", pi2_pulse)
         set_pulse(self, pi2_pulse, waveform="pi2_pulse")
+
+    def setup_waittime(self):
+        self.q_rp = self.ch_page(self.pi2_pulse["ch"])
+        self.r_wait = 3
+        self.regwi(self.q_rp, self.r_wait, self.cfg["start"])
 
     def body(self):
         pi_cfg = self.pi_pulse

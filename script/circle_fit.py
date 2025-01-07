@@ -71,7 +71,7 @@ ax.axvline(
     linestyle="--",
     label=f"kappa = {kappa*1e3:.1f} MHz",
 )
-ax.axvline((fr + 0.2 * kappa), color="green", linestyle="--")
+ax.axvline((fr + 0.5 * kappa), color="green", linestyle="--")
 ax.legend()
 # fig.savefig(savepath + "_fit.png")
 

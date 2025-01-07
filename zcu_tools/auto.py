@@ -71,9 +71,6 @@ def auto_derive_pulse(name: str, pulse_cfg: Union[str, dict]) -> dict:
 
 
 def auto_derive(exp_cfg):
-    # fill default parameters if not provided
-    deepupdate(exp_cfg, DefaultCfg.exp_default, behavior="ignore")
-
     dac_cfg = exp_cfg.setdefault("dac", {})
     adc_cfg = exp_cfg.setdefault("adc", {})
 
@@ -101,6 +98,9 @@ def auto_derive(exp_cfg):
     trig_offset = DefaultCfg.get_adc("trig_offset")
     if trig_offset:
         adc_cfg.setdefault("trig_offset", trig_offset)
+
+    # fill default parameters if not provided
+    deepupdate(exp_cfg, DefaultCfg.exp_default, behavior="ignore")
 
     # flux_dev
     exp_cfg.setdefault("flux_dev", "none")

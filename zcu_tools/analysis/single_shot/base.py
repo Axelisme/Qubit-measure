@@ -59,7 +59,11 @@ def cumulate_plot(ng, ne, bins, ax, title=None):
 
 def fidelity_func(tp, tn, fp, fn):
     # this method calculates fidelity as (Ngg+Nee)/N = Ngg/N + Nee/N=(0.5N-Nge)/N + (0.5N-Neg)/N = 1-(Nge+Neg)/N
-    return (tp + fn) / (tp + tn + fp + fn)
+    # return (tp + fn) / (tp + tn + fp + fn)
+    if (tp + fn) > (tn + fp):
+        return (tp + fn) / (tp + tn + fp + fn)
+    else:
+        return (tn + fp) / (tp + tn + fp + fn)
 
 
 def calculate_fidelity(ng, ne, bins):
