@@ -53,10 +53,10 @@ def make_sweep(
     error_msg = "Not enough information to define a sweep."
     if expts is None:
         assert step is not None, error_msg
-        expts = int(stop - start) // step
+        expts = int(stop - start) // step + 1
     elif step is None:
         assert expts is not None, error_msg
-        step = (stop - start) / expts
+        step = (stop - start) / (expts - 1)
 
     if force_int:
         start = int(start)

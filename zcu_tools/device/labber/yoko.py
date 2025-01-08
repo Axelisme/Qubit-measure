@@ -5,22 +5,31 @@ from .manager import InstrManager
 
 class YokoDevControl:
     yoko = None
-    TIMEOUT = 2 * 60 * 60  # 1 hour
+    TIMEOUT = 5 * 60  # 5 minutes
+    SWEEP_RATE = None  # 10 mA/s
+    dev_cfg = None
 
     @classmethod
     def connect_server(cls, dev_cfg: dict, reinit=False):
         if cls.yoko is not None:
             if not reinit:
                 return  # only register once if not reinit
+            cls.disconnect_server()
             print("Reinit YokoDevControl")
 
-        cls._init_cfg(dev_cfg)
-        cls._init_dev()
+        cls._init_dev(dev_cfg)
 
     @classmethod
-    def _init_cfg(cls, dev_cfg: dict):
-        cls.host_ip = dev_cfg["host_ip"]
-        cls.sweep_rate = dev_cfg["outputCfg"]["Current - Sweep rate"]
+    def disconnect_server(cls):
+        if cls.yoko is not None:
+            cls.yoko = None
+            cls.SWEEP_RATE = None
+            cls.dev_cfg = None
+
+    @classmethod
+    def _init_dev(cls, dev_cfg: dict):
+        cls.SWEEP_RATE = dev_cfg["outputCfg"]["Current - Sweep rate"]
+        cls.dev_cfg = dev_cfg
 
         # overwrite the cfg
         dev_cfg["dComCfg"]["name"] = "globalFlux"
@@ -32,17 +41,40 @@ class YokoDevControl:
             }
         )
 
-        cls.dev_cfg = dev_cfg
-
-    @classmethod
-    def _init_dev(cls):
         sHardware = "Yokogawa GS200 DC Source"
         dComCfg = cls.dev_cfg["dComCfg"]
         output_cfg = cls.dev_cfg["outputCfg"]
 
-        cls.yoko = InstrManager(server_ip=cls.host_ip, timeout=cls.TIMEOUT)
+        cls.yoko = InstrManager(server_ip=dev_cfg["host_ip"], timeout=cls.TIMEOUT)
         cls.yoko.add_instrument(sHardware, dComCfg)
         cls.yoko.ctrl.globalFlux.setInstrConfig(output_cfg)
+
+    @classmethod
+    def get_current(cls):
+        if cls.yoko is None:
+            raise RuntimeError("YokoDevControl not initialized")
+
+        return cls.yoko.ctrl.globalFlux.getValue("Current")
+
+    @classmethod
+    def _set_current_direct(cls, value):
+        cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.SWEEP_RATE)
+
+    @classmethod
+    def _set_current_smart(cls, value):
+        # sweep to the target value step by step
+        step = 0.001
+        cur = cls.get_current()
+        while cur != value:
+            if value > cur:
+                cur += step
+                if cur > value:
+                    cur = value
+            else:
+                cur -= step
+                if cur < value:
+                    cur = value
+            cls._set_current_direct(cur)
 
     @classmethod
     def set_current(cls, value: Number) -> None:
@@ -62,6 +94,14 @@ class YokoDevControl:
         if cls.yoko is None:
             raise RuntimeError("YokoDevControl not initialized")
 
-        # run twice to make sure it is set
-        cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.sweep_rate)
-        cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.sweep_rate)
+        try:
+            cls._set_current_smart(value)
+        except KeyboardInterrupt:
+            # don't catch KeyboardInterrupt
+            raise KeyboardInterrupt
+        except Exception as e:
+            # reconnect and try again
+            print(f"Error in setting current, reconnect and try again: {e}")
+            cls.connect_server(cls.dev_cfg, reinit=True)
+
+            cls._set_current_smart(value)
