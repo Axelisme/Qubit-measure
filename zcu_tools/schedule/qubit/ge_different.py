@@ -11,7 +11,14 @@ from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
 
 
-def measure_ge_contrast(soc, soccfg, cfg, instant_show=False):
+def measure_ge_contrast(
+    soc,
+    soccfg,
+    cfg,
+    instant_show=False,
+    dynamic_reps=False,
+    gain_ref=1000,
+):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     set_flux(cfg["flux_dev"], cfg["flux"])
@@ -25,6 +32,8 @@ def measure_ge_contrast(soc, soccfg, cfg, instant_show=False):
     qub_pulse = cfg["dac"]["qub_pulse"]
     pi_gain = qub_pulse["gain"]
 
+    reps_ref = cfg["reps"]
+
     if instant_show:
         fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
 
@@ -35,6 +44,13 @@ def measure_ge_contrast(soc, soccfg, cfg, instant_show=False):
 
         for i, pdr in enumerate(pdr_tqdm):
             res_pulse["gain"] = pdr
+
+            if dynamic_reps:
+                cfg["reps"] = int(reps_ref * gain_ref / pdr)
+                if cfg["reps"] < 0.1 * reps_ref:
+                    cfg["reps"] = int(0.1 * reps_ref + 0.99)
+                elif cfg["reps"] > 10 * reps_ref:
+                    cfg["reps"] = int(10 * reps_ref)
 
             freq_tqdm.reset()
             freq_tqdm.refresh()
