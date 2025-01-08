@@ -19,20 +19,19 @@ def rabi_analyze(
         y = np.abs(signals)
 
     if decay:
-        fit_func = ft.fitdecaysin
-        sin_func = ft.decaysin
+        fit_func = ft.fitdecaycos
+        cos_func = ft.decaycos
     else:
-        fit_func = ft.fitsin
-        sin_func = ft.sinfunc
+        fit_func = ft.fitcos
+        cos_func = ft.cosfunc
 
     pOpt, _ = fit_func(x, y)
-    curve = sin_func(x, *pOpt)
 
     freq = pOpt[2]
     phase = pOpt[3] % 360 - 180
     if phase < 0:
         pi_x = (0.25 - phase / 360) / freq
-        pi2_x = -phase / 360 / freq
+        pi2_x = (0.0 - phase / 360) / freq
     else:
         pi_x = (0.75 - phase / 360) / freq
         pi2_x = (0.5 - phase / 360) / freq
@@ -40,7 +39,9 @@ def rabi_analyze(
     plt.figure(figsize=figsize)
     plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
     if plot_fit:
-        plt.plot(x, curve, label="fit")
+        xs = np.linspace(pi_x - 0.5 / freq, x[-1], 1000)
+        curve = cos_func(xs, *pOpt)
+        plt.plot(xs, curve, label="fit")
         plt.axvline(pi_x, ls="--", c="red", label=f"pi={pi_x:.1f}")
         plt.axvline(pi2_x, ls="--", c="red", label=f"pi/2={(pi2_x):.1f}")
     plt.title("Rabi", fontsize=15)
@@ -87,9 +88,9 @@ def T2fringe_analyze(
     else:
         y = np.abs(y)
 
-    pOpt, pCov = ft.fitdecaysin(x, y)
+    pOpt, pCov = ft.fitdecaycos(x, y)
     t2f, detune = pOpt[4], pOpt[2]
-    sim = ft.decaysin(x, *pOpt)
+    sim = ft.decaycos(x, *pOpt)
     err = np.sqrt(np.diag(pCov))
 
     if plot:

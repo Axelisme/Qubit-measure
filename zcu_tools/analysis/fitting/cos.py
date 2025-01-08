@@ -4,12 +4,12 @@ from .base import assign_init_p, fit_func
 
 
 # sinusoidal function
-def sinfunc(x, *p):
+def cosfunc(x, *p):
     y0, yscale, freq, phase = p
-    return y0 + yscale * np.sin(2 * np.pi * (freq * x + phase / 360))
+    return y0 + yscale * np.cos(2 * np.pi * (freq * x + phase / 360))
 
 
-def fitsin(xdata, ydata, fitparams=None):
+def fitcos(xdata, ydata, fitparams=None):
     if fitparams is None:
         fitparams = [None] * 4
 
@@ -24,7 +24,7 @@ def fitsin(xdata, ydata, fitparams=None):
         fft_freqs = fft_freqs[freq_mask]
         max_id = np.argmax(np.abs(fft))
         freq = fft_freqs[max_id]
-        phase = np.angle(fft[max_id], deg=True) % 360
+        phase = 0.0
 
         assign_init_p(fitparams, [y0, yscale, freq, phase])
 
@@ -32,11 +32,11 @@ def fitsin(xdata, ydata, fitparams=None):
     yscale = fitparams[1]
     freq = fitparams[2]
     bounds = (
-        [-np.inf, -2 * np.abs(yscale), 0.2 * freq, -720],
-        [np.inf, 2 * np.abs(yscale), 5 * freq, 720],
+        [-np.inf, -2 * np.abs(yscale), 0.2 * freq, -90],
+        [np.inf, 2 * np.abs(yscale), 5 * freq, 90],
     )
 
-    pOpt, pCov = fit_func(xdata, ydata, sinfunc, fitparams, bounds)
+    pOpt, pCov = fit_func(xdata, ydata, cosfunc, fitparams, bounds)
     if pOpt[1] < 0:
         pOpt[1] = -pOpt[1]
         pOpt[3] = pOpt[3] + 180
@@ -45,14 +45,14 @@ def fitsin(xdata, ydata, fitparams=None):
 
 
 # damped sinusoidal function
-def decaysin(x, *p):
+def decaycos(x, *p):
     y0, yscale, freq, phase, decay = p
-    return y0 + yscale * np.sin(2 * np.pi * (freq * x + phase / 360)) * np.exp(
+    return y0 + yscale * np.cos(2 * np.pi * (freq * x + phase / 360)) * np.exp(
         -x / decay
     )
 
 
-def fitdecaysin(xdata, ydata, fitparams=None):
+def fitdecaycos(xdata, ydata, fitparams=None):
     if fitparams is None:
         fitparams = [None] * 5
 
@@ -67,7 +67,7 @@ def fitdecaysin(xdata, ydata, fitparams=None):
         fft_freqs = fft_freqs[freq_mask]
         max_id = np.argmax(np.abs(fft))
         freq = fft_freqs[max_id]
-        phase = np.angle(fft[max_id], deg=True) % 360
+        phase = 0.0
         decay = xdata[-1] - xdata[0]
 
         assign_init_p(fitparams, [y0, yscale, freq, phase, decay])
@@ -77,11 +77,11 @@ def fitdecaysin(xdata, ydata, fitparams=None):
     freq = fitparams[2]
     decay = fitparams[4]
     bounds = (
-        [-np.inf, -2 * np.abs(yscale), 0.2 * freq, -720, 0],
-        [np.inf, 2 * np.abs(yscale), 5 * freq, 720, np.inf],
+        [-np.inf, -2 * np.abs(yscale), 0.2 * freq, -90, 0],
+        [np.inf, 2 * np.abs(yscale), 5 * freq, 90, np.inf],
     )
 
-    pOpt, pCov = fit_func(xdata, ydata, decaysin, fitparams, bounds)
+    pOpt, pCov = fit_func(xdata, ydata, decaycos, fitparams, bounds)
     if pOpt[1] < 0:
         pOpt[1] = -pOpt[1]
         pOpt[3] = pOpt[3] + 180
