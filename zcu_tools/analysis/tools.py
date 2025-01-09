@@ -25,13 +25,12 @@ def convert2max_contrast(Is: np.ndarray, Qs: np.ndarray):
 
 
 def NormalizeData(amps2D: np.ndarray, axis=None, rescale=True) -> np.ndarray:
-    amps2D = amps2D - np.nanmedian(
-        np.append(amps2D, 0, axis=axis), axis=axis, keepdims=True
-    )  # in case of all nan
+    if amps2D.dtype == np.complex:
+        amps2D = np.abs(amps2D - np.nanmean(amps2D, axis=axis, keepdims=True))
+    else:
+        amps2D = amps2D - np.nanmedian(amps2D, axis=axis, keepdims=True)
     if rescale:
-        mins = np.nanmin(amps2D, axis=axis, keepdims=True, initial=np.inf)
-        maxs = np.nanmax(amps2D, axis=axis, keepdims=True, initial=1e-10)
-        amps2D /= maxs - mins
+        amps2D = amps2D / np.nanstd(amps2D, axis=axis, keepdims=True)
     return amps2D
 
 

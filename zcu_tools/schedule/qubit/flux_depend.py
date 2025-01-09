@@ -59,7 +59,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             flux_tqdm.update()
 
             if instant_show:
-                amps = NormalizeData(np.abs(signals2D), axis=1, rescale=False)
+                amps = NormalizeData(signals2D, axis=1, rescale=False) ** 1.2
                 update_show2d(fig, ax, dh, im, amps.T)
 
         if instant_show:

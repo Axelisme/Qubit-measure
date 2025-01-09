@@ -31,6 +31,7 @@ def init_show2d(X, Y, x_label, y_label, title=None):
         np.zeros((len(Y), len(X))),
         aspect="auto",
         origin="lower",
+        interpolation="none",
         extent=[X[0], X[-1], Y[0], Y[-1]],
     )
     dh = display(fig, display_id=True)

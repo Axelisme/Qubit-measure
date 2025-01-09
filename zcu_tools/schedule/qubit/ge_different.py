@@ -4,7 +4,6 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import NormalizeData
 from zcu_tools.program import TwoToneProgram
 
 from ..flux import set_flux
@@ -73,8 +72,7 @@ def measure_ge_contrast(
             pdr_tqdm.update()
 
             if instant_show:
-                amps = NormalizeData(np.abs(signals2D), axis=1)
-                update_show2d(fig, ax, dh, im, amps)
+                update_show2d(fig, ax, dh, im, np.abs(signals2D))
 
         if instant_show:
             clear_show()
