@@ -28,13 +28,16 @@ def rabi_analyze(
     pOpt, _ = fit_func(x, y)
 
     freq = pOpt[2]
-    phase = pOpt[3] % 360 - 180
-    if phase < 0:
-        pi_x = (0.25 - phase / 360) / freq
-        pi2_x = (0.0 - phase / 360) / freq
+    phase = pOpt[3] % 360
+    if phase > 270:
+        pi_x = (1.5 - phase / 360) / freq
+        pi2_x = (1.25 - phase / 360) / freq
+    elif phase < 90:
+        pi_x = (0.5 - phase / 360) / freq
+        pi2_x = (0.25 - phase / 360) / freq
     else:
-        pi_x = (0.75 - phase / 360) / freq
-        pi2_x = (0.5 - phase / 360) / freq
+        pi_x = (1.0 - phase / 360) / freq
+        pi2_x = (0.75 - phase / 360) / freq
 
     plt.figure(figsize=figsize)
     plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)

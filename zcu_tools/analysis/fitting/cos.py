@@ -24,7 +24,7 @@ def fitcos(xdata, ydata, fitparams=None):
         fft_freqs = fft_freqs[freq_mask]
         max_id = np.argmax(np.abs(fft))
         freq = fft_freqs[max_id]
-        phase = 0.0
+        phase = np.angle(fft[max_id], deg=True) % 360
 
         assign_init_p(fitparams, [y0, yscale, freq, phase])
 
@@ -32,8 +32,8 @@ def fitcos(xdata, ydata, fitparams=None):
     yscale = fitparams[1]
     freq = fitparams[2]
     bounds = (
-        [-np.inf, -2 * np.abs(yscale), 0.2 * freq, -90],
-        [np.inf, 2 * np.abs(yscale), 5 * freq, 90],
+        [-np.inf, -2 * np.abs(yscale), 0.2 * freq, -360],
+        [np.inf, 2 * np.abs(yscale), 5 * freq, 360],
     )
 
     pOpt, pCov = fit_func(xdata, ydata, cosfunc, fitparams, bounds)
@@ -67,7 +67,7 @@ def fitdecaycos(xdata, ydata, fitparams=None):
         fft_freqs = fft_freqs[freq_mask]
         max_id = np.argmax(np.abs(fft))
         freq = fft_freqs[max_id]
-        phase = 0.0
+        phase = np.angle(fft[max_id], deg=True) % 360
         decay = xdata[-1] - xdata[0]
 
         assign_init_p(fitparams, [y0, yscale, freq, phase, decay])
@@ -77,8 +77,8 @@ def fitdecaycos(xdata, ydata, fitparams=None):
     freq = fitparams[2]
     decay = fitparams[4]
     bounds = (
-        [-np.inf, -2 * np.abs(yscale), 0.2 * freq, -90, 0],
-        [np.inf, 2 * np.abs(yscale), 5 * freq, 90, np.inf],
+        [-np.inf, -2 * np.abs(yscale), 0.2 * freq, -360, 0],
+        [np.inf, 2 * np.abs(yscale), 5 * freq, 360, np.inf],
     )
 
     pOpt, pCov = fit_func(xdata, ydata, decaycos, fitparams, bounds)
