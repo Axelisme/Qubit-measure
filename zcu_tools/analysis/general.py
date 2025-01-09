@@ -87,47 +87,6 @@ def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False):
     return freq
 
 
-def spectrum_analyze(flxs, fpts, amps, ratio):
-    """
-    flxs: 1D array, flux points
-    fpts: 1D array, frequency points
-    amps: 2D array, shape: (len(fpts), len(flxs))
-    ratio: float, threshold to filter max points
-    """
-    from scipy.ndimage import gaussian_filter1d
-
-    # use guassian filter to smooth the spectrum
-    amps = gaussian_filter1d(amps, 1, axis=0)
-    amps = amps - np.median(amps, axis=0, keepdims=True)
-    amps = amps - np.median(amps, axis=1, keepdims=True)
-    amps = np.abs(amps)
-
-    norm_factor = np.std(amps, axis=0)
-    threshold = 1.5 * np.mean(norm_factor)
-    norm_factor = np.where(norm_factor > threshold, norm_factor, threshold)
-    amps /= norm_factor  # (len(fpts), len(flxs))
-
-    # find peaks
-    max_ids = np.argmax(amps, axis=0)  # (len(flxs),)
-    maxs = amps[max_ids, np.arange(amps.shape[1])]  # (len(flxs),)
-
-    # select points with large contrast
-    max_masks = maxs >= ratio  # (len(flxs),)
-    s_flxs = flxs[max_masks]
-    s_fpts = fpts[max_ids][max_masks]
-
-    plt.figure(figsize=figsize)
-    plt.imshow(
-        amps,
-        aspect="auto",
-        origin="lower",
-        extent=[flxs[0], flxs[-1], fpts[0], fpts[-1]],
-    )
-    plt.scatter(s_flxs, s_fpts, c="r", s=3)
-
-    return s_flxs, s_fpts
-
-
 def pdr_dep_analyze(fpts, pdrs, amps, contour=None):
     """
     fpts: 1D array, frequency points
@@ -147,69 +106,7 @@ def pdr_dep_analyze(fpts, pdrs, amps, contour=None):
         plt.contour(fpts, pdrs, amps, levels=[contour])
 
 
-def dispersive_analyze(
-    fpts: np.ndarray,
-    signals_g: np.ndarray,
-    signals_e: np.ndarray,
-    asym=False,
-    plot_fit=True,
-    use_fit=True,
-):
-    y_g = np.abs(signals_g)
-    y_e = np.abs(signals_e)
-
-    fig, ax = plt.subplots(2, 1, figsize=figsize)
-    ax[0].plot(fpts, y_g, label="e", marker="o", markersize=3)
-    ax[0].plot(fpts, y_e, label="g", marker="o", markersize=3)
-    ax[1].plot(fpts, y_g - y_e)
-
-    if asym:
-        fit_func = ft.fit_asym_lor
-        lor_func = ft.asym_lorfunc
-    else:
-        fit_func = ft.fitlor
-        lor_func = ft.lorfunc
-
-    pOpt1, err1 = fit_func(fpts, y_g)
-    pOpt2, err2 = fit_func(fpts, y_e)
-    freq1, kappa1 = pOpt1[3], 2 * pOpt1[4]
-    freq2, kappa2 = pOpt2[3], 2 * pOpt2[4]
-    err1 = np.sqrt(np.diag(err1))
-    err2 = np.sqrt(np.diag(err2))
-
-    curve1 = lor_func(fpts, *pOpt1)
-    curve2 = lor_func(fpts, *pOpt2)
-
-    if plot_fit:
-        ax[0].plot(fpts, curve1, label=f"excited, $kappa$ = {kappa1:.2f}MHz")
-        ax[0].plot(fpts, curve2, label=f"ground, $kappa$ = {kappa2:.2f}MHz")
-        label1 = f"$f_res$ = {freq1:.2f} +/- {err1[3]:.2f}MHz"
-        ax[0].axvline(freq1, color="r", ls="--", label=label1)
-        label2 = f"$f_res$ = {freq2:.2f} +/- {err2[3]:.2f}MHz"
-        ax[0].axvline(freq2, color="g", ls="--", label=label2)
-
-    diff_curve = curve1 - curve2 if use_fit else y_g - y_e
-    max_id = np.argmax(diff_curve)
-    min_id = np.argmin(diff_curve)
-
-    max_fpt = fpts[max_id]
-    min_fpt = fpts[min_id]
-    if plot_fit:
-        ax[1].plot(fpts, curve1 - curve2)
-        ax[1].axvline(max_fpt, color="r", ls="--", label=f"max SNR1 = {max_fpt:.2f}")
-        ax[1].axvline(min_fpt, color="g", ls="--", label=f"max SNR2 = {min_fpt:.2f}")
-
-    ax[0].legend()
-    ax[1].legend()
-    plt.tight_layout()
-    plt.show()
-
-    max_diff = np.abs(diff_curve[max_id])
-    min_diff = np.abs(diff_curve[min_id])
-    return (max_fpt, min_fpt) if max_diff >= min_diff else (min_fpt, max_fpt)
-
-
-def dispersive_analyze2(fpts, signals_g, signals_e):
+def dispersive_analyze(fpts, signals_g, signals_e):
     y_g = np.abs(signals_g)
     y_e = np.abs(signals_e)
     y_d = np.abs(signals_g - signals_e)
@@ -236,3 +133,57 @@ def dispersive_analyze2(fpts, signals_g, signals_e):
     plt.show()
 
     return abs_fpt, max_fpt, min_fpt
+
+
+def dispersive2D_analyze(fpts, pdrs, signals2D):
+    amps = np.abs(signals2D)
+
+    fpt_max_id = np.argmax(np.max(amps, axis=0))
+    pdr_max_id = np.argmax(np.max(amps, axis=1))
+    fpt_max = fpts[fpt_max_id]
+    pdr_max = pdrs[pdr_max_id]
+
+    plt.figure(figsize=figsize)
+    plt.imshow(
+        amps,
+        aspect="auto",
+        origin="lower",
+        interpolation="none",
+        extent=[fpts[0], fpts[-1], pdrs[0], pdrs[-1]],
+    )
+    plt.scatter(
+        fpt_max, pdr_max, color="r", label=f"max SNR = {fpt_max:.2f}, {int(pdr_max)}"
+    )
+    plt.legend()
+    plt.show()
+
+    return fpt_max, pdr_max
+
+
+def readout_analyze(Ts, signals_g, signals_e, ro_length):
+    # find the best readout window that has the largest average contrast
+    contrasts = signals_g - signals_e
+
+    min_num = int(ro_length * len(Ts) / (Ts[-1] - Ts[0]))
+
+    max_contrast = 0
+    max_idx = 0
+    for idx in range(len(Ts) - min_num):
+        contrast = np.mean(contrasts[idx : idx + min_num])
+        if contrast > max_contrast:
+            max_contrast = contrast
+            max_idx = idx
+
+    best_offset = Ts[max_idx]
+
+    # plot
+    plt.figure(figsize=figsize)
+    plt.plot(Ts, np.abs(signals_g), label="g")
+    plt.plot(Ts, np.abs(signals_e), label="e")
+    plt.plot(Ts, np.abs(contrasts), label="contrast")
+    plt.axvline(best_offset, color="r", ls="--", label="best_offset")
+    plt.axvline(best_offset + ro_length, color="r", ls="--", label="ro end")
+    plt.legend()
+    plt.show()
+
+    return best_offset

@@ -3,8 +3,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm.auto import tqdm, trange
 
-from zcu_tools.analysis.tools import convert2max_contrast
-
 
 class InteractiveSelector:
     def __init__(self, spectrum, flxs, fpts, s_flxs, s_fpts, colors=None):
@@ -15,9 +13,6 @@ class InteractiveSelector:
             np.array(["r" for _ in range(len(s_flxs))]) if colors is None else colors
         )
         self.current_color = "r"
-        self.selection_radius = 0.02 * np.sqrt(
-            (flxs[-1] - flxs[0]) ** 2 + (fpts[-1] - fpts[0]) ** 2
-        )
         self.is_selecting = False
         self.mouse_x = None
         self.mouse_y = None
@@ -43,9 +38,13 @@ class InteractiveSelector:
         self.s_fpts = s_fpts
 
         # 創建選擇圓圈（初始設為不可見）
-        self.circle = patches.Circle(
+        # 因為x, y 長度不同，所以改用Ellipse
+        self.select_x = 0.03 * (flxs[-1] - flxs[0])
+        self.select_y = 0.03 * (fpts[-1] - fpts[0])
+        self.circle = patches.Ellipse(
             (0, 0),
-            self.selection_radius,
+            self.select_x,
+            self.select_y,
             fill=False,
             color=self.current_color,
             linestyle="--",
@@ -115,8 +114,10 @@ class InteractiveSelector:
 
     def update_points(self, x, y):
         # 計算點擊位置附近的點
-        distances = np.sqrt((self.s_flxs - x) ** 2 + (self.s_fpts - y) ** 2)
-        mask = distances < self.selection_radius
+        distances = ((self.s_flxs - x) / self.select_x) ** 2 + (
+            (self.s_fpts - y) / self.select_y
+        ) ** 2
+        mask = distances < 0.25
 
         # 更新顏色
         self.colors[mask] = self.current_color
@@ -140,6 +141,7 @@ class InteractiveSelector:
         self.anim.event_source.stop()
 
     def get_selected_points(self):
+        self.finish_selection(None)
         plt.close(self.fig)
         mask = self.colors == "r"
         s_flxs = self.s_flxs[mask]
@@ -182,6 +184,10 @@ class InteractiveLines:
         # 連接事件
         self.fig.canvas.mpl_connect("pick_event", self.onpick)
         self.fig.canvas.mpl_connect("motion_notify_event", self.onmove)
+
+        # xlim, ylim
+        self.ax.set_xlim(flxs[0], flxs[-1])
+        self.ax.set_ylim(fpts[0], fpts[-1])
 
         # 創建動畫
         self.anim = FuncAnimation(
@@ -257,6 +263,7 @@ class InteractiveLines:
 
     def get_positions(self):
         """運行交互式選擇器並返回兩條線的位置"""
+        self.on_finish(None)
         plt.close(self.fig)
         return float(self.line1.get_xdata()[0]), float(self.line2.get_xdata()[0])
 
@@ -280,27 +287,12 @@ def preprocess_data(flxs, fpts, spectrum):
         fpts = fpts[::-1]
         spectrum = spectrum[::-1, :]
 
-    sps = []
-    for i in range(spectrum.shape[1]):
-        sp, _ = convert2max_contrast(spectrum[:, i].real, spectrum[:, i].imag)
-        sps.append(sp)
-    spectrum = np.array(sps).T
-
     return flxs, fpts, spectrum
 
 
 def spectrum_analyze(flxs, fpts, signals, ratio, min_dist=None):
-    from scipy.ndimage import gaussian_filter1d
-
-    # use guassian filter to smooth the spectrum
-    signals = gaussian_filter1d(signals, 1, axis=0)
-    signals -= np.median(signals, axis=0, keepdims=True)
-    amps = np.abs(signals)  # (len(fpts), len(flxs))
-
-    norm_factor = np.std(amps, axis=0)
-    threshold = 1.5 * np.mean(norm_factor)
-    norm_factor = np.where(norm_factor > threshold, norm_factor, threshold)
-    amps /= norm_factor  # (len(fpts), len(flxs))
+    amps = np.abs(signals - np.mean(signals, axis=0, keepdims=True))
+    amps /= np.std(amps, axis=0, keepdims=True)
 
     # find peaks
     fpt_idxs = np.argmax(amps, axis=0)  # (len(flxs),)
