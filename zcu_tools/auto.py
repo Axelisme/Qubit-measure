@@ -42,7 +42,7 @@ def auto_derive_waveform(pulse_cfg: dict):
 def auto_derive_pulse(name: str, pulse_cfg: Union[str, dict]) -> dict:
     # load pulse configuration if it is a string
     if isinstance(pulse_cfg, str):
-        pulse_cfg = DefaultCfg.get_pulse(pulse_cfg)
+        pulse_cfg = deepcopy(DefaultCfg.get_pulse(pulse_cfg))
 
     ch = None
     nqz = None
