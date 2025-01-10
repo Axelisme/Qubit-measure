@@ -164,26 +164,36 @@ def readout_analyze(Ts, signals_g, signals_e, ro_length):
     # find the best readout window that has the largest average contrast
     contrasts = signals_g - signals_e
 
+    # use gaussian filter to smooth the contrast
+    import scipy.ndimage as ndimage
+
+    contrasts = ndimage.gaussian_filter1d(contrasts, 5)
+
+    cum_contrasts = np.cumsum(contrasts)
+
     min_num = int(ro_length * len(Ts) / (Ts[-1] - Ts[0]))
 
     max_contrast = 0
     max_idx = 0
+    max_jdx = 0
     for idx in range(len(Ts) - min_num):
-        contrast = np.mean(contrasts[idx : idx + min_num])
-        if contrast > max_contrast:
-            max_contrast = contrast
+        jdxs = np.arange(idx + min_num, len(Ts))
+        conts = np.abs(cum_contrasts[jdxs] - cum_contrasts[idx]) / (jdxs - idx)
+        max_j = np.argmax(conts)
+        if conts[max_j] > max_contrast:
+            max_contrast = conts[max_j]
             max_idx = idx
+            max_jdx = jdxs[max_j]
 
     best_offset = Ts[max_idx]
+    best_length = Ts[max_jdx] - Ts[max_idx]
 
     # plot
     plt.figure(figsize=figsize)
-    plt.plot(Ts, np.abs(signals_g), label="g")
-    plt.plot(Ts, np.abs(signals_e), label="e")
-    plt.plot(Ts, np.abs(contrasts), label="contrast")
+    plt.plot(Ts, np.abs(cum_contrasts), label="cum_contrast")
     plt.axvline(best_offset, color="r", ls="--", label="best_offset")
-    plt.axvline(best_offset + ro_length, color="r", ls="--", label="ro end")
+    plt.axvline(best_offset + best_length, color="r", ls="--", label="best ro end")
     plt.legend()
     plt.show()
 
-    return best_offset
+    return best_offset, best_length

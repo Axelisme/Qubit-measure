@@ -63,7 +63,7 @@ class YokoDevControl:
     @classmethod
     def _set_current_smart(cls, value):
         # sweep to the target value step by step
-        step = 0.001
+        step = 1e-4
         cur = cls.get_current()
         while cur != value:
             if value > cur:
@@ -87,9 +87,9 @@ class YokoDevControl:
             raise ValueError(
                 f"Flux must be a float in YokoFluxControl, but got {value}"
             )
-        assert (
-            -0.01 <= value <= 0.01
-        ), f"Flux must be in the range [-0.01, 0.01], but got {value}"
+        assert -0.01 <= value <= 0.01, (
+            f"Flux must be in the range [-0.01, 0.01], but got {value}"
+        )
 
         if cls.yoko is None:
             raise RuntimeError("YokoDevControl not initialized")

@@ -23,6 +23,7 @@ class InteractiveSelector:
             spectrum,
             aspect="auto",
             origin="lower",
+            interpolation="none",
             extent=(flxs[0], flxs[-1], fpts[0], fpts[-1]),
         )
 
@@ -161,6 +162,7 @@ class InteractiveLines:
             spectrum,
             aspect="auto",
             origin="lower",
+            interpolation="none",
             extent=(flxs[0], flxs[-1], fpts[0], fpts[-1]),
         )
 
