@@ -53,7 +53,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
                     freq_tqdm.update()
             else:
                 prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
-                _, avgi, avgq = prog.acquire(soc, progress=False)
+                _, avgi, avgq = prog.acquire(soc, progress=True)
                 signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
 
             flux_tqdm.update()
