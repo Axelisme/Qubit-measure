@@ -1,10 +1,12 @@
+from copy import deepcopy
+
 import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.program import OneToneProgram, TwoToneProgram
 
-from ..flux import set_flux
+from .flux import set_flux
 
 
 def measure_one(soc, soccfg, cfg, progress, qub_pulse):
@@ -20,6 +22,7 @@ def measure_one(soc, soccfg, cfg, progress, qub_pulse):
 
 
 def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
+    cfg = deepcopy(cfg)  # prevent in-place modification
     assert cfg.get("reps", 1) == 1, "Only one rep is allowed for lookback"
 
     set_flux(cfg["flux_dev"], cfg["flux"])
@@ -34,7 +37,7 @@ def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
         total_len = trig_offset + cfg["adc"]["ro_length"]
 
         bar = tqdm(
-            total=int(total_len / MAX_LEN) + 1,
+            total=int(total_len / MAX_LEN + 0.99),
             desc="Readout",
             smoothing=0,
             disable=not progress,

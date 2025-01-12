@@ -191,9 +191,14 @@ def readout_analyze(Ts, signals_g, signals_e, ro_length):
 
     # plot
     plt.figure(figsize=figsize)
-    plt.plot(Ts, np.abs(cum_contrasts), label="cum_contrast")
-    plt.axvline(best_offset, color="r", ls="--", label="best_offset")
-    plt.axvline(best_offset + best_length, color="r", ls="--", label="best ro end")
+    plt.plot(Ts, np.abs(contrasts), label="cum_contrast")
+    plt.axvline(best_offset, color="r", ls="--", label=f"t = {best_offset:.3f}")
+    plt.axvline(
+        best_offset + best_length,
+        color="r",
+        ls="--",
+        label=f"t = {best_offset + best_length:.3f}",
+    )
     plt.legend()
     plt.show()
 
