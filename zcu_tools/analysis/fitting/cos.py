@@ -32,8 +32,8 @@ def fitcos(xdata, ydata, fitparams=None):
     yscale = fitparams[1]
     freq = fitparams[2]
     bounds = (
-        [-np.inf, -2 * np.abs(yscale), 0.2 * freq, -360],
-        [np.inf, 2 * np.abs(yscale), 5 * freq, 360],
+        [-np.inf, -1.1 * np.abs(yscale), 0.2 * freq, -360],
+        [np.inf, 1.1 * np.abs(yscale), 5 * freq, 360],
     )
 
     pOpt, pCov = fit_func(xdata, ydata, cosfunc, fitparams, bounds)
@@ -77,8 +77,8 @@ def fitdecaycos(xdata, ydata, fitparams=None):
     freq = fitparams[2]
     decay = fitparams[4]
     bounds = (
-        [-np.inf, -2 * np.abs(yscale), 0.2 * freq, -360, 0],
-        [np.inf, 2 * np.abs(yscale), 5 * freq, 360, np.inf],
+        [-np.inf, -1.1 * np.abs(yscale), 0.2 * freq, -360, 0],
+        [np.inf, 1.1 * np.abs(yscale), 5 * freq, 360, np.inf],
     )
 
     pOpt, pCov = fit_func(xdata, ydata, decaycos, fitparams, bounds)

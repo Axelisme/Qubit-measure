@@ -61,6 +61,10 @@ class InteractiveSelector:
         self.fig.canvas.mpl_connect("button_release_event", self.on_release)
         self.fig.canvas.mpl_connect("motion_notify_event", self.on_motion)
 
+        # to avoid key press event error
+        self.fig.canvas.mpl_connect("key_press_event", lambda event: None)
+        self.fig.canvas.mpl_connect("key_release_event", lambda event: None)
+
         # 創建動畫
         self.anim = FuncAnimation(
             self.fig,
@@ -186,6 +190,8 @@ class InteractiveLines:
         # 連接事件
         self.fig.canvas.mpl_connect("pick_event", self.onpick)
         self.fig.canvas.mpl_connect("motion_notify_event", self.onmove)
+        self.fig.canvas.mpl_connect("button_press_event", lambda event: None)
+        self.fig.canvas.mpl_connect("button_release_event", lambda event: None)
 
         # xlim, ylim
         self.ax.set_xlim(flxs[0], flxs[-1])

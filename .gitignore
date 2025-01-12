@@ -15,3 +15,5 @@ test.py
 *.yaml
 *.hdf5
 *.h5
+*.png
+*.csv

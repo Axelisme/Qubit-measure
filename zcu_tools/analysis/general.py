@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
 from . import fitting as ft
 from .tools import NormalizeData, convert2max_contrast
@@ -138,6 +139,8 @@ def dispersive_analyze(fpts, signals_g, signals_e):
 def dispersive2D_analyze(fpts, pdrs, signals2D):
     amps = np.abs(signals2D)
 
+    amps = gaussian_filter(amps, 1)
+
     fpt_max_id = np.argmax(np.max(amps, axis=0))
     pdr_max_id = np.argmax(np.max(amps, axis=1))
     fpt_max = fpts[fpt_max_id]
@@ -165,23 +168,21 @@ def readout_analyze(Ts, signals_g, signals_e, ro_length):
     contrasts = signals_g - signals_e
 
     # use gaussian filter to smooth the contrast
-    import scipy.ndimage as ndimage
-
-    contrasts = ndimage.gaussian_filter1d(contrasts, 5)
+    contrasts = gaussian_filter1d(contrasts, 5)
 
     cum_contrasts = np.cumsum(contrasts)
 
     min_num = int(ro_length * len(Ts) / (Ts[-1] - Ts[0]))
 
-    max_contrast = 0
+    max_snr = 0
     max_idx = 0
     max_jdx = 0
     for idx in range(len(Ts) - min_num):
         jdxs = np.arange(idx + min_num, len(Ts))
-        conts = np.abs(cum_contrasts[jdxs] - cum_contrasts[idx]) / (jdxs - idx)
-        max_j = np.argmax(conts)
-        if conts[max_j] > max_contrast:
-            max_contrast = conts[max_j]
+        snr = np.abs(cum_contrasts[jdxs] - cum_contrasts[idx]) / np.sqrt(jdxs - idx)
+        max_j = np.argmax(snr)
+        if snr[max_j] > max_snr:
+            max_snr = snr[max_j]
             max_idx = idx
             max_jdx = jdxs[max_j]
 
