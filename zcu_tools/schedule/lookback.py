@@ -24,7 +24,7 @@ def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
-    MAX_LEN = 2.5  # us
+    MAX_LEN = 3.32  # us
 
     if cfg["adc"]["ro_length"] <= MAX_LEN:
         Ts, Is, Qs = measure_one(soc, soccfg, cfg, progress, qub_pulse)
