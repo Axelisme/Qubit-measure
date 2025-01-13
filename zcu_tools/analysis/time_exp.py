@@ -74,7 +74,7 @@ def T1_analyze(
         y = np.abs(y)
 
     if dual_exp:
-        pOpt, pCov = ft.fitdualexp(x, y)
+        pOpt, pCov = ft.fit_dualexp(x, y)
         sim = ft.dual_expfunc(x, *pOpt)
     else:
         pOpt, pCov = ft.fitexp(x, y)
@@ -90,6 +90,9 @@ def T1_analyze(
         plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
         plt.plot(x, sim, label="fit")
         if dual_exp:
+            plt.plot(
+                x, ft.expfunc(x, pOpt[0], *pOpt[3:]), linestyle="--", label="t1b fit"
+            )
             plt.title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
         else:
             plt.title(f"T1 = {t1_str}", fontsize=15)

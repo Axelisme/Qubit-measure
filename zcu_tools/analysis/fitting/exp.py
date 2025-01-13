@@ -46,16 +46,19 @@ def fit_dualexp(xdata, ydata, fitparams=None):
         y0 = np.mean(ydata[-5:])
 
         mid_idx = len(ydata) // 2
+        xdata1, xdata2 = xdata[:mid_idx], xdata[mid_idx:]
         ydata1, ydata2 = ydata[:mid_idx], ydata[mid_idx:]
 
         yscale1 = ydata1[0] - y0
-        x_2 = xdata[np.argmin(np.abs(ydata1 - (y0 + yscale1 / 2)))]
-        x_4 = xdata[np.argmin(np.abs(ydata1 - (y0 + yscale1 / 4)))]
+        x_2 = xdata1[np.argmin(np.abs(ydata1 - (y0 + yscale1 / 2)))] - xdata1[0]
+        x_4 = xdata1[np.argmin(np.abs(ydata1 - (y0 + yscale1 / 4)))] - xdata1[0]
         decay1 = (x_2 / np.log(2) + x_4 / np.log(4)) / 2
 
+        yscale1 *= np.exp(xdata[mid_idx] / decay1)
+
         yscale2 = ydata2[0] - y0
-        x_2 = xdata[np.argmin(np.abs(ydata2 - (y0 + yscale2 / 2)))] - xdata[mid_idx]
-        x_4 = xdata[np.argmin(np.abs(ydata2 - (y0 + yscale2 / 4)))] - xdata[mid_idx]
+        x_2 = xdata2[np.argmin(np.abs(ydata2 - (y0 + yscale2 / 2)))] - xdata2[0]
+        x_4 = xdata2[np.argmin(np.abs(ydata2 - (y0 + yscale2 / 4)))] - xdata2[0]
         decay2 = (x_2 / np.log(2) + x_4 / np.log(4)) / 2
 
         yscale2 *= np.exp(xdata[mid_idx] / decay2)
