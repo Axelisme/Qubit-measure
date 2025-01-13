@@ -49,6 +49,8 @@ def phase_analyze(fpts, signals, plot=True, plot_fit=True):
         plt.plot(fpts, phase, label="phase")
         if plot_fit:
             plt.plot(fpts, slope * fpts + offset, label="fit")
+        plt.xlabel("Frequency (MHz)")
+        plt.ylabel("Phase (degree)")
         plt.legend()
         plt.tight_layout()
         plt.show()
@@ -81,6 +83,11 @@ def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False):
         plt.plot(fpts, curve, label=f"fit, $kappa$={kappa:.2f}")
         label = f"$f_res$ = {freq:.2f} +/- {freq_err:.2f}"
         plt.axvline(freq, color="r", ls="--", label=label)
+    plt.xlabel("Frequency (MHz)")
+    if max_contrast:
+        plt.ylabel("Signal Real (a.u.)")
+    else:
+        plt.ylabel("Magnitude (a.u.)")
     plt.legend()
     plt.tight_layout()
     plt.show()
@@ -129,6 +136,8 @@ def dispersive_analyze(fpts, signals_g, signals_e):
     ax[1].axvline(min_fpt, color="g", ls="--", label=f"max SNR2 = {min_fpt:.2f}")
     ax[1].axvline(abs_fpt, color="b", ls="--", label=f"max Max IQ = {abs_fpt:.2f}")
 
+    plt.xlabel("Frequency (MHz)")
+    plt.ylabel("Magnitude (a.u.)")
     plt.legend()
     plt.tight_layout()
     plt.show()
@@ -157,13 +166,15 @@ def dispersive2D_analyze(fpts, pdrs, signals2D):
     plt.scatter(
         fpt_max, pdr_max, color="r", label=f"max SNR = {fpt_max:.2f}, {int(pdr_max)}"
     )
+    plt.xlabel("Frequency (MHz)")
+    plt.ylabel("SNR (a.u.)")
     plt.legend()
     plt.show()
 
     return fpt_max, pdr_max
 
 
-def readout_analyze(Ts, signals_g, signals_e, ro_length):
+def readout_analyze(Ts, signals_g, signals_e, ro_length, plot_cum=False):
     # find the best readout window that has the largest average contrast
     contrasts = signals_g - signals_e
 
@@ -179,7 +190,9 @@ def readout_analyze(Ts, signals_g, signals_e, ro_length):
     max_jdx = 0
     for idx in range(len(Ts) - min_num):
         jdxs = np.arange(idx + min_num, len(Ts))
-        snr = np.abs(cum_contrasts[jdxs] - cum_contrasts[idx]) / np.sqrt(jdxs - idx)
+        snr = np.abs(cum_contrasts[jdxs] - cum_contrasts[idx]) / np.sqrt(
+            Ts[jdxs] - Ts[idx]
+        )
         max_j = np.argmax(snr)
         if snr[max_j] > max_snr:
             max_snr = snr[max_j]
@@ -191,7 +204,10 @@ def readout_analyze(Ts, signals_g, signals_e, ro_length):
 
     # plot
     plt.figure(figsize=figsize)
-    plt.plot(Ts, np.abs(contrasts), label="cum_contrast")
+    if plot_cum:
+        plt.plot(Ts, np.abs(cum_contrasts), label="cum_contrast")
+    else:
+        plt.plot(Ts, contrasts, label="contrast")
     plt.axvline(best_offset, color="r", ls="--", label=f"t = {best_offset:.3f}")
     plt.axvline(
         best_offset + best_length,
@@ -199,6 +215,8 @@ def readout_analyze(Ts, signals_g, signals_e, ro_length):
         ls="--",
         label=f"t = {best_offset + best_length:.3f}",
     )
+    plt.xlabel("Time (us)")
+    plt.ylabel("Magnitude (a.u.)")
     plt.legend()
     plt.show()
 

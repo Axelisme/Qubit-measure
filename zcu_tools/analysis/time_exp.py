@@ -7,7 +7,12 @@ from .tools import convert2max_contrast
 
 
 def rabi_analyze(
-    x: int, signals: float, plot_fit=True, decay=False, max_contrast=False
+    x: int,
+    signals: float,
+    plot_fit=True,
+    decay=False,
+    max_contrast=False,
+    xlabel=None,
 ):
     """
     x: 1D array, sweep points
@@ -47,7 +52,12 @@ def rabi_analyze(
         plt.plot(xs, curve, label="fit")
         plt.axvline(pi_x, ls="--", c="red", label=f"pi={pi_x:.1f}")
         plt.axvline(pi2_x, ls="--", c="red", label=f"pi/2={(pi2_x):.1f}")
-    plt.title("Rabi", fontsize=15)
+    if xlabel is not None:
+        plt.xlabel(xlabel)
+    if max_contrast:
+        plt.ylabel("Signal Real (a.u.)")
+    else:
+        plt.ylabel("Magnitude (a.u.)")
     plt.legend(loc=4)
     plt.tight_layout()
     plt.show()
@@ -73,7 +83,11 @@ def T1_analyze(x: float, y: float, return_err=False, plot=True, max_contrast=Fal
         plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
         plt.plot(x, sim, label="fit")
         plt.title(f"T1 = {t1_str}", fontsize=15)
-        plt.xlabel("Time (us)", fontsize=15)
+        plt.xlabel("Time (us)")
+        if max_contrast:
+            plt.ylabel("Signal Real (a.u.)")
+        else:
+            plt.ylabel("Magnitude (a.u.)")
         plt.legend()
         plt.tight_layout()
         plt.show()
@@ -98,14 +112,17 @@ def T2fringe_analyze(
 
     if plot:
         t2f_str = f"{t2f:.2f}us +/- {err[4]:.2f}us"
-        detune_str = f"{detune:.2f}MHz +/- {err[2]*1e3:.2f}kHz"
+        detune_str = f"{detune:.2f}MHz +/- {err[2] * 1e3:.2f}kHz"
 
         plt.figure(figsize=figsize)
         plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
         plt.plot(x, sim, label="fit")
         plt.title(f"T2 fringe = {t2f_str}, detune = {detune_str}", fontsize=15)
-        plt.xlabel("Time (us)", fontsize=15)
-        plt.ylabel("Population", fontsize=15)
+        plt.xlabel("Time (us)")
+        if max_contrast:
+            plt.ylabel("Signal Real (a.u.)")
+        else:
+            plt.ylabel("Magnitude (a.u.)")
         plt.legend()
         plt.tight_layout()
         plt.show()
@@ -134,7 +151,11 @@ def T2decay_analyze(
         plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
         plt.plot(x, ft.expfunc(x, *pOpt), label="fit")
         plt.title(f"T2 decay = {t2e_str}", fontsize=15)
-        plt.xlabel("Time (us)", fontsize=15)
+        plt.xlabel("Time (us)")
+        if max_contrast:
+            plt.ylabel("Signal Real (a.u.)")
+        else:
+            plt.ylabel("Magnitude (a.u.)")
         plt.legend()
         plt.tight_layout()
         plt.show()

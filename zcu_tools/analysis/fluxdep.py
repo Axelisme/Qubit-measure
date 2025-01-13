@@ -353,17 +353,53 @@ def energy2transition(energies, allows):
     fs = []
     labels = []
     names = []
-    for i, j in allows["transitions"]:
-        fs.append(energies[:, j] - energies[:, i])
-        labels.append((i, j))
+    for i, j in allows.get("transitions", []):
+        freq = energies[:, j] - energies[:, i]
+        fs.append(freq)
+        labels.append(((i, -np.ones_like(freq)), (j, np.ones_like(freq))))
         names.append(f"{i} -> {j}")
-    for i, j in allows["mirror"]:
+    for i, j in allows.get("blue side", []):
+        freq = energies[:, j] - energies[:, i]
+        fs.append(allows["r_f"] + freq)
+        labels.append(((i, -np.ones_like(freq)), (j, np.ones_like(freq))))
+        names.append(f"{i} -> {j} blue side")
+    for i, j in allows.get("red side", []):
+        freq = energies[:, j] - energies[:, i]
+        red_f = allows["r_f"] - freq
+        fs.append(np.abs(red_f))
+        mask = np.where(red_f > 0, 1, -1)
+        # labels.append([(i, mask), (j, -mask)])
+        labels.append(((i, mask), (j, -mask)))
+        names.append(f"{i} -> {j} red side")
+    for i, j in allows.get("mirror", []):
         freq = energies[:, j] - energies[:, i]
         fs.append(2 * allows["sample_f"] - freq)
-        labels.append((j, i))
+        labels.append(((i, np.ones_like(freq)), (j, -np.ones_like(freq))))
         names.append(f"{i} -> {j} mirror")
+    for i, j in allows.get("transitions2", []):
+        freq = energies[:, j] - energies[:, i]
+        fs.append(0.5 * freq)
+        labels.append(((i, -0.5 * np.ones_like(freq)), (j, 0.5 * np.ones_like(freq))))
+        names.append(f"{i} -> {j} 2")
+    for i, j in allows.get("blue side2", []):
+        freq = energies[:, j] - energies[:, i]
+        fs.append(0.5 * (allows["r_f"] + freq))
+        labels.append(((i, -0.5 * np.ones_like(freq)), (j, 0.5 * np.ones_like(freq))))
+        names.append(f"{i} -> {j} blue side 2")
+    for i, j in allows.get("red side2", []):
+        freq = energies[:, j] - energies[:, i]
+        red_f = allows["r_f"] - freq
+        fs.append(0.5 * np.abs(red_f))
+        mask = np.where(red_f > 0, 1, -1)
+        labels.append(((i, 0.5 * np.ones_like(freq)), (j, -0.5 * np.ones_like(freq))))
+        names.append(f"{i} -> {j} red side 2")
+    for i, j in allows.get("mirror2", []):
+        freq = energies[:, j] - energies[:, i]
+        fs.append(allows["sample_f"] - 0.5 * freq)
+        labels.append(((i, 0.5 * np.ones_like(freq)), (j, -0.5 * np.ones_like(freq))))
+        names.append(f"{i} -> {j} mirror 2")
 
-    return np.array(fs).T, np.array(labels), names
+    return np.array(fs).T, labels, names
 
 
 def search_in_database(flxs, fpts, datapath, allows):
@@ -451,13 +487,13 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
 
         idxs = np.arange(len(energies))
         min_idx = np.argmin(dist2, axis=1)  # (n, )
-        min_dist2 = dist2[idxs, min_idx]
         grad_energies = np.zeros_like(energies)
-        for i, (f, t) in enumerate(labels[min_idx]):
-            grad_energies[i, f] -= 2 * dist[i, min_idx[i]]
-            grad_energies[i, t] += 2 * dist[i, min_idx[i]]
+        for i, min_id in enumerate(min_idx):
+            f, t = labels[min_id]
+            grad_energies[i, f[0]] += 2 * dist[i, min_idx[i]] * f[1][i]
+            grad_energies[i, t[0]] += 2 * dist[i, min_idx[i]] * t[1][i]
 
-        return np.sum(min_dist2), grad_energies
+        return np.sum(dist2[idxs, min_idx]), grad_energies
 
     def get_dH_dE(fluxonium, params, spect):
         fluxonium.EJ = params[0]

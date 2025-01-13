@@ -35,6 +35,7 @@ def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
         # measure multiple times
         trig_offset = cfg["adc"]["trig_offset"]
         total_len = trig_offset + cfg["adc"]["ro_length"]
+        cfg["adc"]["ro_length"] = MAX_LEN
 
         bar = tqdm(
             total=int(total_len / MAX_LEN + 0.99),
