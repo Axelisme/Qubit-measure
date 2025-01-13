@@ -207,7 +207,7 @@ def readout_analyze(Ts, signals_g, signals_e, ro_length, plot_cum=False):
     if plot_cum:
         plt.plot(Ts, np.abs(cum_contrasts), label="cum_contrast")
     else:
-        plt.plot(Ts, contrasts, label="contrast")
+        plt.plot(Ts, np.abs(contrasts), label="contrast")
     plt.axvline(best_offset, color="r", ls="--", label=f"t = {best_offset:.3f}")
     plt.axvline(
         best_offset + best_length,

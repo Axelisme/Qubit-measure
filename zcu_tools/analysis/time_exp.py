@@ -65,24 +65,34 @@ def rabi_analyze(
     return pi_x, pi2_x
 
 
-def T1_analyze(x: float, y: float, return_err=False, plot=True, max_contrast=False):
+def T1_analyze(
+    x: float, y: float, return_err=False, plot=True, max_contrast=False, dual_exp=False
+):
     if max_contrast:
         y, _ = convert2max_contrast(y.real, y.imag)
     else:
         y = np.abs(y)
 
-    pOpt, pCov = ft.fitexp(x, y)
-    t1 = pOpt[2]
-    sim = ft.expfunc(x, *pOpt)
+    if dual_exp:
+        pOpt, pCov = ft.fitdualexp(x, y)
+        sim = ft.dual_expfunc(x, *pOpt)
+    else:
+        pOpt, pCov = ft.fitexp(x, y)
+        sim = ft.expfunc(x, *pOpt)
     err = np.sqrt(np.diag(pCov))
 
     if plot:
-        t1_str = f"{t1:.2f}us +/- {err[2]:.2f}us"
+        t1_str = f"{pOpt[2]:.2f}us +/- {err[2]:.2f}us"
+        if dual_exp:
+            t1b_str = f"{pOpt[4]:.2f}us +/- {err[4]:.2f}us"
 
         plt.figure(figsize=figsize)
         plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
         plt.plot(x, sim, label="fit")
-        plt.title(f"T1 = {t1_str}", fontsize=15)
+        if dual_exp:
+            plt.title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
+        else:
+            plt.title(f"T1 = {t1_str}", fontsize=15)
         plt.xlabel("Time (us)")
         if max_contrast:
             plt.ylabel("Signal Real (a.u.)")
@@ -92,8 +102,9 @@ def T1_analyze(x: float, y: float, return_err=False, plot=True, max_contrast=Fal
         plt.tight_layout()
         plt.show()
 
+    t1 = pOpt[4] if dual_exp else pOpt[2]
     if return_err:
-        return t1, err[2]
+        return t1, err
     return t1
 
 
