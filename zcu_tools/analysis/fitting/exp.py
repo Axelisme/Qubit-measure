@@ -63,6 +63,9 @@ def fit_dualexp(xdata, ydata, fitparams=None):
 
         yscale2 *= np.exp(xdata[mid_idx] / decay2)
 
+        yscale1 /= 2
+        yscale2 /= 2
+
         assign_init_p(fitparams, [y0, yscale1, decay1, yscale2, decay2])
 
     # bounds

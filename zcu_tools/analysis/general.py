@@ -8,7 +8,9 @@ from .tools import NormalizeData, convert2max_contrast
 figsize = (8, 6)
 
 
-def lookback_analyze(Ts, Is, Qs, plot_fit=True, ratio: float = 0.3):
+def lookback_analyze(
+    Ts, Is, Qs, plot_fit=True, ratio: float = 0.3, pulse_cfg: dict = None
+):
     """
     Ts: 1D array, time points
     Is: 1D array, I values
@@ -25,8 +27,14 @@ def lookback_analyze(Ts, Is, Qs, plot_fit=True, ratio: float = 0.3):
     plt.plot(Ts, y, label="mag")
     if plot_fit:
         plt.axvline(offset, color="r", linestyle="--", label="predict_offset")
+    if pulse_cfg is not None:
+        trig_offset = pulse_cfg["trig_offset"]
+        ro_length = pulse_cfg["ro_length"]
+        plt.axvline(trig_offset, color="g", linestyle="--", label="ro start")
+        plt.axvline(trig_offset + ro_length, color="g", linestyle="--", label="ro end")
+
+    plt.xlabel("Time (us)")
     plt.ylabel("a.u.")
-    plt.xlabel("us")
     plt.legend()
     plt.show()
 

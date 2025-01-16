@@ -81,18 +81,24 @@ def T1_analyze(
         sim = ft.expfunc(x, *pOpt)
     err = np.sqrt(np.diag(pCov))
 
+    if dual_exp:
+        # make sure t1 is the longer one
+        if pOpt[4] > pOpt[2]:
+            pOpt = [pOpt[0], pOpt[3], pOpt[4], pOpt[1], pOpt[2]]
+            err = [err[0], err[3], err[4], err[1], err[2]]
+        t1b, t1berr = pOpt[4], err[4]
+    t1, t1err = pOpt[2], err[2]
+
     if plot:
-        t1_str = f"{pOpt[2]:.2f}us +/- {err[2]:.2f}us"
+        t1_str = f"{t1:.2f}us +/- {t1err:.2f}us"
         if dual_exp:
-            t1b_str = f"{pOpt[4]:.2f}us +/- {err[4]:.2f}us"
+            t1b_str = f"{t1b:.2f}us +/- {t1berr:.2f}us"
 
         plt.figure(figsize=figsize)
         plt.plot(x, y, label="meas", ls="-", marker="o", markersize=3)
         plt.plot(x, sim, label="fit")
         if dual_exp:
-            plt.plot(
-                x, ft.expfunc(x, pOpt[0], *pOpt[3:]), linestyle="--", label="t1b fit"
-            )
+            plt.plot(x, ft.expfunc(x, *pOpt[:3]), linestyle="--", label="t1b fit")
             plt.title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
         else:
             plt.title(f"T1 = {t1_str}", fontsize=15)
@@ -105,9 +111,8 @@ def T1_analyze(
         plt.tight_layout()
         plt.show()
 
-    t1 = pOpt[4] if dual_exp else pOpt[2]
     if return_err:
-        return t1, err
+        return t1, t1err
     return t1
 
 
