@@ -48,14 +48,14 @@ def measure_ge_contrast(
                 qub_pulse["gain"] = 0
                 prog = TwoToneProgram(soccfg, make_cfg(cfg))
                 avggi, avggq, stdgi, stdgq = prog.acquire(
-                    soc, progress=False, return_std=True
+                    soc, progress=False, ret_std=True
                 )
                 noise2_g = stdgi[0][0] ** 2 + stdgq[0][0] ** 2
 
                 qub_pulse["gain"] = pi_gain
                 prog = TwoToneProgram(soccfg, make_cfg(cfg))
                 avgei, avgeq, stdei, stdeq = prog.acquire(
-                    soc, progress=False, return_std=True
+                    soc, progress=False, ret_std=True
                 )
                 noise2_e = stdei[0][0] ** 2 + stdeq[0][0] ** 2
 
