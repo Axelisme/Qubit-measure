@@ -15,8 +15,6 @@ def measure_ge_contrast(
     soccfg,
     cfg,
     instant_show=False,
-    dynamic_reps=False,
-    gain_ref=1000,
 ):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -31,25 +29,16 @@ def measure_ge_contrast(
     qub_pulse = cfg["dac"]["qub_pulse"]
     pi_gain = qub_pulse["gain"]
 
-    reps_ref = cfg["reps"]
-
     if instant_show:
         fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
 
-    signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
+    snr2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     try:
         pdr_tqdm = tqdm(pdrs, desc="Power", smoothing=0)
         freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
 
         for i, pdr in enumerate(pdr_tqdm):
             res_pulse["gain"] = pdr
-
-            if dynamic_reps:
-                cfg["reps"] = int(reps_ref * gain_ref / pdr)
-                if cfg["reps"] < 0.1 * reps_ref:
-                    cfg["reps"] = int(0.1 * reps_ref + 0.99)
-                elif cfg["reps"] > 10 * reps_ref:
-                    cfg["reps"] = int(10 * reps_ref)
 
             freq_tqdm.reset()
             freq_tqdm.refresh()
@@ -58,28 +47,39 @@ def measure_ge_contrast(
 
                 qub_pulse["gain"] = 0
                 prog = TwoToneProgram(soccfg, make_cfg(cfg))
-                avgi, avgq = prog.acquire(soc, progress=False)
-                signals_g = avgi[0][0] + 1j * avgq[0][0]
+                avggi, avggq, stdgi, stdgq = prog.acquire(
+                    soc, progress=False, return_std=True
+                )
+                noise2_g = stdgi[0][0] ** 2 + stdgq[0][0] ** 2
 
                 qub_pulse["gain"] = pi_gain
                 prog = TwoToneProgram(soccfg, make_cfg(cfg))
-                avgi, avgq = prog.acquire(soc, progress=False)
-                signals_e = avgi[0][0] + 1j * avgq[0][0]
+                avgei, avgeq, stdei, stdeq = prog.acquire(
+                    soc, progress=False, return_std=True
+                )
+                noise2_e = stdei[0][0] ** 2 + stdeq[0][0] ** 2
 
-                signals2D[i, j] = signals_e - signals_g
+                # snr2D[i, j] = signals_e - signals_g
+                dist_i = avgei[0][0] - avggi[0][0]
+                dist_q = avgeq[0][0] - avggq[0][0]
+                contrast = dist_i + 1j * dist_q
+                noise = np.sqrt(noise2_g * dist_i**2 + noise2_e * dist_q**2) / np.abs(
+                    contrast
+                )
+                snr2D[i, j] = contrast / noise
                 freq_tqdm.update()
 
             pdr_tqdm.update()
 
             if instant_show:
-                update_show2d(fig, ax, dh, im, np.abs(signals2D))
+                update_show2d(fig, ax, dh, im, np.abs(snr2D))
 
         if instant_show:
             clear_show()
     except Exception as e:
         print("Error during measurement:", e)
 
-    return fpts, pdrs, signals2D  # (pdrs, freqs)
+    return fpts, pdrs, snr2D  # (pdrs, freqs)
 
 
 def measure_ge_contrast2(
