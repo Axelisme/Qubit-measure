@@ -153,15 +153,15 @@ def dispersive_analyze(fpts, signals_g, signals_e):
     return abs_fpt, max_fpt, min_fpt
 
 
-def dispersive2D_analyze(fpts, pdrs, signals2D):
-    amps = np.abs(signals2D)
+def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
+    amps = np.abs(snr2D)
 
     amps = gaussian_filter(amps, 1)
 
-    fpt_max_id = np.argmax(np.max(amps, axis=0))
-    pdr_max_id = np.argmax(np.max(amps, axis=1))
-    fpt_max = fpts[fpt_max_id]
-    pdr_max = pdrs[pdr_max_id]
+    x_max_id = np.argmax(np.max(amps, axis=0))
+    y_max_id = np.argmax(np.max(amps, axis=1))
+    x_max = xs[x_max_id]
+    y_max = ys[y_max_id]
 
     plt.figure(figsize=figsize)
     plt.imshow(
@@ -169,17 +169,17 @@ def dispersive2D_analyze(fpts, pdrs, signals2D):
         aspect="auto",
         origin="lower",
         interpolation="none",
-        extent=[fpts[0], fpts[-1], pdrs[0], pdrs[-1]],
+        extent=[xs[0], xs[-1], ys[0], ys[-1]],
     )
-    plt.scatter(
-        fpt_max, pdr_max, color="r", label=f"max SNR = {fpt_max:.2f}, {int(pdr_max)}"
-    )
-    plt.xlabel("Frequency (MHz)")
-    plt.ylabel("SNR (a.u.)")
+    plt.scatter(x_max, y_max, color="r", label=f"max SNR = {x_max:.2f}, {int(y_max)}")
+    if xlabel is not None:
+        plt.xlabel(xlabel)
+    if ylabel is not None:
+        plt.ylabel(ylabel)
     plt.legend()
     plt.show()
 
-    return fpt_max, pdr_max
+    return x_max, y_max
 
 
 def readout_analyze(Ts, signals_g, signals_e, ro_length, plot_cum=False):
