@@ -1,7 +1,6 @@
 from . import singleshot
-from .dispersive import measure_dispersive
 from .flux_depend import measure_qub_flux_dep
-from .ge_different import measure_ge_contrast, measure_ge_contrast2
+from .ge_different import measure_ge_pdr_dep, measure_ge_ro_dep
 from .power_depend import measure_qub_pdr_dep
 from .rabi import measure_amprabi, measure_lenrabi
 from .singleshot import (
@@ -29,8 +28,8 @@ __all__ = [
     "measure_t2echo",
     "measure_fid",
     "measure_fid_auto",
-    "measure_ge_contrast",
-    "measure_ge_contrast2",
+    "measure_ge_pdr_dep",
+    "measure_ge_ro_dep",
     "scan_pdr",
     "scan_offset",
     "scan_ro_len",

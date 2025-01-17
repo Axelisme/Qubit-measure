@@ -1,7 +1,7 @@
 from . import qubit, resonator
+from .lookback import measure_lookback
 from .qubit import (
     measure_amprabi,
-    measure_dispersive,
     measure_fid,
     measure_fid_auto,
     measure_lenrabi,
@@ -17,7 +17,6 @@ from .resonator import (
     measure_res_freq,
     measure_res_pdr_dep,
 )
-from .lookback import measure_lookback
 
 __all__ = [
     "resonator",
@@ -31,7 +30,6 @@ __all__ = [
     "measure_qub_flux_dep",
     "measure_lenrabi",
     "measure_amprabi",
-    "measure_dispersive",
     "measure_t1",
     "measure_t2ramsey",
     "measure_t2echo",
