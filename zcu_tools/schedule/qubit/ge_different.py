@@ -80,7 +80,7 @@ def measure_ge_pdr_dep(
     return fpts, pdrs, snr2D  # (pdrs, freqs)
 
 
-def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False, cutoff=np.inf):
+def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False, cutoff=(0.0, np.inf)):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     set_flux(cfg["flux_dev"], cfg["flux"])
@@ -108,7 +108,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False, cutoff=np.inf):
             for j, offset in enumerate(offsets):
                 cfg["adc"]["trig_offset"] = offset
 
-                if offset + ro_len <= cutoff:
+                if cutoff[0] <= offset + ro_len <= cutoff[1]:
                     snr2D[i, j] = measure_one(soc, soccfg, cfg)
                 trig_tqdm.update()
 
