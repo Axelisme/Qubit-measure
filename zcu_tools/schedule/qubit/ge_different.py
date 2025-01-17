@@ -80,7 +80,7 @@ def measure_ge_pdr_dep(
     return fpts, pdrs, snr2D  # (pdrs, freqs)
 
 
-def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
+def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False, timeFly=0.0):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     set_flux(cfg["flux_dev"], cfg["flux"])
@@ -90,8 +90,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     offsets = np.linspace(trig_cfg["start"], trig_cfg["stop"], trig_cfg["expts"])
     ro_lens = np.linspace(ro_cfg["start"], ro_cfg["stop"], ro_cfg["expts"])
 
-    pulse_len = cfg["dac"]["qub_pulse"]["length"]
-    total_len = cfg["relax_delay"] + max(pulse_len, ro_lens.max() + offsets.max())
+    pulse_len = cfg["dac"]["res_pulse"]["length"]
 
     if instant_show:
         fig, ax, dh, im = init_show2d(
@@ -111,9 +110,8 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
             for j, offset in enumerate(offsets):
                 cfg["adc"]["trig_offset"] = offset
 
-                cfg["relax_delay"] = total_len - max(pulse_len, ro_len + offset)
-
-                snr2D[i, j] = measure_one(soc, soccfg, cfg)
+                if offset + ro_len <= timeFly + pulse_len + 1.0:
+                    snr2D[i, j] = measure_one(soc, soccfg, cfg)
                 trig_tqdm.update()
 
             if instant_show:
