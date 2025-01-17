@@ -158,8 +158,8 @@ def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
 
     amps = gaussian_filter(amps, 1)
 
-    x_max_id = np.argmax(np.max(amps, axis=0))
-    y_max_id = np.argmax(np.max(amps, axis=1))
+    x_max_id = np.nanargmax(np.nanmax(amps, axis=0))
+    y_max_id = np.nanargmax(np.nanmax(amps, axis=1))
     x_max = xs[x_max_id]
     y_max = ys[y_max_id]
 

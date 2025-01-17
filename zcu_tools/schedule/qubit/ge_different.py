@@ -7,7 +7,13 @@ from zcu_tools import make_cfg
 from zcu_tools.program import TwoToneProgram
 
 from ..flux import set_flux
-from ..instant_show import clear_show, init_show2d, update_show2d
+from ..instant_show import (
+    clear_show,
+    init_show,
+    init_show2d,
+    update_show,
+    update_show2d,
+)
 
 
 def measure_one(soc, soccfg, cfg):
@@ -80,44 +86,34 @@ def measure_ge_pdr_dep(
     return fpts, pdrs, snr2D  # (pdrs, freqs)
 
 
-def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False, cutoff=np.inf):
+def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
-    trig_cfg = cfg["sweep"]["trig_offset"]
-    ro_cfg = cfg["sweep"]["ro_length"]
-    offsets = np.linspace(trig_cfg["start"], trig_cfg["stop"], trig_cfg["expts"])
+    ro_cfg = cfg["sweep"]
     ro_lens = np.linspace(ro_cfg["start"], ro_cfg["stop"], ro_cfg["expts"])
 
+    show_period = int(len(ro_lens) / 10 + 0.99)
     if instant_show:
-        fig, ax, dh, im = init_show2d(
-            offsets, ro_lens, "Trigger offset (us)", "Readout length (us)"
-        )
+        fig, ax, dh, curve = init_show(ro_lens, "Readout Length (us)", "SNR (a.u.)")
 
-    snr2D = np.full((len(ro_lens), len(offsets)), np.nan, dtype=np.complex128)
+    snrs = np.full(len(ro_lens), np.nan, dtype=np.complex128)
     try:
-        ro_tqdm = tqdm(ro_lens, desc="ro length", smoothing=0)
-        trig_tqdm = tqdm(offsets, desc="trig offset", smoothing=0)
-
-        for i, ro_len in enumerate(ro_tqdm):
+        for i, ro_len in enumerate(tqdm(ro_lens, desc="ro length", smoothing=0)):
             cfg["adc"]["ro_length"] = ro_len
 
-            trig_tqdm.reset()
-            trig_tqdm.refresh()
-            for j, offset in enumerate(offsets):
-                cfg["adc"]["trig_offset"] = offset
+            snrs[i] = measure_one(soc, soccfg, cfg)
 
-                if offset + ro_len <= cutoff:
-                    snr2D[i, j] = measure_one(soc, soccfg, cfg)
-                trig_tqdm.update()
-
+            if instant_show and i % show_period == 0:
+                update_show(fig, ax, dh, curve, np.abs(snrs))
+        else:
             if instant_show:
-                update_show2d(fig, ax, dh, im, np.abs(snr2D))
+                update_show(fig, ax, dh, curve, np.abs(snrs))
 
         if instant_show:
             clear_show()
     except Exception as e:
         print("Error during measurement:", e)
 
-    return offsets, ro_lens, snr2D  # (offsets, ro_lens)
+    return ro_lens, snrs
