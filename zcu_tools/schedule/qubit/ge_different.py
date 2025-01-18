@@ -93,8 +93,9 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 
     ro_cfg = cfg["sweep"]
     ro_lens = np.linspace(ro_cfg["start"], ro_cfg["stop"], ro_cfg["expts"])
+    trig_offset = cfg["adc"]["trig_offset"]
 
-    show_period = int(len(ro_lens) / 10 + 0.99)
+    show_period = int(len(ro_lens) / 10 + 0.99999)
     if instant_show:
         fig, ax, dh, curve = init_show(ro_lens, "Readout Length (us)", "SNR (a.u.)")
 
@@ -102,6 +103,8 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     try:
         for i, ro_len in enumerate(tqdm(ro_lens, desc="ro length", smoothing=0)):
             cfg["adc"]["ro_length"] = ro_len
+            res_len = trig_offset + ro_len + 1.0
+            cfg["dac"]["res_pulse"]["length"] = res_len
 
             snrs[i] = measure_one(soc, soccfg, cfg)
 

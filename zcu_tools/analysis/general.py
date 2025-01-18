@@ -182,7 +182,27 @@ def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
     return x_max, y_max
 
 
-def readout_analyze(Ts, signals_g, signals_e, ro_length, plot_cum=False):
+def readout_analyze(xs, snrs, xlabel=None):
+    snrs = np.abs(snrs)
+
+    snrs = gaussian_filter1d(snrs, 1)
+
+    max_id = np.argmax(snrs)
+    max_x = xs[max_id]
+
+    plt.figure(figsize=figsize)
+    plt.plot(xs, snrs)
+    plt.axvline(max_x, color="r", ls="--", label=f"max SNR = {max_x:.2f}")
+    if xlabel is not None:
+        plt.xlabel(xlabel)
+    plt.ylabel("SNR (a.u.)")
+    plt.legend()
+    plt.show()
+
+    return max_x
+
+
+def readout_analyze2(Ts, signals_g, signals_e, ro_length, plot_cum=False):
     # find the best readout window that has the largest average contrast
     contrasts = signals_g - signals_e
 
