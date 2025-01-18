@@ -2,7 +2,6 @@ from .general import (
     dispersive2D_analyze,
     freq_analyze,
     lookback_analyze,
-    pdr_dep_analyze,
     phase_analyze,
     readout_analyze,
 )
@@ -18,7 +17,6 @@ __all__ = [
     "phase_analyze",
     "freq_analyze",
     "readout_analyze",
-    "pdr_dep_analyze",
     "rabi_analyze",
     "dispersive2D_analyze",
     "T1_analyze",

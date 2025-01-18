@@ -3,7 +3,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
 from . import fitting as ft
-from .tools import NormalizeData, convert2max_contrast
+from .tools import convert2max_contrast
 
 figsize = (8, 6)
 
@@ -103,25 +103,6 @@ def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False):
     return freq
 
 
-def pdr_dep_analyze(fpts, pdrs, amps, contour=None):
-    """
-    fpts: 1D array, frequency points
-    pdrs: 1D array, pdr values
-    amps: 2D array, shape: (len(pdrs), len(fpts))
-    """
-    amps = NormalizeData(amps, 1)
-
-    plt.figure(figsize=figsize)
-    plt.imshow(
-        amps,
-        aspect="auto",
-        origin="lower",
-        extent=[fpts[0], fpts[-1], pdrs[0], pdrs[-1]],
-    )
-    if contour is not None:
-        plt.contour(fpts, pdrs, amps, levels=[contour])
-
-
 def dispersive_analyze(fpts, signals_g, signals_e):
     y_g = np.abs(signals_g)
     y_e = np.abs(signals_e)
@@ -154,25 +135,25 @@ def dispersive_analyze(fpts, signals_g, signals_e):
 
 
 def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
-    amps = np.abs(snr2D)
+    snr2D = np.abs(snr2D)
 
-    amps = gaussian_filter(amps, 1)
+    snr2D = gaussian_filter(snr2D, 1)
 
-    x_max_id = np.nanargmax(np.nanmax(amps, axis=0))
-    y_max_id = np.nanargmax(np.nanmax(amps, axis=1))
+    x_max_id = np.nanargmax(np.nanmax(snr2D, axis=0))
+    y_max_id = np.nanargmax(np.nanmax(snr2D, axis=1))
     x_max = xs[x_max_id]
     y_max = ys[y_max_id]
 
     plt.figure(figsize=figsize)
     plt.imshow(
-        amps,
+        snr2D,
         aspect="auto",
         origin="lower",
         interpolation="none",
         extent=[xs[0], xs[-1], ys[0], ys[-1]],
     )
     plt.scatter(
-        x_max, y_max, color="r", label=f"max SNR = {amps[y_max_id, x_max_id]:.2f}"
+        x_max, y_max, color="r", label=f"max SNR = {snr2D[y_max_id, x_max_id]:.2f}"
     )
     if xlabel is not None:
         plt.xlabel(xlabel)
@@ -194,7 +175,7 @@ def readout_analyze(xs, snrs, xlabel=None):
 
     plt.figure(figsize=figsize)
     plt.plot(xs, snrs)
-    plt.axvline(max_x, color="r", ls="--", label=f"max SNR = {max_x:.2f}")
+    plt.axvline(max_x, color="r", ls="--", label=f"max SNR = {snrs[max_id]:.2f}")
     if xlabel is not None:
         plt.xlabel(xlabel)
     plt.ylabel("SNR (a.u.)")
@@ -202,52 +183,3 @@ def readout_analyze(xs, snrs, xlabel=None):
     plt.show()
 
     return max_x
-
-
-def readout_analyze2(Ts, signals_g, signals_e, ro_length, plot_cum=False):
-    # find the best readout window that has the largest average contrast
-    contrasts = signals_g - signals_e
-
-    # use gaussian filter to smooth the contrast
-    contrasts = gaussian_filter1d(contrasts, 5)
-
-    cum_contrasts = np.cumsum(contrasts)
-
-    min_num = int(ro_length * len(Ts) / (Ts[-1] - Ts[0]))
-
-    max_snr = 0
-    max_idx = 0
-    max_jdx = 0
-    for idx in range(len(Ts) - min_num):
-        jdxs = np.arange(idx + min_num, len(Ts))
-        snr = np.abs(cum_contrasts[jdxs] - cum_contrasts[idx]) / np.sqrt(
-            Ts[jdxs] - Ts[idx]
-        )
-        max_j = np.argmax(snr)
-        if snr[max_j] > max_snr:
-            max_snr = snr[max_j]
-            max_idx = idx
-            max_jdx = jdxs[max_j]
-
-    best_offset = Ts[max_idx]
-    best_length = Ts[max_jdx] - Ts[max_idx]
-
-    # plot
-    plt.figure(figsize=figsize)
-    if plot_cum:
-        plt.plot(Ts, np.abs(cum_contrasts), label="cum_contrast")
-    else:
-        plt.plot(Ts, np.abs(contrasts), label="contrast")
-    plt.axvline(best_offset, color="r", ls="--", label=f"t = {best_offset:.3f}")
-    plt.axvline(
-        best_offset + best_length,
-        color="r",
-        ls="--",
-        label=f"t = {best_offset + best_length:.3f}",
-    )
-    plt.xlabel("Time (us)")
-    plt.ylabel("Magnitude (a.u.)")
-    plt.legend()
-    plt.show()
-
-    return best_offset, best_length
