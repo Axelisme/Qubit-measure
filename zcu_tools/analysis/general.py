@@ -171,7 +171,9 @@ def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
         interpolation="none",
         extent=[xs[0], xs[-1], ys[0], ys[-1]],
     )
-    plt.scatter(x_max, y_max, color="r", label=f"max SNR = {x_max:.2f}, {int(y_max)}")
+    plt.scatter(
+        x_max, y_max, color="r", label=f"max SNR = {amps[y_max_id, x_max_id]:.2f}"
+    )
     if xlabel is not None:
         plt.xlabel(xlabel)
     if ylabel is not None:
