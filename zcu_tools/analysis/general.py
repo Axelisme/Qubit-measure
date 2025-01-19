@@ -135,9 +135,11 @@ def dispersive_analyze(fpts, signals_g, signals_e):
 
 
 def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
-    snr2D = np.abs(snr2D)
+    abssnr2D = np.abs(snr2D)
 
-    snr2D = gaussian_filter(snr2D, 1)
+    snr2D = gaussian_filter(abssnr2D, 1)
+    mask = np.isnan(snr2D)
+    snr2D[mask] = abssnr2D[mask]
 
     x_max_id = np.nanargmax(np.nanmax(snr2D, axis=0))
     y_max_id = np.nanargmax(np.nanmax(snr2D, axis=1))
