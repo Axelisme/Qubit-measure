@@ -4,7 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools.auto import make_cfg
-from zcu_tools.program import AmpRabiProgram, TwoToneProgram
+from zcu_tools.program import TwoToneProgram, RGainTwoToneProgram
 
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show, update_show
@@ -75,9 +75,9 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             clear_show()
 
     else:
-        print("Use AmpRabiProgram for hard loop")
+        print("Use TGainTwoToneProgram for hard loop")
 
-        prog = AmpRabiProgram(soccfg, cfg)
+        prog = RGainTwoToneProgram(soccfg, cfg)
         pdrs, avgi, avgq = prog.acquire(soc, progress=True)
         signals = avgi[0][0] + 1j * avgq[0][0]
 
