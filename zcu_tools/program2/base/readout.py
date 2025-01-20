@@ -43,7 +43,7 @@ class BaseReadout(AbsReadout):
         if prog.ch_count[res_ch] > 1:
             set_pulse(prog, prog.res_pulse, ro_ch=ro_chs[0], waveform="res_pulse")
         if before_readout is not None:
-            before_readout(prog)
+            before_readout()
         prog.measure(
             pulse_ch=res_ch,
             adcs=ro_chs,

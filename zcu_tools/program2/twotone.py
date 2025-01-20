@@ -21,7 +21,7 @@ def twotone_body(prog, before_pulse=None):
     if prog.ch_count[ch] > 1:
         set_pulse(prog, prog.qub_pulse, waveform="qub_pulse")
     if before_pulse is not None:
-        before_pulse(prog)
+        before_pulse()
     prog.pulse(ch=ch)
     prog.sync_all(prog.us2cycles(PULSE_DELAY))
 
