@@ -2,8 +2,7 @@ from abc import ABC, abstractmethod
 
 from qick.asm_v1 import AcquireProgram
 
-from ..twotone import setup_qubit
-from .pulse import set_pulse
+from .pulse import set_pulse, declare_pulse
 
 
 def make_reset(name: str):
@@ -37,7 +36,7 @@ class PulseReset(AbsReset):
     RESET_DELAY = 0.05
 
     def init(self, prog: AcquireProgram):
-        setup_qubit(prog, prog.reset_pusle, wavname="reset")
+        declare_pulse(prog, prog.reset_pulse, waveform="reset")
 
     def reset_qubit(self, prog: AcquireProgram):
         reset_pulse = prog.reset_pulse
