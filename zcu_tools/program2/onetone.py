@@ -28,7 +28,7 @@ class RGainOnetoneProgram(MyRAveragerProgram):
         self.r_gain = self.sreg(ch, "gain")
         self.r_gain2 = self.sreg(ch, "gain2")
         self.r_gain_t = 3
-        self.regwi(self.r_rp, self.r_gain_t, self.cfg["start"])
+        self.mathi(self.r_rp, self.r_gain_t, self.r_gain, "+", 0)
 
     def initialize(self):
         self.cfg["start"] = self.sweep_cfg["start"]

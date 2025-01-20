@@ -50,7 +50,7 @@ class RGainTwoToneProgram(MyRAveragerProgram):
         self.q_gain = self.sreg(qub_ch, "gain")
         self.q_gain2 = self.sreg(qub_ch, "gain2")
         self.q_gain_t = 3
-        self.regwi(self.q_rp, self.q_gain_t, self.cfg["start"])
+        self.mathi(self.q_rp, self.q_gain_t, self.q_gain, "+", 0)
 
     def initialize(self):
         self.cfg["start"] = self.sweep_cfg["start"]
@@ -82,7 +82,7 @@ class RFreqTwoToneProgram(MyRAveragerProgram):
         self.q_rp = self.ch_page(qub_ch)
         self.q_freq = self.sreg(qub_ch, "freq")
         self.q_freq_t = 3
-        self.regwi(self.q_rp, self.q_freq_t, self.cfg["start"])
+        self.mathi(self.q_rp, self.q_freq_t, self.q_freq, "+", 0)
 
     def initialize(self):
         qub_ch = self.qub_pulse["ch"]
