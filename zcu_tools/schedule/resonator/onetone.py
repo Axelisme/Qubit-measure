@@ -4,7 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program import OneToneProgram
+from zcu_tools.program2 import OneToneProgram
 
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show, update_show

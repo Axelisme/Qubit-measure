@@ -5,7 +5,7 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.program import RFreqTwoToneProgram, TwoToneProgram
+from zcu_tools.program2 import RFreqTwoToneProgram, TwoToneProgram
 
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
