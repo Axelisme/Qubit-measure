@@ -56,6 +56,7 @@ class RGainTwoToneProgram(MyRAveragerProgram):
         self.cfg["start"] = self.sweep_cfg["start"]
         self.cfg["step"] = self.sweep_cfg["step"]
         self.cfg["expts"] = self.sweep_cfg["expts"]
+        self.qub_pulse["gain"] = self.cfg["start"]
 
         self.resetM.init(self)
         self.readoutM.init(self)
@@ -88,6 +89,7 @@ class RFreqTwoToneProgram(MyRAveragerProgram):
         self.cfg["start"] = self.freq2reg(self.sweep_cfg["start"], gen_ch=qub_ch)
         self.cfg["step"] = self.freq2reg(self.sweep_cfg["step"], gen_ch=qub_ch)
         self.cfg["expts"] = self.sweep_cfg["expts"]
+        self.qub_pulse["freq"] = self.cfg["start"]
 
         self.resetM.init(self)
         self.readoutM.init(self)

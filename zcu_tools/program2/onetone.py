@@ -34,6 +34,7 @@ class RGainOnetoneProgram(MyRAveragerProgram):
         self.cfg["start"] = self.sweep_cfg["start"]
         self.cfg["step"] = self.sweep_cfg["step"]
         self.cfg["expts"] = self.sweep_cfg["expts"]
+        self.res_pulse["gain"] = self.cfg["start"]
 
         self.resetM.init(self)
         self.readoutM.init(self)
