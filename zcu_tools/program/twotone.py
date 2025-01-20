@@ -27,7 +27,9 @@ class RGainTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
         qub_ch = self.qub_pulse["ch"]
         self.q_rp = self.ch_page(qub_ch)
         self.q_gain = self.sreg(qub_ch, "gain")
+        self.q_gain2 = self.sreg(qub_ch, "gain2")
         self.regwi(self.q_rp, self.q_gain, self.cfg["start"])
+        self.mathi(self.q_rp, self.q_gain2, self.q_gain, ">>", 1)
 
     def initialize(self):
         self.parse_cfg()
@@ -42,6 +44,7 @@ class RGainTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
 
     def update(self):
         self.mathi(self.q_rp, self.q_gain, self.q_gain, "+", self.cfg["step"])
+        self.mathi(self.q_rp, self.q_gain2, self.q_gain, ">>", 1)
 
 
 class RFreqTwoToneProgram(RAveragerProgram, BaseTwoToneProgram):
