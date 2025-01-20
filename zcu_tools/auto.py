@@ -45,21 +45,20 @@ def auto_derive_pulse(name: str, pulse_cfg: Union[str, dict]) -> dict:
         pulse_cfg = deepcopy(DefaultCfg.get_pulse(pulse_cfg))
 
     ch = None
-    nqz = None
     if name == "res_pulse":
         ch = DefaultCfg.get_dac("res_ch")
-        nqz = DefaultCfg.get_dac("res_nqz")
     else:
         ch = DefaultCfg.get_dac("qub_ch")
-        nqz = DefaultCfg.get_dac("qub_nqz")
 
     # fill ch if not provided
     if ch is not None:
         pulse_cfg.setdefault("ch", ch)
 
     # fill nqz if not provided
-    if nqz is not None:
-        pulse_cfg.setdefault("nqz", nqz)
+    if "nqz" not in pulse_cfg:
+        if "freq" in pulse_cfg:
+            nqz = 2 if pulse_cfg["freq"] > 2000 else 1
+            pulse_cfg.setdefault("nqz", nqz)
 
     # phase
     pulse_cfg.setdefault("phase", 0.0)
