@@ -1,5 +1,10 @@
 from .pulse import create_waveform, set_pulse, declare_pulse
-from .program import MyAveragerProgram, MyRAveragerProgram, MyNDAveragerProgram
+from .program import (
+    MyAveragerProgram,
+    MyRAveragerProgram,
+    MyNDAveragerProgram,
+    SYNC_TIME,
+)
 from .reset import AbsReset, NoneReset, make_reset
 from .readout import AbsReadout, BaseReadout, make_readout
 
@@ -16,4 +21,5 @@ __all__ = [
     "BaseReadout",
     "make_reset",
     "make_readout",
+    "SYNC_TIME",
 ]
