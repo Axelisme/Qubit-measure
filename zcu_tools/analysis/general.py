@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
 from . import fitting as ft
 from .tools import convert2max_contrast
@@ -101,87 +100,3 @@ def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False):
     plt.show()
 
     return freq
-
-
-def dispersive_analyze(fpts, signals_g, signals_e):
-    y_g = np.abs(signals_g)
-    y_e = np.abs(signals_e)
-    y_d = np.abs(signals_g - signals_e)
-
-    # plot signals
-    fig, ax = plt.subplots(2, 1, figsize=figsize)
-    ax[0].plot(fpts, y_g, label="e", marker="o", markersize=3)
-    ax[0].plot(fpts, y_e, label="g", marker="o", markersize=3)
-    ax[0].legend()
-
-    # plot difference and max/min points
-    diff_curve = y_g - y_e
-    max_fpt = fpts[np.argmax(diff_curve)]
-    min_fpt = fpts[np.argmin(diff_curve)]
-    abs_fpt = fpts[np.argmax(y_d)]
-    ax[1].plot(fpts, diff_curve, label="abs", marker="o", markersize=3)
-    ax[1].plot(fpts, y_d, label="iq", marker="o", markersize=3)
-    ax[1].axvline(max_fpt, color="r", ls="--", label=f"max SNR1 = {max_fpt:.2f}")
-    ax[1].axvline(min_fpt, color="g", ls="--", label=f"max SNR2 = {min_fpt:.2f}")
-    ax[1].axvline(abs_fpt, color="b", ls="--", label=f"max Max IQ = {abs_fpt:.2f}")
-
-    plt.xlabel("Frequency (MHz)")
-    plt.ylabel("Magnitude (a.u.)")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-    return abs_fpt, max_fpt, min_fpt
-
-
-def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
-    abssnr2D = np.abs(snr2D)
-
-    snr2D = gaussian_filter(abssnr2D, 1)
-    mask = np.isnan(snr2D)
-    snr2D[mask] = abssnr2D[mask]
-
-    x_max_id = np.nanargmax(np.nanmax(snr2D, axis=0))
-    y_max_id = np.nanargmax(np.nanmax(snr2D, axis=1))
-    x_max = xs[x_max_id]
-    y_max = ys[y_max_id]
-
-    plt.figure(figsize=figsize)
-    plt.imshow(
-        snr2D,
-        aspect="auto",
-        origin="lower",
-        interpolation="none",
-        extent=[xs[0], xs[-1], ys[0], ys[-1]],
-    )
-    plt.scatter(
-        x_max, y_max, color="r", label=f"max SNR = {snr2D[y_max_id, x_max_id]:.2f}"
-    )
-    if xlabel is not None:
-        plt.xlabel(xlabel)
-    if ylabel is not None:
-        plt.ylabel(ylabel)
-    plt.legend()
-    plt.show()
-
-    return x_max, y_max
-
-
-def readout_analyze(xs, snrs, xlabel=None):
-    snrs = np.abs(snrs)
-
-    snrs = gaussian_filter1d(snrs, 1)
-
-    max_id = np.argmax(snrs)
-    max_x = xs[max_id]
-
-    plt.figure(figsize=figsize)
-    plt.plot(xs, snrs)
-    plt.axvline(max_x, color="r", ls="--", label=f"max SNR = {snrs[max_id]:.2f}")
-    if xlabel is not None:
-        plt.xlabel(xlabel)
-    plt.ylabel("SNR (a.u.)")
-    plt.legend()
-    plt.show()
-
-    return max_x
