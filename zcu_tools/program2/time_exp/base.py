@@ -1,5 +1,5 @@
 from ..base import MyRAveragerProgram, SYNC_TIME
-from ..twotone import declare_pulse, set_pulse  # noqa
+from ..twotone import declare_pulse, set_pulse, PULSE_DELAY  # noqa
 
 
 class TimeProgram(MyRAveragerProgram):

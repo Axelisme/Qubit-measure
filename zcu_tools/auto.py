@@ -99,6 +99,9 @@ def auto_derive(exp_cfg):
     if trig_offset:
         adc_cfg.setdefault("trig_offset", trig_offset)
 
+    # fill default parameters if not provided
+    deepupdate(exp_cfg, DefaultCfg.exp_default, behavior="ignore")
+
     # reset
     exp_cfg.setdefault("reset", "none")
 

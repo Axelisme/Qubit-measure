@@ -7,14 +7,14 @@ from .reset import make_reset
 SYNC_TIME = 200  # cycles
 
 
-def parser_prog(prog):
-    prog.dac = prog.cfg["dac"]
-    prog.adc = prog.cfg["adc"]
-    if "sweep" in prog.cfg:
-        prog.sweep_cfg = prog.cfg["sweep"]
+def parser_prog(prog, cfg):
+    prog.dac = cfg["dac"]
+    prog.adc = cfg["adc"]
+    if "sweep" in cfg:
+        prog.sweep_cfg = cfg["sweep"]
 
-    prog.resetM = make_reset(prog.cfg["reset"])
-    prog.readoutM = make_readout(prog.cfg["readout"])
+    prog.resetM = make_reset(cfg["reset"])
+    prog.readoutM = make_readout(cfg["readout"])
 
     for name, pulse in prog.dac.items():
         if hasattr(prog, name):
@@ -27,18 +27,18 @@ def parser_prog(prog):
 
 
 class MyAveragerProgram(AveragerProgram):
-    def __init__(self, soc, soccfg):
-        super().__init__(soc, soccfg)
-        parser_prog(self)
+    def __init__(self, soccfg, cfg):
+        parser_prog(self, cfg)
+        super().__init__(soccfg, cfg)
 
 
 class MyRAveragerProgram(RAveragerProgram):
-    def __init__(self, soc, soccfg):
-        super().__init__(soc, soccfg)
-        parser_prog(self)
+    def __init__(self, soccfg, cfg):
+        parser_prog(self, cfg)
+        super().__init__(soccfg, cfg)
 
 
 class MyNDAveragerProgram(NDAveragerProgram):
-    def __init__(self, soc, soccfg):
-        super().__init__(soc, soccfg)
-        parser_prog(self)
+    def __init__(self, soccfg, cfg):
+        parser_prog(self, cfg)
+        super().__init__(soccfg, cfg)

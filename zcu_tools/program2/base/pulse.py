@@ -1,12 +1,12 @@
 from qick.asm_v1 import AcquireProgram
 
 
-def declare_pulse(prog, pulse, wavname):
+def declare_pulse(prog, pulse, wavname, ro_ch=None):
     prog.declare_gen(pulse["ch"], nqz=pulse["nqz"])
     create_waveform(prog, wavname, pulse)
     assert prog.ch_count[pulse["ch"]] > 0, "Something went wrong"
     if prog.ch_count[pulse["ch"]] == 1:
-        set_pulse(prog, pulse, waveform=wavname)
+        set_pulse(prog, pulse, ro_ch=ro_ch, waveform=wavname)
 
 
 def create_waveform(prog: AcquireProgram, name: str, pulse_cfg: dict) -> str:

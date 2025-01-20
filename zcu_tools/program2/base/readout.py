@@ -5,7 +5,7 @@ from qick.asm_v1 import AcquireProgram
 from .pulse import declare_pulse, set_pulse
 
 
-def make_readout(name: str, cfg: str, *args, **kwargs):
+def make_readout(name: str):
     if name == "base":
         return BaseReadout()
     else:
@@ -25,9 +25,10 @@ class AbsReadout(ABC):
 class BaseReadout(AbsReadout):
     def init(self, prog: AcquireProgram):
         res_ch = prog.res_pulse["ch"]
-        declare_pulse(prog, prog.res_pulse, "res_pulse")
-
         ro_chs = prog.adc["chs"]
+
+        declare_pulse(prog, prog.res_pulse, "res_pulse", ro_chs[0])
+
         for ro_ch in ro_chs:
             prog.declare_readout(
                 ch=ro_ch,
@@ -37,15 +38,15 @@ class BaseReadout(AbsReadout):
             )
 
     def readout_qubit(self, prog: AcquireProgram, before_readout=None):
-        if prog.ch_count[prog.res_pulse["ch"]] > 1:
-            set_pulse(
-                prog, prog.res_pulse, ro_ch=prog.adc["chs"][0], waveform="res_pulse"
-            )
+        res_ch = prog.res_pulse["ch"]
+        ro_chs = prog.adc["chs"]
+        if prog.ch_count[res_ch] > 1:
+            set_pulse(prog, prog.res_pulse, ro_ch=ro_chs[0], waveform="res_pulse")
         if before_readout is not None:
             before_readout(prog)
         prog.measure(
-            pulse_ch=prog.res_pulse["ch"],
-            adcs=prog.adc["chs"],
+            pulse_ch=res_ch,
+            adcs=ro_chs,
             adc_trig_offset=prog.us2cycles(prog.adc["trig_offset"]),
             wait=True,
             syncdelay=prog.us2cycles(prog.cfg["relax_delay"]),
