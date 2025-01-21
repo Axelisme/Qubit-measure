@@ -6,8 +6,8 @@ from ..twotone import declare_pulse, PULSE_DELAY, SYNC_TIME
 class T2EchoProgram(TimeProgram):
     def initialize(self):
         self.parse_sweep()
-        self.resetM.init(self, self.cfg)
-        self.readoutM.init(self, self.cfg)
+        self.resetM.init(self)
+        self.readoutM.init(self)
 
         declare_pulse(self, self.pi_pulse, "pi")
         declare_pulse(self, self.pi2_pulse, "pi2")

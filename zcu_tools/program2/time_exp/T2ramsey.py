@@ -4,7 +4,7 @@ from .base import TimeProgram, PULSE_DELAY, set_pulse
 class T2RamseyProgram(TimeProgram):
     def body(self):
         # reset
-        self.resetM.reset_qubit()
+        self.resetM.reset_qubit(self)
 
         # pi/2 - wait - pi/2 sequence
         ch = self.qub_pulse["ch"]
@@ -19,4 +19,4 @@ class T2RamseyProgram(TimeProgram):
         self.sync_all(self.us2cycles(PULSE_DELAY))
 
         # measure
-        self.readoutM.readout_qubit()
+        self.readoutM.readout_qubit(self)

@@ -4,7 +4,7 @@ from .base import TimeProgram, set_pulse
 class T1Program(TimeProgram):
     def body(self):
         # reset
-        self.resetM.reset_qubit()
+        self.resetM.reset_qubit(self)
 
         # pi pulse
         ch = self.qub_pulse["ch"]
@@ -17,4 +17,4 @@ class T1Program(TimeProgram):
         self.sync(self.q_rp, self.r_wait)
 
         # measure
-        self.readoutM.readout_qubit()
+        self.readoutM.readout_qubit(self)
