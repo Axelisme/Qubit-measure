@@ -4,9 +4,10 @@ from qick.asm_v1 import AcquireProgram
 def declare_pulse(prog, pulse, waveform, ro_ch=None):
     prog.declare_gen(pulse["ch"], nqz=pulse["nqz"])
     create_waveform(prog, waveform, pulse)
-    assert prog.ch_count[pulse["ch"]] > 0, "Something went wrong"
-    if prog.ch_count[pulse["ch"]] == 1:
-        set_pulse(prog, pulse, ro_ch=ro_ch, waveform=waveform)
+
+    times = prog.ch_count[pulse["ch"]]
+    assert times > 0, "Something went wrong"
+    set_pulse(prog, pulse, ro_ch=ro_ch, waveform=waveform, set_default=(times == 1))
 
 
 def create_waveform(prog: AcquireProgram, name: str, pulse_cfg: dict) -> str:
@@ -41,6 +42,7 @@ def set_pulse(
     pulse_cfg: dict,
     ro_ch: int = None,
     waveform: str = None,
+    set_default=False,
 ):
     ch = pulse_cfg["ch"]
     style = pulse_cfg["style"]
@@ -69,4 +71,9 @@ def set_pulse(
     else:
         raise ValueError(f"Unknown pulse style: {style}")
 
-    prog.set_pulse_registers(ch, **kwargs)
+    if set_default:
+        prog.default_pulse_registers(ch, **kwargs)
+        prog.set_pulse_registers(ch)
+    else:
+        prog.set_pulse_registers(ch, **kwargs)
+
