@@ -40,6 +40,22 @@ def lookback_analyze(
     return offset
 
 
+def contrast_plot(xs, signals, max_contrast=False, xlabel=None):
+    fig, ax = plt.subplots(figsize=figsize)
+    if max_contrast:
+        y, _ = convert2max_contrast(signals.real, signals.imag)
+    else:
+        y = np.abs(signals)
+
+    ax.plot(xs, y, label="signal", marker="o", markersize=3)
+    if xlabel is not None:
+        ax.set_xlabel(xlabel)
+    ax.set_ylabel("Magnitude (a.u.)")
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+
 def phase_analyze(fpts, signals, plot=True, plot_fit=True):
     """
     fpts: 1D array, frequency points
