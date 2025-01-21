@@ -14,6 +14,7 @@ from .singleshot import (
 )
 from .time_domain import measure_t1, measure_t2echo, measure_t2ramsey
 from .twotone import measure_qub_freq
+from .reset import measure_reset_saturation
 
 __all__ = [
     "singleshot",
@@ -30,6 +31,7 @@ __all__ = [
     "measure_fid_auto",
     "measure_ge_pdr_dep",
     "measure_ge_ro_dep",
+    "measure_reset_saturation",
     "scan_pdr",
     "scan_offset",
     "scan_ro_len",
