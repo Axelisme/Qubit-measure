@@ -22,8 +22,11 @@ def parser_prog(prog, cfg):
         setattr(prog, name, pulse)
 
     prog.ch_count = [0 for _ in range(16)]
+    nqzs = dict()
     for pulse in prog.dac.values():
         prog.ch_count[pulse["ch"]] += 1
+        cur_nqz = nqzs.setdefault(pulse["ch"], pulse["nqz"])
+        assert cur_nqz == pulse["nqz"], "Found different nqz on the same channel"
 
 
 class MyAveragerProgram(AveragerProgram):
