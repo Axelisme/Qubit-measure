@@ -92,7 +92,10 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     set_flux(cfg["flux_dev"], cfg["flux"])
 
     ro_cfg = cfg["sweep"]
-    ro_lens = np.linspace(ro_cfg["start"], ro_cfg["stop"], ro_cfg["expts"])
+    if isinstance(ro_cfg, dict):
+        ro_lens = np.linspace(ro_cfg["start"], ro_cfg["stop"], ro_cfg["expts"])
+    else:
+        ro_lens = np.array(ro_cfg)
     trig_offset = cfg["adc"]["trig_offset"]
 
     show_period = int(len(ro_lens) / 10 + 0.99999)

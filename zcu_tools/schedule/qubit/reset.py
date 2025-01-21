@@ -16,7 +16,10 @@ def measure_reset_saturation(soc, soccfg, cfg, instant_show=False):
     set_flux(cfg["flux_dev"], cfg["flux"])
 
     sweep_cfg = cfg["sweep"]
-    lens = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
+    if isinstance(sweep_cfg, dict):
+        lens = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
+    else:
+        lens = np.array(sweep_cfg)
 
     reset_pulse = cfg["dac"]["reset_pulse"]
 

@@ -16,7 +16,11 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     set_flux(cfg["flux_dev"], cfg["flux"])
 
     sweep_cfg = cfg["sweep"]
-    fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
+    if isinstance(sweep_cfg, dict):
+        fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
+    else:
+        assert soft_loop, "Hard loop only supports linear sweep"
+        fpts = np.array(sweep_cfg)
 
     qub_pulse = cfg["dac"]["qub_pulse"]
     if soft_loop:

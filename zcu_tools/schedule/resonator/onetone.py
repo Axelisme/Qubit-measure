@@ -16,7 +16,10 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
     set_flux(cfg["flux_dev"], cfg["flux"])
 
     sweep_cfg = cfg["sweep"]
-    fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
+    if isinstance(sweep_cfg, dict):
+        fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
+    else:
+        fpts = np.array(sweep_cfg)
 
     res_pulse = cfg["dac"]["res_pulse"]
 
