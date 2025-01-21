@@ -82,7 +82,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
             clear_show()
 
     else:
-        print("Use TGainTwoToneProgram for hard loop")
+        print("Use RGainTwoToneProgram for hard loop")
 
         prog = RGainTwoToneProgram(soccfg, cfg)
         pdrs, avgi, avgq = prog.acquire(soc, progress=True)
