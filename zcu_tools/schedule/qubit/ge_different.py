@@ -77,7 +77,7 @@ def measure_ge_pdr_dep(
                 freq_tqdm.update()
 
             if instant_show:
-                ax.set_title(f"Maximum SNR: {np.abs(snr2D).nanmax():.2f}")
+                ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")
                 update_show2d(fig, ax, dh, im, np.abs(snr2D))
 
         if instant_show:
