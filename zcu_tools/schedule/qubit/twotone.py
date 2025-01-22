@@ -86,7 +86,7 @@ def measure_qub_freq(
                 g_cfg = make_cfg(cfg)
                 g_cfg["dac"]["qub_pulse"]["gain"] = 0
                 g_prog = RFreqTwoToneProgramWithRedReset(soccfg, g_cfg)
-                _, g_avgi, g_avgq = g_prog.acquire(soc, progress=False)
+                _, g_avgi, g_avgq = g_prog.acquire(soc, progress=True)
                 signals -= g_avgi[0][0] + 1j * g_avgq[0][0]
         else:
             print("Use RFreqTwoToneProgram for hard loop")
