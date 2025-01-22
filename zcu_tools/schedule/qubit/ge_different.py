@@ -58,6 +58,7 @@ def measure_ge_pdr_dep(
 
     if instant_show:
         fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
+        ax.set_title("Maximum SNR: None")
 
     snr2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     try:
@@ -76,6 +77,7 @@ def measure_ge_pdr_dep(
                 freq_tqdm.update()
 
             if instant_show:
+                ax.set_title(f"Maximum SNR: {np.abs(snr2D).max():.2f}")
                 update_show2d(fig, ax, dh, im, np.abs(snr2D))
 
         if instant_show:
