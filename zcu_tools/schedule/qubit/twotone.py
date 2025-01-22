@@ -68,12 +68,12 @@ def measure_qub_freq(
             clear_show()
 
     else:
-        print("Use RFreqTwoToneProgram for hard loop")
-
         if conjugate_reset:
             cfg["r_f"] = r_f
+            print("Use RFreqTwoToneProgramWithRedReset for hard loop")
             prog = RFreqTwoToneProgramWithRedReset(soccfg, make_cfg(cfg))
         else:
+            print("Use RFreqTwoToneProgram for hard loop")
             prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
         fpts, avgi, avgq = prog.acquire(soc, progress=True)
         fpts = np.array([prog.reg2freq(f, gen_ch=qub_pulse["ch"]) for f in fpts])

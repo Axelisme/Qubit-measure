@@ -5,14 +5,31 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.program2 import RFreqTwoToneProgram, TwoToneProgram
+from zcu_tools.program2 import (
+    RFreqTwoToneProgram,
+    TwoToneProgram,
+    RFreqTwoToneProgramWithRedReset,
+)
 
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
 
 
-def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
+def measure_qub_flux_dep(
+    soc,
+    soccfg,
+    cfg,
+    instant_show=False,
+    soft_loop=False,
+    conjugate_reset=False,
+    r_f=None,
+):
     cfg = deepcopy(cfg)  # prevent in-place modification
+
+    if conjugate_reset:
+        assert r_f is not None, "Need resonator frequency for conjugate reset"
+        assert cfg.get("reset") == "pulse", "Need reset=pulse for conjugate reset"
+        assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
 
     if cfg["flux_dev"] == "none":
         raise NotImplementedError("Flux sweep but get flux_dev == 'none'")
@@ -46,13 +63,21 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, soft_loop=False):
                 freq_tqdm.reset()
                 freq_tqdm.refresh()
                 for j, f in enumerate(fpts):
-                    qub_pulse["freq"] = f
+                    fpt = float(f)
+                    qub_pulse["freq"] = fpt
+                    if conjugate_reset:
+                        cfg["dac"]["reset_pulse"]["freq"] = r_f - fpt
+
                     prog = TwoToneProgram(soccfg, make_cfg(cfg))
                     avgi, avgq = prog.acquire(soc, progress=False)
                     signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]
                     freq_tqdm.update()
             else:
-                prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
+                if conjugate_reset:
+                    cfg["r_f"] = r_f
+                    prog = RFreqTwoToneProgramWithRedReset(soccfg, make_cfg(cfg))
+                else:
+                    prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
                 _, avgi, avgq = prog.acquire(soc, progress=True)
                 signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
 
