@@ -50,7 +50,10 @@ def contrast_plot(xs, signals, max_contrast=False, xlabel=None):
     ax.plot(xs, y, label="signal", marker="o", markersize=3)
     if xlabel is not None:
         ax.set_xlabel(xlabel)
-    ax.set_ylabel("Magnitude (a.u.)")
+    if max_contrast:
+        ax.set_ylabel("Signal Real (a.u.)")
+    else:
+        ax.set_ylabel("Magnitude (a.u.)")
     ax.legend()
     plt.tight_layout()
     plt.show()
