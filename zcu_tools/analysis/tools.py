@@ -25,12 +25,15 @@ def convert2max_contrast(Is: np.ndarray, Qs: np.ndarray):
 
 
 def NormalizeData(amps2D: np.ndarray, axis=None, rescale=True) -> np.ndarray:
-    if amps2D.dtype == np.complex:
-        amps2D = np.abs(amps2D - np.nanmean(amps2D, axis=axis, keepdims=True))
-    else:
-        amps2D = amps2D - np.nanmedian(amps2D, axis=axis, keepdims=True)
-    if rescale:
-        amps2D = amps2D / np.nanstd(amps2D, axis=axis, keepdims=True)
+    with np.errstate(invalid="ignore"):
+        if amps2D.dtype == np.complex:
+            amps2D = np.abs(amps2D - np.nanmean(amps2D, axis=axis, keepdims=True))
+        else:
+            amps2D = amps2D - np.nanmedian(amps2D, axis=axis, keepdims=True)
+
+        if rescale:
+            amps2D = amps2D / np.nanstd(amps2D, axis=axis, keepdims=True)
+
     return amps2D
 
 
