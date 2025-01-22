@@ -108,6 +108,51 @@ class RFreqTwoToneProgram(MyRAveragerProgram):
         self.mathi(self.q_rp, self.q_freq_t, self.q_freq_t, "+", self.cfg["step"])
 
 
+class RFreqTwoToneProgramWithRedReset(MyRAveragerProgram):
+    def declare_freq_reg(self):
+        qub_ch = self.qub_pulse["ch"]
+        reset_ch = self.reset_pulse["ch"]
+        self.q_rp = self.ch_page(qub_ch)
+        self.q_freq = self.sreg(qub_ch, "freq")
+        self.s_rp = self.ch_page(reset_ch)
+        self.s_freq = self.sreg(reset_ch, "freq")
+        self.q_freq_t = 3
+        self.s_freq_t = 4
+        self.mathi(self.q_rp, self.q_freq_t, self.q_freq, "+", 0)
+        self.mathi(self.s_rp, self.s_freq_t, self.s_freq, "+", 0)
+
+    def initialize(self):
+        r_f = self.cfg["r_f"]
+
+        qub_ch = self.qub_pulse["ch"]
+        self.qub_pulse["freq"] = self.sweep_cfg["start"]
+        self.cfg["start"] = self.freq2reg(self.sweep_cfg["start"], gen_ch=qub_ch)
+        self.cfg["step"] = self.freq2reg(self.sweep_cfg["step"], gen_ch=qub_ch)
+        self.cfg["expts"] = self.sweep_cfg["expts"]
+
+        reset_ch = self.reset_pulse["ch"]
+        self.reset_pulse["freq"] = r_f - self.sweep_cfg["start"]
+        self.reset_step = self.freq2reg(self.sweep_cfg["step"], gen_ch=reset_ch)
+
+        self.resetM.init(self)
+        self.readoutM.init(self)
+        declare_pulse(self, self.qub_pulse, "qub_pulse")
+        self.declare_freq_reg()
+
+        self.synci(SYNC_TIME)
+
+    def body(self):
+        twotone_body(self, self.set_freq_reg)
+
+    def set_freq_reg(self):
+        self.mathi(self.q_rp, self.q_freq, self.q_freq_t, "+", 0)
+        self.mathi(self.s_rp, self.s_freq, self.s_freq_t, "+", 0)
+
+    def update(self):
+        self.mathi(self.q_rp, self.q_freq_t, self.q_freq_t, "+", self.cfg["step"])
+        self.mathi(self.s_rp, self.s_freq_t, self.s_freq_t, "-", self.reset_step)
+
+
 class PowerDepProgram(MyNDAveragerProgram):
     def add_freq_sweep(self):
         sweep_cfg = self.sweep_cfg["freq"]

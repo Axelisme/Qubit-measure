@@ -4,14 +4,31 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program2 import RFreqTwoToneProgram, TwoToneProgram
+from zcu_tools.program2 import (
+    RFreqTwoToneProgram,
+    RFreqTwoToneProgramWithRedReset,
+    TwoToneProgram,
+)
 
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show, update_show
 
 
-def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
+def measure_qub_freq(
+    soc,
+    soccfg,
+    cfg,
+    instant_show=False,
+    soft_loop=False,
+    conjugate_reset=False,
+    r_f=None,
+):
     cfg = deepcopy(cfg)  # prevent in-place modification
+
+    if conjugate_reset:
+        assert r_f is not None, "Need resonator frequency for conjugate reset"
+        assert cfg.get("reset") == "pulse", "Need reset=pulse for conjugate reset"
+        assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
@@ -32,7 +49,11 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
         signals = np.full(len(fpts), np.nan, dtype=np.complex128)
         for i, fpt in enumerate(tqdm(fpts, desc="Frequency", smoothing=0)):
-            qub_pulse["freq"] = float(fpt)
+            fpt = float(fpt)
+            qub_pulse["freq"] = fpt
+            if conjugate_reset:
+                cfg["dac"]["reset_pulse"]["freq"] = r_f - fpt
+
             prog = TwoToneProgram(soccfg, make_cfg(cfg))
             avgi, avgq = prog.acquire(soc, progress=False)
             signals[i] = avgi[0][0] + 1j * avgq[0][0]
@@ -49,7 +70,11 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     else:
         print("Use RFreqTwoToneProgram for hard loop")
 
-        prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
+        if conjugate_reset:
+            cfg["r_f"] = r_f
+            prog = RFreqTwoToneProgramWithRedReset(soccfg, make_cfg(cfg))
+        else:
+            prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
         fpts, avgi, avgq = prog.acquire(soc, progress=True)
         fpts = np.array([prog.reg2freq(f, gen_ch=qub_pulse["ch"]) for f in fpts])
         signals = avgi[0][0] + 1j * avgq[0][0]
