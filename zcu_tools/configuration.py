@@ -67,6 +67,10 @@ class DefaultCfg:
         return cls.dac_cfgs.get("pulses", {}).get(name, {})
 
     @classmethod
+    def clear_pulses(cls):
+        cls.dac_cfgs.pop("pulses", None)
+
+    @classmethod
     def set_default(cls, **kwargs):
         deepupdate(cls.exp_default, kwargs, behavior="force")
 
