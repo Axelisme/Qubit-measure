@@ -1,6 +1,6 @@
 from . import singleshot
 from .flux_depend import measure_qub_flux_dep
-from .ge_different import measure_ge_pdr_dep, measure_ge_ro_dep
+from .ge_different import measure_ge_pdr_dep, measure_ge_ro_dep, measure_ge_trig_dep
 from .power_depend import measure_qub_pdr_dep
 from .rabi import measure_amprabi, measure_lenrabi
 from .singleshot import (
@@ -31,6 +31,7 @@ __all__ = [
     "measure_fid_auto",
     "measure_ge_pdr_dep",
     "measure_ge_ro_dep",
+    "measure_ge_trig_dep",
     "measure_reset_saturation",
     "scan_pdr",
     "scan_offset",

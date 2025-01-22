@@ -125,3 +125,44 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
 
     return ro_lens, snrs
+
+
+def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
+    set_flux(cfg["flux_dev"], cfg["flux"])
+
+    trig_cfg = cfg["sweep"]
+    if isinstance(trig_cfg, dict):
+        offsets = np.linspace(trig_cfg["start"], trig_cfg["stop"], trig_cfg["expts"])
+    else:
+        offsets = np.array(trig_cfg)
+    ro_len = cfg["adc"]["ro_length"]
+    res_len = cfg["dac"]["res_pulse"]["length"]
+    orig_offset = cfg["dac"]["res_pulse"]["trig_offset"]
+
+    show_period = int(len(offsets) / 10 + 0.99999)
+    if instant_show:
+        fig, ax, dh, curve = init_show(offsets, "Trigger Offset (us)", "SNR (a.u.)")
+
+    snrs = np.full(len(offsets), np.nan, dtype=np.complex128)
+    try:
+        for i, offset in enumerate(tqdm(offsets, desc="trig offset", smoothing=0)):
+            cfg["adc"]["trig_offset"] = offset
+            cfg["dac"]["res_pulse"]["length"] = res_len + offset - orig_offset
+            cfg["adc"]["ro_length"] = ro_len + offset - orig_offset
+
+            snrs[i] = measure_one(soc, soccfg, cfg)
+
+            if instant_show and i % show_period == 0:
+                update_show(fig, ax, dh, curve, np.abs(snrs))
+        else:
+            if instant_show:
+                update_show(fig, ax, dh, curve, np.abs(snrs))
+
+        if instant_show:
+            clear_show()
+    except Exception as e:
+        print("Error during measurement:", e)
+
+    return offsets, snrs
