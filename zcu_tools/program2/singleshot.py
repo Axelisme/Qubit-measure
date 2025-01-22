@@ -53,10 +53,8 @@ class SingleShotProgram(MyRAveragerProgram):
         return self.collect_shots()
 
     def collect_shots(self):
-        cfg = self.cfg
-        adc_cfg = self.adc_cfg
-        ro_length = self.us2cycles(adc_cfg["ro_length"], ro_ch=adc_cfg["chs"][0])
-        expts, reps = cfg["expts"], cfg["reps"]
+        ro_length = self.us2cycles(self.adc["ro_length"], ro_ch=self.adc["chs"][0])
+        expts, reps = self.cfg["expts"], self.cfg["reps"]
         i0 = self.di_buf[0].reshape((expts, reps)) / ro_length
         q0 = self.dq_buf[0].reshape((expts, reps)) / ro_length
         return i0, q0
