@@ -41,12 +41,14 @@ def measure_qub_freq(
         fpts = np.array(sweep_cfg)
 
     qub_pulse = cfg["dac"]["qub_pulse"]
+
+    if instant_show:
+        fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
+
     if soft_loop:
         print("Use TwoToneProgram for soft loop")
 
         show_period = int(len(fpts) / 10 + 0.99)
-        if instant_show:
-            fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
         signals = np.full(len(fpts), np.nan, dtype=np.complex128)
         for i, fpt in enumerate(tqdm(fpts, desc="Frequency", smoothing=0)):
@@ -72,9 +74,6 @@ def measure_qub_freq(
             if instant_show:
                 update_show(fig, ax, dh, curve, np.abs(signals))
 
-        if instant_show:
-            clear_show()
-
     else:
         if conjugate_reset:
             cfg["r_f"] = r_f
@@ -93,5 +92,11 @@ def measure_qub_freq(
             prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
             fpts, avgi, avgq = prog.acquire(soc, progress=True)
             signals = avgi[0][0] + 1j * avgq[0][0]
+
+        if instant_show:
+            update_show(fig, ax, dh, curve, np.abs(signals))
+
+    if instant_show:
+        clear_show()
 
     return fpts, signals
