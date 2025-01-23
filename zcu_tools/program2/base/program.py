@@ -15,6 +15,10 @@ class MyProgram:
         self.adc = cfg.get("adc", {})
         if "sweep" in cfg:
             self.sweep_cfg = cfg["sweep"]
+            if isinstance(self.sweep_cfg, dict) and "start" in self.sweep_cfg:
+                self.cfg["start"] = self.sweep_cfg["start"]
+                self.cfg["step"] = self.sweep_cfg["step"]
+                self.cfg["expts"] = self.sweep_cfg["expts"]
 
         self.resetM = make_reset(cfg["reset"])
         self.readoutM = make_readout(cfg["readout"])

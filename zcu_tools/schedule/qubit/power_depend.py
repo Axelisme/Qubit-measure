@@ -4,7 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program2 import PowerDepProgram, RGainTwoToneProgram, TwoToneProgram
+from zcu_tools.program2 import PowerDepProgram, RFreqTwoToneProgram, TwoToneProgram
 
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
@@ -48,8 +48,6 @@ def measure_qub_pdr_dep(
                     signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]
                     freq_tqdm.update()
 
-                pdr_tqdm.update()
-
                 if instant_show:
                     update_show2d(fig, ax, dh, im, np.abs(signals2D))
 
@@ -60,10 +58,9 @@ def measure_qub_pdr_dep(
 
                 for i, pdr in enumerate(tqdm(pdrs, desc="Power", smoothing=0)):
                     qub_pulse["gain"] = pdr
-                    prog = RGainTwoToneProgram(soccfg, make_cfg(cfg))
-                    fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True)
+                    prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
+                    fpts, avgi, avgq = prog.acquire(soc, progress=True)
                     signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
-                    fpts = fpt_pdr[0]
 
                     if instant_show:
                         update_show2d(fig, ax, dh, im, np.abs(signals2D))

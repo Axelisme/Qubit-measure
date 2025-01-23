@@ -13,7 +13,7 @@ class T2RamseyProgram(TimeProgram):
         self.pulse(ch=ch)
         self.sync_all()
 
-        self.sync(self.q_rp, self.r_wait)
+        self.sync(self.q_rp, self.q_wait)
 
         self.pulse(ch=ch)
         self.sync_all(self.us2cycles(PULSE_DELAY))

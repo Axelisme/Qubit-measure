@@ -59,7 +59,7 @@ def measure_qub_flux_dep(
 
     signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
     try:
-        for i, flx in enumerate(flxs):
+        for i, flx in enumerate(flux_tqdm):
             cfg["flux"] = flx
             set_flux(cfg["flux_dev"], cfg["flux"])
 
@@ -86,7 +86,7 @@ def measure_qub_flux_dep(
                 if conjugate_reset:
                     cfg["r_f"] = r_f
                     prog = RFreqTwoToneProgramWithRedReset(soccfg, make_cfg(cfg))
-                    _, avgi, avgq = prog.acquire(soc, progress=True)
+                    fpts, avgi, avgq = prog.acquire(soc, progress=True)
                     signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
                     if sub_ground:
                         g_cfg = make_cfg(cfg)
@@ -96,10 +96,8 @@ def measure_qub_flux_dep(
                         signals2D[i] -= g_avgi[0][0] + 1j * g_avgq[0][0]
                 else:
                     prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
-                    _, avgi, avgq = prog.acquire(soc, progress=True)
+                    fpts, avgi, avgq = prog.acquire(soc, progress=True)
                     signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
-
-            flux_tqdm.update()
 
             if instant_show:
                 amps = NormalizeData(signals2D, axis=1, rescale=True) ** 1.5

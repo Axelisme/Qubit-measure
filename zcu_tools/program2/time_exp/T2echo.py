@@ -29,13 +29,13 @@ class T2EchoProgram(TimeProgram):
         self.pulse(ch=ch)
         self.sync_all()
 
-        self.sync(self.q_rp, self.r_wait)
+        self.sync(self.q_rp, self.q_wait)
 
         set_pulse(self, self.pi_pulse, waveform="pi")
         self.pulse(ch=ch)
         self.sync_all()
 
-        self.sync(self.q_rp, self.r_wait)
+        self.sync(self.q_rp, self.q_wait)
 
         set_pulse(self, self.pi2_pulse, waveform="pi2")
         self.pulse(ch=ch)

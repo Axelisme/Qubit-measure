@@ -14,7 +14,7 @@ class T1Program(TimeProgram):
         self.sync_all()
 
         # wait for specified time
-        self.sync(self.q_rp, self.r_wait)
+        self.sync(self.q_rp, self.q_wait)
 
         # measure
         self.readoutM.readout_qubit(self)
