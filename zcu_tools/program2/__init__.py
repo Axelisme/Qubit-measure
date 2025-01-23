@@ -1,4 +1,4 @@
-from .onetone import OneToneProgram, RGainOnetoneProgram
+from .onetone import OneToneProgram, RGainOnetoneProgram, RFreqOnetoneProgram
 from .time_exp import T1Program, T2EchoProgram, T2RamseyProgram
 from .singleshot import SingleShotProgram
 from .twotone import (
@@ -12,6 +12,7 @@ from .twotone import (
 __all__ = [
     "OneToneProgram",
     "RGainOnetoneProgram",
+    "RFreqOnetoneProgram",
     "TwoToneProgram",
     "RGainTwoToneProgram",
     "RFreqTwoToneProgram",
