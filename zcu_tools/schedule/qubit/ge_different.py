@@ -24,17 +24,17 @@ def measure_one(soc, soccfg, cfg):
     qub_pulse["gain"] = 0
     prog = TwoToneProgram(soccfg, make_cfg(cfg))
     avggi, avggq, stdgi, stdgq = prog.acquire(soc, progress=False, ret_std=True)
-    noise2_g = stdgi[0][0] ** 2 + stdgq[0][0] ** 2
 
     qub_pulse["gain"] = pi_gain
     prog = TwoToneProgram(soccfg, make_cfg(cfg))
     avgei, avgeq, stdei, stdeq = prog.acquire(soc, progress=False, ret_std=True)
-    noise2_e = stdei[0][0] ** 2 + stdeq[0][0] ** 2
 
     dist_i = avgei[0][0] - avggi[0][0]
     dist_q = avgeq[0][0] - avggq[0][0]
     contrast = dist_i + 1j * dist_q
-    noise = np.sqrt(noise2_g * dist_i**2 + noise2_e * dist_q**2) / np.abs(contrast)
+    noise2_i = stdgi[0][0] ** 2 + stdei[0][0] ** 2
+    noise2_q = stdgq[0][0] ** 2 + stdeq[0][0] ** 2
+    noise = np.sqrt(noise2_i * dist_i**2 + noise2_q * dist_q**2) / np.abs(contrast)
 
     return contrast / noise
 
