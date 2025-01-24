@@ -29,6 +29,11 @@ def create_waveform(prog: AcquireProgram, name: str, pulse_cfg: dict) -> str:
     elif wav_style == "gauss":
         sigma = prog.us2cycles(pulse_cfg["sigma"], gen_ch=ch)
         prog.add_gauss(ch, name, sigma=sigma, length=length)
+    elif wav_style == "drag":
+        sigma = prog.us2cycles(pulse_cfg["sigma"], gen_ch=ch)
+        delta = pulse_cfg["delta"]
+        alpha = pulse_cfg.get("alpha", 0.5)
+        prog.add_DRAG(ch, name, sigma=sigma, length=length, delta=delta, alpha=alpha)
     elif wav_style == "cosine":
         prog.add_cosine(ch, name, length=length)
     elif wav_style == "flat_top":
@@ -59,14 +64,14 @@ def set_pulse(
 
     if style == "const":
         kwargs["length"] = length
-    elif style == "gauss" or style == "cosine":
-        assert waveform is not None, "Waveform is required for gauss and cosine pulses"
-        kwargs["style"] = "arb"
-        kwargs["waveform"] = waveform
     elif style == "flat_top":
         # the length register for flat_top only contain the flat part
         length = pulse_cfg["length"] - pulse_cfg["raise_pulse"]["length"]
         kwargs["length"] = prog.us2cycles(length, gen_ch=ch)
+        kwargs["waveform"] = waveform
+    elif style in ["gauss", "cosine", "drag", "arb"]:
+        assert waveform is not None, f"Waveform is required for {style} pulse"
+        kwargs["style"] = "arb"
         kwargs["waveform"] = waveform
     else:
         raise ValueError(f"Unknown pulse style: {style}")
@@ -76,4 +81,3 @@ def set_pulse(
         prog.set_pulse_registers(ch)
     else:
         prog.set_pulse_registers(ch, **kwargs)
-
