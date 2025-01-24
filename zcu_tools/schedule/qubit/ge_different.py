@@ -6,6 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program import TwoToneProgram
 
+from ..tools import map2adcfreq
 from ..flux import set_flux
 from ..instant_show import (
     clear_show,
@@ -49,12 +50,19 @@ def measure_ge_pdr_dep(
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
+    res_pulse = cfg["dac"]["res_pulse"]
+
     freq_cfg = cfg["sweep"]["freq"]
     pdr_cfg = cfg["sweep"]["gain"]
-    fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
-    pdrs = np.arange(pdr_cfg["start"], pdr_cfg["stop"], pdr_cfg["step"])
-
-    res_pulse = cfg["dac"]["res_pulse"]
+    if isinstance(freq_cfg, dict):
+        fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
+    else:
+        fpts = np.array(freq_cfg)
+    fpts = map2adcfreq(fpts, soccfg, res_pulse["ch"], cfg["adc"]["chs"][0])
+    if isinstance(pdr_cfg, dict):
+        pdrs = np.arange(pdr_cfg["start"], pdr_cfg["stop"], pdr_cfg["step"])
+    else:
+        pdrs = np.array(pdr_cfg)
 
     if instant_show:
         fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
