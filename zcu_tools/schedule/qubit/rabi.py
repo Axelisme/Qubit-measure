@@ -4,7 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools.auto import make_cfg
-from zcu_tools.program2 import TwoToneProgram, RGainTwoToneProgram
+from zcu_tools.program import TwoToneProgram, RGainTwoToneProgram
 
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show, update_show

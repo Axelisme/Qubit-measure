@@ -1,60 +1,45 @@
-from ..base import create_waveform, set_pulse
+from ..base import set_pulse
 from .base import TimeProgram
+from ..twotone import declare_pulse, PULSE_DELAY, SYNC_TIME
 
 
 class T2EchoProgram(TimeProgram):
-    def parse_cfg(self):
-        TimeProgram.parse_cfg(self)
+    def initialize(self):
+        self.parse_sweep()
+        self.resetM.init(self)
+        self.readoutM.init(self)
 
-        self.pi_pulse = self.dac_cfg["pi_pulse"]
-        self.pi2_pulse = self.dac_cfg["pi2_pulse"]
+        declare_pulse(self, self.pi_pulse, "pi")
+        declare_pulse(self, self.pi2_pulse, "pi2")
 
         assert (
             self.pi_pulse["ch"] == self.pi2_pulse["ch"]
         ), "pi and pi/2 pulse must be on the same channel"
+        self.declare_wait_reg(self.pi_pulse["ch"])
 
-    def setup_qubit(self):
-        pi_pulse = self.pi_pulse
-        pi2_pulse = self.pi2_pulse
-
-        self.declare_gen(pi_pulse["ch"], nqz=pi_pulse["nqz"])
-        if pi_pulse["ch"] != pi2_pulse["ch"]:
-            self.declare_gen(pi2_pulse["ch"], nqz=pi2_pulse["nqz"])
-        else:
-            assert (
-                pi2_pulse["nqz"] == pi_pulse["nqz"]
-            ), "pi and pi/2 pulse on the same channel must have the same nqz"
-
-        create_waveform(self, "pi_pulse", pi_pulse)
-        set_pulse(self, pi_pulse, waveform="pi_pulse")
-
-        create_waveform(self, "pi2_pulse", pi2_pulse)
-        set_pulse(self, pi2_pulse, waveform="pi2_pulse")
-
-    def setup_waittime(self):
-        self.q_rp = self.ch_page(self.pi2_pulse["ch"])
-        self.r_wait = 3
-        self.regwi(self.q_rp, self.r_wait, self.cfg["start"])
+        self.synci(SYNC_TIME)
 
     def body(self):
-        pi_cfg = self.pi_pulse
-        pi2_cfg = self.pi2_pulse
+        # reset
+        self.resetM.reset_qubit(self)
 
         # pi/2 - wait - pi - wait - pi/2 sequence
-        set_pulse(self, pi2_cfg, waveform="pi2_pulse")
-        self.pulse(ch=pi2_cfg["ch"])
+        ch = self.pi_pulse["ch"]
+        set_pulse(self, self.pi2_pulse, waveform="pi2")
+        self.pulse(ch=ch)
         self.sync_all()
 
-        self.sync(self.q_rp, self.r_wait)
+        self.sync(self.q_rp, self.q_wait)
 
-        set_pulse(self, pi_cfg, waveform="pi_pulse")
-        self.pulse(ch=pi_cfg["ch"])
+        set_pulse(self, self.pi_pulse, waveform="pi")
+        self.pulse(ch=ch)
         self.sync_all()
 
-        self.sync(self.q_rp, self.r_wait)
+        self.sync(self.q_rp, self.q_wait)
 
-        set_pulse(self, pi2_cfg, waveform="pi2_pulse")
-        self.pulse(ch=pi2_cfg["ch"])
-        self.sync_all(self.us2cycles(0.05))
+        set_pulse(self, self.pi2_pulse, waveform="pi2")
+        self.pulse(ch=ch)
+        self.sync_all(self.us2cycles(PULSE_DELAY))
 
-        self.measure_pulse()
+        # readout
+        self.readoutM.readout_qubit(self)

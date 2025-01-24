@@ -7,7 +7,7 @@ from zcu_tools import make_cfg
 from zcu_tools.analysis import fidelity_func, singleshot_analysis
 from zcu_tools.analysis.single_shot.base import rotate
 from zcu_tools.analysis.single_shot.regression import get_rotate_angle
-from zcu_tools.program2 import SingleShotProgram
+from zcu_tools.program import SingleShotProgram
 
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show, update_show

@@ -1,83 +1,51 @@
-from qick.asm_v1 import AcquireProgram
+from collections import defaultdict
 
-from .pulse import create_waveform, set_pulse
+from qick import AveragerProgram, RAveragerProgram, NDAveragerProgram
 
-
-class BaseOneToneProgram(AcquireProgram):
-    def parse_cfg(self):
-        assert isinstance(self.cfg, dict), "cfg is not a dict"
-
-        self.dac_cfg: dict = self.cfg["dac"]
-        self.adc_cfg: dict = self.cfg["adc"]
-
-        self.res_pulse = self.dac_cfg.get("res_pulse")
-
-    def setup_readout(self):
-        # declare the resonator generator
-        res_ch = self.res_pulse["ch"]
-        self.declare_gen(ch=res_ch, nqz=self.res_pulse["nqz"])
-
-        # declare the readout channels
-        adc_cfg = self.adc_cfg
-        ro_chs = adc_cfg["chs"]
-        for ro_ch in ro_chs:
-            self.declare_readout(
-                ch=ro_ch,
-                length=self.us2cycles(adc_cfg["ro_length"], ro_ch=ro_ch),
-                freq=self.res_pulse["freq"],
-                gen_ch=res_ch,
-            )
-
-        # create the resonator pulse
-        create_waveform(self, "res_pulse", self.res_pulse)
-        set_pulse(self, self.res_pulse, ro_chs[0], "res_pulse")
-
-    def initialize(self):
-        self.parse_cfg()
-        self.setup_readout()
-
-        self.synci(200)
-
-    def measure_pulse(self):
-        cfg = self.cfg
-        res_pulse = self.res_pulse
-        adc_cfg = self.adc_cfg
-
-        self.measure(
-            pulse_ch=res_pulse["ch"],
-            adcs=adc_cfg["chs"],
-            adc_trig_offset=self.us2cycles(adc_cfg["trig_offset"]),
-            wait=True,
-            syncdelay=self.us2cycles(cfg["relax_delay"]),
-        )
-
-    def body(self):
-        self.measure_pulse()
+from .readout import make_readout
+from .reset import make_reset
 
 
-class BaseTwoToneProgram(BaseOneToneProgram):
-    def parse_cfg(self):
-        BaseOneToneProgram.parse_cfg(self)
+SYNC_TIME = 200  # cycles
 
-        self.qub_pulse = self.dac_cfg.get("qub_pulse")
 
-    def setup_qubit(self):
-        qub_pulse = self.qub_pulse
-        self.declare_gen(qub_pulse["ch"], nqz=qub_pulse["nqz"])
-        create_waveform(self, "qub_pulse", qub_pulse)
-        set_pulse(self, qub_pulse, waveform="qub_pulse")
+class MyProgram:
+    def __init__(self, soccfg, cfg):
+        self.dac = cfg.get("dac", {})
+        self.adc = cfg.get("adc", {})
+        if "sweep" in cfg:
+            self.sweep_cfg = cfg["sweep"]
+            if isinstance(self.sweep_cfg, dict) and "start" in self.sweep_cfg:
+                cfg["start"] = self.sweep_cfg["start"]
+                cfg["step"] = self.sweep_cfg["step"]
+                cfg["expts"] = self.sweep_cfg["expts"]
 
-    def initialize(self):
-        self.parse_cfg()
-        self.setup_readout()
-        self.setup_qubit()
+        self.resetM = make_reset(cfg["reset"])
+        self.readoutM = make_readout(cfg["readout"])
 
-        self.synci(200)
+        for name, pulse in self.dac.items():
+            if hasattr(self, name):
+                raise ValueError(f"Pulse name {name} already exists")
+            setattr(self, name, pulse)
 
-    def body(self):
-        # qubit pulse
-        self.pulse(ch=self.qub_pulse["ch"])
-        self.sync_all(self.us2cycles(0.05))
+        self.ch_count = defaultdict(int)
+        nqzs = dict()
+        for pulse in self.dac.values():
+            ch, nqz = pulse["ch"], pulse["nqz"]
+            self.ch_count[ch] += 1
+            cur_nqz = nqzs.setdefault(ch, nqz)
+            assert cur_nqz == nqz, "Found different nqz on the same channel"
 
-        # measure
-        self.measure_pulse()
+        super().__init__(soccfg, cfg)
+
+
+class MyAveragerProgram(MyProgram, AveragerProgram):
+    pass
+
+
+class MyRAveragerProgram(MyProgram, RAveragerProgram):
+    pass
+
+
+class MyNDAveragerProgram(MyProgram, NDAveragerProgram):
+    pass

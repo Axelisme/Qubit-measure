@@ -1,43 +1,51 @@
-from qick import AveragerProgram, RAveragerProgram
-
-from .base import BaseOneToneProgram
+from .base import MyAveragerProgram, MyRAveragerProgram, SYNC_TIME
 
 
-class OneToneProgram(AveragerProgram, BaseOneToneProgram):
+def onetone_body(prog: MyAveragerProgram, before_readout=None):
+    # reset
+    prog.resetM.reset_qubit(prog)
+
+    # readout
+    prog.readoutM.readout_qubit(prog, before_readout)
+
+
+class OneToneProgram(MyAveragerProgram):
     def initialize(self):
-        BaseOneToneProgram.initialize(self)
+        self.resetM.init(self)
+        self.readoutM.init(self)
+
+        self.synci(SYNC_TIME)
 
     def body(self):
-        BaseOneToneProgram.body(self)
+        onetone_body(self)
 
 
-class RGainOnetoneProgram(RAveragerProgram, BaseOneToneProgram):
-    def parse_cfg(self):
-        BaseOneToneProgram.parse_cfg(self)
-
-        sweep_cfg = self.cfg["sweep"]
-        self.cfg["start"] = sweep_cfg["start"]
-        self.cfg["step"] = sweep_cfg["step"]
-        self.cfg["expts"] = sweep_cfg["expts"]
-
-        self.res_pulse["gain"] = self.cfg["start"]
-
-    def setup_gain_reg(self):
+class RGainOnetoneProgram(MyRAveragerProgram):
+    def declare_gain_reg(self):
         # setup gain register
         ch = self.res_pulse["ch"]
         self.r_rp = self.ch_page(ch)
         self.r_gain = self.sreg(ch, "gain")
-        self.regwi(self.r_rp, self.r_gain, self.cfg["start"])
+        self.r_gain2 = self.sreg(ch, "gain2")
+        self.r_gain_t = 3
+        self.mathi(self.r_rp, self.r_gain_t, self.r_gain, "+", 0)
+        self.r_step = self.cfg["step"]
 
     def initialize(self):
-        self.parse_cfg()
-        self.setup_readout()
-        self.setup_gain_reg()
+        self.res_pulse["gain"] = self.cfg["start"]
 
-        self.synci(200)
+        self.resetM.init(self)
+        self.readoutM.init(self)
+        self.declare_gain_reg()
+
+        self.synci(SYNC_TIME)
 
     def body(self):
-        BaseOneToneProgram.body(self)
+        onetone_body(self, self.set_gain_reg)
+
+    def set_gain_reg(self):
+        self.mathi(self.r_rp, self.r_gain, self.r_gain_t, "+", 0)
+        self.mathi(self.r_rp, self.r_gain2, self.r_gain_t, ">>", 1)  # divide by 2
 
     def update(self):
-        self.mathi(self.r_rp, self.r_gain, self.r_gain, "+", self.cfg["step"])
+        self.mathi(self.r_rp, self.r_gain_t, self.r_gain_t, "+", self.r_step)

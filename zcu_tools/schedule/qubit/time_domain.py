@@ -1,6 +1,6 @@
 from copy import deepcopy
 
-from zcu_tools.program2 import T1Program, T2EchoProgram, T2RamseyProgram
+from zcu_tools.program import T1Program, T2EchoProgram, T2RamseyProgram
 
 from ..flux import set_flux
 

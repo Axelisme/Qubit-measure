@@ -1,17 +1,22 @@
-from .base import TimeProgram
+from .base import TimeProgram, PULSE_DELAY, set_pulse
 
 
 class T2RamseyProgram(TimeProgram):
     def body(self):
-        qub_ch = self.qub_pulse["ch"]
+        # reset
+        self.resetM.reset_qubit(self)
 
         # pi/2 - wait - pi/2 sequence
-        self.pulse(ch=qub_ch)
+        ch = self.qub_pulse["ch"]
+        if self.ch_count[ch] > 1:
+            set_pulse(self, self.qub_pulse, waveform="qub_pulse")
+        self.pulse(ch=ch)
         self.sync_all()
 
-        self.sync(self.q_rp, self.r_wait)
+        self.sync(self.q_rp, self.q_wait)
 
-        self.pulse(ch=qub_ch)
-        self.sync_all(self.us2cycles(0.05))
+        self.pulse(ch=ch)
+        self.sync_all(self.us2cycles(PULSE_DELAY))
 
-        self.measure_pulse()
+        # measure
+        self.readoutM.readout_qubit(self)

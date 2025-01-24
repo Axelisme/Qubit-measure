@@ -4,7 +4,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program2 import (
+from zcu_tools.program import (
     RFreqTwoToneProgram,
     RFreqTwoToneProgramWithRedReset,
     TwoToneProgram,

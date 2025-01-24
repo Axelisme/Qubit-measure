@@ -5,7 +5,7 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.program2 import (
+from zcu_tools.program import (
     RFreqTwoToneProgram,
     TwoToneProgram,
     RFreqTwoToneProgramWithRedReset,
