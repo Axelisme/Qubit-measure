@@ -11,6 +11,7 @@ from zcu_tools.program import (
     RFreqTwoToneProgramWithRedReset,
 )
 
+from ..tools import sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
 
@@ -37,8 +38,8 @@ def measure_qub_flux_dep(
 
     freq_cfg = cfg["sweep"]["freq"]
     flux_cfg = cfg["sweep"]["flux"]
-    fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
-    flxs = np.arange(flux_cfg["start"], flux_cfg["stop"], flux_cfg["step"])
+    fpts = sweep2array(freq_cfg, soft_loop, "Custom frequency sweep only for soft loop")
+    flxs = sweep2array(flux_cfg)
 
     qub_pulse = cfg["dac"]["qub_pulse"]
 

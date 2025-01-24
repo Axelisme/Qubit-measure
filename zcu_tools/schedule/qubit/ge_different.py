@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program import TwoToneProgram
 
-from ..tools import map2adcfreq
+from ..tools import map2adcfreq, sweep2array, check_time_sweep
 from ..flux import set_flux
 from ..instant_show import (
     clear_show,
@@ -53,19 +53,12 @@ def measure_ge_pdr_dep(
 
     freq_cfg = cfg["sweep"]["freq"]
     pdr_cfg = cfg["sweep"]["gain"]
-    if isinstance(freq_cfg, dict):
-        fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
-    else:
-        fpts = np.array(freq_cfg)
-    fpts = map2adcfreq(fpts, soccfg, res_pulse["ch"], cfg["adc"]["chs"][0])
-    if isinstance(pdr_cfg, dict):
-        pdrs = np.arange(pdr_cfg["start"], pdr_cfg["stop"], pdr_cfg["step"])
-    else:
-        pdrs = np.array(pdr_cfg)
+    fpts = sweep2array(freq_cfg)
+    fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
+    pdrs = sweep2array(pdr_cfg)
 
     if instant_show:
         fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
-        ax.set_title("Maximum SNR: None")
 
     snr2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     try:
@@ -100,11 +93,13 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
-    ro_cfg = cfg["sweep"]
-    if isinstance(ro_cfg, dict):
-        ro_lens = np.linspace(ro_cfg["start"], ro_cfg["stop"], ro_cfg["expts"])
-    else:
-        ro_lens = np.array(ro_cfg)
+    res_pulse = cfg["dac"]["res_pulse"]
+
+    ro_lens = sweep2array(cfg["sweep"])
+    check_time_sweep(
+        soccfg, ro_lens, gen_ch=res_pulse["ch"], ro_ch=cfg["adc"]["chs"][0]
+    )
+
     trig_offset = cfg["adc"]["trig_offset"]
 
     show_period = int(len(ro_lens) / 10 + 0.99999)
@@ -115,8 +110,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     try:
         for i, ro_len in enumerate(tqdm(ro_lens, desc="ro length", smoothing=0)):
             cfg["adc"]["ro_length"] = ro_len
-            res_len = trig_offset + ro_len + 1.0
-            cfg["dac"]["res_pulse"]["length"] = res_len
+            res_pulse["length"] = trig_offset + ro_len + 1.0
 
             snrs[i] = measure_one(soc, soccfg, cfg)
 
@@ -139,13 +133,14 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
-    trig_cfg = cfg["sweep"]
-    if isinstance(trig_cfg, dict):
-        offsets = np.linspace(trig_cfg["start"], trig_cfg["stop"], trig_cfg["expts"])
-    else:
-        offsets = np.array(trig_cfg)
+    res_pulse = cfg["dac"]["res_pulse"]
+
+    offsets = sweep2array(cfg["sweep"])
+    check_time_sweep(
+        soccfg, offsets, gen_ch=res_pulse["ch"], ro_ch=cfg["adc"]["chs"][0]
+    )
     ro_len = cfg["adc"]["ro_length"]
-    orig_offset = cfg["dac"]["res_pulse"]["trig_offset"]
+    orig_offset = cfg["adc"]["trig_offset"]
 
     show_period = int(len(offsets) / 10 + 0.99999)
     if instant_show:

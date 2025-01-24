@@ -7,7 +7,7 @@ from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
 from zcu_tools.program import OneToneProgram
 
-from ..tools import map2adcfreq
+from ..tools import map2adcfreq, sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
 
@@ -26,17 +26,10 @@ def measure_res_pdr_dep(
 
     res_pulse = cfg["dac"]["res_pulse"]
 
-    freq_cfg = cfg["sweep"]["freq"]
-    pdr_cfg = cfg["sweep"]["gain"]
-    if isinstance(freq_cfg, dict):
-        fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
-    else:
-        fpts = np.array(freq_cfg)
+    fpts = sweep2array(cfg["sweep"]["freq"])
     fpts = map2adcfreq(fpts, soccfg, res_pulse["ch"], cfg["adc"]["chs"][0])
-    if isinstance(pdr_cfg, dict):
-        pdrs = np.arange(pdr_cfg["start"], pdr_cfg["stop"], pdr_cfg["step"])
-    else:
-        pdrs = np.array(pdr_cfg)
+
+    pdrs = sweep2array(cfg["sweep"]["gain"])
 
     reps_ref = cfg["reps"]
 

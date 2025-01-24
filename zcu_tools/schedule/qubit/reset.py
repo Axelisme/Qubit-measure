@@ -6,6 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools.auto import make_cfg
 from zcu_tools.program import TwoToneProgram
 
+from ..tools import sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show, update_show
 
@@ -15,13 +16,9 @@ def measure_reset_saturation(soc, soccfg, cfg, instant_show=False):
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
-    sweep_cfg = cfg["sweep"]
-    if isinstance(sweep_cfg, dict):
-        lens = np.arange(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["step"])
-    else:
-        lens = np.array(sweep_cfg)
-
     reset_pulse = cfg["dac"]["reset_pulse"]
+
+    lens = sweep2array(cfg["sweep"])
 
     show_period = int(len(lens) / 10 + 0.99)
     if instant_show:

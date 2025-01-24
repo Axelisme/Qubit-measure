@@ -16,8 +16,10 @@ def measure_one(soc, soccfg, cfg, progress, qub_pulse):
         prog = OneToneProgram(soccfg, make_cfg(cfg, reps=1))
     IQlist = prog.acquire_decimated(soc, progress=progress)
     Is, Qs = IQlist[0]
+
     Ts = prog.cycles2us(np.arange(len(Is)), ro_ch=cfg["adc"]["chs"][0])
     Ts += cfg["adc"]["trig_offset"]
+
     return Ts, Is, Qs
 
 

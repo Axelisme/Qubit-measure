@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program import OneToneProgram
 
-from ..tools import map2adcfreq
+from ..tools import map2adcfreq, sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show, update_show
 
@@ -18,11 +18,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
 
     res_pulse = cfg["dac"]["res_pulse"]
 
-    sweep_cfg = cfg["sweep"]
-    if isinstance(sweep_cfg, dict):
-        fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
-    else:
-        fpts = np.array(sweep_cfg)
+    fpts = sweep2array(cfg["sweep"])
     fpts = map2adcfreq(fpts, soccfg, res_pulse["ch"], cfg["adc"]["chs"][0])
 
     show_period = int(len(fpts) / 10 + 0.99)

@@ -7,7 +7,7 @@ from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
 from zcu_tools.program import OneToneProgram
 
-from ..tools import map2adcfreq
+from ..tools import map2adcfreq, sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
 
@@ -21,17 +21,11 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     res_pulse = cfg["dac"]["res_pulse"]
 
     freq_cfg = cfg["sweep"]["freq"]
-    flux_cfg = cfg["sweep"]["flux"]
-    if isinstance(freq_cfg, dict):
-        fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
-    else:
-        fpts = np.array(freq_cfg)
+    fpts = sweep2array(freq_cfg)
     fpts = map2adcfreq(fpts, soccfg, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    if isinstance(flux_cfg, dict):
-        flxs = np.arange(flux_cfg["start"], flux_cfg["stop"], flux_cfg["step"])
-    else:
-        flxs = np.array(flux_cfg)
+    flux_cfg = cfg["sweep"]["flux"]
+    flxs = sweep2array(flux_cfg)
 
     freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)

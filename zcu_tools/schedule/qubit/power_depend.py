@@ -6,6 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program import PowerDepProgram, RFreqTwoToneProgram, TwoToneProgram
 
+from ..tools import sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
 
@@ -19,8 +20,8 @@ def measure_qub_pdr_dep(
 
     freq_cfg = cfg["sweep"]["freq"]
     pdr_cfg = cfg["sweep"]["gain"]
-    fpts = np.linspace(freq_cfg["start"], freq_cfg["stop"], freq_cfg["expts"])
-    pdrs = np.arange(pdr_cfg["start"], pdr_cfg["stop"], pdr_cfg["step"])
+    fpts = sweep2array(freq_cfg, soft_freq, "Custom frequency sweep only for soft loop")
+    pdrs = sweep2array(pdr_cfg, soft_pdr, "Custom power sweep only for soft loop")
 
     qub_pulse = cfg["dac"]["qub_pulse"]
 

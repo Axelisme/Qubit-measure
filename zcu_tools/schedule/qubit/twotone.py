@@ -10,6 +10,7 @@ from zcu_tools.program import (
     TwoToneProgram,
 )
 
+from ..tools import sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show, update_show
 
@@ -33,14 +34,11 @@ def measure_qub_freq(
 
     set_flux(cfg["flux_dev"], cfg["flux"])
 
-    sweep_cfg = cfg["sweep"]
-    if isinstance(sweep_cfg, dict):
-        fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
-    else:
-        assert soft_loop, "Hard loop only supports linear sweep"
-        fpts = np.array(sweep_cfg)
-
     qub_pulse = cfg["dac"]["qub_pulse"]
+
+    fpts = sweep2array(
+        cfg["sweep"], soft_loop, "Custom frequency sweep only for soft loop"
+    )
 
     if instant_show:
         fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
@@ -76,11 +74,14 @@ def measure_qub_freq(
 
     else:
         if conjugate_reset:
-            cfg["r_f"] = r_f
             print("Use RFreqTwoToneProgramWithRedReset for hard loop")
+
+            cfg["r_f"] = r_f
+
             prog = RFreqTwoToneProgramWithRedReset(soccfg, make_cfg(cfg))
             fpts, avgi, avgq = prog.acquire(soc, progress=True)
             signals = avgi[0][0] + 1j * avgq[0][0]
+
             if sub_ground:
                 g_cfg = make_cfg(cfg)
                 g_cfg["dac"]["qub_pulse"]["gain"] = 0
