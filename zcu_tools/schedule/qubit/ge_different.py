@@ -31,7 +31,6 @@ def measure_one(soc, soccfg, cfg):
     avgei, avgeq, stdei, stdeq = prog.acquire(soc, progress=False, ret_std=True)
     noise2_e = stdei[0][0] ** 2 + stdeq[0][0] ** 2
 
-    # snr2D[i, j] = signals_e - signals_g
     dist_i = avgei[0][0] - avggi[0][0]
     dist_q = avgeq[0][0] - avggq[0][0]
     contrast = dist_i + 1j * dist_q
@@ -146,7 +145,6 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
     else:
         offsets = np.array(trig_cfg)
     ro_len = cfg["adc"]["ro_length"]
-    res_len = cfg["dac"]["res_pulse"]["length"]
     orig_offset = cfg["dac"]["res_pulse"]["trig_offset"]
 
     show_period = int(len(offsets) / 10 + 0.99999)
@@ -157,7 +155,6 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
     try:
         for i, offset in enumerate(tqdm(offsets, desc="trig offset", smoothing=0)):
             cfg["adc"]["trig_offset"] = offset
-            cfg["dac"]["res_pulse"]["length"] = res_len + offset - orig_offset
             cfg["adc"]["ro_length"] = ro_len + offset - orig_offset
 
             snrs[i] = measure_one(soc, soccfg, cfg)
