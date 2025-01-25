@@ -86,8 +86,8 @@ class InteractiveSelector:
         self.btn_black = Button(ax_black, "Black", color="gray")
         self.btn_done = Button(ax_done, "Done", color="lightgreen")
 
-        self.btn_red.on_clicked(lambda event: self.set_color("r"))
-        self.btn_black.on_clicked(lambda event: self.set_color("k"))
+        self.btn_red.on_clicked(lambda _: self.set_color("r"))
+        self.btn_black.on_clicked(lambda _: self.set_color("k"))
         self.btn_done.on_clicked(self.finish_selection)
 
     def set_color(self, color):
@@ -175,8 +175,8 @@ class InteractiveLines:
         self.eflx = flxs[-5] if eflx is None else eflx
 
         # 創建兩條垂直線
-        self.line1 = self.ax.axvline(x=self.cflx, color="r", linestyle="--", picker=5)
-        self.line2 = self.ax.axvline(x=self.eflx, color="b", linestyle="--", picker=5)
+        self.rline = self.ax.axvline(x=self.cflx, color="r", linestyle="--", picker=5)
+        self.bline = self.ax.axvline(x=self.eflx, color="b", linestyle="--", picker=5)
 
         # 設置變數
         self.picked = None
@@ -185,7 +185,7 @@ class InteractiveLines:
         self.is_finished = False
 
         # 添加完成按鈕
-        self.add_finish_button()
+        self.add_button()
 
         # 連接事件
         self.fig.canvas.mpl_connect("pick_event", self.onpick)
@@ -208,13 +208,27 @@ class InteractiveLines:
 
         plt.show()
 
-    def add_finish_button(self):
+    def add_button(self):
         from matplotlib.widgets import Button
 
         # 創建按鈕的軸域，位置在圖表右下角
-        ax_finish = plt.axes([0.8, 0.02, 0.1, 0.04])
-        self.btn_finish = Button(ax_finish, "Finish", color="lightgreen")
-        self.btn_finish.on_clicked(self.on_finish)
+        ax_red = plt.axes([0.7, 0.05, 0.1, 0.04])
+        ax_blue = plt.axes([0.81, 0.05, 0.1, 0.04])
+        ax_done = plt.axes([0.92, 0.05, 0.1, 0.04])
+
+        self.btn_red = Button(ax_red, "Red", color="lightcoral")
+        self.btn_blue = Button(ax_blue, "Blue", color="lightblue")
+        self.btn_done = Button(ax_done, "Done", color="lightgreen")
+
+        self.btn_red.on_clicked(self.set_picked_red)
+        self.btn_blue.on_clicked(self.set_picked_blue)
+        self.btn_done.on_clicked(self.on_finish)
+
+    def set_picked_red(self, _):
+        self.picked = self.rline
+
+    def set_picked_blue(self, _):
+        self.picked = self.bline
 
     def onpick(self, event):
         if self.is_finished:
@@ -239,10 +253,10 @@ class InteractiveLines:
 
     def update_animation(self, frame):
         if self.picked is None or self.mouse_x is None:
-            return [self.line1, self.line2]
+            return [self.rline, self.bline]
 
         new_x = self.mouse_x
-        other_line = self.line2 if self.picked is self.line1 else self.line1
+        other_line = self.bline if self.picked is self.rline else self.rline
         other_x = other_line.get_xdata()[0]
 
         # 確保線之間保持最小距離
@@ -260,7 +274,7 @@ class InteractiveLines:
         # 更新線的位置
         self.picked.set_xdata([new_x, new_x])
 
-        return [self.line1, self.line2]
+        return [self.rline, self.bline]
 
     def on_finish(self, event):
         """完成按鈕的回調函數"""
@@ -273,7 +287,7 @@ class InteractiveLines:
         """運行交互式選擇器並返回兩條線的位置"""
         self.on_finish(None)
         plt.close(self.fig)
-        return float(self.line1.get_xdata()[0]), float(self.line2.get_xdata()[0])
+        return float(self.rline.get_xdata()[0]), float(self.bline.get_xdata()[0])
 
 
 def calculate_energy(flxs, EJ, EC, EL, cutoff=50):
