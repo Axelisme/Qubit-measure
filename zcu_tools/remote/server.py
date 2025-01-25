@@ -1,17 +1,20 @@
 import Pyro4
 
-from zcu_tools.schedule import measure_lookback
+import zcu_tools.program as zp
+
+SUPPORTED_PROGRAMS = ["OneToneProgram", "TwoToneProgram"]
 
 
-class RemoteSchedule:
+class ProgramServer:
     def __init__(self, soc):
         self.soc = soc
 
-    def _override_cfg(self, cfg):
-        # ignore flux control in remote mode
-        cfg["flux_dev"] = "none"
-
     @Pyro4.expose
-    def measure_lookback(self, cfg):
-        self._override_cfg(cfg)
-        return measure_lookback(self.soc, self.soc, cfg, progress=False)
+    def run_program(self, name: str, cfg: dict, *args, **kwargs):
+        if name not in SUPPORTED_PROGRAMS:
+            raise ValueError(f"Program {name} is not supported")
+
+        prog = getattr(zp, name)(self.soc, cfg)
+        return prog.acquire(
+            self.soc, *args, **kwargs, progress=False, round_callback=None
+        )

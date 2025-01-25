@@ -20,7 +20,7 @@ class OneToneProgram(MyAveragerProgram):
         onetone_body(self)
 
 
-class RGainOnetoneProgram(MyRAveragerProgram):
+class RGainOneToneProgram(MyRAveragerProgram):
     def declare_gain_reg(self):
         # setup gain register
         ch = self.res_pulse["ch"]

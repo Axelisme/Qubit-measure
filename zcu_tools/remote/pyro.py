@@ -5,8 +5,10 @@ import Pyro4
 import Pyro4.naming
 
 from qick import QickSoc
+from qick.qick_asm import QickConfig
 
-from .server import RemoteSchedule
+from .server import ProgramServer
+from .program import init_proxy
 
 
 def start_nameserver(ns_host="0.0.0.0", ns_port=8888):
@@ -61,18 +63,46 @@ def start_server(
         daemon.register(obj)
         print("registered member " + str(obj))
 
-    remote_zs = RemoteSchedule(soc)
-    ns.register("remote_zs", daemon.register(remote_zs))
-    print("registered RemoteSchedule")
+    prog_server = ProgramServer(soc)
+    ns.register("prog_server", daemon.register(prog_server))
+    print("registered ProgramServer")
 
     print("starting daemon")
     daemon.requestLoop()  # this will run forever until interrupted
 
 
-def make_proxy(ns_host, ns_port=8888, proxy_name="myqick"):
+def make_proxy(ns_host, ns_port=8888, remote_traceback=True):
     Pyro4.config.SERIALIZER = "pickle"
     Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
 
     ns = Pyro4.locateNS(host=ns_host, port=ns_port)
 
-    return Pyro4.Proxy(ns.lookup(proxy_name))
+    # print the nameserver entries: you should see the QickSoc proxy
+    for k, v in ns.list().items():
+        print(k, v)
+
+    soc = Pyro4.Proxy(ns.lookup("myqick"))
+    soccfg = QickConfig(soc.get_cfg())
+    init_proxy(Pyro4.Proxy(ns.lookup("prog_server")))
+
+    # adapted from https://pyro4.readthedocs.io/en/stable/errors.html and https://stackoverflow.com/a/70433500
+    if remote_traceback:
+        try:
+            import sys
+
+            import IPython
+
+            ip = IPython.get_ipython()
+            if ip is not None:
+
+                def exception_handler(self, etype, evalue, tb, tb_offset=None):
+                    sys.stderr.write("".join(Pyro4.util.getPyroTraceback()))
+                    # self.showtraceback((etype, evalue, tb), tb_offset=tb_offset)  # standard IPython's printout
+
+                ip.set_custom_exc(
+                    (Exception,), exception_handler
+                )  # register your handler
+        except Exception as e:
+            raise RuntimeError("Failed to set up Pyro exception handler: ", e)
+
+    return (soc, soccfg)
