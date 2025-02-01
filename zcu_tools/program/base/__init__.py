@@ -1,5 +1,6 @@
 from .pulse import create_waveform, set_pulse, declare_pulse
 from .program import (
+    MyProgram,
     MyAveragerProgram,
     MyRAveragerProgram,
     MyNDAveragerProgram,
@@ -12,6 +13,7 @@ __all__ = [
     "set_pulse",
     "create_waveform",
     "declare_pulse",
+    "MyProgram",
     "MyAveragerProgram",
     "MyRAveragerProgram",
     "MyNDAveragerProgram",

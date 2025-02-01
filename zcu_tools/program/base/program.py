@@ -35,8 +35,8 @@ class MyProgram:
                 cfg["step"] = self.sweep_cfg["step"]
                 cfg["expts"] = self.sweep_cfg["expts"]
 
-        self.resetM = make_reset(cfg["reset"])
-        self.readoutM = make_readout(cfg["readout"])
+        self.resetM = make_reset(self.dac["reset"])
+        self.readoutM = make_readout(self.adc["readout"])
 
         for name, pulse in self.dac.items():
             if hasattr(self, name):

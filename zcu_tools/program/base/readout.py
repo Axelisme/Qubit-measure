@@ -49,5 +49,5 @@ class BaseReadout(AbsReadout):
             adcs=ro_chs,
             adc_trig_offset=prog.us2cycles(prog.adc["trig_offset"]),
             wait=True,
-            syncdelay=prog.us2cycles(prog.cfg["relax_delay"]),
+            syncdelay=prog.us2cycles(prog.adc["relax_delay"]),
         )

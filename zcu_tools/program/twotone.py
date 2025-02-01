@@ -28,8 +28,6 @@ def twotone_body(prog, before_pulse=None):
     # measure
     prog.readoutM.readout_qubit(prog)
 
-    prog.synci(SYNC_TIME)
-
 
 class TwoToneProgram(MyAveragerProgram):
     def initialize(self):
