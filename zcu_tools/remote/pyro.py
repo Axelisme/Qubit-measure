@@ -8,7 +8,6 @@ from qick import QickSoc
 from qick.qick_asm import QickConfig
 
 from .server import ProgramServer
-from .program import init_proxy
 
 
 def start_nameserver(ns_host="0.0.0.0", ns_port=8888):
@@ -83,7 +82,7 @@ def make_proxy(ns_host, ns_port=8888, remote_traceback=True):
 
     soc = Pyro4.Proxy(ns.lookup("myqick"))
     soccfg = QickConfig(soc.get_cfg())
-    init_proxy(Pyro4.Proxy(ns.lookup("prog_server")))
+    prog_server = Pyro4.Proxy(ns.lookup("prog_server"))
 
     # adapted from https://pyro4.readthedocs.io/en/stable/errors.html and https://stackoverflow.com/a/70433500
     if remote_traceback:
@@ -105,4 +104,4 @@ def make_proxy(ns_host, ns_port=8888, remote_traceback=True):
         except Exception as e:
             raise RuntimeError("Failed to set up Pyro exception handler: ", e)
 
-    return (soc, soccfg)
+    return (soc, soccfg, prog_server)

@@ -1,5 +1,6 @@
 from collections import defaultdict
 
+import Pyro4
 from qick import AveragerProgram, RAveragerProgram, NDAveragerProgram
 
 from .readout import make_readout
@@ -10,7 +11,21 @@ SYNC_TIME = 200  # cycles
 
 
 class MyProgram:
+    proxy = None
+
+    @classmethod
+    def init_proxy(cls, proxy):
+        cls.proxy = proxy
+
     def __init__(self, soccfg, cfg):
+        if self.proxy is not None:
+            # use remote proxy, so we don't need to do anything
+            self.cfg = cfg
+        else:
+            self._parse_cfg(cfg)
+            super().__init__(soccfg, cfg)
+
+    def _parse_cfg(self, cfg: dict):
         self.dac = cfg.get("dac", {})
         self.adc = cfg.get("adc", {})
         if "sweep" in cfg:
@@ -36,7 +51,37 @@ class MyProgram:
             cur_nqz = nqzs.setdefault(ch, nqz)
             assert cur_nqz == nqz, "Found different nqz on the same channel"
 
-        super().__init__(soccfg, cfg)
+    def _override_cfg(self, kwargs: dict):
+        kwargs["progress"] = False  # progress bar is not supported
+        kwargs["round_callback"] = None  # callback is not supported
+
+        return kwargs
+
+    def acquire(self, soc, *args, **kwargs):
+        if self.proxy is not None:
+            self._override_cfg(kwargs)
+            try:
+                return self.proxy.run_program(
+                    self.__class__.__name__, self.cfg, *args, **kwargs
+                )
+            except Pyro4.errors.CommunicationError as e:
+                print("Error: ", e)
+                return None
+
+        return super().acquire(soc, *args, **kwargs)
+
+    def acquire_decimated(self, soc, *args, **kwargs):
+        if self.proxy is not None:
+            self._override_cfg(kwargs)
+            try:
+                return self.proxy.run_program_decimated(
+                    self.__class__.__name__, self.cfg, *args, **kwargs
+                )
+            except Pyro4.errors.CommunicationError as e:
+                print("Error: ", e)
+                return None
+
+        return super().acquire_decimated(soc, *args, **kwargs)
 
 
 class MyAveragerProgram(MyProgram, AveragerProgram):
