@@ -4,7 +4,7 @@ from .tools import deepupdate, numpy2number
 class DefaultCfg:
     dac_cfgs = {}
     adc_cfgs = {}
-    exp_default = {}
+    dev_cfgs = {}
 
     @classmethod
     def load(cls, filepath: str):
@@ -15,11 +15,11 @@ class DefaultCfg:
 
         cls.dac_cfgs: dict = cfg.get("dac_cfgs", {})
         cls.adc_cfgs: dict = cfg.get("adc_cfgs", {})
-        cls.exp_default: dict = cfg.get("exp_default", {})
+        cls.dev_cfgs: dict = cfg.get("dev_cfgs", {})
 
         assert isinstance(cls.dac_cfgs, dict), "dac_cfgs should be a dict"
         assert isinstance(cls.adc_cfgs, dict), "adc_cfgs should be a dict"
-        assert isinstance(cls.exp_default, dict), "exp_default should be a dict"
+        assert isinstance(cls.dev_cfgs, dict), "dev_cfgs should be a dict"
 
     @classmethod
     def dump(cls, filepath=None):
@@ -71,13 +71,17 @@ class DefaultCfg:
         cls.dac_cfgs.pop("pulses", None)
 
     @classmethod
-    def set_default(cls, **kwargs):
-        deepupdate(cls.exp_default, kwargs, behavior="force")
+    def set_dev(cls, behavior="force", **dev_cfgs):
+        deepupdate(cls.dev_cfgs, dev_cfgs, behavior=behavior)
+
+    @classmethod
+    def get_dev(cls, name: str):
+        return cls.dev_cfgs.get(name)
 
     @classmethod
     def dict(cls):
         return {
             "dac_cfgs": cls.dac_cfgs,
             "adc_cfgs": cls.adc_cfgs,
-            "exp_default": cls.exp_default,
+            "dev_cfgs": cls.dev_cfgs,
         }

@@ -72,43 +72,60 @@ def auto_derive_pulse(name: str, pulse_cfg: Union[str, dict]) -> dict:
 def auto_derive(exp_cfg):
     dac_cfg = exp_cfg.setdefault("dac", {})
     adc_cfg = exp_cfg.setdefault("adc", {})
+    dev_cfg = exp_cfg.setdefault("dev", {})
 
-    # derive each pulse
+    # dac
+    ## derive each pulse
     for name, pulse_cfg in dac_cfg.items():
-        dac_cfg[name] = auto_derive_pulse(name, pulse_cfg)
+        # check if it is a pulse
+        if isinstance(pulse_cfg, dict) and "style" in pulse_cfg:
+            dac_cfg[name] = auto_derive_pulse(name, pulse_cfg)
 
-    # readout channel
+    ## reset and measure module
+    dac_cfg.setdefault("reset", "none")
+    dac_cfg.setdefault("readout", "base")
+
+    # adc
+    ## readout channel
     ro_chs = DefaultCfg.get_adc("ro_chs")
     if ro_chs:
         adc_cfg.setdefault("chs", ro_chs)
 
-    # readout length
+    ## readout length
     if "res_pulse" in dac_cfg:
         res_pulse = dac_cfg["res_pulse"]
         if "ro_length" in res_pulse:
+            # if pulse cfg has set ro_length, use it
             adc_cfg.setdefault("ro_length", res_pulse["ro_length"])
         if "length" in res_pulse:
+            # or, use the length of the readout pulse
             adc_cfg.setdefault("ro_length", res_pulse["length"])
 
+    ## trig_offset
+    if "trig_offset" not in adc_cfg:
+        # if pulse provide, use it
+        res_pulse = dac_cfg.get("res_pulse", {})
         if "trig_offset" in res_pulse:
             adc_cfg.setdefault("trig_offset", res_pulse["trig_offset"])
 
-    # trig_offset
-    trig_offset = DefaultCfg.get_adc("trig_offset")
-    if trig_offset:
-        adc_cfg.setdefault("trig_offset", trig_offset)
+        # or, use the timeFly
+        timeFly = DefaultCfg.get_adc("timeFly")
+        if timeFly:
+            adc_cfg.setdefault("trig_offset", timeFly)
 
-    # fill default parameters if not provided
-    deepupdate(exp_cfg, DefaultCfg.exp_default, behavior="ignore")
+    ## relax delay
+    adc_cfg.setdefault("relax_delay", 0.0)
 
-    # reset
-    exp_cfg.setdefault("reset", "none")
+    # dev
+    ## flux dev
+    flux_dev = DefaultCfg.get_dev("flux_dev")
+    if flux_dev:
+        # if default flux_dev is provided, use it
+        dev_cfg.setdefault("flux_dev", flux_dev)
+    # use none if not provided
+    dev_cfg.setdefault("flux_pulse", "none")
 
-    # measure
-    exp_cfg.setdefault("readout", "base")
-
-    # flux_dev
-    exp_cfg.setdefault("flux_dev", "none")
-
-    # relax delay
-    exp_cfg.setdefault("relax_delay", 0.0)
+    # other
+    flux_value = DefaultCfg.get_dev("flux")
+    if flux_value:
+        dev_cfg.setdefault("flux", flux_value)
