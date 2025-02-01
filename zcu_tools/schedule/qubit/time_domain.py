@@ -7,7 +7,7 @@ from ..flux import set_flux
 
 
 def measure_t2ramsey(soc, soccfg, cfg):
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
 
     check_time_sweep(soccfg, cfg["sweep"])
 
@@ -19,7 +19,7 @@ def measure_t2ramsey(soc, soccfg, cfg):
 
 
 def measure_t1(soc, soccfg, cfg):
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
 
     check_time_sweep(soccfg, cfg["sweep"])
 
@@ -31,7 +31,7 @@ def measure_t1(soc, soccfg, cfg):
 
 
 def measure_t2echo(soc, soccfg, cfg):
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
 
     check_time_sweep(soccfg, cfg["sweep"])
 

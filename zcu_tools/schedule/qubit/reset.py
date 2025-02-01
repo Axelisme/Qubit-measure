@@ -14,7 +14,7 @@ from ..instant_show import clear_show, init_show, update_show
 def measure_reset_saturation(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)
 
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
 
     reset_pulse = cfg["dac"]["reset_pulse"]
 

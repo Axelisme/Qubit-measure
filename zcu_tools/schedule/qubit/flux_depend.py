@@ -32,7 +32,7 @@ def measure_qub_flux_dep(
         assert cfg.get("reset") == "pulse", "Need reset=pulse for conjugate reset"
         assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
 
-    if cfg["flux_dev"] == "none":
+    if cfg["dev"]["flux_dev"] == "none":
         raise NotImplementedError("Flux sweep but get flux_dev == 'none'")
 
     freq_cfg = cfg["sweep"]["freq"]
@@ -61,7 +61,7 @@ def measure_qub_flux_dep(
     try:
         for i, flx in enumerate(flux_tqdm):
             cfg["flux"] = flx
-            set_flux(cfg["flux_dev"], cfg["flux"])
+            set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
 
             if soft_loop:
                 freq_tqdm.reset()

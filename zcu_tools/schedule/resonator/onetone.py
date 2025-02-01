@@ -14,7 +14,7 @@ from ..instant_show import clear_show, init_show, update_show
 def measure_res_freq(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
 
     res_pulse = cfg["dac"]["res_pulse"]
 

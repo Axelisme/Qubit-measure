@@ -15,7 +15,7 @@ from ..instant_show import clear_show, init_show2d, update_show2d
 def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    if cfg["flux_dev"] == "none":
+    if cfg["dev"]["flux_dev"] == "none":
         raise NotImplementedError("Flux sweep but get flux_dev == 'none'")
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -36,7 +36,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     try:
         for i, flx in enumerate(flxs):
             cfg["flux"] = flx
-            set_flux(cfg["flux_dev"], cfg["flux"])
+            set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
 
             freq_tqdm.reset()
             freq_tqdm.refresh()

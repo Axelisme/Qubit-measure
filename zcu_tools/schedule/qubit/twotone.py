@@ -31,7 +31,7 @@ def measure_qub_freq(
         assert cfg.get("reset") == "pulse", "Need reset=pulse for conjugate reset"
         assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
 
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
 
     qub_pulse = cfg["dac"]["qub_pulse"]
 
@@ -67,12 +67,6 @@ def measure_qub_freq(
     else:
         show_period = int(cfg["soft_avgs"] / 10 + 0.9999)
 
-        def callback(ir, avg_d):
-            if instant_show and ir % show_period == 0:
-                avgi = avg_d[0, 0, :, 0] / ir
-                avgq = avg_d[0, 0, :, 1] / ir
-                update_show(fig, ax, dh, curve, np.abs(avgi + 1j * avgq))
-
         if conjugate_reset:
             cfg["r_f"] = r_f
             print("Use RFreqTwoToneProgramWithRedReset for hard loop")
@@ -80,6 +74,15 @@ def measure_qub_freq(
         else:
             print("Use RFreqTwoToneProgram for hard loop")
             prog = RFreqTwoToneProgram(soccfg, make_cfg(cfg))
+
+        if instant_show:
+
+            def callback(ir, avg_d):
+                if ir % show_period == 0:
+                    avgi, avgq = avg_d[0, 0, :, 0], avg_d[0, 0, :, 1]
+                    update_show(fig, ax, dh, curve, np.abs(avgi + 1j * avgq))
+        else:
+            callback = None
 
         fpts, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)
         signals = avgi[0][0] + 1j * avgq[0][0]

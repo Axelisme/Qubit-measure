@@ -27,7 +27,7 @@ def measure_lookback(soc, soccfg, cfg, qub_pulse=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
     assert cfg.get("reps", 1) == 1, "Only one rep is allowed for lookback"
 
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
 
     MAX_LEN = 3.32  # us
 

@@ -13,7 +13,7 @@ from ..flux import set_flux
 def measure_fid(soc, soccfg, cfg, threshold, angle, progress=False):
     """return: fidelity, (tp, fp, tn, fn)"""
 
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
     prog = SingleShotProgram(soccfg, deepcopy(cfg))
     result = prog.acquire_orig(soc, threshold=threshold, angle=angle, progress=progress)
     fp, tp = result[1][0][0]
@@ -24,7 +24,7 @@ def measure_fid(soc, soccfg, cfg, threshold, angle, progress=False):
 def measure_fid_auto(
     soc, soccfg, cfg, plot=False, progress=False, backend="regression"
 ):
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
     prog = SingleShotProgram(soccfg, deepcopy(cfg))
     i0, q0 = prog.acquire(soc, progress=progress)
     fid, threhold, angle = singleshot_analysis(i0, q0, plot=plot, backend=backend)
@@ -32,7 +32,7 @@ def measure_fid_auto(
 
 
 def measure_fid_score(soc, soccfg, cfg):
-    set_flux(cfg["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
     prog = SingleShotProgram(soccfg, deepcopy(cfg))
     i0, q0 = prog.acquire(soc, progress=False)
 
