@@ -2,6 +2,7 @@ matplotlib==3.6
 numpy==1.19.5
 scipy==1.10
 tqdm
+pyro4
 
 # for fitting
 # scikit-learn
