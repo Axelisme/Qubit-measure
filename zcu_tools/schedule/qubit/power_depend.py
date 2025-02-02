@@ -6,9 +6,9 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program import PowerDepProgram, RFreqTwoToneProgram, TwoToneProgram
 
-from ..tools import sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
+from ..tools import sweep2array
 
 
 def measure_qub_pdr_dep(
@@ -74,10 +74,8 @@ def measure_qub_pdr_dep(
                 signals2D = avgi[0][0] + 1j * avgq[0][0]
                 fpts, pdrs = fpt_pdr[0], fpt_pdr[1]
 
-                if instant_show:
-                    update_show2d(fig, ax, dh, im, np.abs(signals2D))
-
         if instant_show:
+            update_show2d(fig, ax, dh, im, np.abs(signals2D))
             clear_show()
     except Exception as e:
         print("Error during measurement:", e)
