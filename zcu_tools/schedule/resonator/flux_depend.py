@@ -36,7 +36,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     try:
         for i, flx in enumerate(flxs):
             cfg["flux"] = flx
-            set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
+            set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
             freq_tqdm.reset()
             freq_tqdm.refresh()

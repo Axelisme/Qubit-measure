@@ -47,7 +47,7 @@ def measure_ge_pdr_dep(
 ):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     res_pulse = cfg["dac"]["res_pulse"]
 
@@ -91,7 +91,7 @@ def measure_ge_pdr_dep(
 def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     res_pulse = cfg["dac"]["res_pulse"]
 
@@ -131,7 +131,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     res_pulse = cfg["dac"]["res_pulse"]
 

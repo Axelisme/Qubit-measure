@@ -1,16 +1,19 @@
 from collections import defaultdict
 
 import Pyro4
-from qick import AveragerProgram, RAveragerProgram, NDAveragerProgram
+import tqdm.auto as tqdm
 
+from qick import AveragerProgram, NDAveragerProgram, RAveragerProgram
+from zcu_tools.remote.client import pyro_callback
+
+from .dry_run import DryRunProgram
 from .readout import make_readout
 from .reset import make_reset
-
 
 SYNC_TIME = 200  # cycles
 
 
-class MyProgram:
+class MyProgram(DryRunProgram):
     proxy = None
 
     @classmethod
@@ -36,9 +39,11 @@ class MyProgram:
                 cfg["expts"] = self.sweep_cfg["expts"]
 
         self.resetM = make_reset(self.dac["reset"])
-        self.readoutM = make_readout(self.adc["readout"])
+        self.readoutM = make_readout(self.dac["readout"])
 
         for name, pulse in self.dac.items():
+            if not isinstance(pulse, dict):
+                continue
             if hasattr(self, name):
                 raise ValueError(f"Pulse name {name} already exists")
             setattr(self, name, pulse)
@@ -46,42 +51,71 @@ class MyProgram:
         self.ch_count = defaultdict(int)
         nqzs = dict()
         for pulse in self.dac.values():
+            if not isinstance(pulse, dict):
+                continue
             ch, nqz = pulse["ch"], pulse["nqz"]
             self.ch_count[ch] += 1
             cur_nqz = nqzs.setdefault(ch, nqz)
             assert cur_nqz == nqz, "Found different nqz on the same channel"
 
     def _override_cfg(self, kwargs: dict):
-        kwargs["progress"] = False  # progress bar is not supported
-        kwargs["round_callback"] = None  # callback is not supported
+        if kwargs.get("progress", False):
+            # upate in callback
+
+            bar = tqdm.tqdm(
+                total=self.cfg["rounds"] // kwargs["callback_period"],
+                desc="Soft avg",
+                leave=False,
+            )
+
+            kwargs["progress"] = False
+
+            if kwargs.get("round_callback") is not None:
+                callback = kwargs["round_callback"]
+
+                def _update(*args, **kwargs):
+                    bar.update()
+                    callback(*args, **kwargs)
+            else:
+
+                def _update(*args, **kwargs):
+                    bar.update()
+
+            kwargs["round_callback"] = _update
+
+        kwargs["round_callback"] = (
+            pyro_callback(kwargs["round_callback"])
+            if kwargs.get("round_callback") is not None
+            else None
+        )
 
         return kwargs
 
-    def acquire(self, soc, *args, **kwargs):
+    def acquire(self, soc, **kwargs):
         if self.proxy is not None:
             self._override_cfg(kwargs)
             try:
                 return self.proxy.run_program(
-                    self.__class__.__name__, self.cfg, *args, **kwargs
+                    self.__class__.__name__, self.cfg, **kwargs
                 )
             except Pyro4.errors.CommunicationError as e:
                 print("Error: ", e)
                 return None
 
-        return super().acquire(soc, *args, **kwargs)
+        return super().acquire(soc, **kwargs)
 
-    def acquire_decimated(self, soc, *args, **kwargs):
+    def acquire_decimated(self, soc, **kwargs):
         if self.proxy is not None:
             self._override_cfg(kwargs)
             try:
                 return self.proxy.run_program_decimated(
-                    self.__class__.__name__, self.cfg, *args, **kwargs
+                    self.__class__.__name__, self.cfg, **kwargs
                 )
             except Pyro4.errors.CommunicationError as e:
                 print("Error: ", e)
                 return None
 
-        return super().acquire_decimated(soc, *args, **kwargs)
+        return super().acquire_decimated(soc, **kwargs)
 
 
 class MyAveragerProgram(MyProgram, AveragerProgram):

@@ -14,10 +14,15 @@ def init_show(X, x_label, y_label, title=None):
     return fig, ax, dh, curve
 
 
-def update_show(fig, ax, dh, curve, Y):
+def update_show(fig, ax, dh, curve, Y, X=None):
+    if X is not None:
+        curve.set_xdata(X)
     curve.set_ydata(Y)
     ax.relim()
-    ax.autoscale(axis="y")
+    if X is None:
+        ax.autoscale(axis="y")
+    else:
+        ax.autoscale_view()
     dh.update(fig)
 
 

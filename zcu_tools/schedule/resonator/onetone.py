@@ -6,20 +6,20 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program import OneToneProgram
 
-from ..tools import map2adcfreq, sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show, update_show
+from ..tools import map2adcfreq, sweep2array
 
 
 def measure_res_freq(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     res_pulse = cfg["dac"]["res_pulse"]
 
     fpts = sweep2array(cfg["sweep"])
-    fpts = map2adcfreq(fpts, soccfg, res_pulse["ch"], cfg["adc"]["chs"][0])
+    fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
     show_period = int(len(fpts) / 10 + 0.99)
     if instant_show:

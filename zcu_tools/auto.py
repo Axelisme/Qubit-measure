@@ -123,9 +123,9 @@ def auto_derive(exp_cfg):
         # if default flux_dev is provided, use it
         dev_cfg.setdefault("flux_dev", flux_dev)
     # use none if not provided
-    dev_cfg.setdefault("flux_pulse", "none")
+    dev_cfg.setdefault("flux_dev", "none")
 
     # other
     flux_value = DefaultCfg.get_dev("flux")
-    if flux_value:
+    if flux_value is not None:
         dev_cfg.setdefault("flux", flux_value)

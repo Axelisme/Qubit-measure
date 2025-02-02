@@ -61,7 +61,7 @@ def measure_qub_flux_dep(
     try:
         for i, flx in enumerate(flux_tqdm):
             cfg["flux"] = flx
-            set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
+            set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
             if soft_loop:
                 freq_tqdm.reset()

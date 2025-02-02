@@ -2,6 +2,11 @@ import Pyro4
 
 import zcu_tools.program as zp
 
+Pyro4.config.SERIALIZER = "pickle"
+Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
+Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
+
+
 SUPPORTED_PROGRAMS = [
     "OneToneProgram",
     "RGainOneToneProgram",
@@ -30,13 +35,11 @@ class ProgramServer:
     @Pyro4.expose
     def run_program(self, name: str, cfg: dict, *args, **kwargs):
         prog = self._get_prog(name, cfg)
-        return prog.acquire(
-            self.soc, *args, **kwargs, progress=False, round_callback=None
-        )
+        kwargs["progress"] = False
+        return prog.acquire(self.soc, *args, **kwargs)
 
     @Pyro4.expose
     def run_program_decimated(self, name: str, cfg: dict, *args, **kwargs):
         prog = self._get_prog(name, cfg)
-        return prog.acquire_decimated(
-            self.soc, *args, **kwargs, progress=False, round_callback=None
-        )
+        kwargs["progress"] = False
+        return prog.acquire_decimated(self.soc, *args, **kwargs)

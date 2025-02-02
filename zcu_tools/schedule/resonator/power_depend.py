@@ -22,7 +22,7 @@ def measure_res_pdr_dep(
 ):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     res_pulse = cfg["dac"]["res_pulse"]
 

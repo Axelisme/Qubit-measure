@@ -4,8 +4,7 @@ import psutil
 import Pyro4
 import Pyro4.naming
 
-from qick import QickSoc
-from qick.qick_asm import QickConfig
+from qick import QickConfig, QickSoc
 
 from .server import ProgramServer
 
