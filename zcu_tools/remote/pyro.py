@@ -4,7 +4,7 @@ import psutil
 import Pyro4
 import Pyro4.naming
 
-from qick import QickConfig, QickSoc
+from qick import QickConfig
 
 from .server import ProgramServer
 
@@ -20,6 +20,8 @@ def start_server(
     ns_port=8888,
     iface="eth0",
 ):
+    from qick import QickSoc
+
     Pyro4.config.REQUIRE_EXPOSE = False
     Pyro4.config.SERIALIZER = "pickle"
     Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])

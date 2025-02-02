@@ -3,13 +3,15 @@ import numpy as np
 from IPython.display import clear_output, display
 
 
-def init_show(X, x_label, y_label, title=None):
+def init_show(X, x_label, y_label, title=None, **kwargs):
     fig, ax = plt.subplots()
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     if title:
         ax.set_title(title)
-    curve = ax.plot(X, np.zeros_like(X), "-o")[0]
+    kwargs.setdefault("linestyle", "-")
+    kwargs.setdefault("marker", "o")
+    curve = ax.plot(X, np.zeros_like(X), **kwargs)[0]
     dh = display(fig, display_id=True)
     return fig, ax, dh, curve
 

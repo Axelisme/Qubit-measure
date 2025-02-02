@@ -62,8 +62,16 @@ class MyProgram:
         if kwargs.get("progress", False):
             # upate in callback
 
+            if "callback_period" in kwargs:
+                preiod = kwargs["callback_period"]
+                total = int(float(self.cfg["rounds"]) / preiod + 0.99)
+            else:
+                total = 10
+                kwargs["callback_period"] = self.cfg["rounds"] // total
+
+            print(total)
             bar = tqdm.tqdm(
-                total=int(self.cfg["rounds"] / kwargs["callback_period"] + 0.99),
+                total=total,
                 desc="Soft avg",
                 leave=False,
             )

@@ -18,10 +18,10 @@ def measure_one(soc, soccfg, cfg, progress, qub_pulse):
     IQlist = prog.acquire_decimated(soc, progress=progress)
     Is, Qs = IQlist[0]
 
-    Ts = prog.cycles2us(np.arange(len(Is)), ro_ch=cfg["adc"]["chs"][0])
+    Ts = soccfg.cycles2us(np.arange(len(Is)), ro_ch=cfg["adc"]["chs"][0])
     Ts += cfg["adc"]["trig_offset"]
 
-    return Ts, Is, Qs
+    return Ts, np.array(Is), np.array(Qs)
 
 
 def measure_lookback(soc, soccfg, cfg, instant_show=False, qub_pulse=False):
@@ -48,6 +48,8 @@ def measure_lookback(soc, soccfg, cfg, instant_show=False, qub_pulse=False):
                 np.linspace(0, total_len, total_num, endpoint=False),
                 "Time (us)",
                 "Amplitude",
+                linestyle="-",
+                marker=None,
             )
 
         Ts = []
@@ -71,6 +73,7 @@ def measure_lookback(soc, soccfg, cfg, instant_show=False, qub_pulse=False):
 
             trig_offset += MAX_LEN
             bar.update()
+
         bar.close()
         Ts = np.concatenate(Ts)
         Is = np.concatenate(Is)
