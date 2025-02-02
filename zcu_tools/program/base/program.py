@@ -6,14 +6,14 @@ import tqdm.auto as tqdm
 from qick import AveragerProgram, NDAveragerProgram, RAveragerProgram
 from zcu_tools.remote.client import pyro_callback
 
-from .dry_run import DryRunProgram
+from .dry_run import DryRunProgram  # noqa
 from .readout import make_readout
 from .reset import make_reset
 
 SYNC_TIME = 200  # cycles
 
 
-class MyProgram(DryRunProgram):
+class MyProgram:
     proxy = None
 
     @classmethod
