@@ -1,20 +1,19 @@
 from ..base import set_pulse
+from ..twotone import PULSE_DELAY, SYNC_TIME, declare_pulse
 from .base import TimeProgram
-from ..twotone import declare_pulse, PULSE_DELAY, SYNC_TIME
 
 
 class T2EchoProgram(TimeProgram):
     def initialize(self):
-        self.parse_sweep()
         self.resetM.init(self)
         self.readoutM.init(self)
 
         declare_pulse(self, self.pi_pulse, "pi")
         declare_pulse(self, self.pi2_pulse, "pi2")
 
-        assert (
-            self.pi_pulse["ch"] == self.pi2_pulse["ch"]
-        ), "pi and pi/2 pulse must be on the same channel"
+        assert self.pi_pulse["ch"] == self.pi2_pulse["ch"], (
+            "pi and pi/2 pulse must be on the same channel"
+        )
         self.declare_wait_reg(self.pi_pulse["ch"])
 
         self.synci(SYNC_TIME)

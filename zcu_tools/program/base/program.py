@@ -63,7 +63,7 @@ class MyProgram:
             # upate in callback
 
             bar = tqdm.tqdm(
-                total=self.cfg["rounds"] // kwargs["callback_period"],
+                total=int(self.cfg["rounds"] / kwargs["callback_period"] + 0.99),
                 desc="Soft avg",
                 leave=False,
             )

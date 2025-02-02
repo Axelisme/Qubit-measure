@@ -72,6 +72,12 @@ class DryRunProgram:
     def sync_all(self, *args, **kwargs):
         pass
 
+    def sync(self, *args, **kwargs):
+        pass
+
+    def regwi(self, *args, **kwargs):
+        pass
+
     def mathi(self, *args, **kwargs):
         pass
 
