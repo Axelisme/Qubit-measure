@@ -60,7 +60,8 @@ class MyProgram:
 
     def _override_cfg(self, kwargs: dict):
         if kwargs.get("progress", False):
-            # upate in callback
+            # replace internal progress with callback
+            # to make remote progress bar work
 
             if "callback_period" in kwargs:
                 preiod = kwargs["callback_period"]
@@ -69,7 +70,6 @@ class MyProgram:
                 total = 10
                 kwargs["callback_period"] = self.cfg["rounds"] // total
 
-            print(total)
             bar = tqdm.tqdm(
                 total=total,
                 desc="Soft avg",
@@ -114,7 +114,7 @@ class MyProgram:
 
     def acquire_decimated(self, soc, **kwargs):
         if self.proxy is not None:
-            self._override_cfg(kwargs)
+            kwargs["progress"] = False  # disable progress bar for decimated
             try:
                 return self.proxy.run_program_decimated(
                     self.__class__.__name__, self.cfg, **kwargs
