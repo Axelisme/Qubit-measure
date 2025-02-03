@@ -1,11 +1,9 @@
-import socket
-
-import psutil
 import Pyro4
 import Pyro4.naming
 
 from qick import QickConfig
 
+from ..tools import get_ip_address
 from .server import ProgramServer
 
 
@@ -32,23 +30,10 @@ def start_server(
     print("found nameserver")
 
     # if we have multiple network interfaces, we want to register the daemon using the IP address that faces the nameserver
-    host = Pyro4.socketutil.getInterfaceAddress(ns._pyroUri.host)
     # if the nameserver is running on the QICK, the above will usually return the loopback address - not useful
+    host = Pyro4.socketutil.getInterfaceAddress(ns._pyroUri.host)
     if host == "127.0.0.1":
-        # if the eth0 interface has an IPv4 address, use that
-        # otherwise use the address of any interface starting with "eth0" (e.g. eth0:1, which is typically a static IP)
-        # unless you have an unusual network config (e.g. VPN), this is the interface clients will want to connect to
-        for name, addrs in psutil.net_if_addrs().items():
-            addrs_v4 = [
-                addr.address
-                for addr in addrs
-                if addr.family == socket.AddressFamily.AF_INET
-            ]
-            if len(addrs_v4) == 1:
-                if name.startswith(iface):
-                    host = addrs_v4[0]
-                if name == iface:
-                    break
+        host = get_ip_address(iface)
     daemon = Pyro4.Daemon(host=host)
 
     soc = QickSoc()
