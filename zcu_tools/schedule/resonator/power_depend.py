@@ -7,9 +7,9 @@ from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
 from zcu_tools.program import OneToneProgram
 
-from ..tools import map2adcfreq, sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
+from ..tools import map2adcfreq, sweep2array
 
 
 def measure_res_pdr_dep(
@@ -27,9 +27,9 @@ def measure_res_pdr_dep(
     res_pulse = cfg["dac"]["res_pulse"]
 
     fpts = sweep2array(cfg["sweep"]["freq"])
-    fpts = map2adcfreq(fpts, soccfg, res_pulse["ch"], cfg["adc"]["chs"][0])
+    fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    pdrs = sweep2array(cfg["sweep"]["gain"])
+    pdrs = sweep2array(cfg["sweep"]["gain"], int_step=True)
 
     reps_ref = cfg["reps"]
 

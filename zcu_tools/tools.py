@@ -46,9 +46,9 @@ def make_sweep(
     step: Optional[float] = None,
     force_int: bool = False,
 ) -> dict:
-    assert (
-        stop is not None or step is not None or expts is not None
-    ), "Not enough information to define a sweep."
+    assert stop is not None or step is not None or expts is not None, (
+        "Not enough information to define a sweep."
+    )
 
     error_msg = "Not enough information to define a sweep."
     if expts is None:
@@ -69,3 +69,19 @@ def make_sweep(
     assert step != 0, f"step must not be zero, but got {step}"
 
     return {"start": start, "stop": stop, "expts": expts, "step": step}
+
+
+def get_ip_address(ifname):
+    import fcntl
+    import socket
+    import struct
+
+    # get the IP address of the interface
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return socket.inet_ntoa(
+        fcntl.ioctl(
+            s.fileno(),
+            0x8915,  # SIOCGIFADDR
+            struct.pack("256s", bytes(ifname[:15], "utf-8")),
+        )[20:24]
+    )

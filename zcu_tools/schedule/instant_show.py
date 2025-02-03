@@ -10,7 +10,7 @@ def init_show(X, x_label, y_label, title=None, **kwargs):
     if title:
         ax.set_title(title)
     kwargs.setdefault("linestyle", "-")
-    kwargs.setdefault("marker", "o")
+    kwargs.setdefault("marker", ".")
     curve = ax.plot(X, np.zeros_like(X), **kwargs)[0]
     dh = display(fig, display_id=True)
     return fig, ax, dh, curve

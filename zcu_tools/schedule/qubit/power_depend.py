@@ -21,7 +21,9 @@ def measure_qub_pdr_dep(
     freq_cfg = cfg["sweep"]["freq"]
     pdr_cfg = cfg["sweep"]["gain"]
     fpts = sweep2array(freq_cfg, soft_freq, "Custom frequency sweep only for soft loop")
-    pdrs = sweep2array(pdr_cfg, soft_pdr, "Custom power sweep only for soft loop")
+    pdrs = sweep2array(
+        pdr_cfg, soft_pdr, "Custom power sweep only for soft loop", int_step=True
+    )
 
     qub_pulse = cfg["dac"]["qub_pulse"]
 

@@ -49,7 +49,9 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
     cfg = deepcopy(cfg)
 
-    pdrs = sweep2array(cfg["sweep"], soft_loop, "Custom power sweep only for soft loop")
+    pdrs = sweep2array(
+        cfg["sweep"], soft_loop, "Custom power sweep only for soft loop", int_step=True
+    )
 
     show_period = int(len(pdrs) / 10 + 0.99)
     if instant_show:

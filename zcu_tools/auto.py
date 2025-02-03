@@ -78,7 +78,7 @@ def auto_derive(exp_cfg):
     ## derive each pulse
     for name, pulse_cfg in dac_cfg.items():
         # check if it is a pulse
-        if isinstance(pulse_cfg, dict) and "style" in pulse_cfg:
+        if name.endswith("_pulse"):
             dac_cfg[name] = auto_derive_pulse(name, pulse_cfg)
 
     ## reset and measure module

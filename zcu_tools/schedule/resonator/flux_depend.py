@@ -7,9 +7,9 @@ from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
 from zcu_tools.program import OneToneProgram
 
-from ..tools import map2adcfreq, sweep2array
 from ..flux import set_flux
 from ..instant_show import clear_show, init_show2d, update_show2d
+from ..tools import map2adcfreq, sweep2array
 
 
 def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
@@ -22,7 +22,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
 
     freq_cfg = cfg["sweep"]["freq"]
     fpts = sweep2array(freq_cfg)
-    fpts = map2adcfreq(fpts, soccfg, res_pulse["ch"], cfg["adc"]["chs"][0])
+    fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
     flux_cfg = cfg["sweep"]["flux"]
     flxs = sweep2array(flux_cfg)

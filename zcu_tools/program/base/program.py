@@ -1,6 +1,5 @@
 from collections import defaultdict
 
-import Pyro4
 import tqdm.auto as tqdm
 
 from qick import AveragerProgram, NDAveragerProgram, RAveragerProgram
@@ -102,26 +101,18 @@ class MyProgram:
     def acquire(self, soc, **kwargs):
         if self.proxy is not None:
             self._override_cfg(kwargs)
-            try:
-                return self.proxy.run_program(
-                    self.__class__.__name__, self.cfg, **kwargs
-                )
-            except Pyro4.errors.CommunicationError as e:
-                print("Error: ", e)
-                return None
+            print(f"Running {self.__class__.__name__} on remote")
+            return self.proxy.run_program(self.__class__.__name__, self.cfg, **kwargs)
 
+        print(f"Running {self.__class__.__name__} locally")
         return super().acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
         if self.proxy is not None:
             kwargs["progress"] = False  # disable progress bar for decimated
-            try:
-                return self.proxy.run_program_decimated(
-                    self.__class__.__name__, self.cfg, **kwargs
-                )
-            except Pyro4.errors.CommunicationError as e:
-                print("Error: ", e)
-                return None
+            return self.proxy.run_program_decimated(
+                self.__class__.__name__, self.cfg, **kwargs
+            )
 
         return super().acquire_decimated(soc, **kwargs)
 

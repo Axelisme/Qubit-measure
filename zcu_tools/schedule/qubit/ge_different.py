@@ -6,7 +6,6 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program import TwoToneProgram
 
-from ..tools import map2adcfreq, sweep2array, check_time_sweep
 from ..flux import set_flux
 from ..instant_show import (
     clear_show,
@@ -15,6 +14,7 @@ from ..instant_show import (
     update_show,
     update_show2d,
 )
+from ..tools import check_time_sweep, map2adcfreq, sweep2array
 
 
 def measure_one(soc, soccfg, cfg):
@@ -55,7 +55,7 @@ def measure_ge_pdr_dep(
     pdr_cfg = cfg["sweep"]["gain"]
     fpts = sweep2array(freq_cfg)
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
-    pdrs = sweep2array(pdr_cfg)
+    pdrs = sweep2array(pdr_cfg, int_step=True)
 
     if instant_show:
         fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
