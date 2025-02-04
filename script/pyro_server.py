@@ -2,13 +2,8 @@
 """This file starts a pyro nameserver and the proxying server."""
 
 import argparse
-import os
-import sys
 import threading
 import time
-
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from zcu_tools.remote.pyro import start_nameserver, start_server
 
 ############
 # default parameters
@@ -35,16 +30,14 @@ iface = args.iface
 
 ############
 # start the nameserver process
-try:
-    ns_t = threading.Thread(
-        target=start_nameserver, args=(ns_host, ns_port), daemon=True
-    )
-    ns_t.start()
+import os  # noqa
+import sys  # noqa
 
-except Exception as e:
-    print(f"Failed to start nameserver: {e}", file=sys.stderr)
-    sys.exit(1)
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+from zcu_tools.remote.pyro import start_nameserver, start_server  # noqa
 
+ns_t = threading.Thread(target=start_nameserver, args=(ns_host, ns_port), daemon=True)
+ns_t.start()
 time.sleep(2)  # wait for the nameserver to start up
 
 ############

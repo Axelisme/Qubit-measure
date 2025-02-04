@@ -101,10 +101,8 @@ class MyProgram:
     def acquire(self, soc, **kwargs):
         if self.proxy is not None:
             self._override_cfg(kwargs)
-            print(f"Running {self.__class__.__name__} on remote")
             return self.proxy.run_program(self.__class__.__name__, self.cfg, **kwargs)
 
-        print(f"Running {self.__class__.__name__} locally")
         return super().acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):

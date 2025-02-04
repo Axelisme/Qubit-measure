@@ -1,5 +1,8 @@
 import threading
+
 import Pyro4
+
+from .config import config
 
 Pyro4.config.SERIALIZER = "pickle"
 Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
@@ -13,7 +16,7 @@ _daemon_thread = None
 def get_daemon():
     global _daemon, _daemon_thread
     if _daemon is None:
-        _daemon = Pyro4.Daemon()  # 以隨機可用埠口建立
+        _daemon = Pyro4.Daemon(host=config.LOCAL_IP, port=config.LOCAL_PORT)
         # 將 daemon.requestLoop 放在背景執行緒執行
         _daemon_thread = threading.Thread(target=_daemon.requestLoop, daemon=True)
         _daemon_thread.start()
@@ -27,6 +30,7 @@ class CallbackWrapper(object):
         self.func = func
 
     @Pyro4.expose
+    @Pyro4.callback
     @Pyro4.oneway
     def oneway_callback(self, *args, **kwargs):
         return self.func(*args, **kwargs)
@@ -44,6 +48,7 @@ def pyro_callback(func):
     callback = CallbackWrapper(func)
 
     # 將 callback 物件註冊到 daemon 中，取得其 URI
-    daemon.register(callback)
+    uri = daemon.register(callback)
+    print(f"Registered callback {func.__name__} at {uri}")
     # 建立並回傳一個 proxy，這個 proxy 可供遠端呼叫
     return callback
