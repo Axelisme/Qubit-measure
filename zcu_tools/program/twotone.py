@@ -1,12 +1,12 @@
-from qick.averager_program import QickSweep
+from qick.averager_program import QickSweep, merge_sweeps
 
 from .base import (
+    SYNC_TIME,
     MyAveragerProgram,
-    MyRAveragerProgram,
     MyNDAveragerProgram,
+    MyRAveragerProgram,
     declare_pulse,
     set_pulse,
-    SYNC_TIME,
 )
 
 PULSE_DELAY = 0.05  # us
@@ -156,9 +156,25 @@ class PowerDepProgram(MyNDAveragerProgram):
         sweep_cfg = self.sweep_cfg["gain"]
         self.qub_pulse["gain"] = sweep_cfg["start"]
         r_gain = self.get_gen_reg(self.qub_pulse["ch"], "gain")
+        r_gain2 = self.get_gen_reg(self.qub_pulse["ch"], "gain2")
         self.add_sweep(
-            QickSweep(
-                self, r_gain, sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"]
+            merge_sweeps(
+                [
+                    QickSweep(
+                        self,
+                        r_gain,
+                        sweep_cfg["start"],
+                        sweep_cfg["stop"],
+                        sweep_cfg["expts"],
+                    ),
+                    QickSweep(
+                        self,
+                        r_gain2,
+                        sweep_cfg["start"] // 2,
+                        sweep_cfg["stop"] // 2,
+                        sweep_cfg["expts"],
+                    ),
+                ]
             )
         )
 
@@ -169,8 +185,6 @@ class PowerDepProgram(MyNDAveragerProgram):
             raise ValueError(
                 "Only one pulse per channel is supported in PowerDepProgram"
             )
-        if self.qub_pulse["style"] == "flat_top":  # due to bug
-            raise ValueError("Flat top pulse is not supported in PowerDepProgram")
         declare_pulse(self, self.qub_pulse, "qub_pulse")
         self.add_freq_sweep()
         self.add_gain_sweep()
