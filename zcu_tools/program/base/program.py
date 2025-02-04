@@ -12,7 +12,7 @@ from .reset import make_reset
 SYNC_TIME = 200  # cycles
 
 
-class MyProgram:
+class MyProgram(DryRunProgram):
     proxy = None
 
     @classmethod
@@ -57,13 +57,13 @@ class MyProgram:
             cur_nqz = nqzs.setdefault(ch, nqz)
             assert cur_nqz == nqz, "Found different nqz on the same channel"
 
-    def _override_cfg(self, kwargs: dict):
+    def _override_remote(self, kwargs: dict):
         if kwargs.get("progress", False):
             # replace internal progress with callback
             # to make remote progress bar work
 
             kwargs.setdefault("callback_period", self.cfg["rounds"] // 10)
-            total = int(float(self.cfg["rounds"]) / kwargs["callback_period"] + 0.99)
+            total = int(self.cfg["rounds"] / kwargs["callback_period"] + 0.99)
 
             bar = tqdm.tqdm(
                 total=total,
@@ -96,14 +96,14 @@ class MyProgram:
 
     def acquire(self, soc, **kwargs):
         if self.proxy is not None:
-            self._override_cfg(kwargs)
+            self._override_remote(kwargs)
             return self.proxy.run_program(self.__class__.__name__, self.cfg, **kwargs)
 
         return super().acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
         if self.proxy is not None:
-            self._override_cfg(kwargs)
+            self._override_remote(kwargs)
             return self.proxy.run_program_decimated(
                 self.__class__.__name__, self.cfg, **kwargs
             )

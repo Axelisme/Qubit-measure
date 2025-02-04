@@ -3,7 +3,7 @@ from .ge_different import measure_ge_pdr_dep, measure_ge_ro_dep, measure_ge_trig
 from .power_depend import measure_qub_pdr_dep
 from .rabi import measure_amprabi, measure_lenrabi
 from .reset import measure_reset_saturation
-from .singleshot import measure_fid, measure_fid_auto
+from .singleshot import measure_fid_auto
 from .time_domain import measure_t1, measure_t2echo, measure_t2ramsey
 from .twotone import measure_qub_freq, measure_qub_freq_with_reset
 
@@ -18,7 +18,6 @@ __all__ = [
     "measure_t1",
     "measure_t2ramsey",
     "measure_t2echo",
-    "measure_fid",
     "measure_fid_auto",
     "measure_ge_pdr_dep",
     "measure_ge_ro_dep",

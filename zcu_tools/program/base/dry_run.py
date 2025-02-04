@@ -1,7 +1,8 @@
-import numpy as np
-from tqdm.auto import trange
-import Pyro4
 import time
+
+import numpy as np
+import Pyro4
+from tqdm.auto import trange
 
 
 class DryRunProgram:
@@ -81,6 +82,9 @@ class DryRunProgram:
     def mathi(self, *args, **kwargs):
         pass
 
+    def bitw(self, *args, **kwargs):
+        pass
+
     def pulse(self, *args, **kwargs):
         pass
 
@@ -137,7 +141,10 @@ class DryRunProgram:
         # RAveragerProgram
         xs = self.cfg["start"] + np.arange(self.cfg["expts"]) * self.cfg["step"]
         ys = np.sin(xs / (xs.max() - xs.min()) * 2 * np.pi) * 0.1
-        ys = np.stack((ys, ys), axis=-1)
+        ys2 = np.copy(ys)
+        # ys2[1::2] += 0.1
+        ys = np.stack((ys, ys2), axis=-1)
+
         avg_d = [np.zeros((1, len(xs), 2))]
         std2_d = [np.ones((1, len(xs), 2))]
         for ir in trange(self.soft_avgs, leave=False, disable=not progress):
@@ -165,8 +172,6 @@ class DryRunProgram:
     def acquire(
         self, soc, progress=False, round_callback=None, callback_period=100, **kwargs
     ):
-        self.di_buf = [np.random.randn(self.cfg["expts"] * self.cfg["reps"])]
-        self.dq_buf = [np.random.randn(self.cfg["expts"] * self.cfg["reps"])]
         if hasattr(self, "update"):  # RAveragerProgram
             return self.acquire_ravg(
                 soc,

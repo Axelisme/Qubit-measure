@@ -11,7 +11,7 @@ def get_rotate_angle(Ig, Qg, Ie, Qe):
     Y = np.hstack((np.zeros(len(Ig)), np.ones(len(Ie))))
 
     model = LogisticRegression(
-        penalty="l2", C=10, solver="liblinear", max_iter=1000
+        penalty="l1", C=100, solver="liblinear", max_iter=1000
     ).fit(X, Y)
 
     # ax + by + c = 0

@@ -2,23 +2,12 @@ from copy import deepcopy
 
 import numpy as np
 
-from zcu_tools.analysis import fidelity_func, singleshot_analysis
+from zcu_tools.analysis import singleshot_analysis
 from zcu_tools.analysis.single_shot.base import rotate
 from zcu_tools.analysis.single_shot.regression import get_rotate_angle
 from zcu_tools.program import SingleShotProgram
 
 from ..flux import set_flux
-
-
-def measure_fid(soc, soccfg, cfg, threshold, angle, progress=False):
-    """return: fidelity, (tp, fp, tn, fn)"""
-
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
-    prog = SingleShotProgram(soccfg, deepcopy(cfg))
-    result = prog.acquire_orig(soc, threshold=threshold, angle=angle, progress=progress)
-    fp, tp = result[1][0][0]
-    fn, tn = 1 - fp, 1 - tp
-    return fidelity_func(tp, tn, fp, fn)
 
 
 def measure_fid_auto(
