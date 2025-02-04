@@ -58,9 +58,11 @@ class DefaultCfg:
         return cls.adc_cfgs.get(name)
 
     @classmethod
-    def set_pulse(cls, behavior="force", **pulse_cfgs):
+    def set_pulse(cls, **pulse_cfgs):
         dac_pulses = cls.dac_cfgs.setdefault("pulses", {})
-        deepupdate(dac_pulses, pulse_cfgs, behavior=behavior)
+        # directly overwrite the pulse
+        for k, v in pulse_cfgs.items():
+            dac_pulses[k] = v
 
     @classmethod
     def get_pulse(cls, name: str) -> dict:

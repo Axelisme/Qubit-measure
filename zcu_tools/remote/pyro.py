@@ -3,21 +3,16 @@ import Pyro4.naming
 
 from qick import QickConfig
 
-from ..tools import get_ip_address
 from .server import ProgramServer
 
 
-def start_nameserver(ns_host="0.0.0.0", ns_port=8888):
+def start_nameserver(ns_port):
     Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
     Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
-    Pyro4.naming.startNSloop(host=ns_host, port=ns_port)
+    Pyro4.naming.startNSloop(host="0.0.0.0", port=ns_port)
 
 
-def start_server(
-    ns_host,
-    ns_port=8888,
-    iface="eth0",
-):
+def start_server(host: str, port: int, ns_port: int):
     from qick import QickSoc
 
     Pyro4.config.REQUIRE_EXPOSE = False
@@ -26,37 +21,37 @@ def start_server(
     Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
 
     print("looking for nameserver . . .")
-    ns = Pyro4.locateNS(host=ns_host, port=ns_port)
+    ns = Pyro4.locateNS(host="0.0.0.0", port=ns_port)
     print("found nameserver")
 
-    # if we have multiple network interfaces, we want to register the daemon using the IP address that faces the nameserver
-    # if the nameserver is running on the QICK, the above will usually return the loopback address - not useful
-    host = Pyro4.socketutil.getInterfaceAddress(ns._pyroUri.host)
-    if host == "127.0.0.1":
-        host = get_ip_address(iface)
-    daemon = Pyro4.Daemon(host=host)
+    if host in ["localhost", "0.0.0.0", "127.0.0.1"]:
+        print(
+            "WARNING: using localhost as host, this will only work on the local machine"
+        )
+    print(f"starting daemon on {host}:{port}")
+    daemon = Pyro4.Daemon(host=host, port=port)
 
+    # create and register the QickSoc
     soc = QickSoc()
-    print("initialized QICK")
-
-    # register the QickSoc in the daemon (so the daemon exposes the QickSoc over Pyro4)
-    # and in the nameserver (so the client can find the QickSoc)
-    ns.register("myqick", daemon.register(soc))
-    print("registered QICK")
+    uri = daemon.register(soc)
+    ns.register("myqick", uri)
+    print(f"registered QICK at {uri}")
 
     for obj in soc.autoproxy:
         daemon.register(obj)
         print("registered member " + str(obj))
 
+    # create and register the program server
     prog_server = ProgramServer(soc)
-    ns.register("prog_server", daemon.register(prog_server))
-    print("registered ProgramServer")
+    uri = daemon.register(prog_server)
+    ns.register("prog_server", uri)
+    print(f"registered program server at {uri}")
 
     print("starting daemon")
     daemon.requestLoop()  # this will run forever until interrupted
 
 
-def make_proxy(ns_host, ns_port=8888, remote_traceback=True):
+def make_proxy(ns_host, ns_port, remote_traceback=True):
     Pyro4.config.SERIALIZER = "pickle"
     Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
 
@@ -90,4 +85,4 @@ def make_proxy(ns_host, ns_port=8888, remote_traceback=True):
         except Exception as e:
             raise RuntimeError("Failed to set up Pyro exception handler: ", e)
 
-    return (soc, soccfg, prog_server)
+    return soc, soccfg, prog_server

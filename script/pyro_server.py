@@ -6,27 +6,13 @@ import threading
 import time
 
 ############
-# default parameters
-ns_port = 8887
-ns_host = "0.0.0.0"
-# iface = "tailscale0"
-iface = "eth0"
-
-############
 # parse command line arguments
 parser = argparse.ArgumentParser()
-parser.add_argument(
-    "--port", "-p", type=int, default=ns_port, help="The nameserver port"
-)
-parser.add_argument("--host", "-H", default=ns_host, help="The nameserver host ip")
-parser.add_argument(
-    "--iface", "-i", default=iface, help="The network interface to bind to"
-)
+parser.add_argument("--host", "-H", default="localhost", help="Host ip")
+parser.add_argument("--port", "-p", type=int, default=0, help="Daemon port")
+parser.add_argument("--ns-port", "-np", type=int, default=8080, help="Nameserver port")
 
 args = parser.parse_args()
-ns_host = args.host
-ns_port = args.port
-iface = args.iface
 
 ############
 # start the nameserver process
@@ -36,10 +22,10 @@ import sys  # noqa
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from zcu_tools.remote.pyro import start_nameserver, start_server  # noqa
 
-ns_t = threading.Thread(target=start_nameserver, args=(ns_host, ns_port), daemon=True)
+ns_t = threading.Thread(target=start_nameserver, args=(args.ns_port,), daemon=True)
 ns_t.start()
 time.sleep(2)  # wait for the nameserver to start up
 
 ############
 # start the qick proxy server
-start_server(ns_host, ns_port, iface=iface)
+start_server(args.host, args.port, args.ns_port)
