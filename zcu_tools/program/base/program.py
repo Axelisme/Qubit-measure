@@ -12,7 +12,7 @@ from .reset import make_reset
 SYNC_TIME = 200  # cycles
 
 
-class MyProgram(DryRunProgram):
+class MyProgram:
     proxy = None
 
     @classmethod
