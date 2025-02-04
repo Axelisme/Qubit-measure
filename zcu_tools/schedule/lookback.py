@@ -24,7 +24,9 @@ def measure_one(soc, soccfg, cfg, progress, qub_pulse):
     return Ts, np.array(Is), np.array(Qs)
 
 
-def measure_lookback(soc, soccfg, cfg, instant_show=False, qub_pulse=False):
+def measure_lookback(
+    soc, soccfg, cfg, progress=True, instant_show=False, qub_pulse=False
+):
     cfg = deepcopy(cfg)  # prevent in-place modification
     assert cfg.get("reps", 1) == 1, "Only one rep is allowed for lookback"
 
@@ -33,14 +35,21 @@ def measure_lookback(soc, soccfg, cfg, instant_show=False, qub_pulse=False):
     MAX_LEN = 3.32  # us
 
     if cfg["adc"]["ro_length"] <= MAX_LEN:
-        Ts, Is, Qs = measure_one(soc, soccfg, cfg, progress=True, qub_pulse=qub_pulse)
+        Ts, Is, Qs = measure_one(
+            soc, soccfg, cfg, progress=progress, qub_pulse=qub_pulse
+        )
     else:
         # measure multiple times
         trig_offset = cfg["adc"]["trig_offset"]
         total_len = trig_offset + cfg["adc"]["ro_length"]
         cfg["adc"]["ro_length"] = MAX_LEN
 
-        bar = tqdm(total=int(total_len / MAX_LEN + 0.999), desc="Readout", smoothing=0)
+        bar = tqdm(
+            total=int(total_len / MAX_LEN + 0.999),
+            desc="Readout",
+            smoothing=0,
+            disable=not progress,
+        )
 
         if instant_show:
             total_num = soccfg.us2cycles(total_len, ro_ch=cfg["adc"]["chs"][0])

@@ -20,11 +20,9 @@ def map2adcfreq(soccfg, fpts, gen_ch, ro_ch):
     return fpts
 
 
-def sweep2array(sweep, soft_loop=True, err_str=None, int_step=False):
+def sweep2array(sweep, soft_loop=True, err_str=None):
     if isinstance(sweep, dict):
-        if int_step:
-            return np.arange(sweep["start"], sweep["stop"] + 1, sweep["step"])
-        return np.linspace(sweep["start"], sweep["stop"], sweep["expts"])
+        return sweep["start"] + np.arange(sweep["expts"]) * sweep["step"]
 
     assert soft_loop, err_str
     return np.array(sweep)
