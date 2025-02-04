@@ -122,19 +122,19 @@ def measure_qub_freq_with_reset(
                 update_show(fig, ax, dh, curve, np.abs(signals))
 
     else:
-        show_period = int(cfg["rounds"] / 10 + 0.9999)
-
         cfg["r_f"] = r_f
         print("Use RFreqTwoToneProgramWithRedReset for hard loop")
         prog = RFreqTwoToneProgramWithRedReset(soccfg, make_cfg(cfg))
 
         if instant_show:
+            show_period = int(cfg["rounds"] / 10 + 0.9999)
 
             def callback(ir, avg_d):
                 avgi, avgq = avg_d[0][0, :, 0], avg_d[0][0, :, 1]
                 update_show(fig, ax, dh, curve, np.abs(avgi + 1j * avgq))
         else:
             callback = None
+            show_period = None
 
         fpts, avgi, avgq = prog.acquire(
             soc, progress=True, round_callback=callback, callback_period=show_period

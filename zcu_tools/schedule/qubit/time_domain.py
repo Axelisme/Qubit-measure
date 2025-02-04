@@ -26,14 +26,19 @@ def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
     if instant_show:
         fig, ax, dh, curve = init_show(ts, "Time (us)", "Amplitude")
 
+        show_period = int(cfg["rounds"] / 10 + 0.9999)
+
         def callback(ir, avg_d):
             avgi, avgq = avg_d[0][0, :, 0], avg_d[0][0, :, 1]
             update_show(fig, ax, dh, curve, np.abs(avgi + 1j * avgq))
     else:
         callback = None
+        show_period = None
 
     prog = T2RamseyProgram(soccfg, deepcopy(cfg))
-    ts, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)
+    ts, avgi, avgq = prog.acquire(
+        soc, progress=True, round_callback=callback, callback_period=show_period
+    )
     signals = avgi[0][0] + 1j * avgq[0][0]
 
     if instant_show:
@@ -51,14 +56,19 @@ def measure_t1(soc, soccfg, cfg, instant_show=False):
     if instant_show:
         fig, ax, dh, curve = init_show(ts, "Time (us)", "Amplitude")
 
+        show_period = int(cfg["rounds"] / 10 + 0.9999)
+
         def callback(ir, avg_d):
             avgi, avgq = avg_d[0][0, :, 0], avg_d[0][0, :, 1]
             update_show(fig, ax, dh, curve, np.abs(avgi + 1j * avgq))
     else:
         callback = None
+        show_period = None
 
     prog = T1Program(soccfg, deepcopy(cfg))
-    ts, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)
+    ts, avgi, avgq = prog.acquire(
+        soc, progress=True, round_callback=callback, callback_period=show_period
+    )
     signals = avgi[0][0] + 1j * avgq[0][0]
 
     if instant_show:
@@ -76,14 +86,19 @@ def measure_t2echo(soc, soccfg, cfg, instant_show=False):
     if instant_show:
         fig, ax, dh, curve = init_show(2 * ts, "Time (us)", "Amplitude")
 
+        show_period = int(cfg["rounds"] / 10 + 0.9999)
+
         def callback(ir, avg_d):
             avgi, avgq = avg_d[0][0, :, 0], avg_d[0][0, :, 1]
             update_show(fig, ax, dh, curve, np.abs(avgi + 1j * avgq))
     else:
         callback = None
+        show_period = None
 
     prog = T2EchoProgram(soccfg, deepcopy(cfg))
-    ts, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)
+    ts, avgi, avgq = prog.acquire(
+        soc, progress=True, round_callback=callback, callback_period=show_period
+    )
     signals = avgi[0][0] + 1j * avgq[0][0]
 
     if instant_show:
