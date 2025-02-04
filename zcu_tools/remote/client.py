@@ -38,17 +38,14 @@ class CallbackWrapper(object):
 
 # 定義 decorator，將原函數包裝成 callback proxy 物件
 def pyro_callback(func):
-    """
-    使用此 decorator 包裝後，原本的函數會被註冊到本地的 Pyro4 Daemon，
-    並傳回一個 Pyro4.Proxy 物件，可直接傳遞給遠端方法作為 callback 使用。
-    """
     daemon = get_daemon()
 
     # 用 CallbackWrapper 包裝原始函數
     callback = CallbackWrapper(func)
 
     # 將 callback 物件註冊到 daemon 中，取得其 URI
-    uri = daemon.register(callback)
-    print(f"Registered callback {func.__name__} at {uri}")
-    # 建立並回傳一個 proxy，這個 proxy 可供遠端呼叫
+    daemon.register(callback)
+    # uri = daemon.register(callback)
+    # print(f"Registered callback {func.__name__} at {uri}")
+
     return callback

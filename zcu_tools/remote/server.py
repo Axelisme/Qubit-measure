@@ -36,14 +36,10 @@ class ProgramServer:
     def run_program(self, name: str, cfg: dict, *args, **kwargs):
         prog = self._get_prog(name, cfg)
         kwargs["progress"] = False
-        if callable(kwargs.get("round_callback")):
-            kwargs["round_callback"] = None  # remove non-serializable callback
         return prog.acquire(self.soc, *args, **kwargs)
 
     @Pyro4.expose
     def run_program_decimated(self, name: str, cfg: dict, *args, **kwargs):
         prog = self._get_prog(name, cfg)
         kwargs["progress"] = False
-        if callable(kwargs.get("round_callback")):
-            kwargs["round_callback"] = None  # remove non-serializable callback
         return prog.acquire_decimated(self.soc, *args, **kwargs)

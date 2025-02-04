@@ -62,16 +62,12 @@ class MyProgram:
             # replace internal progress with callback
             # to make remote progress bar work
 
-            if "callback_period" in kwargs:
-                preiod = kwargs["callback_period"]
-                total = int(float(self.cfg["rounds"]) / preiod + 0.99)
-            else:
-                total = 10
-                kwargs["callback_period"] = self.cfg["rounds"] // total
+            kwargs.setdefault("callback_period", self.cfg["rounds"] // 10)
+            total = int(float(self.cfg["rounds"]) / kwargs["callback_period"] + 0.99)
 
             bar = tqdm.tqdm(
                 total=total,
-                desc="Soft avg",
+                desc="soft_avgs",
                 leave=False,
             )
 
@@ -107,7 +103,7 @@ class MyProgram:
 
     def acquire_decimated(self, soc, **kwargs):
         if self.proxy is not None:
-            kwargs["progress"] = False  # disable progress bar for decimated
+            self._override_cfg(kwargs)
             return self.proxy.run_program_decimated(
                 self.__class__.__name__, self.cfg, **kwargs
             )
