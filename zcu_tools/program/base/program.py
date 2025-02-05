@@ -19,13 +19,18 @@ class MyProgram:
     def init_proxy(cls, proxy):
         cls.proxy = proxy
 
+    def run_in_remote(self):
+        return self.proxy is not None
+
     def __init__(self, soccfg, cfg):
-        if self.proxy is not None:
+        if self.run_in_remote():
             # use remote proxy, so we don't need to do anything
             self.cfg = cfg
         else:
             self._parse_cfg(cfg)
             super().__init__(soccfg, cfg)
+            self._interrupt = False
+            self._interrupt_err = None
 
     def _parse_cfg(self, cfg: dict):
         self.dac = cfg.get("dac", {})
@@ -94,19 +99,43 @@ class MyProgram:
 
         return kwargs
 
+    def set_interrupt(self, err="Unknown error"):
+        self._interrupt = True
+        self._interrupt_err = err
+
+    def _handle_early_stop(self):
+        # call by loop in acquire method
+        # handle client-side interrupt
+        if self._interrupt:
+            print("Interrupted by client")
+            raise RuntimeError(self._interrupt_err)
+
+    def _remote_acquire(self, remote_func, **kwargs):
+        self._override_remote(kwargs)
+        prog_name = self.__class__.__name__
+        try:
+            # call remote function
+            return remote_func(prog_name, self.cfg, **kwargs)
+        except Exception as e:
+            import sys
+
+            # if find '_pyroTraceback' in error value, it's a remote error
+            # if not, need to raise it on remote side
+            if not hasattr(sys.exc_info()[1], "_pyroTraceback"):
+                self.proxy._pyroTimeout = 1  # prevent deadlock
+                self.proxy.set_interrupt(str(e))
+
+            raise e
+
     def acquire(self, soc, **kwargs):
-        if self.proxy is not None:
-            self._override_remote(kwargs)
-            return self.proxy.run_program(self.__class__.__name__, self.cfg, **kwargs)
+        if self.run_in_remote():
+            return self._remote_acquire(self.proxy.run_program, **kwargs)
 
         return super().acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
-        if self.proxy is not None:
-            self._override_remote(kwargs)
-            return self.proxy.run_program_decimated(
-                self.__class__.__name__, self.cfg, **kwargs
-            )
+        if self.run_in_remote():
+            return self._remote_acquire(self.proxy.run_program_decimated, **kwargs)
 
         return super().acquire_decimated(soc, **kwargs)
 

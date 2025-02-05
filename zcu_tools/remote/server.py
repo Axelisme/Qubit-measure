@@ -25,21 +25,40 @@ SUPPORTED_PROGRAMS = [
 class ProgramServer:
     def __init__(self, soc):
         self.soc = soc
+        self.cur_prog = None
 
     def _get_prog(self, name, cfg):
         if name not in SUPPORTED_PROGRAMS:
             raise ValueError(f"Program {name} is not supported")
 
-        return getattr(zp, name)(self.soc, cfg)
+        if self.cur_prog is not None:
+            raise RuntimeError("Only one program can be run at a time")
+
+        prog = getattr(zp, name)(self.soc, cfg)
+        self.cur_prog = prog
+        return prog
+
+    @Pyro4.expose
+    @Pyro4.oneway
+    def set_interrupt(self, err="Unknown error"):
+        if self.cur_prog is not None:
+            self.cur_prog, prog = None, self.cur_prog
+            prog.set_interrupt(err)
+        else:
+            print("Warning: no program is running but received KeyboardInterrupt")
 
     @Pyro4.expose
     def run_program(self, name: str, cfg: dict, *args, **kwargs):
         prog = self._get_prog(name, cfg)
         kwargs["progress"] = False
-        return prog.acquire(self.soc, *args, **kwargs)
+        result = prog.acquire(self.soc, *args, **kwargs)
+        self.cur_prog = None
+        return result
 
     @Pyro4.expose
     def run_program_decimated(self, name: str, cfg: dict, *args, **kwargs):
         prog = self._get_prog(name, cfg)
         kwargs["progress"] = False
-        return prog.acquire_decimated(self.soc, *args, **kwargs)
+        result = prog.acquire_decimated(self.soc, *args, **kwargs)
+        self.cur_prog = None
+        return result
