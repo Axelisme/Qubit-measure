@@ -23,11 +23,12 @@ class MyProgram:
         return self.proxy is not None
 
     def __init__(self, soccfg, cfg):
+        self._parse_cfg(cfg)
         if self.run_in_remote():
             # use remote proxy, so we don't need to do anything
+            self.soccfg = soccfg
             self.cfg = cfg
         else:
-            self._parse_cfg(cfg)
             super().__init__(soccfg, cfg)
             self._interrupt = False
             self._interrupt_err = None
@@ -41,9 +42,6 @@ class MyProgram:
                 cfg["start"] = self.sweep_cfg["start"]
                 cfg["step"] = self.sweep_cfg["step"]
                 cfg["expts"] = self.sweep_cfg["expts"]
-
-        self.resetM = make_reset(self.dac["reset"])
-        self.readoutM = make_readout(self.dac["readout"])
 
         for name, pulse in self.dac.items():
             if not isinstance(pulse, dict):
@@ -61,6 +59,9 @@ class MyProgram:
             self.ch_count[ch] += 1
             cur_nqz = nqzs.setdefault(ch, nqz)
             assert cur_nqz == nqz, "Found different nqz on the same channel"
+
+        self.resetM = make_reset(self.dac["reset"])
+        self.readoutM = make_readout(self.dac["readout"])
 
     def _override_remote(self, kwargs: dict):
         if kwargs.get("progress", False):
@@ -116,14 +117,16 @@ class MyProgram:
         try:
             # call remote function
             return remote_func(prog_name, self.cfg, **kwargs)
-        except Exception as e:
+        except BaseException as e:
             import sys
 
             # if find '_pyroTraceback' in error value, it's a remote error
             # if not, need to raise it on remote side
             if not hasattr(sys.exc_info()[1], "_pyroTraceback"):
-                self.proxy._pyroTimeout = 1  # prevent deadlock
+                print("Client-side error, raise it on remote side...")
+                self.proxy._pyroTimeout, old = 1, self.proxy._pyroTimeout
                 self.proxy.set_interrupt(str(e))
+                self.proxy._pyroTimeout = old
 
             raise e
 
