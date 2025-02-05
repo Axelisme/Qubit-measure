@@ -51,7 +51,9 @@ class ProgramServer:
     def run_program(self, name: str, cfg: dict, *args, **kwargs):
         prog = self._get_prog(name, cfg)
         kwargs["progress"] = False
-        result = prog.acquire(self.soc, *args, **kwargs)
+        # call original method from MyProgram instead of subclass method
+        # in case of multiple execution of overridden method
+        result = prog._local_acquire(self.soc, *args, **kwargs)
         self.cur_prog = None
         return result
 
@@ -59,6 +61,8 @@ class ProgramServer:
     def run_program_decimated(self, name: str, cfg: dict, *args, **kwargs):
         prog = self._get_prog(name, cfg)
         kwargs["progress"] = False
-        result = prog.acquire_decimated(self.soc, *args, **kwargs)
+        # call original method from MyProgram instead of subclass method
+        # in case of multiple execution of overridden method
+        result = prog._local_acquire_decimated(self.soc, *args, **kwargs)
         self.cur_prog = None
         return result

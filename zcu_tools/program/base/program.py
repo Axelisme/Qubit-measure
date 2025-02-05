@@ -130,17 +130,25 @@ class MyProgram:
 
             raise e
 
+    def _local_acquire(self, soc, **kwargs):
+        # non-overridable method
+        return super().acquire(soc, **kwargs)
+
+    def _local_acquire_decimated(self, soc, **kwargs):
+        # non-overridable method
+        return super().acquire_decimated(soc, **kwargs)
+
     def acquire(self, soc, **kwargs):
         if self.run_in_remote():
             return self._remote_acquire(self.proxy.run_program, **kwargs)
 
-        return super().acquire(soc, **kwargs)
+        return self._local_acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
         if self.run_in_remote():
             return self._remote_acquire(self.proxy.run_program_decimated, **kwargs)
 
-        return super().acquire_decimated(soc, **kwargs)
+        return self._local_acquire_decimated(soc, **kwargs)
 
 
 class MyAveragerProgram(MyProgram, AveragerProgram):
