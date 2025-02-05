@@ -19,6 +19,7 @@
 # %load_ext autoreload
 import os
 import sys
+from pprint import pprint
 
 import numpy as np
 
@@ -43,25 +44,25 @@ from zcu_tools import (  # noqa: E402
 # %% [markdown]
 # # Connect to zcu216
 # %%
-# import zcu_tools.remote as zr
-# from zcu_tools.program import MyProgram  # noqa: E402
+import zcu_tools.remote as zr
+from zcu_tools.program import MyProgram  # noqa: E402
 
-# ns_host = "220.134.33.7"
-# ns_port = 8080
-# zr.config.LOCAL_IP = "140.114.234.27"
-# zr.config.LOCAL_PORT = 1764
+ns_host = "100.69.52.44"
+ns_port = 8887
+zr.config.LOCAL_IP = "100.125.114.114"
+zr.config.LOCAL_PORT = 8887
 
-# soc, soccfg, rm_prog = zr.make_proxy(ns_host, ns_port)
-# MyProgram.init_proxy(rm_prog)
-# print(soccfg)
+soc, soccfg, rm_prog = zr.make_proxy(ns_host, ns_port)
+MyProgram.init_proxy(rm_prog)
+print(soccfg)
 
 
 # %%
-from qick import QickSoc  # noqa: E402
+# from qick import QickSoc  # noqa: E402
 
-soc = QickSoc()
-soccfg = soc
-print(soc)
+# soc = QickSoc()
+# soccfg = soc
+# print(soc)
 
 # %% [markdown]
 # # Create data folder
@@ -113,16 +114,18 @@ DefaultCfg.set_dev(flux=cur_flux)
 # %%
 DefaultCfg.set_pulse(
     probe_rf={
-        # "style": "const",
-        "style": "flat_top",
+        "style": "const",
+        # "style": "cosine",
+        # "style": "gauss",
+        # "style": "flat_top",
         # "raise_pulse": {"style": "gauss", "length": 1.0, "sigma": 0.2},
-        "raise_pulse": {"style": "cosine", "length": 1.0},
-        "length": 1.1,  # us
+        # "raise_pulse": {"style": "cosine", "length": 5.0},
+        "length": 5.1,  # us
         "trig_offset": 0.4455,  # us
         "ro_length": 1.1,  # us
     },
 )
-DefaultCfg.dac_cfgs["pulses"]["probe_rf"]
+pprint(DefaultCfg.dac_cfgs["pulses"]["probe_rf"])
 
 # %% [markdown]
 # # Lookback
@@ -133,21 +136,21 @@ exp_cfg = {
         "res_pulse": {
             **DefaultCfg.get_pulse("probe_rf"),
             # **DefaultCfg.get_pulse("readout_dpm"),
-            "gain": 5000,
-            "freq": 6027.5,
+            "gain": 10,
+            "freq": 6020,
         },
     },
     "adc": {
-        "ro_length": 12.2,  # us
+        "ro_length": 6.0,  # us
         # "trig_offset": 0.0,  # us
-        "trig_offset": 0.4,  # us
+        "trig_offset": 0.3,  # us
         "relax_delay": 0.0,  # us
     },
 }
 
 
 # %%
-cfg = make_cfg(exp_cfg, rounds=1000)
+cfg = make_cfg(exp_cfg, rounds=10000)
 
 Ts, Is, Qs = zs.measure_lookback(soc, soccfg, cfg, progress=True, instant_show=True)
 
@@ -330,7 +333,7 @@ DefaultCfg.set_pulse(
         "gain": 500,
     },
 )
-DefaultCfg.get_pulse("readout_rf")
+pprint(DefaultCfg.get_pulse("readout_rf"))
 
 # %% [markdown]
 # # TwoTone
@@ -343,7 +346,7 @@ DefaultCfg.set_pulse(
         "raise_pulse": {"style": "cosine", "length": 0.02},
     },
 )
-DefaultCfg.get_pulse("probe_qf")
+pprint(DefaultCfg.get_pulse("probe_qf"))
 
 # %% [markdown]
 # # Twotone Frequency
@@ -389,7 +392,7 @@ exp_cfg = {
 # %%
 exp_cfg["sweep"] = make_sweep(48.5, 49.5, 51)
 # exp_cfg["sweep"] = make_sweep(5950, 5990, 101)
-cfg = make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 er_f = 6020.5
 fpts, signals = zs.measure_qub_freq(
@@ -501,19 +504,13 @@ exp_cfg = {
 # %%
 exp_cfg["sweep"] = {
     "gain": make_sweep(10, 30000, 40, force_int=True),
-    "freq": make_sweep(q_f - 25, q_f + 25, 51),
-    #     "freq": make_sweep(1700, 2000, 301)
+    # "freq": make_sweep(q_f - 25, q_f + 25, 51),
+    "freq": make_sweep(1700, 2000, 101),
 }
-cfg = make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, reps=1, rounds=100)
 
 fpts, pdrs, signals2D = zs.measure_qub_pdr_dep(
-    # soc, soccfg, cfg, instant_show=True, soft_freq=True, soft_pdr=True
-    soc,
-    soccfg,
-    cfg,
-    instant_show=True,
-    soft_freq=False,
-    soft_pdr=False,
+    soc, soccfg, cfg, instant_show=True, soft_freq=False, soft_pdr=False
 )
 
 # %%
@@ -644,15 +641,13 @@ DefaultCfg.set_pulse(
         "desc": "pi/2 pulse",
     },
 )
-DefaultCfg.get_pulse("pi_len")
+pprint(DefaultCfg.get_pulse("pi_len"))
 
 # %% [markdown]
 # ## Amplitude Rabi
 
 # %%
 qub_len = 0.2
-
-# %%
 # qub_len = pi_len * 5.0
 exp_cfg = {
     "dac": {
@@ -713,7 +708,7 @@ DefaultCfg.set_pulse(
         "desc": "pi/2 pulse",
     },
 )
-DefaultCfg.get_pulse("pi_amp")
+pprint(DefaultCfg.get_pulse("pi_amp"))
 
 # %% [markdown]
 # # Dispersive shift
@@ -849,7 +844,7 @@ exp_cfg = {
 }
 
 # %%
-# timeFly = 0.5
+timeFly = 0.5
 exp_cfg["sweep"] = make_sweep(timeFly - 0.5, 4.0, 51)
 cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
 
@@ -883,7 +878,7 @@ DefaultCfg.set_pulse(
         "desc": "Readout with largest dispersive shift",
     },
 )
-DefaultCfg.get_pulse("readout_dpm")
+pprint(DefaultCfg.get_pulse("readout_dpm"))
 
 # %% [markdown]
 # ## Readout Lookback
@@ -891,7 +886,7 @@ DefaultCfg.get_pulse("readout_dpm")
 # %%
 exp_cfg = {
     "dac": {
-        "res_pulse": "readout_dpm",
+        "res_pulse": "readout_rf",
         "qub_pulse": "pi_amp",
         # "qub_pulse": "pi_len",
     },
@@ -936,7 +931,7 @@ activate_detune = 0.0
 orig_q_f = q_f
 exp_cfg = {
     "dac": {
-        "res_pulse": "readout_dpm",
+        "res_pulse": "readout_rf",
         "qub_pulse": {
             **DefaultCfg.get_pulse("pi2_amp"),
             "freq": orig_q_f + activate_detune,
@@ -951,7 +946,7 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = make_sweep(0, 30.0, 100)  # us
-cfg = make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, reps=100, rounds=10)
 
 Ts, signals = zs.measure_t2ramsey(soc, soccfg, cfg, instant_show=True)
 
@@ -982,7 +977,7 @@ q_f
 # %%
 exp_cfg = {
     "dac": {
-        "res_pulse": "readout_dpm",
+        "res_pulse": "readout_rf",
         "qub_pulse": "pi_amp",
         # "qub_pulse": "pi_len",
         # "qub_pulse": "reset_red",
@@ -1002,7 +997,7 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = make_sweep(0, 60, 101)
-cfg = make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 Ts, signals = zs.measure_t1(soc, soccfg, cfg, instant_show=True)
 
@@ -1098,7 +1093,7 @@ fig.savefig("t1overnight")
 # %%
 exp_cfg = {
     "dac": {
-        "res_pulse": "readout_dpm",
+        "res_pulse": "readout_rf",
         "pi_pulse": "pi_amp",
         "pi2_pulse": "pi2_amp",
         # "reset": "pulse",
@@ -1111,7 +1106,7 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = make_sweep(0, 20, 100)
-cfg = make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, reps=100, rounds=10)
 
 Ts, signals = zs.measure_t2echo(soc, soccfg, cfg, instant_show=True)
 
@@ -1147,7 +1142,7 @@ exp_cfg = {
 }
 
 # %%
-cfg = make_cfg(exp_cfg, reps=100, shots=5000)
+cfg = make_cfg(exp_cfg, reps=1, shots=5000)
 
 fid, threshold, angle, signals = zs.measure_fid_auto(soc, soccfg, cfg, plot=True)
 print(f"Optimal fidelity after rotation = {fid:.1%}")
