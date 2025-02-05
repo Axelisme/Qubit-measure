@@ -96,9 +96,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     res_pulse = cfg["dac"]["res_pulse"]
 
     ro_lens = sweep2array(cfg["sweep"])
-    check_time_sweep(
-        soccfg, ro_lens, gen_ch=res_pulse["ch"], ro_ch=cfg["adc"]["chs"][0]
-    )
+    check_time_sweep(soccfg, ro_lens, ro_ch=cfg["adc"]["chs"][0])
 
     trig_offset = cfg["adc"]["trig_offset"]
 
@@ -133,12 +131,8 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    res_pulse = cfg["dac"]["res_pulse"]
-
     offsets = sweep2array(cfg["sweep"])
-    check_time_sweep(
-        soccfg, offsets, gen_ch=res_pulse["ch"], ro_ch=cfg["adc"]["chs"][0]
-    )
+    check_time_sweep(soccfg, offsets)
     ro_len = cfg["adc"]["ro_length"]
     orig_offset = cfg["adc"]["trig_offset"]
 

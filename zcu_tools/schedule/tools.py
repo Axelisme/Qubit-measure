@@ -4,7 +4,7 @@ import numpy as np
 
 
 def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):
-    cycles = soccfg.us2cycles(ts, gen_ch=gen_ch, ro_ch=ro_ch)
+    cycles = [soccfg.us2cycles(t, gen_ch=gen_ch, ro_ch=ro_ch) for t in ts]
     if len(set(cycles)) != len(ts):
         warnings.warn(
             "Some time points are duplicated, you sweep step may be too small"

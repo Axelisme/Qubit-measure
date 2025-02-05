@@ -144,7 +144,6 @@ class RFreqTwoToneProgramWithRedReset(MyRAveragerProgram):
 class PowerDepProgram(MyNDAveragerProgram):
     def add_freq_sweep(self):
         sweep_cfg = self.sweep_cfg["freq"]
-        self.qub_pulse["freq"] = sweep_cfg["start"]
         r_freq = self.get_gen_reg(self.qub_pulse["ch"], "freq")
         self.add_sweep(
             QickSweep(
@@ -154,7 +153,6 @@ class PowerDepProgram(MyNDAveragerProgram):
 
     def add_gain_sweep(self):
         sweep_cfg = self.sweep_cfg["gain"]
-        self.qub_pulse["gain"] = sweep_cfg["start"]
         r_gain = self.get_gen_reg(self.qub_pulse["ch"], "gain")
         r_gain2 = self.get_gen_reg(self.qub_pulse["ch"], "gain2")
         self.add_sweep(
@@ -179,6 +177,9 @@ class PowerDepProgram(MyNDAveragerProgram):
         )
 
     def initialize(self):
+        self.qub_pulse["freq"] = self.sweep_cfg["freq"]["start"]
+        self.qub_pulse["gain"] = self.sweep_cfg["gain"]["start"]
+
         self.resetM.init(self)
         self.readoutM.init(self)
         if self.ch_count[self.qub_pulse["ch"]] > 1:
