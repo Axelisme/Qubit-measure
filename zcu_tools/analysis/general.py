@@ -7,7 +7,7 @@ from .tools import convert2max_contrast
 figsize = (8, 6)
 
 
-def lookback_analyze(
+def lookback_show(
     Ts, Is, Qs, plot_fit=True, ratio: float = 0.3, pulse_cfg: dict = None
 ):
     """
@@ -38,6 +38,38 @@ def lookback_analyze(
     plt.show()
 
     return offset
+
+def lookback_fft(records, xrange=(-5, 5), normalize=True):
+    def get_fft(Ts, Is, Qs):
+        N = len(Ts)
+        dt = Ts[1] - Ts[0]
+        freqs = np.fft.fftfreq(N, dt)
+        fft = np.fft.fft(Is + 1j * Qs)
+
+        # sort the freqs and fft
+        idx = np.argsort(freqs)
+        freqs = freqs[idx]
+        fft = fft[idx]
+
+        if normalize:
+            fft = fft / np.max(np.abs(fft))
+
+        return freqs, fft
+
+    results = {k: get_fft(*v) for k, v in records.items()}
+
+    plt.figure(figsize=figsize)
+    for name, (freqs, fft) in results.items():
+        plt.plot(freqs, np.abs(fft), label=name)
+    plt.xlim(xrange)
+    plt.xlabel("Frequency (MHz)")
+    plt.ylabel("Magnitude (a.u.)")
+    plt.tight_layout()
+    plt.legend()
+    plt.grid()
+    plt.show()
+
+    return freqs, fft
 
 
 def contrast_plot(xs, signals, max_contrast=False, xlabel=None):

@@ -31,6 +31,7 @@ sys.path.append(os.getcwd())
 import zcu_tools.analysis as zf  # noqa: E402
 import zcu_tools.schedule as zs  # noqa: E402
 
+
 # ruff: noqa: I001
 from zcu_tools import (  # noqa: E402
     DefaultCfg,
@@ -155,7 +156,7 @@ cfg = make_cfg(exp_cfg, rounds=10000)
 Ts, Is, Qs = zs.measure_lookback(soc, soccfg, cfg, progress=True, instant_show=True)
 
 # %%
-predict_offset = zf.lookback_analyze(
+predict_offset = zf.lookback_show(
     Ts, Is, Qs, ratio=0.1, pulse_cfg=cfg["dac"]["res_pulse"]
 )
 predict_offset
