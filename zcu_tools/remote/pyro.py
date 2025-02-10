@@ -12,7 +12,7 @@ def start_nameserver(ns_port):
     Pyro4.naming.startNSloop(host="0.0.0.0", port=ns_port)
 
 
-def start_server(host: str, port: int, ns_port: int):
+def start_server(host: str, port: int, ns_port: int, **kwargs):
     from qick import QickSoc
 
     Pyro4.config.REQUIRE_EXPOSE = False
@@ -32,7 +32,7 @@ def start_server(host: str, port: int, ns_port: int):
     daemon = Pyro4.Daemon(host=host, port=port)
 
     # create and register the QickSoc
-    soc = QickSoc()
+    soc = QickSoc(**kwargs)
     uri = daemon.register(soc)
     ns.register("myqick", uri)
     print(f"registered QICK at {uri}")
