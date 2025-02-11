@@ -8,7 +8,7 @@
 #       extension: .py
 #       format_name: percent
 #       format_version: '1.3'
-#       jupytext_version: 1.16.6
+#       jupytext_version: 1.16.7
 #   kernelspec:
 #     display_name: Python 3
 #     language: python
@@ -30,7 +30,6 @@ sys.path.append(os.getcwd())
 # %autoreload 2
 import zcu_tools.analysis as zf  # noqa: E402
 import zcu_tools.schedule as zs  # noqa: E402
-
 
 # ruff: noqa: I001
 from zcu_tools import (  # noqa: E402
@@ -115,12 +114,13 @@ DefaultCfg.set_dev(flux=cur_flux)
 # %%
 DefaultCfg.set_pulse(
     probe_rf={
-        "style": "const",
+        # "style": "const",
         # "style": "cosine",
         # "style": "gauss",
-        # "style": "flat_top",
-        # "raise_pulse": {"style": "gauss", "length": 1.0, "sigma": 0.2},
-        # "raise_pulse": {"style": "cosine", "length": 5.0},
+        # "sigma": 2.0,  # us
+        "style": "flat_top",
+        # "raise_pulse": {"style": "gauss", "length": 5.0, "sigma": 0.2},
+        "raise_pulse": {"style": "cosine", "length": 1.0},
         "length": 5.1,  # us
         "trig_offset": 0.4455,  # us
         "ro_length": 1.1,  # us
@@ -137,7 +137,7 @@ exp_cfg = {
         "res_pulse": {
             **DefaultCfg.get_pulse("probe_rf"),
             # **DefaultCfg.get_pulse("readout_dpm"),
-            "gain": 10,
+            "gain": 30000,
             "freq": 6020,
         },
     },
@@ -151,7 +151,7 @@ exp_cfg = {
 
 
 # %%
-cfg = make_cfg(exp_cfg, rounds=10000)
+cfg = make_cfg(exp_cfg, rounds=1000)
 
 Ts, Is, Qs = zs.measure_lookback(soc, soccfg, cfg, progress=True, instant_show=True)
 
@@ -183,6 +183,21 @@ DefaultCfg.set_adc(timeFly=timeFly)
 
 
 # %% [markdown]
+# ## FFT
+
+# %%
+pulse_name = "flat_cos1.0"
+signal_records = signal_records if "signal_records" in locals() else {}  # type: ignore
+signal_records[pulse_name] = (Ts, Is, Qs)
+pprint(signal_records.keys())
+
+# %%
+# del signal_records['gauss2.0']
+
+# %%
+freqs, ffts = zf.lookback_fft(signal_records)
+
+# %% [markdown]
 # # Resonator Frequency
 
 # %%
@@ -207,8 +222,8 @@ exp_cfg = {
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(4000, 7000, 201)
-cfg = make_cfg(exp_cfg, reps=200, rounds=100)
+exp_cfg["sweep"] = make_sweep(4000, 7000, 11)
+cfg = make_cfg(exp_cfg, reps=1, rounds=1)
 
 fpts, signals = zs.measure_res_freq(soc, soccfg, cfg, instant_show=True)
 
