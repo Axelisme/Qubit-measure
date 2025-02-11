@@ -68,7 +68,7 @@ class MyProgram:
             # replace internal progress with callback
             # to make remote progress bar work
 
-            kwargs.setdefault("callback_period", self.cfg["rounds"] // 10)
+            kwargs.setdefault("callback_period", self.cfg["rounds"] // 50)
             total = int(self.cfg["rounds"] / kwargs["callback_period"] + 0.99)
 
             bar = tqdm.tqdm(

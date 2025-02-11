@@ -1,6 +1,7 @@
 import Pyro4
 
 import zcu_tools.program as zp
+from zcu_tools.program.base.program import MyProgram
 
 Pyro4.config.SERIALIZER = "pickle"
 Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
@@ -27,7 +28,7 @@ class ProgramServer:
         self.soc = soc
         self.cur_prog = None
 
-    def _get_prog(self, name, cfg):
+    def _get_prog(self, name, cfg) -> MyProgram:
         if name not in SUPPORTED_PROGRAMS:
             raise ValueError(f"Program {name} is not supported")
 

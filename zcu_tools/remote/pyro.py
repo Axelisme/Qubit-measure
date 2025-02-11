@@ -3,8 +3,6 @@ import Pyro4.naming
 
 from qick import QickConfig
 
-from .server import ProgramServer
-
 
 def start_nameserver(ns_port):
     Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
@@ -14,6 +12,8 @@ def start_nameserver(ns_port):
 
 def start_server(host: str, port: int, ns_port: int, **kwargs):
     from qick import QickSoc
+
+    from .server import ProgramServer
 
     Pyro4.config.REQUIRE_EXPOSE = False
     Pyro4.config.SERIALIZER = "pickle"
