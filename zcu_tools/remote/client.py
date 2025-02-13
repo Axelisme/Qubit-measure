@@ -7,19 +7,10 @@ from tqdm.auto import tqdm
 from . import pyro  # noqa , 初始化Pyro4.config
 from .config import config
 from .server import ProgramServer
-
+from .wrapper import CallbackWrapper
 
 # 定義一個包裝器類別，內含你欲當作 callback 的函數。
 # 加上 @Pyro4.oneway 表示此方法為 one-way 呼叫，遠端不等待回傳值
-class CallbackWrapper:
-    def __init__(self, func: callable):
-        self.func = func
-
-    @Pyro4.expose
-    @Pyro4.callback
-    @Pyro4.oneway
-    def oneway_callback(self, *args, **kwargs):
-        return self.func(*args, **kwargs)
 
 
 class ProgramClient:

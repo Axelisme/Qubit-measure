@@ -6,7 +6,7 @@ import Pyro4.errors
 from qick.qick_asm import AcquireMixin
 
 from . import pyro  # noqa , 初始化Pyro4.config
-from .client import CallbackWrapper
+from .wrapper import CallbackWrapper
 
 MIN_CALLBACK_INTERVAL = 0.5  # seconds
 
