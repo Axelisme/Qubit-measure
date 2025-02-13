@@ -1,9 +1,3 @@
-from .base import (
-    MyAveragerProgram,
-    MyNDAveragerProgram,
-    MyProgram,
-    MyRAveragerProgram,
-)
 from .onetone import OneToneProgram, RGainOneToneProgram
 from .singleshot import SingleShotProgram
 from .time_exp import T1Program, T2EchoProgram, T2RamseyProgram
@@ -16,10 +10,6 @@ from .twotone import (
 )
 
 __all__ = [
-    "MyProgram",
-    "MyAveragerProgram",
-    "MyRAveragerProgram",
-    "MyNDAveragerProgram",
     "OneToneProgram",
     "RGainOneToneProgram",
     "TwoToneProgram",

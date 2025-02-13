@@ -1,7 +1,7 @@
-from .base import MyProgram
+from .base import MyProgramV2
 
 
-def onetone_body(prog: MyProgram, _):
+def onetone_body(prog: MyProgramV2, _):
     # reset
     prog.resetM.reset_qubit(prog)
 
@@ -9,7 +9,7 @@ def onetone_body(prog: MyProgram, _):
     prog.readoutM.readout_qubit(prog)
 
 
-class OneToneProgram(MyProgram):
+class OneToneProgram(MyProgramV2):
     def _initialize(self, cfg):
         self.resetM.init(self)
         self.readoutM.init(self)
