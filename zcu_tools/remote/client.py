@@ -17,6 +17,7 @@ def get_daemon():
         # 將 daemon.requestLoop 放在背景執行緒執行
         _daemon_thread = threading.Thread(target=_daemon.requestLoop, daemon=True)
         _daemon_thread.start()
+        print(f"Client Pyro4 daemon started at {config.LOCAL_IP}:{config.LOCAL_PORT}")
     return _daemon
 
 

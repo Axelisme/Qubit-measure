@@ -4,16 +4,23 @@ from typing import Any, Dict
 from tqdm.auto import tqdm
 
 from zcu_tools.remote.client import pyro_callback
+from zcu_tools.remote.server import ProgramServer
 
 DEFAULT_CALLBACK_TIMES = 50
 
 
 class MyProgram:
-    proxy = None
+    proxy: ProgramServer = None
 
     @classmethod
-    def init_proxy(cls, proxy):
+    def init_proxy(cls, proxy, test=False):
         cls.proxy = proxy
+        if test:
+            cls.test_remote_callback()
+
+    @classmethod
+    def reset_proxy(cls):
+        cls.proxy = None
 
     @classmethod
     def run_in_remote(cls):
@@ -156,11 +163,15 @@ class MyProgram:
 
     @classmethod
     def test_remote_callback(cls):
-        assert cls.run_in_remote()
+        assert cls.run_in_remote(), "This method should be called in remote mode"
+
+        success_flag = False
 
         def oneway_callback(self):
+            nonlocal success_flag
+            success_flag = True
             print("Client-side callback executed")
 
-        print("Sending callback to server...")
+        print("Sending callback to server...", end="   ")
         cls.proxy.test_callback(pyro_callback(oneway_callback))
-        print("Test finished")
+        print("Callback test ", "passed" if success_flag else "failed", "!")
