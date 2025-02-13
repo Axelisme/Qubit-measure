@@ -6,6 +6,7 @@ pyro4
 requests
 h5py
 pandas
+dill
 
 # for fitting
 # scikit-learn

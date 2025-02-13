@@ -6,6 +6,15 @@ import Pyro4.naming
 import qick
 from qick import QickConfig
 
+# Pyro4.config.SERIALIZER = "pickle"
+# Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
+# Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
+# use dill instead of pickle
+Pyro4.config.SERIALIZER = "dill"
+Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill"])
+Pyro4.config.DILL_PROTOCOL_VERSION = 5
+Pyro4.config.REQUIRE_EXPOSE = False
+
 
 def get_bitfile(version):
     version_dict = {
@@ -29,19 +38,12 @@ def get_program_module(version):
 
 
 def start_nameserver(ns_port):
-    Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
-    Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
     Pyro4.naming.startNSloop(host="0.0.0.0", port=ns_port)
 
 
 def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs):
     from qick import QickSoc
     from zcu_tools.remote.server import ProgramServer
-
-    Pyro4.config.REQUIRE_EXPOSE = False
-    Pyro4.config.SERIALIZER = "pickle"
-    Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
-    Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
 
     print("looking for nameserver . . .")
     ns = Pyro4.locateNS(host="0.0.0.0", port=ns_port)
@@ -76,9 +78,6 @@ def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs):
 
 
 def make_proxy(ns_host, ns_port, remote_traceback=True):
-    Pyro4.config.SERIALIZER = "pickle"
-    Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
-
     ns = Pyro4.locateNS(host=ns_host, port=ns_port)
 
     # print the nameserver entries: you should see the QickSoc proxy

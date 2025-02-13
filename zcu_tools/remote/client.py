@@ -2,11 +2,8 @@ import threading
 
 import Pyro4
 
+from . import pyro  # noqa , 初始化Pyro4.config
 from .config import config
-
-Pyro4.config.SERIALIZER = "pickle"
-Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
-Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
 
 # 取得或建立全域的 Daemon 實例，並以背景執行緒啟動 requestLoop
 _daemon = None

@@ -2,9 +2,7 @@ import Pyro4
 
 from qick.qick_asm import AcquireMixin
 
-Pyro4.config.SERIALIZER = "pickle"
-Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
-Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
+from . import pyro  # noqa , 初始化Pyro4.config
 
 
 class ProgramServer:
