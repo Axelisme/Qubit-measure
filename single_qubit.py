@@ -19,17 +19,18 @@
 # %load_ext autoreload
 import os
 import sys
-from pprint import pprint
-
-import numpy as np
 
 # # %cd /home/xilinx/jupyter_notebooks/nthu/sinica-5q/Axel/Qubit-measure
 print(os.getcwd())
 sys.path.append(os.getcwd())
 
+from pprint import pprint
+
+import numpy as np
+
 # %autoreload 2
 import zcu_tools.analysis as zf  # noqa: E402
-import zcu_tools.schedule as zs  # noqa: E402
+import zcu_tools.schedule.v2 as zs  # noqa: E402
 
 # ruff: noqa: I001
 from zcu_tools import (  # noqa: E402
@@ -41,19 +42,27 @@ from zcu_tools import (  # noqa: E402
     make_comment,
 )
 
+# %%
+import zcu_tools.config as zc
+
+zc.config.DATA_DRY_RUN = True
+zc.config.YOKO_DRY_RUN = True
+
 # %% [markdown]
 # # Connect to zcu216
 # %%
-import zcu_tools.remote as zr
-from zcu_tools.program import MyProgram  # noqa: E402
+import zcu_tools.config as zc
+from zcu_tools.remote import make_proxy
+from zcu_tools.program.base import MyProgram  # noqa: E402
+from zcu_tools.tools import get_ip_address
 
-ns_host = "100.69.52.44"
+ns_host = "pynq"
 ns_port = 8887
-zr.config.LOCAL_IP = "100.125.114.114"
-zr.config.LOCAL_PORT = 8887
+zc.config.LOCAL_IP = get_ip_address("tailscale0")
+zc.config.LOCAL_PORT = 8887
 
-soc, soccfg, rm_prog = zr.make_proxy(ns_host, ns_port)
-MyProgram.init_proxy(rm_prog)
+soc, soccfg, rm_prog = make_proxy(ns_host, ns_port)
+MyProgram.init_proxy(rm_prog, test=True)
 print(soccfg)
 
 
@@ -89,22 +98,22 @@ DefaultCfg.set_dev(flux_dev="none", flux=0.0)
 # # Initialize the flux
 
 # %%
-# from zcu_tools.device import YokoDevControl  # noqa: E402
+from zcu_tools.device import YokoDevControl  # noqa: E402
 
-# YokoDevControl.connect_server(
-#     {
-#         "host_ip": data_host,
-#         # "host_ip": "127.0.0.1",
-#         "dComCfg": {"address": "0x0B21::0x0039::90ZB35281", "interface": "USB"},
-#         "outputCfg": {"Current - Sweep rate": 10e-6},
-#     },
-#     reinit=True,
-# )
-# DefaultCfg.set_dev(flux_dev="yoko")
+YokoDevControl.connect_server(
+    {
+        "host_ip": data_host,
+        # "host_ip": "127.0.0.1",
+        "dComCfg": {"address": "0x0B21::0x0039::90ZB35281", "interface": "USB"},
+        "outputCfg": {"Current - Sweep rate": 10e-6},
+    },
+    reinit=True,
+)
+DefaultCfg.set_dev(flux_dev="yoko")
 
 # %%
 cur_flux = 0.0e-3
-# YokoDevControl.set_current(cur_flux)
+YokoDevControl.set_current(cur_flux)
 DefaultCfg.set_dev(flux=cur_flux)
 
 
@@ -114,14 +123,14 @@ DefaultCfg.set_dev(flux=cur_flux)
 # %%
 DefaultCfg.set_pulse(
     probe_rf={
-        # "style": "const",
+        "style": "const",
         # "style": "cosine",
         # "style": "gauss",
-        # "sigma": 2.0,  # us
-        "style": "flat_top",
+        # "sigma": 9.5/4,  # us
+        # "style": "flat_top",
         # "raise_pulse": {"style": "gauss", "length": 5.0, "sigma": 0.2},
-        "raise_pulse": {"style": "cosine", "length": 1.0},
-        "length": 5.1,  # us
+        # "raise_pulse": {"style": "cosine", "length": 3.0},
+        "length": 9.5,  # us
         "trig_offset": 0.4455,  # us
         "ro_length": 1.1,  # us
     },
@@ -137,12 +146,12 @@ exp_cfg = {
         "res_pulse": {
             **DefaultCfg.get_pulse("probe_rf"),
             # **DefaultCfg.get_pulse("readout_dpm"),
-            "gain": 30000,
+            "gain": 1.0,
             "freq": 6020,
         },
     },
     "adc": {
-        "ro_length": 6.0,  # us
+        "ro_length": 9.0,  # us
         # "trig_offset": 0.0,  # us
         "trig_offset": 0.3,  # us
         "relax_delay": 0.0,  # us
@@ -151,13 +160,13 @@ exp_cfg = {
 
 
 # %%
-cfg = make_cfg(exp_cfg, rounds=1000)
+cfg = make_cfg(exp_cfg, rounds=10)
 
-Ts, Is, Qs = zs.measure_lookback(soc, soccfg, cfg, progress=True, instant_show=True)
+Ts, signals = zs.measure_lookback(soc, soccfg, cfg, progress=True, instant_show=True)
 
 # %%
 predict_offset = zf.lookback_show(
-    Ts, Is, Qs, ratio=0.1, pulse_cfg=cfg["dac"]["res_pulse"]
+    Ts, signals, ratio=0.1, pulse_cfg=cfg["dac"]["res_pulse"]
 )
 predict_offset
 
@@ -172,7 +181,7 @@ filename = f"lookback_{cur_flux * 1e3:.3f}mA"
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": Is + 1j * Qs},
+    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=make_comment(cfg, f"adc_trig_offset = {timeFly}us"),
     tag="Lookback",
     server_ip=data_host,
@@ -186,16 +195,16 @@ DefaultCfg.set_adc(timeFly=timeFly)
 # ## FFT
 
 # %%
-pulse_name = "flat_cos1.0"
-signal_records = signal_records if "signal_records" in locals() else {}  # type: ignore
-signal_records[pulse_name] = (Ts, Is, Qs)
+# pulse_name = "const"
+pulse_name = cfg["dac"]["res_pulse"]["style"]
+
+signal_records = signal_records if "signal_records" in locals() else {}  # type: ignore  # noqa
+signal_records[pulse_name] = (Ts, signals)
 pprint(signal_records.keys())
+# del signal_records
 
 # %%
-# del signal_records['gauss2.0']
-
-# %%
-freqs, ffts = zf.lookback_fft(signal_records)
+freqs, ffts = zf.lookback_fft(signal_records, xrange=(-1, 1), pad_ratio=20)
 
 # %% [markdown]
 # # Resonator Frequency
@@ -222,7 +231,7 @@ exp_cfg = {
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(4000, 7000, 11)
+exp_cfg["sweep"] = make_sweep(6019, 6022, 401)
 cfg = make_cfg(exp_cfg, reps=1, rounds=1)
 
 fpts, signals = zs.measure_res_freq(soc, soccfg, cfg, instant_show=True)
@@ -292,7 +301,7 @@ save_data(
 
 # %%
 cur_flux = -3.2e-3
-# YokoDevControl.set_current(cur_flux)
+YokoDevControl.set_current(cur_flux)
 DefaultCfg.set_dev(flux=cur_flux)
 
 # %%
@@ -334,7 +343,7 @@ save_data(
 
 # %%
 cur_flux = -3.8e-3
-# YokoDevControl.set_current(cur_flux)
+YokoDevControl.set_current(cur_flux)
 DefaultCfg.set_dev(flux=cur_flux)
 
 # %% [markdown]
@@ -369,9 +378,9 @@ pprint(DefaultCfg.get_pulse("probe_qf"))
 
 # %%
 # cur_flux = -1.7e-3
-# YokoDevControl.set_current(cur_flux)
-# DefaultCfg.set_dev(flux=cur_flux)
-# cur_flux
+YokoDevControl.set_current(cur_flux)
+DefaultCfg.set_dev(flux=cur_flux)
+cur_flux
 
 # %%
 qub_name = f"q5_{cur_flux * 1e3:.3f}mA"
@@ -408,7 +417,7 @@ exp_cfg = {
 # %%
 exp_cfg["sweep"] = make_sweep(48.5, 49.5, 51)
 # exp_cfg["sweep"] = make_sweep(5950, 5990, 101)
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 er_f = 6020.5
 fpts, signals = zs.measure_qub_freq(
@@ -546,7 +555,7 @@ save_data(
 
 # %%
 cur_flux = -4.65e-3
-# YokoDevControl.set_current(cur_flux)
+YokoDevControl.set_current(cur_flux)
 DefaultCfg.set_dev(flux=cur_flux)
 
 # %%
