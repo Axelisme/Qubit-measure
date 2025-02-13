@@ -1,11 +1,10 @@
 from copy import deepcopy
 
-from qick.asm_v2 import QickSweep1D
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import OneToneProgram
 
 from ..flux import set_flux
-from ..tools import format_sweep
+from ..tools import format_sweep, sweep2param
 
 
 def measure_res_freq(soc, soccfg, cfg):
@@ -15,7 +14,7 @@ def measure_res_freq(soc, soccfg, cfg):
     sweep = cfg["sweep"]
 
     cfg["sweep"] = format_sweep(sweep, "res_freq")
-    res_pulse["freq"] = QickSweep1D("res_freq", sweep["start"], sweep["stop"])
+    res_pulse["freq"] = sweep2param(cfg["sweep"])
     cfg = make_cfg(cfg)
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
