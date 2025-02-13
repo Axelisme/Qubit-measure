@@ -1,5 +1,7 @@
 from numbers import Number
 
+from zcu_tools.config import config
+
 from .manager import InstrManager
 
 
@@ -45,12 +47,20 @@ class YokoDevControl:
         dComCfg = cls.dev_cfg["dComCfg"]
         output_cfg = cls.dev_cfg["outputCfg"]
 
+        if config.YOKO_DRY_RUN:
+            print("Dry run mode, skip connecting to Yoko")
+            cls.yoko = tuple()  # dummy object that are not None
+            return
+
         cls.yoko = InstrManager(server_ip=dev_cfg["host_ip"], timeout=cls.TIMEOUT)
         cls.yoko.add_instrument(sHardware, dComCfg)
         cls.yoko.ctrl.globalFlux.setInstrConfig(output_cfg)
 
     @classmethod
     def get_current(cls):
+        if config.YOKO_DRY_RUN:
+            return 0.0
+
         if cls.yoko is None:
             raise RuntimeError("YokoDevControl not initialized")
 
@@ -58,6 +68,8 @@ class YokoDevControl:
 
     @classmethod
     def _set_current_direct(cls, value):
+        if config.YOKO_DRY_RUN:
+            return
         cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.SWEEP_RATE)
 
     @classmethod
@@ -81,6 +93,9 @@ class YokoDevControl:
         # cast numpy float to python float
         if hasattr(value, "item"):
             value = value.item()
+
+        if config.YOKO_DRY_RUN:
+            print(f"DRY RUN: Set current to {value}")
 
         # if not np.issubdtype(flux, np.floating):
         if not isinstance(value, float):

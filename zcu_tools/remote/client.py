@@ -4,8 +4,8 @@ import time
 import Pyro4
 from tqdm.auto import tqdm
 
+from ..config import config
 from . import pyro  # noqa , 初始化Pyro4.config
-from .config import config
 from .server import ProgramServer
 from .wrapper import CallbackWrapper
 
@@ -72,18 +72,20 @@ class ProgramClient:
             period = kwargs["callback_period"]
             total = int(soft_avgs / period + 0.99)
 
-            bar = tqdm(total=total, desc="soft_avgs", leave=False)
+            bar = tqdm(total=total, desc="soft_avgs", leave=True)
             if kwargs.get("round_callback") is not None:
                 # wrap existing callback
                 orig_callback = kwargs["round_callback"]
 
                 def callback_with_bar(ir, *args, **kwargs):
                     bar.update((ir + 1) // period - bar.n)
+                    bar.refresh()
                     orig_callback(ir, *args, **kwargs)
             else:
 
                 def callback_with_bar(ir, *args, **kwargs):
                     bar.update((ir + 1) // period - bar.n)
+                    bar.refresh()
 
             kwargs["round_callback"] = callback_with_bar
         else:
@@ -115,7 +117,7 @@ class ProgramClient:
 
             raise e
 
-    def test_remote_callback(self):
+    def test_remote_callback(self) -> bool:
         success_flag = False
 
         def oneway_callback():
@@ -125,14 +127,16 @@ class ProgramClient:
         boxed_callback = type(self).wrap_callback(oneway_callback)
         print("Sending callback to server...", end="   ")
         self._remote_call("test_callback", boxed_callback)
-        time.sleep(0.1)
+        time.sleep(0.5)
         print("Callback test ", "passed" if success_flag else "failed", "!")
+        return success_flag
 
     def acquire(self, prog, **kwargs):
         kwargs, bar = self.overwrite_kwargs_for_remote(prog, kwargs)
         prog_name = type(prog).__name__
         ret = self._remote_call("run_program", prog_name, prog.cfg, **kwargs)
         if bar is not None:
+            bar.update(bar.total - bar.n)  # force to finish
             bar.close()
         return ret
 
@@ -141,5 +145,6 @@ class ProgramClient:
         prog_name = type(prog).__name__
         ret = self._remote_call("run_program_decimated", prog_name, prog.cfg, **kwargs)
         if bar is not None:
+            bar.update(bar.total - bar.n)  # force to finish
             bar.close()
         return ret

@@ -80,10 +80,6 @@ def make_proxy(ns_host, ns_port, remote_traceback=True):
 
     ns = Pyro4.locateNS(host=ns_host, port=ns_port)
 
-    # print the nameserver entries: you should see the QickSoc proxy
-    for k, v in ns.list().items():
-        print(k, v)
-
     soc = Pyro4.Proxy(ns.lookup("myqick"))
     soccfg = QickConfig(soc.get_cfg())
     prog_server = Pyro4.Proxy(ns.lookup("prog_server"))

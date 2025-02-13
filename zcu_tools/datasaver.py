@@ -1,12 +1,15 @@
 import os
 from datetime import datetime
 
+from .config import config
+
 
 def create_datafolder(root_dir: str, prefix: str = "") -> str:
     root_dir = os.path.abspath(os.path.join(root_dir, "Database"))
     yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
     save_dir = os.path.join(root_dir, prefix, f"{yy}/{mm}/Data_{mm}{dd}")
-    os.makedirs(save_dir, exist_ok=True)
+    if not config.DATA_DRY_RUN:
+        os.makedirs(save_dir, exist_ok=True)
     return save_dir
 
 
@@ -61,6 +64,10 @@ def save_data_local(
     log_channels = [z_info]
     step_channels = list(filter(None, [x_info, y_info]))
 
+    if config.DATA_DRY_RUN:
+        print("DRY RUN: Save data to ", filepath)
+        return
+
     import Labber  # type: ignore
 
     fObj = Labber.createLogFile_ForData(filepath, log_channels, step_channels)
@@ -92,6 +99,10 @@ def save_data_local(
 def load_data_local(file_path):
     import h5py
 
+    if config.DATA_DRY_RUN:
+        print("DRY RUN: Load data from ", file_path)
+        return None, None, None
+
     with h5py.File(file_path, "r") as file:
         data = file["Data"]["Data"]
         if data.shape[2] == 1:  # 1D data,
@@ -108,6 +119,10 @@ def load_data_local(file_path):
 def upload_file2server(filepath: str, server_ip: str, port: int):
     import requests
 
+    if config.DATA_DRY_RUN:
+        print(f"DRY RUN: Upload {filepath} to {server_ip}:{port}")
+        return
+
     filepath = os.path.abspath(filepath)
     url = f"http://{server_ip}:{port}/upload"
     with open(filepath, "rb") as file:
@@ -119,6 +134,10 @@ def upload_file2server(filepath: str, server_ip: str, port: int):
 
 def download_file2server(filepath: str, server_ip: str, port: int):
     import requests
+
+    if config.DATA_DRY_RUN:
+        print(f"DRY RUN: Download {filepath} from {server_ip}:{port}")
+        return
 
     url = f"http://{server_ip}:{port}/download"
     response = requests.post(url, json={"path": filepath})

@@ -1,3 +1,4 @@
+import warnings
 from collections import defaultdict
 from typing import Any, Dict
 
@@ -12,7 +13,12 @@ class MyProgram:
     @classmethod
     def init_proxy(cls, proxy: ProgramClient, test=False):
         if test:
-            proxy.test_remote_callback()
+            success = proxy.test_remote_callback()
+            if not success:
+                warnings.warn(
+                    "Callback test failed, remote callback may not work, you should check your LOCAL_IP or LOCAL_PORT, it may be blocked by firewall"
+                )
+
         cls.proxy = proxy
 
     @classmethod
