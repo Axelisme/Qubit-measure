@@ -163,15 +163,18 @@ class MyProgram:
 
     @classmethod
     def test_remote_callback(cls):
+        import time
+
         assert cls.run_in_remote(), "This method should be called in remote mode"
 
         success_flag = False
 
-        def oneway_callback(self):
+        def oneway_callback():
             nonlocal success_flag
             success_flag = True
-            print("Client-side callback executed")
+            # print("Client-side callback executed")
 
         print("Sending callback to server...", end="   ")
         cls.proxy.test_callback(pyro_callback(oneway_callback))
+        time.sleep(1)
         print("Callback test ", "passed" if success_flag else "failed", "!")
