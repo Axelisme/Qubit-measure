@@ -1,31 +1,18 @@
 import threading
+import time
 
 import Pyro4
+from tqdm.auto import tqdm
 
 from . import pyro  # noqa , 初始化Pyro4.config
 from .config import config
-
-# 取得或建立全域的 Daemon 實例，並以背景執行緒啟動 requestLoop
-_daemon = None
-_daemon_thread = None
-
-
-def get_daemon():
-    global _daemon, _daemon_thread
-    if _daemon is None:
-        print(f"Client Pyro4 daemon started at {config.LOCAL_IP}:{config.LOCAL_PORT}")
-        _daemon = Pyro4.Daemon(host=config.LOCAL_IP, port=config.LOCAL_PORT)
-        # 將 daemon.requestLoop 放在背景執行緒執行
-        _daemon_thread = threading.Thread(target=_daemon.requestLoop, daemon=True)
-        _daemon_thread.start()
-
-    return _daemon
+from .server import ProgramServer
 
 
 # 定義一個包裝器類別，內含你欲當作 callback 的函數。
 # 加上 @Pyro4.oneway 表示此方法為 one-way 呼叫，遠端不等待回傳值
-class CallbackWrapper(object):
-    def __init__(self, func):
+class CallbackWrapper:
+    def __init__(self, func: callable):
         self.func = func
 
     @Pyro4.expose
@@ -35,16 +22,129 @@ class CallbackWrapper(object):
         return self.func(*args, **kwargs)
 
 
-# 定義 decorator，將原函數包裝成 callback proxy 物件
-def pyro_callback(func):
-    daemon = get_daemon()
+class ProgramClient:
+    callback_daemon = None  # lazy init
+    callback_thread = None  # lazy init
 
-    # 用 CallbackWrapper 包裝原始函數
-    callback = CallbackWrapper(func)
+    def __init__(self, prog_server: ProgramServer):
+        self.prog_server = prog_server
 
-    # 將 callback 物件註冊到 daemon 中，取得其 URI
-    daemon.register(callback)
-    # uri = daemon.register(callback)
-    # print(f"Registered callback {func.__name__} at {uri}")
+    @classmethod
+    def get_daemon(cls):
+        if cls.callback_daemon is None:
+            print(
+                f"Client Pyro4 daemon started at {config.LOCAL_IP}:{config.LOCAL_PORT}"
+            )
+            cls.callback_daemon = Pyro4.Daemon(
+                host=config.LOCAL_IP, port=config.LOCAL_PORT
+            )
+            # 將 daemon.requestLoop 放在背景執行緒執行
+            cls.callback_thread = threading.Thread(
+                target=cls.callback_daemon.requestLoop, daemon=True
+            )
+            cls.callback_thread.start()
 
-    return callback
+        return cls.callback_daemon
+
+    @classmethod
+    def clear_daemon(cls):
+        if cls.callback_daemon is not None:
+            print("Client Pyro4 daemon stopped")
+            cls.callback_daemon.shutdown()
+            cls.callback_daemon = None
+            cls.callback_thread.join()
+            cls.callback_thread = None
+
+    @classmethod
+    def wrap_callback(cls, func: callable) -> CallbackWrapper:
+        daemon = cls.get_daemon()
+
+        # 用 CallbackWrapper 包裝原始函數
+        callback = CallbackWrapper(func)
+
+        # 將 callback 物件註冊到 daemon 中，取得其 URI
+        daemon.register(callback)
+
+        return callback
+
+    def overwrite_kwargs_for_remote(self, prog, kwargs: dict):
+        # before send to remote server, override some kwargs
+
+        soft_avgs = prog.cfg["soft_avgs"]
+
+        # remote progress bar
+        if kwargs.get("progress", False):
+            # replace tqdm progress with callback
+            # to make remote progress bar work
+            kwargs["progress"] = False
+
+            period = kwargs["callback_period"]
+            total = int(soft_avgs / period + 0.99)
+
+            bar = tqdm(total=total, desc="soft_avgs", leave=False)
+            if kwargs.get("round_callback") is not None:
+                # wrap existing callback
+                orig_callback = kwargs["round_callback"]
+
+                def callback_with_bar(ir, *args, **kwargs):
+                    bar.update(ir - bar.n)
+                    if ir == bar.total:
+                        bar.close()
+                    orig_callback(ir, *args, **kwargs)
+            else:
+
+                def callback_with_bar(ir, *args, **kwargs):
+                    bar.update(ir - bar.n)
+                    if ir == bar.total:
+                        bar.close()
+
+            kwargs["round_callback"] = callback_with_bar
+
+        # remote callback
+        if kwargs.get("round_callback") is not None:
+            kwargs["round_callback"] = type(self).wrap_callback(
+                kwargs["round_callback"]
+            )
+
+        return kwargs
+
+    def _remote_call(self, func_name, *args, **kwargs):
+        # call server-side method with kwargs
+        try:
+            return getattr(self.prog_server, func_name)(*args, **kwargs)
+        except BaseException as e:
+            import sys
+
+            # if find '_pyroTraceback' in error value, it's a remote error
+            # if not, need to raise it on remote side
+            if not hasattr(sys.exc_info()[1], "_pyroTraceback"):
+                print("Client-side error, raise it on remote side...")
+                prog_server = type(self).prog_server
+                prog_server._pyroTimeout, old = 1, prog_server._pyroTimeout
+                prog_server.set_interrupt(str(e))
+                prog_server._pyroTimeout = old
+
+            raise e
+
+    def test_remote_callback(self):
+        success_flag = False
+
+        def oneway_callback():
+            nonlocal success_flag
+            success_flag = True
+
+        boxed_callback = type(self).wrap_callback(oneway_callback)
+        print("Sending callback to server...", end="   ")
+        self._remote_call("test_callback", boxed_callback)
+        time.sleep(0.1)
+        print("Callback test ", "passed" if success_flag else "failed", "!")
+
+    def acquire(self, prog, **kwargs):
+        kwargs = self.overwrite_kwargs_for_remote(prog, kwargs)
+        prog_name = type(prog).__name__
+        return self._remote_call("run_program", prog_name, **kwargs)
+
+    def acquire_decimated(self, prog, **kwargs):
+        kwargs = self.overwrite_kwargs_for_remote(prog, kwargs)
+        prog_name = type(prog).__name__
+        return self._remote_call("run_program_decimated", prog_name, **kwargs)

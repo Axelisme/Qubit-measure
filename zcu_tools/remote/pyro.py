@@ -6,14 +6,12 @@ import Pyro4.naming
 import qick
 from qick import QickConfig
 
-# Pyro4.config.SERIALIZER = "pickle"
-# Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
-# Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
 # use dill instead of pickle
 Pyro4.config.SERIALIZER = "dill"
 Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill"])
 Pyro4.config.DILL_PROTOCOL_VERSION = 5
 Pyro4.config.REQUIRE_EXPOSE = False
+Pyro4.config.ONEWAY_THREADED = False  # make callbacks synchronous
 
 
 def get_bitfile(version):
@@ -78,6 +76,8 @@ def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs):
 
 
 def make_proxy(ns_host, ns_port, remote_traceback=True):
+    from .client import ProgramClient
+
     ns = Pyro4.locateNS(host=ns_host, port=ns_port)
 
     # print the nameserver entries: you should see the QickSoc proxy
@@ -87,6 +87,7 @@ def make_proxy(ns_host, ns_port, remote_traceback=True):
     soc = Pyro4.Proxy(ns.lookup("myqick"))
     soccfg = QickConfig(soc.get_cfg())
     prog_server = Pyro4.Proxy(ns.lookup("prog_server"))
+    prog_client = ProgramClient(prog_server)
 
     # adapted from https://pyro4.readthedocs.io/en/stable/errors.html and https://stackoverflow.com/a/70433500
     if remote_traceback:
@@ -108,4 +109,4 @@ def make_proxy(ns_host, ns_port, remote_traceback=True):
         except Exception as e:
             raise RuntimeError("Failed to set up Pyro exception handler: ", e)
 
-    return soc, soccfg, prog_server
+    return soc, soccfg, prog_client

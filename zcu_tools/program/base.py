@@ -1,35 +1,32 @@
 from collections import defaultdict
 from typing import Any, Dict
 
-from tqdm.auto import tqdm
-
-from zcu_tools.remote.client import pyro_callback
-from zcu_tools.remote.server import ProgramServer
+from zcu_tools.remote.client import ProgramClient
 
 DEFAULT_CALLBACK_TIMES = 50
 
 
 class MyProgram:
-    proxy: ProgramServer = None
+    proxy: ProgramClient = None
 
     @classmethod
-    def init_proxy(cls, proxy, test=False):
-        cls.proxy = proxy
+    def init_proxy(cls, proxy: ProgramClient, test=False):
         if test:
-            cls.test_remote_callback()
+            proxy.test_remote_callback()
+        cls.proxy = proxy
 
     @classmethod
-    def reset_proxy(cls):
+    def clear_proxy(cls):
         cls.proxy = None
 
     @classmethod
-    def run_in_remote(cls):
+    def is_use_proxy(cls):
         return cls.proxy is not None
 
     def __init__(self, soccfg, cfg, **kwargs):
         self._parse_cfg(cfg)  # parse config first
         super().__init__(soccfg, cfg=cfg, **kwargs)
-        if not self.run_in_remote():
+        if not self.is_use_proxy():
             # flag for interrupt
             self._interrupt = False
             self._interrupt_err = None
@@ -64,48 +61,8 @@ class MyProgram:
     def parse_modules(self, cfg: dict):
         pass
 
-    def _override_remote(self, kwargs: dict):
-        # remote progress bar
-        if kwargs.get("progress", False):
-            # replace tqdm progress with callback
-            # to make remote progress bar work
-            kwargs["progress"] = False
-
-            total = int(self.cfg["rounds"] / kwargs["callback_period"] + 0.99)
-
-            bar = tqdm(total=total, desc="soft_avgs", leave=False)
-            if kwargs.get("round_callback") is not None:
-                # wrap existing callback
-                orig_callback = kwargs["round_callback"]
-
-                def callback_with_bar(*args, **kwargs):
-                    bar.update()
-                    orig_callback(*args, **kwargs)
-
-                kwargs["round_callback"] = callback_with_bar
-            else:
-
-                def update_bar(*args, **kwargs):
-                    bar.update()
-
-                kwargs["round_callback"] = update_bar
-
-        # remote callback
-        if kwargs.get("round_callback") is not None:
-            callback = kwargs["round_callback"]
-
-            def remote_callback(*args, **kwargs):
-                try:
-                    callback(*args, **kwargs)
-                except Exception as e:
-                    # don't raise error during remote callback execution
-                    print(f"Error during remote callback execution: {e}")
-
-            kwargs["round_callback"] = pyro_callback(remote_callback)
-
-        return kwargs
-
     def set_interrupt(self, err="Unknown error"):
+        # acquire method will check this flag
         self._interrupt = True
         self._interrupt_err = err
 
@@ -116,65 +73,22 @@ class MyProgram:
             print("Interrupted by client-side")
             raise RuntimeError(self._interrupt_err)
 
-    def _remote_acquire(self, remote_func, **kwargs):
-        self._override_remote(kwargs)
-        prog_name = self.__class__.__name__
-        try:
-            # call remote function
-            return remote_func(prog_name, self.cfg, **kwargs)
-        except BaseException as e:
-            import sys
-
-            # if find '_pyroTraceback' in error value, it's a remote error
-            # if not, need to raise it on remote side
-            if not hasattr(sys.exc_info()[1], "_pyroTraceback"):
-                print("Client-side error, raise it on remote side...")
-                self.proxy._pyroTimeout, old = 1, self.proxy._pyroTimeout
-                self.proxy.set_interrupt(str(e))
-                self.proxy._pyroTimeout = old
-
-            raise e
-
     def _local_acquire(self, soc, **kwargs):
-        # non-overridable method
+        # non-overridable method, for ProgramServer to call
         return super().acquire(soc, **kwargs)
 
     def _local_acquire_decimated(self, soc, **kwargs):
-        # non-overridable method
+        # non-overridable method, for ProgramServer to call
         return super().acquire_decimated(soc, **kwargs)
 
     def acquire(self, soc, **kwargs):
-        kwargs.setdefault(
-            "callback_period", max(self.cfg["rounds"] // DEFAULT_CALLBACK_TIMES, 1)
-        )
-        if self.run_in_remote():
-            return self._remote_acquire(self.proxy.run_program, **kwargs)
+        if self.is_use_proxy():
+            return self.proxy.acquire(self, **kwargs)
 
-        return self._local_acquire(soc, **kwargs)
+        return super().acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
-        kwargs.setdefault(
-            "callback_period", max(self.cfg["rounds"] // DEFAULT_CALLBACK_TIMES, 1)
-        )
-        if self.run_in_remote():
-            return self._remote_acquire(self.proxy.run_program_decimated, **kwargs)
+        if self.is_use_proxy():
+            return self.proxy.acquire_decimated(self, **kwargs)
 
-        return self._local_acquire_decimated(soc, **kwargs)
-
-    @classmethod
-    def test_remote_callback(cls):
-        import time
-
-        assert cls.run_in_remote(), "This method should be called in remote mode"
-
-        success_flag = False
-
-        def oneway_callback():
-            nonlocal success_flag
-            success_flag = True
-            # print("Client-side callback executed")
-
-        print("Sending callback to server...", end="   ")
-        cls.proxy.test_callback(pyro_callback(oneway_callback))
-        time.sleep(1)
-        print("Callback test ", "passed" if success_flag else "failed", "!")
+        return super().acquire_decimated(soc, **kwargs)
