@@ -18,12 +18,9 @@ class MyProgram:
 
     def __init__(self, soccfg, cfg, **kwargs):
         self._parse_cfg(cfg)  # parse config first
-        if self.run_in_remote():
-            # use remote proxy, so we don't need to do anything
-            self.soccfg = soccfg
-            self.cfg = cfg
-        else:
-            super().__init__(soccfg, cfg=cfg, **kwargs)
+        super().__init__(soccfg, cfg=cfg, **kwargs)
+        if not self.run_in_remote():
+            # flag for interrupt
             self._interrupt = False
             self._interrupt_err = None
 
@@ -60,41 +57,46 @@ class MyProgram:
     def _override_remote(self, kwargs: dict):
         from zcu_tools.remote.client import pyro_callback  # lazy import
 
+        # remote progress bar
         if kwargs.get("progress", False):
-            # replace internal progress with callback
+            # replace tqdm progress with callback
             # to make remote progress bar work
+            kwargs["progress"] = False
 
             kwargs.setdefault(
-                "callback_period", self.cfg["rounds"] // DEFAULT_CALLBACK_TIMES
+                "callback_period", max(self.cfg["rounds"] // DEFAULT_CALLBACK_TIMES, 1)
             )
             total = int(self.cfg["rounds"] / kwargs["callback_period"] + 0.99)
 
-            bar = tqdm.tqdm(
-                total=total,
-                desc="soft_avgs",
-                leave=False,
-            )
-
-            kwargs["progress"] = False
-
+            bar = tqdm(total=total, desc="soft_avgs", leave=False)
             if kwargs.get("round_callback") is not None:
-                callback = kwargs["round_callback"]
+                # wrap existing callback
+                orig_callback = kwargs["round_callback"]
 
-                def _update(*args, **kwargs):
+                def callback_with_bar(*args, **kwargs):
                     bar.update()
-                    callback(*args, **kwargs)
+                    orig_callback(*args, **kwargs)
+
+                kwargs["round_callback"] = callback_with_bar
             else:
 
-                def _update(*args, **kwargs):
+                def update_bar(*args, **kwargs):
                     bar.update()
 
-            kwargs["round_callback"] = _update
+                kwargs["round_callback"] = update_bar
 
-        kwargs["round_callback"] = (
-            pyro_callback(kwargs["round_callback"])
-            if kwargs.get("round_callback") is not None
-            else None
-        )
+        # remote callback
+        if kwargs.get("round_callback") is not None:
+            callback = kwargs["round_callback"]
+
+            def remote_callback(*args, **kwargs):
+                try:
+                    callback(*args, **kwargs)
+                except Exception as e:
+                    # don't raise error during remote callback execution
+                    print(f"Error during remote callback execution: {e}")
+
+            kwargs["round_callback"] = pyro_callback(remote_callback)
 
         return kwargs
 

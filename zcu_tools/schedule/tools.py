@@ -1,6 +1,16 @@
 import warnings
+from typing import Any, Dict, Optional
 
 import numpy as np
+
+
+def format_sweep(sweep: Dict[str, Any], default_name: str) -> Dict[str, Any]:
+    # convert abbreviated single sweep to regular format
+    if "start" in sweep and "stop" in sweep:
+        # conclude by key "start" and "stop"
+        return {default_name: sweep}
+
+    return sweep
 
 
 def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):
@@ -26,3 +36,15 @@ def sweep2array(sweep, soft_loop=True, err_str=None):
 
     assert soft_loop, err_str
     return np.array(sweep)
+
+
+def sweep2param(sweep: Dict[str, Any], name: Optional[str] = None):
+    from qick.asm_v2 import QickSweep1D
+
+    # convert formatted sweep to qick v2 sweep param
+    assert sweep, "Sweep should not be empty"
+    if name is None:
+        # use the first key as the name
+        name = list(sweep.keys())[0]
+
+    return QickSweep1D(name, sweep[name]["start"], sweep[name]["stop"])
