@@ -40,7 +40,7 @@ class ProgramServer:
         self.prev_t = None
 
     def _wrap_callback(self, cb: CallbackWrapper):
-        def wrapped_cb(ir, *args, **kwargs):
+        def wrapped_cb(*args, **kwargs):
             cur_t = time.time()
             if self.prev_t is not None and cur_t - self.prev_t < MIN_CALLBACK_INTERVAL:
                 return  # do nothing if callback is called too frequently
@@ -48,7 +48,7 @@ class ProgramServer:
             # don't raise exception in callback
             try:
                 cb._pyroTimeout = 1.0  # 1s timeout for callback
-                cb.oneway_callback(ir, *args, **kwargs)
+                cb.oneway_callback(*args, **kwargs)
                 self.prev_t = time.time()
             except Pyro4.errors.CommunicationError as e:
                 print(f"Error during callback execution: {e}")
