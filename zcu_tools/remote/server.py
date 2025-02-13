@@ -49,3 +49,10 @@ class ProgramServer:
             return prog._local_acquire_decimated(self.soc, *args, **kwargs)
         finally:
             self.cur_prog = None
+
+    @Pyro4.expose
+    def test_callback(self, cb):
+        print("Server received callback")
+        print("executing callback...")
+        cb.oneway_callback()
+        print("callback executed")

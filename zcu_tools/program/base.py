@@ -13,8 +13,9 @@ class MyProgram:
     def init_proxy(cls, proxy):
         cls.proxy = proxy
 
-    def run_in_remote(self):
-        return self.proxy is not None
+    @classmethod
+    def run_in_remote(cls):
+        return cls.proxy is not None
 
     def __init__(self, soccfg, cfg, **kwargs):
         self._parse_cfg(cfg)  # parse config first
@@ -152,3 +153,14 @@ class MyProgram:
             return self._remote_acquire(self.proxy.run_program_decimated, **kwargs)
 
         return self._local_acquire_decimated(soc, **kwargs)
+
+    @classmethod
+    def test_remote_callback(cls):
+        assert cls.run_in_remote()
+
+        def callback():
+            print("Client-side callback executed")
+
+        print("Sending callback to server...")
+        cls.proxy.test_callback(callback)
+        print("Test finished")
