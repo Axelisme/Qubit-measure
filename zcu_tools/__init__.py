@@ -1,5 +1,4 @@
 from .auto import make_cfg
-from .program import MyProgram
 from .configuration import DefaultCfg
 from .datasaver import (
     create_datafolder,
@@ -10,7 +9,6 @@ from .datasaver import (
 from .tools import make_sweep
 
 __all__ = [
-    "MyProgram",
     "make_cfg",
     "DefaultCfg",
     "create_datafolder",

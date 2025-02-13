@@ -3,6 +3,9 @@ numpy==1.19.5
 scipy==1.10
 tqdm
 pyro4
+requests
+h5py
+pandas
 
 # for fitting
 # scikit-learn

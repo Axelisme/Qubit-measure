@@ -4,15 +4,14 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program import (
+from zcu_tools.program.v1 import (
     RFreqTwoToneProgram,
     RFreqTwoToneProgramWithRedReset,
     TwoToneProgram,
 )
-
-from ..flux import set_flux
-from ..instant_show import clear_show, init_show, update_show
-from ..tools import sweep2array
+from zcu_tools.schedule.flux import set_flux
+from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
+from zcu_tools.schedule.tools import sweep2array
 
 
 def measure_qub_freq(

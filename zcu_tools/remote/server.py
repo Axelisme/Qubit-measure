@@ -1,41 +1,23 @@
 import Pyro4
 
-import zcu_tools.program as zp
-from zcu_tools.program.base.program import MyProgram
+from qick.qick_asm import AcquireMixin
 
 Pyro4.config.SERIALIZER = "pickle"
 Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
 Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
 
 
-SUPPORTED_PROGRAMS = [
-    "OneToneProgram",
-    "RGainOneToneProgram",
-    "TwoToneProgram",
-    "RGainTwoToneProgram",
-    "RFreqTwoToneProgram",
-    "RFreqTwoToneProgramWithRedReset",
-    "PowerDepProgram",
-    "T1Program",
-    "T2RamseyProgram",
-    "T2EchoProgram",
-    "SingleShotProgram",
-]
-
-
 class ProgramServer:
-    def __init__(self, soc):
+    def __init__(self, soc, zp):
         self.soc = soc
         self.cur_prog = None
+        self.zp = zp
 
-    def _get_prog(self, name, cfg) -> MyProgram:
-        if name not in SUPPORTED_PROGRAMS:
-            raise ValueError(f"Program {name} is not supported")
-
+    def _get_prog(self, name, cfg) -> AcquireMixin:
         if self.cur_prog is not None:
             raise RuntimeError("Only one program can be run at a time")
 
-        prog = getattr(zp, name)(self.soc, cfg)
+        prog = getattr(self.zp, name)(self.soc, cfg)
         self.cur_prog = prog
         return prog
 
@@ -54,9 +36,10 @@ class ProgramServer:
         kwargs["progress"] = False
         # call original method from MyProgram instead of subclass method
         # in case of multiple execution of overridden method
-        result = prog._local_acquire(self.soc, *args, **kwargs)
-        self.cur_prog = None
-        return result
+        try:
+            return prog._local_acquire(self.soc, *args, **kwargs)
+        finally:
+            self.cur_prog = None
 
     @Pyro4.expose
     def run_program_decimated(self, name: str, cfg: dict, *args, **kwargs):
@@ -64,6 +47,7 @@ class ProgramServer:
         kwargs["progress"] = False
         # call original method from MyProgram instead of subclass method
         # in case of multiple execution of overridden method
-        result = prog._local_acquire_decimated(self.soc, *args, **kwargs)
-        self.cur_prog = None
-        return result
+        try:
+            return prog._local_acquire_decimated(self.soc, *args, **kwargs)
+        finally:
+            self.cur_prog = None

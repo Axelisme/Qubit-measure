@@ -4,11 +4,10 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools.auto import make_cfg
-from zcu_tools.program import RGainTwoToneProgram, TwoToneProgram
-
-from ..flux import set_flux
-from ..instant_show import clear_show, init_show, update_show
-from ..tools import sweep2array
+from zcu_tools.program.v1 import RGainTwoToneProgram, TwoToneProgram
+from zcu_tools.schedule.flux import set_flux
+from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
+from zcu_tools.schedule.tools import sweep2array
 
 
 def measure_lenrabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):

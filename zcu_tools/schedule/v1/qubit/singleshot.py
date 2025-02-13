@@ -5,9 +5,8 @@ import numpy as np
 from zcu_tools.analysis import singleshot_analysis
 from zcu_tools.analysis.single_shot.base import rotate
 from zcu_tools.analysis.single_shot.regression import get_rotate_angle
-from zcu_tools.program import SingleShotProgram
-
-from ..flux import set_flux
+from zcu_tools.program.v1 import SingleShotProgram
+from zcu_tools.schedule.flux import set_flux
 
 
 def measure_fid_auto(

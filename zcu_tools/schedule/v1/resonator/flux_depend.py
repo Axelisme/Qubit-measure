@@ -5,11 +5,10 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.program import OneToneProgram
-
-from ..flux import set_flux
-from ..instant_show import clear_show, init_show2d, update_show2d
-from ..tools import map2adcfreq, sweep2array
+from zcu_tools.program.v1 import OneToneProgram
+from zcu_tools.schedule.flux import set_flux
+from zcu_tools.schedule.instant_show import clear_show, init_show2d, update_show2d
+from zcu_tools.schedule.tools import map2adcfreq, sweep2array
 
 
 def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):

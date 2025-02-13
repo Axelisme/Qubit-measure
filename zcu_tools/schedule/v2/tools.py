@@ -1,6 +1,16 @@
 import warnings
+from typing import Any, Dict
 
 import numpy as np
+
+
+def format_sweep(sweep: Dict[str, Any], name: str) -> Dict[str, Any]:
+    # convert abbreviated single sweep to regular format
+    if "start" in sweep and "stop" in sweep:
+        # conclude by key "start" and "stop"
+        return {name: sweep}
+
+    return sweep
 
 
 def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):

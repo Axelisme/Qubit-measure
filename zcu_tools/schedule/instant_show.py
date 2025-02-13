@@ -45,7 +45,9 @@ def init_show2d(X, Y, x_label, y_label, title=None):
     return fig, ax, dh, im
 
 
-def update_show2d(fig, ax, dh, im, Z):
+def update_show2d(fig, ax, dh, im, Z, XY: tuple = None):
+    if XY is not None:
+        im.set_extent([XY[0][0], XY[0][-1], XY[1][0], XY[1][-1]])
     im.set_data(Z)
     im.autoscale()
     dh.update(fig)

@@ -1,7 +1,31 @@
+import os
+
 import Pyro4
 import Pyro4.naming
 
+import qick
 from qick import QickConfig
+
+
+def get_bitfile(version):
+    version_dict = {
+        "v1": "qick_216.bit",
+        "v2": "qick_216_v2.bit",
+    }
+    if version not in version_dict:
+        raise ValueError(f"Invalid version {version}")
+    return os.path.join(os.path.dirname(qick.__file__), version_dict[version])
+
+
+def get_program_module(version):
+    import importlib
+
+    if version == "v1":
+        return importlib.import_module("zcu_tools.program.v1")
+    elif version == "v2":
+        return importlib.import_module("zcu_tools.program.v2")
+    else:
+        raise ValueError(f"Invalid version {version}")
 
 
 def start_nameserver(ns_port):
@@ -10,10 +34,9 @@ def start_nameserver(ns_port):
     Pyro4.naming.startNSloop(host="0.0.0.0", port=ns_port)
 
 
-def start_server(host: str, port: int, ns_port: int, **kwargs):
+def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs):
     from qick import QickSoc
-
-    from .server import ProgramServer
+    from zcu_tools.remote.server import ProgramServer
 
     Pyro4.config.REQUIRE_EXPOSE = False
     Pyro4.config.SERIALIZER = "pickle"
@@ -32,7 +55,8 @@ def start_server(host: str, port: int, ns_port: int, **kwargs):
     daemon = Pyro4.Daemon(host=host, port=port)
 
     # create and register the QickSoc
-    soc = QickSoc(**kwargs)
+
+    soc = QickSoc(bitfile=get_bitfile(version), **kwargs)
     uri = daemon.register(soc)
     ns.register("myqick", uri)
     print(f"registered QICK at {uri}")
@@ -42,7 +66,7 @@ def start_server(host: str, port: int, ns_port: int, **kwargs):
         print("registered member " + str(obj))
 
     # create and register the program server
-    prog_server = ProgramServer(soc)
+    prog_server = ProgramServer(soc, get_program_module(version))
     uri = daemon.register(prog_server)
     ns.register("prog_server", uri)
     print(f"registered program server at {uri}")

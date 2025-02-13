@@ -1,13 +1,10 @@
 from collections import defaultdict
-from typing import Dict, Any
-
+from typing import Any, Dict
 
 from qick.asm_v2 import AveragerProgramV2
 
 from .readout import make_readout
 from .reset import make_reset
-
-DEFAULT_LOOP_NAME = "loop0"
 
 
 class MyProgram(AveragerProgramV2):
@@ -19,9 +16,6 @@ class MyProgram(AveragerProgramV2):
 
     def _initialize(self, cfg):
         if "sweep" in cfg:
-            # convert single loop to dict
-            if "start" in cfg["sweep"] and "expts" in cfg["sweep"]:
-                cfg["sweep"] = {DEFAULT_LOOP_NAME: cfg["sweep"]}
             # add loops
             for name, sweep in cfg["sweep"].items():
                 self.add_loop(name, count=sweep["expts"])
@@ -55,3 +49,9 @@ class MyProgram(AveragerProgramV2):
         # reset and readout modules
         self.resetM = make_reset(self.dac["reset"])
         self.readoutM = make_readout(self.dac["readout"])
+
+    def _local_acquire(self, soc, *args, **kwargs):
+        return super().acquire(soc, *args, **kwargs)
+
+    def _local_acquire_decimated(self, soc, *args, **kwargs):
+        return super().acquire_decimated(soc, *args, **kwargs)

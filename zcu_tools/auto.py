@@ -1,8 +1,10 @@
 from copy import deepcopy
-from typing import Union, Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional, Union
 
 from .configuration import DefaultCfg
 from .tools import deepupdate, numpy2number
+
+NQZ_THRESHOLD = 2000  # MHz
 
 
 def make_cfg(exp_cfg: Dict[str, Any], **kwargs) -> Dict[str, Any]:
@@ -61,8 +63,8 @@ def auto_derive_pulse(
     # fill nqz if not provided
     if "nqz" not in pulse_cfg:
         if "freq" in pulse_cfg:
-            # use 2000 MHz as the threshold
-            nqz = 2 if pulse_cfg["freq"] > 2000 else 1
+            # use NQZ_THRESHOLD as the threshold
+            nqz = 2 if pulse_cfg["freq"] > NQZ_THRESHOLD else 1
             pulse_cfg.setdefault("nqz", nqz)
 
     # phase

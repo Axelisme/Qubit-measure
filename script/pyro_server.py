@@ -2,10 +2,10 @@
 """This file starts a pyro nameserver and the proxying server."""
 
 import argparse
-import threading
-import time
 import os  # noqa
 import sys  # noqa
+import threading
+import time
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import qick  # noqa
@@ -16,7 +16,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--host", "-H", default="localhost", help="Host ip")
 parser.add_argument("--port", "-p", type=int, default=0, help="Daemon port")
 parser.add_argument("--ns-port", "-np", type=int, default=8080, help="Nameserver port")
-parser.add_argument("--soc", "-s", default="v1", choices=["v1", "v2"], help="bitfile version")
+parser.add_argument(
+    "--soc", "-s", default="v1", choices=["v1", "v2"], help="bitfile version"
+)
 
 args = parser.parse_args()
 
@@ -34,7 +36,4 @@ time.sleep(2)  # wait for the nameserver to start up
 
 ############
 # start the qick proxy server
-bitfile = "qick_216.bit" if args.soc == "v1" else "qick_216_v2.bit"
-src = os.path.join(os.path.dirname(qick.__file__), bitfile)
-print(f"Using bitfile: {src}")
-start_server(args.host, args.port, args.ns_port, bitfile=src)
+start_server(args.host, args.port, args.ns_port, version=args.soc)

@@ -1,4 +1,4 @@
-from .base import MyProgram, DEFAULT_LOOP_NAME
+from .base import DEFAULT_LOOP_NAME, MyProgram
 from .onetone import OneToneProgram
 
 __all__ = [

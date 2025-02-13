@@ -3,9 +3,7 @@ from collections import defaultdict
 import tqdm.auto as tqdm
 
 from qick import AveragerProgram, NDAveragerProgram, RAveragerProgram
-from zcu_tools.remote.client import pyro_callback
 
-from .dry_run import DryRunProgram  # noqa
 from .readout import make_readout
 from .reset import make_reset
 
@@ -64,6 +62,8 @@ class MyProgram:
         self.readoutM = make_readout(self.dac["readout"])
 
     def _override_remote(self, kwargs: dict):
+        from zcu_tools.remote.client import pyro_callback  # lazy import
+
         if kwargs.get("progress", False):
             # replace internal progress with callback
             # to make remote progress bar work

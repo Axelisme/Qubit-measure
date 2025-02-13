@@ -2,11 +2,10 @@ from copy import deepcopy
 
 import numpy as np
 
-from zcu_tools.program import T1Program, T2EchoProgram, T2RamseyProgram
-
-from ..flux import set_flux
-from ..instant_show import clear_show, init_show, update_show
-from ..tools import check_time_sweep, sweep2array
+from zcu_tools.program.v1 import T1Program, T2EchoProgram, T2RamseyProgram
+from zcu_tools.schedule.flux import set_flux
+from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
+from zcu_tools.schedule.tools import check_time_sweep, sweep2array
 
 
 def safe_sweep2array(soccfg, sweep_cfg):
