@@ -54,5 +54,12 @@ class ProgramServer:
     def test_callback(self, cb):
         print("Server received callback")
         print("executing callback...")
-        cb.oneway_callback()
-        print("callback executed")
+        try:
+            cb._pyroTimeout = 1.0  # s
+            cb.oneway_callback()
+        except Exception as e:
+            print(f"Error during callback execution: {e}")
+        else:
+            print("callback executed successfully")
+        finally:
+            print("Finished processing callback")

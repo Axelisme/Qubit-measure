@@ -3,6 +3,8 @@ from typing import Any, Dict
 
 from tqdm.auto import tqdm
 
+from zcu_tools.remote.client import pyro_callback
+
 DEFAULT_CALLBACK_TIMES = 50
 
 
@@ -56,8 +58,6 @@ class MyProgram:
         pass
 
     def _override_remote(self, kwargs: dict):
-        from zcu_tools.remote.client import pyro_callback  # lazy import
-
         # remote progress bar
         if kwargs.get("progress", False):
             # replace tqdm progress with callback
@@ -158,9 +158,9 @@ class MyProgram:
     def test_remote_callback(cls):
         assert cls.run_in_remote()
 
-        def callback():
+        def oneway_callback(self):
             print("Client-side callback executed")
 
         print("Sending callback to server...")
-        cls.proxy.test_callback(callback)
+        cls.proxy.test_callback(pyro_callback(oneway_callback))
         print("Test finished")
