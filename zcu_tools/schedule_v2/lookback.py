@@ -4,30 +4,24 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program import OneToneProgram, TwoToneProgram
+from zcu_tools.program_v2 import OneToneProgram
 
 from .flux import set_flux
 from .instant_show import clear_show, init_show, update_show
 
 
-def measure_one(soc, soccfg, cfg, progress, qub_pulse):
-    if qub_pulse:
-        prog = TwoToneProgram(soccfg, make_cfg(cfg, reps=1))
-    else:
-        prog = OneToneProgram(soccfg, make_cfg(cfg, reps=1))
-    IQlist = prog.acquire_decimated(soc, progress=progress)
-    Is, Qs = IQlist[0]
-    signals = np.array(Is) + 1j * np.array(Qs)
+def measure_one(soc, soccfg, cfg, progress):
+    cfg = make_cfg(cfg, reps=1)
+    prog = OneToneProgram(soccfg, cfg)
+    IQlist = prog.acquire_decimated(soc, progress=progress, soft_avgs=cfg["soft_avgs"])
 
-    Ts = soccfg.cycles2us(np.arange(len(Is)), ro_ch=cfg["adc"]["chs"][0])
+    Ts = soccfg.cycles2us(np.arange(len(IQlist[0])), ro_ch=cfg["adc"]["chs"][0])
     Ts += cfg["adc"]["trig_offset"]
 
-    return Ts, signals
+    return Ts, IQlist[0].dot([1, 1j])
 
 
-def measure_lookback(
-    soc, soccfg, cfg, progress=True, instant_show=False, qub_pulse=False
-):
+def measure_lookback(soc, soccfg, cfg, progress=True, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
     assert cfg.get("reps", 1) == 1, "Only one rep is allowed for lookback"
 
@@ -36,9 +30,7 @@ def measure_lookback(
     MAX_LEN = 3.32  # us
 
     if cfg["adc"]["ro_length"] <= MAX_LEN:
-        Ts, signals = measure_one(
-            soc, soccfg, cfg, progress=progress, qub_pulse=qub_pulse
-        )
+        Ts, signals = measure_one(soc, soccfg, cfg, progress=progress)
     else:
         # measure multiple times
         trig_offset = cfg["adc"]["trig_offset"]
@@ -67,12 +59,10 @@ def measure_lookback(
         while trig_offset < total_len:
             cfg["adc"]["trig_offset"] = trig_offset
 
-            Ts_, signals_ = measure_one(
-                soc, soccfg, cfg, progress=False, qub_pulse=qub_pulse
-            )
+            Ts_, singals_ = measure_one(soc, soccfg, cfg, progress=False)
 
             Ts.append(Ts_)
-            signals.append(signals_)
+            signals.append(singals_)
 
             if instant_show:
                 update_show(

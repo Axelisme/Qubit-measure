@@ -8,21 +8,16 @@ figsize = (8, 6)
 
 
 def lookback_show(
-    Ts, Is, Qs, plot_fit=True, ratio: float = 0.3, pulse_cfg: dict = None
+    Ts, signals, plot_fit=True, ratio: float = 0.3, pulse_cfg: dict = None
 ):
-    """
-    Ts: 1D array, time points
-    Is: 1D array, I values
-    Qs: 1D array, Q values
-    """
-    y = np.abs(Is + 1j * Qs)
+    y = np.abs(signals)
 
-    # find first idx where y is larger than 0.05 * max_y
+    # find first idx where y is larger than ratio * max_y
     offset = Ts[np.argmax(y > ratio * np.max(y))]
 
     plt.figure(figsize=figsize)
-    plt.plot(Ts, Is, label="I value")
-    plt.plot(Ts, Qs, label="Q value")
+    plt.plot(Ts, signals.real, label="I value")
+    plt.plot(Ts, signals.imag, label="Q value")
     plt.plot(Ts, y, label="mag")
     if plot_fit:
         plt.axvline(offset, color="r", linestyle="--", label="predict_offset")
@@ -39,12 +34,13 @@ def lookback_show(
 
     return offset
 
-def lookback_fft(records, xrange=(-5, 5), normalize=True):
-    def get_fft(Ts, Is, Qs):
-        N = len(Ts)
-        dt = Ts[1] - Ts[0]
-        freqs = np.fft.fftfreq(N, dt)
-        fft = np.fft.fft(Is + 1j * Qs)
+
+def lookback_fft(records, xrange=(-5, 5), normalize=True, pad_ratio=1):
+    def get_fft(Ts, signals):
+        N = int(len(Ts) * pad_ratio)
+        signals = np.pad(signals, (0, N - len(signals)), "constant")
+        freqs = np.fft.fftfreq(N, (Ts[-1] - Ts[0]) / len(Ts))
+        fft = np.fft.fft(signals)
 
         # sort the freqs and fft
         idx = np.argsort(freqs)

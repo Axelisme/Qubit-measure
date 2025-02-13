@@ -1,0 +1,47 @@
+from abc import ABC, abstractmethod
+from typing import List, Dict, Any
+
+from qick.asm_v2 import AveragerProgramV2
+
+from .pulse import declare_pulse
+
+
+def make_readout(name: str):
+    if name == "base":
+        return BaseReadout()
+    else:
+        raise ValueError(f"Unknown readout type: {name}")
+
+
+class AbsReadout(ABC):
+    @abstractmethod
+    def init(self, prog: AveragerProgramV2):
+        pass
+
+    @abstractmethod
+    def readout_qubit(self, prog: AveragerProgramV2):
+        pass
+
+
+class BaseReadout(AbsReadout):
+    def init(self, prog: AveragerProgramV2):
+        res_pulse: Dict[str, Any] = prog.res_pulse
+        res_ch: int = res_pulse["ch"]
+        ro_chs: List[int] = prog.adc["chs"]
+
+        assert len(ro_chs) == 1, "Only one readout channel is supported"
+        ro_ch = ro_chs[0]
+
+        declare_pulse(prog, res_pulse, "res_pulse", ro_chs[0])
+
+        prog.declare_readout(ch=ro_ch, length=prog.adc["ro_length"])
+        prog.add_readoutconfig(
+            ch=ro_ch, name="readout_adc", freq=res_pulse["freq"], gen_ch=res_ch
+        )
+
+    def readout_qubit(self, prog: AveragerProgramV2):
+        ro_ch = prog.adc["chs"][0]
+
+        prog.send_readoutconfig(ro_ch, "readout_adc", t=0)
+        prog.pulse(prog.res_pulse["ch"], "res_pulse", t="auto")  # pyright: ignore[reportArgumentType]
+        prog.trigger([ro_ch], t=prog.adc["trig_offset"])

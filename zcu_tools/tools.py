@@ -1,33 +1,29 @@
-from collections.abc import Mapping, MutableMapping
-from typing import Literal, Optional
+from typing import Literal, Optional, Any, Dict
+from numbers import Number
 
 
 def deepupdate(
-    d: dict, u: dict, behavior: Literal["error", "force", "ignore"] = "error"
+    d: Dict[str, Any],
+    u: Dict[str, Any],
+    behavior: Literal["error", "force", "ignore"] = "error",
 ):
-    def conflict_handler(d, u, k):
+    def conflict_handler(d: Dict[str, Any], u: Dict[str, Any], k: Any):
         if behavior == "error":
             raise KeyError(f"Key {k} already exists in {d}.")
         elif behavior == "force":
             d[k] = u[k]
-        elif behavior == "ignore":
-            pass
-        else:
-            raise ValueError(f"Unknown behavior: {behavior}")
 
-    assert isinstance(d, MutableMapping), f"d should be dict, got {d}"
-    assert isinstance(u, Mapping), f"u should be dict, got {u}"
     for k, v in u.items():
         if k not in d:
             d[k] = v
-        elif isinstance(v, Mapping) and isinstance(d[k], MutableMapping):
+        elif isinstance(v, dict) and isinstance(d[k], dict):
             deepupdate(d[k], v, behavior)
         else:
             conflict_handler(d, u, k)
 
 
 # type cast all numpy types to python types
-def numpy2number(obj):
+def numpy2number(obj: Any) -> Any:
     if hasattr(obj, "tolist"):
         obj = obj.tolist()
     if isinstance(obj, dict):
@@ -40,30 +36,28 @@ def numpy2number(obj):
 
 
 def make_sweep(
-    start: float,
-    stop: Optional[float] = None,
+    start: Number,
+    stop: Optional[Number] = None,
     expts: Optional[int] = None,
-    step: Optional[float] = None,
+    step: Optional[Number] = None,
     force_int: bool = False,
 ) -> dict:
-    assert stop is not None or step is not None or expts is not None, (
-        "Not enough information to define a sweep."
-    )
-
-    error_msg = "Not enough information to define a sweep."
+    err_str = "Not enough information to define a sweep."
     if expts is None:
-        assert step is not None, error_msg
-        expts = int(stop - start) // step + 1
+        assert stop is not None, err_str
+        assert step is not None, err_str
+        expts = int((stop - start) / step + 0.99)  # pyright: ignore[reportOperatorIssue]
     elif step is None:
-        assert expts is not None, error_msg
-        step = (stop - start) / (expts - 1)
+        assert stop is not None, err_str
+        assert expts is not None, err_str
+        step = (stop - start) / expts  # pyright: ignore[reportOperatorIssue]
 
     if force_int:
-        start = int(start)
-        step = int(step)
+        start = int(start)  # pyright: ignore
+        step = int(step)  # pyright: ignore
         expts = int(expts)
 
-    stop = start + step * expts
+    stop = start + step * expts  # pyright: ignore[reportOperatorIssue]
 
     assert expts > 0, f"expts must be greater than 0, but got {expts}"
     assert step != 0, f"step must not be zero, but got {step}"
