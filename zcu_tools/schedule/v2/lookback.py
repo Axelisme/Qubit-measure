@@ -86,6 +86,6 @@ def measure_lookback(soc, soccfg, cfg, progress=True, instant_show=False):
 
         if instant_show:
             update_show(fig, ax, dh, curve, np.abs(signals), Ts)
-            clear_show()
+            clear_show(fig, dh)
 
     return Ts, signals

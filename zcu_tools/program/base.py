@@ -81,13 +81,23 @@ class MyProgram:
         # non-overridable method, for ProgramServer to call
         return super().acquire_decimated(soc, **kwargs)
 
+    def derive_default_kwargs(self, kwargs: dict):
+        # derive default callback_period from soft_avgs
+        kwargs.setdefault(
+            "callback_period", max(self.cfg["soft_avgs"] // DEFAULT_CALLBACK_TIMES, 1)
+        )
+
+        return kwargs
+
     def acquire(self, soc, **kwargs):
+        kwargs = self.derive_default_kwargs(kwargs)
         if self.is_use_proxy():
             return self.proxy.acquire(self, **kwargs)
 
         return super().acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
+        kwargs = self.derive_default_kwargs(kwargs)
         if self.is_use_proxy():
             return self.proxy.acquire_decimated(self, **kwargs)
 

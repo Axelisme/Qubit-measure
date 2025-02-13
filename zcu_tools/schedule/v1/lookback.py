@@ -96,6 +96,6 @@ def measure_lookback(
 
         if instant_show:
             update_show(fig, ax, dh, curve, np.abs(signals), Ts)
-            clear_show()
+            clear_show(fig, dh)
 
     return Ts, signals

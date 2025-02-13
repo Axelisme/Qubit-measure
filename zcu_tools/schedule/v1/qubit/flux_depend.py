@@ -91,7 +91,7 @@ def measure_qub_flux_dep(
                 update_show2d(fig, ax, dh, im, amps.T)
 
         if instant_show:
-            clear_show()
+            clear_show(fig, dh)
     except Exception as e:
         print("Error during measurement:", e)
 

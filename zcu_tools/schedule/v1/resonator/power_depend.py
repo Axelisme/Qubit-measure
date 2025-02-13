@@ -65,7 +65,7 @@ def measure_res_pdr_dep(
                 update_show2d(fig, ax, dh, im, amps)
 
         if instant_show:
-            clear_show()
+            clear_show(fig, dh)
     except Exception as e:
         print("Error during measurement:", e)
 

@@ -32,7 +32,7 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False):
 
     if instant_show:
         update_show(fig, ax, dh, curve, np.abs(signals))
-        clear_show()
+        clear_show(fig, dh)
 
     return fpts, signals
 
@@ -72,6 +72,6 @@ def measure_qub_freq_with_reset(
 
     if instant_show:
         update_show(fig, ax, dh, curve, np.abs(signals))
-        clear_show()
+        clear_show(fig, dh)
 
     return fpts, signals

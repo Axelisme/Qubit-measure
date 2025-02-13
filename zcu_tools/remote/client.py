@@ -78,18 +78,16 @@ class ProgramClient:
                 orig_callback = kwargs["round_callback"]
 
                 def callback_with_bar(ir, *args, **kwargs):
-                    bar.update(ir - bar.n)
-                    if ir == bar.total:
-                        bar.close()
+                    bar.update((ir + 1) // period - bar.n)
                     orig_callback(ir, *args, **kwargs)
             else:
 
                 def callback_with_bar(ir, *args, **kwargs):
-                    bar.update(ir - bar.n)
-                    if ir == bar.total:
-                        bar.close()
+                    bar.update((ir + 1) // period - bar.n)
 
             kwargs["round_callback"] = callback_with_bar
+        else:
+            bar = None
 
         # remote callback
         if kwargs.get("round_callback") is not None:
@@ -97,7 +95,7 @@ class ProgramClient:
                 kwargs["round_callback"]
             )
 
-        return kwargs
+        return kwargs, bar
 
     def _remote_call(self, func_name, *args, **kwargs):
         # call server-side method with kwargs
@@ -131,11 +129,17 @@ class ProgramClient:
         print("Callback test ", "passed" if success_flag else "failed", "!")
 
     def acquire(self, prog, **kwargs):
-        kwargs = self.overwrite_kwargs_for_remote(prog, kwargs)
+        kwargs, bar = self.overwrite_kwargs_for_remote(prog, kwargs)
         prog_name = type(prog).__name__
-        return self._remote_call("run_program", prog_name, **kwargs)
+        ret = self._remote_call("run_program", prog_name, prog.cfg, **kwargs)
+        if bar is not None:
+            bar.close()
+        return ret
 
     def acquire_decimated(self, prog, **kwargs):
-        kwargs = self.overwrite_kwargs_for_remote(prog, kwargs)
+        kwargs, bar = self.overwrite_kwargs_for_remote(prog, kwargs)
         prog_name = type(prog).__name__
-        return self._remote_call("run_program_decimated", prog_name, **kwargs)
+        ret = self._remote_call("run_program_decimated", prog_name, prog.cfg, **kwargs)
+        if bar is not None:
+            bar.close()
+        return ret

@@ -37,6 +37,6 @@ def measure_reset_saturation(soc, soccfg, cfg, instant_show=False):
             update_show(fig, ax, dh, curve, np.abs(signals))
 
     if instant_show:
-        clear_show()
+        clear_show(fig, dh)
 
     return lens, signals

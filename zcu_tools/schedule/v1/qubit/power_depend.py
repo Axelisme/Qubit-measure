@@ -75,7 +75,7 @@ def measure_qub_pdr_dep(
 
         if instant_show:
             update_show2d(fig, ax, dh, im, np.abs(signals2D))
-            clear_show()
+            clear_show(fig, dh)
     except Exception as e:
         print("Error during measurement:", e)
 

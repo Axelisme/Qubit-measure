@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import clear_output, display
+from IPython.display import display
 
 
 def init_show(X, x_label, y_label, title=None, **kwargs):
@@ -53,5 +53,5 @@ def update_show2d(fig, ax, dh, im, Z, XY: tuple = None):
     dh.update(fig)
 
 
-def clear_show():
-    clear_output()
+def clear_show(fig, dh):
+    plt.close(fig)

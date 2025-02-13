@@ -28,8 +28,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
         def callback(ir, avg_d):
-            avgi, avgq = avg_d[0][0, :, 0], avg_d[0][0, :, 1]
-            update_show(fig, ax, dh, curve, np.abs(avgi + 1j * avgq))
+            update_show(fig, ax, dh, curve, np.abs(avg_d[0][0].dot([1, 1j])))
     else:
         callback = None
 
@@ -40,6 +39,6 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
 
     if instant_show:
         update_show(fig, ax, dh, curve, np.abs(signals))
-        clear_show()
+        clear_show(fig, dh)
 
     return fpts, signals

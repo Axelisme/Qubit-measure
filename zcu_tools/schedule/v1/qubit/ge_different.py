@@ -80,7 +80,7 @@ def measure_ge_pdr_dep(
                 update_show2d(fig, ax, dh, im, np.abs(snr2D))
 
         if instant_show:
-            clear_show()
+            clear_show(fig, dh)
     except Exception as e:
         print("Error during measurement:", e)
 
@@ -118,7 +118,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
                 update_show(fig, ax, dh, curve, np.abs(snrs))
 
         if instant_show:
-            clear_show()
+            clear_show(fig, dh)
     except Exception as e:
         print("Error during measurement:", e)
 
@@ -154,7 +154,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
                 update_show(fig, ax, dh, curve, np.abs(snrs))
 
         if instant_show:
-            clear_show()
+            clear_show(fig, dh)
     except Exception as e:
         print("Error during measurement:", e)
 

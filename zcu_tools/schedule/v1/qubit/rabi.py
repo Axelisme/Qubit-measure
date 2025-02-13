@@ -40,7 +40,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
     if instant_show:
         update_show(fig, ax, dh, curve, np.abs(signals))
-        clear_show()
+        clear_show(fig, dh)
 
     return lens, signals
 
@@ -90,6 +90,6 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
     if instant_show:
         update_show(fig, ax, dh, curve, np.abs(signals))
-        clear_show()
+        clear_show(fig, dh)
 
     return pdrs, signals
