@@ -63,9 +63,6 @@ class MyProgram:
             # to make remote progress bar work
             kwargs["progress"] = False
 
-            kwargs.setdefault(
-                "callback_period", max(self.cfg["rounds"] // DEFAULT_CALLBACK_TIMES, 1)
-            )
             total = int(self.cfg["rounds"] / kwargs["callback_period"] + 0.99)
 
             bar = tqdm(total=total, desc="soft_avgs", leave=False)
@@ -139,12 +136,18 @@ class MyProgram:
         return super().acquire_decimated(soc, **kwargs)
 
     def acquire(self, soc, **kwargs):
+        kwargs.setdefault(
+            "callback_period", max(self.cfg["rounds"] // DEFAULT_CALLBACK_TIMES, 1)
+        )
         if self.run_in_remote():
             return self._remote_acquire(self.proxy.run_program, **kwargs)
 
         return self._local_acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
+        kwargs.setdefault(
+            "callback_period", max(self.cfg["rounds"] // DEFAULT_CALLBACK_TIMES, 1)
+        )
         if self.run_in_remote():
             return self._remote_acquire(self.proxy.run_program_decimated, **kwargs)
 
