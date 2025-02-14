@@ -104,5 +104,7 @@ class ProgramServer:
     @Pyro4.expose
     def test_callback(self, cb: CallbackWrapper):
         print("Server received and executing callback...")
+        self._before_run_program()
         self._wrap_callback(cb)()
+        self._after_run_program()
         print("Finished callback test")
