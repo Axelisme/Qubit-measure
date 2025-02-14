@@ -40,6 +40,8 @@ class MyProgram:
         self.cfg = cfg
         self.dac: Dict[str, Any] = cfg.get("dac", {})
         self.adc: Dict[str, Any] = cfg.get("adc", {})
+        if "sweep" in cfg:
+            self.sweep_cfg = cfg["sweep"]
 
         # dac pulse
         for name, pulse in self.dac.items():

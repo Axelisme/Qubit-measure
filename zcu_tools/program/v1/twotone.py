@@ -80,7 +80,7 @@ class RFreqTwoToneProgram(MyRAveragerProgram):
         self.q_step = self.freq2reg(self.cfg["step"], gen_ch=ch)  # type: ignore
 
     def initialize(self):
-        self.qub_pulse["freq"] = self.sweep_cfg["start"]  # type: ignore
+        self.qub_pulse["freq"] = self.cfg["start"]  # type: ignore
 
         super().initialize()
         declare_pulse(self, self.qub_pulse, "qub_pulse")

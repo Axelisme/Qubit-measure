@@ -29,11 +29,6 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
         self.resetM.init(self)
         self.readoutM.init(self)
 
-    def parse_modules(self, cfg: Dict[str, Any]):
-        # reset and readout modules
-        self.resetM = make_reset(cfg["dac"]["reset"])
-        self.readoutM = make_readout(cfg["dac"]["readout"])
-
     def acquire(self, soc, **kwargs):
         return super().acquire(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)
 
