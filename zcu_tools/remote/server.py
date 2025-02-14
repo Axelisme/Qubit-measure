@@ -89,7 +89,8 @@ class ProgramServer:
             # in case of multiple execution of overridden method
             ret = prog._local_acquire(self.soc, **kwargs)
             if self.delay_args is not None:
-                self.orig_cb(*self.delay_args[0], **self.delay_args[1])
+                # execute delayed callback
+                self.orig_cb.oneway_callback(*self.delay_args[0], **self.delay_args[1])
         finally:
             self._after_run_program()
         return ret
@@ -103,7 +104,8 @@ class ProgramServer:
             # in case of multiple execution of overridden method
             ret = prog._local_acquire_decimated(self.soc, **kwargs)
             if self.delay_args is not None:
-                self.orig_cb(*self.delay_args[0], **self.delay_args[1])
+                # execute delayed callback
+                self.orig_cb.oneway_callback(*self.delay_args[0], **self.delay_args[1])
         finally:
             self._after_run_program()  # just in case
         return ret
