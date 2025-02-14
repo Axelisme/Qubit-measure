@@ -31,8 +31,7 @@ def twotone_body(prog, before_pulse=None):
 
 class TwoToneProgram(MyAveragerProgram):
     def initialize(self):
-        self.resetM.init(self)
-        self.readoutM.init(self)
+        super().initialize()
         declare_pulse(self, self.qub_pulse, "qub_pulse")
 
         self.synci(SYNC_TIME)
@@ -43,7 +42,7 @@ class TwoToneProgram(MyAveragerProgram):
 
 class RGainTwoToneProgram(MyRAveragerProgram):
     def declare_gain_reg(self):
-        ch = self.qub_pulse["ch"]
+        ch = self.qub_pulse["ch"]  # type: ignore
         self.q_rp = self.ch_page(ch)
         self.q_gain = self.sreg(ch, "gain")
         self.q_gain2 = self.sreg(ch, "gain2")
@@ -52,10 +51,9 @@ class RGainTwoToneProgram(MyRAveragerProgram):
         self.q_step = self.cfg["step"]
 
     def initialize(self):
-        self.qub_pulse["gain"] = self.cfg["start"]
+        self.qub_pulse["gain"] = self.cfg["start"]  # type: ignore
 
-        self.resetM.init(self)
-        self.readoutM.init(self)
+        super().initialize()
         declare_pulse(self, self.qub_pulse, "qub_pulse")
         self.declare_gain_reg()
 
@@ -74,18 +72,17 @@ class RGainTwoToneProgram(MyRAveragerProgram):
 
 class RFreqTwoToneProgram(MyRAveragerProgram):
     def declare_freq_reg(self):
-        ch = self.qub_pulse["ch"]
+        ch = self.qub_pulse["ch"]  # type: ignore
         self.q_rp = self.ch_page(ch)
         self.q_freq = self.sreg(ch, "freq")
         self.q_freq_t = 3
         self.mathi(self.q_rp, self.q_freq_t, self.q_freq, "+", 0)
-        self.q_step = self.freq2reg(self.cfg["step"], gen_ch=ch)
+        self.q_step = self.freq2reg(self.cfg["step"], gen_ch=ch)  # type: ignore
 
     def initialize(self):
-        self.qub_pulse["freq"] = self.sweep_cfg["start"]
+        self.qub_pulse["freq"] = self.sweep_cfg["start"]  # type: ignore
 
-        self.resetM.init(self)
-        self.readoutM.init(self)
+        super().initialize()
         declare_pulse(self, self.qub_pulse, "qub_pulse")
         self.declare_freq_reg()
 
@@ -103,27 +100,26 @@ class RFreqTwoToneProgram(MyRAveragerProgram):
 
 class RFreqTwoToneProgramWithRedReset(MyRAveragerProgram):
     def declare_freq_reg(self):
-        qub_ch = self.qub_pulse["ch"]
-        reset_ch = self.reset_pulse["ch"]
+        qub_ch = self.qub_pulse["ch"]  # type: ignore
+        reset_ch = self.reset_pulse["ch"]  # type: ignore
 
         self.q_rp = self.ch_page(qub_ch)
         self.q_freq = self.sreg(qub_ch, "freq")
         self.q_freq_t = 3
         self.mathi(self.q_rp, self.q_freq_t, self.q_freq, "+", 0)
-        self.q_step = self.freq2reg(self.cfg["step"], gen_ch=qub_ch)
+        self.q_step = self.freq2reg(self.cfg["step"], gen_ch=qub_ch)  # type: ignore
 
         self.s_rp = self.ch_page(reset_ch)
         self.s_freq = self.sreg(reset_ch, "freq")
         self.s_freq_t = 4
         self.mathi(self.s_rp, self.s_freq_t, self.s_freq, "+", 0)
-        self.s_step = self.freq2reg(self.cfg["step"], gen_ch=reset_ch)
+        self.s_step = self.freq2reg(self.cfg["step"], gen_ch=reset_ch)  # type: ignore
 
     def initialize(self):
-        self.qub_pulse["freq"] = self.cfg["start"]
-        self.reset_pulse["freq"] = self.cfg["r_f"] - self.cfg["start"]
+        self.qub_pulse["freq"] = self.cfg["start"]  # type: ignore
+        self.reset_pulse["freq"] = self.cfg["r_f"] - self.cfg["start"]  # type: ignore
 
-        self.resetM.init(self)
-        self.readoutM.init(self)
+        super().initialize()
         declare_pulse(self, self.qub_pulse, "qub_pulse")
         self.declare_freq_reg()
 
@@ -143,8 +139,8 @@ class RFreqTwoToneProgramWithRedReset(MyRAveragerProgram):
 
 class PowerDepProgram(MyNDAveragerProgram):
     def add_freq_sweep(self):
-        sweep_cfg = self.sweep_cfg["freq"]
-        r_freq = self.get_gen_reg(self.qub_pulse["ch"], "freq")
+        sweep_cfg = self.sweep_cfg["freq"]  # type: ignore
+        r_freq = self.get_gen_reg(self.qub_pulse["ch"], "freq")  # type: ignore
         self.add_sweep(
             QickSweep(
                 self, r_freq, sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"]
@@ -152,9 +148,9 @@ class PowerDepProgram(MyNDAveragerProgram):
         )
 
     def add_gain_sweep(self):
-        sweep_cfg = self.sweep_cfg["gain"]
-        r_gain = self.get_gen_reg(self.qub_pulse["ch"], "gain")
-        r_gain2 = self.get_gen_reg(self.qub_pulse["ch"], "gain2")
+        sweep_cfg = self.sweep_cfg["gain"]  # type: ignore
+        r_gain = self.get_gen_reg(self.qub_pulse["ch"], "gain")  # type: ignore
+        r_gain2 = self.get_gen_reg(self.qub_pulse["ch"], "gain2")  # type: ignore
         self.add_sweep(
             merge_sweeps(
                 [
@@ -177,12 +173,11 @@ class PowerDepProgram(MyNDAveragerProgram):
         )
 
     def initialize(self):
-        self.qub_pulse["freq"] = self.sweep_cfg["freq"]["start"]
-        self.qub_pulse["gain"] = self.sweep_cfg["gain"]["start"]
+        self.qub_pulse["freq"] = self.sweep_cfg["freq"]["start"]  # type: ignore
+        self.qub_pulse["gain"] = self.sweep_cfg["gain"]["start"]  # type: ignore
 
-        self.resetM.init(self)
-        self.readoutM.init(self)
-        if self.ch_count[self.qub_pulse["ch"]] > 1:
+        super().initialize()
+        if self.ch_count[self.qub_pulse["ch"]] > 1:  # type: ignore
             raise ValueError(
                 "Only one pulse per channel is supported in PowerDepProgram"
             )

@@ -53,7 +53,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
 
         if instant_show:
             clear_show(fig, dh)
-    except Exception as e:
+    except BaseException as e:
         print("Error during measurement:", e)
 
     return fpts, flxs, signals2D

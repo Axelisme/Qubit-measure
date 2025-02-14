@@ -14,13 +14,28 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             soccfg, cfg=cfg, reps=cfg["reps"], final_delay=cfg["adc"]["relax_delay"]
         )
 
-    def _initialize(self, cfg):
+    def _parse_cfg(self, cfg: Dict[str, Any]):
+        self.resetM = make_reset(cfg["dac"]["reset"])
+        self.readoutM = make_readout(cfg["dac"]["readout"])
+        return super()._parse_cfg(cfg)
+
+    def _initialize(self, cfg: Dict[str, Any]):
+        # add sweep loops
         if "sweep" in cfg:
-            # add loops
             for name, sweep in cfg["sweep"].items():
                 self.add_loop(name, count=sweep["expts"])
 
-    def parse_modules(self, cfg: dict):
+        # initialize reset and readout modules
+        self.resetM.init(self)
+        self.readoutM.init(self)
+
+    def parse_modules(self, cfg: Dict[str, Any]):
         # reset and readout modules
         self.resetM = make_reset(cfg["dac"]["reset"])
         self.readoutM = make_readout(cfg["dac"]["readout"])
+
+    def acquire(self, soc, **kwargs):
+        return super().acquire(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)
+
+    def acquire_decimated(self, soc, **kwargs):
+        return super().acquire_decimated(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)

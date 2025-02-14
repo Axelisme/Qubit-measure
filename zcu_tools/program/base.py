@@ -1,6 +1,6 @@
 import warnings
 from collections import defaultdict
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from zcu_tools.remote.client import ProgramClient
 
@@ -8,7 +8,7 @@ DEFAULT_CALLBACK_TIMES = 50
 
 
 class MyProgram:
-    proxy: ProgramClient = None
+    proxy: Optional[ProgramClient] = None
 
     @classmethod
     def init_proxy(cls, proxy: ProgramClient, test=False):
@@ -29,9 +29,9 @@ class MyProgram:
     def is_use_proxy(cls):
         return cls.proxy is not None
 
-    def __init__(self, soccfg, cfg, **kwargs):
+    def __init__(self, soccfg, cfg: Dict[str, Any], **kwargs):
         self._parse_cfg(cfg)  # parse config first
-        super().__init__(soccfg, cfg=cfg, **kwargs)
+        super().__init__(soccfg, cfg=cfg, **kwargs)  # type: ignore
         if not self.is_use_proxy():
             # flag for interrupt
             self._interrupt = False
@@ -39,6 +39,7 @@ class MyProgram:
 
     def _parse_cfg(self, cfg: dict):
         # dac and adc config
+        self.cfg = cfg
         self.dac: Dict[str, Any] = cfg.get("dac", {})
         self.adc: Dict[str, Any] = cfg.get("adc", {})
 
@@ -61,12 +62,6 @@ class MyProgram:
             cur_nqz = nqzs.setdefault(ch, nqz)
             assert cur_nqz == nqz, "Found different nqz on the same channel"
 
-        # other modules
-        self.parse_modules(cfg)
-
-    def parse_modules(self, cfg: dict):
-        pass
-
     def set_interrupt(self, err="Unknown error"):
         # acquire method will check this flag
         self._interrupt = True
@@ -81,11 +76,11 @@ class MyProgram:
 
     def _local_acquire(self, soc, **kwargs):
         # non-overridable method, for ProgramServer to call
-        return super().acquire(soc, **kwargs)
+        return super().acquire(soc, **kwargs)  # type: ignore
 
     def _local_acquire_decimated(self, soc, **kwargs):
         # non-overridable method, for ProgramServer to call
-        return super().acquire_decimated(soc, **kwargs)
+        return super().acquire_decimated(soc, **kwargs)  # type: ignore
 
     def derive_default_kwargs(self, kwargs: dict):
         # derive default callback_period from soft_avgs
@@ -98,13 +93,13 @@ class MyProgram:
     def acquire(self, soc, **kwargs):
         kwargs = self.derive_default_kwargs(kwargs)
         if self.is_use_proxy():
-            return self.proxy.acquire(self, **kwargs)
+            return self.proxy.acquire(self, **kwargs)  # type: ignore
 
-        return super().acquire(soc, **kwargs)
+        return super().acquire(soc, **kwargs)  # type: ignore
 
     def acquire_decimated(self, soc, **kwargs):
         kwargs = self.derive_default_kwargs(kwargs)
         if self.is_use_proxy():
-            return self.proxy.acquire_decimated(self, **kwargs)
+            return self.proxy.acquire_decimated(self, **kwargs)  # type: ignore
 
-        return super().acquire_decimated(soc, **kwargs)
+        return super().acquire_decimated(soc, **kwargs)  # type: ignore

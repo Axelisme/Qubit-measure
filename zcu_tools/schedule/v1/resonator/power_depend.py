@@ -66,7 +66,7 @@ def measure_res_pdr_dep(
 
         if instant_show:
             clear_show(fig, dh)
-    except Exception as e:
+    except BaseException as e:
         print("Error during measurement:", e)
 
     return fpts, pdrs, signals2D  # (pdrs, freqs)

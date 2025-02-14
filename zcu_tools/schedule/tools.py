@@ -1,16 +1,24 @@
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any, Dict
+from qick.asm_v2 import QickSweep1D, QickParam
 
 import numpy as np
 
 
-def format_sweep(sweep: Dict[str, Any], default_name: str) -> Dict[str, Any]:
+def format_sweep1D(sweeps: Dict[str, Any], name: str) -> Dict[str, Any]:
     # convert abbreviated single sweep to regular format
-    if "start" in sweep and "stop" in sweep:
-        # conclude by key "start" and "stop"
-        return {default_name: sweep}
+    # if already in regular format, check it key is correct
 
-    return sweep
+    if "start" in sweeps and "stop" in sweeps:
+        # conclude by key "start" and "stop"
+        # use default name if not provided
+        return {name: sweeps}
+
+    # check if only one sweep is provided
+    assert len(sweeps) == 1, "Only one sweep is allowed"
+    assert sweeps.get(name) is not None, f"Key {name} is not found in the sweep"
+
+    return sweeps
 
 
 def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):
@@ -38,13 +46,6 @@ def sweep2array(sweep, soft_loop=True, err_str=None):
     return np.array(sweep)
 
 
-def sweep2param(sweep: Dict[str, Any], name: Optional[str] = None):
-    from qick.asm_v2 import QickSweep1D
-
+def sweep2param(name: str, sweep: Dict[str, Any]) -> QickParam:
     # convert formatted sweep to qick v2 sweep param
-    assert sweep, "Sweep should not be empty"
-    if name is None:
-        # use the first key as the name
-        name = list(sweep.keys())[0]
-
-    return QickSweep1D(name, sweep[name]["start"], sweep[name]["stop"])
+    return QickSweep1D(name, sweep["start"], sweep["stop"])

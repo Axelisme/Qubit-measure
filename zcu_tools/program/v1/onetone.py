@@ -11,9 +11,7 @@ def onetone_body(prog: MyAveragerProgram, before_readout=None):
 
 class OneToneProgram(MyAveragerProgram):
     def initialize(self):
-        self.resetM.init(self)
-        self.readoutM.init(self)
-
+        super().initialize()
         self.synci(SYNC_TIME)
 
     def body(self):
@@ -23,7 +21,7 @@ class OneToneProgram(MyAveragerProgram):
 class RGainOneToneProgram(MyRAveragerProgram):
     def declare_gain_reg(self):
         # setup gain register
-        ch = self.res_pulse["ch"]
+        ch = self.res_pulse["ch"]  # type: ignore
         self.r_rp = self.ch_page(ch)
         self.r_gain = self.sreg(ch, "gain")
         self.r_gain2 = self.sreg(ch, "gain2")
@@ -32,16 +30,15 @@ class RGainOneToneProgram(MyRAveragerProgram):
         self.r_step = self.cfg["step"]
 
     def initialize(self):
-        self.res_pulse["gain"] = self.cfg["start"]
+        self.res_pulse["gain"] = self.cfg["start"]  # type: ignore
 
-        self.resetM.init(self)
-        self.readoutM.init(self)
+        super().initialize()
         self.declare_gain_reg()
 
         self.synci(SYNC_TIME)
 
     def body(self):
-        onetone_body(self, self.set_gain_reg)
+        onetone_body(self, self.set_gain_reg)  # type: ignore
 
     def set_gain_reg(self):
         self.mathi(self.r_rp, self.r_gain, self.r_gain_t, "+", 0)

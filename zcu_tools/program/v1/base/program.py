@@ -8,9 +8,14 @@ SYNC_TIME = 200  # cycles
 
 
 class MyProgramV1(MyProgram):
-    def parse_modules(self, cfg):
+    def _parse_cfg(self, cfg):
         self.resetM = make_reset(cfg["dac"]["reset"])
         self.readoutM = make_readout(cfg["dac"]["readout"])
+        return super()._parse_cfg(cfg)
+
+    def initialize(self):
+        self.resetM.init(self)  # type: ignore
+        self.readoutM.init(self)  # type: ignore
 
 
 class MyAveragerProgram(MyProgramV1, AveragerProgram):
