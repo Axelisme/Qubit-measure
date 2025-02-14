@@ -47,6 +47,8 @@ class ProgramServer:
     def _wrap_callback(self, cb: CallbackWrapper):
         def wrapped_cb(*args, **kwargs):
             cur_t = time.time()
+            if self.prev_t is None:  # make it robust
+                self.prev_t = cur_t - MIN_CALLBACK_INTERVAL - 1
             if cur_t - self.prev_t < MIN_CALLBACK_INTERVAL:
                 # delay callback execution to end, and ensure it's newest
                 # this args will be executed after acquiring data
