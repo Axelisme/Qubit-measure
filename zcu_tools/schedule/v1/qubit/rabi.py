@@ -57,7 +57,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         print("Use TwoToneProgram for soft loop")
 
         qub_pulse = cfg["dac"]["qub_pulse"]
-        show_period = int(len(pdrs) / 10 + 0.99)
+        show_period = int(len(pdrs) / 50 + 0.99)
 
         signals = np.full(len(pdrs), np.nan, dtype=np.complex128)
         for i, pdr in enumerate(tqdm(pdrs, desc="Amplitude", smoothing=0)):
@@ -73,19 +73,15 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
         print("Use RGainTwoToneProgram for hard loop")
 
         if instant_show:
-            show_period = int(cfg["rounds"] / 10 + 0.99)
 
-            def callback(ir, avg_d):
-                avgi, avgq = avg_d[0][0, :, 0], avg_d[0][0, :, 1]
-                update_show(fig, ax, dh, curve, np.abs(avgi + 1j * avgq))
+            def callback(ir, sum_d):
+                amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
+                update_show(fig, ax, dh, curve, amps)
         else:
             callback = None
-            show_period = None
 
         prog = RGainTwoToneProgram(soccfg, cfg)
-        pdrs, avgi, avgq = prog.acquire(
-            soc, progress=True, round_callback=callback, callback_period=show_period
-        )
+        pdrs, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)
         signals = avgi[0][0] + 1j * avgq[0][0]
 
     if instant_show:

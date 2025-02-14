@@ -21,9 +21,9 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False):
     if instant_show:
         fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
-        def callback(ir, avg_d):
-            avgi, avgq = avg_d[0][0, :, 0], avg_d[0][0, :, 1]
-            update_show(fig, ax, dh, curve, np.abs(avgi + 1j * avgq), fpts)
+        def callback(ir, sum_d):
+            amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
+            update_show(fig, ax, dh, curve, amps)
     else:
         callback = None
 
@@ -61,9 +61,9 @@ def measure_qub_freq_with_reset(
         fpts = sweep2array(cfg["sweep"], False)
         fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
-        def callback(ir, avg_d):
-            avgi, avgq = avg_d[0][0, :, 0], avg_d[0][0, :, 1]
-            update_show(fig, ax, dh, curve, np.abs(avgi + 1j * avgq))
+        def callback(ir, sum_d):
+            amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
+            update_show(fig, ax, dh, curve, amps)
     else:
         callback = None
 

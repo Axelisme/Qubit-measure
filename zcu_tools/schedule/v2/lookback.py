@@ -1,18 +1,17 @@
-from copy import deepcopy
-
 import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.program.v2 import OneToneProgram
+from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
 
 
-def measure_one(soc, soccfg, cfg, progress):
+def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
     cfg = make_cfg(cfg, reps=1)
-    prog = OneToneProgram(soccfg, cfg)
-    IQlist = prog.acquire_decimated(soc, progress=progress, soft_avgs=cfg["soft_avgs"])
+
+    prog = TwoToneProgram(soccfg, cfg) if qub_pulse else OneToneProgram(soccfg, cfg)
+    IQlist = prog.acquire_decimated(soc, progress=progress)
 
     Ts = soccfg.cycles2us(np.arange(len(IQlist[0])), ro_ch=cfg["adc"]["chs"][0])
     Ts += cfg["adc"]["trig_offset"]
@@ -20,16 +19,19 @@ def measure_one(soc, soccfg, cfg, progress):
     return Ts, IQlist[0].dot([1, 1j])
 
 
-def measure_lookback(soc, soccfg, cfg, progress=True, instant_show=False):
-    cfg = deepcopy(cfg)  # prevent in-place modification
-    assert cfg.get("reps", 1) == 1, "Only one rep is allowed for lookback"
+def measure_lookback(
+    soc, soccfg, cfg, progress=True, instant_show=False, qub_pulse=False
+):
+    cfg = make_cfg(cfg)
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     MAX_LEN = 3.32  # us
 
     if cfg["adc"]["ro_length"] <= MAX_LEN:
-        Ts, signals = measure_one(soc, soccfg, cfg, progress=progress)
+        Ts, signals = onetone_demimated(
+            soc, soccfg, cfg, progress=progress, qub_pulse=qub_pulse
+        )
     else:
         # measure multiple times
         trig_offset = cfg["adc"]["trig_offset"]
@@ -58,7 +60,9 @@ def measure_lookback(soc, soccfg, cfg, progress=True, instant_show=False):
         while trig_offset < total_len:
             cfg["adc"]["trig_offset"] = trig_offset
 
-            Ts_, singals_ = measure_one(soc, soccfg, cfg, progress=False)
+            Ts_, singals_ = onetone_demimated(
+                soc, soccfg, cfg, progress=False, qub_pulse=qub_pulse
+            )
 
             Ts.append(Ts_)
             signals.append(singals_)

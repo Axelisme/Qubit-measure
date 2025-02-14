@@ -4,8 +4,6 @@ from typing import Any, Dict, Optional
 
 from zcu_tools.remote.client import ProgramClient
 
-DEFAULT_CALLBACK_TIMES = 50
-
 
 class MyProgram:
     proxy: Optional[ProgramClient] = None
@@ -82,23 +80,13 @@ class MyProgram:
         # non-overridable method, for ProgramServer to call
         return super().acquire_decimated(soc, **kwargs)  # type: ignore
 
-    def derive_default_kwargs(self, kwargs: dict):
-        # derive default callback_period from soft_avgs
-        kwargs.setdefault(
-            "callback_period", max(self.cfg["soft_avgs"] // DEFAULT_CALLBACK_TIMES, 1)
-        )
-
-        return kwargs
-
     def acquire(self, soc, **kwargs):
-        kwargs = self.derive_default_kwargs(kwargs)
         if self.is_use_proxy():
             return self.proxy.acquire(self, **kwargs)  # type: ignore
 
         return super().acquire(soc, **kwargs)  # type: ignore
 
     def acquire_decimated(self, soc, **kwargs):
-        kwargs = self.derive_default_kwargs(kwargs)
         if self.is_use_proxy():
             return self.proxy.acquire_decimated(self, **kwargs)  # type: ignore
 

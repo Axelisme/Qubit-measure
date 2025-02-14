@@ -9,9 +9,6 @@ from . import pyro  # noqa , 初始化Pyro4.config
 from .server import ProgramServer
 from .wrapper import CallbackWrapper
 
-# 定義一個包裝器類別，內含你欲當作 callback 的函數。
-# 加上 @Pyro4.oneway 表示此方法為 one-way 呼叫，遠端不等待回傳值
-
 
 class ProgramClient:
     callback_daemon = None  # lazy init
@@ -69,22 +66,19 @@ class ProgramClient:
             # to make remote progress bar work
             kwargs["progress"] = False
 
-            period = kwargs["callback_period"]
-            total = int(soft_avgs / period + 0.99)
-
-            bar = tqdm(total=total, desc="soft_avgs", leave=True)
+            bar = tqdm(total=soft_avgs, desc="soft_avgs", leave=True)
             if kwargs.get("round_callback") is not None:
                 # wrap existing callback
                 orig_callback = kwargs["round_callback"]
 
                 def callback_with_bar(ir, *args, **kwargs):
-                    bar.update((ir + 1) // period - bar.n)
+                    bar.update(ir + 1 - bar.n)
                     bar.refresh()
                     orig_callback(ir, *args, **kwargs)
             else:
 
                 def callback_with_bar(ir, *args, **kwargs):
-                    bar.update((ir + 1) // period - bar.n)
+                    bar.update(ir + 1 - bar.n)
                     bar.refresh()
 
             kwargs["round_callback"] = callback_with_bar
@@ -110,7 +104,7 @@ class ProgramClient:
             # if not, need to raise it on remote side
             if not hasattr(sys.exc_info()[1], "_pyroTraceback"):
                 print("Client-side error, raise it on remote side...")
-                prog_server = type(self).prog_server
+                prog_server = self.prog_server
                 prog_server._pyroTimeout, old = 1, prog_server._pyroTimeout
                 prog_server.set_interrupt(str(e))
                 prog_server._pyroTimeout = old

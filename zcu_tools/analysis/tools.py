@@ -30,7 +30,7 @@ def NormalizeData(amps2D: np.ndarray, axis=None, rescale=True) -> np.ndarray:
     nan_mask = np.broadcast_to(nan_mask, amps2D.shape)
     amps2D[nan_mask] = 0
 
-    if amps2D.dtype == np.complex:
+    if np.iscomplexobj(amps2D):
         # if complex, minus the mean
         amps2D = np.abs(amps2D - np.nanmean(amps2D, axis=axis, keepdims=True))
     else:
