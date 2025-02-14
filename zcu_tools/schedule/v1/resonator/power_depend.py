@@ -61,7 +61,7 @@ def measure_res_pdr_dep(
                 freq_tqdm.update()
 
             if instant_show:
-                amps = NormalizeData(np.abs(signals2D), axis=1)
+                amps = NormalizeData(signals2D, axis=1)
                 update_show2d(fig, ax, dh, im, amps)
 
         if instant_show:

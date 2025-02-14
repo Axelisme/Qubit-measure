@@ -36,7 +36,7 @@ def measure_res_pdr_dep(
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     try:
         pdr_tqdm = tqdm(pdrs, desc="Power", smoothing=0)
-        freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
+        avgs_tqdm = tqdm(total=cfg["soft_avgs"], desc="Soft_avgs", smoothing=0)
         for i, pdr in enumerate(pdr_tqdm):
             res_pulse["gain"] = pdr
 
@@ -47,15 +47,16 @@ def measure_res_pdr_dep(
                 elif cfg["reps"] > 10 * reps_ref:
                     cfg["reps"] = int(10 * reps_ref)
 
-            freq_tqdm.reset()
-            freq_tqdm.refresh()
+            avgs_tqdm.reset()
+            avgs_tqdm.refresh()
 
             def callback(ir, sum_d, *, xs):
-                freq_tqdm.update(ir + 1 - freq_tqdm.n)
+                avgs_tqdm.update(ir + 1 - avgs_tqdm.n)
+                avgs_tqdm.refresh()
                 if instant_show:
                     signals2D[i] = sum_d[0][0].dot([1, 1j]) / (ir + 1)
                     amps = NormalizeData(np.abs(signals2D), axis=1)
-                    update_show2d(fig, ax, dh, im, amps, (pdr, xs))
+                    update_show2d(fig, ax, dh, im, amps)
 
             fpts, signals2D[i] = sweep_onetone(
                 soc,
@@ -67,11 +68,14 @@ def measure_res_pdr_dep(
                 callback=callback,
             )
 
-            freq_tqdm.update(freq_tqdm.total - freq_tqdm.n)
+            avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
 
             if instant_show:
                 amps = NormalizeData(np.abs(signals2D), axis=1)
                 update_show2d(fig, ax, dh, im, amps)
+
+        pdr_tqdm.close()
+        avgs_tqdm.close()
 
         if instant_show:
             clear_show(fig, dh)

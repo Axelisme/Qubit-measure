@@ -33,7 +33,7 @@ class ProgramServer:
 
         self.cur_cb = kwargs.get("round_callback")
         self.delay_args = None
-        self.prev_t = None
+        self.prev_t = -MIN_CALLBACK_INTERVAL - 1  # immediate callback first time
 
     def _after_run_program(self):
         self.prev_t = None  # reset previous time
@@ -47,22 +47,21 @@ class ProgramServer:
     def _wrap_callback(self, cb: CallbackWrapper):
         def wrapped_cb(*args, **kwargs):
             cur_t = time.time()
-            if self.prev_t is not None and cur_t - self.prev_t < MIN_CALLBACK_INTERVAL:
+            if cur_t - self.prev_t < MIN_CALLBACK_INTERVAL:
                 # delay callback execution to end, and ensure it's newest
                 # this args will be executed after acquiring data
                 self.delay_args = (args, kwargs)
                 return
 
             # don't raise exception in callback
+            self.prev_t = cur_t
+            self.delay_args = None  # drop old delayed args
             try:
-                try:
-                    cb._pyroTimeout = 1.0  # 1s timeout for callback
-                    self.prev_t = time.time()
-                    cb.oneway_callback(*args, **kwargs)
-                except Pyro4.errors.CommunicationError as e:
-                    print(f"Error during callback execution: {e}, retrying...")
-                    cb._pyroReconnect(3)
-                    cb.oneway_callback(*args, **kwargs)  # retry
+                # timeout is set to prevent blocking of the server
+                timeout = max(MIN_CALLBACK_INTERVAL - 0.1, 0)
+                cb._pyroTimeout, old = timeout, cb._pyroTimeout
+                cb.oneway_callback(*args, **kwargs)
+                cb._pyroTimeout = old
             except Exception as e:
                 print(f"Error during callback execution: {e}")
                 self.delay_args = (args, kwargs)  # try again later

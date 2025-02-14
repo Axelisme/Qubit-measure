@@ -25,21 +25,27 @@ def convert2max_contrast(Is: np.ndarray, Qs: np.ndarray):
 
 
 def NormalizeData(amps2D: np.ndarray, axis=None, rescale=True) -> np.ndarray:
-    # if all values are nan along the axis, replace with 0
-    nan_mask = np.all(np.isnan(amps2D), axis=axis, keepdims=True)
-    nan_mask = np.broadcast_to(nan_mask, amps2D.shape)
-    amps2D[nan_mask] = 0
+    # find the mask of all values are nan along the axis,
+    amps2D = amps2D.copy()  # prevent in-place modification
+    nan_mask = np.isnan(amps2D)
+
+    # skip if all values are nan
+    if np.all(nan_mask):
+        return amps2D
 
     if np.iscomplexobj(amps2D):
         # if complex, minus the mean
-        amps2D = np.abs(amps2D - np.nanmean(amps2D, axis=axis, keepdims=True))
+        amps2D = np.abs(
+            amps2D - np.nanmean(amps2D, axis=axis, keepdims=True, where=~nan_mask)
+        )
     else:
         # if real, minus the median
-        amps2D = amps2D - np.nanmedian(amps2D, axis=axis, keepdims=True)
+        nan_row = np.all(nan_mask, axis=axis)
+        amps2D[~nan_row] -= np.nanmedian(amps2D[~nan_row], axis=axis, keepdims=True)
 
     if rescale:
         # divide by the standard deviation
-        stds = np.nanstd(amps2D, axis=axis, keepdims=True)
+        stds = np.nanstd(amps2D, axis=axis, keepdims=True, where=~nan_mask)
         stds[stds == 0] = 1e-10
         amps2D = amps2D / stds
 
