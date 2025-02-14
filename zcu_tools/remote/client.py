@@ -1,5 +1,5 @@
 import threading
-import time
+from typing import Optional
 
 import Pyro4
 from tqdm.auto import tqdm
@@ -23,6 +23,7 @@ class ProgramClient:
             print(
                 f"Client Pyro4 daemon started at {config.LOCAL_IP}:{config.LOCAL_PORT}"
             )
+            Pyro4.config.ONEWAY_THREADED = False
             cls.callback_daemon = Pyro4.Daemon(
                 host=config.LOCAL_IP, port=config.LOCAL_PORT
             )
@@ -56,7 +57,9 @@ class ProgramClient:
         return callback
 
     @classmethod
-    def drop_callback(cls, callback: CallbackWrapper):
+    def drop_callback(cls, callback: Optional[CallbackWrapper]):
+        if callback is None:
+            return
         cls.callback_daemon.unregister(callback)
         callback.close()
 
@@ -119,25 +122,26 @@ class ProgramClient:
     def test_remote_callback(self) -> bool:
         success_flag = False
 
-        def oneway_callback():
+        def oneway_callback(_):
             nonlocal success_flag
             success_flag = True
 
         boxed_callback = type(self).wrap_callback(oneway_callback)
         print("Sending callback to server...", end="   ")
-        self._remote_call("test_callback", boxed_callback)
-        time.sleep(0.5)
-        type(self).drop_callback(boxed_callback)
+        try:
+            self._remote_call("test_callback", boxed_callback)
+        finally:
+            type(self).drop_callback(boxed_callback)
         print("Callback test ", "passed" if success_flag else "failed", "!")
         return success_flag
 
     def acquire(self, prog, **kwargs):
         kwargs, bar = self.overwrite_kwargs_for_remote(prog, kwargs)
         prog_name = type(prog).__name__
-        ret = self._remote_call("run_program", prog_name, prog.cfg, **kwargs)
-        boxed_callback = kwargs.get("round_callback")
-        if boxed_callback is not None:
-            type(self).drop_callback(boxed_callback)
+        try:
+            ret = self._remote_call("run_program", prog_name, prog.cfg, **kwargs)
+        finally:
+            type(self).drop_callback(kwargs.get("round_callback"))
         if bar is not None:
             bar.update(bar.total - bar.n)  # force to finish
             bar.close()
@@ -146,10 +150,12 @@ class ProgramClient:
     def acquire_decimated(self, prog, **kwargs):
         kwargs, bar = self.overwrite_kwargs_for_remote(prog, kwargs)
         prog_name = type(prog).__name__
-        ret = self._remote_call("run_program_decimated", prog_name, prog.cfg, **kwargs)
-        boxed_callback = kwargs.get("round_callback")
-        if boxed_callback is not None:
-            type(self).drop_callback(boxed_callback)
+        try:
+            ret = self._remote_call(
+                "run_program_decimated", prog_name, prog.cfg, **kwargs
+            )
+        finally:
+            type(self).drop_callback(kwargs.get("round_callback"))
         if bar is not None:
             bar.update(bar.total - bar.n)  # force to finish
             bar.close()
