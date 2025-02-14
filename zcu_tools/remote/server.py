@@ -48,18 +48,24 @@ class ProgramServer:
         def wrapped_cb(*args, **kwargs):
             cur_t = time.time()
             if self.prev_t is not None and cur_t - self.prev_t < MIN_CALLBACK_INTERVAL:
-                # delay callback execution, and ensure it's newest
+                # delay callback execution to end, and ensure it's newest
                 # this args will be executed after acquiring data
                 self.delay_args = (args, kwargs)
                 return
 
             # don't raise exception in callback
             try:
-                cb._pyroTimeout = 1.0  # 1s timeout for callback
-                cb.oneway_callback(*args, **kwargs)
-                self.prev_t = time.time()
+                try:
+                    cb._pyroTimeout = 1.0  # 1s timeout for callback
+                    self.prev_t = time.time()
+                    cb.oneway_callback(*args, **kwargs)
+                except Pyro4.errors.CommunicationError as e:
+                    print(f"Error during callback execution: {e}, retrying...")
+                    cb._pyroReconnect(3)
+                    cb.oneway_callback(*args, **kwargs)  # retry
             except Exception as e:
                 print(f"Error during callback execution: {e}")
+                self.delay_args = (args, kwargs)  # try again later
 
         return wrapped_cb
 
