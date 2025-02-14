@@ -114,6 +114,6 @@ class ProgramServer:
     def test_callback(self, cb: CallbackWrapper):
         print("Server received and executing callback...")
         self._before_run_program((), {})
-        self._wrap_callback(cb)()
+        self._wrap_callback(cb)(0)
         self._after_run_program()
         print("Finished callback test")

@@ -1,5 +1,3 @@
-from functools import partial
-
 import numpy as np
 
 from zcu_tools import make_cfg
@@ -20,10 +18,6 @@ def sweep_onetone(
     prog = OneToneProgram(soccfg, cfg)
     xs = prog.get_pulse_param("res_pulse", p_attr, as_array=True)
 
-    # partial fill callback with fpts
-    if callback is not None:
-        callback = partial(callback, xs=xs)
-
     IQlist = prog.acquire(soc, progress=progress, round_callback=callback, **kwargs)
     signals = IQlist[0][0].dot([1, 1j])
 
@@ -41,9 +35,9 @@ def measure_res_freq(soc, soccfg, cfg, progress=True, instant_show=False):
         fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
         fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
-        def callback(ir, sum_d, *, xs):
+        def callback(ir, sum_d):
             amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
-            update_show(fig, ax, dh, curve, amps, xs)
+            update_show(fig, ax, dh, curve, amps)
     else:
         callback = None  # type: ignore
 

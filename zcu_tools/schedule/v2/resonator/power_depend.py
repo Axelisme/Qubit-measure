@@ -52,7 +52,7 @@ def measure_res_pdr_dep(
 
             _signals2D = signals2D.copy()  # prevent overwrite
 
-            def callback(ir, sum_d, *, xs):
+            def callback(ir, sum_d):
                 avgs_tqdm.update(max(ir + 1 - avgs_tqdm.n, 0))
                 avgs_tqdm.refresh()
                 if instant_show:
@@ -75,12 +75,12 @@ def measure_res_pdr_dep(
             if instant_show:
                 amps = NormalizeData(np.abs(signals2D), axis=1)
                 update_show2d(fig, ax, dh, im, amps, (fpts, pdrs))
+        else:
+            if instant_show:
+                clear_show(fig, dh)
 
         pdr_tqdm.close()
         avgs_tqdm.close()
-
-        if instant_show:
-            clear_show(fig, dh)
     except BaseException as e:
         print("Error during measurement:", e)
 

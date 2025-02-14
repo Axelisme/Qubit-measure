@@ -55,6 +55,11 @@ class ProgramClient:
 
         return callback
 
+    @classmethod
+    def drop_callback(cls, callback: CallbackWrapper):
+        cls.callback_daemon.unregister(callback)
+        callback.close()
+
     def overwrite_kwargs_for_remote(self, prog, kwargs: dict):
         # before send to remote server, override some kwargs
 
@@ -122,6 +127,7 @@ class ProgramClient:
         print("Sending callback to server...", end="   ")
         self._remote_call("test_callback", boxed_callback)
         time.sleep(0.5)
+        type(self).drop_callback(boxed_callback)
         print("Callback test ", "passed" if success_flag else "failed", "!")
         return success_flag
 
@@ -129,6 +135,9 @@ class ProgramClient:
         kwargs, bar = self.overwrite_kwargs_for_remote(prog, kwargs)
         prog_name = type(prog).__name__
         ret = self._remote_call("run_program", prog_name, prog.cfg, **kwargs)
+        boxed_callback = kwargs.get("round_callback")
+        if boxed_callback is not None:
+            type(self).drop_callback(boxed_callback)
         if bar is not None:
             bar.update(bar.total - bar.n)  # force to finish
             bar.close()
@@ -138,6 +147,9 @@ class ProgramClient:
         kwargs, bar = self.overwrite_kwargs_for_remote(prog, kwargs)
         prog_name = type(prog).__name__
         ret = self._remote_call("run_program_decimated", prog_name, prog.cfg, **kwargs)
+        boxed_callback = kwargs.get("round_callback")
+        if boxed_callback is not None:
+            type(self).drop_callback(boxed_callback)
         if bar is not None:
             bar.update(bar.total - bar.n)  # force to finish
             bar.close()

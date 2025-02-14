@@ -5,6 +5,7 @@ from IPython.display import display
 
 def init_show(X, x_label, y_label, title=None, **kwargs):
     fig, ax = plt.subplots()
+    fig.tight_layout(pad=3)
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
     if title:

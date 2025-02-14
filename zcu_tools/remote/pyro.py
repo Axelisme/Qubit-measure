@@ -11,7 +11,6 @@ Pyro4.config.SERIALIZER = "dill"
 Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill"])
 Pyro4.config.DILL_PROTOCOL_VERSION = 5
 Pyro4.config.REQUIRE_EXPOSE = False
-Pyro4.config.ONEWAY_THREADED = False  # make callbacks synchronous
 
 
 def get_bitfile(version):
