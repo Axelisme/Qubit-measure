@@ -50,12 +50,14 @@ def measure_res_pdr_dep(
             avgs_tqdm.reset()
             avgs_tqdm.refresh()
 
+            _signals2D = signals2D.copy()  # prevent overwrite
+
             def callback(ir, sum_d, *, xs):
                 avgs_tqdm.update(max(ir + 1 - avgs_tqdm.n, 0))
                 avgs_tqdm.refresh()
                 if instant_show:
-                    signals2D[i] = sum_d[0][0].dot([1, 1j]) / (ir + 1)
-                    amps = NormalizeData(np.abs(signals2D), axis=1)
+                    _signals2D[i] = sum_d[0][0].dot([1, 1j]) / (ir + 1)
+                    amps = NormalizeData(np.abs(_signals2D), axis=1)
                     update_show2d(fig, ax, dh, im, amps)
 
             fpts, signals2D[i] = sweep_onetone(
