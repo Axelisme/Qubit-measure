@@ -33,21 +33,19 @@ def NormalizeData(amps2D: np.ndarray, axis=None, rescale=True) -> np.ndarray:
     if np.all(nan_mask):
         return amps2D
 
-    if np.iscomplexobj(amps2D):
-        # if complex, minus the mean
-        amps2D = np.abs(
-            amps2D - np.nanmean(amps2D, axis=axis, keepdims=True, where=~nan_mask)
-        )
-    else:
-        # if real, minus the median
-        nan_row = np.all(nan_mask, axis=axis)
-        amps2D[~nan_row] -= np.nanmedian(amps2D[~nan_row], axis=axis, keepdims=True)
+    _amps2D = np.swapaxes(amps2D, axis, 0)  # move the axis to the first dimension
+
+    # minus the mean
+    where = np.all(np.isnan(_amps2D), axis=0)
+    _amps2D[:, ~where] -= np.nanmean(_amps2D[:, ~where], axis=0, keepdims=True)
+    _amps2D = np.abs(_amps2D).astype(np.float64)
 
     if rescale:
-        # divide by the standard deviation
-        stds = np.nanstd(amps2D, axis=axis, keepdims=True, where=~nan_mask)
-        stds[stds == 0] = 1e-10
-        amps2D = amps2D / stds
+        where = np.sum(_amps2D, axis=0) > 1
+        _amps2D[:, where] /= np.std(_amps2D[:, where], axis=0)
+        _amps2D[:, ~where] = 0
+
+    amps2D = np.swapaxes(_amps2D, 0, axis)  # move the axis back
 
     # restore nan values
     amps2D[nan_mask] = np.nan

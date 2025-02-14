@@ -1,4 +1,5 @@
 import time
+from copy import deepcopy
 
 import Pyro4
 import Pyro4.errors
@@ -15,7 +16,7 @@ class ProgramServer:
         self.zp = zp  # zcu_tools.program.v1 or v2
 
         self.cur_prog = None  # current running program
-        self.cur_cb = None  # delayed callback
+        self.orig_cb = None  # delayed callback
         self.delay_args = None  # arguments for delayed program execution
         self.prev_t = None  # previous successful callback time
 
@@ -28,31 +29,31 @@ class ProgramServer:
         self.cur_prog = prog
 
         kwargs["progress"] = False  # disable progress bar
-        if kwargs.get("round_callback") is not None:
-            kwargs["round_callback"] = self._wrap_callback(kwargs["round_callback"])
 
-        self.cur_cb = kwargs.get("round_callback")
+        self.orig_cb = kwargs.get("round_callback")
+        if self.orig_cb is not None:
+            kwargs["round_callback"] = self._wrap_callback(self.orig_cb)
+
         self.delay_args = None
         self.prev_t = -MIN_CALLBACK_INTERVAL - 1  # immediate callback first time
 
     def _after_run_program(self):
-        self.prev_t = None  # reset previous time
-        if self.delay_args is not None:
-            # because prev_t is None, this must be executed
-            self.cur_cb(*self.delay_args[0], **self.delay_args[1])
+        self.prev_t = None
         self.cur_prog = None
-        self.cur_cb = None
+        self.orig_cb = None
         self.delay_args = None
 
     def _wrap_callback(self, cb: CallbackWrapper):
         def wrapped_cb(*args, **kwargs):
             cur_t = time.time()
-            if self.prev_t is None:  # make it robust
-                self.prev_t = cur_t - MIN_CALLBACK_INTERVAL - 1
+
+            if self.prev_t is None:
+                self.prev_t = -1  # immediate callback first time
+
             if cur_t - self.prev_t < MIN_CALLBACK_INTERVAL:
                 # delay callback execution to end, and ensure it's newest
                 # this args will be executed after acquiring data
-                self.delay_args = (args, kwargs)
+                self.delay_args = deepcopy((args, kwargs))
                 return
 
             # don't raise exception in callback
@@ -87,6 +88,8 @@ class ProgramServer:
             # call original method from MyProgram instead of subclass method
             # in case of multiple execution of overridden method
             ret = prog._local_acquire(self.soc, **kwargs)
+            if self.delay_args is not None:
+                self.orig_cb(*self.delay_args[0], **self.delay_args[1])
         finally:
             self._after_run_program()
         return ret
@@ -99,8 +102,10 @@ class ProgramServer:
             # call original method from MyProgram instead of subclass method
             # in case of multiple execution of overridden method
             ret = prog._local_acquire_decimated(self.soc, **kwargs)
+            if self.delay_args is not None:
+                self.orig_cb(*self.delay_args[0], **self.delay_args[1])
         finally:
-            self._after_run_program()
+            self._after_run_program()  # just in case
         return ret
 
     @Pyro4.expose

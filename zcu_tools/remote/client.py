@@ -72,13 +72,13 @@ class ProgramClient:
                 orig_callback = kwargs["round_callback"]
 
                 def callback_with_bar(ir, *args, **kwargs):
-                    bar.update(ir + 1 - bar.n)
+                    bar.update(max(ir + 1 - bar.n, 0))
                     bar.refresh()
                     orig_callback(ir, *args, **kwargs)
             else:
 
                 def callback_with_bar(ir, *args, **kwargs):
-                    bar.update(ir + 1 - bar.n)
+                    bar.update(max(ir + 1 - bar.n, 0))
                     bar.refresh()
 
             kwargs["round_callback"] = callback_with_bar

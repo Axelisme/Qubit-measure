@@ -15,7 +15,7 @@ def measure_res_pdr_dep(
     cfg,
     instant_show=False,
     dynamic_reps=False,
-    gain_ref=1000,
+    gain_ref=0.1,
 ):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
@@ -41,7 +41,7 @@ def measure_res_pdr_dep(
             res_pulse["gain"] = pdr
 
             if dynamic_reps:
-                cfg["reps"] = int(reps_ref * gain_ref / pdr)
+                cfg["reps"] = int(reps_ref * gain_ref / max(pdr, 1e-6))
                 if cfg["reps"] < 0.1 * reps_ref:
                     cfg["reps"] = int(0.1 * reps_ref + 0.99)
                 elif cfg["reps"] > 10 * reps_ref:
@@ -51,7 +51,7 @@ def measure_res_pdr_dep(
             avgs_tqdm.refresh()
 
             def callback(ir, sum_d, *, xs):
-                avgs_tqdm.update(ir + 1 - avgs_tqdm.n)
+                avgs_tqdm.update(max(ir + 1 - avgs_tqdm.n, 0))
                 avgs_tqdm.refresh()
                 if instant_show:
                     signals2D[i] = sum_d[0][0].dot([1, 1j]) / (ir + 1)
@@ -72,7 +72,7 @@ def measure_res_pdr_dep(
 
             if instant_show:
                 amps = NormalizeData(np.abs(signals2D), axis=1)
-                update_show2d(fig, ax, dh, im, amps)
+                update_show2d(fig, ax, dh, im, amps, (fpts, pdrs))
 
         pdr_tqdm.close()
         avgs_tqdm.close()

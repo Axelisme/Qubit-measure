@@ -41,6 +41,7 @@ def init_show2d(X, Y, x_label, y_label, title=None):
         interpolation="none",
         extent=[X[0], X[-1], Y[0], Y[-1]],
     )
+    fig.tight_layout()
     dh = display(fig, display_id=True)
     return fig, ax, dh, im
 
