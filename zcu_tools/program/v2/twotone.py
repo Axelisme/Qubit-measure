@@ -1,9 +1,13 @@
-from .base import MyProgramV2
+from .base import MyProgramV2, declare_pulse
 
 PULSE_DELAY = 0.05  # us
 
 
 class TwoToneProgram(MyProgramV2):
+    def _initialize(self, cfg):
+        declare_pulse(self, self.qub_pulse, "qub_pulse")
+        super()._initialize(cfg)
+
     def _body(self, _):
         # reset
         self.resetM.reset_qubit(self)

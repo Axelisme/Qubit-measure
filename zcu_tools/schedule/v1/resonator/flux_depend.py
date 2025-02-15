@@ -26,6 +26,8 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     flux_cfg = cfg["sweep"]["flux"]
     flxs = sweep2array(flux_cfg)
 
+    set_flux(cfg["dev"]["flux_dev"], flxs[0])  # set initial flux
+
     freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
     if instant_show:
@@ -34,7 +36,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
     try:
         for i, flx in enumerate(flxs):
-            cfg["flux"] = flx
+            cfg["dev"]["flux"] = flx
             set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
             freq_tqdm.reset()
@@ -56,4 +58,4 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     except BaseException as e:
         print("Error during measurement:", e)
 
-    return fpts, flxs, signals2D
+    return flxs, fpts, signals2D

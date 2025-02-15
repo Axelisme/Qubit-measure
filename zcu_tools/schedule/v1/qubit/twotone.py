@@ -41,12 +41,11 @@ def measure_qub_freq_with_reset(
     soc,
     soccfg,
     cfg,
+    r_f,
     instant_show=False,
-    r_f=None,
 ):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    assert r_f is not None, "Need resonator frequency for conjugate reset"
     assert cfg["dac"].get("reset") == "pulse", "Need reset=pulse for conjugate reset"
     assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
 

@@ -95,7 +95,7 @@ class YokoDevControl:
             value = value.item()
 
         if config.YOKO_DRY_RUN:
-            print(f"DRY RUN: Set current to {value}")
+            print(f"DRY RUN: Set current to {value}\r")
 
         # if not np.issubdtype(flux, np.floating):
         if not isinstance(value, float):

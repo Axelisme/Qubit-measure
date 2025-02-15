@@ -4,17 +4,10 @@ from zcu_tools import make_cfg
 from zcu_tools.program.v2 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
-from zcu_tools.schedule.tools import format_sweep1D, sweep2param
+from zcu_tools.schedule.tools import format_sweep1D, sweep2param, sweep2array
 
 
-def sweep_onetone(
-    soc, soccfg, cfg, loop, p_attr, progress=True, callback=None, **kwargs
-):
-    cfg = make_cfg(cfg)  # prevent in-place modification
-
-    cfg["dac"]["res_pulse"][p_attr] = sweep2param(loop, cfg["sweep"][loop])
-    cfg = make_cfg(cfg)
-
+def sweep_onetone(soc, soccfg, cfg, p_attr, progress=True, callback=None, **kwargs):
     prog = OneToneProgram(soccfg, cfg)
     xs = prog.get_pulse_param("res_pulse", p_attr, as_array=True)
 
@@ -29,10 +22,12 @@ def measure_res_freq(soc, soccfg, cfg, progress=True, instant_show=False):
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
 
+    sweep_cfg = cfg["sweep"]["freq"]
+    cfg["dac"]["res_pulse"]["freq"] = sweep2param("freq", sweep_cfg)
+
     if instant_show:
         # predict fpts
-        sweep_cfg = cfg["sweep"]["freq"]
-        fpts = np.linspace(sweep_cfg["start"], sweep_cfg["stop"], sweep_cfg["expts"])
+        fpts = sweep2array(sweep_cfg, False)
         fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
         def callback(ir, sum_d):
@@ -47,7 +42,6 @@ def measure_res_freq(soc, soccfg, cfg, progress=True, instant_show=False):
         soc,
         soccfg,
         cfg,
-        loop="freq",
         p_attr="freq",
         progress=progress,
         callback=callback,
