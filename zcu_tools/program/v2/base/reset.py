@@ -41,4 +41,4 @@ class PulseReset(AbsReset):
     def reset_qubit(self, prog: AveragerProgramV2):
         reset_pulse = prog.reset_pulse
         prog.pulse(reset_pulse["ch"], "reset")
-        prog.sync_all(reset_pulse.get("delay", self.DEFAULT_RESET_DELAY))
+        prog.delay_auto(reset_pulse.get("delay", self.DEFAULT_RESET_DELAY))

@@ -4,8 +4,7 @@ from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
-
-from zcu_tools.schedule.tools import format_sweep1D, sweep2param, sweep2array
+from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 
 
 def sweep_twotone(soc, soccfg, cfg, p_attr, progress=True, callback=None, **kwargs):
@@ -72,7 +71,7 @@ def measure_qub_freq_with_reset(
 
     if instant_show:
         # predict fpts
-        fpts = sweep2array(cfg["sweep"], False)
+        fpts = sweep2array(cfg["sweep"]["freq"], False)
         fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
 
         def callback(ir, sum_d):
