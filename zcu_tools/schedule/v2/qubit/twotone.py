@@ -9,12 +9,18 @@ from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 
 def sweep_twotone(soc, soccfg, cfg, p_attr, progress=True, callback=None, **kwargs):
     prog = TwoToneProgram(soccfg, cfg)
-    xs = prog.get_pulse_param("qub_pulse", p_attr, as_array=True)
 
     IQlist = prog.acquire(soc, progress=progress, round_callback=callback, **kwargs)
     signals = IQlist[0][0].dot([1, 1j])
 
-    return xs, signals
+    if isinstance(p_attr, str):
+        xs = prog.get_pulse_param("qub_pulse", p_attr, as_array=True)
+        return xs, signals
+    elif isinstance(p_attr, (list, tuple)):
+        xss = [prog.get_pulse_param("qub_pulse", r, as_array=True) for r in p_attr]
+        return *xss, signals
+    else:
+        raise ValueError(f"Invalid p_attr: {p_attr}")
 
 
 def measure_qub_freq(soc, soccfg, cfg, progress=True, instant_show=False):

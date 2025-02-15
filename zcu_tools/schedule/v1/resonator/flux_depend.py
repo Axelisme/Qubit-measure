@@ -51,7 +51,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
 
             if instant_show:
                 amps = NormalizeData(np.abs(signals2D), axis=1, rescale=False)
-                update_show2d(fig, ax, dh, im, amps.T)
+                update_show2d(fig, ax, dh, im, amps)
 
         if instant_show:
             clear_show(fig, dh)

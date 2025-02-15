@@ -62,11 +62,11 @@ def measure_res_pdr_dep(
 
             if instant_show:
                 amps = NormalizeData(signals2D, axis=1)
-                update_show2d(fig, ax, dh, im, amps)
+                update_show2d(fig, ax, dh, im, amps.T)
 
         if instant_show:
             clear_show(fig, dh)
     except BaseException as e:
         print("Error during measurement:", e)
 
-    return fpts, pdrs, signals2D  # (pdrs, freqs)
+    return pdrs, fpts, signals2D  # (pdrs, freqs)

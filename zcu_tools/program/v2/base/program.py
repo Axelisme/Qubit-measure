@@ -8,10 +8,16 @@ from .reset import make_reset
 
 
 class MyProgramV2(MyProgram, AveragerProgramV2):
-    def __init__(self, soccfg, cfg: Dict[str, Any]):
+    def __init__(self, soccfg, cfg: Dict[str, Any], **kwargs):
+        kwargs.setdefault("reps_innermost", True)  # make it align with v1 program
+
         # v2 program need to pass reps and final_delay to init
         super().__init__(
-            soccfg, cfg=cfg, reps=cfg["reps"], final_delay=cfg["adc"]["relax_delay"]
+            soccfg,
+            cfg=cfg,
+            reps=cfg["reps"],
+            final_delay=cfg["adc"]["relax_delay"],
+            **kwargs,
         )
 
     def _parse_cfg(self, cfg: Dict[str, Any]):

@@ -59,7 +59,7 @@ def measure_res_pdr_dep(
                 if instant_show:
                     _signals2D[i] = sum_d[0][0].dot([1, 1j]) / (ir + 1)
                     amps = NormalizeData(np.abs(_signals2D), axis=1)
-                    update_show2d(fig, ax, dh, im, amps)
+                    update_show2d(fig, ax, dh, im, amps.T)
 
             fpts, signals2D[i] = sweep_onetone(
                 soc,
@@ -75,7 +75,7 @@ def measure_res_pdr_dep(
 
             if instant_show:
                 amps = NormalizeData(np.abs(signals2D), axis=1)
-                update_show2d(fig, ax, dh, im, amps, (fpts, pdrs))
+                update_show2d(fig, ax, dh, im, amps.T, (fpts, pdrs))
         else:
             if instant_show:
                 clear_show(fig, dh)
@@ -86,4 +86,4 @@ def measure_res_pdr_dep(
     except BaseException as e:
         print("Error during measurement:", e)
 
-    return fpts, pdrs, signals2D  # (pdrs, freqs)
+    return pdrs, fpts, signals2D  # (pdrs, freqs)

@@ -78,7 +78,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
                 amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
                 update_show(fig, ax, dh, curve, amps)
         else:
-            callback = None
+            callback = None  # type: ignore
 
         prog = RGainTwoToneProgram(soccfg, cfg)
         pdrs, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)

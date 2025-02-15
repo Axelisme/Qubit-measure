@@ -48,7 +48,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
                 if instant_show:
                     _signals2D[i] = sum_d[0][0].dot([1, 1j]) / (ir + 1)
                     amps = NormalizeData(np.abs(_signals2D), axis=1, rescale=False)
-                    update_show2d(fig, ax, dh, im, amps.T)
+                    update_show2d(fig, ax, dh, im, amps)
 
             fpts, signals2D[i] = sweep_onetone(
                 soc,
@@ -64,7 +64,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
 
             if instant_show:
                 amps = NormalizeData(np.abs(signals2D), axis=1, rescale=False)
-                update_show2d(fig, ax, dh, im, amps.T, (flxs, fpts))
+                update_show2d(fig, ax, dh, im, amps, (flxs, fpts))
         else:
             if instant_show:
                 clear_show(fig, dh)
