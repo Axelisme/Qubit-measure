@@ -1,3 +1,4 @@
+from typing import Callable, Optional
 import threading
 from queue import Queue
 
@@ -5,21 +6,16 @@ import Pyro4
 
 
 class CallbackWrapper:
-    def exec(self):
-        while True:
-            job = self.JOB_Q.get()
-            if job is None:
-                break
-
-            ir, args, kwargs = job
-            try:
-                # do not raise exception in this thread
-                self.func(ir, *args, **kwargs)
-            except Exception:
-                pass
-
-    def __init__(self, func: callable):
+    def __init__(self, client, func: Optional[Callable]):
+        self.client = client
         self.func = func
+
+    def __enter__(self):
+        if self.func is None:
+            return self.func  # do nothing
+
+        self.daemon = self.client.get_daemon()
+
         self.lock = threading.Lock()
 
         # these variables are protected by lock
@@ -32,6 +28,42 @@ class CallbackWrapper:
 
         self.WORKER_T.start()
 
+        self.daemon.register(self)
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.func is None:
+            return  # do nothing
+
+        self.daemon.unregister(self)
+
+        self.alive = False
+        with self.lock:
+            self.clear_last_job()
+            self.JOB_Q.put_nowait(None)  # tell worker no more job
+        self.WORKER_T.join(2)
+
+    def clear_last_job(self):
+        assert self.lock.locked(), "This method should be called within lock"
+        while not self.JOB_Q.empty():
+            self.JOB_Q.get_nowait()
+
+    def exec(self):
+        assert self.func is not None, "This method should not be called"
+        while True:
+            job = self.JOB_Q.get()
+            if job is None:
+                break  # end of job
+
+            # do not raise exception in this thread
+            try:
+                ir, args, kwargs = job
+                self.func(ir, *args, **kwargs)
+            except BaseException as e:
+                print(f"Error in callback: {e}")
+                pass
+
     @Pyro4.expose
     @Pyro4.callback
     @Pyro4.oneway
@@ -43,16 +75,3 @@ class CallbackWrapper:
                 self.last_ir = ir
                 self.clear_last_job()
                 self.JOB_Q.put_nowait((ir, args, kwargs))
-
-    def clear_last_job(self):
-        assert self.lock.locked(), "This method should be called within lock"
-        while not self.JOB_Q.empty():
-            self.JOB_Q.get_nowait()
-
-    def close(self):
-        with self.lock:
-            self.alive = False
-
-            self.clear_last_job()
-            self.JOB_Q.put_nowait(None)  # tell worker no more job
-            self.WORKER_T.join(2)

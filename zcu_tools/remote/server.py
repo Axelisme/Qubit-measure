@@ -62,9 +62,9 @@ class ProgramServer:
             try:
                 # timeout is set to prevent blocking of the server
                 timeout = max(MIN_CALLBACK_INTERVAL - 0.1, 0)
-                cb._pyroTimeout, old = timeout, cb._pyroTimeout
+                cb._pyroTimeout, old = timeout, cb._pyroTimeout  # type: ignore
                 cb.oneway_callback(*args, **kwargs)
-                cb._pyroTimeout = old
+                cb._pyroTimeout = old  # type: ignore
             except Exception as e:
                 print(f"Error during callback execution: {e}")
                 self.delay_args = (args, kwargs)  # try again later
@@ -81,38 +81,28 @@ class ProgramServer:
             print("Warning: no program is running but received KeyboardInterrupt")
 
     @Pyro4.expose
-    def run_program(self, name: str, cfg: dict, **kwargs):
+    def run_program(self, name: str, cfg: dict, decimated: bool, **kwargs):
         prog = self._make_prog(name, cfg)
         self._before_run_program(prog, kwargs)
         try:
             # call original method from MyProgram instead of subclass method
             # in case of multiple execution of overridden method
-            ret = prog._local_acquire(self.soc, **kwargs)
+            if decimated:
+                ret = prog._local_acquire_decimated(self.soc, **kwargs)
+            else:
+                ret = prog._local_acquire(self.soc, **kwargs)
+
+            # execute delayed callback
             if self.delay_args is not None:
-                # execute delayed callback
-                self.orig_cb.oneway_callback(*self.delay_args[0], **self.delay_args[1])
+                args, kwargs = self.delay_args  # type: ignore
+                self.orig_cb.oneway_callback(*args, **kwargs)  # type: ignore
         finally:
             self._after_run_program()
         return ret
 
     @Pyro4.expose
-    def run_program_decimated(self, name: str, cfg: dict, **kwargs):
-        prog = self._make_prog(name, cfg)
-        self._before_run_program(prog, kwargs)
-        try:
-            # call original method from MyProgram instead of subclass method
-            # in case of multiple execution of overridden method
-            ret = prog._local_acquire_decimated(self.soc, **kwargs)
-            if self.delay_args is not None:
-                # execute delayed callback
-                self.orig_cb.oneway_callback(*self.delay_args[0], **self.delay_args[1])
-        finally:
-            self._after_run_program()  # just in case
-        return ret
-
-    @Pyro4.expose
     def test_callback(self, cb: CallbackWrapper):
-        print("Server received and executing callback...")
+        print("Server received callback test...")
         self._before_run_program((), {})
         self._wrap_callback(cb)(0)
         self._after_run_program()
