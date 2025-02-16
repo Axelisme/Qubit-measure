@@ -1,7 +1,7 @@
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import clear_show, init_show2d, update_show2d
+from zcu_tools.schedule.instant_show import close_show, init_show2d, update_show2d
 from zcu_tools.schedule.tools import sweep2array, sweep2param
 
 from .twotone import sweep_twotone
@@ -50,6 +50,6 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
     if instant_show:
         amps = NormalizeData(signals2D, axis=0, rescale=False)
         update_show2d(fig, ax, dh, im, amps.T, (fpts, pdrs))
-        clear_show(fig, dh)
+        close_show(fig, dh)
 
     return pdrs, fpts, signals2D

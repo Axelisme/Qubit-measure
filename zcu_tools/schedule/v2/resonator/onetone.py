@@ -3,7 +3,7 @@ import numpy as np
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
+from zcu_tools.schedule.instant_show import close_show, init_show, update_show
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 
 
@@ -38,17 +38,20 @@ def measure_res_freq(soc, soccfg, cfg, progress=True, instant_show=False):
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    fpts, signals = sweep_onetone(
-        soc,
-        soccfg,
-        cfg,
-        p_attr="freq",
-        progress=progress,
-        callback=callback,
-    )
+    try:
+        fpts, signals = sweep_onetone(
+            soc,
+            soccfg,
+            cfg,
+            p_attr="freq",
+            progress=progress,
+            callback=callback,
+        )
 
-    if instant_show:
-        update_show(fig, ax, dh, curve, np.abs(signals), fpts)
-        clear_show(fig, dh)
+        if instant_show:
+            update_show(fig, ax, dh, curve, np.abs(signals), fpts)
+    finally:
+        if instant_show:
+            close_show(fig, dh)
 
     return fpts, signals

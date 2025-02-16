@@ -2,8 +2,9 @@ import numpy as np
 
 from zcu_tools import make_cfg
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
+from zcu_tools.schedule.instant_show import close_show, init_show, update_show
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
+
 from .twotone import sweep_twotone
 
 
@@ -39,7 +40,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
 
     if instant_show:
         update_show(fig, ax, dh, curve, np.abs(signals), lens)
-        clear_show(fig, dh)
+        close_show(fig, dh)
 
     return lens, signals
 
@@ -76,6 +77,6 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False):
 
     if instant_show:
         update_show(fig, ax, dh, curve, np.abs(signals), pdrs)
-        clear_show(fig, dh)
+        close_show(fig, dh)
 
     return pdrs, signals

@@ -56,5 +56,5 @@ def update_show2d(fig, ax, dh, im, Z, XY: tuple = None):
     dh.update(fig)
 
 
-def clear_show(fig, dh):
+def close_show(fig, dh):
     plt.close(fig)

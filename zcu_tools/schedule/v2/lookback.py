@@ -4,7 +4,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
+from zcu_tools.schedule.instant_show import close_show, init_show, update_show
 
 
 def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
@@ -90,6 +90,6 @@ def measure_lookback(
 
         if instant_show:
             update_show(fig, ax, dh, curve, np.abs(signals), Ts)
-            clear_show(fig, dh)
+            close_show(fig, dh)
 
     return Ts, signals

@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools.auto import make_cfg
 from zcu_tools.program.v1 import RGainTwoToneProgram, TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
+from zcu_tools.schedule.instant_show import close_show, init_show, update_show
 from zcu_tools.schedule.tools import sweep2array
 
 
@@ -40,7 +40,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
     if instant_show:
         update_show(fig, ax, dh, curve, np.abs(signals))
-        clear_show(fig, dh)
+        close_show(fig, dh)
 
     return lens, signals
 
@@ -86,6 +86,6 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
 
     if instant_show:
         update_show(fig, ax, dh, curve, np.abs(signals))
-        clear_show(fig, dh)
+        close_show(fig, dh)
 
     return pdrs, signals

@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
+from zcu_tools.schedule.instant_show import close_show, init_show, update_show
 from zcu_tools.schedule.tools import map2adcfreq, sweep2array
 
 
@@ -39,6 +39,6 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
             update_show(fig, ax, dh, curve, np.abs(signals))
 
     if instant_show:
-        clear_show(fig, dh)
+        close_show(fig, dh)
 
     return fpts, signals

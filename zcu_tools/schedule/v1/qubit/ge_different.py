@@ -7,7 +7,7 @@ from zcu_tools import make_cfg
 from zcu_tools.program.v1 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import (
-    clear_show,
+    close_show,
     init_show,
     init_show2d,
     update_show,
@@ -80,7 +80,7 @@ def measure_ge_pdr_dep(
                 update_show2d(fig, ax, dh, im, np.abs(snr2D))
 
         if instant_show:
-            clear_show(fig, dh)
+            close_show(fig, dh)
     except Exception as e:
         print("Error during measurement:", e)
 
@@ -118,7 +118,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
                 update_show(fig, ax, dh, curve, np.abs(snrs))
 
         if instant_show:
-            clear_show(fig, dh)
+            close_show(fig, dh)
     except Exception as e:
         print("Error during measurement:", e)
 
@@ -154,7 +154,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
                 update_show(fig, ax, dh, curve, np.abs(snrs))
 
         if instant_show:
-            clear_show(fig, dh)
+            close_show(fig, dh)
     except Exception as e:
         print("Error during measurement:", e)
 

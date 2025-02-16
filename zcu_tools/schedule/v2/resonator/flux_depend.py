@@ -4,7 +4,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import clear_show, init_show2d, update_show2d
+from zcu_tools.schedule.instant_show import close_show, init_show2d, update_show2d
 from zcu_tools.schedule.tools import map2adcfreq, sweep2array, sweep2param
 from zcu_tools.schedule.v2.resonator.onetone import sweep_onetone
 
@@ -67,7 +67,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
                 update_show2d(fig, ax, dh, im, amps, (flxs, fpts))
         else:
             if instant_show:
-                clear_show(fig, dh)
+                close_show(fig, dh)
 
         flux_tqdm.close()
         avgs_tqdm.close()

@@ -5,7 +5,7 @@ import numpy as np
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import clear_show, init_show, update_show
+from zcu_tools.schedule.instant_show import close_show, init_show, update_show
 from zcu_tools.schedule.tools import sweep2array
 
 
@@ -39,6 +39,6 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, reset_rf=None):
 
     if instant_show:
         update_show(fig, ax, dh, curve, np.abs(signals))
-        clear_show(fig, dh)
+        close_show(fig, dh)
 
     return fpts, signals
