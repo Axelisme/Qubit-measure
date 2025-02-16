@@ -80,9 +80,12 @@ def measure_res_pdr_dep(
         pdr_tqdm.close()
         avgs_tqdm.close()
 
-    except BaseException as e:
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, early stopping the program")
+    except Exception as e:
+        print("Error during measurement:", e)
+    finally:
         if instant_show:
             close_show(fig, dh)
-        print("Error during measurement:", e)
 
     return pdrs, fpts, signals2D  # (pdrs, freqs)

@@ -35,11 +35,14 @@ def sweep_template(
     else:
         callback = None  # type: ignore
 
+    prog = prog_cls(soccfg, cfg)
     try:
-        prog = prog_cls(soccfg, cfg)
-
         IQlist = prog.acquire(soc, progress=progress, round_callback=callback, **kwargs)
         signals = IQlist[0][0].dot([1, 1j])
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, early stopping the program")
+    except Exception as e:
+        print("Error during measurement:", e)
     finally:
         if instant_show:
             update_show(fig, ax, dh, contain, signal2amp(signals))

@@ -1,3 +1,5 @@
+import warnings
+
 from . import qubit, resonator
 from .lookback import measure_lookback
 from .qubit import (
@@ -15,6 +17,11 @@ from .resonator import (
     measure_res_flux_dep,
     measure_res_freq,
     measure_res_pdr_dep,
+)
+
+warnings.warn(
+    "zcu_tools.schedule.v1 is deprecated, please use zcu_tools.schedule.v2 instead.",
+    DeprecationWarning,
 )
 
 __all__ = [

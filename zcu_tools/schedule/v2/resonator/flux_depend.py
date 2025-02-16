@@ -69,9 +69,14 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
         flux_tqdm.close()
         avgs_tqdm.close()
 
-    except BaseException as e:
-        if instant_show:
-            close_show(fig, dh)
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, early stopping the program")
+    except Exception as e:
         print("Error during measurement:", e)
+    finally:
+        if instant_show:
+            amps = NormalizeData(np.abs(signals2D), axis=1, rescale=False)
+            update_show2d(fig, ax, dh, im, amps, (flxs, fpts))
+            close_show(fig, dh)
 
     return flxs, fpts, signals2D
