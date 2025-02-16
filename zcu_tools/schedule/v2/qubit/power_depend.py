@@ -1,10 +1,10 @@
+import numpy as np
+
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
-from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show2d, update_show2d
+from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import sweep2array, sweep2param
-
-from .twotone import sweep_twotone
+from zcu_tools.schedule.v2.template import sweep_template
 
 
 def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
@@ -21,35 +21,25 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
     qub_pulse["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
     qub_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
-    if instant_show:
-        pdrs = sweep2array(cfg["sweep"]["gain"])
-        fpts = sweep2array(cfg["sweep"]["freq"])
-        fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Pulse Gain")
+    pdrs = sweep2array(cfg["sweep"]["gain"], False)  # predicted pulse gains
+    fpts = sweep2array(cfg["sweep"]["freq"], False)  # predicted frequency points
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
-
-    if instant_show:
-
-        def callback(ir, sum_d):
-            if instant_show:
-                signals2D = sum_d[0][0].dot([1, 1j]) / (ir + 1)
-                amps = NormalizeData(signals2D, axis=0, rescale=False)
-                update_show2d(fig, ax, dh, im, amps.T)
-    else:
-        callback = None  # type: ignore
-
-    pdrs, fpts, signals2D = sweep_twotone(  # type: ignore
+    prog, signals = sweep_template(
         soc,
         soccfg,
         cfg,
-        p_attr=["gain", "freq"],
+        TwoToneProgram,
+        init_signals=np.full((len(pdrs), len(fpts)), np.nan, dtype=complex),
+        ticks=(fpts, pdrs),
         progress=True,
-        callback=callback,
+        instant_show=instant_show,
+        signal2amp=lambda x: NormalizeData(x, rescale=False).T,
+        xlabel="Frequency (MHz)",
+        ylabel="Pulse Gain",
     )
 
-    if instant_show:
-        amps = NormalizeData(signals2D, axis=0, rescale=False)
-        update_show2d(fig, ax, dh, im, amps.T, (fpts, pdrs))
-        close_show(fig, dh)
+    # get the actual pulse gains and frequency points
+    pdrs = prog.get_pulse_param("qub_pulse", "gain", as_array=True)
+    fpts = prog.get_pulse_param("qub_pulse", "freq", as_array=True)
 
-    return pdrs, fpts, signals2D
+    return pdrs, fpts, signals  # (pdrs, fpts)

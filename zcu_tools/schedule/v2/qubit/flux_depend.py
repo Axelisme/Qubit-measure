@@ -3,11 +3,10 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
+from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import close_show, init_show2d, update_show2d
 from zcu_tools.schedule.tools import sweep2array, sweep2param
-
-from .twotone import sweep_twotone
 
 
 def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
@@ -55,14 +54,11 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
                     amps = NormalizeData(_signals2D, axis=1) ** 1.5
                     update_show2d(fig, ax, dh, im, amps)
 
-            fpts, signals2D[i] = sweep_twotone(
-                soc,
-                soccfg,
-                cfg,
-                p_attr="freq",
-                progress=False,
-                callback=callback,
-            )
+            prog = TwoToneProgram(soccfg, cfg)
+
+            IQlist = prog.acquire(soc, progress=False, round_callback=callback)
+            signals2D[i] = IQlist[0][0].dot([1, 1j])
+            print(np.nanmax(np.abs(signals2D)))
 
             avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
             avgs_tqdm.refresh()
@@ -78,6 +74,8 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
         avgs_tqdm.close()
 
     except BaseException as e:
+        if instant_show:
+            close_show(fig, dh)
         print("Error during measurement:", e)
 
     return flxs, fpts, signals2D

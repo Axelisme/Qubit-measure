@@ -1,11 +1,10 @@
 import numpy as np
 
 from zcu_tools import make_cfg
-from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show, update_show
+from zcu_tools.analysis import NormalizeData
+from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
-
-from .twotone import sweep_twotone
+from zcu_tools.schedule.v2.template import sweep_template
 
 
 def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
@@ -16,31 +15,24 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]["length"]
     cfg["dac"]["qub_pulse"]["length"] = sweep2param("length", sweep_cfg)
 
-    if instant_show:
-        # predict lengths
-        lens = sweep2array(sweep_cfg, False)
-        fig, ax, dh, curve = init_show(lens, "Length (us)", "Amplitude")
+    lens = sweep2array(sweep_cfg, False)  # predicted lengths
 
-        def callback(ir, sum_d):
-            amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
-            update_show(fig, ax, dh, curve, amps)
-    else:
-        callback = None  # type: ignore
-
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
-
-    lens, signals = sweep_twotone(
+    prog, signals = sweep_template(
         soc,
         soccfg,
         cfg,
-        p_attr="length",
+        TwoToneProgram,
+        init_signals=np.full(len(lens), np.nan, dtype=complex),
+        ticks=(lens,),
         progress=True,
-        callback=callback,
+        instant_show=instant_show,
+        signal2amp=lambda x: NormalizeData(x, rescale=False),
+        xlabel="Length (us)",
+        ylabel="Amplitude",
     )
 
-    if instant_show:
-        update_show(fig, ax, dh, curve, np.abs(signals), lens)
-        close_show(fig, dh)
+    # get the actual lengths
+    lens = prog.get_pulse_param("qub_pulse", "length", as_array=True)
 
     return lens, signals
 
@@ -53,30 +45,23 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]["gain"]
     cfg["dac"]["qub_pulse"]["gain"] = sweep2param("gain", sweep_cfg)
 
-    if instant_show:
-        # predict pdrs
-        pdrs = sweep2array(sweep_cfg, False)
-        fig, ax, dh, curve = init_show(pdrs, "Pulse gain", "Amplitude")
+    amps = sweep2array(sweep_cfg, False)  # predicted amplitudes
 
-        def callback(ir, sum_d):
-            amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
-            update_show(fig, ax, dh, curve, amps)
-    else:
-        callback = None  # type: ignore
-
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
-
-    pdrs, signals = sweep_twotone(
+    prog, signals = sweep_template(
         soc,
         soccfg,
         cfg,
-        p_attr="gain",
+        TwoToneProgram,
+        init_signals=np.full(len(amps), np.nan, dtype=complex),
+        ticks=(amps,),
         progress=True,
-        callback=callback,
+        instant_show=instant_show,
+        signal2amp=lambda x: NormalizeData(x, rescale=False),
+        xlabel="Pulse gain",
+        ylabel="Amplitude",
     )
 
-    if instant_show:
-        update_show(fig, ax, dh, curve, np.abs(signals), pdrs)
-        close_show(fig, dh)
+    # get the actual amplitudes
+    amps = prog.get_pulse_param("qub_pulse", "gain", as_array=True)
 
-    return pdrs, signals
+    return amps, signals

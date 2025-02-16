@@ -5,7 +5,7 @@ import numpy as np
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show, update_show
+from zcu_tools.schedule.instant_show import close_show, init_show1d, update_show1d
 from zcu_tools.schedule.tools import sweep2array
 
 
@@ -20,11 +20,11 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, reset_rf=None):
     fpts = sweep2array(cfg["sweep"], False, "Custom frequency sweep only for soft loop")
 
     if instant_show:
-        fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
+        fig, ax, dh, curve = init_show1d(fpts, "Frequency (MHz)", "Amplitude")
 
         def callback(ir, sum_d):
             amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
-            update_show(fig, ax, dh, curve, amps)
+            update_show1d(fig, ax, dh, curve, amps)
     else:
         callback = None  # type: ignore
 
@@ -38,7 +38,7 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, reset_rf=None):
     signals = avgi[0][0] + 1j * avgq[0][0]
 
     if instant_show:
-        update_show(fig, ax, dh, curve, np.abs(signals))
+        update_show1d(fig, ax, dh, curve, np.abs(signals))
         close_show(fig, dh)
 
     return fpts, signals

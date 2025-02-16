@@ -24,33 +24,37 @@ def convert2max_contrast(Is: np.ndarray, Qs: np.ndarray):
     return data_rot[0], data_rot[1]
 
 
-def NormalizeData(amps2D: np.ndarray, axis=None, rescale=True) -> np.ndarray:
+def NormalizeData(signals: np.ndarray, axis=None, rescale=True) -> np.ndarray:
     # find the mask of all values are nan along the axis,
-    amps2D = amps2D.copy()  # prevent in-place modification
-    nan_mask = np.isnan(amps2D)
+    signals = signals.copy()  # prevent in-place modification
+    nan_mask = np.isnan(signals)
 
     # skip if all values are nan
     if np.all(nan_mask):
-        return amps2D
+        return signals
 
-    _amps2D = np.swapaxes(amps2D, axis, 0)  # move the axis to the first dimension
+    if axis is None:
+        signals -= np.nanmean(signals)
+        amps = np.abs(signals).astype(np.float64)
 
-    # minus the mean
-    where = np.all(np.isnan(_amps2D), axis=0)
-    _amps2D[:, ~where] -= np.nanmean(_amps2D[:, ~where], axis=0, keepdims=True)
-    _amps2D = np.abs(_amps2D).astype(np.float64)
+        if rescale:
+            amps /= np.nanstd(amps)
 
-    if rescale:
-        where = np.sum(_amps2D, axis=0) > 1
-        _amps2D[:, where] /= np.std(_amps2D[:, where], axis=0)
-        _amps2D[:, ~where] = 0
+    else:
+        _signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
-    amps2D = np.swapaxes(_amps2D, 0, axis)  # move the axis back
+        # minus the mean
+        where = np.all(np.isnan(_signals), axis=0)
+        _signals[:, ~where] -= np.nanmean(_signals[:, ~where], axis=0, keepdims=True)
+        _amps = np.abs(_signals).astype(np.float64)
 
-    # restore nan values
-    amps2D[nan_mask] = np.nan
+        if rescale:
+            where = np.sum(~np.isnan(_amps), axis=0) > 1
+            _amps[:, where] /= np.nanstd(_amps[:, where], axis=0, keepdims=True)
 
-    return amps2D
+        amps = np.swapaxes(_amps, 0, axis)  # move the axis back
+
+    return amps
 
 
 def rotate_phase(fpts, y, phase_slope):

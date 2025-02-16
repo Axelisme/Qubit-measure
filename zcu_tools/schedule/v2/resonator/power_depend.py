@@ -3,10 +3,10 @@ from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
+from zcu_tools.program.v2 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import close_show, init_show2d, update_show2d
 from zcu_tools.schedule.tools import map2adcfreq, sweep2array, sweep2param
-from zcu_tools.schedule.v2.resonator.onetone import sweep_onetone
 
 
 def measure_res_pdr_dep(
@@ -61,14 +61,11 @@ def measure_res_pdr_dep(
                     amps = NormalizeData(np.abs(_signals2D), axis=1)
                     update_show2d(fig, ax, dh, im, amps.T)
 
-            fpts, signals2D[i] = sweep_onetone(
-                soc,
-                soccfg,
-                cfg,
-                p_attr="freq",
-                progress=False,
-                callback=callback,
-            )
+            prog = OneToneProgram(soccfg, cfg)
+            IQlist = prog.acquire(soc, progress=False, round_callback=callback)
+
+            fpts = prog.get_pulse_param("res_pulse", "freq", as_array=True)
+            signals2D[i] = IQlist[0][0].dot([1, 1j])
 
             avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
             avgs_tqdm.refresh()
@@ -84,6 +81,8 @@ def measure_res_pdr_dep(
         avgs_tqdm.close()
 
     except BaseException as e:
+        if instant_show:
+            close_show(fig, dh)
         print("Error during measurement:", e)
 
     return pdrs, fpts, signals2D  # (pdrs, freqs)

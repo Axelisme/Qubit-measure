@@ -8,9 +8,9 @@ from zcu_tools.program.v1 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import (
     close_show,
-    init_show,
+    init_show1d,
     init_show2d,
-    update_show,
+    update_show1d,
     update_show2d,
 )
 from zcu_tools.schedule.tools import check_time_sweep, map2adcfreq, sweep2array
@@ -101,7 +101,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 
     show_period = int(len(ro_lens) / 10 + 0.99999)
     if instant_show:
-        fig, ax, dh, curve = init_show(ro_lens, "Readout Length (us)", "SNR (a.u.)")
+        fig, ax, dh, curve = init_show1d(ro_lens, "Readout Length (us)", "SNR (a.u.)")
 
     snrs = np.full(len(ro_lens), np.nan, dtype=np.complex128)
     try:
@@ -112,10 +112,10 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
             snrs[i] = measure_one(soc, soccfg, cfg)
 
             if instant_show and i % show_period == 0:
-                update_show(fig, ax, dh, curve, np.abs(snrs))
+                update_show1d(fig, ax, dh, curve, np.abs(snrs))
         else:
             if instant_show:
-                update_show(fig, ax, dh, curve, np.abs(snrs))
+                update_show1d(fig, ax, dh, curve, np.abs(snrs))
 
         if instant_show:
             close_show(fig, dh)
@@ -137,7 +137,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
 
     show_period = int(len(offsets) / 10 + 0.99999)
     if instant_show:
-        fig, ax, dh, curve = init_show(offsets, "Trigger Offset (us)", "SNR (a.u.)")
+        fig, ax, dh, curve = init_show1d(offsets, "Trigger Offset (us)", "SNR (a.u.)")
 
     snrs = np.full(len(offsets), np.nan, dtype=np.complex128)
     try:
@@ -148,10 +148,10 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
             snrs[i] = measure_one(soc, soccfg, cfg)
 
             if instant_show and i % show_period == 0:
-                update_show(fig, ax, dh, curve, np.abs(snrs))
+                update_show1d(fig, ax, dh, curve, np.abs(snrs))
         else:
             if instant_show:
-                update_show(fig, ax, dh, curve, np.abs(snrs))
+                update_show1d(fig, ax, dh, curve, np.abs(snrs))
 
         if instant_show:
             close_show(fig, dh)

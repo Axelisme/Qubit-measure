@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show, update_show
+from zcu_tools.schedule.instant_show import close_show, init_show1d, update_show1d
 from zcu_tools.schedule.tools import map2adcfreq, sweep2array
 
 
@@ -22,7 +22,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
 
     show_period = int(len(fpts) / 10 + 0.99)
     if instant_show:
-        fig, ax, dh, curve = init_show(fpts, "Frequency (MHz)", "Amplitude")
+        fig, ax, dh, curve = init_show1d(fpts, "Frequency (MHz)", "Amplitude")
 
     print("Use OneToneProgram for soft loop")
     signals = np.full(len(fpts), np.nan, dtype=np.complex128)
@@ -33,10 +33,10 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
         if instant_show and i % show_period == 0:
-            update_show(fig, ax, dh, curve, np.abs(signals))
+            update_show1d(fig, ax, dh, curve, np.abs(signals))
     else:
         if instant_show:
-            update_show(fig, ax, dh, curve, np.abs(signals))
+            update_show1d(fig, ax, dh, curve, np.abs(signals))
 
     if instant_show:
         close_show(fig, dh)
