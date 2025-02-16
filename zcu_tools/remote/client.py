@@ -61,10 +61,12 @@ class ProgramClient:
             bar = tqdm(total=soft_avgs, desc="Soft_avgs", leave=True)
 
             # wrap existing callback
+            orig_cb = kwargs["round_callback"]
+
             def callback_with_bar(ir: int, *args, **kwargs):
                 bar.update(max(ir + 1 - bar.n, 0))
-                if kwargs["round_callback"] is not None:
-                    kwargs["round_callback"](ir, *args, **kwargs)
+                if orig_cb is not None:
+                    orig_cb(ir, *args, **kwargs)
 
             kwargs["round_callback"] = callback_with_bar
         else:

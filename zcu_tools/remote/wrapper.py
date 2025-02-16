@@ -1,6 +1,6 @@
-from typing import Callable, Optional
 import threading
 from queue import Queue
+from typing import Callable, Optional
 
 import Pyro4
 
@@ -62,7 +62,6 @@ class CallbackWrapper:
                 self.func(ir, *args, **kwargs)
             except BaseException as e:
                 print(f"Error in callback: {e}")
-                pass
 
     @Pyro4.expose
     @Pyro4.callback
