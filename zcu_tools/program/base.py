@@ -138,10 +138,13 @@ class MyProgram:
             raise RuntimeError(self._interrupt_err)
 
     def _local_acquire(self, soc, decimated=False, **kwargs):
-        # non-overridable method, for ProgramServer to call
-        if decimated:
-            return super().acquire_decimated(soc, **kwargs)  # type: ignore
-        return super().acquire(soc, **kwargs)  # type: ignore
+        # acquire use soc, for ProgramServer to call
+        try:
+            if decimated:
+                return super().acquire_decimated(soc, **kwargs)  # type: ignore
+            return super().acquire(soc, **kwargs)  # type: ignore
+        finally:
+            soc.reset_gens()  # reset the tProc
 
     def acquire(self, soc, **kwargs):
         with CallbackWrapper(kwargs.get("round_callback")) as cb:
