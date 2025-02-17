@@ -7,7 +7,7 @@ from tqdm.auto import tqdm
 from ..config import config
 from .pyro import *  # noqa , initialize Pyro4.config
 from .server import ProgramServer
-from .wrapper import CallbackWrapper
+from .wrapper import RemoteCallback
 
 
 class ProgramClient:
@@ -100,7 +100,7 @@ class ProgramClient:
             success_flag = True
 
         print("Sending callback to server...", end="   ")
-        with CallbackWrapper(self, set_success) as cb:
+        with RemoteCallback(self, set_success) as cb:
             self._remote_call("test_callback", cb)
         print("Callback test ", "passed" if success_flag else "failed", "!")
         return success_flag
@@ -108,7 +108,7 @@ class ProgramClient:
     def _remote_acquire(self, prog, decimated: bool, **kwargs):
         kwargs, bar = self.overwrite_kwargs_for_remote(prog, kwargs)
 
-        with CallbackWrapper(self, kwargs["round_callback"]) as cb:
+        with RemoteCallback(self, kwargs["round_callback"]) as cb:
             kwargs["round_callback"] = cb
             ret = self._remote_call(
                 "run_program", type(prog).__name__, prog.cfg, decimated, **kwargs

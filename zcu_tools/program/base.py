@@ -1,8 +1,71 @@
+import threading
 import warnings
 from collections import defaultdict
-from typing import Any, Dict, Optional
+from queue import Queue
+from typing import Any, Callable, Dict, Optional
 
 from zcu_tools.remote.client import ProgramClient
+
+
+class CallbackWrapper:
+    def __init__(self, func: Optional[Callable]):
+        self.func = func
+
+    def __enter__(self):
+        if self.func is None:
+            return None  # do nothing
+
+        self.lock = threading.Lock()
+
+        # these variables are protected by lock
+        self.acquiring = True
+        self.last_ir = -1  # initial to -1 to accept the first job
+
+        # start worker thread
+        self.worker_t = threading.Thread(target=self.exec, daemon=True)
+        self.last_job = Queue(maxsize=1)
+
+        self.worker_t.start()  # start worker thread
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.func is None:
+            return  # do nothing
+
+        self.acquiring = False
+        with self.lock:
+            self.clear_last_job()
+            self.last_job.put_nowait(None)  # tell worker no more job
+        self.worker_t.join(2)
+
+    def clear_last_job(self):
+        assert self.lock.locked(), "This method should be called within lock"
+        while not self.last_job.empty():
+            self.last_job.get_nowait()
+
+    def exec(self):
+        assert self.func is not None, "This method should not be called if func is None"
+        while True:
+            job = self.last_job.get()
+            if job is None:
+                break  # end of job
+
+            # do not raise exception in this thread
+            try:
+                ir, args, kwargs = job
+                self.func(ir, *args, **kwargs)
+            except BaseException as e:
+                print(f"Error in callback: {e}")
+
+    def __call__(self, ir: int, *args, **kwargs):
+        # this method may be called concurrently, so we need to protect it
+        with self.lock:
+            # only keep the latest job
+            if ir > self.last_ir and self.acquiring:
+                self.last_ir = ir
+                self.clear_last_job()
+                self.last_job.put_nowait((ir, args, kwargs))
 
 
 class MyProgram:
@@ -74,22 +137,26 @@ class MyProgram:
             print("Interrupted by client-side")
             raise RuntimeError(self._interrupt_err)
 
-    def _local_acquire(self, soc, **kwargs):
+    def _local_acquire(self, soc, decimated=False, **kwargs):
         # non-overridable method, for ProgramServer to call
+        if decimated:
+            return super().acquire_decimated(soc, **kwargs)  # type: ignore
         return super().acquire(soc, **kwargs)  # type: ignore
-
-    def _local_acquire_decimated(self, soc, **kwargs):
-        # non-overridable method, for ProgramServer to call
-        return super().acquire_decimated(soc, **kwargs)  # type: ignore
 
     def acquire(self, soc, **kwargs):
-        if self.is_use_proxy():
-            return self.proxy.acquire(self, **kwargs)  # type: ignore
+        with CallbackWrapper(kwargs.get("round_callback")) as cb:
+            kwargs["round_callback"] = cb
 
-        return super().acquire(soc, **kwargs)  # type: ignore
+            if self.is_use_proxy():
+                return self.proxy.acquire(self, **kwargs)  # type: ignore
+
+            return self._local_acquire(soc, decimated=False, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
-        if self.is_use_proxy():
-            return self.proxy.acquire_decimated(self, **kwargs)  # type: ignore
+        with CallbackWrapper(kwargs.get("round_callback")) as cb:
+            kwargs["round_callback"] = cb
 
-        return super().acquire_decimated(soc, **kwargs)  # type: ignore
+            if self.is_use_proxy():
+                return self.proxy.acquire_decimated(self, **kwargs)  # type: ignore
+
+            return self._local_acquire(soc, decimated=True, **kwargs)

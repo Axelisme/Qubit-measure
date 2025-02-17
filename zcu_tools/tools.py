@@ -1,5 +1,5 @@
-from typing import Literal, Optional, Any, Dict
 from numbers import Number
+from typing import Any, Dict, Literal, Optional
 
 
 def deepupdate(
@@ -65,7 +65,7 @@ def make_sweep(
     return {"start": start, "stop": stop, "expts": expts, "step": step}
 
 
-def get_ip_address(ifname):
+def get_ip_address(iface):
     import fcntl
     import socket
     import struct
@@ -76,6 +76,6 @@ def get_ip_address(ifname):
         fcntl.ioctl(
             s.fileno(),
             0x8915,  # SIOCGIFADDR
-            struct.pack("256s", bytes(ifname[:15], "utf-8")),
+            struct.pack("256s", bytes(iface[:15], "utf-8")),
         )[20:24]
     )
