@@ -1,7 +1,6 @@
 import threading
 import warnings
 from collections import defaultdict
-from queue import Queue
 from typing import Any, Callable, Dict, Optional
 
 from zcu_tools.remote.client import ProgramClient
@@ -19,12 +18,12 @@ class CallbackWrapper:
 
         # these variables are protected by lock
         self.acquiring = True
+        self.have_new_job = threading.Event()
         self.last_ir = -1  # initial to -1 to accept the first job
+        self.last_job = None
 
         # start worker thread
-        self.worker_t = threading.Thread(target=self.exec, daemon=True)
-        self.last_job = Queue(maxsize=1)
-
+        self.worker_t = threading.Thread(target=self.work_loop, daemon=True)
         self.worker_t.start()  # start worker thread
 
         return self
@@ -33,26 +32,26 @@ class CallbackWrapper:
         if self.func is None:
             return  # do nothing
 
-        self.acquiring = False
         with self.lock:
-            self.clear_last_job()
-            self.last_job.put_nowait(None)  # tell worker no more job
+            self.acquiring = False
+            self.have_new_job.set()  # notify worker thread to exit
         self.worker_t.join(2)
 
-    def clear_last_job(self):
-        assert self.lock.locked(), "This method should be called within lock"
-        while not self.last_job.empty():
-            self.last_job.get_nowait()
-
-    def exec(self):
+    def work_loop(self):
         assert self.func is not None, "This method should not be called if func is None"
         while True:
-            job = self.last_job.get()
-            if job is None:
-                break  # end of job
+            self.have_new_job.wait()  # wait for new job
+
+            if not self.acquiring:
+                break  # if not acquiring, exit
+
+            with self.lock:  # get job
+                job, self.last_job = self.last_job, None
+                self.have_new_job.clear()  # clear flag
 
             # do not raise exception in this thread
             try:
+                assert job is not None, "Job should not be None"
                 ir, args, kwargs = job
                 self.func(ir, *args, **kwargs)
             except BaseException as e:
@@ -60,12 +59,13 @@ class CallbackWrapper:
 
     def __call__(self, ir: int, *args, **kwargs):
         # this method may be called concurrently, so we need to protect it
+        # also, make it executed in worker thread, to avoid blocking main thread
         with self.lock:
             # only keep the latest job
             if ir > self.last_ir and self.acquiring:
                 self.last_ir = ir
-                self.clear_last_job()
-                self.last_job.put_nowait((ir, args, kwargs))
+                self.last_job = (ir, args, kwargs)
+                self.have_new_job.set()  # notify worker thread
 
 
 class MyProgram:
