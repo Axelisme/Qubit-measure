@@ -1,25 +1,14 @@
 import json
 import os
+import sys
 
-import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 
+sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/..")
+
 from resonator_tools import circuit
-
-
-def load_data(file_path):
-    with h5py.File(file_path, "r") as file:
-        data = file["Data"]["Data"]
-        if data.shape[2] == 1:  # 1D data,
-            x_data = data[:, 0, 0][:]
-            y_data = None
-            z_data = data[:, 1, 0][:] + 1j * data[:, 2, 0][:]
-        else:
-            x_data = data[:, 0, 0][:]
-            y_data = data[0, 1, :][:]
-            z_data = data[:, 2, :][:] + 1j * data[:, 3, :][:]
-    return z_data, x_data, y_data
+from zcu_tools.datasaver import load_data
 
 
 filepath = "data/res/res_freq_r5_g300.hdf5"
@@ -69,7 +58,7 @@ ax.axvline(
     (fr - 0.5 * kappa),
     color="green",
     linestyle="--",
-    label=f"kappa = {kappa*1e3:.1f} MHz",
+    label=f"kappa = {kappa * 1e3:.1f} MHz",
 )
 ax.axvline((fr + 0.5 * kappa), color="green", linestyle="--")
 ax.legend()

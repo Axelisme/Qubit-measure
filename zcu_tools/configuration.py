@@ -1,4 +1,5 @@
 from .tools import deepupdate, numpy2number
+from typing import Optional, Literal
 
 
 class DefaultCfg:
@@ -22,7 +23,7 @@ class DefaultCfg:
         assert isinstance(cls.dev_cfgs, dict), "dev_cfgs should be a dict"
 
     @classmethod
-    def dump(cls, filepath=None):
+    def dump(cls, filepath: Optional[str] = None):
         import yaml
 
         if filepath is None:
@@ -38,7 +39,9 @@ class DefaultCfg:
             yaml.dump(dump_cfg, f)
 
     @classmethod
-    def set_dac(cls, behavior="force", **dac_cfgs):
+    def set_dac(
+        cls, behavior: Literal["error", "force", "ignore"] = "force", **dac_cfgs
+    ):
         if "pulses" in dac_cfgs:
             print(
                 "Warning: Use set_dac to set pulse is not recommended, use set_pulse instead."
@@ -50,7 +53,9 @@ class DefaultCfg:
         return cls.dac_cfgs.get(name)
 
     @classmethod
-    def set_adc(cls, behavior="force", **adc_cfgs):
+    def set_adc(
+        cls, behavior: Literal["error", "force", "ignore"] = "force", **adc_cfgs
+    ):
         deepupdate(cls.adc_cfgs, adc_cfgs, behavior=behavior)
 
     @classmethod
@@ -73,7 +78,9 @@ class DefaultCfg:
         cls.dac_cfgs.pop("pulses", None)
 
     @classmethod
-    def set_dev(cls, behavior="force", **dev_cfgs):
+    def set_dev(
+        cls, behavior: Literal["error", "force", "ignore"] = "force", **dev_cfgs
+    ):
         deepupdate(cls.dev_cfgs, dev_cfgs, behavior=behavior)
 
     @classmethod

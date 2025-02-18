@@ -1,5 +1,7 @@
 import os
+from typing import Optional, Tuple
 from datetime import datetime
+import numpy as np
 
 from .config import config
 
@@ -55,9 +57,9 @@ def save_data_local(
     filepath: str,
     x_info: dict,
     z_info: dict,
-    y_info: dict = None,
-    comment=None,
-    tag=None,
+    y_info: Optional[dict] = None,
+    comment: Optional[str] = None,
+    tag: Optional[str] = None,
 ):
     zdata = z_info["values"]
     z_info.update({"complex": True, "vector": False})
@@ -96,15 +98,17 @@ def save_data_local(
         pass
 
 
-def load_data_local(file_path):
+def load_data_local(
+    file_path: str,
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     import h5py
 
     if config.DATA_DRY_RUN:
         print("DRY RUN: Load data from ", file_path)
-        return None, None, None
+        return np.array([]), np.array([]), None
 
     with h5py.File(file_path, "r") as file:
-        data = file["Data"]["Data"]
+        data: np.ndarray = file["Data"]["Data"]  # type: ignore
         if data.shape[2] == 1:  # 1D data,
             x_data = data[:, 0, 0][:]
             y_data = None
@@ -154,10 +158,10 @@ def save_data(
     filepath: str,
     x_info: dict,
     z_info: dict,
-    y_info: dict = None,
-    comment=None,
-    tag=None,
-    server_ip: str = None,
+    y_info: Optional[dict] = None,
+    comment: Optional[str] = None,
+    tag: Optional[str] = None,
+    server_ip: Optional[str] = None,
     port: int = 4999,
 ):
     filepath = safe_labber_filepath(filepath)
@@ -173,7 +177,7 @@ def save_data(
 
 def load_data(
     filepath: str,
-    server_ip: str = None,
+    server_ip: Optional[str] = None,
     port: int = 4999,
 ):
     if not filepath.endswith(".hdf5") and not filepath.endswith(".h5"):
