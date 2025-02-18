@@ -100,7 +100,7 @@ def auto_derive(exp_cfg: Dict[str, Any]):
 
     ## readout length
     if "res_pulse" in dac_cfg:
-        res_pulse: Dict[str, Any] = dac_cfg["res_pulse"]
+        res_pulse: Dict[str, Any] = dac_cfg["res_pulse"]  # type: ignore
         if "ro_length" in res_pulse:
             # if pulse cfg has set ro_length, use it
             adc_cfg.setdefault("ro_length", res_pulse["ro_length"])

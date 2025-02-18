@@ -24,8 +24,8 @@ class SingleShotProgram(RGainTwoToneProgram):
         self.bitw(self.q_rp, self.q_gain_0, self.q_gain_0, "^", self.q_gain_t)
 
     def acquire(self, *args, **kwargs):
-        ro_length = self.us2cycles(self.adc["ro_length"], ro_ch=self.adc["chs"][0])  # type: ignore
-        _, avgi, avgq = super().acquire(*args, **kwargs)
-        avgi = avgi[0][0].reshape(-1, 2).T / ro_length
-        avgq = avgq[0][0].reshape(-1, 2).T / ro_length
-        return avgi, avgq
+        _, avgi, avgq = super().acquire(*args, **kwargs)  # type: ignore
+        assert isinstance(avgi, list), "make pyright happy"
+        avgi = avgi[0][0].reshape(-1, 2).T  # (2, reps)
+        avgq = avgq[0][0].reshape(-1, 2).T  # (2, reps)
+        return avgi, avgq  # (2, reps)

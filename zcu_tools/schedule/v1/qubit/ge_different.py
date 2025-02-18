@@ -38,12 +38,7 @@ def measure_one(soc, soccfg, cfg):
     return contrast / noise
 
 
-def measure_ge_pdr_dep(
-    soc,
-    soccfg,
-    cfg,
-    instant_show=False,
-):
+def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
@@ -76,7 +71,7 @@ def measure_ge_pdr_dep(
                 freq_tqdm.update()
 
             if instant_show:
-                ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")
+                ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")  # type: ignore
                 update_show2d(fig, ax, dh, im, np.abs(snr2D))
 
         if instant_show:
@@ -84,7 +79,7 @@ def measure_ge_pdr_dep(
     except Exception as e:
         print("Error during measurement:", e)
 
-    return fpts, pdrs, snr2D  # (pdrs, freqs)
+    return pdrs, fpts, snr2D  # (pdrs, freqs)
 
 
 def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):

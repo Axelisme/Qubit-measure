@@ -1,6 +1,7 @@
 from typing import Any, Callable, Dict, Tuple
 
 from numpy import ndarray
+from qick.asm_v2 import AveragerProgramV2
 
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import close_show, init_show, update_show
@@ -30,15 +31,15 @@ def sweep_template(
 
         def callback(ir, sum_d):
             nonlocal signals
-            signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)
+            signals: ndarray = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
             update_show(fig, ax, dh, contain, signal2amp(signals))
     else:
         callback = None  # type: ignore
 
-    prog = prog_cls(soccfg, cfg)
+    prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
     try:
         IQlist = prog.acquire(soc, progress=progress, round_callback=callback, **kwargs)
-        signals = IQlist[0][0].dot([1, 1j])
+        signals: ndarray = IQlist[0][0].dot([1, 1j])  # type: ignore
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
     except Exception as e:

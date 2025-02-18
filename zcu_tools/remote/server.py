@@ -1,4 +1,5 @@
 import time
+from typing import Optional
 from copy import deepcopy
 
 import Pyro4
@@ -15,7 +16,8 @@ class ProgramServer:
         self.soc = soc
         self.zp = zp  # zcu_tools.program.v1 or v2
 
-        self.cur_prog = None  # current running program
+        self.last_prog = None  # last running program
+        self.acquiring = False
         self.orig_cb = None  # delayed callback
         self.delay_args = None  # arguments for delayed program execution
         self.prev_t = None  # previous successful callback time
@@ -24,21 +26,19 @@ class ProgramServer:
         return getattr(self.zp, name)(self.soc, cfg)
 
     def _before_run_program(self, prog, kwargs):
-        if self.cur_prog is not None:
+        if self.acquiring:
             raise RuntimeError("Only one program can be run at a time")
-        self.cur_prog = prog
+        self.last_prog = prog
+        self.acquiring = True
 
         kwargs["progress"] = False  # disable progress bar
-
-        self.orig_cb = kwargs.get("round_callback")
-        if self.orig_cb is not None:
-            kwargs["round_callback"] = self._wrap_callback(self.orig_cb)
+        kwargs["round_callback"] = self._wrap_callback(kwargs.get("round_callback"))
 
         self.delay_args = None
         self.prev_t = None
 
     def _after_run_program(self):
-        self.cur_prog = None
+        self.acquiring = False
         self.prev_t = None
         self.orig_cb = None
         self.delay_args = None
@@ -56,7 +56,12 @@ class ProgramServer:
         finally:
             cb._pyroTimeout = old  # type: ignore
 
-    def _wrap_callback(self, cb: RemoteCallback):
+    def _wrap_callback(self, cb: Optional[RemoteCallback]):
+        if cb is None:
+            return None  # do nothing
+
+        self.orig_cb = cb
+
         # wrap callback obj to callable function
         # also drop some calling to reduce network traffic
         def wrapped_cb(*args, **kwargs):
@@ -88,8 +93,8 @@ class ProgramServer:
     @Pyro4.expose
     @Pyro4.oneway
     def set_interrupt(self, err="Unknown error"):
-        if self.cur_prog is not None:
-            self.cur_prog, prog = None, self.cur_prog
+        if self.last_prog is not None:
+            self.last_prog, prog = None, self.last_prog
             prog.set_interrupt(err)  # set interrupt flag in program
         else:
             print("Warning: no program is running but received KeyboardInterrupt")
@@ -115,9 +120,19 @@ class ProgramServer:
         return ret
 
     @Pyro4.expose
+    def get_acc_buf(self, prog_name: str):
+        if self.last_prog is None:
+            raise RuntimeError("No program is running")
+        if prog_name != self.last_prog.__class__.__name__:
+            raise ValueError(
+                f"Program name mismatch: {prog_name} != {self.last_prog.__class__.__name__}"
+            )
+        return self.last_prog.acc_buf
+
+    @Pyro4.expose
     def test_callback(self, cb: RemoteCallback):
         print("Server received callback test...")
         self._before_run_program((), {})
-        self._wrap_callback(cb)(0)
+        self._wrap_callback(cb)(0)  # type: ignore
         self._after_run_program()
         print("Finished callback test")

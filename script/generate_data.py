@@ -19,14 +19,14 @@ ELb = (0.1, 2.0)
 # ELb = (0.5, 3.5)
 
 DRY_RUN = False
-scq.settings.PROGRESSBAR_DISABLED = True
+scq.settings.PROGRESSBAR_DISABLED = True  # type: ignore
 
 level_num = 10
 cutoff = 40
 flxs = np.linspace(0.0, 0.5, 120)
 
 
-fluxonium = scq.Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=40)
+fluxonium = scq.Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=40)  # type: ignore
 
 
 def calculate_spectrum(flxs, EJ, EC, EL):
@@ -104,7 +104,7 @@ for EJ in tqdm(np.linspace(EJb[0], EJb[1], num_per + 1)):
 
 print("Total data points:", len(params))
 
-scq.settings.PROGRESSBAR_DISABLED = False
+scq.settings.PROGRESSBAR_DISABLED = False  # type: ignore
 
 # we can flip the data around 0.5 to make the other half
 # since the fluxonium is symmetric

@@ -29,7 +29,7 @@ def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
             amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
             update_show1d(fig, ax, dh, curve, amps)
     else:
-        callback = None
+        callback = None  # type: ignore
 
     prog = T2RamseyProgram(soccfg, deepcopy(cfg))
     ts, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)
@@ -54,7 +54,7 @@ def measure_t1(soc, soccfg, cfg, instant_show=False):
             amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
             update_show1d(fig, ax, dh, curve, amps)
     else:
-        callback = None
+        callback = None  # type: ignore
 
     prog = T1Program(soccfg, deepcopy(cfg))
     ts, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)
@@ -79,7 +79,7 @@ def measure_t2echo(soc, soccfg, cfg, instant_show=False):
             amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
             update_show1d(fig, ax, dh, curve, amps)
     else:
-        callback = None
+        callback = None  # type: ignore
 
     prog = T2EchoProgram(soccfg, deepcopy(cfg))
     ts, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)

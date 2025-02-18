@@ -121,6 +121,9 @@ class ProgramClient:
 
         return ret
 
+    def get_acc_buf(self, prog):
+        return self._remote_call("get_acc_buf", prog.__class__.__name__)
+
     def acquire(self, prog, **kwargs):
         return self._remote_acquire(prog, decimated=False, **kwargs)
 

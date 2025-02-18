@@ -13,7 +13,7 @@ def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
     prog = TwoToneProgram(soccfg, cfg) if qub_pulse else OneToneProgram(soccfg, cfg)
     IQlist = prog.acquire_decimated(soc, progress=progress)
 
-    Ts = soccfg.cycles2us(np.arange(len(IQlist[0])), ro_ch=cfg["adc"]["chs"][0])
+    Ts = prog.get_time_axis(ro_index=0)
     Ts += cfg["adc"]["trig_offset"]
 
     return Ts, IQlist[0].dot([1, 1j])
