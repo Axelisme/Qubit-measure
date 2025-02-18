@@ -1,6 +1,6 @@
 from .base import MyProgramV2, declare_pulse
 
-PULSE_DELAY = 0.05  # us
+PULSE_DELAY = 0.01  # us
 
 
 class TwoToneProgram(MyProgramV2):

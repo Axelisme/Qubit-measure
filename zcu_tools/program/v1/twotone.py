@@ -9,7 +9,7 @@ from .base import (
     set_pulse,
 )
 
-PULSE_DELAY = 0.05  # us
+PULSE_DELAY = 0.01  # us
 
 
 def twotone_body(prog, before_pulse=None):
