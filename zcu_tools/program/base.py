@@ -138,7 +138,7 @@ class MyProgram:
             raise RuntimeError(self._interrupt_err)
 
     def _local_acquire(self, soc, decimated=False, **kwargs):
-        # acquire use soc, for ProgramServer to call
+        # non-overridable method, for ProgramServer to call
         try:
             if decimated:
                 return super().acquire_decimated(soc, **kwargs)  # type: ignore

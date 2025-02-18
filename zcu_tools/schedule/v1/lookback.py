@@ -18,7 +18,7 @@ def measure_one(soc, soccfg, cfg, progress, qub_pulse):
     Is, Qs = IQlist[0]
     signals = np.array(Is) + 1j * np.array(Qs)
 
-    Ts = soccfg.cycles2us(np.arange(len(Is)), ro_ch=cfg["adc"]["chs"][0])
+    Ts = prog.get_time_axis(ro_index=0)
     Ts += cfg["adc"]["trig_offset"]
 
     return Ts, signals

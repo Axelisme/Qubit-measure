@@ -14,7 +14,7 @@ class T1Program(MyProgramV2):
         self.pulse(self.qub_pulse["ch"], "pi_pulse")
 
         # wait for specified time
-        self.delay_auto(t=self.sweep_cfg["length"], ros=False, tag="T1")
+        self.delay_auto(t=self.dac["t1_length"], ros=False, tag="T1")
 
         # measure
         self.readoutM.readout_qubit(self)

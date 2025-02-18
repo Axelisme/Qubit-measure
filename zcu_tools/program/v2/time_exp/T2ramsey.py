@@ -14,7 +14,7 @@ class T2RamseyProgram(MyProgramV2):
         self.pulse(self.qub_pulse["ch"], "pi2_pulse", t=None)  # type: ignore
 
         # wait for specified time
-        self.delay_auto(t=self.sweep_cfg["length"], ros=False, tag="T2r")
+        self.delay_auto(t=self.dac["ramsey_length"], ros=False, tag="T2r")
 
         # qub pi2 pulse
         self.pulse(self.qub_pulse["ch"], "pi2_pulse", t=None)  # type: ignore
