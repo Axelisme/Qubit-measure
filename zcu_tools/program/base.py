@@ -4,6 +4,8 @@ from collections import defaultdict
 from queue import Queue
 from typing import Any, Callable, Dict, Optional
 
+from qick.qick_asm import AcquireMixin
+
 from zcu_tools.remote.client import ProgramClient
 
 
@@ -68,7 +70,7 @@ class CallbackWrapper:
                 self.last_job.put_nowait((ir, args, kwargs))
 
 
-class MyProgram:
+class MyProgram(AcquireMixin):
     proxy: Optional[ProgramClient] = None
 
     @classmethod
@@ -92,7 +94,7 @@ class MyProgram:
 
     def __init__(self, soccfg, cfg: Dict[str, Any], **kwargs):
         self._parse_cfg(cfg)  # parse config first
-        super().__init__(soccfg, cfg=cfg, **kwargs)  # type: ignore
+        super().__init__(soccfg, cfg=cfg, **kwargs)
         if not self.is_use_proxy():
             # flag for interrupt
             self._interrupt = False
@@ -141,16 +143,25 @@ class MyProgram:
         # non-overridable method, for ProgramServer to call
         try:
             if decimated:
-                return super().acquire_decimated(soc, **kwargs)  # type: ignore
-            return super().acquire(soc, **kwargs)  # type: ignore
+                return super().acquire_decimated(soc, **kwargs)
+            return super().acquire(soc, **kwargs)
         finally:
             soc.reset_gens()  # reset the tProc
+
+    @property
+    def acc_buf(self):
+        if self.is_use_proxy():
+            # fetch acc_buf from proxy
+            if super().acc_buf is None:
+                super().acc_buf = self.proxy.get_acc_buf(self)  # type: ignore
+        return super().acc_buf
 
     def acquire(self, soc, **kwargs):
         with CallbackWrapper(kwargs.get("round_callback")) as cb:
             kwargs["round_callback"] = cb
 
             if self.is_use_proxy():
+                super().acc_buf = None  # clear local acc_buf
                 return self.proxy.acquire(self, **kwargs)  # type: ignore
 
             return self._local_acquire(soc, decimated=False, **kwargs)
@@ -160,6 +171,7 @@ class MyProgram:
             kwargs["round_callback"] = cb
 
             if self.is_use_proxy():
+                super().acc_buf = None  # clear local acc_buf
                 return self.proxy.acquire_decimated(self, **kwargs)  # type: ignore
 
             return self._local_acquire(soc, decimated=True, **kwargs)
