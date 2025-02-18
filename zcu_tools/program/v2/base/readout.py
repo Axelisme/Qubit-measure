@@ -6,13 +6,6 @@ from qick.asm_v2 import AveragerProgramV2
 from .pulse import declare_pulse
 
 
-def make_readout(name: str):
-    if name == "base":
-        return BaseReadout()
-    else:
-        raise ValueError(f"Unknown readout type: {name}")
-
-
 class AbsReadout(ABC):
     @abstractmethod
     def init(self, prog: AveragerProgramV2):
@@ -21,6 +14,13 @@ class AbsReadout(ABC):
     @abstractmethod
     def readout_qubit(self, prog: AveragerProgramV2):
         pass
+
+
+def make_readout(name: str) -> AbsReadout:
+    if name == "base":
+        return BaseReadout()
+    else:
+        raise ValueError(f"Unknown readout type: {name}")
 
 
 class BaseReadout(AbsReadout):
@@ -44,4 +44,5 @@ class BaseReadout(AbsReadout):
 
         prog.send_readoutconfig(ro_ch, "readout_adc", t=0)
         prog.pulse(prog.res_pulse["ch"], "res_pulse", t="auto")  # pyright: ignore[reportArgumentType]
-        prog.trigger([ro_ch], t=prog.adc["trig_offset"])
+        prog.delay_auto(t=prog.adc["trig_offset"], ros=False, tag="trig_offset")
+        prog.trigger([ro_ch], t=None)  # type: ignore
