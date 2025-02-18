@@ -2,13 +2,12 @@
 """This file starts a pyro nameserver and the proxying server."""
 
 import argparse
-import os  # noqa
-import sys  # noqa
+import os
+import sys
 import threading
 import time
 
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-import qick  # noqa
 
 ############
 # parse command line arguments
@@ -17,7 +16,7 @@ parser.add_argument("--host", "-H", default="localhost", help="Host ip")
 parser.add_argument("--port", "-p", type=int, default=0, help="Daemon port")
 parser.add_argument("--ns-port", "-np", type=int, default=8080, help="Nameserver port")
 parser.add_argument(
-    "--soc", "-s", default="v1", choices=["v1", "v2"], help="bitfile version"
+    "--soc", "-s", default="v2", choices=["v1", "v2"], help="bitfile version"
 )
 
 args = parser.parse_args()
