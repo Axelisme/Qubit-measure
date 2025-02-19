@@ -1,8 +1,8 @@
 from typing import Any, Callable, Dict, Tuple
 
 from numpy import ndarray
-from qick.asm_v2 import AveragerProgramV2
 
+from qick.asm_v2 import AveragerProgramV2
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import close_show, init_show, update_show
 
@@ -31,7 +31,7 @@ def sweep_template(
 
         def callback(ir, sum_d):
             nonlocal signals
-            signals: ndarray = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
+            signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
             update_show(fig, ax, dh, contain, signal2amp(signals))
     else:
         callback = None  # type: ignore
