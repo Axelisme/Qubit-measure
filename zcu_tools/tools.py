@@ -1,8 +1,6 @@
 from numbers import Number
 from typing import Any, Callable, Dict, Literal, Optional
 
-import threading
-
 
 def deepupdate(
     d: Dict[str, Any],
@@ -91,6 +89,8 @@ class AsyncFunc:
         if self.func is None:
             return None  # do nothing
 
+        import threading
+
         self.lock = threading.Lock()
 
         # these variables are protected by lock
@@ -119,6 +119,8 @@ class AsyncFunc:
         while True:
             self.have_new_job.wait()  # wait for new job
 
+            # this don't need to be protected by lock
+            # because it is only be set before event is set
             if not self.acquiring:
                 break  # if not acquiring, exit
 
@@ -131,7 +133,7 @@ class AsyncFunc:
                 assert job is not None, "Job should not be None"
                 ir, args, kwargs = job
                 self.func(ir, *args, **kwargs)
-            except BaseException as e:
+            except Exception as e:
                 print(f"Error in callback: {e}")
 
     def __call__(self, ir: int, *args, **kwargs):

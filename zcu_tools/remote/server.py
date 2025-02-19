@@ -44,6 +44,7 @@ class ProgramServer:
         self._before_run_program(prog, kwargs)
         callback = unwrap_callback(kwargs.get("round_callback"))
         try:
+            # use async callback to prevent blocking by connection
             with AsyncFunc(callback) as cb:
                 kwargs["round_callback"] = cb
 
@@ -57,12 +58,14 @@ class ProgramServer:
     def get_acc_buf(self, prog_name: str):
         if self.acquiring:
             raise RuntimeError("Program is still running")
+
         if self.last_prog is None:
-            raise RuntimeError("No program is running")
-        if prog_name != self.last_prog.__class__.__name__:
-            raise ValueError(
-                f"Program name mismatch: {prog_name} != {self.last_prog.__class__.__name__}"
-            )
+            raise RuntimeError("No program has been run")
+
+        last_name = self.last_prog.__class__.__name__
+        if prog_name != last_name:
+            raise ValueError(f"Program name mismatch: {prog_name} != {last_name}")
+
         return self.last_prog.acc_buf
 
     @Pyro4.expose
@@ -71,9 +74,6 @@ class ProgramServer:
         self._before_run_program((), {})
         callback = unwrap_callback(cb)
         assert callback is not None  # of course
-        try:
-            callback(0)  # test callback
-        except Exception as e:
-            print(f"Error during callback execution: {e}")
+        callback(0)  # test callback
         self._after_run_program()
         print("Finished callback test")

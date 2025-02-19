@@ -26,24 +26,29 @@ class RemoteCallback:
         self.daemon.unregister(self)
 
     @Pyro4.expose
-    def do_callback(self, ir, *args, **kwargs):
+    @Pyro4.oneway
+    def do_callback(self, *args, **kwargs):
         if self.func is None:
             raise RuntimeError("This method should not be called if func is None")
-        self.func(ir, *args, **kwargs)
+        self.func(*args, **kwargs)
 
 
 def unwrap_callback(cb: Optional[RemoteCallback]):
+    """
+    Unwrap the callback function from RemoteCallback object
+    The return function is guaranteed to have no exception
+    """
     if cb is None:
         return None  # do nothing
 
-    def unwrapped_func(*args, **kwargs):
+    def unwrapped_cb(*args, **kwargs):
         # timeout is set to prevent connecting forever
         cb._pyroTimeout, old = CALLBACK_TIMEOUT, cb._pyroTimeout  # type: ignore
         try:
             cb.do_callback(*args, **kwargs)
         except Exception as e:
-            print(f"Error during callback execution: {e}")
+            print(f"Error during calling client-side callback: {e}")
         finally:
             cb._pyroTimeout = old  # type: ignore
 
-    return unwrapped_func
+    return unwrapped_cb

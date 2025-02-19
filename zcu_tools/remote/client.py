@@ -12,7 +12,7 @@ from .wrapper import RemoteCallback
 
 class ProgramClient:
     callback_daemon = None  # lazy init
-    callback_thread = None  # lazy init
+    daemon_thread = None  # lazy init
 
     def __init__(self, prog_server: ProgramServer):
         self.prog_server = prog_server
@@ -23,15 +23,13 @@ class ProgramClient:
             print(
                 f"Client Pyro4 daemon started at {config.LOCAL_IP}:{config.LOCAL_PORT}"
             )
-            Pyro4.config.ONEWAY_THREADED = False  # type: ignore
-            cls.callback_daemon = Pyro4.Daemon(
-                host=config.LOCAL_IP, port=config.LOCAL_PORT
-            )
+            Pyro4.config.ONEWAY_THREADED = True  # type: ignore
+            cls.callback_daemon = Pyro4.Daemon(config.LOCAL_IP, config.LOCAL_PORT)
             # 將 daemon.requestLoop 放在背景執行緒執行
-            cls.callback_thread = threading.Thread(
+            cls.daemon_thread = threading.Thread(
                 target=cls.callback_daemon.requestLoop, daemon=True
             )
-            cls.callback_thread.start()
+            cls.daemon_thread.start()
 
         return cls.callback_daemon
 
@@ -41,8 +39,8 @@ class ProgramClient:
             print("Client Pyro4 daemon stopped")
             cls.callback_daemon.shutdown()
             cls.callback_daemon = None
-            cls.callback_thread.join()  # type: ignore
-            cls.callback_thread = None
+            cls.daemon_thread.join()  # type: ignore
+            cls.daemon_thread = None
 
     def overwrite_kwargs_for_remote(self, prog, kwargs: Dict[str, Any]):
         # before send to remote server, override some kwargs
@@ -61,12 +59,12 @@ class ProgramClient:
             bar = tqdm(total=soft_avgs, desc="Soft_avgs", leave=True)
 
             # wrap existing callback
-            orig_cb = kwargs["round_callback"]
+            cb = kwargs["round_callback"]
 
             def callback_with_bar(ir: int, *args, **kwargs):
                 bar.update(max(ir + 1 - bar.n, 0))
-                if orig_cb is not None:
-                    orig_cb(ir, *args, **kwargs)
+                if cb is not None:
+                    cb(ir, *args, **kwargs)
 
             kwargs["round_callback"] = callback_with_bar
         else:
@@ -82,13 +80,13 @@ class ProgramClient:
             import sys
 
             # if find '_pyroTraceback' in error value, it's a remote error
-            # if not, need to raise it on remote side
+            # if not, need to interrupt remote side
             if not hasattr(sys.exc_info()[1], "_pyroTraceback"):
                 print("Client-side error, raise it on remote side...")
-                prog_server = self.prog_server
-                prog_server._pyroTimeout, old = 1, prog_server._pyroTimeout  # type: ignore
-                prog_server.set_interrupt(str(e))
-                prog_server._pyroTimeout = old  # type: ignore
+                prog_s = self.prog_server
+                prog_s._pyroTimeout, old = 1, prog_s._pyroTimeout  # type: ignore
+                prog_s.set_interrupt(repr(e))
+                prog_s._pyroTimeout = old  # type: ignore
 
             raise e
 
@@ -110,10 +108,13 @@ class ProgramClient:
 
         with RemoteCallback(self, kwargs["round_callback"]) as cb:
             kwargs["round_callback"] = cb
+
+            # acquiring on server-side and return result
             ret = self._remote_call(
                 "run_program", type(prog).__name__, prog.cfg, decimated, **kwargs
             )
 
+        # force update progress bar
         if bar is not None:
             bar.update(bar.total - bar.n)
             bar.refresh()
