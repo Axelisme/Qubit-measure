@@ -7,10 +7,10 @@ import qick
 from qick import QickConfig
 
 # use dill instead of pickle
-Pyro4.config.SERIALIZER = "dill"
-Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill"])
+Pyro4.config.SERIALIZER = "dill"  # type: ignore
+Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill"])  # type: ignore
 Pyro4.config.DILL_PROTOCOL_VERSION = 5
-Pyro4.config.REQUIRE_EXPOSE = False
+Pyro4.config.REQUIRE_EXPOSE = False  # type: ignore
 
 
 def get_bitfile(version):
@@ -59,6 +59,7 @@ def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs):
     uri = daemon.register(soc)
     ns.register("myqick", uri)
     print(f"registered QICK at {uri}")
+    print(soc)
 
     for obj in soc.autoproxy:
         daemon.register(obj)
@@ -82,7 +83,7 @@ def make_proxy(ns_host, ns_port, remote_traceback=True):
     soc = Pyro4.Proxy(ns.lookup("myqick"))
     soccfg = QickConfig(soc.get_cfg())
     prog_server = Pyro4.Proxy(ns.lookup("prog_server"))
-    prog_client = ProgramClient(prog_server)
+    prog_client = ProgramClient(prog_server)  # type: ignore
 
     # adapted from https://pyro4.readthedocs.io/en/stable/errors.html and https://stackoverflow.com/a/70433500
     if remote_traceback:
@@ -91,12 +92,11 @@ def make_proxy(ns_host, ns_port, remote_traceback=True):
 
             import IPython
 
-            ip = IPython.get_ipython()
+            ip = IPython.get_ipython()  # type: ignore
             if ip is not None:
 
-                def exception_handler(self, etype, evalue, tb, tb_offset=None):
-                    sys.stderr.write("".join(Pyro4.util.getPyroTraceback()))
-                    # self.showtraceback((etype, evalue, tb), tb_offset=tb_offset)  # standard IPython's printout
+                def exception_handler(*_):
+                    sys.stderr.write("".join(Pyro4.util.getPyroTraceback()))  # type: ignore
 
                 ip.set_custom_exc(
                     (Exception,), exception_handler
