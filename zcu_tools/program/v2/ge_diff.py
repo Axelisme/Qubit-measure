@@ -2,12 +2,17 @@ import warnings
 from typing import Tuple
 
 from numpy import ndarray
+from qick.asm_v2 import QickSweep1D
 
 from .twotone import TwoToneProgram
 
 
 class GEProgram(TwoToneProgram):
     def _initialize(self, cfg):
+        # make pi pulse gain 0 or normal
+        self.dac["qub_pulse"]["gain"] = QickSweep1D(
+            "ge_sweep", 0, self.dac["qub_pulse"]["gain"]
+        )
         super()._initialize(cfg)
 
         # add ge sweep to inner loop
