@@ -29,6 +29,8 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
 
     cfg["sweep"] = cfg["sweep"]["freq"]
 
+    set_flux(cfg["dev"]["flux_dev"], flxs[0])  # set initial flux
+
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
     avgs_tqdm = tqdm(total=cfg["soft_avgs"], desc="Soft_avgs", smoothing=0)
     if instant_show:
@@ -59,10 +61,10 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
                 else RFreqTwoToneProgramWithRedReset
             )
             prog = prog_cls(soccfg, make_cfg(cfg))
-            fpts, avgi, avgq = prog.acquire(
+            fpts, avgi, avgq = prog.acquire(  # type: ignore
                 soc, progress=False, round_callback=callback
             )
-            signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
+            signals2D[i] = avgi[0][0] + 1j * avgq[0][0]  # type: ignore
 
             avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
             avgs_tqdm.refresh()
@@ -70,14 +72,17 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
             if instant_show:
                 amps = NormalizeData(signals2D, axis=1, rescale=True) ** 1.5
                 update_show2d(fig, ax, dh, im, amps.T, (flxs, fpts))
-        else:
-            if instant_show:
-                close_show(fig, dh)
 
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, early stopping the program")
+    except Exception as e:
+        print("Error during measurement:", e)
+    finally:
+        if instant_show:
+            amps = NormalizeData(signals2D, axis=1, rescale=True) ** 1.5
+            update_show2d(fig, ax, dh, im, amps.T, (flxs, fpts))
+            close_show(fig, dh)
         flux_tqdm.close()
         avgs_tqdm.close()
-
-    except BaseException as e:
-        print("Error during measurement:", e)
 
     return flxs, fpts, signals2D

@@ -1,6 +1,7 @@
 import warnings
 from typing import Tuple
 
+import numpy as np
 from numpy import ndarray
 from qick.asm_v2 import QickSweep1D
 
@@ -29,6 +30,16 @@ class GEProgram(TwoToneProgram):
         avgi, avgq = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, 2)
         return avgi.T, avgq.T  # (2, reps)
 
-    def acquire(self, soc, **kwargs):
-        IQlist = super().acquire(soc, **kwargs)
-        return [iq[..., 1, :] - iq[..., 0, :] for iq in IQlist]  # type: ignore
+    def acquire_snr(self, soc, **kwargs):
+        avg_d, std2_d = super().acquire(soc, ret_std=True, **kwargs)  # type: ignore
+        avg_d = avg_d[0][0].dot([1, 1j])  # type: ignore , (*sweep, ge)
+        std2_d = std2_d[0][0].dot([1, 1j])  # type: ignore , (*sweep, ge)
+
+        contrast = avg_d[..., 1] - avg_d[..., 0]  # (*sweep)
+        noise2_i = np.sum(std2_d.real**2, axis=-1)  # (*sweep)
+        noise2_q = np.sum(std2_d.imag**2, axis=-1)  # (*sweep)
+        noise = np.sqrt(
+            noise2_i * contrast.real**2 + noise2_q * contrast.imag**2
+        ) / np.abs(contrast)
+
+        return contrast / noise

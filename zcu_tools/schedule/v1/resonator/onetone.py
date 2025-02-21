@@ -1,44 +1,36 @@
 from copy import deepcopy
 
 import numpy as np
-from tqdm.auto import tqdm
 
-from zcu_tools import make_cfg
 from zcu_tools.program.v1 import OneToneProgram
-from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show1d, update_show1d
 from zcu_tools.schedule.tools import map2adcfreq, sweep2array
+from zcu_tools.schedule.v1.template import sweep1D_soft_template
 
 
 def measure_res_freq(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
-
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     res_pulse = cfg["dac"]["res_pulse"]
 
     fpts = sweep2array(cfg["sweep"])
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    show_period = int(len(fpts) / 10 + 0.99)
-    if instant_show:
-        fig, ax, dh, curve = init_show1d(fpts, "Frequency (MHz)", "Amplitude")
+    def update_cfg(cfg, _, f):
+        cfg["dac"]["res_pulse"]["freq"] = f
 
-    print("Use OneToneProgram for soft loop")
-    signals = np.full(len(fpts), np.nan, dtype=np.complex128)
-    for i, fpt in enumerate(tqdm(fpts, desc="Frequency", smoothing=0)):
-        res_pulse["freq"] = fpt
-        prog = OneToneProgram(soccfg, make_cfg(cfg))
-        avgi, avgq = prog.acquire(soc, progress=False)
-        signals[i] = avgi[0][0] + 1j * avgq[0][0]
-
-        if instant_show and i % show_period == 0:
-            update_show1d(fig, ax, dh, curve, np.abs(signals))
-    else:
-        if instant_show:
-            update_show1d(fig, ax, dh, curve, np.abs(signals))
-
-    if instant_show:
-        close_show(fig, dh)
+    fpts, signals = sweep1D_soft_template(
+        soc,
+        soccfg,
+        cfg,
+        OneToneProgram,
+        xs=fpts,
+        init_signals=np.full(len(fpts), np.nan, dtype=np.complex128),
+        progress=True,
+        instant_show=instant_show,
+        signal2amp=np.abs,
+        updateCfg=update_cfg,
+        xlabel="Frequency (MHz)",
+        ylabel="Amplitude",
+    )
 
     return fpts, signals

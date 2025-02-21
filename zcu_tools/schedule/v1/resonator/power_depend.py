@@ -21,8 +21,6 @@ def measure_res_pdr_dep(
 ):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
-
     res_pulse = cfg["dac"]["res_pulse"]
 
     fpts = sweep2array(cfg["sweep"]["freq"])
@@ -31,6 +29,8 @@ def measure_res_pdr_dep(
     pdrs = sweep2array(cfg["sweep"]["gain"])
 
     reps_ref = cfg["reps"]
+
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     if instant_show:
         fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
@@ -56,17 +56,22 @@ def measure_res_pdr_dep(
             for j, fpt in enumerate(fpts):
                 res_pulse["freq"] = fpt
                 prog = OneToneProgram(soccfg, make_cfg(cfg))
-                avgi, avgq = prog.acquire(soc, progress=False)
-                signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]
+                avgi, avgq = prog.acquire(soc, progress=False)  # type: ignore
+                signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]  # type: ignore
                 freq_tqdm.update()
 
             if instant_show:
                 amps = NormalizeData(signals2D, axis=1)
                 update_show2d(fig, ax, dh, im, amps.T)
 
-        if instant_show:
-            close_show(fig, dh)
-    except BaseException as e:
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, early stopping the program")
+    except Exception as e:
         print("Error during measurement:", e)
+    finally:
+        if instant_show:
+            amps = NormalizeData(signals2D, axis=1)
+            update_show2d(fig, ax, dh, im, amps.T)
+            close_show(fig, dh)
 
     return pdrs, fpts, signals2D  # (pdrs, freqs)

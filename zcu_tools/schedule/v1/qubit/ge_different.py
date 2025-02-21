@@ -22,14 +22,14 @@ def measure_one(soc, soccfg, cfg):
 
     qub_pulse["gain"] = 0
     prog = TwoToneProgram(soccfg, make_cfg(cfg))
-    avggi, avggq, stdgi, stdgq = prog.acquire(soc, progress=False, ret_std=True)
+    avggi, avggq, stdgi, stdgq = prog.acquire(soc, progress=False, ret_std=True)  # type: ignore
 
     qub_pulse["gain"] = pi_gain
     prog = TwoToneProgram(soccfg, make_cfg(cfg))
-    avgei, avgeq, stdei, stdeq = prog.acquire(soc, progress=False, ret_std=True)
+    avgei, avgeq, stdei, stdeq = prog.acquire(soc, progress=False, ret_std=True)  # type: ignore
 
-    dist_i = avgei[0][0] - avggi[0][0]
-    dist_q = avgeq[0][0] - avggq[0][0]
+    dist_i = avgei[0][0] - avggi[0][0]  # type: ignore
+    dist_q = avgeq[0][0] - avggq[0][0]  # type: ignore
     contrast = dist_i + 1j * dist_q
     noise2_i = stdgi[0][0] ** 2 + stdei[0][0] ** 2
     noise2_q = stdgq[0][0] ** 2 + stdeq[0][0] ** 2
@@ -41,8 +41,6 @@ def measure_one(soc, soccfg, cfg):
 def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
-
     res_pulse = cfg["dac"]["res_pulse"]
 
     freq_cfg = cfg["sweep"]["freq"]
@@ -50,6 +48,8 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     fpts = sweep2array(freq_cfg)
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
     pdrs = sweep2array(pdr_cfg)
+
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     if instant_show:
         fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
@@ -76,16 +76,21 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
 
         if instant_show:
             close_show(fig, dh)
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, early stopping the program")
     except Exception as e:
         print("Error during measurement:", e)
+    finally:
+        if instant_show:
+            ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")  # type: ignore
+            update_show2d(fig, ax, dh, im, np.abs(snr2D))
+            close_show(fig, dh)
 
     return pdrs, fpts, snr2D  # (pdrs, freqs)
 
 
 def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
-
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     res_pulse = cfg["dac"]["res_pulse"]
 
@@ -94,8 +99,10 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 
     trig_offset = cfg["adc"]["trig_offset"]
 
-    show_period = int(len(ro_lens) / 10 + 0.99999)
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+
     if instant_show:
+        show_period = int(len(ro_lens) / 20 + 0.99999)
         fig, ax, dh, curve = init_show1d(ro_lens, "Readout Length (us)", "SNR (a.u.)")
 
     snrs = np.full(len(ro_lens), np.nan, dtype=np.complex128)
@@ -108,14 +115,15 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 
             if instant_show and i % show_period == 0:
                 update_show1d(fig, ax, dh, curve, np.abs(snrs))
-        else:
-            if instant_show:
-                update_show1d(fig, ax, dh, curve, np.abs(snrs))
 
-        if instant_show:
-            close_show(fig, dh)
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, early stopping the program")
     except Exception as e:
         print("Error during measurement:", e)
+    finally:
+        if instant_show:
+            update_show1d(fig, ax, dh, curve, np.abs(snrs))
+            close_show(fig, dh)
 
     return ro_lens, snrs
 
@@ -123,15 +131,14 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
-
     offsets = sweep2array(cfg["sweep"])
     check_time_sweep(soccfg, offsets)
     ro_len = cfg["adc"]["ro_length"]
     orig_offset = cfg["adc"]["trig_offset"]
 
-    show_period = int(len(offsets) / 10 + 0.99999)
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
     if instant_show:
+        show_period = int(len(offsets) / 20 + 0.99999)
         fig, ax, dh, curve = init_show1d(offsets, "Trigger Offset (us)", "SNR (a.u.)")
 
     snrs = np.full(len(offsets), np.nan, dtype=np.complex128)
@@ -144,13 +151,14 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
 
             if instant_show and i % show_period == 0:
                 update_show1d(fig, ax, dh, curve, np.abs(snrs))
-        else:
-            if instant_show:
-                update_show1d(fig, ax, dh, curve, np.abs(snrs))
 
-        if instant_show:
-            close_show(fig, dh)
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, early stopping the program")
     except Exception as e:
         print("Error during measurement:", e)
+    finally:
+        if instant_show:
+            update_show1d(fig, ax, dh, curve, np.abs(snrs))
+            close_show(fig, dh)
 
     return offsets, snrs

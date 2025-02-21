@@ -1,91 +1,56 @@
 from copy import deepcopy
 
 import numpy as np
-from tqdm.auto import tqdm
 
-from zcu_tools.auto import make_cfg
+from zcu_tools.analysis import NormalizeData
 from zcu_tools.program.v1 import RGainTwoToneProgram, TwoToneProgram
-from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show1d, update_show1d
 from zcu_tools.schedule.tools import sweep2array
+from zcu_tools.schedule.v1.template import sweep1D_hard_template, sweep1D_soft_template
 
 
-def measure_lenrabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
+def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    lens = sweep2array(cfg["sweep"], False, "Custom length sweep only for soft loop")
 
-    lens = sweep2array(cfg["sweep"])
+    def update_cfg(cfg, _, length):
+        cfg["dac"]["qub_pulse"]["length"] = length
 
-    show_period = int(len(lens) / 10 + 0.99)
-    if instant_show:
-        fig, ax, dh, curve = init_show1d(lens, "Length (us)", "Amplitude (a.u.)")
-
-    signals = np.full(len(lens), np.nan, dtype=np.complex128)
-    if soft_loop:
-        print("Use TwoToneProgram for soft loop")
-
-        qub_pulse = cfg["dac"]["qub_pulse"]
-
-        for i, length in enumerate(tqdm(lens, desc="Length", smoothing=0)):
-            qub_pulse["length"] = length
-            prog = TwoToneProgram(soccfg, make_cfg(cfg))
-            avgi, avgq = prog.acquire(soc, progress=False)
-            signals[i] = avgi[0][0] + 1j * avgq[0][0]
-
-            if instant_show and i % show_period == 0:
-                update_show1d(fig, ax, dh, curve, np.abs(signals))
-    else:
-        raise NotImplementedError("Hard loop is not implemented for lenrabi")
-
-    if instant_show:
-        update_show1d(fig, ax, dh, curve, np.abs(signals))
-        close_show(fig, dh)
+    lens, signals = sweep1D_soft_template(
+        soc,
+        soccfg,
+        cfg,
+        TwoToneProgram,
+        xs=lens,
+        init_signals=np.full(len(lens), np.nan, dtype=np.complex128),
+        progress=True,
+        instant_show=instant_show,
+        signal2amp=lambda x: NormalizeData(x, rescale=False),
+        updateCfg=update_cfg,
+        xlabel="Length (us)",
+        ylabel="Amplitude",
+    )
 
     return lens, signals
 
 
-def measure_amprabi(soc, soccfg, cfg, instant_show=False, soft_loop=False):
+def measure_amprabi(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)
 
-    pdrs = sweep2array(cfg["sweep"], soft_loop, "Custom power sweep only for soft loop")
+    pdrs = sweep2array(cfg["sweep"], False, "Custom power sweep only for soft loop")
 
-    if instant_show:
-        fig, ax, dh, curve = init_show1d(pdrs, "Power (a.u.)", "Signal (a.u.)")
-
-    if soft_loop:
-        print("Use TwoToneProgram for soft loop")
-
-        qub_pulse = cfg["dac"]["qub_pulse"]
-        show_period = int(len(pdrs) / 50 + 0.99)
-
-        signals = np.full(len(pdrs), np.nan, dtype=np.complex128)
-        for i, pdr in enumerate(tqdm(pdrs, desc="Amplitude", smoothing=0)):
-            qub_pulse["gain"] = pdr
-            prog = TwoToneProgram(soccfg, make_cfg(cfg))
-            avgi, avgq = prog.acquire(soc, progress=False)
-            signals[i] = avgi[0][0] + 1j * avgq[0][0]
-
-            if instant_show and i % show_period == 0:
-                update_show1d(fig, ax, dh, curve, np.abs(signals))
-
-    else:
-        print("Use RGainTwoToneProgram for hard loop")
-
-        if instant_show:
-
-            def callback(ir, sum_d):
-                amps = np.abs(sum_d[0][0].dot([1, 1j]) / (ir + 1))
-                update_show1d(fig, ax, dh, curve, amps)
-        else:
-            callback = None  # type: ignore
-
-        prog = RGainTwoToneProgram(soccfg, cfg)
-        pdrs, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)
-        signals = avgi[0][0] + 1j * avgq[0][0]
-
-    if instant_show:
-        update_show1d(fig, ax, dh, curve, np.abs(signals))
-        close_show(fig, dh)
+    pdrs, signals = sweep1D_hard_template(
+        soc,
+        soccfg,
+        cfg,
+        RGainTwoToneProgram,
+        init_xs=pdrs,
+        init_signals=np.full(len(pdrs), np.nan, dtype=np.complex128),
+        progress=True,
+        instant_show=instant_show,
+        signal2amp=lambda x: NormalizeData(x, rescale=False),
+        xlabel="Pulse Power (a.u.)",
+        ylabel="Amplitude",
+    )
 
     return pdrs, signals

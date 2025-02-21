@@ -110,6 +110,6 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
     )
 
     # get the actual trigger offsets
-    offsets = prog.get_time_param("trig_offset", as_array=True)
+    offsets = prog.get_time_param("trig_offset", "t", as_array=True)
 
     return offsets, snrs

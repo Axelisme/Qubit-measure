@@ -44,8 +44,8 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
             for j, f in enumerate(fpts):
                 res_pulse["freq"] = f
                 prog = OneToneProgram(soccfg, make_cfg(cfg))
-                avgi, avgq = prog.acquire(soc, progress=False)
-                signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]
+                avgi, avgq = prog.acquire(soc, progress=False)  # type: ignore
+                signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]  # type: ignore
                 freq_tqdm.update()
             flux_tqdm.update()
 
@@ -53,9 +53,14 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
                 amps = NormalizeData(np.abs(signals2D), axis=1, rescale=False)
                 update_show2d(fig, ax, dh, im, amps)
 
-        if instant_show:
-            close_show(fig, dh)
-    except BaseException as e:
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, early stopping the program")
+    except Exception as e:
         print("Error during measurement:", e)
+    finally:
+        if instant_show:
+            amps = NormalizeData(np.abs(signals2D), axis=1, rescale=False)
+            update_show2d(fig, ax, dh, im, amps)
+            close_show(fig, dh)
 
     return flxs, fpts, signals2D

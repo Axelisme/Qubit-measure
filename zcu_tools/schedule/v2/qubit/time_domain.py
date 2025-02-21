@@ -32,7 +32,7 @@ def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
     )
 
     # get the actual times
-    ts = prog.get_time_param("t2ramsey_length", as_array=True)
+    ts = prog.get_time_param("t2ramsey_length", "t", as_array=True)
 
     return ts, signals
 
@@ -62,7 +62,7 @@ def measure_t2echo(soc, soccfg, cfg, instant_show=False):
     )
 
     # get the actual times
-    ts = 2 * prog.get_time_param("t2echo_length", as_array=True)
+    ts = 2 * prog.get_time_param("t2echo_length", "t", as_array=True)
 
     return ts, signals
 
@@ -92,6 +92,6 @@ def measure_t1(soc, soccfg, cfg, instant_show=False):
     )
 
     # get the actual times
-    ts = prog.get_time_param("t1_length", as_array=True)
+    ts = prog.get_time_param("t1_length", "t", as_array=True)
 
     return ts, signals
