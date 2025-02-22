@@ -4,7 +4,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show1d, update_show1d
+from zcu_tools.schedule.instant_show import InstantShow
 
 
 def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
@@ -47,10 +47,11 @@ def measure_lookback(
 
         if instant_show:
             total_num = soccfg.us2cycles(total_len, ro_ch=cfg["adc"]["chs"][0])
-            fig, ax, dh, curve = init_show1d(
+            viewer = InstantShow(
                 np.linspace(0, total_len, total_num, endpoint=False),
-                "Time (us)",
-                "Amplitude",
+                x_label="Time (us)",
+                y_label="Amplitude",
+                title="Readout",
                 linestyle="-",
                 marker=None,
             )
@@ -68,14 +69,7 @@ def measure_lookback(
             signals.append(singals_)
 
             if instant_show:
-                update_show1d(
-                    fig,
-                    ax,
-                    dh,
-                    curve,
-                    np.abs(np.concatenate(signals)),
-                    np.concatenate(Ts),
-                )
+                viewer.update_show(np.abs(np.concatenate(signals)), np.concatenate(Ts))
 
             trig_offset += MAX_LEN
             bar.update()
@@ -89,7 +83,7 @@ def measure_lookback(
         signals = signals[sort_idxs]
 
         if instant_show:
-            update_show1d(fig, ax, dh, curve, np.abs(signals), Ts)
-            close_show(fig, dh)
+            viewer.update_show(np.abs(signals), Ts)
+            viewer.close_show()
 
     return Ts, signals

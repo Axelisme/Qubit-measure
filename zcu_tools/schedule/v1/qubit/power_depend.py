@@ -5,7 +5,7 @@ import numpy as np
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import PowerDepProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show2d, update_show2d
+from zcu_tools.schedule.instant_show import InstantShow
 from zcu_tools.schedule.tools import sweep2array
 
 
@@ -19,13 +19,22 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    if instant_show:
-        fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
-
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
+    if instant_show:
+        viewer = InstantShow(
+            pdrs, fpts, xlabel="Power (a.u.)", ylabel="Frequency (MHz)"
+        )
+
+        def callback(ir, sum_d):
+            nonlocal signals2D
+            signals2D = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
+            viewer.update_show(np.abs(signals2D))
+    else:
+        callback = None  # type: ignore
+
     try:
         prog = PowerDepProgram(soccfg, make_cfg(cfg))
-        fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True)  # type: ignore
+        fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)  # type: ignore
         signals2D = avgi[0][0] + 1j * avgq[0][0]  # type: ignore
         fpts, pdrs = fpt_pdr[0], fpt_pdr[1]  # type: ignore
 
@@ -35,7 +44,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            update_show2d(fig, ax, dh, im, np.abs(signals2D))
-            close_show(fig, dh)
+            viewer.update_show(np.abs(signals2D))
+            viewer.close_show()
 
     return fpts, pdrs, signals2D  # (pdrs, freqs)

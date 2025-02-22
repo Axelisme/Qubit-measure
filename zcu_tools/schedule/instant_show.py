@@ -3,77 +3,53 @@ import numpy as np
 from IPython.display import display
 
 
-def init_show1d(X, x_label, y_label, title=None, **kwargs):
-    fig, ax = plt.subplots()
-    fig.tight_layout(pad=3)
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    if title:
-        ax.set_title(title)
-    kwargs.setdefault("linestyle", "-")
-    kwargs.setdefault("marker", ".")
-    curve = ax.plot(X, np.zeros_like(X), **kwargs)[0]
-    dh = display(fig, display_id=True)
-    return fig, ax, dh, curve
+class InstantShow:
+    def __init__(self, *ticks, x_label, y_label, title=None, **kwargs):
+        if len(ticks) > 2 or len(ticks) == 0:
+            raise ValueError("Invalid number of ticks")
 
+        fig, ax = plt.subplots()
+        fig.tight_layout(pad=3)
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
+        if title:
+            ax.set_title(title)
 
-def update_show1d(fig, ax, dh, curve, Y, X=None):
-    if X is not None:
-        curve.set_xdata(X)
-    curve.set_ydata(Y)
-    ax.relim()
-    if X is None:
-        ax.autoscale(axis="y")
-    else:
-        ax.autoscale_view()
-    dh.update(fig)
+        self.fig = fig
+        self.ax = ax
+        if len(ticks) == 1:
+            kwargs.setdefault("linestyle", "-")
+            kwargs.setdefault("marker", ".")
+            self.contain = ax.plot(ticks[0], np.zeros_like(ticks[0]), **kwargs)[0]
+        elif len(ticks) == 2:
+            kwargs.setdefault("origin", "lower")
+            kwargs.setdefault("interpolation", "none")
+            kwargs.setdefault("aspect", "auto")
+            self.contain = ax.imshow(
+                np.zeros((len(ticks[1]), len(ticks[0]))),
+                extent=[ticks[0][0], ticks[0][-1], ticks[1][0], ticks[1][-1]],
+                **kwargs,
+            )
+        self.dh = display(fig, display_id=True)
 
+    def update_show(self, data, ticks=None):
+        if len(data.shape) == 1:  # 1D
+            if ticks is None:
+                self.contain.set_xdata(ticks)
+            self.contain.set_ydata(data)
+            self.ax.relim()
+            if ticks is None:
+                self.ax.autoscale(axis="y")
+            else:
+                self.ax.autoscale_view()
+        elif len(data.shape) == 2:  # 2D
+            if ticks is not None:
+                X, Y = ticks
+                self.contain.set_extent([X[0], X[-1], Y[0], Y[-1]])
+            self.contain.set_data(data.T)
+            self.contain.autoscale()
 
-def init_show2d(X, Y, x_label, y_label, title=None, **kwargs):
-    fig, ax = plt.subplots()
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    if title:
-        ax.set_title(title)
-    kwargs.setdefault("origin", "lower")
-    kwargs.setdefault("interpolation", "none")
-    kwargs.setdefault("aspect", "auto")
-    im = ax.imshow(
-        np.zeros((len(Y), len(X))),
-        extent=[X[0], X[-1], Y[0], Y[-1]],
-        **kwargs,
-    )
-    fig.tight_layout()
-    dh = display(fig, display_id=True)
-    return fig, ax, dh, im
+        self.dh.update(self.fig)
 
-
-def update_show2d(fig, ax, dh, im, Z, XY: tuple = None):
-    if XY is not None:
-        X, Y = XY
-        im.set_extent([X[0], X[-1], Y[0], Y[-1]])
-    im.set_data(Z.T)
-    im.autoscale()
-    dh.update(fig)
-
-
-def init_show(*ticks, x_label, y_label, title=None, **kwargs):
-    if len(ticks) == 1:
-        return init_show1d(ticks[0], x_label, y_label, title, **kwargs)
-    elif len(ticks) == 2:
-        return init_show2d(ticks[0], ticks[1], x_label, y_label, title, **kwargs)
-    else:
-        raise ValueError("Invalid number of ticks")
-
-
-def update_show(fig, ax, dh, contain, data, ticks=None):
-    if len(data.shape) == 1:
-        update_show1d(fig, ax, dh, contain, data, ticks)
-    elif len(data.shape) == 2:
-        update_show2d(fig, ax, dh, contain, data, ticks)
-    else:
-        raise ValueError("Unkown data shape")
-
-
-def close_show(fig, dh):
-    plt.close(fig)
+    def close_show(self):
+        plt.close(self.fig)

@@ -7,7 +7,7 @@ from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
 from zcu_tools.program.v1 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show2d, update_show2d
+from zcu_tools.schedule.instant_show import InstantShow
 from zcu_tools.schedule.tools import map2adcfreq, sweep2array
 
 
@@ -33,7 +33,9 @@ def measure_res_pdr_dep(
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     if instant_show:
-        fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
+        viewer = InstantShow(
+            fpts, pdrs, xlabel="Frequency (MHz)", ylabel="Power (a.u.)"
+        )
 
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     try:
@@ -61,8 +63,7 @@ def measure_res_pdr_dep(
                 freq_tqdm.update()
 
             if instant_show:
-                amps = NormalizeData(signals2D, axis=1)
-                update_show2d(fig, ax, dh, im, amps.T)
+                viewer.update_show(NormalizeData(signals2D, axis=1).T)
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -70,8 +71,7 @@ def measure_res_pdr_dep(
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            amps = NormalizeData(signals2D, axis=1)
-            update_show2d(fig, ax, dh, im, amps.T)
-            close_show(fig, dh)
+            viewer.update_show(NormalizeData(signals2D, axis=1).T)
+            viewer.close_show()
 
     return pdrs, fpts, signals2D  # (pdrs, freqs)

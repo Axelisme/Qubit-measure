@@ -4,7 +4,7 @@ from numpy import ndarray
 
 from qick.asm_v2 import AveragerProgramV2
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show, update_show
+from zcu_tools.schedule.instant_show import InstantShow
 
 
 def sweep_template(
@@ -27,12 +27,12 @@ def sweep_template(
 
     signals = init_signals.copy()
     if instant_show:
-        fig, ax, dh, contain = init_show(*ticks, x_label=xlabel, y_label=ylabel)
+        viewer = InstantShow(*ticks, x_label=xlabel, y_label=ylabel)
 
         def callback(ir, sum_d):
             nonlocal signals
             signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
-            update_show(fig, ax, dh, contain, signal2amp(signals))
+            InstantShow.update_show(signal2amp(signals))
     else:
         callback = None  # type: ignore
 
@@ -46,7 +46,7 @@ def sweep_template(
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            update_show(fig, ax, dh, contain, signal2amp(signals))
-            close_show(fig, dh)
+            viewer.update_show(signal2amp(signals))
+            viewer.close_show()
 
     return prog, signals
