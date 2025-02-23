@@ -32,7 +32,7 @@ def sweep_template(
         def callback(ir, sum_d):
             nonlocal signals
             signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
-            InstantShow.update_show(signal2amp(signals))
+            viewer.update_show(signal2amp(signals))
     else:
         callback = None  # type: ignore
 

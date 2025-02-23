@@ -22,7 +22,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     if instant_show:
         viewer = InstantShow(
-            pdrs, fpts, xlabel="Power (a.u.)", ylabel="Frequency (MHz)"
+            pdrs, fpts, x_label="Power (a.u.)", y_label="Frequency (MHz)"
         )
 
         def callback(ir, sum_d):

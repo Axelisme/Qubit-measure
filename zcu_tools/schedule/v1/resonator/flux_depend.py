@@ -31,7 +31,9 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
     if instant_show:
-        viewer = InstantShow(flxs, fpts, xlabel="Flux", ylabel="Frequency (MHz)")
+        viewer = InstantShow(
+            flxs, fpts, x_label="Flux (a.u.)", y_label="Frequency (MHz)"
+        )
 
     signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
     try:

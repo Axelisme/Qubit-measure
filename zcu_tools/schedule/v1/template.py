@@ -27,7 +27,7 @@ def sweep1D_hard_template(
     xs = init_xs.copy()
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(xs, xlabel=xlabel, ylabel=ylabel)
+        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel)
 
         def callback(ir, sum_d):
             nonlocal signals
@@ -74,7 +74,7 @@ def sweep1D_soft_template(
 ):
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(xs, xlabel=xlabel, ylabel=ylabel)
+        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel)
         show_period = int(len(xs[0]) / 20 + 0.99)
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])

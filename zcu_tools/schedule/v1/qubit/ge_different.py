@@ -6,13 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import (
-    close_show,
-    init_show1d,
-    init_show2d,
-    update_show1d,
-    update_show2d,
-)
+from zcu_tools.schedule.instant_show import InstantShow
 from zcu_tools.schedule.tools import check_time_sweep, map2adcfreq, sweep2array
 
 
@@ -52,7 +46,9 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     if instant_show:
-        fig, ax, dh, im = init_show2d(fpts, pdrs, "Frequency (MHz)", "Power (a.u.)")
+        viewer = InstantShow(
+            fpts, pdrs, x_label="Frequency (MHz)", y_label="Power (a.u.)"
+        )
 
     snr2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     try:
@@ -71,20 +67,18 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
                 freq_tqdm.update()
 
             if instant_show:
-                ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")  # type: ignore
-                update_show2d(fig, ax, dh, im, np.abs(snr2D))
+                viewer.ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")  # type: ignore
+                viewer.update_show(np.abs(snr2D))
 
-        if instant_show:
-            close_show(fig, dh)
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
     except Exception as e:
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")  # type: ignore
-            update_show2d(fig, ax, dh, im, np.abs(snr2D))
-            close_show(fig, dh)
+            viewer.ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")  # type: ignore
+            viewer.update_show(np.abs(snr2D))
+            viewer.close_show()
 
     return pdrs, fpts, snr2D  # (pdrs, freqs)
 
@@ -103,7 +97,9 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 
     if instant_show:
         show_period = int(len(ro_lens) / 20 + 0.99999)
-        fig, ax, dh, curve = init_show1d(ro_lens, "Readout Length (us)", "SNR (a.u.)")
+        viewer = InstantShow(
+            ro_lens, x_label="Readout Length (us)", y_label="SNR (a.u.)"
+        )
 
     snrs = np.full(len(ro_lens), np.nan, dtype=np.complex128)
     try:
@@ -114,7 +110,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
             snrs[i] = measure_one(soc, soccfg, cfg)
 
             if instant_show and i % show_period == 0:
-                update_show1d(fig, ax, dh, curve, np.abs(snrs))
+                viewer.update_show(np.abs(snrs))
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -122,8 +118,8 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            update_show1d(fig, ax, dh, curve, np.abs(snrs))
-            close_show(fig, dh)
+            viewer.update_show(np.abs(snrs))
+            viewer.close_show()
 
     return ro_lens, snrs
 
@@ -139,7 +135,9 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
     if instant_show:
         show_period = int(len(offsets) / 20 + 0.99999)
-        fig, ax, dh, curve = init_show1d(offsets, "Trigger Offset (us)", "SNR (a.u.)")
+        viewer = InstantShow(
+            offsets, x_label="Trigger Offset (us)", y_label="SNR (a.u.)"
+        )
 
     snrs = np.full(len(offsets), np.nan, dtype=np.complex128)
     try:
@@ -150,7 +148,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
             snrs[i] = measure_one(soc, soccfg, cfg)
 
             if instant_show and i % show_period == 0:
-                update_show1d(fig, ax, dh, curve, np.abs(snrs))
+                viewer.update_show(np.abs(snrs))
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -158,7 +156,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            update_show1d(fig, ax, dh, curve, np.abs(snrs))
-            close_show(fig, dh)
+            viewer.update_show(np.abs(snrs))
+            viewer.close_show()
 
     return offsets, snrs

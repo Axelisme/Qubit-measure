@@ -7,7 +7,7 @@ from zcu_tools import make_cfg
 from zcu_tools.analysis import NormalizeData
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import close_show, init_show2d, update_show2d
+from zcu_tools.schedule.instant_show import InstantShow
 from zcu_tools.schedule.tools import sweep2array
 
 
@@ -34,7 +34,9 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
     avgs_tqdm = tqdm(total=cfg["soft_avgs"], desc="Soft_avgs", smoothing=0)
     if instant_show:
-        fig, ax, dh, im = init_show2d(flxs, fpts, "Flux", "Frequency (MHz)")
+        viewer = InstantShow(
+            flxs, fpts, x_label="Flux (a.u.)", y_label="Frequency (MHz)"
+        )
 
     signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
     try:
@@ -53,7 +55,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
                 if instant_show:
                     _signals2D[i] = sum_d[0][0].dot([1, 1j]) / (ir + 1)
                     amps = NormalizeData(_signals2D, axis=1, rescale=True) ** 1.5
-                    update_show2d(fig, ax, dh, im, amps.T)
+                    viewer.update_show(amps.T)
 
             prog_cls = (
                 RFreqTwoToneProgram
@@ -71,7 +73,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
 
             if instant_show:
                 amps = NormalizeData(signals2D, axis=1, rescale=True) ** 1.5
-                update_show2d(fig, ax, dh, im, amps.T, (flxs, fpts))
+                viewer.update_show(amps.T, ticks=(flxs, fpts))
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -80,8 +82,8 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
     finally:
         if instant_show:
             amps = NormalizeData(signals2D, axis=1, rescale=True) ** 1.5
-            update_show2d(fig, ax, dh, im, amps.T, (flxs, fpts))
-            close_show(fig, dh)
+            viewer.update_show(amps.T, ticks=(flxs, fpts))
+            viewer.close_show()
         flux_tqdm.close()
         avgs_tqdm.close()
 

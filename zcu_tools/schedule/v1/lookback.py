@@ -55,8 +55,8 @@ def measure_lookback(
             total_num = soccfg.us2cycles(total_len, ro_ch=cfg["adc"]["chs"][0])
             viewer = InstantShow(
                 np.linspace(0, total_len, total_num, endpoint=False),
-                xlable="Time (us)",
-                ylabel="Amplitude",
+                x_label="Time (us)",
+                y_label="Amplitude",
                 linestyle="-",
                 marker=None,
             )

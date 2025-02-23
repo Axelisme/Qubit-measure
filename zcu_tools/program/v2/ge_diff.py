@@ -43,3 +43,7 @@ class GEProgram(TwoToneProgram):
         ) / np.abs(contrast)
 
         return contrast / noise
+
+    def acquire(self, soc, **kwargs):
+        # default to acquire_snr
+        return self.acquire_snr(soc, **kwargs)

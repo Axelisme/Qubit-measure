@@ -34,7 +34,7 @@ def measure_res_pdr_dep(
 
     if instant_show:
         viewer = InstantShow(
-            fpts, pdrs, xlabel="Frequency (MHz)", ylabel="Power (a.u.)"
+            fpts, pdrs, x_label="Frequency (MHz)", y_label="Power (a.u.)"
         )
 
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
