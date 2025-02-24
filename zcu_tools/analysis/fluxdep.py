@@ -461,8 +461,8 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
     max_level = int(
         np.max(
             [
-                np.max(np.array(allows["transitions"]), initial=0),
-                np.max(np.array(allows["mirror"]), initial=0),
+                np.max(np.array(allows.get("transitions", [])), initial=0),
+                np.max(np.array(allows.get("mirror",[])), initial=0),
             ]
         )
         + 1

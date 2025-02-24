@@ -97,9 +97,6 @@ def server2remote():
     if not filepath:
         return "No file path", 400
 
-    if not os.path.exists(filepath):
-        return "File not found", 404
-
     return load_file(filepath)
 
 
