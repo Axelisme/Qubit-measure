@@ -1,157 +1,186 @@
-import matplotlib.patches as patches
+import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
+from IPython.display import display
+from scipy.signal import find_peaks
 from tqdm.auto import tqdm, trange
 
 
 class InteractiveSelector:
-    def __init__(self, spectrum, flxs, fpts, s_flxs, s_fpts, colors=None):
-        from matplotlib.animation import FuncAnimation
+    def __init__(self, spectrum, flxs, fpts, threshold=1.0, brush_width=0.05):
+        self.spectrum = spectrum
+        self.flxs = flxs
+        self.fpts = fpts
 
+        plt.ioff()  # to avoid showing the plot immediately
         self.fig, self.ax = plt.subplots()
-        self.colors = (
-            np.array(["r" for _ in range(len(s_flxs))]) if colors is None else colors
-        )
-        self.current_color = "r"
-        self.is_selecting = False
-        self.mouse_x = None
-        self.mouse_y = None
-        self.is_dragging = False  # 新增：追蹤滑鼠按住狀態
+        self.fig.tight_layout()
+        plt.ion()
 
-        # 顯示光譜圖
-        self.ax.imshow(
-            spectrum,
+        # 顯示 widget
+        self.create_widgets(threshold, brush_width)
+
+        # 顯示頻譜
+        self.init_background(spectrum, flxs, fpts)
+
+        # 顯示 mask
+        self.init_mask(fpts, flxs)
+
+        # 顯示發現的點
+        self.init_points(flxs, fpts, spectrum)
+
+        # 準備手繪曲線
+        self.init_callback()
+
+        display(
+            widgets.HBox(
+                [
+                    self.fig.canvas,
+                    widgets.VBox(
+                        [
+                            widgets.HBox(
+                                [
+                                    widgets.VBox(
+                                        [self.threshold_slider, self.width_slider]
+                                    ),
+                                    widgets.VBox(
+                                        [self.operation_tb, self.perform_all_bt]
+                                    ),
+                                ]
+                            ),
+                            widgets.HBox(
+                                [
+                                    self.show_mask_box,
+                                    self.finish_button,
+                                ]
+                            ),
+                        ]
+                    ),
+                ]
+            )
+        )
+
+    def create_widgets(self, threshold, brush_width):
+        self.threshold_slider = widgets.FloatSlider(
+            value=threshold, min=1.0, max=10.0, step=0.01, description="Threshold:"
+        )
+        self.width_slider = widgets.FloatSlider(
+            value=brush_width, min=0.01, max=0.1, step=1e-4, description="Brush Width:"
+        )
+        self.show_mask_box = widgets.Checkbox(value=False, description="Show Mask")
+        self.operation_tb = widgets.Dropdown(
+            options=["Select", "Erase"], value="Select", description="Operation:"
+        )
+        self.perform_all_bt = widgets.Button(description="Perform on All")
+        self.finish_button = widgets.Button(description="Finish")
+
+        self.threshold_slider.observe(self.on_ratio_change, names="value")
+        self.show_mask_box.observe(self.on_select_show, names="value")
+        self.perform_all_bt.on_click(self.on_perform_all)
+        self.finish_button.on_click(self.on_finish)
+
+    def init_background(self, spectrum, flxs, fpts):
+        s_spectrum = np.abs(spectrum - np.mean(spectrum, axis=0, keepdims=True))
+        s_spectrum /= np.std(s_spectrum, axis=0, keepdims=True)
+        self.spectrum_img = self.ax.imshow(
+            s_spectrum,
             aspect="auto",
             origin="lower",
             interpolation="none",
             extent=(flxs[0], flxs[-1], fpts[0], fpts[-1]),
         )
 
-        # 設定座標軸範圍與光譜圖一致
-        self.ax.set_xlim(flxs[0], flxs[-1])
-        self.ax.set_ylim(fpts[0], fpts[-1])
+    def init_mask(self, fpts, flxs):
+        self.mask = np.ones((len(fpts), len(flxs)), dtype=bool)
 
-        # 散點圖
-        self.scatter = self.ax.scatter(s_flxs, s_fpts, color=self.colors, s=2)
-
-        # 保存原始數據
-        self.s_flxs = s_flxs
-        self.s_fpts = s_fpts
-
-        # 創建選擇圓圈（初始設為不可見）
-        # 因為x, y 長度不同，所以改用Ellipse
-        self.select_x = 0.03 * (flxs[-1] - flxs[0])
-        self.select_y = 0.03 * (fpts[-1] - fpts[0])
-        self.circle = patches.Ellipse(
-            (0, 0),
-            self.select_x,
-            self.select_y,
-            fill=False,
-            color=self.current_color,
-            linestyle="--",
-            visible=False,
+        self.select_mask = self.ax.imshow(
+            self.mask,
+            aspect="auto",
+            origin="lower",
+            interpolation="none",
+            extent=(flxs[0], flxs[-1], fpts[0], fpts[-1]),
+            alpha=0.2 if self.show_mask_box.value else 0,
+            cmap="gray",
+            vmin=0,
+            vmax=1,
         )
-        self.ax.add_patch(self.circle)
 
-        # 添加按鈕
-        self.add_buttons()
+    def init_points(self, flxs, fpts, spectrum):
+        threshold = self.threshold_slider.value
+        self.s_flxs, self.s_fpts, self.s_ids = spectrum_analyze(
+            flxs, fpts, spectrum, threshold, weight=self.mask
+        )
+        self.scatter = self.ax.scatter(self.s_flxs, self.s_fpts, color="r", s=2)
 
-        # 連接事件
+    def init_callback(self):
+        # 綁定事件
         self.fig.canvas.mpl_connect("button_press_event", self.on_press)
-        self.fig.canvas.mpl_connect("button_release_event", self.on_release)
-        self.fig.canvas.mpl_connect("motion_notify_event", self.on_motion)
 
-        # to avoid key press event error
-        self.fig.canvas.mpl_connect("key_press_event", lambda event: None)
-        self.fig.canvas.mpl_connect("key_release_event", lambda event: None)
-
-        # 創建動畫
-        self.anim = FuncAnimation(
-            self.fig,
-            self.update_animation,
-            interval=33,  # 約30 FPS
-            blit=True,
-            cache_frame_data=False,
+    def update_points(self):
+        threshold = self.threshold_slider.value
+        self.s_flxs, self.s_fpts, _ = spectrum_analyze(
+            self.flxs, self.fpts, self.spectrum, threshold, weight=self.mask
         )
+        self.scatter.set_offsets(np.column_stack((self.s_flxs, self.s_fpts)))
 
-    def add_buttons(self):
-        from matplotlib.widgets import Button
+    def toggle_near_mask(self, x, y, width, mask, mode):
+        x_d = np.abs(self.flxs - x) / (self.flxs[-1] - self.flxs[0])
+        y_d = np.abs(self.fpts - y) / (self.fpts[-1] - self.fpts[0])
+        d2 = x_d[None, :] ** 2 + y_d[:, None] ** 2
 
-        # 創建按鈕
-        ax_red = plt.axes([0.7, 0.05, 0.1, 0.04])
-        ax_black = plt.axes([0.81, 0.05, 0.1, 0.04])
-        ax_done = plt.axes([0.92, 0.05, 0.1, 0.04])
+        weight = d2 <= width**2
+        if mode == "Select":
+            mask |= weight
+        elif mode == "Erase":
+            mask &= ~weight
 
-        self.btn_red = Button(ax_red, "Red", color="lightcoral")
-        self.btn_black = Button(ax_black, "Black", color="gray")
-        self.btn_done = Button(ax_done, "Done", color="lightgreen")
+    def on_ratio_change(self, _):
+        self.update_points()
+        self.fig.canvas.draw_idle()
 
-        self.btn_red.on_clicked(lambda _: self.set_color("r"))
-        self.btn_black.on_clicked(lambda _: self.set_color("k"))
-        self.btn_done.on_clicked(self.finish_selection)
-
-    def set_color(self, color):
-        self.current_color = color
-        self.is_selecting = True
-        self.circle.set_color(color)
-
-    def update_animation(self, frame):
-        if not self.is_selecting or self.mouse_x is None or self.mouse_y is None:
-            self.circle.set_visible(False)
-            return [self.circle]
-
-        self.circle.center = (self.mouse_x, self.mouse_y)
-        self.circle.set_visible(True)
-        return [self.circle]
-
-    def on_motion(self, event):
-        if not event.inaxes == self.ax:
-            self.mouse_x = None
-            self.mouse_y = None
-            return
-
-        self.mouse_x = event.xdata
-        self.mouse_y = event.ydata
-
-        # 如果滑鼠正在拖曳中，就更新點的顏色
-        if self.is_dragging:
-            self.update_points(event.xdata, event.ydata)
-
-    def update_points(self, x, y):
-        # 計算點擊位置附近的點
-        distances = ((self.s_flxs - x) / self.select_x) ** 2 + (
-            (self.s_fpts - y) / self.select_y
-        ) ** 2
-        mask = distances < 0.25
-
-        # 更新顏色
-        self.colors[mask] = self.current_color
-        self.scatter.set_color(self.colors)
+    def on_select_show(self, _):
+        if self.show_mask_box.value:
+            self.select_mask.set_data(self.mask)
+            self.select_mask.set_alpha(0.2)
+        else:
+            self.select_mask.set_alpha(0)
+        self.fig.canvas.draw_idle()
 
     def on_press(self, event):
-        if not self.is_selecting or event.inaxes != self.ax:
+        if event.inaxes != self.ax:
             return
 
-        self.is_dragging = True
-        self.update_points(event.xdata, event.ydata)
+        # 計算靠近滑鼠點擊的點
+        self.toggle_near_mask(
+            event.xdata,
+            event.ydata,
+            self.width_slider.value,
+            self.mask,
+            self.operation_tb.value,
+        )
 
-    def on_release(self, event):
-        self.is_dragging = False
+        # 更新 mask
+        self.select_mask.set_data(self.mask)
 
-    def show_and_run(self):
-        plt.show()
+        self.update_points()
+        self.fig.canvas.draw_idle()
 
-    def finish_selection(self, event):
-        # 停止動畫
-        self.anim.event_source.stop()
+    def on_perform_all(self, _):
+        if self.operation_tb.value == "Select":
+            self.mask = np.ones_like(self.mask)
+        elif self.operation_tb.value == "Erase":
+            self.mask = np.zeros_like(self.mask)
 
-    def get_selected_points(self):
-        self.finish_selection(None)
+        self.select_mask.set_data(self.mask)
+
+        self.update_points()
+        self.fig.canvas.draw_idle()
+
+    def on_finish(self, _):
         plt.close(self.fig)
-        mask = self.colors == "r"
-        s_flxs = self.s_flxs[mask]
-        s_fpts = self.s_fpts[mask]
-        return s_flxs, s_fpts, self.colors
+
+    def get_positions(self):
+        return self.s_flxs, self.s_fpts
 
 
 class InteractiveLines:
@@ -312,41 +341,29 @@ def preprocess_data(flxs, fpts, spectrum):
     return flxs, fpts, spectrum
 
 
-def spectrum_analyze(flxs, fpts, signals, ratio, min_dist=None):
-    amps = np.abs(signals - np.mean(signals, axis=0, keepdims=True))
-    amps /= np.std(amps, axis=0, keepdims=True)
+def spectrum_analyze(flxs, fpts, signals, threshold, weight=None):
+    amps = np.abs(signals - np.ma.mean(signals, axis=0))
+    amps /= np.ma.std(amps, axis=0)
 
-    # find peaks
-    fpt_idxs = np.argmax(amps, axis=0)  # (len(flxs),)
-    maxs = amps[fpt_idxs, np.arange(amps.shape[1])]  # (len(flxs),)
-    masks = maxs >= ratio  # (len(flxs),)
-    s_flxs = flxs[masks]
-    s_fpts = fpts[fpt_idxs][masks]
+    if weight is not None:
+        amps *= weight
 
-    # mask +/- 5 points around the selected points
-    # and try to find the second peak
-    d_idxs = np.maximum(0, fpt_idxs - 5)
-    u_idxs = np.minimum(len(fpts), fpt_idxs + 6)
-    for i in range(len(fpt_idxs)):
-        amps[d_idxs[i] : u_idxs[i], i] = 0
-    fpt_idxs = np.argmax(amps, axis=0)
-    maxs = amps[fpt_idxs, np.arange(amps.shape[1])]
-    masks = maxs >= ratio
-    s_flxs2 = flxs[masks]
-    s_fpts2 = fpts[fpt_idxs][masks]
-
-    # append the second peaks
-    s_flxs = np.concatenate([s_flxs, s_flxs2])
-    s_fpts = np.concatenate([s_fpts, s_fpts2])
-
-    if min_dist is not None:
-        s_flxs, s_fpts = remove_close_points(s_flxs, s_fpts, min_dist)
-
-    return s_flxs, s_fpts
+    s_flxs = []
+    s_fpts = []
+    s_ids = []
+    for i in range(amps.shape[1]):
+        peaks, _ = find_peaks(amps[:, i], height=threshold)
+        s_flxs.extend(flxs[i] * np.ones(len(peaks)))
+        s_fpts.extend(fpts[peaks])
+        s_ids.extend([(i, j) for j in peaks])
+    return np.array(s_flxs), np.array(s_fpts), np.array(s_ids)
 
 
 def remove_close_points(flxs, fpts, dist_ratio):
     # remove some close points
+    if len(flxs) < 2:
+        return flxs, fpts  # ignore in edge case
+
     mask = np.ones(len(flxs), dtype=bool)
     t_d2 = np.sqrt((flxs[-1] - flxs[0]) ** 2 + (fpts[-1] - fpts[0]) ** 2) * dist_ratio
     prev = 0
@@ -462,7 +479,7 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
         np.max(
             [
                 np.max(np.array(allows.get("transitions", [])), initial=0),
-                np.max(np.array(allows.get("mirror",[])), initial=0),
+                np.max(np.array(allows.get("mirror", [])), initial=0),
             ]
         )
         + 1
