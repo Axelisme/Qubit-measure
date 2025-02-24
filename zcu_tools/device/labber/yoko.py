@@ -18,18 +18,6 @@ class YokoDevControl:
                 return  # only register once if not reinit
             cls.disconnect_server()
             print("Reinit YokoDevControl")
-
-        cls._init_dev(dev_cfg)
-
-    @classmethod
-    def disconnect_server(cls):
-        if cls.yoko is not None:
-            cls.yoko = None
-            cls.SWEEP_RATE = None
-            cls.dev_cfg = None
-
-    @classmethod
-    def _init_dev(cls, dev_cfg: dict):
         cls.SWEEP_RATE = dev_cfg["outputCfg"]["Current - Sweep rate"]
         cls.dev_cfg = dev_cfg
 
@@ -55,6 +43,13 @@ class YokoDevControl:
         cls.yoko = InstrManager(server_ip=dev_cfg["host_ip"], timeout=cls.TIMEOUT)
         cls.yoko.add_instrument(sHardware, dComCfg)
         cls.yoko.ctrl.globalFlux.setInstrConfig(output_cfg)
+
+    @classmethod
+    def disconnect_server(cls):
+        if cls.yoko is not None:
+            cls.yoko = None
+            cls.SWEEP_RATE = None
+            cls.dev_cfg = None
 
     @classmethod
     def get_current(cls):
