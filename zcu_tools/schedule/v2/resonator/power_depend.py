@@ -2,7 +2,6 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import NormalizeData
 from zcu_tools.program.v2 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow
@@ -60,7 +59,7 @@ def measure_res_pdr_dep(
                 avgs_tqdm.refresh()
                 if instant_show:
                     _signals2D[i] = sum_d[0][0].dot([1, 1j]) / (ir + 1)
-                    viewer.update_show(NormalizeData(np.abs(_signals2D), axis=1).T)
+                    viewer.update_show(_signals2D.T)
 
             prog = OneToneProgram(soccfg, cfg)
             IQlist = prog.acquire(soc, progress=False, round_callback=callback)
@@ -72,8 +71,7 @@ def measure_res_pdr_dep(
             avgs_tqdm.refresh()
 
             if instant_show:
-                amps = NormalizeData(np.abs(signals2D), axis=1)
-                viewer.update_show(amps.T, (fpts, pdrs))
+                viewer.update_show(signals2D.T, (fpts, pdrs))
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")

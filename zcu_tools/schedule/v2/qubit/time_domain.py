@@ -1,7 +1,6 @@
 import numpy as np
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import NormalizeData
 from zcu_tools.program.v2 import T1Program, T2EchoProgram, T2RamseyProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_template
@@ -26,7 +25,6 @@ def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
         ticks=(ts,),
         progress=True,
         instant_show=instant_show,
-        signal2amp=lambda x: NormalizeData(x, rescale=False),
         xlabel="Time (us)",
         ylabel="Amplitude",
     )
@@ -56,7 +54,6 @@ def measure_t2echo(soc, soccfg, cfg, instant_show=False):
         ticks=(ts,),
         progress=True,
         instant_show=instant_show,
-        signal2amp=lambda x: NormalizeData(x, rescale=False),
         xlabel="Time (us)",
         ylabel="Amplitude",
     )
@@ -86,7 +83,6 @@ def measure_t1(soc, soccfg, cfg, instant_show=False):
         ticks=(ts,),
         progress=True,
         instant_show=instant_show,
-        signal2amp=lambda x: NormalizeData(x, rescale=False),
         xlabel="Time (us)",
         ylabel="Amplitude",
     )

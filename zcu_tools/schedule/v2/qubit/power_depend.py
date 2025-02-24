@@ -1,7 +1,6 @@
 import numpy as np
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import NormalizeData
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_template
@@ -33,7 +32,6 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
         ticks=(fpts, pdrs),
         progress=True,
         instant_show=instant_show,
-        signal2amp=lambda x: NormalizeData(x, rescale=False).T,
         xlabel="Frequency (MHz)",
         ylabel="Pulse Gain",
     )

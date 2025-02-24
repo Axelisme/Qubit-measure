@@ -2,7 +2,6 @@ from copy import deepcopy
 
 import numpy as np
 
-from zcu_tools.analysis import NormalizeData
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.tools import sweep2array
 from zcu_tools.schedule.v1.template import sweep1D_hard_template
@@ -27,7 +26,6 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, reset_rf=None):
         init_signals=np.full(len(fpts), np.nan, dtype=np.complex128),
         progress=True,
         instant_show=instant_show,
-        signal2amp=lambda x: NormalizeData(x, rescale=False),
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
     )

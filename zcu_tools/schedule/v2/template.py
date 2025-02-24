@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Dict, Tuple
 
 from numpy import ndarray
 
@@ -17,7 +17,6 @@ def sweep_template(
     ticks: Tuple[ndarray, ...],
     progress: bool,
     instant_show: bool,
-    signal2amp: Callable,
     xlabel: str,
     ylabel: str,
     **kwargs,
@@ -32,7 +31,7 @@ def sweep_template(
         def callback(ir, sum_d):
             nonlocal signals
             signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
-            viewer.update_show(signal2amp(signals))
+            viewer.update_show(signals)
     else:
         callback = None  # type: ignore
 
@@ -46,7 +45,7 @@ def sweep_template(
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(signal2amp(signals))
+            viewer.update_show(signals)
             viewer.close_show()
 
     return prog, signals

@@ -1,60 +1,82 @@
 import numpy as np
 
 
-def convert2max_contrast(Is: np.ndarray, Qs: np.ndarray):
+def rotate2real(signals: np.ndarray):
     """
-    rotate the 2-d input data to maximize on the x-axis
+    Rotate the signals to maximize the contrast on real axis
+
+    Parameters
+    ----------
+    signals : np.ndarray
+        The 1-D complex signals
+
+    Returns
+    -------
+    np.ndarray
+        The rotated signals
     """
+
+    if len(signals.shape) != 1:
+        raise ValueError(f"Expect 1-D signals, but get shape {signals.shape}")
+    if signals.dtype != complex:
+        raise ValueError(f"Expect complex signals, but get dtype {signals.dtype}")
 
     # calculate the covariance matrix
-    cov = np.cov(Is, Qs)
+    cov = np.cov(signals.real, signals.imag)  # (2, 2)
 
     # calculate the eigenvalues and eigenvectors
-    eigenvalues, eigenvectors = np.linalg.eig(cov)
+    eigenvalues, eigenvectors = np.linalg.eig(cov)  # (2,), (2, 2)
 
     # sort the eigenvectors by decreasing eigenvalues
-    idx = eigenvalues.argsort()[::-1]
-    eigenvalues = eigenvalues[idx]
-    eigenvectors = eigenvectors[:, idx]
+    eigenvectors = eigenvectors[:, eigenvalues.argmax()]  # (2,)
 
-    # rotate the data
-    data = np.vstack([Is, Qs])
-    data_rot = np.dot(eigenvectors.T, data)
+    # rotate the signals to maximize the contrast on real axis
+    rot_signals = signals * eigenvectors.dot([1, -1j])
 
-    return data_rot[0], data_rot[1]
+    return rot_signals
 
 
-def NormalizeData(signals: np.ndarray, axis=None, rescale=True) -> np.ndarray:
-    # find the mask of all values are nan along the axis,
+def minus_mean(signals: np.ndarray, axis=None) -> np.ndarray:
     signals = signals.copy()  # prevent in-place modification
-    nan_mask = np.isnan(signals)
 
-    # skip if all values are nan
-    if np.all(nan_mask):
+    if np.all(np.isnan(signals)):
         return signals
 
     if axis is None:
         signals -= np.nanmean(signals)
-        amps = np.abs(signals).astype(np.float64)
-
-        if rescale:
-            amps /= np.nanstd(amps)
 
     else:
         _signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         # minus the mean
-        where = np.all(np.isnan(_signals), axis=0)
-        _signals[:, ~where] -= np.nanmean(_signals[:, ~where], axis=0, keepdims=True)
-        _amps = np.abs(_signals).astype(np.float64)
+        where = ~np.all(np.isnan(_signals), axis=0)
+        _signals[:, where] -= np.nanmean(_signals[:, where], axis=0, keepdims=True)
 
-        if rescale:
-            where = np.sum(~np.isnan(_amps), axis=0) > 1
-            _amps[:, where] /= np.nanstd(_amps[:, where], axis=0, keepdims=True)
+        signals = np.swapaxes(_signals, 0, axis)  # move the axis back
 
-        amps = np.swapaxes(_amps, 0, axis)  # move the axis back
+    return signals
 
-    return amps
+
+def rescale(signals: np.ndarray, axis=None) -> np.ndarray:
+    signals = signals.copy()  # prevent in-place modification
+    nan_mask = np.isnan(signals)
+
+    if np.all(nan_mask):
+        return signals
+
+    if axis is None:
+        if np.sum(~nan_mask) > 1:  # at least 2 non-nan values
+            signals /= np.nanstd(signals)
+
+    else:
+        _signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
+
+        where = np.sum(~np.isnan(_signals), axis=0) > 1
+        _signals[:, where] /= np.nanstd(_signals[:, where], axis=0, keepdims=True)
+
+        signals = np.swapaxes(_signals, 0, axis)  # move the axis back
+
+    return signals
 
 
 def rotate_phase(fpts, y, phase_slope):

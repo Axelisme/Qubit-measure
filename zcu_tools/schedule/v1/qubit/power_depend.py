@@ -28,7 +28,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
         def callback(ir, sum_d):
             nonlocal signals2D
             signals2D = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
-            viewer.update_show(np.abs(signals2D))
+            viewer.update_show(signals2D)
     else:
         callback = None  # type: ignore
 
@@ -44,7 +44,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(np.abs(signals2D))
+            viewer.update_show(signals2D)
             viewer.close_show()
 
     return fpts, pdrs, signals2D  # (pdrs, freqs)

@@ -69,7 +69,7 @@ def measure_lookback(
             signals.append(singals_)
 
             if instant_show:
-                viewer.update_show(np.abs(np.concatenate(signals)), np.concatenate(Ts))
+                viewer.update_show(np.concatenate(signals), np.concatenate(Ts))
 
             trig_offset += MAX_LEN
             bar.update()
@@ -83,7 +83,7 @@ def measure_lookback(
         signals = signals[sort_idxs]
 
         if instant_show:
-            viewer.update_show(np.abs(signals), Ts)
+            viewer.update_show(signals, Ts)
             viewer.close_show()
 
     return Ts, signals

@@ -4,7 +4,6 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import NormalizeData
 from zcu_tools.program.v1 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow
@@ -52,8 +51,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
             flux_tqdm.update()
 
             if instant_show:
-                amps = NormalizeData(np.abs(signals2D), axis=1, rescale=False)
-                viewer.update_show(amps)
+                viewer.update_show(signals2D)
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -61,8 +59,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            amps = NormalizeData(np.abs(signals2D), axis=1, rescale=False)
-            viewer.update_show(amps)
+            viewer.update_show(signals2D)
             viewer.close_show()
 
     return flxs, fpts, signals2D

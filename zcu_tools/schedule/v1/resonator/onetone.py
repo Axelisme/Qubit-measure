@@ -27,7 +27,6 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         init_signals=np.full(len(fpts), np.nan, dtype=np.complex128),
         progress=True,
         instant_show=instant_show,
-        signal2amp=np.abs,
         updateCfg=update_cfg,
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",

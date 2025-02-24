@@ -3,7 +3,6 @@ from collections import defaultdict
 from typing import Any, Dict, Optional
 
 from qick.qick_asm import AcquireMixin
-
 from zcu_tools.remote.client import ProgramClient
 from zcu_tools.tools import AsyncFunc
 
@@ -33,8 +32,8 @@ class MyProgram(AcquireMixin):
     def __init__(self, soccfg, cfg: Dict[str, Any], **kwargs):
         self._parse_cfg(cfg)  # parse config first
         super().__init__(soccfg, cfg=cfg, **kwargs)
+
         if not self.is_use_proxy():
-            # flag for interrupt
             self._interrupt = False
             self._interrupt_err = None
 
@@ -86,13 +85,15 @@ class MyProgram(AcquireMixin):
         finally:
             soc.reset_gens()  # reset the tProc
 
-    @property
-    def acc_buf(self):
-        if self.is_use_proxy():
-            # fetch acc_buf from proxy
-            if super().acc_buf is None:
-                super().acc_buf = self.proxy.get_acc_buf(self)  # type: ignore
-        return super().acc_buf
+    def __getattr__(self, name):
+        if name == "acc_buf":
+            # intercept acc_buf to fetch from proxy
+            if self.is_use_proxy():
+                # fetch acc_buf from proxy
+                if super().__getattr__("acc_buf") is None:
+                    super().__setattr__("acc_buf", self.proxy.get_acc_buf(self))
+                return super().__getattr__("acc_buf")
+        return super().__getattr__(name)
 
     def acquire(self, soc, **kwargs):
         with AsyncFunc(kwargs.get("round_callback")) as cb:
@@ -109,7 +110,7 @@ class MyProgram(AcquireMixin):
             kwargs["round_callback"] = cb
 
             if self.is_use_proxy():
-                super().acc_buf = None  # clear local acc_buf
+                super().__setattr__("acc_buf", None)  # clear local acc_buf
                 return self.proxy.acquire_decimated(self, **kwargs)  # type: ignore
 
             return self._local_acquire(soc, decimated=True, **kwargs)

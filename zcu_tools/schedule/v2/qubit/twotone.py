@@ -1,7 +1,6 @@
 import numpy as np
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import NormalizeData
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_template
@@ -26,7 +25,6 @@ def measure_qub_freq(soc, soccfg, cfg, progress=True, instant_show=False):
         ticks=(fpts,),
         progress=progress,
         instant_show=instant_show,
-        signal2amp=lambda x: NormalizeData(x, rescale=False),
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
     )
@@ -63,7 +61,6 @@ def measure_qub_freq_with_reset(
         ticks=(fpts,),
         progress=progress,
         instant_show=instant_show,
-        signal2amp=lambda x: NormalizeData(x, rescale=False),
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
     )

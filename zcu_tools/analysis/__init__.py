@@ -1,8 +1,14 @@
-from .general import freq_analyze, lookback_show, phase_analyze, contrast_plot, lookback_fft
 from .dispersive import dispersive1D_analyze, dispersive2D_analyze, ge_lookback_analyze
+from .general import (
+    contrast_plot,
+    freq_analyze,
+    lookback_fft,
+    lookback_show,
+    phase_analyze,
+)
 from .single_shot import fidelity_func, singleshot_analysis
 from .time_exp import T1_analyze, T2decay_analyze, T2fringe_analyze, rabi_analyze
-from .tools import NormalizeData, convert2max_contrast, rotate_phase
+from .tools import rotate2real, rotate_phase
 
 __all__ = [
     "freq_analyze",
@@ -19,7 +25,6 @@ __all__ = [
     "T2decay_analyze",
     "T2fringe_analyze",
     "rabi_analyze",
-    "NormalizeData",
-    "convert2max_contrast",
+    "rotate2real",
     "rotate_phase",
 ]

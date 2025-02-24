@@ -38,7 +38,6 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
         ticks=(fpts, pdrs),
         progress=True,
         instant_show=instant_show,
-        signal2amp=lambda x: np.abs(x).T,
         xlabel="Frequency (MHz)",
         ylabel="Readout Gain",
     )
@@ -71,7 +70,6 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
         ticks=(lens,),
         progress=True,
         instant_show=instant_show,
-        signal2amp=lambda x: np.abs(x).T,
         xlabel="Readout Length (us)",
         ylabel="Amplitude",
     )
@@ -104,7 +102,6 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
         ticks=(offsets,),
         progress=True,
         instant_show=instant_show,
-        signal2amp=lambda x: np.abs(x).T,
         xlabel="Trigger Offset (us)",
         ylabel="Amplitude",
     )

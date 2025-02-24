@@ -4,7 +4,6 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import NormalizeData
 from zcu_tools.program.v1 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow
@@ -63,7 +62,7 @@ def measure_res_pdr_dep(
                 freq_tqdm.update()
 
             if instant_show:
-                viewer.update_show(NormalizeData(signals2D, axis=1).T)
+                viewer.update_show(signals2D.T)
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -71,7 +70,7 @@ def measure_res_pdr_dep(
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(NormalizeData(signals2D, axis=1).T)
+            viewer.update_show(signals2D.T)
             viewer.close_show()
 
     return pdrs, fpts, signals2D  # (pdrs, freqs)

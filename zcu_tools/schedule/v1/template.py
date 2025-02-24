@@ -19,7 +19,6 @@ def sweep1D_hard_template(
     init_signals: ndarray,
     progress: bool,
     instant_show: bool,
-    signal2amp: Callable,
     xlabel: str,
     ylabel: str,
     **kwargs,
@@ -32,7 +31,7 @@ def sweep1D_hard_template(
         def callback(ir, sum_d):
             nonlocal signals
             signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
-            viewer.update_show(signal2amp(signals))
+            viewer.update_show(signals)
     else:
         callback = None  # type: ignore
 
@@ -50,7 +49,7 @@ def sweep1D_hard_template(
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(signal2amp(signals), xs)
+            viewer.update_show(signals, xs)
             viewer.close_show()
 
     return xs, signals
@@ -66,7 +65,6 @@ def sweep1D_soft_template(
     init_signals: ndarray,
     progress: bool,
     instant_show: bool,
-    signal2amp: Callable,
     updateCfg: Callable,
     xlabel: str,
     ylabel: str,
@@ -90,7 +88,7 @@ def sweep1D_soft_template(
             signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
             if instant_show and i % show_period == 0:
-                viewer.update_show(signal2amp(signals))
+                viewer.update_show(signals)
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -98,7 +96,7 @@ def sweep1D_soft_template(
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(signal2amp(signals))
+            viewer.update_show(signals)
             viewer.close_show()
 
     return xs, signals

@@ -25,7 +25,6 @@ def measure_res_freq(soc, soccfg, cfg, progress=True, instant_show=False):
         ticks=(fpts,),
         progress=progress,
         instant_show=instant_show,
-        signal2amp=np.abs,
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
     )

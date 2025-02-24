@@ -68,7 +68,7 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
 
             if instant_show:
                 viewer.ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")  # type: ignore
-                viewer.update_show(np.abs(snr2D))
+                viewer.update_show(snr2D)
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -77,7 +77,7 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     finally:
         if instant_show:
             viewer.ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")  # type: ignore
-            viewer.update_show(np.abs(snr2D))
+            viewer.update_show(snr2D)
             viewer.close_show()
 
     return pdrs, fpts, snr2D  # (pdrs, freqs)
@@ -110,7 +110,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
             snrs[i] = measure_one(soc, soccfg, cfg)
 
             if instant_show and i % show_period == 0:
-                viewer.update_show(np.abs(snrs))
+                viewer.update_show(snrs)
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -118,7 +118,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(np.abs(snrs))
+            viewer.update_show(snrs)
             viewer.close_show()
 
     return ro_lens, snrs
@@ -148,7 +148,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
             snrs[i] = measure_one(soc, soccfg, cfg)
 
             if instant_show and i % show_period == 0:
-                viewer.update_show(np.abs(snrs))
+                viewer.update_show(snrs)
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -156,7 +156,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(np.abs(snrs))
+            viewer.update_show(snrs)
             viewer.close_show()
 
     return offsets, snrs
