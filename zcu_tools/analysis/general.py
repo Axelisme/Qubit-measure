@@ -72,8 +72,7 @@ def lookback_fft(records, xrange=(-5, 5), normalize=True, pad_ratio=1):
 
 def contrast_plot(xs, signals, max_contrast=False, xlabel=None):
     if max_contrast:
-        signals = rotate2real(signals)
-        y = signals.real
+        y = rotate2real(signals).real
     else:
         y = np.abs(signals)
 
@@ -117,12 +116,11 @@ def phase_analyze(fpts, signals, plot=True, plot_fit=True):
 
 def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False):
     """
-    fpts: 1D array, frequency points
+    fpts: 1D array, frequency points (MHz)
     signals: 1D array, signal points
     """
     if max_contrast:
-        signals = rotate2real(signals)
-        y = signals.real
+        y = rotate2real(signals).real
     else:
         y = np.abs(signals)
 
@@ -139,14 +137,14 @@ def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False):
     plt.tight_layout()
     plt.plot(fpts, y, label="signal", marker="o", markersize=3)
     if plot_fit:
-        plt.plot(fpts, curve, label=f"fit, $kappa$={kappa:.2f}")
-        label = f"$f_res$ = {freq:.2f} +/- {freq_err:.2f}"
+        plt.plot(fpts, curve, label=f"fit, $kappa$={kappa:.1g} MHz")
+        label = f"$f_res$ = {freq:.5g} +/- {freq_err:.1g} MHz"
         plt.axvline(freq, color="r", ls="--", label=label)  # type: ignore
     plt.xlabel("Frequency (MHz)")
     if max_contrast:
-        plt.ylabel("Signal Real (a.u.)")
+        plt.ylabel("Signal Real")
     else:
-        plt.ylabel("Magnitude (a.u.)")
+        plt.ylabel("Magnitude")
     plt.legend()
     plt.show()
 

@@ -52,8 +52,8 @@ def rabi_analyze(
         xs = np.linspace(pi_x - 0.5 / freq, xs[-1], 1000)  # type: ignore
         curve = cos_func(xs, *pOpt)
         plt.plot(xs, curve, label="fit")
-        plt.axvline(pi_x, ls="--", c="red", label=f"pi={pi_x:.1f}")
-        plt.axvline(pi2_x, ls="--", c="red", label=f"pi/2={(pi2_x):.1f}")
+        plt.axvline(pi_x, ls="--", c="red", label=f"pi={pi_x:.2g}")
+        plt.axvline(pi2_x, ls="--", c="red", label=f"pi/2={(pi2_x):.2g}")
     if xlabel is not None:
         plt.xlabel(xlabel)
     if max_contrast:
