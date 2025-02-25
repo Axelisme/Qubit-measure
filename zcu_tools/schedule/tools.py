@@ -71,7 +71,7 @@ def map2adcfreq(soccfg, fpts, gen_ch, ro_ch):
     return fpts
 
 
-def sweep2array(sweep, soft_loop=True, err_str=None):
+def sweep2array(sweep, allow_array=False):
     """
     Convert sweep to array
 
@@ -85,9 +85,12 @@ def sweep2array(sweep, soft_loop=True, err_str=None):
     """
     if isinstance(sweep, dict):
         return sweep["start"] + np.arange(sweep["expts"]) * sweep["step"]
-
-    assert soft_loop, err_str
-    return np.array(sweep)
+    elif isinstance(sweep, list) or isinstance(sweep, np.ndarray):
+        if not allow_array:
+            raise ValueError("Custom sweep is not allowed")
+        return np.array(sweep)
+    else:
+        raise ValueError("Invalid sweep format")
 
 
 def sweep2param(name: str, sweep: Dict[str, Any]) -> QickParam:

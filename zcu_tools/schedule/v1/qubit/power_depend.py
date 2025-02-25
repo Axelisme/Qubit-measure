@@ -14,8 +14,8 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
 
     freq_cfg = cfg["sweep"]["freq"]
     pdr_cfg = cfg["sweep"]["gain"]
-    fpts = sweep2array(freq_cfg, False, "Custom frequency sweep only for soft loop")
-    pdrs = sweep2array(pdr_cfg, False, "Custom power sweep only for soft loop")
+    fpts = sweep2array(freq_cfg)
+    pdrs = sweep2array(pdr_cfg)
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 

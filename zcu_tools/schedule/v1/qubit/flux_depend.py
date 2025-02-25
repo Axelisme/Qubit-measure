@@ -23,10 +23,10 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
 
     freq_cfg = cfg["sweep"]["freq"]
     flux_cfg = cfg["sweep"]["flux"]
-    fpts = sweep2array(freq_cfg, soft_loop=False)
-    flxs = sweep2array(flux_cfg)
+    fpts = sweep2array(freq_cfg)
+    flxs = sweep2array(flux_cfg, allow_array=True)
 
-    cfg["sweep"] = cfg["sweep"]["freq"]
+    cfg["sweep"] = cfg["sweep"]["freq"]  # remain only freq sweep in cfg
 
     set_flux(cfg["dev"]["flux_dev"], flxs[0])  # set initial flux
 

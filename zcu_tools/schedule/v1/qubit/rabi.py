@@ -10,7 +10,9 @@ from zcu_tools.schedule.v1.template import sweep1D_hard_template, sweep1D_soft_t
 def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)
 
-    lens = sweep2array(cfg["sweep"], False, "Custom length sweep only for soft loop")
+    lens = sweep2array(cfg["sweep"], allow_array=True)
+
+    del cfg["sweep"]  # remove sweep for program use
 
     def update_cfg(cfg, _, length):
         cfg["dac"]["qub_pulse"]["length"] = length
@@ -35,7 +37,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
 def measure_amprabi(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)
 
-    pdrs = sweep2array(cfg["sweep"], False, "Custom power sweep only for soft loop")
+    pdrs = sweep2array(cfg["sweep"])
 
     pdrs, signals = sweep1D_hard_template(
         soc,

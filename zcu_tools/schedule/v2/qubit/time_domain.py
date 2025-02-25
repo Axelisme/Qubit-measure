@@ -14,7 +14,7 @@ def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]["length"]
     cfg["dac"]["ramsey_length"] = sweep2param("length", sweep_cfg)
 
-    ts = sweep2array(sweep_cfg, False)  # predicted times
+    ts = sweep2array(sweep_cfg)  # predicted times
 
     prog, signals = sweep_template(
         soc,
@@ -43,7 +43,7 @@ def measure_t2echo(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]["length"]
     cfg["dac"]["ramsey_length"] = sweep2param("length", sweep_cfg)
 
-    ts = 2 * sweep2array(sweep_cfg, False)  # predicted times
+    ts = 2 * sweep2array(sweep_cfg)  # predicted times
 
     prog, signals = sweep_template(
         soc,
@@ -72,7 +72,7 @@ def measure_t1(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]["length"]
     cfg["dac"]["t1_length"] = sweep2param("length", sweep_cfg)
 
-    ts = sweep2array(sweep_cfg, False)  # predicted times
+    ts = sweep2array(sweep_cfg)  # predicted times
 
     prog, signals = sweep_template(
         soc,

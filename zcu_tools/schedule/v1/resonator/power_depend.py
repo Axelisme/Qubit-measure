@@ -21,13 +21,14 @@ def measure_res_pdr_dep(
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
+    reps_ref = cfg["reps"]
 
-    fpts = sweep2array(cfg["sweep"]["freq"])
+    fpts = sweep2array(cfg["sweep"]["freq"], allow_array=True)
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    pdrs = sweep2array(cfg["sweep"]["gain"])
+    pdrs = sweep2array(cfg["sweep"]["gain"], allow_array=True)
 
-    reps_ref = cfg["reps"]
+    del cfg["sweep"]  # remove sweep for program use
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 

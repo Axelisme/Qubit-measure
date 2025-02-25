@@ -20,8 +20,8 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
     qub_pulse["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
     qub_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
-    pdrs = sweep2array(cfg["sweep"]["gain"], False)  # predicted pulse gains
-    fpts = sweep2array(cfg["sweep"]["freq"], False)  # predicted frequency points
+    pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
+    fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
     prog, signals = sweep_template(
         soc,

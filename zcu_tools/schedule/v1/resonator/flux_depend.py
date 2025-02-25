@@ -19,11 +19,13 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     res_pulse = cfg["dac"]["res_pulse"]
 
     freq_cfg = cfg["sweep"]["freq"]
-    fpts = sweep2array(freq_cfg)
+    fpts = sweep2array(freq_cfg, allow_array=True)
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
     flux_cfg = cfg["sweep"]["flux"]
-    flxs = sweep2array(flux_cfg)
+    flxs = sweep2array(flux_cfg, allow_array=True)
+
+    del cfg["sweep"]  # remove sweep for program use
 
     set_flux(cfg["dev"]["flux_dev"], flxs[0])  # set initial flux
 

@@ -14,7 +14,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]["length"]
     cfg["dac"]["qub_pulse"]["length"] = sweep2param("length", sweep_cfg)
 
-    lens = sweep2array(sweep_cfg, False)  # predicted lengths
+    lens = sweep2array(sweep_cfg)  # predicted lengths
 
     prog, signals = sweep_template(
         soc,
@@ -43,7 +43,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False):
     sweep_cfg = cfg["sweep"]["gain"]
     cfg["dac"]["qub_pulse"]["gain"] = sweep2param("gain", sweep_cfg)
 
-    amps = sweep2array(sweep_cfg, False)  # predicted amplitudes
+    amps = sweep2array(sweep_cfg)  # predicted amplitudes
 
     prog, signals = sweep_template(
         soc,

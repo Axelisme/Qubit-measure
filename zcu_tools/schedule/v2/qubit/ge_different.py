@@ -3,10 +3,10 @@ import numpy as np
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import GEProgram
 from zcu_tools.schedule.tools import (
+    format_sweep1D,
+    map2adcfreq,
     sweep2array,
     sweep2param,
-    map2adcfreq,
-    format_sweep1D,
 )
 from zcu_tools.schedule.v2.template import sweep_template
 
@@ -25,8 +25,8 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     res_pulse["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
     res_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
-    pdrs = sweep2array(cfg["sweep"]["gain"], False)  # predicted pulse gains
-    fpts = sweep2array(cfg["sweep"]["freq"], False)  # predicted frequency points
+    pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
+    fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
     fpts = map2adcfreq(soc, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
     prog, snr2D = sweep_template(
@@ -59,7 +59,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
         cfg["adc"]["ro_length"] + cfg["adc"]["trig_offset"] + 1.0
     )
 
-    lens = sweep2array(cfg["sweep"]["length"], False)  # predicted readout lengths
+    lens = sweep2array(cfg["sweep"]["length"])  # predicted readout lengths
 
     prog, snrs = sweep_template(
         soc,
@@ -91,7 +91,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
         cfg["adc"]["ro_length"] - cfg["adc"]["trig_offset"] + orig_offset
     )
 
-    offsets = sweep2array(cfg["sweep"]["offset"], False)  # predicted trigger offsets
+    offsets = sweep2array(cfg["sweep"]["offset"])  # predicted trigger offsets
 
     prog, snrs = sweep_template(
         soc,

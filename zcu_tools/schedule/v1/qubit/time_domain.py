@@ -14,7 +14,7 @@ def safe_sweep2array(soccfg, sweep_cfg):
     return ts
 
 
-def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
+def measure_t2ramsey(soc, soccfg, cfg, instant_show=False, log_scale=False):
     ts = safe_sweep2array(soccfg, cfg["sweep"])
 
     ts, signals = sweep1D_hard_template(

@@ -22,7 +22,7 @@ def measure_res_pdr_dep(
     res_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
     reps_ref = cfg["reps"]
 
-    pdrs = sweep2array(cfg["sweep"]["gain"])
+    pdrs = sweep2array(cfg["sweep"]["gain"], allow_array=True)
     fpts = sweep2array(cfg["sweep"]["freq"])
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 

@@ -14,7 +14,7 @@ def measure_qub_freq(soc, soccfg, cfg, progress=True, instant_show=False):
     sweep_cfg = cfg["sweep"]["freq"]
     cfg["dac"]["qub_pulse"]["freq"] = sweep2param("freq", sweep_cfg)
 
-    fpts = sweep2array(sweep_cfg, False)  # predicted frequency points
+    fpts = sweep2array(sweep_cfg)  # predicted frequency points
 
     prog, signals = sweep_template(
         soc,
@@ -50,7 +50,7 @@ def measure_qub_freq_with_reset(
     cfg["dac"]["qub_pulse"]["freq"] = params
     cfg["dac"]["reset_pulse"]["freq"] = r_f - params  # conjugate reset
 
-    fpts = sweep2array(sweep_cfg, False)  # predicted frequency points
+    fpts = sweep2array(sweep_cfg)  # predicted frequency points
 
     prog, signals = sweep_template(
         soc,

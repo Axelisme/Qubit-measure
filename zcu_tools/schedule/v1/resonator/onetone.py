@@ -12,8 +12,10 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
 
     res_pulse = cfg["dac"]["res_pulse"]
 
-    fpts = sweep2array(cfg["sweep"])
+    fpts = sweep2array(cfg["sweep"], allow_array=True)
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
+
+    del cfg["sweep"]  # remove sweep for program
 
     def update_cfg(cfg, _, f):
         cfg["dac"]["res_pulse"]["freq"] = f

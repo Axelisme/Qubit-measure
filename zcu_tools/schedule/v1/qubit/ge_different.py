@@ -39,9 +39,11 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
 
     freq_cfg = cfg["sweep"]["freq"]
     pdr_cfg = cfg["sweep"]["gain"]
-    fpts = sweep2array(freq_cfg)
+    fpts = sweep2array(freq_cfg, allow_array=True)
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
-    pdrs = sweep2array(pdr_cfg)
+    pdrs = sweep2array(pdr_cfg, allow_array=True)
+
+    del cfg["sweep"]  # remove sweep from cfg
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
@@ -88,8 +90,10 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 
     res_pulse = cfg["dac"]["res_pulse"]
 
-    ro_lens = sweep2array(cfg["sweep"])
+    ro_lens = sweep2array(cfg["sweep"], allow_array=True)
     check_time_sweep(soccfg, ro_lens, ro_ch=cfg["adc"]["chs"][0])
+
+    del cfg["sweep"]  # remove sweep from cfg
 
     trig_offset = cfg["adc"]["trig_offset"]
 
@@ -127,10 +131,12 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    offsets = sweep2array(cfg["sweep"])
+    offsets = sweep2array(cfg["sweep"], allow_array=True)
     check_time_sweep(soccfg, offsets)
     ro_len = cfg["adc"]["ro_length"]
     orig_offset = cfg["adc"]["trig_offset"]
+
+    del cfg["sweep"]  # remove sweep from cfg
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
     if instant_show:

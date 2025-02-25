@@ -15,7 +15,7 @@ def measure_qub_freq(soc, soccfg, cfg, instant_show=False, reset_rf=None):
         assert cfg.get("reset") == "pulse", "Need reset=pulse for conjugate reset"
         assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
 
-    fpts = sweep2array(cfg["sweep"], False, "Custom frequency sweep only for soft loop")
+    fpts = sweep2array(cfg["sweep"])
 
     fpts, signals = sweep1D_hard_template(
         soc,

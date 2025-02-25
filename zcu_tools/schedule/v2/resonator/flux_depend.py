@@ -17,7 +17,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     if cfg["dev"]["flux_dev"] == "none":
         raise ValueError("Flux sweep but get flux_dev == 'none'")
 
-    flxs = sweep2array(cfg["sweep"]["flux"])
+    flxs = sweep2array(cfg["sweep"]["flux"], allow_array=True)
     fpts = sweep2array(cfg["sweep"]["freq"])
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
