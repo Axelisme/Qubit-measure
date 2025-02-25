@@ -2,6 +2,7 @@ import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import display
+from matplotlib.animation import FuncAnimation
 from scipy.signal import find_peaks
 from tqdm.auto import tqdm, trange
 
@@ -11,6 +12,8 @@ class InteractiveSelector:
         self.spectrum = spectrum
         self.flxs = flxs
         self.fpts = fpts
+
+        self.is_finished = False
 
         plt.ioff()  # to avoid showing the plot immediately
         self.fig, self.ax = plt.subplots()
@@ -38,20 +41,15 @@ class InteractiveSelector:
                     self.fig.canvas,
                     widgets.VBox(
                         [
-                            widgets.HBox(
-                                [
-                                    widgets.VBox(
-                                        [self.threshold_slider, self.width_slider]
-                                    ),
-                                    widgets.VBox(
-                                        [self.operation_tb, self.perform_all_bt]
-                                    ),
-                                ]
-                            ),
+                            self.threshold_slider,
+                            self.width_slider,
+                            self.operation_tb,
                             widgets.HBox(
                                 [
                                     self.show_mask_box,
-                                    self.finish_button,
+                                    widgets.VBox(
+                                        [self.perform_all_bt, self.finish_button]
+                                    ),
                                 ]
                             ),
                         ]
@@ -62,7 +60,7 @@ class InteractiveSelector:
 
     def create_widgets(self, threshold, brush_width):
         self.threshold_slider = widgets.FloatSlider(
-            value=threshold, min=1.0, max=10.0, step=0.01, description="Threshold:"
+            value=threshold, min=1.0, max=20.0, step=0.01, description="Threshold:"
         )
         self.width_slider = widgets.FloatSlider(
             value=brush_width, min=0.01, max=0.1, step=1e-4, description="Brush Width:"
@@ -71,8 +69,12 @@ class InteractiveSelector:
         self.operation_tb = widgets.Dropdown(
             options=["Select", "Erase"], value="Select", description="Operation:"
         )
-        self.perform_all_bt = widgets.Button(description="Perform on All")
-        self.finish_button = widgets.Button(description="Finish")
+        self.perform_all_bt = widgets.Button(
+            description="Perform on All", button_style="danger"
+        )
+        self.finish_button = widgets.Button(
+            description="Finish", button_style="success"
+        )
 
         self.threshold_slider.observe(self.on_ratio_change, names="value")
         self.show_mask_box.observe(self.on_select_show, names="value")
@@ -135,10 +137,16 @@ class InteractiveSelector:
             mask &= ~weight
 
     def on_ratio_change(self, _):
+        if self.is_finished:
+            return
+
         self.update_points()
         self.fig.canvas.draw_idle()
 
     def on_select_show(self, _):
+        if self.is_finished:
+            return
+
         if self.show_mask_box.value:
             self.select_mask.set_data(self.mask)
             self.select_mask.set_alpha(0.2)
@@ -147,7 +155,7 @@ class InteractiveSelector:
         self.fig.canvas.draw_idle()
 
     def on_press(self, event):
-        if event.inaxes != self.ax:
+        if event.inaxes != self.ax or self.is_finished:
             return
 
         # 計算靠近滑鼠點擊的點
@@ -166,6 +174,9 @@ class InteractiveSelector:
         self.fig.canvas.draw_idle()
 
     def on_perform_all(self, _):
+        if self.is_finished:
+            return
+
         if self.operation_tb.value == "Select":
             self.mask = np.ones_like(self.mask)
         elif self.operation_tb.value == "Erase":
@@ -178,20 +189,103 @@ class InteractiveSelector:
 
     def on_finish(self, _):
         plt.close(self.fig)
+        self.is_finished = True
 
     def get_positions(self):
+        if not self.is_finished:
+            self.on_finish(None)
         return self.s_flxs, self.s_fpts
 
 
 class InteractiveLines:
+    TRACK_INFO = {
+        "red": "<span style='color:red'>正在移動紅線</span>",
+        "blue": "<span style='color:blue'>正在移動藍線</span>",
+        "none": "<span style='color:gray'>未選擇線條</span>",
+    }
+
     def __init__(self, spectrum, flxs, fpts, cflx=None, eflx=None):
-        from matplotlib.animation import FuncAnimation
+        plt.ioff()  # 避免立即顯示圖表
+        self.fig_main, self.ax_main = plt.subplots(num=None)
+        self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(5, 5), num=None)
+        self.fig_main.tight_layout()
+        self.fig_zoom.tight_layout()
+        plt.ion()
 
-        self.fig, self.ax = plt.subplots()
+        # 初始化線的位置
+        self.cflx = (flxs[0] + flxs[-1]) / 2 if cflx is None else cflx
+        self.eflx = flxs[-5] if eflx is None else eflx
+
         self.flxs = flxs
+        self.fpts = fpts
+        self.spectrum = spectrum
 
+        self.mouse_x = None
+        self.mouse_y = None
+
+        self.create_widgets()
+        self.create_background(flxs, fpts, spectrum)
+        self.create_lines(flxs)
+        self.create_zoom(flxs, fpts, spectrum)
+
+        # 顯示 widget
+        display(
+            widgets.HBox(
+                [
+                    self.fig_main.canvas,
+                    widgets.VBox(
+                        [
+                            widgets.HBox(
+                                [
+                                    self.red_button,
+                                    self.blue_button,
+                                ]
+                            ),
+                            self.position_text,
+                            widgets.HBox(
+                                [
+                                    self.status_text,
+                                    self.finish_button,
+                                ]
+                            ),
+                            self.fig_zoom.canvas,
+                        ]
+                    ),
+                ]
+            )
+        )
+
+    def create_widgets(self):
+        """創建 ipywidgets 控件"""
+        self.red_button = widgets.Button(
+            description="選擇紅線",
+            button_style="danger",
+            tooltip="選擇紅色線進行移動",
+        )
+        self.blue_button = widgets.Button(
+            description="選擇藍線",
+            button_style="info",
+            tooltip="選擇藍色線進行移動",
+        )
+        self.finish_button = widgets.Button(
+            description="完成",
+            button_style="success",
+            tooltip="完成選擇並返回結果",
+        )
+        self.position_text = widgets.HTML(value=self.get_info())
+        self.status_text = widgets.HTML(
+            value="<span style='color:gray'>未選擇線條</span>"
+        )
+
+        # 綁定事件
+        self.red_button.on_click(self.set_picked_red)
+        self.blue_button.on_click(self.set_picked_blue)
+        self.finish_button.on_click(self.on_finish)
+
+    def create_background(self, flxs, fpts, spectrum):
+        """創建背景圖片"""
         # 顯示光譜圖
-        self.ax.imshow(
+        self.ax_main.imshow(
             spectrum,
             aspect="auto",
             origin="lower",
@@ -199,88 +293,132 @@ class InteractiveLines:
             extent=(flxs[0], flxs[-1], fpts[0], fpts[-1]),
         )
 
-        # 初始化線的位置
-        self.cflx = (flxs[0] + flxs[-1]) / 2 if cflx is None else cflx
-        self.eflx = flxs[-5] if eflx is None else eflx
+        # xlim, ylim
+        self.ax_main.set_xlim(flxs[0], flxs[-1])
+        self.ax_main.set_ylim(fpts[0], fpts[-1])
 
+    def create_lines(self, flxs):
+        """創建兩條垂直線"""
         # 創建兩條垂直線
-        self.rline = self.ax.axvline(x=self.cflx, color="r", linestyle="--", picker=5)
-        self.bline = self.ax.axvline(x=self.eflx, color="b", linestyle="--", picker=5)
+        self.rline = self.ax_main.axvline(x=self.cflx, color="r", linestyle="--")
+        self.bline = self.ax_main.axvline(x=self.eflx, color="b", linestyle="--")
 
         # 設置變數
         self.picked = None
         self.min_dist = 0.1 * (flxs[-1] - flxs[0])
-        self.mouse_x = None
         self.is_finished = False
-
-        # 添加完成按鈕
-        self.add_button()
+        self.active_line = None  # 用來跟踪目前正在移動的線
 
         # 連接事件
-        self.fig.canvas.mpl_connect("pick_event", self.onpick)
-        self.fig.canvas.mpl_connect("motion_notify_event", self.onmove)
-        self.fig.canvas.mpl_connect("button_press_event", lambda event: None)
-        self.fig.canvas.mpl_connect("button_release_event", lambda event: None)
-
-        # xlim, ylim
-        self.ax.set_xlim(flxs[0], flxs[-1])
-        self.ax.set_ylim(fpts[0], fpts[-1])
+        self.fig_main.canvas.mpl_connect("button_press_event", self.onclick)
+        self.fig_main.canvas.mpl_connect("motion_notify_event", self.onmove)
 
         # 創建動畫
-        self.anim = FuncAnimation(
-            self.fig,
-            self.update_animation,
+        self.anim_main = FuncAnimation(
+            self.fig_main,
+            self.update_main_view,
             interval=33,  # 約30 FPS
             blit=True,
             cache_frame_data=False,
         )
 
-        plt.show()
+    def create_zoom(self, flxs, fpts, spectrum):
+        """創建放大視圖"""
+        self.ax_zoom.set_title("Zoom View")
+        self.zoom_im = self.ax_zoom.imshow(
+            spectrum,
+            aspect="auto",
+            origin="lower",
+            interpolation="none",
+            extent=(flxs[0], flxs[-1], fpts[0], fpts[-1]),
+        )
+        self.ax_zoom.set_xticks([])
+        self.ax_zoom.set_yticks([])
 
-    def add_button(self):
-        from matplotlib.widgets import Button
+        # show red spot at center
+        x = self.cflx
+        y = 0.5 * (fpts[0] + fpts[-1])
+        self.zoom_dot = self.ax_zoom.plot([x], [y], "ro")[0]
 
-        # 創建按鈕的軸域，位置在圖表右下角
-        ax_red = plt.axes([0.7, 0.05, 0.1, 0.04])
-        ax_blue = plt.axes([0.81, 0.05, 0.1, 0.04])
-        ax_done = plt.axes([0.92, 0.05, 0.1, 0.04])
+        self.anim_zoom = FuncAnimation(
+            self.fig_zoom,
+            self.update_zoom_view,
+            interval=33,
+            blit=True,
+            cache_frame_data=False,
+        )
 
-        self.btn_red = Button(ax_red, "Red", color="lightcoral")
-        self.btn_blue = Button(ax_blue, "Blue", color="lightblue")
-        self.btn_done = Button(ax_done, "Done", color="lightgreen")
-
-        self.btn_red.on_clicked(self.set_picked_red)
-        self.btn_blue.on_clicked(self.set_picked_blue)
-        self.btn_done.on_clicked(self.on_finish)
+    def get_info(self):
+        return f"紅線: {self.cflx:.2e}, 藍線: {self.eflx:.2e}, 週期：{2 * abs(self.eflx - self.cflx):.2e}"
 
     def set_picked_red(self, _):
-        self.picked = self.rline
+        """選擇紅線"""
+        if self.is_finished:
+            return
+
+        if self.active_line == self.rline:
+            # 如果已經在移動紅線，則停止移動
+            self.stop_tracking()
+        else:
+            # 開始移動紅線
+            self.active_line = self.rline
+            self.picked = self.rline
+            self.status_text.value = self.TRACK_INFO["red"]
 
     def set_picked_blue(self, _):
-        self.picked = self.bline
-
-    def onpick(self, event):
+        """選擇藍線"""
         if self.is_finished:
             return
-        # 檢查滑鼠點擊是否在線上
-        if event.mouseevent.name != "button_press_event":
+
+        if self.active_line == self.bline:
+            # 如果已經在移動藍線，則停止移動
+            self.stop_tracking()
+        else:
+            # 開始移動藍線
+            self.active_line = self.bline
+            self.picked = self.bline
+            self.status_text.value = self.TRACK_INFO["blue"]
+
+    def stop_tracking(self):
+        """停止追蹤滑鼠"""
+        self.active_line = None
+        self.picked = None
+        self.status_text.value = self.TRACK_INFO["none"]
+
+    def onclick(self, event):
+        """滑鼠點擊事件"""
+        if self.is_finished or event.inaxes != self.ax_main:
             return
 
-        # 切換選中狀態
-        if self.picked is None:
-            self.picked = event.artist
-        else:
-            self.picked = None
+        # 判斷點擊了哪條線
+        red_x = self.rline.get_xdata()[0]
+        blue_x = self.bline.get_xdata()[0]
+
+        red_dist = abs(event.xdata - red_x)
+        blue_dist = abs(event.xdata - blue_x)
+
+        # 如果已經有活動的線條，點擊任何位置都停止追蹤
+        if self.active_line is not None:
+            self.stop_tracking()
+            return
+
+        # 選擇最近的線
+        if red_dist < blue_dist and red_dist < self.min_dist / 2:
+            self.set_picked_red(None)
+        elif blue_dist < red_dist and blue_dist < self.min_dist / 2:
+            self.set_picked_blue(None)
 
     def onmove(self, event):
-        if self.is_finished:
-            return
-        if event.inaxes != self.ax:
+        """滑鼠移動事件"""
+        if self.is_finished or event.inaxes != self.ax_main:
             self.mouse_x = None
+            self.mouse_y = None
             return
         self.mouse_x = event.xdata
+        self.mouse_y = event.ydata
 
-    def update_animation(self, frame):
+    def update_main_view(self, _):
+        """更新動畫"""
         if self.picked is None or self.mouse_x is None:
             return [self.rline, self.bline]
 
@@ -303,20 +441,47 @@ class InteractiveLines:
         # 更新線的位置
         self.picked.set_xdata([new_x, new_x])
 
+        # 更新位置文字
+        self.cflx = self.rline.get_xdata()[0]
+        self.eflx = self.bline.get_xdata()[0]
+        self.position_text.value = self.get_info()
+
         return [self.rline, self.bline]
 
-    def on_finish(self, event):
+    def update_zoom_view(self, _):
+        """更新放大視圖"""
+        x, y = self.mouse_x, self.mouse_y
+        if x is None or y is None or self.active_line is None:
+            return []  # out of axes or not dragging, do nothing
+
+        # set axis limits to simulate zoom
+        Dx = 0.1 * (self.flxs[-1] - self.flxs[0])
+        Dy = 0.1 * (self.fpts[-1] - self.fpts[0])
+        self.ax_zoom.set_xlim(x - Dx, x + Dx)
+        self.ax_zoom.set_ylim(y - Dy, y + Dy)
+
+        self.zoom_dot.set_xdata([x])
+        self.zoom_dot.set_ydata([y])
+        self.zoom_dot.set_color("r" if self.active_line is self.rline else "b")
+
+        return [self.zoom_im, self.zoom_dot]
+
+    def on_finish(self, _):
         """完成按鈕的回調函數"""
         self.is_finished = True
         self.picked = None
+        self.active_line = None
         # 停止動畫
-        self.anim.event_source.stop()
+        self.anim_main.event_source.stop()
+        self.anim_zoom.event_source.stop()
+        plt.close(self.fig_main)
+        plt.close(self.fig_zoom)
 
     def get_positions(self):
         """運行交互式選擇器並返回兩條線的位置"""
-        self.on_finish(None)
-        plt.close(self.fig)
-        return float(self.rline.get_xdata()[0]), float(self.bline.get_xdata()[0])
+        if not self.is_finished:
+            self.on_finish(None)
+        return float(self.cflx), float(self.eflx)
 
 
 def calculate_energy(flxs, EJ, EC, EL, cutoff=50):
