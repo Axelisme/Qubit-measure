@@ -3,7 +3,7 @@ import numpy as np
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
-from zcu_tools.schedule.v2.template import sweep_template
+from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
 def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
@@ -16,7 +16,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
 
     lens = sweep2array(sweep_cfg)  # predicted lengths
 
-    prog, signals = sweep_template(
+    prog, signals = sweep_hard_template(
         soc,
         soccfg,
         cfg,
@@ -45,7 +45,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False):
 
     amps = sweep2array(sweep_cfg)  # predicted amplitudes
 
-    prog, signals = sweep_template(
+    prog, signals = sweep_hard_template(
         soc,
         soccfg,
         cfg,

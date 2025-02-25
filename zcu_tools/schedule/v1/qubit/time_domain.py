@@ -5,18 +5,11 @@ from zcu_tools.schedule.tools import check_time_sweep, sweep2array
 from zcu_tools.schedule.v1.template import sweep1D_hard_template
 
 
-def safe_sweep2array(soccfg, sweep_cfg):
-    ts = sweep2array(
-        sweep_cfg, soft_loop=False, err_str="Custom time sweep only for soft loop"
-    )
+def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
+    ts = sweep2array(cfg["sweep"])
     check_time_sweep(soccfg, ts)
 
-    return ts
-
-
-def measure_t2ramsey(soc, soccfg, cfg, instant_show=False, log_scale=False):
-    ts = safe_sweep2array(soccfg, cfg["sweep"])
-
+    # linear hard sweep
     ts, signals = sweep1D_hard_template(
         soc,
         soccfg,
@@ -34,7 +27,8 @@ def measure_t2ramsey(soc, soccfg, cfg, instant_show=False, log_scale=False):
 
 
 def measure_t1(soc, soccfg, cfg, instant_show=False):
-    ts = safe_sweep2array(soccfg, cfg["sweep"])
+    ts = sweep2array(cfg["sweep"])
+    check_time_sweep(soccfg, ts)
 
     ts, signals = sweep1D_hard_template(
         soc,
@@ -53,7 +47,8 @@ def measure_t1(soc, soccfg, cfg, instant_show=False):
 
 
 def measure_t2echo(soc, soccfg, cfg, instant_show=False):
-    ts = safe_sweep2array(soccfg, cfg["sweep"])
+    ts = sweep2array(cfg["sweep"])
+    check_time_sweep(soccfg, ts)
 
     ts, signals = sweep1D_hard_template(
         soc,

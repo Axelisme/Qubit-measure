@@ -3,7 +3,7 @@ import numpy as np
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import sweep2array, sweep2param
-from zcu_tools.schedule.v2.template import sweep_template
+from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
 def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
@@ -23,7 +23,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
     pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
     fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
-    prog, signals = sweep_template(
+    prog, signals = sweep_hard_template(
         soc,
         soccfg,
         cfg,

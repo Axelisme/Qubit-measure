@@ -1,12 +1,14 @@
 import warnings
-from typing import Any, Dict
+from typing import Any, Dict, Union
 
 import numpy as np
 
 from qick.asm_v2 import QickParam, QickSweep1D
 
 
-def format_sweep1D(sweeps: Dict[str, Any], name: str) -> Dict[str, Any]:
+def format_sweep1D(
+    sweep: Union[Dict[str, Any], np.ndarray], name: str
+) -> Dict[str, Any]:
     """
     Convert abbreviated single sweep to regular format
 
@@ -18,16 +20,21 @@ def format_sweep1D(sweeps: Dict[str, Any], name: str) -> Dict[str, Any]:
         dict, regular format of the sweep
     """
 
-    if "start" in sweeps and "stop" in sweeps:
+    if isinstance(sweep, np.ndarray):
+        return {name: sweep}
+
+    elif isinstance(sweep, dict):
         # conclude by key "start" and "stop"
-        # use default name if not provided
-        return {name: sweeps}
+        if "start" in sweep and "stop" in sweep:
+            # it is in abbreviated format
+            return {name: sweep}
 
-    # check if only one sweep is provided
-    assert len(sweeps) == 1, "Only one sweep is allowed"
-    assert sweeps.get(name) is not None, f"Key {name} is not found in the sweep"
+        # check if only one sweep is provided
+        assert len(sweep) == 1, "Only one sweep is allowed"
+        assert sweep.get(name) is not None, f"Key {name} is not found in the sweep"
 
-    return sweeps
+        # it is already in regular format
+        return sweep
 
 
 def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):

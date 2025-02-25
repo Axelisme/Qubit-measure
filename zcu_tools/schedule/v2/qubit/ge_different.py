@@ -8,7 +8,7 @@ from zcu_tools.schedule.tools import (
     sweep2array,
     sweep2param,
 )
-from zcu_tools.schedule.v2.template import sweep_template
+from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
 def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
@@ -29,7 +29,7 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
     fpts = map2adcfreq(soc, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    prog, snr2D = sweep_template(
+    prog, snr2D = sweep_hard_template(
         soc,
         soccfg,
         cfg,
@@ -61,7 +61,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 
     lens = sweep2array(cfg["sweep"]["length"])  # predicted readout lengths
 
-    prog, snrs = sweep_template(
+    prog, snrs = sweep_hard_template(
         soc,
         soccfg,
         cfg,
@@ -93,7 +93,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
 
     offsets = sweep2array(cfg["sweep"]["offset"])  # predicted trigger offsets
 
-    prog, snrs = sweep_template(
+    prog, snrs = sweep_hard_template(
         soc,
         soccfg,
         cfg,
