@@ -24,9 +24,8 @@ import sys
 print(os.getcwd())
 sys.path.append(os.getcwd())
 
-from pprint import pprint
-
 import numpy as np
+from pprint import pprint
 
 # %autoreload 2
 import zcu_tools.analysis as zf  # noqa: E402
@@ -45,18 +44,17 @@ from zcu_tools import (  # noqa: E402
 # %%
 import zcu_tools.config as zc
 
-zc.config.DATA_DRY_RUN = True
-zc.config.YOKO_DRY_RUN = True
+zc.config.DATA_DRY_RUN = True  # don't save data
+zc.config.YOKO_DRY_RUN = True  # don't run yoko
 
 # %% [markdown]
 # # Connect to zcu216
 # %%
-import zcu_tools.config as zc
 from zcu_tools.remote import make_proxy
 from zcu_tools.program.base import MyProgram  # noqa: E402
 from zcu_tools.tools import get_ip_address
 
-ns_host = "pynq"
+ns_host = "zcu216"
 ns_port = 8887
 zc.config.LOCAL_IP = get_ip_address("tailscale0")
 zc.config.LOCAL_PORT = 8887
@@ -77,17 +75,20 @@ print(soccfg)
 # # Create data folder
 
 # %%
-database_path = create_datafolder(os.getcwd(), "Axel")
+chip_name = "S001"
 
 # data_host = "192.168.10.232"  # cmd-> ipconfig -> ipv4 #controling computer
 # data_host = "100.76.229.37"  # tailscale
 data_host = None
 
+
+database_path = create_datafolder(os.getcwd(), prefix=chip_name)
+
 # %% [markdown]
 # # Predefine parameters
 
 # %%
-DefaultCfg.set_dac(res_ch=0, qub_ch=6)
+DefaultCfg.set_dac(res_ch=0, qub_ch=1)
 DefaultCfg.set_adc(ro_chs=[0])
 DefaultCfg.set_dev(flux_dev="none", flux=0.0)
 
@@ -147,6 +148,7 @@ exp_cfg = {
             **DefaultCfg.get_pulse("probe_rf"),
             # **DefaultCfg.get_pulse("readout_dpm"),
             "gain": 1.0,
+            # "gain": 30000,
             "freq": 6020,
         },
     },
@@ -220,7 +222,7 @@ exp_cfg = {
         "res_pulse": {
             **DefaultCfg.get_pulse("probe_rf"),
             "nqz": 2,
-            "gain": 5000,
+            "gain": 1.0,
         },
         # "reset": "pulse",
         # "reset_pulse": "reset_red"
@@ -232,7 +234,7 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = make_sweep(6019, 6022, 401)
-cfg = make_cfg(exp_cfg, reps=1, rounds=1)
+cfg = make_cfg(exp_cfg, reps=10, rounds=100)
 
 fpts, signals = zs.measure_res_freq(soc, soccfg, cfg, instant_show=True)
 
@@ -262,7 +264,10 @@ r_f
 # %%
 exp_cfg = {
     "dac": {
-        "res_pulse": "probe_rf",
+        "res_pulse": {
+            **DefaultCfg.get_pulse("probe_rf"),
+            "nqz": 2,
+        },
         # "reset": "pulse",
         # "reset_pulse": "reset_red",
     },
@@ -273,14 +278,15 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = {
-    "gain": make_sweep(100, 1000, step=100),
-    "freq": make_sweep(6010, 6040, 51),
+    "gain": make_sweep(0.05, 1.0, 10),
+    # "gain": make_sweep(10, 30000, 10, force_int=True),
+    "freq": make_sweep(6010, 6040, 11),
     # "freq": make_sweep(r_f-5, r_f+5, 51),
 }
-cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
+cfg = make_cfg(exp_cfg, reps=10, rounds=10)
 
 fpts, pdrs, signals2D = zs.measure_res_pdr_dep(
-    soc, soccfg, cfg, instant_show=True, dynamic_reps=True, gain_ref=800
+    soc, soccfg, cfg, instant_show=True, dynamic_reps=True, gain_ref=0.1
 )
 
 
@@ -307,13 +313,11 @@ DefaultCfg.set_dev(flux=cur_flux)
 # %%
 exp_cfg = {
     "dac": {
-        "res_pulse": "probe_rf",
-        # "res_pulse": {
-        #     "style": res_style,
-        #     "freq": r_f,
-        #     "gain": max_res_gain,
-        #     "length": res_length,  # us
-        # },
+        "res_pulse": {
+            **DefaultCfg.get_pulse("probe_rf"),
+            "nqz": 2,
+            "gain": 1.0,
+        },
     },
     "adc": {
         "relax_delay": 0.0,  # us
@@ -322,12 +326,12 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = {
-    "flux": make_sweep(-3.2e-3, -4.3e-3, 220),
-    "freq": make_sweep(6020, 6030, 51),
+    "flux": make_sweep(-3.2e-3, -4.3e-3, 10),
+    "freq": make_sweep(6020, 6030, 101),
 }
-cfg = make_cfg(exp_cfg, reps=100000, rounds=1)
+cfg = make_cfg(exp_cfg, reps=1, rounds=10)
 
-fpts, flxs, signals2D = zs.measure_res_flux_dep(soc, soccfg, cfg, instant_show=True)
+flxs, fpts, signals2D = zs.measure_res_flux_dep(soc, soccfg, cfg, instant_show=True)
 
 # %%
 filename = "res_flux_dep"
@@ -350,7 +354,7 @@ DefaultCfg.set_dev(flux=cur_flux)
 # # Set readout pulse
 
 # %%
-# r_f = 4000
+r_f = 4000
 DefaultCfg.set_pulse(
     readout_rf={
         **DefaultCfg.get_pulse("probe_rf"),
@@ -392,9 +396,9 @@ exp_cfg = {
         # "res_pulse": "readout_dpm",
         "qub_pulse": {
             **DefaultCfg.get_pulse("probe_qf"),
-            "ch": 6,
+            "ch": 1,
             "nqz": 1,
-            "gain": 30000,
+            "gain": 1.0,
             "length": 3,  # us
         },
         # "qub_pulse": "reset_red",
@@ -403,9 +407,9 @@ exp_cfg = {
         # "reset_pulse": "reset_red",
         # "reset_pulse": {
         #     **DefaultCfg.get_pulse('probe_qf'),
-        #     "ch": 4,
+        #     "ch": 2,
         #     "nqz": 2,
-        #     "gain": 10000,
+        #     "gain": 1.0,
         #     "length": 4,  # us
         # },
     },
@@ -415,14 +419,13 @@ exp_cfg = {
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(48.5, 49.5, 51)
-# exp_cfg["sweep"] = make_sweep(5950, 5990, 101)
+# exp_cfg["sweep"] = make_sweep(48.5, 49.5, 51)
+exp_cfg["sweep"] = make_sweep(5950, 5990, 101)
 cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 er_f = 6020.5
-fpts, signals = zs.measure_qub_freq(
-    soc, soccfg, cfg, instant_show=True, soft_loop=False
-)
+fpts, signals = zs.measure_qub_freq(soc, soccfg, cfg, instant_show=True)
+# fpts, signals = zs.measure_qub_freq_with_reset(soc, soccfg, cfg, instant_show=True, r_f=er_f)
 
 # %%
 f = zf.freq_analyze(fpts, signals, max_contrast=True)
@@ -454,10 +457,10 @@ exp_cfg = {
         # "res_pulse": "readout_dpm",
         "qub_pulse": {
             **DefaultCfg.get_pulse("probe_qf"),
-            "ch": 4,
+            "ch": 1,
             "nqz": 2,
             "freq": reset_f,
-            "gain": 30000,
+            "gain": 1.0,
         },
         # "reset": "pulse",
         # "reset_pulse": {
@@ -478,7 +481,7 @@ exp_cfg = {
 exp_cfg["sweep"] = make_sweep(0.1, 5.0, 51)
 cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
-Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg, instant_show=True, soft_loop=True)
+Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg, instant_show=True)
 
 # %%
 zf.contrast_plot(Ts, signals, max_contrast=True, xlabel="Length (us)")
@@ -516,7 +519,7 @@ exp_cfg = {
         "qub_pulse": {
             **DefaultCfg.get_pulse("probe_qf"),
             "nqz": 1,
-            "ch": 6,
+            "ch": 1,
             "gain": 30000,
             "length": 5,  # us
         },
@@ -528,15 +531,13 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = {
-    "gain": make_sweep(10, 30000, 40, force_int=True),
+    "gain": make_sweep(0.05, 1.0, 40),
     # "freq": make_sweep(q_f - 25, q_f + 25, 51),
-    "freq": make_sweep(1700, 2000, 101),
+    "freq": make_sweep(1700, 2000, 50),
 }
-cfg = make_cfg(exp_cfg, reps=1, rounds=100)
+cfg = make_cfg(exp_cfg, reps=10, rounds=100)
 
-fpts, pdrs, signals2D = zs.measure_qub_pdr_dep(
-    soc, soccfg, cfg, instant_show=True, soft_freq=False, soft_pdr=False
-)
+fpts, pdrs, signals2D = zs.measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=True)
 
 # %%
 filename = f"qub_pdr_dep_{qub_name}"
@@ -561,12 +562,12 @@ DefaultCfg.set_dev(flux=cur_flux)
 # %%
 exp_cfg = {
     "dac": {
-        # "res_pulse": "readout_rf",
-        "res_pulse": "readout_dpm",
+        "res_pulse": "readout_rf",
+        # "res_pulse": "readout_dpm",
         "qub_pulse": {
             **DefaultCfg.get_pulse("probe_qf"),
-            "ch": 6,
-            "nqz": 1,
+            "ch": 1,
+            "nqz": 2,
             "gain": 30000,
             "length": 5,  # us
         },
@@ -580,13 +581,13 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = {
-    "flux": make_sweep(-4.65e-3, -4.46e-3, 25),
-    "freq": make_sweep(30, 200, 301),
+    "flux": make_sweep(-4.65e-3, -4.46e-3, 11),
+    "freq": make_sweep(5000, 8000, 11),
 }
-cfg = make_cfg(exp_cfg, reps=20, rounds=100)
+cfg = make_cfg(exp_cfg, reps=10, rounds=10)
 
 fpts, flxs, signals2D = zs.measure_qub_flux_dep(
-    soc, soccfg, cfg, instant_show=True, conjugate_reset=True, r_f=r_f
+    soc, soccfg, cfg, instant_show=True, reset_rf=r_f
 )
 
 # %%
@@ -617,7 +618,12 @@ exp_cfg = {
     "dac": {
         "res_pulse": "readout_rf",
         # "res_pulse": "readout_dpm",
-        "qub_pulse": {**DefaultCfg.get_pulse("probe_qf"), "freq": q_f, "gain": 30000},
+        "qub_pulse": {
+            **DefaultCfg.get_pulse("probe_qf"),
+            "ch": 1,
+            "freq": q_f,
+            "gain": 1.0,
+        },
         # "reset": "pulse",
         # "reset_pulse": "reset_red",
     },
@@ -628,9 +634,9 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = make_sweep(0.026, 20.0, 50)
-cfg = make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = make_cfg(exp_cfg, reps=10, rounds=100)
 
-Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg, instant_show=True, soft_loop=True)
+Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg, instant_show=True)
 
 # %%
 pi_len, pi2_len = zf.rabi_analyze(
@@ -680,6 +686,7 @@ exp_cfg = {
         # "res_pulse": "readout_dpm",
         "qub_pulse": {
             **DefaultCfg.get_pulse("probe_qf"),
+            "ch": 1,
             "freq": q_f,
             "length": qub_len,
         },
@@ -695,7 +702,7 @@ exp_cfg = {
 exp_cfg["sweep"] = make_sweep(0, 30000, step=1000)
 cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
-pdrs, signals = zs.measure_amprabi(soc, soccfg, cfg, instant_show=True, soft_loop=False)
+pdrs, signals = zs.measure_amprabi(soc, soccfg, cfg, instant_show=True)
 
 # %%
 pi_gain, pi2_gain = zf.rabi_analyze(
