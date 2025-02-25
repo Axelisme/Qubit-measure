@@ -61,7 +61,6 @@ def rabi_analyze(
     else:
         plt.ylabel("Magnitude (a.u.)")
     plt.legend(loc=4)
-    plt.show()
 
     return pi_x, pi2_x
 
@@ -116,7 +115,6 @@ def T1_analyze(
             plt.ylabel("Magnitude (a.u.)")
         plt.legend()
         plt.tight_layout()
-        plt.show()
 
     if return_err:
         return t1, t1err
@@ -152,7 +150,6 @@ def T2fringe_analyze(
             plt.ylabel("Magnitude (a.u.)")
         plt.legend()
         plt.tight_layout()
-        plt.show()
 
     if return_err:
         return t2f, detune, err[4], err[2]
@@ -186,7 +183,6 @@ def T2decay_analyze(
             plt.ylabel("Magnitude (a.u.)")
         plt.legend()
         plt.tight_layout()
-        plt.show()
 
     if return_err:
         return t2e, err[2]

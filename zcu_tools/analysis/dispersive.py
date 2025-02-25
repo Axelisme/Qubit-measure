@@ -1,6 +1,6 @@
-from scipy.ndimage import gaussian_filter, gaussian_filter1d
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
 from .general import figsize
 
@@ -46,7 +46,7 @@ def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
         extent=[xs[0], xs[-1], ys[0], ys[-1]],
     )
     plt.scatter(
-        x_max, y_max, color="r", label=f"max SNR = {snr2D[y_max_id, x_max_id]:.2f}"
+        x_max, y_max, color="r", label=f"max SNR = {snr2D[y_max_id, x_max_id]:.2e}"
     )
     if xlabel is not None:
         plt.xlabel(xlabel)

@@ -1,6 +1,7 @@
 import os
-from typing import Optional, Tuple
 from datetime import datetime
+from typing import Optional, Tuple
+
 import numpy as np
 
 from .config import config
@@ -107,16 +108,37 @@ def load_data_local(
         print("DRY RUN: Load data from ", file_path)
         return np.array([]), np.array([]), None
 
-    with h5py.File(file_path, "r") as file:
-        data: np.ndarray = file["Data"]["Data"]  # type: ignore
+    def parser_data(data):
         if data.shape[2] == 1:  # 1D data,
             x_data = data[:, 0, 0][:]
             y_data = None
             z_data = data[:, 1, 0][:] + 1j * data[:, 2, 0][:]
-        else:
+        else:  # 2D data
             x_data = data[:, 0, 0][:]
             y_data = data[0, 1, :][:]
-            z_data = data[:, 2, :][:] + 1j * data[:, 3, :][:]
+            z_data = data[:, -2, :][:] + 1j * data[:, -1, :][:]
+
+        return z_data, x_data, y_data
+
+    with h5py.File(file_path, "r") as file:
+        data: np.ndarray = file["Data"]["Data"]  # type: ignore
+        z_data, x_data, y_data = parser_data(data)
+
+        if "Log_2" in file:
+            z_data = [z_data]
+
+            i = 2
+            while f"Log_{i}" in file:
+                log_data = file[f"Log_{i}"]["Data"]["Data"]
+                z_data_i, x_i, y_i = parser_data(log_data)
+                if not x_data.shape == x_i.shape or not y_data.shape == y_i.shape:
+                    raise ValueError("Data shape mismatch")
+                if not np.allclose(x_data, x_i) or not np.allclose(y_data, y_i):
+                    raise ValueError("Find different x or y data in log data")
+                z_data.append(z_data_i)
+                i += 1
+            z_data = np.array(z_data)
+
     return z_data, x_data, y_data
 
 
@@ -145,7 +167,7 @@ def download_file2server(filepath: str, server_ip: str, port: int):
 
     url = f"http://{server_ip}:{port}/download"
     response = requests.post(url, json={"path": filepath})
-    assert response.status_code == 200, f"Fail to download file: {filepath}"
+    assert response.status_code == 200, f"Fail to download file: {response.text}"
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, "wb") as file:
