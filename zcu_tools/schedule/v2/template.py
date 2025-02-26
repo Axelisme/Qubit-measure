@@ -25,9 +25,11 @@ def sweep_hard_template(
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
+    prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
+
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(*ticks, x_label=xlabel, y_label=ylabel)
+        viewer = InstantShow(*ticks, x_label=xlabel, y_label=ylabel, prog=prog)
 
         def callback(ir, sum_d):
             nonlocal signals
@@ -36,7 +38,6 @@ def sweep_hard_template(
     else:
         callback = None
 
-    prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
     try:
         IQlist = prog.acquire(soc, progress=progress, callback=callback, **kwargs)
         signals: ndarray = IQlist[0][0].dot([1, 1j])
@@ -70,12 +71,13 @@ def sweep1D_soft_template(
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
+    prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
+
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel)
+        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel, prog=prog)
         show_period = int(len(xs[0]) / 20 + 0.99)
 
-    prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
     try:
         for i, x in enumerate(tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)):
             updateCfg(cfg, i, x)

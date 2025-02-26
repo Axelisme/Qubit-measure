@@ -10,15 +10,43 @@ from zcu_tools.analysis.tools import minus_mean, rescale
 
 class InstantShow:
     def __init__(
-        self, *ticks, x_label: str, y_label: str, title: Optional[str] = None, **kwargs
+        self,
+        *ticks,
+        x_label: str,
+        y_label: str,
+        title: Optional[str] = None,
+        prog=None,
+        **kwargs,
     ):
         if len(ticks) > 2 or len(ticks) == 0:
             raise ValueError("Invalid number of ticks")
 
         self.is_1d = len(ticks) == 1
+        self.prog = prog
 
         self._init_widget()
         self._init_fig(*ticks, x_label=x_label, y_label=y_label, title=title, **kwargs)
+
+        wds = widgets.HBox(
+            [
+                self.fig.canvas,
+                widgets.VBox(
+                    [
+                        self.mode_tb,
+                        self.axis_tb,
+                        widgets.HBox(
+                            [
+                                self.minusMean_cb,
+                                self.rescale_cb,
+                            ]
+                        ),
+                        self.earlyStop_bt,
+                    ]
+                ),
+            ]
+        )
+
+        self.dh = display(*wds, display_id=True)
 
     def _init_fig(
         self, *ticks, x_label: str, y_label: str, title: Optional[str], **kwargs
@@ -47,50 +75,54 @@ class InstantShow:
                 **kwargs,
             )
 
-        self.dh = display(fig, display_id=True)
-
     def _init_widget(self):
-        if not self.is_1d:
-            self.axis_widget = widgets.Dropdown(
-                options=["None", "x", "y"],
-                value="None",
-                description="operate axis",
-            )
-        self.minus_mean_widget = widgets.Checkbox(
-            value=False,
-            description="minus mean",
-        )
-        self.rescale_widget = widgets.Checkbox(
-            value=False,
-            description="rescale",
-        )
-        self.mode_widget = widgets.Dropdown(
+        self.mode_tb = widgets.Dropdown(
             options=["Real", "Imag", "Magnitude", "Phase"],
             value="Magnitude",
             description="showing mode",
+            layout=widgets.Layout(display="block"),
+        )
+        self.axis_tb = widgets.Dropdown(
+            options=["None", "x", "y"],
+            value="None",
+            description="operate axis",
+            layout=widgets.Layout(display="none" if self.is_1d else "block"),
+        )
+        self.minusMean_cb = widgets.Checkbox(
+            value=False,
+            description="minus mean",
+            layout=widgets.Layout(display="flex"),
+        )
+        self.rescale_cb = widgets.Checkbox(
+            value=False,
+            description="rescale",
+            layout=widgets.Layout(display="flex"),
+        )
+        self.earlyStop_bt = widgets.Button(
+            description="Early Stop",
+            button_style="danger",
+            layout=widgets.Layout(display="none" if self.prog is None else "block"),
         )
 
-        widget_list = [self.minus_mean_widget, self.rescale_widget, self.mode_widget]
-        if not self.is_1d:
-            widget_list.insert(0, self.axis_widget)
-        display(*widget_list)
+        if self.prog is not None:
+            self.earlyStop_bt.on_click(self.prog.set_early_stop, remove=True)
 
     def _process_signals(self, signals: np.ndarray):
         if self.is_1d:
             axis = None
         else:
             map_table = {"None": None, "x": 1, "y": 0}
-            axis = map_table[self.axis_widget.value]
+            axis = map_table[self.axis_tb.value]
 
-        if self.minus_mean_widget.value:
+        if self.minusMean_cb.value:
             signals = minus_mean(signals, axis)
-        if self.rescale_widget.value:
+        if self.rescale_cb.value:
             signals = rescale(signals, axis)
 
         return signals
 
     def _cast2real(self, signals: np.ndarray):
-        mode = self.mode_widget.value
+        mode = self.mode_tb.value
         if mode == "Real":
             return np.real(signals)
         elif mode == "Imag":
