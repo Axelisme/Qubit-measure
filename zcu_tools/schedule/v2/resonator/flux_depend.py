@@ -51,7 +51,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
                     viewer.update_show(_signals2D)
 
             prog = OneToneProgram(soccfg, cfg)
-            IQlist = prog.acquire(soc, progress=False, round_callback=callback)
+            IQlist = prog.acquire(soc, progress=False, callback=callback)
 
             fpts = prog.get_pulse_param("res_pulse", "freq", as_array=True)
             signals2D[i] = IQlist[0][0].dot([1, 1j])

@@ -96,8 +96,8 @@ class MyProgram(AcquireMixin):
         return super().__getattr__(name)
 
     def acquire(self, soc, **kwargs):
-        with AsyncFunc(kwargs.get("round_callback")) as cb:
-            kwargs["round_callback"] = cb
+        with AsyncFunc(kwargs.get("callback")) as cb:
+            kwargs["callback"] = cb
 
             if self.is_use_proxy():
                 super().acc_buf = None  # clear local acc_buf
@@ -106,8 +106,8 @@ class MyProgram(AcquireMixin):
             return self._local_acquire(soc, decimated=False, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
-        with AsyncFunc(kwargs.get("round_callback")) as cb:
-            kwargs["round_callback"] = cb
+        with AsyncFunc(kwargs.get("callback")) as cb:
+            kwargs["callback"] = cb
 
             if self.is_use_proxy():
                 super().__setattr__("acc_buf", None)  # clear local acc_buf

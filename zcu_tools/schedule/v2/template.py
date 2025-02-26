@@ -38,7 +38,7 @@ def sweep_hard_template(
 
     prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
     try:
-        IQlist = prog.acquire(soc, progress=progress, round_callback=callback, **kwargs)
+        IQlist = prog.acquire(soc, progress=progress, callback=callback, **kwargs)
         signals: ndarray = IQlist[0][0].dot([1, 1j])
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")

@@ -62,7 +62,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
             )
             prog = prog_cls(soccfg, make_cfg(cfg))
             fpts, avgi, avgq = prog.acquire(
-                soc, progress=False, round_callback=callback
+                soc, progress=False, callback=callback
             )
             signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
 

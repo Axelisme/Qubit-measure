@@ -40,7 +40,7 @@ def sweep1D_hard_template(
     prog: RAveragerProgram = prog_cls(soccfg, cfg)
     try:
         xs, avgi, avgq = prog.acquire(
-            soc, progress=progress, round_callback=callback, **kwargs
+            soc, progress=progress, callback=callback, **kwargs
         )
         signals: ndarray = avgi[0][0] + 1j * avgq[0][0]
     except KeyboardInterrupt:

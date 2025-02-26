@@ -34,7 +34,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
 
     try:
         prog = PowerDepProgram(soccfg, make_cfg(cfg))
-        fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)
+        fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True, callback=callback)
         signals2D = avgi[0][0] + 1j * avgq[0][0]
         fpts, pdrs = fpt_pdr[0], fpt_pdr[1]
 

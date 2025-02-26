@@ -48,7 +48,7 @@ class ProgramClient:
         soft_avgs = prog.cfg["soft_avgs"]
 
         kwargs.setdefault("progress", False)
-        kwargs.setdefault("round_callback", None)
+        kwargs.setdefault("callback", None)
 
         # remote progress bar
         if kwargs["progress"]:
@@ -59,14 +59,14 @@ class ProgramClient:
             bar = tqdm(total=soft_avgs, desc="Soft_avgs", leave=True)
 
             # wrap existing callback
-            cb = kwargs["round_callback"]
+            cb = kwargs["callback"]
 
             def callback_with_bar(ir: int, *args, **kwargs):
                 bar.update(max(ir + 1 - bar.n, 0))
                 if cb is not None:
                     cb(ir, *args, **kwargs)
 
-            kwargs["round_callback"] = callback_with_bar
+            kwargs["callback"] = callback_with_bar
         else:
             bar = None
 
@@ -106,8 +106,8 @@ class ProgramClient:
     def _remote_acquire(self, prog, decimated: bool, **kwargs):
         kwargs, bar = self.overwrite_kwargs_for_remote(prog, kwargs)
 
-        with RemoteCallback(self, kwargs["round_callback"]) as cb:
-            kwargs["round_callback"] = cb
+        with RemoteCallback(self, kwargs["callback"]) as cb:
+            kwargs["callback"] = cb
 
             # acquiring on server-side and return result
             ret = self._remote_call(

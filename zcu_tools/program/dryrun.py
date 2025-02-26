@@ -47,7 +47,7 @@ class DryRunProxy:
         threshold=None,
         progress=True,
         ret_std=False,
-        round_callback=None,
+        callback=None,
         **kwargs,
     ):
         total_count = functools.reduce(operator.mul, prog.loop_dims)
@@ -98,8 +98,8 @@ class DryRunProxy:
                         std2_d[ii] += d**2 + s**2
 
             # callback
-            if round_callback is not None:
-                round_callback(ir, avg_d)
+            if callback is not None:
+                callback(ir, avg_d)
 
         # divide total by rounds
         for d in avg_d:
@@ -117,7 +117,7 @@ class DryRunProxy:
         prog,
         soft_avgs=1,
         progress=True,
-        round_callback=None,
+        callback=None,
         **kwargs,
     ):
         total_count = functools.reduce(operator.mul, prog.loop_dims)
@@ -138,8 +138,8 @@ class DryRunProxy:
             self.acc_buf.append(np.random.rand(*prog.loop_dims, 1, 2))
 
             # callback
-            if round_callback is not None:
-                round_callback(ir)
+            if callback is not None:
+                callback(ir)
 
         # average the decimated data
         result = []

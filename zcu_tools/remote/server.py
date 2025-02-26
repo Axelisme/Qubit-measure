@@ -42,11 +42,11 @@ class ProgramServer:
     def run_program(self, name: str, cfg: dict, decimated: bool, **kwargs):
         prog = self._make_prog(name, cfg)
         self._before_run_program(prog, kwargs)
-        callback = unwrap_callback(kwargs.get("round_callback"))
+        callback = unwrap_callback(kwargs.get("callback"))
         try:
             # use async callback to prevent blocking by connection
             with AsyncFunc(callback) as cb:
-                kwargs["round_callback"] = cb
+                kwargs["callback"] = cb
 
                 # call original method from MyProgram instead of subclass method
                 # in case of multiple execution of overridden method
