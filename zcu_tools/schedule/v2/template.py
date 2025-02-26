@@ -8,6 +8,14 @@ from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow
 
 
+def default_raw2signals(ir, sum_d, *_) -> ndarray:
+    return sum_d[0][0].dot([1, 1j]) / (ir + 1)
+
+
+def default_result2signals(IQlist) -> ndarray:
+    return IQlist[0][0].dot([1, 1j])
+
+
 def sweep_hard_template(
     soc,
     soccfg,
@@ -20,6 +28,9 @@ def sweep_hard_template(
     instant_show: bool,
     xlabel: str,
     ylabel: str,
+    acquire_method: str = "acquire",
+    raw2signals: Callable = default_raw2signals,
+    result2signals: Callable = default_result2signals,
     **kwargs,
 ) -> Tuple[AveragerProgramV2, ndarray]:
     # set flux first
@@ -31,16 +42,18 @@ def sweep_hard_template(
     if instant_show:
         viewer = InstantShow(*ticks, x_label=xlabel, y_label=ylabel, prog=prog)
 
-        def callback(ir, sum_d):
+        def callback(*args):
             nonlocal signals
-            signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)
+            signals = raw2signals(*args)
             viewer.update_show(signals)
     else:
         callback = None
 
     try:
-        IQlist = prog.acquire(soc, progress=progress, callback=callback, **kwargs)
-        signals: ndarray = IQlist[0][0].dot([1, 1j])
+        result = getattr(prog, acquire_method)(
+            soc, progress=progress, callback=callback, **kwargs
+        )
+        signals: ndarray = result2signals(result)
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
     except Exception as e:
@@ -66,6 +79,8 @@ def sweep1D_soft_template(
     updateCfg: Callable,
     xlabel: str,
     ylabel: str,
+    acquire_method: str = "acquire",
+    result2signals: Callable = default_result2signals,
     **kwargs,
 ) -> Tuple[ndarray, ndarray]:
     # set flux first
@@ -75,7 +90,7 @@ def sweep1D_soft_template(
 
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel, prog=prog)
+        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel)
         show_period = int(len(xs[0]) / 20 + 0.99)
 
     try:
@@ -85,8 +100,8 @@ def sweep1D_soft_template(
             # set again in case of change
             set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-            IQlist = prog.acquire(soc, progress=False, **kwargs)
-            signals[i] = IQlist[0][0].dot([1, 1j])
+            result = getattr(prog, acquire_method)(soc, progress=False, **kwargs)
+            signals[i] = result2signals(result)
 
             if instant_show and i % show_period == 0:
                 viewer.update_show(signals)

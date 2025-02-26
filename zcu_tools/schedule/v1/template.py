@@ -23,10 +23,12 @@ def sweep1D_hard_template(
     ylabel: str,
     **kwargs,
 ):
+    prog: RAveragerProgram = prog_cls(soccfg, cfg)
+
     xs = init_xs.copy()
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel)
+        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel, prog=prog)
 
         def callback(ir, sum_d):
             nonlocal signals
@@ -37,7 +39,6 @@ def sweep1D_hard_template(
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    prog: RAveragerProgram = prog_cls(soccfg, cfg)
     try:
         xs, avgi, avgq = prog.acquire(
             soc, progress=progress, callback=callback, **kwargs

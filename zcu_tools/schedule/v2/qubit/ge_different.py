@@ -11,6 +11,27 @@ from zcu_tools.schedule.tools import (
 from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
+def ge_raw2signals(ir, sum_d, sum2_d):
+    sum_d = sum_d[0][0].dot([1, 1j])  # (*sweep, ge)
+    sum2_d = sum2_d[0][0].dot([1, 1j])  # (*sweep, ge)
+
+    avg_d = sum_d / (ir + 1)
+    std_d = np.sqrt(sum2_d / (ir + 1) - avg_d**2)
+
+    contrast = avg_d[..., 1] - avg_d[..., 0]  # (*sweep)
+    noise2_i = np.sum(std_d.real**2, axis=-1)  # (*sweep)
+    noise2_q = np.sum(std_d.imag**2, axis=-1)  # (*sweep)
+    noise = np.sqrt(noise2_i * contrast.real**2 + noise2_q * contrast.imag**2) / np.abs(
+        contrast
+    )
+
+    return contrast / noise
+
+
+def ge_result2signals(snr):
+    return snr
+
+
 def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
@@ -40,6 +61,10 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
         instant_show=instant_show,
         xlabel="Frequency (MHz)",
         ylabel="Readout Gain",
+        acquire_method="acquire_snr",
+        raw2signals=ge_raw2signals,
+        result2signals=ge_result2signals,
+        ret_std=True,
     )
 
     # get the actual pulse gains and frequency points
@@ -72,6 +97,10 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
         instant_show=instant_show,
         xlabel="Readout Length (us)",
         ylabel="Amplitude",
+        acquire_method="acquire_snr",
+        raw2signals=ge_raw2signals,
+        result2signals=ge_result2signals,
+        ret_std=True,
     )
 
     # get the actual readout lengths
@@ -104,6 +133,10 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
         instant_show=instant_show,
         xlabel="Trigger Offset (us)",
         ylabel="Amplitude",
+        acquire_method="acquire_snr",
+        raw2signals=ge_raw2signals,
+        result2signals=ge_result2signals,
+        ret_std=True,
     )
 
     # get the actual trigger offsets
