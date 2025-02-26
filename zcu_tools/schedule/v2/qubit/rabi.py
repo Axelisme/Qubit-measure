@@ -1,3 +1,4 @@
+from typing import Tuple
 import numpy as np
 
 from zcu_tools import make_cfg
@@ -6,7 +7,9 @@ from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
-def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
+def measure_lenrabi(
+    soc, soccfg, cfg, instant_show=False
+) -> Tuple[np.ndarray, np.ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -30,12 +33,14 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
     )
 
     # get the actual lengths
-    lens = prog.get_pulse_param("qub_pulse", "length", as_array=True)
+    lens: np.ndarray = prog.get_pulse_param("qub_pulse", "length", as_array=True)  # type: ignore
 
     return lens, signals
 
 
-def measure_amprabi(soc, soccfg, cfg, instant_show=False):
+def measure_amprabi(
+    soc, soccfg, cfg, instant_show=False
+) -> Tuple[np.ndarray, np.ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
@@ -59,6 +64,6 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False):
     )
 
     # get the actual amplitudes
-    amps = prog.get_pulse_param("qub_pulse", "gain", as_array=True)
+    amps: np.ndarray = prog.get_pulse_param("qub_pulse", "gain", as_array=True)  # type: ignore
 
     return amps, signals

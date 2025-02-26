@@ -114,7 +114,7 @@ def phase_analyze(fpts, signals, plot=True, plot_fit=True):
     return slope, offset
 
 
-def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False):
+def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False) -> float:
     """
     fpts: 1D array, frequency points (MHz)
     signals: 1D array, signal points
@@ -130,7 +130,8 @@ def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False):
     else:
         pOpt, err = ft.fitlor(fpts, y)
         curve = ft.lorfunc(fpts, *pOpt)
-    freq, kappa = pOpt[3], 2 * pOpt[4]  # type: ignore
+    freq: float = pOpt[3]  # type: ignore
+    kappa: float = 2 * pOpt[4]  # type: ignore
     freq_err = np.sqrt(np.diag(err))[3]
 
     plt.figure(figsize=figsize)

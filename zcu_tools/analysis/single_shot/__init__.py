@@ -12,8 +12,6 @@ def singleshot_analysis(
         return fit_by_center(Is, Qs, plot=plot)
     elif backend == "regression":
         return fit_by_regression(Is, Qs, plot=plot)
-    else:
-        raise ValueError(f"Unknown backend: {backend}")
 
 
 __all__ = ["singleshot_analysis", "fidelity_func"]

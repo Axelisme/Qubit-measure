@@ -1,4 +1,4 @@
-from numbers import Number
+from typing import Union
 
 from zcu_tools.config import config
 
@@ -9,7 +9,7 @@ class YokoDevControl:
     yoko = None
     TIMEOUT = 5 * 60  # 5 minutes
     SWEEP_RATE = None  # 10 mA/s
-    dev_cfg = None
+    dev_cfg = {}
 
     @classmethod
     def connect_server(cls, dev_cfg: dict, reinit=False):
@@ -42,14 +42,14 @@ class YokoDevControl:
 
         cls.yoko = InstrManager(server_ip=dev_cfg["host_ip"], timeout=cls.TIMEOUT)
         cls.yoko.add_instrument(sHardware, dComCfg)
-        cls.yoko.ctrl.globalFlux.setInstrConfig(output_cfg)
+        cls.yoko.ctrl.globalFlux.setInstrConfig(output_cfg)  # type: ignore
 
     @classmethod
     def disconnect_server(cls):
         if cls.yoko is not None:
             cls.yoko = None
             cls.SWEEP_RATE = None
-            cls.dev_cfg = None
+            cls.dev_cfg = {}
 
     @classmethod
     def get_current(cls):
@@ -59,13 +59,13 @@ class YokoDevControl:
         if cls.yoko is None:
             raise RuntimeError("YokoDevControl not initialized")
 
-        return cls.yoko.ctrl.globalFlux.getValue("Current")
+        return cls.yoko.ctrl.globalFlux.getValue("Current")  # type: ignore
 
     @classmethod
     def _set_current_direct(cls, value):
         if config.YOKO_DRY_RUN:
             return
-        cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.SWEEP_RATE)
+        cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.SWEEP_RATE)  # type: ignore
 
     @classmethod
     def _set_current_smart(cls, value):
@@ -84,10 +84,10 @@ class YokoDevControl:
             cls._set_current_direct(cur)
 
     @classmethod
-    def set_current(cls, value: Number) -> None:
+    def set_current(cls, value: Union[int, float]) -> None:
         # cast numpy float to python float
         if hasattr(value, "item"):
-            value = value.item()
+            value = value.item()  # type: ignore
 
         if config.YOKO_DRY_RUN:
             print(f"DRY RUN: Set current to {value}\r")

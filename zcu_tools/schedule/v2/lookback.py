@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import numpy as np
 from tqdm.auto import tqdm
 
@@ -21,7 +23,7 @@ def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
 
 def measure_lookback(
     soc, soccfg, cfg, progress=True, instant_show=False, qub_pulse=False
-):
+) -> Tuple[np.ndarray, np.ndarray]:
     cfg = make_cfg(cfg)
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])

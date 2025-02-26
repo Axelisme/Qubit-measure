@@ -78,7 +78,7 @@ def map2adcfreq(soccfg, fpts, gen_ch, ro_ch):
     return fpts
 
 
-def sweep2array(sweep, allow_array=False):
+def sweep2array(sweep, allow_array=False) -> np.ndarray:
     """
     Convert sweep to array
 

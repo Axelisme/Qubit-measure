@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -42,8 +44,8 @@ def hist(Ig, Ie, numbins=200, ax=None, title=None):
         if title is not None:
             ax.set_title(title, fontsize=14)
     else:
-        ng, *_ = np.histogram(Ig, bins=bins, range=xlims)
-        ne, *_ = np.histogram(Ie, bins=bins, range=xlims)
+        ng, *_ = np.histogram(Ig, bins=bins, range=xlims)  # type: ignore
+        ne, *_ = np.histogram(Ie, bins=bins, range=xlims)  # type: ignore
 
     return ng, ne, bins
 
@@ -80,7 +82,9 @@ def calculate_fidelity(ng, ne, bins):
     return fid, bins[tind]
 
 
-def fitting_and_plot(Is, Qs, classify_func, plot=True, numbins=200):
+def fitting_and_plot(
+    Is, Qs, classify_func, plot=True, numbins=200
+) -> Tuple[float, float, float]:
     Ig, Ie = Is
     Qg, Qe = Qs
 

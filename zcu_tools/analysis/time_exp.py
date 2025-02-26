@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -13,7 +15,7 @@ def rabi_analyze(
     decay=False,
     max_contrast=False,
     xlabel=None,
-):
+) -> Tuple[float, float]:
     """
     x: 1D array, sweep points
     signals: 1D array, signal points
@@ -33,8 +35,8 @@ def rabi_analyze(
 
     pOpt, _ = fit_func(xs, y)
 
-    freq = pOpt[2]
-    phase = pOpt[3] % 360  # type: ignore
+    freq: float = pOpt[2]  # type: ignore
+    phase: float = pOpt[3] % 360  # type: ignore
     if phase > 270:
         pi_x = (1.5 - phase / 360) / freq
         pi2_x = (1.25 - phase / 360) / freq
@@ -44,16 +46,17 @@ def rabi_analyze(
     else:
         pi_x = (1.0 - phase / 360) / freq
         pi2_x = (0.75 - phase / 360) / freq
+    assert isinstance(pi_x, float) and isinstance(pi2_x, float)
 
     plt.figure(figsize=figsize)
     plt.tight_layout()
     plt.plot(xs, y, label="meas", ls="-", marker="o", markersize=3)
     if plot_fit:
-        xs = np.linspace(pi_x - 0.5 / freq, xs[-1], 1000)  # type: ignore
+        xs = np.linspace(pi_x - 0.5 / freq, xs[-1], 1000)
         curve = cos_func(xs, *pOpt)
         plt.plot(xs, curve, label="fit")
-        plt.axvline(pi_x, ls="--", c="red", label=f"pi={pi_x:.2g}")
-        plt.axvline(pi2_x, ls="--", c="red", label=f"pi/2={(pi2_x):.2g}")
+        plt.axvline(pi_x, ls="--", c="red", label=f"pi={pi_x:.2g}")  # type: ignore
+        plt.axvline(pi2_x, ls="--", c="red", label=f"pi/2={(pi2_x):.2g}")  # type: ignore
     if xlabel is not None:
         plt.xlabel(xlabel)
     if max_contrast:
@@ -68,7 +71,6 @@ def rabi_analyze(
 def T1_analyze(
     xs: np.ndarray,
     signals: np.ndarray,
-    return_err=False,
     plot=True,
     max_contrast=False,
     dual_exp=False,
@@ -92,8 +94,10 @@ def T1_analyze(
         if pOpt[4] > pOpt[2]:  # type: ignore
             pOpt = [pOpt[0], pOpt[3], pOpt[4], pOpt[1], pOpt[2]]
             err = [err[0], err[3], err[4], err[1], err[2]]
-        t1b, t1berr = pOpt[4], err[4]
-    t1, t1err = pOpt[2], err[2]
+        t1b: float = pOpt[4]  # type: ignore
+        t1berr: float = err[4]
+    t1: float = pOpt[2]  # type: ignore
+    t1err: float = err[2]
 
     if plot:
         t1_str = f"{t1:.2f}us +/- {t1err:.2f}us"
@@ -116,13 +120,11 @@ def T1_analyze(
         plt.legend()
         plt.tight_layout()
 
-    if return_err:
-        return t1, t1err
-    return t1
+    return t1, t1err
 
 
 def T2fringe_analyze(
-    xs: np.ndarray, signals: np.ndarray, return_err=False, plot=True, max_contrast=False
+    xs: np.ndarray, signals: np.ndarray, plot=True, max_contrast=False
 ):
     if max_contrast:
         signals = rotate2real(signals)
@@ -131,7 +133,8 @@ def T2fringe_analyze(
         y = np.abs(signals)
 
     pOpt, pCov = ft.fitdecaycos(xs, y)
-    t2f, detune = pOpt[4], pOpt[2]
+    t2f: float = pOpt[4]  # type: ignore
+    detune: float = pOpt[2]  # type: ignore
     sim = ft.decaycos(xs, *pOpt)
     err = np.sqrt(np.diag(pCov))
 
@@ -151,14 +154,10 @@ def T2fringe_analyze(
         plt.legend()
         plt.tight_layout()
 
-    if return_err:
-        return t2f, detune, err[4], err[2]
-    return t2f, detune
+    return t2f, detune, err[4], err[2]
 
 
-def T2decay_analyze(
-    xs: np.ndarray, signals: np.ndarray, return_err=False, plot=True, max_contrast=False
-):
+def T2decay_analyze(xs: np.ndarray, signals: np.ndarray, plot=True, max_contrast=False):
     if max_contrast:
         signals = rotate2real(signals)
         y = signals.real
@@ -166,7 +165,7 @@ def T2decay_analyze(
         y = np.abs(signals)
 
     pOpt, pCov = ft.fitexp(xs, y)
-    t2e = pOpt[2]
+    t2e: float = pOpt[2]  # type: ignore
     err = np.sqrt(np.diag(pCov))
 
     if plot:
@@ -184,6 +183,4 @@ def T2decay_analyze(
         plt.legend()
         plt.tight_layout()
 
-    if return_err:
-        return t2e, err[2]
-    return t2e
+    return t2e, err[2]

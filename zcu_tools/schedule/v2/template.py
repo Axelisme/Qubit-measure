@@ -21,7 +21,7 @@ def sweep_hard_template(
     xlabel: str,
     ylabel: str,
     **kwargs,
-):
+) -> Tuple[AveragerProgramV2, ndarray]:
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
@@ -66,7 +66,7 @@ def sweep1D_soft_template(
     xlabel: str,
     ylabel: str,
     **kwargs,
-):
+) -> Tuple[ndarray, ndarray]:
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 

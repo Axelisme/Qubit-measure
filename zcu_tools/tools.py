@@ -1,5 +1,4 @@
-from numbers import Number
-from typing import Any, Callable, Dict, Literal, Optional
+from typing import Any, Callable, Dict, Literal, Optional, Union
 
 
 def deepupdate(
@@ -36,10 +35,10 @@ def numpy2number(obj: Any) -> Any:
 
 
 def make_sweep(
-    start: Number,
-    stop: Optional[Number] = None,
+    start: Union[int, float],
+    stop: Optional[Union[int, float]] = None,
     expts: Optional[int] = None,
-    step: Optional[Number] = None,
+    step: Optional[Union[int, float]] = None,
     force_int: bool = False,
 ) -> dict:
     err_str = "Not enough information to define a sweep."

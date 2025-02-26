@@ -928,12 +928,10 @@ exp_cfg = {
 # %%
 cfg = make_cfg(exp_cfg, rounds=10000)
 
-Ts, Ise, Qse = zs.measure_lookback(soc, soccfg, cfg, qub_pulse=True)
-signals_e = Ise + 1j * Qse
+Ts, signals_e = zs.measure_lookback(soc, soccfg, cfg, qub_pulse=True)
 
 cfg["dac"]["qub_pulse"]["gain"] = 0
-Ts, Isg, Qsg = zs.measure_lookback(soc, soccfg, cfg, qub_pulse=True)
-signals_g = Isg + 1j * Qsg
+Ts, signals_g = zs.measure_lookback(soc, soccfg, cfg, qub_pulse=True)
 
 # %%
 zf.ge_lookback_analyze(Ts, signals_g, signals_e, cfg["dac"]["res_pulse"])
@@ -983,8 +981,8 @@ cfg = make_cfg(exp_cfg, reps=100, rounds=10)
 Ts, signals = zs.measure_t2ramsey(soc, soccfg, cfg, instant_show=True)
 
 # %%
-t2f, detune = zf.T2fringe_analyze(Ts, signals, max_contrast=True)
-t2d = zf.T2decay_analyze(Ts, signals, max_contrast=True)
+t2f, detune, _, _ = zf.T2fringe_analyze(Ts, signals, max_contrast=True)  # type: ignore
+t2d, _ = zf.T2decay_analyze(Ts, signals, max_contrast=True)
 detune, t2f, t2d
 
 # %%
@@ -1037,7 +1035,7 @@ Ts, signals = zs.measure_t1(soc, soccfg, cfg, instant_show=True)
 start = 0
 stop = -1
 
-t1 = zf.T1_analyze(
+t1, _ = zf.T1_analyze(
     Ts[start:stop], signals[start:stop], max_contrast=True, dual_exp=False
 )
 t1
@@ -1091,7 +1089,6 @@ try:
             max_contrast=True,
             dual_exp=False,
             plot=False,
-            return_err=True,
         )
         T1s.append(t1)
         errs.append(err)
@@ -1109,7 +1106,7 @@ try:
         ax[1].clear()
         ax[0].errorbar(xs, T1s, errs, capsize=4, marker="o", markersize=4, ls="none")
         ax[1].plot(Ts, np.abs(signals))
-        dh.update(fig)
+        dh.update(fig)  # type: ignore
     else:
         clear_output()
 except Exception as e:
@@ -1117,7 +1114,7 @@ except Exception as e:
 
 df = pd.DataFrame([T1s, errs])
 df.to_csv("T1s.csv")
-fig.savefig("t1overnight")
+fig.savefig("t1overnight")  # type: ignore
 
 # %% [markdown]
 # # T2Echo
@@ -1143,7 +1140,7 @@ cfg = make_cfg(exp_cfg, reps=100, rounds=10)
 Ts, signals = zs.measure_t2echo(soc, soccfg, cfg, instant_show=True)
 
 # %%
-t2e = zf.T2decay_analyze(Ts, signals)
+t2e, _ = zf.T2decay_analyze(Ts, signals)
 t2e
 
 # %%
