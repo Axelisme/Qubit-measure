@@ -27,16 +27,16 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
 
         def callback(ir, sum_d):
             nonlocal signals2D
-            signals2D = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
+            signals2D = sum_d[0][0].dot([1, 1j]) / (ir + 1)  
             viewer.update_show(signals2D)
     else:
-        callback = None  # type: ignore
+        callback = None  
 
     try:
         prog = PowerDepProgram(soccfg, make_cfg(cfg))
-        fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)  # type: ignore
-        signals2D = avgi[0][0] + 1j * avgq[0][0]  # type: ignore
-        fpts, pdrs = fpt_pdr[0], fpt_pdr[1]  # type: ignore
+        fpt_pdr, avgi, avgq = prog.acquire(soc, progress=True, round_callback=callback)  
+        signals2D = avgi[0][0] + 1j * avgq[0][0]  
+        fpts, pdrs = fpt_pdr[0], fpt_pdr[1]  
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")

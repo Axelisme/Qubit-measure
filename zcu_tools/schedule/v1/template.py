@@ -30,19 +30,19 @@ def sweep1D_hard_template(
 
         def callback(ir, sum_d):
             nonlocal signals
-            signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
+            signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)  
             viewer.update_show(signals)
     else:
-        callback = None  # type: ignore
+        callback = None  
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     prog: RAveragerProgram = prog_cls(soccfg, cfg)
     try:
-        xs, avgi, avgq = prog.acquire(  # type: ignore
+        xs, avgi, avgq = prog.acquire(  
             soc, progress=progress, round_callback=callback, **kwargs
         )
-        signals: ndarray = avgi[0][0] + 1j * avgq[0][0]  # type: ignore
+        signals: ndarray = avgi[0][0] + 1j * avgq[0][0]  
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
     except Exception as e:
@@ -84,7 +84,7 @@ def sweep1D_soft_template(
 
             set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-            avgi, avgq = prog.acquire(soc, progress=False, **kwargs)  # type: ignore
+            avgi, avgq = prog.acquire(soc, progress=False, **kwargs)  
             signals[i] = avgi[0][0] + 1j * avgq[0][0]
 
             if instant_show and i % show_period == 0:

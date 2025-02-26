@@ -47,8 +47,8 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
             for j, f in enumerate(fpts):
                 res_pulse["freq"] = f
                 prog = OneToneProgram(soccfg, make_cfg(cfg))
-                avgi, avgq = prog.acquire(soc, progress=False)  # type: ignore
-                signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]  # type: ignore
+                avgi, avgq = prog.acquire(soc, progress=False)  
+                signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]  
                 freq_tqdm.update()
             flux_tqdm.update()
 

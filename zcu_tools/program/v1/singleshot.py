@@ -9,7 +9,7 @@ class SingleShotProgram(RGainTwoToneProgram):
         super().__init__(soccfg, cfg)
 
     def declare_gain_reg(self):
-        ch = self.qub_pulse["ch"]  # type: ignore
+        ch = self.qub_pulse["ch"]  
         self.q_rp = self.ch_page(ch)
         self.q_gain = self.sreg(ch, "gain")
         self.q_gain2 = self.sreg(ch, "gain2")
@@ -24,7 +24,7 @@ class SingleShotProgram(RGainTwoToneProgram):
         self.bitw(self.q_rp, self.q_gain_0, self.q_gain_0, "^", self.q_gain_t)
 
     def acquire(self, *args, **kwargs):
-        _, avgi, avgq = super().acquire(*args, **kwargs)  # type: ignore
+        _, avgi, avgq = super().acquire(*args, **kwargs)  
         assert isinstance(avgi, list), "make pyright happy"
         avgi = avgi[0][0].reshape(-1, 2).T  # (2, reps)
         avgq = avgq[0][0].reshape(-1, 2).T  # (2, reps)

@@ -71,7 +71,7 @@ def save_data_local(
         print("DRY RUN: Save data to ", filepath)
         return
 
-    import Labber  # type: ignore
+    import Labber  
 
     fObj = Labber.createLogFile_ForData(filepath, log_channels, step_channels)
     if y_info:
@@ -121,7 +121,7 @@ def load_data_local(
         return z_data, x_data, y_data
 
     with h5py.File(file_path, "r") as file:
-        data: np.ndarray = file["Data"]["Data"]  # type: ignore
+        data: np.ndarray = file["Data"]["Data"]  
         z_data, x_data, y_data = parser_data(data)
 
         if "Log_2" in file:

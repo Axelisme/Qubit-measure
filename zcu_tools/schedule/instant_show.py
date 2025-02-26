@@ -24,24 +24,24 @@ class InstantShow:
         self, *ticks, x_label: str, y_label: str, title: Optional[str], **kwargs
     ):
         fig, ax = plt.subplots()
-        fig.tight_layout(pad=3)  # type: ignore
-        ax.set_xlabel(x_label)  # type: ignore
-        ax.set_ylabel(y_label)  # type: ignore
+        fig.tight_layout(pad=3)  
+        ax.set_xlabel(x_label)  
+        ax.set_ylabel(y_label)  
         if title:
-            ax.set_title(title)  # type: ignore
+            ax.set_title(title)  
 
         self.fig = fig
         self.ax = ax
         if self.is_1d:
             kwargs.setdefault("linestyle", "-")
             kwargs.setdefault("marker", ".")
-            self.contain = ax.plot(ticks[0], np.zeros_like(ticks[0]), **kwargs)[0]  # type: ignore
+            self.contain = ax.plot(ticks[0], np.zeros_like(ticks[0]), **kwargs)[0]  
         else:
             kwargs.setdefault("origin", "lower")
             kwargs.setdefault("interpolation", "none")
             kwargs.setdefault("aspect", "auto")
-            xs, ys = ticks  # type: ignore
-            self.contain = ax.imshow(  # type: ignore
+            xs, ys = ticks  
+            self.contain = ax.imshow(  
                 np.zeros((len(ys), len(xs))),
                 extent=[xs[0], xs[-1], ys[0], ys[-1]],
                 **kwargs,
@@ -80,7 +80,7 @@ class InstantShow:
             axis = None
         else:
             map_table = {"None": None, "x": 1, "y": 0}
-            axis = map_table[self.axis_widget.value]  # type: ignore
+            axis = map_table[self.axis_widget.value]  
 
         if self.minus_mean_widget.value:
             signals = minus_mean(signals, axis)
@@ -109,7 +109,7 @@ class InstantShow:
         else:  # 2D
             self._update_show2d(signals, ticks)
 
-        self.dh.update(self.fig)  # type: ignore
+        self.dh.update(self.fig)  
 
     def _update_show1d(self, signals: np.ndarray, ticks):
         if len(signals.shape) != 1:
@@ -122,11 +122,11 @@ class InstantShow:
             self.contain.set_xdata(ticks)
         self.contain.set_ydata(ys)
 
-        self.ax.relim()  # type: ignore
+        self.ax.relim()  
         if ticks is None:
-            self.ax.autoscale(axis="y")  # type: ignore
+            self.ax.autoscale(axis="y")  
         else:
-            self.ax.autoscale_view()  # type: ignore
+            self.ax.autoscale_view()  
 
     def _update_show2d(self, signals: np.ndarray, ticks):
         if len(signals.shape) != 2:

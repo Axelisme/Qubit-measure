@@ -31,15 +31,15 @@ def sweep_hard_template(
 
         def callback(ir, sum_d):
             nonlocal signals
-            signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)  # type: ignore
+            signals = sum_d[0][0].dot([1, 1j]) / (ir + 1)  
             viewer.update_show(signals)
     else:
-        callback = None  # type: ignore
+        callback = None  
 
     prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
     try:
         IQlist = prog.acquire(soc, progress=progress, round_callback=callback, **kwargs)
-        signals: ndarray = IQlist[0][0].dot([1, 1j])  # type: ignore
+        signals: ndarray = IQlist[0][0].dot([1, 1j])  
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
     except Exception as e:
@@ -83,8 +83,8 @@ def sweep1D_soft_template(
             # set again in case of change
             set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-            IQlist = prog.acquire(soc, progress=False, **kwargs)  # type: ignore
-            signals[i] = IQlist[0][0].dot([1, 1j])  # type: ignore
+            IQlist = prog.acquire(soc, progress=False, **kwargs)  
+            signals[i] = IQlist[0][0].dot([1, 1j])  
 
             if instant_show and i % show_period == 0:
                 viewer.update_show(signals)

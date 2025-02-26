@@ -77,7 +77,7 @@ def load_file(remote_path):
 app = Flask(__name__)
 
 
-@app.route("/upload", methods=["POST"])  # type: ignore
+@app.route("/upload", methods=["POST"])  
 def remote2server():
     if "file" not in request.files:
         return "No file part", 400
@@ -93,7 +93,7 @@ def remote2server():
 
 @app.route("/download", methods=["POST"])
 def server2remote():
-    filepath = request.json.get("path")  # type: ignore
+    filepath = request.json.get("path")  
     if not filepath:
         return "No file path", 400
 

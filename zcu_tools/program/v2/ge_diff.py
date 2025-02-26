@@ -25,15 +25,15 @@ class GEProgram(TwoToneProgram):
             kwargs["soft_avgs"] = 1
 
         super().acquire(soc, **kwargs)
-        acc_buf = self.acc_buf[0]  # type: ignore
+        acc_buf = self.acc_buf[0]  
         avgiq = acc_buf / self.get_time_axis(0)[-1]  # (reps, 2, 1, 2)
         avgi, avgq = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, 2)
         return avgi.T, avgq.T  # (2, reps)
 
     def acquire_snr(self, soc, **kwargs):
-        avg_d, std2_d = super().acquire(soc, ret_std=True, **kwargs)  # type: ignore
-        avg_d = avg_d[0][0].dot([1, 1j])  # type: ignore , (*sweep, ge)
-        std2_d = std2_d[0][0].dot([1, 1j])  # type: ignore , (*sweep, ge)
+        avg_d, std2_d = super().acquire(soc, ret_std=True, **kwargs)  
+        avg_d = avg_d[0][0].dot([1, 1j])   , (*sweep, ge)
+        std2_d = std2_d[0][0].dot([1, 1j])   , (*sweep, ge)
 
         contrast = avg_d[..., 1] - avg_d[..., 0]  # (*sweep)
         noise2_i = np.sum(std2_d.real**2, axis=-1)  # (*sweep)

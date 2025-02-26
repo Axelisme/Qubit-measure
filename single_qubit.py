@@ -200,7 +200,7 @@ DefaultCfg.set_adc(timeFly=timeFly)
 # pulse_name = "const"
 pulse_name = cfg["dac"]["res_pulse"]["style"]
 
-signal_records = signal_records if "signal_records" in locals() else {}  # type: ignore  # noqa
+signal_records = signal_records if "signal_records" in locals() else {}  # noqa
 signal_records[pulse_name] = (Ts, signals)
 pprint(signal_records.keys())
 # del signal_records
@@ -981,7 +981,7 @@ cfg = make_cfg(exp_cfg, reps=100, rounds=10)
 Ts, signals = zs.measure_t2ramsey(soc, soccfg, cfg, instant_show=True)
 
 # %%
-t2f, detune, _, _ = zf.T2fringe_analyze(Ts, signals, max_contrast=True)  # type: ignore
+t2f, detune, _, _ = zf.T2fringe_analyze(Ts, signals, max_contrast=True)
 t2d, _ = zf.T2decay_analyze(Ts, signals, max_contrast=True)
 detune, t2f, t2d
 
@@ -1106,7 +1106,7 @@ try:
         ax[1].clear()
         ax[0].errorbar(xs, T1s, errs, capsize=4, marker="o", markersize=4, ls="none")
         ax[1].plot(Ts, np.abs(signals))
-        dh.update(fig)  # type: ignore
+        dh.update(fig)
     else:
         clear_output()
 except Exception as e:
@@ -1114,7 +1114,7 @@ except Exception as e:
 
 df = pd.DataFrame([T1s, errs])
 df.to_csv("T1s.csv")
-fig.savefig("t1overnight")  # type: ignore
+fig.savefig("t1overnight")
 
 # %% [markdown]
 # # T2Echo

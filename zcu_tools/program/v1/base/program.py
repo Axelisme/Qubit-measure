@@ -14,8 +14,8 @@ class MyProgramV1(MyProgram):
         self.readoutM = make_readout(cfg["dac"]["readout"])
 
     def initialize(self):
-        self.resetM.init(self)  # type: ignore
-        self.readoutM.init(self)  # type: ignore
+        self.resetM.init(self)  
+        self.readoutM.init(self)  
 
 
 class MyAveragerProgram(MyProgramV1, AveragerProgram):

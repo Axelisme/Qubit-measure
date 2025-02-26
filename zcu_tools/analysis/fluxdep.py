@@ -602,9 +602,9 @@ def search_in_database(flxs, fpts, datapath, allows):
     from h5py import File
 
     with File(datapath, "r") as file:
-        h_flxs = file["flxs"][:]  # type: ignore
-        h_params = file["params"][:]  # type: ignore
-        h_energies = file["energies"][:]  # type: ignore
+        h_flxs = file["flxs"][:]  
+        h_params = file["params"][:]  
+        h_energies = file["energies"][:]  
 
     def dist_to_curve(energies):
         fs, *_ = energy2transition(energies, allows)

@@ -18,7 +18,7 @@ def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
     Ts = prog.get_time_axis(ro_index=0)
     Ts += cfg["adc"]["trig_offset"]
 
-    return Ts, IQlist[0].dot([1, 1j])  # type: ignore
+    return Ts, IQlist[0].dot([1, 1j])  
 
 
 def measure_lookback(

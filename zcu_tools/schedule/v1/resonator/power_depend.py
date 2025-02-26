@@ -58,8 +58,8 @@ def measure_res_pdr_dep(
             for j, fpt in enumerate(fpts):
                 res_pulse["freq"] = fpt
                 prog = OneToneProgram(soccfg, make_cfg(cfg))
-                avgi, avgq = prog.acquire(soc, progress=False)  # type: ignore
-                signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]  # type: ignore
+                avgi, avgq = prog.acquire(soc, progress=False)  
+                signals2D[i, j] = avgi[0][0] + 1j * avgq[0][0]  
                 freq_tqdm.update()
 
             if instant_show:

@@ -23,7 +23,7 @@ class ProgramClient:
             print(
                 f"Client Pyro4 daemon started at {config.LOCAL_IP}:{config.LOCAL_PORT}"
             )
-            Pyro4.config.ONEWAY_THREADED = True  # type: ignore
+            Pyro4.config.ONEWAY_THREADED = True  
             cls.callback_daemon = Pyro4.Daemon(config.LOCAL_IP, config.LOCAL_PORT)
             # 將 daemon.requestLoop 放在背景執行緒執行
             cls.daemon_thread = threading.Thread(
@@ -39,7 +39,7 @@ class ProgramClient:
             print("Client Pyro4 daemon stopped")
             cls.callback_daemon.shutdown()
             cls.callback_daemon = None
-            cls.daemon_thread.join()  # type: ignore
+            cls.daemon_thread.join()  
             cls.daemon_thread = None
 
     def overwrite_kwargs_for_remote(self, prog, kwargs: Dict[str, Any]):
@@ -84,9 +84,9 @@ class ProgramClient:
             if not hasattr(sys.exc_info()[1], "_pyroTraceback"):
                 print("Client-side error, raise it on remote side...")
                 prog_s = self.prog_server
-                prog_s._pyroTimeout, old = 1, prog_s._pyroTimeout  # type: ignore
+                prog_s._pyroTimeout, old = 1, prog_s._pyroTimeout  
                 prog_s.set_interrupt(repr(e))
-                prog_s._pyroTimeout = old  # type: ignore
+                prog_s._pyroTimeout = old  
 
             raise e
 

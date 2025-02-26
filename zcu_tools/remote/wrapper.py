@@ -43,12 +43,12 @@ def unwrap_callback(cb: Optional[RemoteCallback]):
 
     def unwrapped_cb(*args, **kwargs):
         # timeout is set to prevent connecting forever
-        cb._pyroTimeout, old = CALLBACK_TIMEOUT, cb._pyroTimeout  # type: ignore
+        cb._pyroTimeout, old = CALLBACK_TIMEOUT, cb._pyroTimeout  
         try:
             cb.do_callback(*args, **kwargs)
         except Exception as e:
             print(f"Error during calling client-side callback: {e}")
         finally:
-            cb._pyroTimeout = old  # type: ignore
+            cb._pyroTimeout = old  
 
     return unwrapped_cb

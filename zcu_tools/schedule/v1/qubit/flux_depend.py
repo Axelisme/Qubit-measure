@@ -61,10 +61,10 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
                 else RFreqTwoToneProgramWithRedReset
             )
             prog = prog_cls(soccfg, make_cfg(cfg))
-            fpts, avgi, avgq = prog.acquire(  # type: ignore
+            fpts, avgi, avgq = prog.acquire(  
                 soc, progress=False, round_callback=callback
             )
-            signals2D[i] = avgi[0][0] + 1j * avgq[0][0]  # type: ignore
+            signals2D[i] = avgi[0][0] + 1j * avgq[0][0]  
 
             avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
             avgs_tqdm.refresh()

@@ -44,8 +44,8 @@ def hist(Ig, Ie, numbins=200, ax=None, title=None):
         if title is not None:
             ax.set_title(title, fontsize=14)
     else:
-        ng, *_ = np.histogram(Ig, bins=bins, range=xlims)  # type: ignore
-        ne, *_ = np.histogram(Ie, bins=bins, range=xlims)  # type: ignore
+        ng, *_ = np.histogram(Ig, bins=bins, range=xlims)  
+        ne, *_ = np.histogram(Ie, bins=bins, range=xlims)  
 
     return ng, ne, bins
 

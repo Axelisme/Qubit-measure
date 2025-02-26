@@ -77,15 +77,15 @@ def contrast_plot(xs, signals, max_contrast=False, xlabel=None):
         y = np.abs(signals)
 
     fig, ax = plt.subplots(figsize=figsize)
-    fig.tight_layout(pad=3)  # type: ignore
-    ax.plot(xs, y, label="signal", marker="o", markersize=3)  # type: ignore
+    fig.tight_layout(pad=3)  
+    ax.plot(xs, y, label="signal", marker="o", markersize=3)  
     if xlabel is not None:
-        ax.set_xlabel(xlabel)  # type: ignore
+        ax.set_xlabel(xlabel)  
     if max_contrast:
-        ax.set_ylabel("Signal Real (a.u.)")  # type: ignore
+        ax.set_ylabel("Signal Real (a.u.)")  
     else:
-        ax.set_ylabel("Magnitude (a.u.)")  # type: ignore
-    ax.legend()  # type: ignore
+        ax.set_ylabel("Magnitude (a.u.)")  
+    ax.legend()  
     plt.show()
 
 
@@ -130,8 +130,8 @@ def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False) -
     else:
         pOpt, err = ft.fitlor(fpts, y)
         curve = ft.lorfunc(fpts, *pOpt)
-    freq: float = pOpt[3]  # type: ignore
-    kappa: float = 2 * pOpt[4]  # type: ignore
+    freq: float = pOpt[3]  
+    kappa: float = 2 * pOpt[4]  
     freq_err = np.sqrt(np.diag(err))[3]
 
     plt.figure(figsize=figsize)
@@ -140,7 +140,7 @@ def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False) -
     if plot_fit:
         plt.plot(fpts, curve, label=f"fit, $kappa$={kappa:.1g} MHz")
         label = f"$f_res$ = {freq:.5g} +/- {freq_err:.1g} MHz"
-        plt.axvline(freq, color="r", ls="--", label=label)  # type: ignore
+        plt.axvline(freq, color="r", ls="--", label=label)  
     plt.xlabel("Frequency (MHz)")
     if max_contrast:
         plt.ylabel("Signal Real")
