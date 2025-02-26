@@ -72,10 +72,18 @@ class ProgramClient:
 
         return kwargs, bar
 
-    def _remote_call(self, func_name: str, *args, **kwargs):
+    def _remote_call(self, func_name: str, *args, timeout=None, **kwargs):
         # call server-side method with kwargs
+        prog_s = self.prog_server
+        if timeout is None:
+            timeout = prog_s._pyroTimeout
+
         try:
+            prog_s._pyroTimeout, old = timeout, prog_s._pyroTimeout
             return getattr(self.prog_server, func_name)(*args, **kwargs)
+        except Pyro4.errors.CommunicationError as e:
+            print("Connection error:", e)
+            raise e
         except BaseException as e:
             import sys
 
@@ -83,12 +91,12 @@ class ProgramClient:
             # if not, need to interrupt remote side
             if not hasattr(sys.exc_info()[1], "_pyroTraceback"):
                 print("Client-side error, raise it on remote side...")
-                prog_s = self.prog_server
-                prog_s._pyroTimeout, old = 1, prog_s._pyroTimeout
-                prog_s.set_interrupt(repr(e))
-                prog_s._pyroTimeout = old
+                prog_s._pyroTimeout = 1
+                prog_s.set_early_stop()
 
             raise e
+        finally:
+            prog_s._pyroTimeout = old
 
     def test_remote_callback(self) -> bool:
         success_flag = False
@@ -123,7 +131,10 @@ class ProgramClient:
         return ret
 
     def get_acc_buf(self, prog):
-        return self._remote_call("get_acc_buf", prog.__class__.__name__)
+        return self._remote_call("get_acc_buf", prog.__class__.__name__, timeout=5)
+
+    def set_early_stop(self):
+        return self._remote_call("set_early_stop", timeout=2)
 
     def acquire(self, prog, **kwargs):
         return self._remote_acquire(prog, decimated=False, **kwargs)

@@ -31,12 +31,11 @@ class ProgramServer:
 
     @Pyro4.expose
     @Pyro4.oneway
-    def set_interrupt(self, err="Unknown error"):
+    def set_early_stop(self):
         if self.last_prog is not None:
-            self.last_prog, prog = None, self.last_prog
-            prog.set_interrupt(err)  # set interrupt flag in program
+            self.last_prog.set_early_stop()  # set interrupt flag in program
         else:
-            print("Warning: no program is running but received KeyboardInterrupt")
+            print("Warning: no program is running but received early stop signal")
 
     @Pyro4.expose
     def run_program(self, name: str, cfg: dict, decimated: bool, **kwargs):

@@ -33,10 +33,6 @@ class MyProgram(AcquireMixin):
         self._parse_cfg(cfg)  # parse config first
         super().__init__(soccfg, cfg=cfg, **kwargs)
 
-        if not self.is_use_proxy():
-            self._interrupt = False
-            self._interrupt_err = None
-
     def _parse_cfg(self, cfg: dict):
         # dac and adc config
         self.cfg = cfg
@@ -64,20 +60,18 @@ class MyProgram(AcquireMixin):
             cur_nqz = nqzs.setdefault(ch, nqz)
             assert cur_nqz == nqz, "Found different nqz on the same channel"
 
-    def set_interrupt(self, err="Unknown error"):
-        # acquire method will check this flag
-        self._interrupt = True
-        self._interrupt_err = err
-
-    def _handle_early_stop(self):
-        # call by loop in acquire method
-        # handle client-side interrupt
-        if self._interrupt:
-            print("Interrupted by client-side")
-            raise RuntimeError(self._interrupt_err)
+    def set_early_stop(self):
+        # tell program to return as soon as possible
+        if self.is_use_proxy():
+            self.proxy.set_early_stop()
+        else:
+            self.early_stop = True
 
     def _local_acquire(self, soc, decimated=False, **kwargs):
         # non-overridable method, for ProgramServer to call
+        if self.is_use_proxy():
+            raise RuntimeError("_local_acquire should not be called when using proxy")
+
         try:
             if decimated:
                 return super().acquire_decimated(soc, **kwargs)
@@ -100,7 +94,7 @@ class MyProgram(AcquireMixin):
             kwargs["callback"] = cb
 
             if self.is_use_proxy():
-                super().acc_buf = None  # clear local acc_buf
+                super().__setattr__("acc_buf", None)  # clear local acc_buf
                 return self.proxy.acquire(self, **kwargs)
 
             return self._local_acquire(soc, decimated=False, **kwargs)
