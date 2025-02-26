@@ -65,7 +65,7 @@ def measure_res_pdr_dep(
             IQlist = prog.acquire(soc, progress=False, round_callback=callback)
 
             fpts = prog.get_pulse_param("res_pulse", "freq", as_array=True)
-            signals2D[i] = IQlist[0][0].dot([1, 1j])  
+            signals2D[i] = IQlist[0][0].dot([1, 1j])
 
             avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
             avgs_tqdm.refresh()

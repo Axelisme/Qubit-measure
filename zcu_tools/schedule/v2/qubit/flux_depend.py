@@ -57,7 +57,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
             prog = TwoToneProgram(soccfg, cfg)
 
             IQlist = prog.acquire(soc, progress=False, round_callback=callback)
-            signals2D[i] = IQlist[0][0].dot([1, 1j])  
+            signals2D[i] = IQlist[0][0].dot([1, 1j])
             print(np.nanmax(np.abs(signals2D)))
 
             avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)

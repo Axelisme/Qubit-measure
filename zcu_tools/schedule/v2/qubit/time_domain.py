@@ -28,10 +28,10 @@ def measure_t2ramsey(
     if isinstance(sweep_cfg, dict):
         # linear hard sweep
         cfg["dac"]["t2r_length"] = sweep2param("length", sweep_cfg)
-        prog, signals = sweep_hard_template(*args, ticks=(ts,), **kwargs)  
+        prog, signals = sweep_hard_template(*args, ticks=(ts,), **kwargs)
 
         # get the actual times
-        ts: np.ndarray = prog.get_time_param("t2ramsey_length", "t", as_array=True)  
+        ts: np.ndarray = prog.get_time_param("t2ramsey_length", "t", as_array=True)
 
     elif isinstance(sweep_cfg, np.ndarray) or isinstance(sweep_cfg, list):
         # custom soft sweep
@@ -42,7 +42,7 @@ def measure_t2ramsey(
         def updateCfg(cfg, _, t):
             cfg["dac"]["t2r_length"] = t
 
-        ts, signals = sweep1D_soft_template(*args, xs=ts, updateCfg=updateCfg, **kwargs)  
+        ts, signals = sweep1D_soft_template(*args, xs=ts, updateCfg=updateCfg, **kwargs)
 
     return ts, signals
 
@@ -68,10 +68,10 @@ def measure_t2echo(
     if isinstance(sweep_cfg, dict):
         # linear hard sweep
         cfg["dac"]["t2e_half"] = sweep2param("length", sweep_cfg)
-        prog, signals = sweep_hard_template(*args, ticks=(ts,), **kwargs)  
+        prog, signals = sweep_hard_template(*args, ticks=(ts,), **kwargs)
 
         # get the actual times
-        ts: np.ndarray = 2 * prog.get_time_param("t2e_half", "t", as_array=True)  
+        ts: np.ndarray = 2 * prog.get_time_param("t2e_half", "t", as_array=True)
 
     elif isinstance(sweep_cfg, np.ndarray) or isinstance(sweep_cfg, list):
         # custom soft sweep
@@ -82,7 +82,7 @@ def measure_t2echo(
         def updateCfg(cfg, _, t):
             cfg["dac"]["t2e_half"] = t / 2  # half the time
 
-        ts, signals = sweep1D_soft_template(*args, xs=ts, updateCfg=updateCfg, **kwargs)  
+        ts, signals = sweep1D_soft_template(*args, xs=ts, updateCfg=updateCfg, **kwargs)
 
     return ts, signals
 
@@ -106,10 +106,10 @@ def measure_t1(soc, soccfg, cfg, instant_show=False) -> Tuple[np.ndarray, np.nda
     if isinstance(sweep_cfg, dict):
         # linear hard sweep
         cfg["dac"]["t1_length"] = sweep2param("length", sweep_cfg)
-        prog, signals = sweep_hard_template(*args, ticks=(ts,), **kwargs)  
+        prog, signals = sweep_hard_template(*args, ticks=(ts,), **kwargs)
 
         # get the actual times
-        ts: np.ndarray = prog.get_time_param("t1_length", "t", as_array=True)  
+        ts: np.ndarray = prog.get_time_param("t1_length", "t", as_array=True)
 
     elif isinstance(sweep_cfg, np.ndarray) or isinstance(sweep_cfg, list):
         # custom soft sweep
@@ -120,6 +120,6 @@ def measure_t1(soc, soccfg, cfg, instant_show=False) -> Tuple[np.ndarray, np.nda
         def updateCfg(cfg, _, t):
             cfg["dac"]["t1_length"] = t
 
-        ts, signals = sweep1D_soft_template(*args, xs=ts, updateCfg=updateCfg, **kwargs)  
+        ts, signals = sweep1D_soft_template(*args, xs=ts, updateCfg=updateCfg, **kwargs)
 
     return ts, signals

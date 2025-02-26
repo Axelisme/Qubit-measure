@@ -42,7 +42,7 @@ class YokoDevControl:
 
         cls.yoko = InstrManager(server_ip=dev_cfg["host_ip"], timeout=cls.TIMEOUT)
         cls.yoko.add_instrument(sHardware, dComCfg)
-        cls.yoko.ctrl.globalFlux.setInstrConfig(output_cfg)  
+        cls.yoko.ctrl.globalFlux.setInstrConfig(output_cfg)
 
     @classmethod
     def disconnect_server(cls):
@@ -59,13 +59,13 @@ class YokoDevControl:
         if cls.yoko is None:
             raise RuntimeError("YokoDevControl not initialized")
 
-        return cls.yoko.ctrl.globalFlux.getValue("Current")  
+        return cls.yoko.ctrl.globalFlux.getValue("Current")
 
     @classmethod
     def _set_current_direct(cls, value):
         if config.YOKO_DRY_RUN:
             return
-        cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.SWEEP_RATE)  
+        cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.SWEEP_RATE)
 
     @classmethod
     def _set_current_smart(cls, value):
@@ -87,7 +87,7 @@ class YokoDevControl:
     def set_current(cls, value: Union[int, float]) -> None:
         # cast numpy float to python float
         if hasattr(value, "item"):
-            value = value.item()  
+            value = value.item()
 
         if config.YOKO_DRY_RUN:
             print(f"DRY RUN: Set current to {value}\r")

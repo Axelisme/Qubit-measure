@@ -9,7 +9,7 @@ def declare_pulse(
     prog.declare_gen(pulse["ch"], nqz=pulse["nqz"])
     create_waveform(prog, waveform, pulse)
 
-    times = prog.ch_count[pulse["ch"]]  
+    times = prog.ch_count[pulse["ch"]]
     assert times > 0, "Something went wrong"
     set_pulse(prog, pulse, ro_ch=ro_ch, waveform=waveform, set_default=(times == 1))
 
@@ -22,7 +22,7 @@ def create_waveform(prog: AcquireProgram, name: str, pulse_cfg: Dict[str, Any]):
         pulse_cfg = pulse_cfg["raise_pulse"]
 
     wav_style = pulse_cfg["style"]
-    length = prog.us2cycles(pulse_cfg["length"], gen_ch=ch)  
+    length = prog.us2cycles(pulse_cfg["length"], gen_ch=ch)
 
     if style == "flat_top":
         length = int(2 * (length // 2))  # make even
@@ -31,10 +31,10 @@ def create_waveform(prog: AcquireProgram, name: str, pulse_cfg: Dict[str, Any]):
         if style == "flat_top":
             raise ValueError("Flat top with constant raise style is not supported")
     elif wav_style == "gauss":
-        sigma = prog.us2cycles(pulse_cfg["sigma"], gen_ch=ch)  
+        sigma = prog.us2cycles(pulse_cfg["sigma"], gen_ch=ch)
         prog.add_gauss(ch, name, sigma=sigma, length=length)
     elif wav_style == "drag":
-        sigma = prog.us2cycles(pulse_cfg["sigma"], gen_ch=ch)  
+        sigma = prog.us2cycles(pulse_cfg["sigma"], gen_ch=ch)
         delta = pulse_cfg["delta"]
         alpha = pulse_cfg.get("alpha", 0.5)
         prog.add_DRAG(ch, name, sigma=sigma, length=length, delta=delta, alpha=alpha)
@@ -58,11 +58,11 @@ def set_pulse(
     gain = pulse_cfg["gain"]
 
     # convert frequency and phase to DAC register values
-    freq = prog.freq2reg(pulse_cfg["freq"], gen_ch=ch, ro_ch=ro_ch)  
-    phase = prog.deg2reg(pulse_cfg["phase"], gen_ch=ch)  
+    freq = prog.freq2reg(pulse_cfg["freq"], gen_ch=ch, ro_ch=ro_ch)
+    phase = prog.deg2reg(pulse_cfg["phase"], gen_ch=ch)
 
     # convert length to cycles
-    length = prog.us2cycles(pulse_cfg["length"], gen_ch=ch)  
+    length = prog.us2cycles(pulse_cfg["length"], gen_ch=ch)
 
     kwargs = dict(style=style, freq=freq, phase=phase, gain=gain)
 
@@ -71,7 +71,7 @@ def set_pulse(
     elif style == "flat_top":
         # the length register for flat_top only contain the flat part
         length = pulse_cfg["length"] - pulse_cfg["raise_pulse"]["length"]
-        kwargs["length"] = prog.us2cycles(length, gen_ch=ch)  
+        kwargs["length"] = prog.us2cycles(length, gen_ch=ch)
         kwargs["waveform"] = waveform
     elif style in ["gauss", "cosine", "drag", "arb"]:
         assert waveform is not None, f"Waveform is required for {style} pulse"

@@ -14,7 +14,7 @@ class TwoToneProgram(MyProgramV2):
 
         # qubit pulse
         self.pulse(self.qub_pulse["ch"], "qub_pulse")
-        self.delay_auto(PULSE_DELAY)  
+        self.delay_auto(PULSE_DELAY)
 
         # measure
         self.readoutM.readout_qubit(self)

@@ -12,19 +12,19 @@ class T2EchoProgram(MyProgramV2):
         self.resetM.reset_qubit(self)
 
         # qub pi2 pulse
-        self.pulse(self.pi2_pulse["ch"], "pi2_pulse", t=None)  
+        self.pulse(self.pi2_pulse["ch"], "pi2_pulse", t=None)
 
         # wait for specified time
         self.delay_auto(t=self.dac["t2e_half"], ros=False, tag="T2e")
 
         # qub pi pulse
-        self.pulse(self.pi_pulse["ch"], "pi_pulse", t=None)  
+        self.pulse(self.pi_pulse["ch"], "pi_pulse", t=None)
 
         # wait for specified time
         self.delay_auto(t=self.dac["t2e_half"], ros=False, tag="T2e")
 
         # qub pi2 pulse
-        self.pulse(self.pi2_pulse["ch"], "pi2_pulse", t=None)  
+        self.pulse(self.pi2_pulse["ch"], "pi2_pulse", t=None)
         self.delay_auto()
 
         # measure

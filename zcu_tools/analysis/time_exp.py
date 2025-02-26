@@ -35,8 +35,8 @@ def rabi_analyze(
 
     pOpt, _ = fit_func(xs, y)
 
-    freq: float = pOpt[2]  
-    phase: float = pOpt[3] % 360  
+    freq: float = pOpt[2]
+    phase: float = pOpt[3] % 360
     if phase > 270:
         pi_x = (1.5 - phase / 360) / freq
         pi2_x = (1.25 - phase / 360) / freq
@@ -55,8 +55,8 @@ def rabi_analyze(
         xs = np.linspace(pi_x - 0.5 / freq, xs[-1], 1000)
         curve = cos_func(xs, *pOpt)
         plt.plot(xs, curve, label="fit")
-        plt.axvline(pi_x, ls="--", c="red", label=f"pi={pi_x:.2g}")  
-        plt.axvline(pi2_x, ls="--", c="red", label=f"pi/2={(pi2_x):.2g}")  
+        plt.axvline(pi_x, ls="--", c="red", label=f"pi={pi_x:.2g}")
+        plt.axvline(pi2_x, ls="--", c="red", label=f"pi/2={(pi2_x):.2g}")
     if xlabel is not None:
         plt.xlabel(xlabel)
     if max_contrast:
@@ -91,12 +91,12 @@ def T1_analyze(
 
     if dual_exp:
         # make sure t1 is the longer one
-        if pOpt[4] > pOpt[2]:  
+        if pOpt[4] > pOpt[2]:
             pOpt = [pOpt[0], pOpt[3], pOpt[4], pOpt[1], pOpt[2]]
             err = [err[0], err[3], err[4], err[1], err[2]]
-        t1b: float = pOpt[4]  
+        t1b: float = pOpt[4]
         t1berr: float = err[4]
-    t1: float = pOpt[2]  
+    t1: float = pOpt[2]
     t1err: float = err[2]
 
     if plot:
@@ -133,8 +133,8 @@ def T2fringe_analyze(
         y = np.abs(signals)
 
     pOpt, pCov = ft.fitdecaycos(xs, y)
-    t2f: float = pOpt[4]  
-    detune: float = pOpt[2]  
+    t2f: float = pOpt[4]
+    detune: float = pOpt[2]
     sim = ft.decaycos(xs, *pOpt)
     err = np.sqrt(np.diag(pCov))
 
@@ -165,7 +165,7 @@ def T2decay_analyze(xs: np.ndarray, signals: np.ndarray, plot=True, max_contrast
         y = np.abs(signals)
 
     pOpt, pCov = ft.fitexp(xs, y)
-    t2e: float = pOpt[2]  
+    t2e: float = pOpt[2]
     err = np.sqrt(np.diag(pCov))
 
     if plot:

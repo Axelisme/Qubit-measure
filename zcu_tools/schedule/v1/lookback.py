@@ -15,7 +15,7 @@ def measure_one(soc, soccfg, cfg, progress, qub_pulse):
     else:
         prog = OneToneProgram(soccfg, make_cfg(cfg, reps=1))
     IQlist = prog.acquire_decimated(soc, progress=progress)
-    Is, Qs = IQlist[0]  
+    Is, Qs = IQlist[0]
     signals = np.array(Is) + 1j * np.array(Qs)
 
     Ts = prog.get_time_axis(ro_index=0)

@@ -33,7 +33,7 @@ def measure_lenrabi(
     )
 
     # get the actual lengths
-    lens: np.ndarray = prog.get_pulse_param("qub_pulse", "length", as_array=True)  
+    lens: np.ndarray = prog.get_pulse_param("qub_pulse", "length", as_array=True)
 
     return lens, signals
 
@@ -64,6 +64,6 @@ def measure_amprabi(
     )
 
     # get the actual amplitudes
-    amps: np.ndarray = prog.get_pulse_param("qub_pulse", "gain", as_array=True)  
+    amps: np.ndarray = prog.get_pulse_param("qub_pulse", "gain", as_array=True)
 
     return amps, signals

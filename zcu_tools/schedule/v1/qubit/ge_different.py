@@ -16,14 +16,14 @@ def measure_one(soc, soccfg, cfg):
 
     qub_pulse["gain"] = 0
     prog = TwoToneProgram(soccfg, make_cfg(cfg))
-    avggi, avggq, stdgi, stdgq = prog.acquire(soc, progress=False, ret_std=True)  
+    avggi, avggq, stdgi, stdgq = prog.acquire(soc, progress=False, ret_std=True)
 
     qub_pulse["gain"] = pi_gain
     prog = TwoToneProgram(soccfg, make_cfg(cfg))
-    avgei, avgeq, stdei, stdeq = prog.acquire(soc, progress=False, ret_std=True)  
+    avgei, avgeq, stdei, stdeq = prog.acquire(soc, progress=False, ret_std=True)
 
-    dist_i = avgei[0][0] - avggi[0][0]  
-    dist_q = avgeq[0][0] - avggq[0][0]  
+    dist_i = avgei[0][0] - avggi[0][0]
+    dist_q = avgeq[0][0] - avggq[0][0]
     contrast = dist_i + 1j * dist_q
     noise2_i = stdgi[0][0] ** 2 + stdei[0][0] ** 2
     noise2_q = stdgq[0][0] ** 2 + stdeq[0][0] ** 2
@@ -69,7 +69,7 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
                 freq_tqdm.update()
 
             if instant_show:
-                viewer.ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")  
+                viewer.ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")
                 viewer.update_show(snr2D)
 
     except KeyboardInterrupt:
@@ -78,7 +78,7 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")  
+            viewer.ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")
             viewer.update_show(snr2D)
             viewer.close_show()
 

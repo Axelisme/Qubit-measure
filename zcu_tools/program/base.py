@@ -101,7 +101,7 @@ class MyProgram(AcquireMixin):
 
             if self.is_use_proxy():
                 super().acc_buf = None  # clear local acc_buf
-                return self.proxy.acquire(self, **kwargs)  
+                return self.proxy.acquire(self, **kwargs)
 
             return self._local_acquire(soc, decimated=False, **kwargs)
 
@@ -111,6 +111,6 @@ class MyProgram(AcquireMixin):
 
             if self.is_use_proxy():
                 super().__setattr__("acc_buf", None)  # clear local acc_buf
-                return self.proxy.acquire_decimated(self, **kwargs)  
+                return self.proxy.acquire_decimated(self, **kwargs)
 
             return self._local_acquire(soc, decimated=True, **kwargs)
