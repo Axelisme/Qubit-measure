@@ -69,7 +69,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
     except Exception as e:
-        print("Error during measurement:", e)
+        print("Error during measurement:", repr(e))
     finally:
         if instant_show:
             viewer.update_show(signals2D, (flxs, fpts))

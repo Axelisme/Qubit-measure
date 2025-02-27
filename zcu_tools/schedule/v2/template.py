@@ -28,7 +28,6 @@ def sweep_hard_template(
     instant_show: bool,
     xlabel: str,
     ylabel: str,
-    acquire_method: str = "acquire",
     raw2signals: Callable = default_raw2signals,
     result2signals: Callable = default_result2signals,
     **kwargs,
@@ -50,14 +49,12 @@ def sweep_hard_template(
         callback = None
 
     try:
-        result = getattr(prog, acquire_method)(
-            soc, progress=progress, callback=callback, **kwargs
-        )
+        result = prog.acquire(soc, progress=progress, callback=callback, **kwargs)
         signals: ndarray = result2signals(result)
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
     except Exception as e:
-        print("Error during measurement:", e)
+        print("Error during measurement:", repr(e))
     finally:
         if instant_show:
             viewer.update_show(signals)
@@ -79,7 +76,6 @@ def sweep1D_soft_template(
     updateCfg: Callable,
     xlabel: str,
     ylabel: str,
-    acquire_method: str = "acquire",
     result2signals: Callable = default_result2signals,
     **kwargs,
 ) -> Tuple[ndarray, ndarray]:
@@ -100,7 +96,7 @@ def sweep1D_soft_template(
             # set again in case of change
             set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-            result = getattr(prog, acquire_method)(soc, progress=False, **kwargs)
+            result = prog.acquire(soc, progress=False, **kwargs)
             signals[i] = result2signals(result)
 
             if instant_show and i % show_period == 0:

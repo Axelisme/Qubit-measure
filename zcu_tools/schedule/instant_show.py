@@ -56,7 +56,7 @@ class InstantShow:
 
     def _update_show1d(self, signals: np.ndarray, ticks):
         if len(signals.shape) != 1:
-            raise ValueError("Invalid shape of signals")
+            raise ValueError(f"Invalid shape of signals: {signals.shape}, expect 1D")
 
         ys = np.abs(signals)
 
@@ -72,7 +72,7 @@ class InstantShow:
 
     def _update_show2d(self, signals: np.ndarray, ticks):
         if len(signals.shape) != 2:
-            raise ValueError("Invalid shape of signals")
+            raise ValueError(f"Invalid shape of signals: {signals.shape}, expect 2D")
 
         zs = np.abs(signals).T
 

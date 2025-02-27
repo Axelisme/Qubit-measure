@@ -1,7 +1,7 @@
 import numpy as np
 
 from zcu_tools import make_cfg
-from zcu_tools.program.v2 import GEProgram
+from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import (
     format_sweep1D,
     map2adcfreq,
@@ -11,13 +11,7 @@ from zcu_tools.schedule.tools import (
 from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
-def ge_raw2signals(ir, sum_d, sum2_d):
-    sum_d = sum_d[0][0].dot([1, 1j])  # (*sweep, ge)
-    sum2_d = sum2_d[0][0].dot([1, 1j])  # (*sweep, ge)
-
-    avg_d = sum_d / (ir + 1)
-    std_d = np.sqrt(sum2_d / (ir + 1) - avg_d**2)
-
+def calc_snr(avg_d, std_d):
     contrast = avg_d[..., 1] - avg_d[..., 0]  # (*sweep)
     noise2_i = np.sum(std_d.real**2, axis=-1)  # (*sweep)
     noise2_q = np.sum(std_d.imag**2, axis=-1)  # (*sweep)
@@ -28,12 +22,29 @@ def ge_raw2signals(ir, sum_d, sum2_d):
     return contrast / noise
 
 
-def ge_result2signals(snr):
-    return snr
+def ge_raw2signals(ir, sum_d, sum2_d):
+    sum_d = sum_d[0][0].dot([1, 1j])  # (*sweep, ge)
+    sum2_d = sum2_d[0][0].dot([1, 1j])  # (*sweep, ge)
+
+    avg_d = sum_d / (ir + 1)
+    std_d = np.sqrt(sum2_d / (ir + 1) - avg_d**2)
+
+    return calc_snr(avg_d, std_d)
+
+
+def ge_result2signals(result):
+    avg_d, std_d = result
+    avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep, ge)
+    std_d = std_d[0][0].dot([1, 1j])  # (*sweep, ge)
+
+    return calc_snr(avg_d, std_d)
 
 
 def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     cfg = make_cfg(cfg)  # prevent in-place modification
+
+    res_pulse = cfg["dac"]["res_pulse"]
+    qub_pulse = cfg["dac"]["qub_pulse"]
 
     # make sure gain is the outer loop
     if list(cfg["sweep"].keys())[0] == "freq":
@@ -42,7 +53,12 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
             "freq": cfg["sweep"]["freq"],
         }
 
-    res_pulse = cfg["dac"]["res_pulse"]
+    # append ge sweep to inner loop
+    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+
+    # set with / without pi gain for qubit pulse
+    qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+
     res_pulse["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
     res_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
@@ -54,16 +70,16 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
         soc,
         soccfg,
         cfg,
-        GEProgram,
+        TwoToneProgram,
         init_signals=np.full((len(pdrs), len(fpts)), np.nan, dtype=complex),
         ticks=(fpts, pdrs),
         progress=True,
         instant_show=instant_show,
         xlabel="Frequency (MHz)",
         ylabel="Readout Gain",
-        acquire_method="acquire_snr",
         raw2signals=ge_raw2signals,
         result2signals=ge_result2signals,
+        ret_std=True,
     )
 
     # get the actual pulse gains and frequency points
@@ -76,7 +92,15 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
 def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
+    qub_pulse = cfg["dac"]["qub_pulse"]
+
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+
+    # append ge sweep to inner loop
+    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+
+    # set with / without pi length for qubit pulse
+    qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
     cfg["adc"]["ro_length"] = sweep2param("gain", cfg["sweep"]["length"])
     cfg["dac"]["res_pulse"]["length"] = (
@@ -89,16 +113,16 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
         soc,
         soccfg,
         cfg,
-        GEProgram,
+        TwoToneProgram,
         init_signals=np.full(len(lens), np.nan, dtype=complex),
         ticks=(lens,),
         progress=True,
         instant_show=instant_show,
         xlabel="Readout Length (us)",
         ylabel="Amplitude",
-        acquire_method="acquire_snr",
         raw2signals=ge_raw2signals,
         result2signals=ge_result2signals,
+        ret_std=True,
     )
 
     # get the actual readout lengths
@@ -110,7 +134,15 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
+    qub_pulse = cfg["dac"]["qub_pulse"]
+
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "offset")
+
+    # append ge sweep to inner loop
+    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+
+    # set with / without pi length for qubit pulse
+    qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
     orig_offset = cfg["adc"]["trig_offset"]
     cfg["adc"]["trig_offset"] = sweep2param("offset", cfg["sweep"]["offset"])
@@ -124,16 +156,16 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
         soc,
         soccfg,
         cfg,
-        GEProgram,
+        TwoToneProgram,
         init_signals=np.full(len(offsets), np.nan, dtype=complex),
         ticks=(offsets,),
         progress=True,
         instant_show=instant_show,
         xlabel="Trigger Offset (us)",
         ylabel="Amplitude",
-        acquire_method="acquire_snr",
         raw2signals=ge_raw2signals,
         result2signals=ge_result2signals,
+        ret_std=True,
     )
 
     # get the actual trigger offsets
