@@ -64,7 +64,6 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
         acquire_method="acquire_snr",
         raw2signals=ge_raw2signals,
         result2signals=ge_result2signals,
-        ret_std=True,
     )
 
     # get the actual pulse gains and frequency points
@@ -100,7 +99,6 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
         acquire_method="acquire_snr",
         raw2signals=ge_raw2signals,
         result2signals=ge_result2signals,
-        ret_std=True,
     )
 
     # get the actual readout lengths
@@ -136,7 +134,6 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
         acquire_method="acquire_snr",
         raw2signals=ge_raw2signals,
         result2signals=ge_result2signals,
-        ret_std=True,
     )
 
     # get the actual trigger offsets

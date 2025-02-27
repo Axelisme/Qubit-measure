@@ -1,3 +1,4 @@
+import time
 from typing import Any, Callable, Dict, Literal, Optional, Union
 
 
@@ -81,8 +82,12 @@ def get_ip_address(iface):
 
 
 class AsyncFunc:
-    def __init__(self, func: Optional[Callable]):
+    def __init__(self, func: Optional[Callable], min_interval: float = 0.1):
         self.func = func
+        self.min_interval = min_interval
+
+        if min_interval <= 0:
+            raise ValueError("min_interval must be greater than 0")
 
     def __enter__(self):
         if self.func is None:
@@ -115,6 +120,7 @@ class AsyncFunc:
 
     def work_loop(self):
         assert self.func is not None, "This method should not be called if func is None"
+        prev_end = time.time() - 2 * self.min_interval
         while True:
             self.have_new_job.wait()  # wait for new job
 
@@ -122,6 +128,11 @@ class AsyncFunc:
             # because it is only be set before event is set
             if not self.acquiring:
                 break  # if not acquiring, exit
+
+            # check if min_interval is satisfied
+            if time.time() - prev_end < self.min_interval:
+                time.sleep(self.min_interval / 10)
+                continue
 
             with self.lock:  # get job
                 job, self.last_job = self.last_job, None
@@ -134,6 +145,8 @@ class AsyncFunc:
                 self.func(ir, *args, **kwargs)
             except Exception as e:
                 print(f"Error in callback: {e}")
+            finally:
+                prev_end = time.time()
 
     def __call__(self, ir: int, *args, **kwargs):
         # this method may be called concurrently, so we need to protect it

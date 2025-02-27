@@ -4,6 +4,7 @@ from collections import defaultdict
 from typing import Any, Dict, Optional
 
 from qick.qick_asm import AcquireMixin
+from zcu_tools.config import config
 from zcu_tools.tools import AsyncFunc
 
 
@@ -87,6 +88,7 @@ class MyProgram(AcquireMixin):
         if self.is_use_proxy():
             self.proxy.set_early_stop()
         else:
+            print("Program received early stop signal")
             self.early_stop = True
 
     def _local_acquire(self, soc, decimated=False, **kwargs) -> list:
@@ -94,12 +96,9 @@ class MyProgram(AcquireMixin):
         if self.is_use_proxy():
             raise RuntimeError("_local_acquire should not be called when using proxy")
 
-        try:
-            if decimated:
-                return super().acquire_decimated(soc, **kwargs)
-            return super().acquire(soc, **kwargs)
-        finally:
-            soc.reset_gens()  # reset the tProc
+        if decimated:
+            return super().acquire_decimated(soc, **kwargs)
+        return super().acquire(soc, **kwargs)
 
     def __getattr__(self, name):
         if name == "acc_buf":
@@ -119,6 +118,11 @@ class MyProgram(AcquireMixin):
                 super().__setattr__("acc_buf", None)  # clear local acc_buf
                 return self.proxy.acquire(self, **kwargs)
 
+            if config.ZCU_DRY_RUN:
+                raise NotImplementedError(
+                    "ZCU_DRY_RUN is enabled, but not supported in local mode"
+                )
+
             return self._local_acquire(soc, decimated=False, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
@@ -128,5 +132,10 @@ class MyProgram(AcquireMixin):
             if self.is_use_proxy():
                 super().__setattr__("acc_buf", None)  # clear local acc_buf
                 return self.proxy.acquire_decimated(self, **kwargs)
+
+            if config.ZCU_DRY_RUN:
+                raise NotImplementedError(
+                    "ZCU_DRY_RUN is enabled, but not supported in local mode"
+                )
 
             return self._local_acquire(soc, decimated=True, **kwargs)
