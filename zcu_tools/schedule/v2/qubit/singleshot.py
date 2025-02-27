@@ -18,6 +18,8 @@ def measure_fid_auto(
     progress=False,
     backend: Literal["center", "regression"] = "regression",
 ):
+    cfg = deepcopy(cfg)  # avoid in-place modification
+
     if cfg.setdefault("soft_avgs", 1) != 1:
         warn("soft_avgs will be overwritten to 1 for singleshot measurement")
 
