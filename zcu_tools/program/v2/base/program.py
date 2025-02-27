@@ -1,4 +1,4 @@
-from typing import Any, Dict, override
+from typing import Any, Dict
 
 from qick.asm_v2 import AveragerProgramV2
 from zcu_tools.program.base import MyProgram
@@ -18,13 +18,11 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             **kwargs,
         )
 
-    @override
     def _parse_cfg(self, cfg: Dict[str, Any]):
         self.resetM = make_reset(cfg["dac"]["reset"])
         self.readoutM = make_readout(cfg["dac"]["readout"])
         return super()._parse_cfg(cfg)
 
-    @override
     def _initialize(self, cfg: Dict[str, Any]):
         # add sweep loops
         if "sweep" in cfg:
@@ -35,11 +33,9 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
         self.resetM.init(self)
         self.readoutM.init(self)
 
-    @override
     def acquire(self, soc, **kwargs):
         return super().acquire(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)
 
-    @override
     def acquire_decimated(self, soc, **kwargs):
         return super().acquire_decimated(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)
 

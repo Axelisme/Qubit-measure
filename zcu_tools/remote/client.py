@@ -1,5 +1,5 @@
 import threading
-from typing import Any, Dict, override
+from typing import Any, Dict
 
 import Pyro4
 from tqdm.auto import tqdm
@@ -100,7 +100,6 @@ class ProgramClient(AbsProxy):
         finally:
             prog_s._pyroTimeout = old
 
-    @override
     def test_remote_callback(self) -> bool:
         success_flag = False
 
@@ -133,18 +132,14 @@ class ProgramClient(AbsProxy):
 
         return ret
 
-    @override
     def get_acc_buf(self, prog) -> list:
         return self._remote_call("get_acc_buf", prog.__class__.__name__, timeout=5)
 
-    @override
     def set_early_stop(self) -> None:
         self._remote_call("set_early_stop", timeout=2)
 
-    @override
     def acquire(self, prog, **kwargs):
         return self._remote_acquire(prog, decimated=False, **kwargs)
 
-    @override
     def acquire_decimated(self, prog, **kwargs):
         return self._remote_acquire(prog, decimated=True, **kwargs)
