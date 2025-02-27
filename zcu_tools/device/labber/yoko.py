@@ -89,9 +89,6 @@ class YokoDevControl:
         if hasattr(value, "item"):
             value = value.item()
 
-        if config.YOKO_DRY_RUN:
-            print(f"DRY RUN: Set current to {value}\r")
-
         # if not np.issubdtype(flux, np.floating):
         if not isinstance(value, float):
             raise ValueError(
@@ -103,6 +100,9 @@ class YokoDevControl:
 
         if cls.yoko is None:
             raise RuntimeError("YokoDevControl not initialized")
+
+        if config.YOKO_DRY_RUN:
+            print(f"DRY RUN: Set current to {value}\r")
 
         try:
             cls._set_current_smart(value)

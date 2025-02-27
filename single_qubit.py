@@ -46,6 +46,7 @@ import zcu_tools.config as zc
 
 zc.config.DATA_DRY_RUN = True  # don't save data
 zc.config.YOKO_DRY_RUN = True  # don't run yoko
+zc.config.ZCU_DRY_RUN = True  # don't run zcu
 
 # %% [markdown]
 # # Connect to zcu216
@@ -54,7 +55,7 @@ from zcu_tools.remote import make_proxy
 from zcu_tools.program.base import MyProgram  # noqa: E402
 from zcu_tools.tools import get_ip_address
 
-ns_host = "zcu216"
+ns_host = "zcu216-2"
 ns_port = 8887
 zc.config.LOCAL_IP = get_ip_address("tailscale0")
 zc.config.LOCAL_PORT = 8887
@@ -162,7 +163,7 @@ exp_cfg = {
 
 
 # %%
-cfg = make_cfg(exp_cfg, rounds=10)
+cfg = make_cfg(exp_cfg, rounds=100)
 
 Ts, signals = zs.measure_lookback(soc, soccfg, cfg, progress=True, instant_show=True)
 
@@ -200,7 +201,7 @@ DefaultCfg.set_adc(timeFly=timeFly)
 # pulse_name = "const"
 pulse_name = cfg["dac"]["res_pulse"]["style"]
 
-signal_records = signal_records if "signal_records" in locals() else {}  # noqa
+signal_records = signal_records if "signal_records" in locals() else {}  # type: ignore  # noqa
 signal_records[pulse_name] = (Ts, signals)
 pprint(signal_records.keys())
 # del signal_records
@@ -228,13 +229,13 @@ exp_cfg = {
         # "reset_pulse": "reset_red"
     },
     "adc": {
-        "relax_delay": 0.0,  # us
+        "relax_delay": 0.4,  # us
     },
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(6019, 6022, 401)
-cfg = make_cfg(exp_cfg, reps=10, rounds=100)
+exp_cfg["sweep"] = make_sweep(6019, 6022, 51)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=1000)
 
 fpts, signals = zs.measure_res_freq(soc, soccfg, cfg, instant_show=True)
 
@@ -278,12 +279,12 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = {
-    "gain": make_sweep(0.05, 1.0, 10),
+    "gain": make_sweep(0.05, 1.0, 50),
     # "gain": make_sweep(10, 30000, 10, force_int=True),
-    "freq": make_sweep(6010, 6040, 11),
+    "freq": make_sweep(6010, 6040, 50),
     # "freq": make_sweep(r_f-5, r_f+5, 51),
 }
-cfg = make_cfg(exp_cfg, reps=10, rounds=10)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 fpts, pdrs, signals2D = zs.measure_res_pdr_dep(
     soc, soccfg, cfg, instant_show=True, dynamic_reps=True, gain_ref=0.1
@@ -414,7 +415,7 @@ exp_cfg = {
         # },
     },
     "adc": {
-        "relax_delay": 0.0,  # us
+        "relax_delay": 0.4,  # us
     },
 }
 
@@ -478,7 +479,7 @@ exp_cfg = {
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(0.1, 5.0, 51)
+exp_cfg["sweep"] = make_sweep(0.1, 5.0, 101)
 cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg, instant_show=True)
@@ -520,22 +521,22 @@ exp_cfg = {
             **DefaultCfg.get_pulse("probe_qf"),
             "nqz": 1,
             "ch": 1,
-            "gain": 30000,
+            "gain": 1.0,
             "length": 5,  # us
         },
     },
     "adc": {
-        "relax_delay": 0.0,  # us
+        "relax_delay": 1.6,  # us
     },
 }
 
 # %%
 exp_cfg["sweep"] = {
-    "gain": make_sweep(0.05, 1.0, 40),
+    "gain": make_sweep(0.05, 1.0, 100),
     # "freq": make_sweep(q_f - 25, q_f + 25, 51),
-    "freq": make_sweep(1700, 2000, 50),
+    "freq": make_sweep(1700, 2000, 100),
 }
-cfg = make_cfg(exp_cfg, reps=10, rounds=100)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 fpts, pdrs, signals2D = zs.measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=True)
 
@@ -571,8 +572,8 @@ exp_cfg = {
             "gain": 30000,
             "length": 5,  # us
         },
-        "reset": "pulse",
-        "reset_pulse": "reset_red",
+        # "reset": "pulse",
+        # "reset_pulse": "reset_red",
     },
     "adc": {
         "relax_delay": 0.0,  # us
@@ -587,7 +588,7 @@ exp_cfg["sweep"] = {
 cfg = make_cfg(exp_cfg, reps=10, rounds=10)
 
 fpts, flxs, signals2D = zs.measure_qub_flux_dep(
-    soc, soccfg, cfg, instant_show=True, reset_rf=r_f
+    soc, soccfg, cfg, instant_show=True, reset_rf=None
 )
 
 # %%
@@ -628,13 +629,13 @@ exp_cfg = {
         # "reset_pulse": "reset_red",
     },
     "adc": {
-        "relax_delay": 0.0,  # us
+        "relax_delay": 0.4,  # us
     },
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(0.026, 20.0, 50)
-cfg = make_cfg(exp_cfg, reps=10, rounds=100)
+exp_cfg["sweep"] = make_sweep(0.026, 20.0, 100)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg, instant_show=True)
 
@@ -765,7 +766,7 @@ exp_cfg = {
         # "reset_pulse": "reset_red",
     },
     "adc": {
-        "relax_delay": 0.0,  # us
+        "relax_delay": 0.5,  # us
     },
 }
 
@@ -773,13 +774,13 @@ exp_cfg = {
 exp_cfg["sweep"] = {
     # "gain": make_sweep(500, 15000, step=1000),
     # "freq": make_sweep(6023, 6032, 31),
-    "gain": make_sweep(11000, 16000, step=200),
-    "freq": make_sweep(6027, 6029, 41),
+    "gain": make_sweep(0.0, 1.0, 51),
+    "freq": make_sweep(6027, 6029, 51),
 }
 # cfg = make_cfg(exp_cfg, reps=5000, rounds=1)
-cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
-fpts, pdrs, snr2D = zs.qubit.measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=True)
+pdrs, fpts, snr2D = zs.qubit.measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=True)
 
 # %%
 fpt_max, pdr_max = zf.dispersive2D_analyze(
@@ -828,8 +829,8 @@ exp_cfg = {
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(0.5, 10.0, 51)
-cfg = make_cfg(exp_cfg, reps=100000, rounds=1)
+exp_cfg["sweep"] = make_sweep(1.5, 8.0, 51)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=1)
 
 ro_lens, snrs = zs.qubit.measure_ge_ro_dep(soc, soccfg, cfg, instant_show=True)
 
@@ -878,7 +879,7 @@ exp_cfg = {
 # %%
 timeFly = 0.5
 exp_cfg["sweep"] = make_sweep(timeFly - 0.5, 4.0, 51)
-cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 offsets, snrs = zs.qubit.measure_ge_trig_dep(soc, soccfg, cfg, instant_show=True)
 
@@ -926,7 +927,7 @@ exp_cfg = {
 }
 
 # %%
-cfg = make_cfg(exp_cfg, rounds=10000)
+cfg = make_cfg(exp_cfg, rounds=1000)
 
 Ts, signals_e = zs.measure_lookback(soc, soccfg, cfg, qub_pulse=True)
 
@@ -976,12 +977,12 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = make_sweep(0, 30.0, 100)  # us
-cfg = make_cfg(exp_cfg, reps=100, rounds=10)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 Ts, signals = zs.measure_t2ramsey(soc, soccfg, cfg, instant_show=True)
 
 # %%
-t2f, detune, _, _ = zf.T2fringe_analyze(Ts, signals, max_contrast=True)
+t2f, detune, _, _ = zf.T2fringe_analyze(Ts, signals, max_contrast=True)  # type: ignore
 t2d, _ = zf.T2decay_analyze(Ts, signals, max_contrast=True)
 detune, t2f, t2d
 
@@ -1106,15 +1107,13 @@ try:
         ax[1].clear()
         ax[0].errorbar(xs, T1s, errs, capsize=4, marker="o", markersize=4, ls="none")
         ax[1].plot(Ts, np.abs(signals))
-        dh.update(fig)
+        dh.update(fig)  # type: ignore
     else:
         clear_output()
-except Exception as e:
-    print(e)
-
-df = pd.DataFrame([T1s, errs])
-df.to_csv("T1s.csv")
-fig.savefig("t1overnight")
+finally:
+    df = pd.DataFrame([T1s, errs])
+    df.to_csv("T1s.csv")
+    fig.savefig("t1overnight")  # type: ignore
 
 # %% [markdown]
 # # T2Echo
@@ -1135,7 +1134,7 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = make_sweep(0, 20, 100)
-cfg = make_cfg(exp_cfg, reps=100, rounds=10)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 Ts, signals = zs.measure_t2echo(soc, soccfg, cfg, instant_show=True)
 
@@ -1171,7 +1170,7 @@ exp_cfg = {
 }
 
 # %%
-cfg = make_cfg(exp_cfg, reps=1, shots=5000)
+cfg = make_cfg(exp_cfg, reps=5000)
 
 fid, threshold, angle, signals = zs.measure_fid_auto(soc, soccfg, cfg, plot=True)
 print(f"Optimal fidelity after rotation = {fid:.1%}")
@@ -1180,7 +1179,7 @@ print(f"Optimal fidelity after rotation = {fid:.1%}")
 filename = f"single_shot_rf_{qub_name}"
 save_data(
     filepath=os.path.join(database_path, filename),
-    x_info={"name": "shot", "unit": "point", "values": np.arange(cfg["shots"])},
+    x_info={"name": "shot", "unit": "point", "values": np.arange(cfg["reps"])},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
     comment=make_comment(cfg, f"fide {fid:.1%}"),
