@@ -120,7 +120,7 @@ class AsyncFunc:
 
     def work_loop(self):
         assert self.func is not None, "This method should not be called if func is None"
-        prev_end = time.time() - 2 * self.min_interval
+        prev_start = time.time() - 2 * self.min_interval
         while True:
             self.have_new_job.wait()  # wait for new job
 
@@ -130,7 +130,7 @@ class AsyncFunc:
                 break  # if not acquiring, exit
 
             # check if min_interval is satisfied
-            if time.time() - prev_end < self.min_interval:
+            if time.time() - prev_start < self.min_interval:
                 time.sleep(self.min_interval / 10)
                 continue
 
@@ -142,11 +142,10 @@ class AsyncFunc:
             try:
                 assert job is not None, "Job should not be None"
                 ir, args, kwargs = job
+                prev_start = time.time()
                 self.func(ir, *args, **kwargs)
             except Exception as e:
                 print(f"Error in callback: {e}")
-            finally:
-                prev_end = time.time()
 
     def __call__(self, ir: int, *args, **kwargs):
         # this method may be called concurrently, so we need to protect it

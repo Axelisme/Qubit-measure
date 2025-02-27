@@ -52,6 +52,8 @@ class MyProgram(AcquireMixin):
         self._parse_cfg(cfg)  # parse config first
         super().__init__(soccfg, cfg=cfg, **kwargs)
 
+        self.buf_expired = False
+
     def _parse_cfg(self, cfg: dict):
         # dac and adc config
         self.cfg = cfg
@@ -99,12 +101,11 @@ class MyProgram(AcquireMixin):
     def __getattribute__(self, name):
         if name == "acc_buf":
             # intercept acc_buf to fetch from proxy
-            print("fetch acc_buf from proxy")
             if self.is_use_proxy():
                 # fetch acc_buf from proxy
-                if object.__getattribute__(self, "acc_buf") is None:
+                if self.buf_expired:
                     self.acc_buf = self.proxy.get_acc_buf(self)
-                return object.__getattribute__(self, "acc_buf")
+                    self.buf_expired = False
         return object.__getattribute__(self, name)
 
     def _acquire(self, soc, decimated=False, **kwargs) -> list:
@@ -113,6 +114,7 @@ class MyProgram(AcquireMixin):
 
             if self.is_use_proxy():
                 self.acc_buf = None  # clear local acc_buf
+                self.buf_expired = True
                 return self.proxy.acquire(self, decimated=decimated, **kwargs)
 
             if config.ZCU_DRY_RUN:

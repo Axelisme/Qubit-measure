@@ -1,3 +1,4 @@
+import sys
 from typing import Any, Callable, Dict, Tuple
 
 from numpy import ndarray
@@ -53,8 +54,13 @@ def sweep_hard_template(
         signals: ndarray = result2signals(result)
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
-    except Exception as e:
-        print("Error during measurement:", repr(e))
+    except Exception:
+        print("Error during measurement:")
+        err_msg = sys.exc_info()[1]
+        if hasattr(err_msg, "_pyroTraceback"):
+            print("".join(err_msg._pyroTraceback))
+        else:
+            print(err_msg)
     finally:
         if instant_show:
             viewer.update_show(signals)
