@@ -40,7 +40,7 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
         return super().acquire_decimated(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)
 
 
-class DoNothingProgramV2(MyProgramV2):
+class DoNothingProgram(MyProgramV2):
     def _body(self, _):
         # only acquire
         ro_ch = self.adc["chs"][0]

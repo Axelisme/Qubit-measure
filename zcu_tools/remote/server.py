@@ -1,10 +1,11 @@
 import Pyro4
 import Pyro4.errors
 
+from zcu_tools.config import config
+from zcu_tools.tools import AsyncFunc
+
 from . import pyro  # noqa , 初始化Pyro4.config
 from .wrapper import RemoteCallback, unwrap_callback
-
-from zcu_tools.tools import AsyncFunc
 
 
 class ProgramServer:
@@ -16,6 +17,9 @@ class ProgramServer:
         self.acquiring = False
 
     def _make_prog(self, name: str, cfg: dict):
+        if config.ZCU_DRY_RUN:
+            print("Running zcu program in dry run mode")
+            name = "DoNothingProgram"  # force use DoNothingProgram
         return getattr(self.zp, name)(self.soc, cfg)
 
     def _before_run_program(self, prog, kwargs):
