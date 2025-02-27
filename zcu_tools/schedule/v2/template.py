@@ -40,7 +40,7 @@ def sweep_hard_template(
 
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(*ticks, x_label=xlabel, y_label=ylabel, prog=prog)
+        viewer = InstantShow(*ticks, x_label=xlabel, y_label=ylabel)
 
         def callback(*args):
             nonlocal signals
