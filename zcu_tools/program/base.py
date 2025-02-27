@@ -1,17 +1,39 @@
 import warnings
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
 from qick.qick_asm import AcquireMixin
-from zcu_tools.remote.client import ProgramClient
 from zcu_tools.tools import AsyncFunc
 
 
+class AbsProxy(ABC):
+    @abstractmethod
+    def test_remote_callback(self) -> bool:
+        pass
+
+    @abstractmethod
+    def get_acc_buf(self, prog) -> list:
+        pass
+
+    @abstractmethod
+    def set_early_stop(self) -> None:
+        pass
+
+    @abstractmethod
+    def acquire(self, prog, **kwargs) -> list:
+        pass
+
+    @abstractmethod
+    def acquire_decimated(self, prog, **kwargs) -> list:
+        pass
+
+
 class MyProgram(AcquireMixin):
-    proxy: Optional[ProgramClient] = None
+    proxy: Optional[AbsProxy] = None
 
     @classmethod
-    def init_proxy(cls, proxy: ProgramClient, test=False):
+    def init_proxy(cls, proxy: AbsProxy, test=False):
         if test:
             success = proxy.test_remote_callback()
             if not success:
@@ -60,14 +82,14 @@ class MyProgram(AcquireMixin):
             cur_nqz = nqzs.setdefault(ch, nqz)
             assert cur_nqz == nqz, "Found different nqz on the same channel"
 
-    def set_early_stop(self):
+    def set_early_stop(self) -> None:
         # tell program to return as soon as possible
         if self.is_use_proxy():
             self.proxy.set_early_stop()
         else:
             self.early_stop = True
 
-    def _local_acquire(self, soc, decimated=False, **kwargs):
+    def _local_acquire(self, soc, decimated=False, **kwargs) -> list:
         # non-overridable method, for ProgramServer to call
         if self.is_use_proxy():
             raise RuntimeError("_local_acquire should not be called when using proxy")

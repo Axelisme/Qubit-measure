@@ -1,4 +1,4 @@
-from .program import MyProgramV2
+from .program import DoNothingProgramV2, MyProgramV2
 from .pulse import add_pulse, create_waveform, declare_pulse
 from .readout import AbsReadout, BaseReadout, make_readout
 from .reset import AbsReset, NoneReset, make_reset
@@ -8,6 +8,7 @@ __all__ = [
     "create_waveform",
     "declare_pulse",
     "MyProgramV2",
+    "DoNothingProgramV2",
     "AbsReset",
     "NoneReset",
     "AbsReadout",

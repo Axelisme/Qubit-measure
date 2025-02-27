@@ -1,8 +1,10 @@
 import threading
-from typing import Any, Dict
+from typing import Any, Dict, override
 
 import Pyro4
 from tqdm.auto import tqdm
+
+from zcu_tools.program.base import AbsProxy
 
 from ..config import config
 from .pyro import *  # noqa , initialize Pyro4.config
@@ -10,7 +12,7 @@ from .server import ProgramServer
 from .wrapper import RemoteCallback
 
 
-class ProgramClient:
+class ProgramClient(AbsProxy):
     callback_daemon = None  # lazy init
     daemon_thread = None  # lazy init
 
@@ -42,7 +44,7 @@ class ProgramClient:
             cls.daemon_thread.join()
             cls.daemon_thread = None
 
-    def overwrite_kwargs_for_remote(self, prog, kwargs: Dict[str, Any]):
+    def _overwrite_kwargs_for_remote(self, prog, kwargs: Dict[str, Any]):
         # before send to remote server, override some kwargs
 
         soft_avgs = prog.cfg["soft_avgs"]
@@ -98,6 +100,7 @@ class ProgramClient:
         finally:
             prog_s._pyroTimeout = old
 
+    @override
     def test_remote_callback(self) -> bool:
         success_flag = False
 
@@ -112,7 +115,7 @@ class ProgramClient:
         return success_flag
 
     def _remote_acquire(self, prog, decimated: bool, **kwargs):
-        kwargs, bar = self.overwrite_kwargs_for_remote(prog, kwargs)
+        kwargs, bar = self._overwrite_kwargs_for_remote(prog, kwargs)
 
         with RemoteCallback(self, kwargs["callback"]) as cb:
             kwargs["callback"] = cb
@@ -130,14 +133,18 @@ class ProgramClient:
 
         return ret
 
-    def get_acc_buf(self, prog):
+    @override
+    def get_acc_buf(self, prog) -> list:
         return self._remote_call("get_acc_buf", prog.__class__.__name__, timeout=5)
 
-    def set_early_stop(self):
-        return self._remote_call("set_early_stop", timeout=2)
+    @override
+    def set_early_stop(self) -> None:
+        self._remote_call("set_early_stop", timeout=2)
 
+    @override
     def acquire(self, prog, **kwargs):
         return self._remote_acquire(prog, decimated=False, **kwargs)
 
+    @override
     def acquire_decimated(self, prog, **kwargs):
         return self._remote_acquire(prog, decimated=True, **kwargs)
