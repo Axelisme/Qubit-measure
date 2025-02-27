@@ -1,5 +1,6 @@
 from copy import deepcopy
 from typing import Literal
+from warnings import warn
 
 import numpy as np
 
@@ -17,15 +18,21 @@ def measure_fid_auto(
     progress=False,
     backend: Literal["center", "regression"] = "regression",
 ):
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    if cfg.setdefault("soft_avgs", 1) != 1:
+        warn("soft_avgs will be overwritten to 1 for singleshot measurement")
+
+    if "sweep" in cfg:
+        warn("sweep will be overwritten by singleshot measurement")
 
     qub_pulse = cfg["dac"]["qub_pulse"]
 
     # append ge sweep to inner loop
-    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+    cfg["sweep"] = {"ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2}}
 
     # set with / without pi gain for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     prog = TwoToneProgram(soccfg, deepcopy(cfg))
     prog.acquire(soc, progress=progress)

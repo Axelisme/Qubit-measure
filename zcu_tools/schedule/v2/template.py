@@ -87,7 +87,7 @@ def sweep1D_soft_template(
     signals = init_signals.copy()
     if instant_show:
         viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel)
-        show_period = int(len(xs[0]) / 20 + 0.99)
+        show_period = int(len(xs) / 20 + 0.99)
 
     try:
         for i, x in enumerate(tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)):

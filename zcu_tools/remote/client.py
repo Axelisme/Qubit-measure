@@ -138,8 +138,5 @@ class ProgramClient(AbsProxy):
     def set_early_stop(self) -> None:
         self._remote_call("set_early_stop", timeout=2)
 
-    def acquire(self, prog, **kwargs):
-        return self._remote_acquire(prog, decimated=False, **kwargs)
-
-    def acquire_decimated(self, prog, **kwargs):
-        return self._remote_acquire(prog, decimated=True, **kwargs)
+    def acquire(self, prog, decimated=False, **kwargs):
+        return self._remote_acquire(prog, decimated=decimated, **kwargs)

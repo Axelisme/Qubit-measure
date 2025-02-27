@@ -69,7 +69,7 @@ class ProgramServer:
             raise RuntimeError("No program has been run")
 
         last_name = self.last_prog.__class__.__name__
-        if prog_name != last_name:
+        if prog_name != last_name and last_name != "DoNothingProgram":
             raise ValueError(f"Program name mismatch: {prog_name} != {last_name}")
 
         return self.last_prog.acc_buf

@@ -11,13 +11,13 @@ class T2RamseyProgram(MyProgramV2):
         self.resetM.reset_qubit(self)
 
         # qub pi2 pulse
-        self.pulse(self.qub_pulse["ch"], "pi2_pulse", t=None)
+        self.pulse(self.qub_pulse["ch"], "pi2_pulse", t="auto")
 
         # wait for specified time
-        self.delay_auto(t=self.dac["t2r_length"], ros=False, tag="T2r")
+        self.delay_auto(t=self.dac["t2r_length"], ros=False, tag="t2r_length")
 
         # qub pi2 pulse
-        self.pulse(self.qub_pulse["ch"], "pi2_pulse", t=None)
+        self.pulse(self.qub_pulse["ch"], "pi2_pulse", t="auto")
         self.delay_auto()
 
         # measure

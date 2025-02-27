@@ -41,7 +41,7 @@ def measure_lookback(
         cfg["adc"]["ro_length"] = MAX_LEN
 
         bar = tqdm(
-            total=int(total_len / MAX_LEN + 0.999),
+            total=int((total_len - trig_offset) / MAX_LEN + 0.999),
             desc="Readout",
             smoothing=0,
             disable=not progress,

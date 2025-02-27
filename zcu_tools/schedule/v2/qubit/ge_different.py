@@ -8,7 +8,7 @@ from zcu_tools.schedule.tools import (
     sweep2array,
     sweep2param,
 )
-from zcu_tools.schedule.v2.template import sweep_hard_template
+from zcu_tools.schedule.v2.template import sweep1D_soft_template, sweep_hard_template
 
 
 def calc_snr(avg_d, std_d):
@@ -102,31 +102,32 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     # set with / without pi length for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
-    cfg["adc"]["ro_length"] = sweep2param("gain", cfg["sweep"]["length"])
-    cfg["dac"]["res_pulse"]["length"] = (
-        cfg["adc"]["ro_length"] + cfg["adc"]["trig_offset"] + 1.0
-    )
-
     lens = sweep2array(cfg["sweep"]["length"])  # predicted readout lengths
 
-    prog, snrs = sweep_hard_template(
+    cfg["adc"]["ro_length"] = lens[0]
+    cfg["dac"]["res_pulse"]["length"] = lens[0] + cfg["adc"]["trig_offset"] + 1.0
+
+    del cfg["sweep"]["length"]  # program should not use this
+
+    def updateCfg(cfg, _, ro_len):
+        cfg["adc"]["ro_length"] = ro_len
+        cfg["dac"]["res_pulse"]["length"] = ro_len + cfg["adc"]["trig_offset"] + 1.0
+
+    lens, snrs = sweep1D_soft_template(
         soc,
         soccfg,
         cfg,
         TwoToneProgram,
+        xs=lens,
         init_signals=np.full(len(lens), np.nan, dtype=complex),
-        ticks=(lens,),
         progress=True,
         instant_show=instant_show,
+        updateCfg=updateCfg,
         xlabel="Readout Length (us)",
         ylabel="Amplitude",
-        raw2signals=ge_raw2signals,
         result2signals=ge_result2signals,
         ret_std=True,
     )
-
-    # get the actual readout lengths
-    lens = prog.get_pulse_param("readout_adc", "length", as_array=True)
 
     return lens, snrs
 
@@ -144,31 +145,35 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
     # set with / without pi length for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
-    orig_offset = cfg["adc"]["trig_offset"]
-    cfg["adc"]["trig_offset"] = sweep2param("offset", cfg["sweep"]["offset"])
-    cfg["adc"]["ro_length"] = (
-        cfg["adc"]["ro_length"] - cfg["adc"]["trig_offset"] + orig_offset
-    )
-
     offsets = sweep2array(cfg["sweep"]["offset"])  # predicted trigger offsets
 
-    prog, snrs = sweep_hard_template(
+    del cfg["sweep"]["offset"]  # program should not use this
+
+    orig_offset = cfg["adc"]["trig_offset"]
+
+    def updateCfg(cfg, _, offset):
+        cfg["adc"]["trig_offset"] = offset
+        cfg["adc"]["ro_length"] = (
+            cfg["adc"]["ro_length"] - cfg["adc"]["trig_offset"] + orig_offset
+        )
+
+        if cfg["adc"]["ro_length"] < 0:
+            raise ValueError("Readout length cannot be negative")
+
+    offsets, snrs = sweep1D_soft_template(
         soc,
         soccfg,
         cfg,
         TwoToneProgram,
+        xs=offsets,
         init_signals=np.full(len(offsets), np.nan, dtype=complex),
-        ticks=(offsets,),
         progress=True,
         instant_show=instant_show,
+        updateCfg=updateCfg,
         xlabel="Trigger Offset (us)",
         ylabel="Amplitude",
-        raw2signals=ge_raw2signals,
         result2signals=ge_result2signals,
         ret_std=True,
     )
-
-    # get the actual trigger offsets
-    offsets = prog.get_time_param("trig_offset", "t", as_array=True)
 
     return offsets, snrs

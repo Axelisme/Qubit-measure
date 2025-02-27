@@ -8,6 +8,9 @@ from .general import figsize
 def dispersive1D_analyze(xs, snrs, xlabel=None):
     snrs = np.abs(snrs)
 
+    # fill NaNs with zeros
+    snrs[np.isnan(snrs)] = 0
+
     snrs = gaussian_filter1d(snrs, 1)
 
     max_id = np.argmax(snrs)
@@ -26,14 +29,15 @@ def dispersive1D_analyze(xs, snrs, xlabel=None):
 
 
 def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
-    abssnr2D = np.abs(snr2D)
+    snr2D = np.abs(snr2D)
 
-    snr2D = gaussian_filter(abssnr2D, 1)
-    mask = np.isnan(snr2D)
-    snr2D[mask] = abssnr2D[mask]
+    # fill NaNs with zeros
+    snr2D[np.isnan(snr2D)] = 0
 
-    x_max_id = np.nanargmax(np.nanmax(snr2D, axis=0))
-    y_max_id = np.nanargmax(np.nanmax(snr2D, axis=1))
+    snr2D = gaussian_filter(snr2D, 1)
+
+    x_max_id = np.argmax(np.max(snr2D, axis=0))
+    y_max_id = np.argmax(np.max(snr2D, axis=1))
     x_max = xs[x_max_id]
     y_max = ys[y_max_id]
 

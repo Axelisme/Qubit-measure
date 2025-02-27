@@ -22,11 +22,7 @@ class AbsProxy(ABC):
         pass
 
     @abstractmethod
-    def acquire(self, prog, **kwargs) -> list:
-        pass
-
-    @abstractmethod
-    def acquire_decimated(self, prog, **kwargs) -> list:
+    def acquire(self, prog, decimated, **kwargs) -> list:
         pass
 
 
@@ -100,42 +96,34 @@ class MyProgram(AcquireMixin):
             return super().acquire_decimated(soc, **kwargs)
         return super().acquire(soc, **kwargs)
 
-    def __getattr__(self, name):
+    def __getattribute__(self, name):
         if name == "acc_buf":
             # intercept acc_buf to fetch from proxy
+            print("fetch acc_buf from proxy")
             if self.is_use_proxy():
                 # fetch acc_buf from proxy
-                if super().__getattr__("acc_buf") is None:
-                    super().__setattr__("acc_buf", self.proxy.get_acc_buf(self))
-                return super().__getattr__("acc_buf")
-        return super().__getattr__(name)
+                if object.__getattribute__(self, "acc_buf") is None:
+                    self.acc_buf = self.proxy.get_acc_buf(self)
+                return object.__getattribute__(self, "acc_buf")
+        return object.__getattribute__(self, name)
+
+    def _acquire(self, soc, decimated=False, **kwargs) -> list:
+        with AsyncFunc(kwargs.get("callback")) as cb:
+            kwargs["callback"] = cb
+
+            if self.is_use_proxy():
+                self.acc_buf = None  # clear local acc_buf
+                return self.proxy.acquire(self, decimated=decimated, **kwargs)
+
+            if config.ZCU_DRY_RUN:
+                raise NotImplementedError(
+                    "ZCU_DRY_RUN is enabled, but not supported in local mode"
+                )
+
+            return self._local_acquire(soc, decimated=decimated, **kwargs)
 
     def acquire(self, soc, **kwargs):
-        with AsyncFunc(kwargs.get("callback")) as cb:
-            kwargs["callback"] = cb
-
-            if self.is_use_proxy():
-                super().__setattr__("acc_buf", None)  # clear local acc_buf
-                return self.proxy.acquire(self, **kwargs)
-
-            if config.ZCU_DRY_RUN:
-                raise NotImplementedError(
-                    "ZCU_DRY_RUN is enabled, but not supported in local mode"
-                )
-
-            return self._local_acquire(soc, decimated=False, **kwargs)
+        return self._acquire(soc, decimated=False, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs):
-        with AsyncFunc(kwargs.get("callback")) as cb:
-            kwargs["callback"] = cb
-
-            if self.is_use_proxy():
-                super().__setattr__("acc_buf", None)  # clear local acc_buf
-                return self.proxy.acquire_decimated(self, **kwargs)
-
-            if config.ZCU_DRY_RUN:
-                raise NotImplementedError(
-                    "ZCU_DRY_RUN is enabled, but not supported in local mode"
-                )
-
-            return self._local_acquire(soc, decimated=True, **kwargs)
+        return self._acquire(soc, decimated=True, **kwargs)
