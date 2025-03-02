@@ -46,7 +46,7 @@ import zcu_tools.config as zc
 
 zc.config.DATA_DRY_RUN = True  # don't save data
 zc.config.YOKO_DRY_RUN = True  # don't run yoko
-zc.config.ZCU_DRY_RUN = True  # don't run zcu
+# zc.config.ZCU_DRY_RUN = True  # don't run zcu
 
 # %% [markdown]
 # # Connect to zcu216
@@ -229,13 +229,13 @@ exp_cfg = {
         # "reset_pulse": "reset_red"
     },
     "adc": {
-        "relax_delay": 0.4,  # us
+        "relax_delay": 0.8,  # us
     },
 }
 
 # %%
 exp_cfg["sweep"] = make_sweep(6019, 6022, 51)
-cfg = make_cfg(exp_cfg, reps=1000, rounds=1000)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 fpts, signals = zs.measure_res_freq(soc, soccfg, cfg, instant_show=True)
 
@@ -281,13 +281,13 @@ exp_cfg = {
 exp_cfg["sweep"] = {
     "gain": make_sweep(0.05, 1.0, 50),
     # "gain": make_sweep(10, 30000, 10, force_int=True),
-    "freq": make_sweep(6010, 6040, 50),
+    "freq": make_sweep(6030, 6100, 50),
     # "freq": make_sweep(r_f-5, r_f+5, 51),
 }
-cfg = make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, reps=100, rounds=10)
 
 fpts, pdrs, signals2D = zs.measure_res_pdr_dep(
-    soc, soccfg, cfg, instant_show=True, dynamic_reps=True, gain_ref=0.1
+    soc, soccfg, cfg, instant_show=True, dynamic_reps=False, gain_ref=0.1
 )
 
 
@@ -532,9 +532,9 @@ exp_cfg = {
 
 # %%
 exp_cfg["sweep"] = {
-    "gain": make_sweep(0.05, 1.0, 100),
+    "gain": make_sweep(0.05, 1.0, 10),
     # "freq": make_sweep(q_f - 25, q_f + 25, 51),
-    "freq": make_sweep(1700, 2000, 100),
+    "freq": make_sweep(1700, 2000, 10),
 }
 cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
@@ -700,7 +700,7 @@ exp_cfg = {
 }
 
 # %%
-exp_cfg["sweep"] = make_sweep(0, 30000, step=1000)
+exp_cfg["sweep"] = make_sweep(0.0, 1.0, 100)
 cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 pdrs, signals = zs.measure_amprabi(soc, soccfg, cfg, instant_show=True)
@@ -757,6 +757,7 @@ exp_cfg = {
         "qub_pulse": "pi_amp",
         # "qub_pulse": "reset_red",
         # "qub_pulse": {
+
         #     **DefaultCfg.get_pulse('probe_qf'),
         #     "freq": q_f,
         #     "gain": 30000,
@@ -766,21 +767,22 @@ exp_cfg = {
         # "reset_pulse": "reset_red",
     },
     "adc": {
-        "relax_delay": 0.5,  # us
+        "relax_delay": 0.0,  # us
     },
 }
 
 # %%
 exp_cfg["sweep"] = {
-    # "gain": make_sweep(500, 15000, step=1000),
-    # "freq": make_sweep(6023, 6032, 31),
-    "gain": make_sweep(0.0, 1.0, 51),
-    "freq": make_sweep(6027, 6029, 51),
+    "gain": make_sweep(0.0, 1.0, 31),
+    "freq": make_sweep(7020, 7029, 31),
 }
 # cfg = make_cfg(exp_cfg, reps=5000, rounds=1)
-cfg = make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = make_cfg(exp_cfg, reps=10, rounds=100)
 
 pdrs, fpts, snr2D = zs.qubit.measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=True)
+
+# %%
+# ret, records = zs.qubit.ge_different.measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=True, method='Nelder-Mead')
 
 # %%
 fpt_max, pdr_max = zf.dispersive2D_analyze(
