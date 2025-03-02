@@ -7,9 +7,9 @@ requests
 h5py
 pandas
 dill
+scikit-learn
 
 # for fitting
-# scikit-learn
 # scqubits
 
 # for labber

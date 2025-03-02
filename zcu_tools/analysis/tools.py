@@ -45,7 +45,7 @@ def minus_mean(signals: np.ndarray, axis=None) -> np.ndarray:
     if axis is None:
         signals -= np.nanmean(signals)
 
-    else:
+    elif isinstance(axis, int):
         _signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         # minus the mean
@@ -53,6 +53,8 @@ def minus_mean(signals: np.ndarray, axis=None) -> np.ndarray:
         _signals[:, where] -= np.nanmean(_signals[:, where], axis=0, keepdims=True)
 
         signals = np.swapaxes(_signals, 0, axis)  # move the axis back
+    else:
+        raise ValueError(f"Invalid axis: {axis} for minus_mean")
 
     return signals
 
@@ -68,13 +70,15 @@ def rescale(signals: np.ndarray, axis=None) -> np.ndarray:
         if np.sum(~nan_mask) > 1:  # at least 2 non-nan values
             signals /= np.nanstd(signals)
 
-    else:
+    elif isinstance(axis, int):
         _signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         where = np.sum(~np.isnan(_signals), axis=0) > 1
         _signals[:, where] /= np.nanstd(_signals[:, where], axis=0, keepdims=True)
 
         signals = np.swapaxes(_signals, 0, axis)  # move the axis back
+    else:
+        raise ValueError(f"Invalid axis: {axis} for rescale")
 
     return signals
 

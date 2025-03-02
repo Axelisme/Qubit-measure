@@ -1,6 +1,7 @@
 import sys
 from typing import Any, Callable, Dict, Tuple
 
+import numpy as np
 from numpy import ndarray
 from tqdm.auto import tqdm
 
@@ -9,12 +10,12 @@ from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
 
 
-def default_raw2signals(ir, sum_d, *_) -> ndarray:
-    return sum_d[0][0].dot([1, 1j]) / (ir + 1)
-
-
 def default_result2signals(IQlist) -> ndarray:
     return IQlist[0][0].dot([1, 1j])
+
+
+def default_signals2real(signals) -> ndarray:
+    return np.abs(signals)
 
 
 def sweep_hard_template(
@@ -29,8 +30,8 @@ def sweep_hard_template(
     instant_show: bool,
     xlabel: str,
     ylabel: str,
-    raw2signals: Callable = default_raw2signals,
     result2signals: Callable = default_result2signals,
+    signals2real: Callable = default_signals2real,
     **kwargs,
 ) -> Tuple[AveragerProgramV2, ndarray]:
     # set flux first
@@ -47,10 +48,18 @@ def sweep_hard_template(
         else:
             raise ValueError("ticks should be 1D or 2D")
 
-        def callback(*args):
+        def callback(ir, *args):
             nonlocal signals
-            signals = raw2signals(*args)
-            viewer.update_show(signals)
+            if len(args) == 1:
+                (sum_d,) = args
+                avg_d = [d / (ir + 1) for d in sum_d]
+                signals = result2signals(avg_d)
+            else:
+                sum_d, sum2_d = args
+                avg_d = [d / (ir + 1) for d in sum_d]
+                std_d = [np.sqrt(d2 / (ir + 1) - d**2) for d, d2 in zip(avg_d, sum2_d)]
+                signals = result2signals((avg_d, std_d))
+            viewer.update_show(signals2real(signals))
     else:
         callback = None
 
@@ -70,7 +79,8 @@ def sweep_hard_template(
             print(err_msg)
     finally:
         if instant_show:
-            viewer.update_show(signals)
+            amps = signals2real(signals)
+            viewer.update_show(amps)
             viewer.close_show()
 
     return prog, signals
@@ -90,6 +100,7 @@ def sweep1D_soft_template(
     xlabel: str,
     ylabel: str,
     result2signals: Callable = default_result2signals,
+    signals2real: Callable = default_signals2real,
     **kwargs,
 ) -> Tuple[ndarray, ndarray]:
     # set flux first
@@ -112,7 +123,7 @@ def sweep1D_soft_template(
             signals[i] = result2signals(result)
 
             if instant_show and i % show_period == 0:
-                viewer.update_show(signals)
+                viewer.update_show(signals2real(signals))
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -120,7 +131,7 @@ def sweep1D_soft_template(
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(signals)
+            viewer.update_show(signals2real(signals))
             viewer.close_show()
 
     return xs, signals

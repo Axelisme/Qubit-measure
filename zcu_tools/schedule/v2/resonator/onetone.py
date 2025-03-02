@@ -27,6 +27,7 @@ def measure_res_freq(soc, soccfg, cfg, progress=True, instant_show=False):
         instant_show=instant_show,
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
+        signals2real=np.abs,
     )
 
     # get the actual frequency points

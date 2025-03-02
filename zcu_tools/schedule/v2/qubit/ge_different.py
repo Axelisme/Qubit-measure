@@ -3,6 +3,7 @@ import numpy as np
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
+from zcu_tools.schedule.instant_show import InstantShowScatter
 from zcu_tools.schedule.tools import (
     format_sweep1D,
     map2adcfreq,
@@ -23,22 +24,12 @@ def calc_snr(avg_d, std_d):
     return contrast / noise
 
 
-def ge_raw2signals(ir, sum_d, sum2_d):
-    sum_d = sum_d[0][0].dot([1, 1j])  # (*sweep, ge)
-    sum2_d = sum2_d[0][0].dot([1, 1j])  # (*sweep, ge)
-
-    avg_d = sum_d / (ir + 1)
-    std_d = np.sqrt(sum2_d / (ir + 1) - avg_d**2)
-
-    return calc_snr(avg_d, std_d)
-
-
 def ge_result2signals(result):
     avg_d, std_d = result
     avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep, ge)
     std_d = std_d[0][0].dot([1, 1j])  # (*sweep, ge)
 
-    return calc_snr(avg_d, std_d)
+    return calc_snr(avg_d, std_d).T
 
 
 def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
@@ -78,7 +69,6 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
         instant_show=instant_show,
         xlabel="Frequency (MHz)",
         ylabel="Readout Gain",
-        raw2signals=ge_raw2signals,
         result2signals=ge_result2signals,
         ret_std=True,
     )
@@ -109,6 +99,8 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=False, method="Nelder
 
     from scipy.optimize import minimize
 
+    viewer = InstantShowScatter("Readout Gain", "Frequency (MHz)", title="SNR")
+
     records = []
 
     def loss_func(point, cfg):
@@ -122,15 +114,27 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=False, method="Nelder
         result = prog.acquire(soc, progress=False, ret_std=True)
         snr = ge_result2signals(result)
 
-        snr += 0.1 * pdr - 0.1 * (fpt - fpts.mean()) ** 2  # for testing
+        # snr = 1 - (
+        #     1e-1 * ((2 * pdr - pdrs[0] - pdrs[-1]) / (pdrs[-1] - pdrs[0])) ** 2
+        #     + 1e-1 * ((2 * fpt - fpts[0] - fpts[-1]) / (fpts[-1] - fpts[0])) ** 2
+        # ) # fake loss
 
         records.append((pdr, fpt, snr))
-        print(f"pdr: {pdr:.3e}, fpt: {fpt:.3e}, snr: {np.abs(snr):.3e}")
+
+        viewer.append_spot(pdr, fpt, np.abs(snr), title=f"SNR: {np.abs(snr):.3e}")
 
         return -np.abs(snr)
 
     # set again in case of change
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+
+    options = dict(maxiter=(len(pdrs) * len(fpts)) // 5)
+
+    if method in ["Nelder-Mead", "Powell"]:
+        options["xatol"] = min(pdrs[1] - pdrs[0], fpts[1] - fpts[0])
+    elif method in ["L-BFGS-B"]:
+        options["ftol"] = 1e-3
+        options["maxfun"] = (len(pdrs) * len(fpts)) // 5
 
     init_point = (0.5 * (pdrs[0] + pdrs[-1]), 0.5 * (fpts[0] + fpts[-1]))
     res = minimize(
@@ -139,12 +143,10 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=False, method="Nelder
         args=(cfg,),
         method=method,
         bounds=[(pdrs[0], pdrs[-1]), (fpts[0], fpts[-1])],
-        options={
-            "maxfun": (len(pdrs) * len(fpts)) // 10,  # 10% of total points
-            "xatol": min(pdrs[1] - pdrs[0], fpts[1] - fpts[0]),
-            # "disp": True,
-        },
+        options=options,
     )
+
+    viewer.close_show()
 
     return res.x, records
 
