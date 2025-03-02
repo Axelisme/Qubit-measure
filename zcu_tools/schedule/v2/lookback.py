@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow
+from zcu_tools.schedule.instant_show import InstantShow1D
 
 
 def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
@@ -49,7 +49,7 @@ def measure_lookback(
 
         if instant_show:
             total_num = soccfg.us2cycles(total_len, ro_ch=cfg["adc"]["chs"][0])
-            viewer = InstantShow(
+            viewer = InstantShow1D(
                 np.linspace(0, total_len, total_num, endpoint=False),
                 x_label="Time (us)",
                 y_label="Amplitude",

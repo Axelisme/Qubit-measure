@@ -2,6 +2,7 @@ import numpy as np
 
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
+from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.tools import (
     format_sweep1D,
     map2adcfreq,
@@ -87,6 +88,65 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     fpts = prog.get_pulse_param("res_pulse", "freq", as_array=True)
 
     return pdrs, fpts, snr2D  # (pdrs, fpts)
+
+
+def measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=False, method="Nelder-Mead"):
+    cfg = make_cfg(cfg)  # prevent in-place modification
+
+    res_pulse = cfg["dac"]["res_pulse"]
+    qub_pulse = cfg["dac"]["qub_pulse"]
+
+    # append ge sweep to inner loop
+    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+    qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+
+    pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
+    fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+    fpts = map2adcfreq(soc, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
+
+    del cfg["sweep"]["gain"]  # program should not use this
+    del cfg["sweep"]["freq"]  # program should not use this
+
+    from scipy.optimize import minimize
+
+    records = []
+
+    def loss_func(point, cfg):
+        cfg = make_cfg(cfg)  # prevent in-place modification
+
+        pdr, fpt = point
+        cfg["dac"]["res_pulse"]["gain"] = pdr
+        cfg["dac"]["res_pulse"]["freq"] = fpt
+
+        prog = TwoToneProgram(soccfg, cfg)
+        result = prog.acquire(soc, progress=False, ret_std=True)
+        snr = ge_result2signals(result)
+
+        snr += 0.1 * pdr - 0.1 * (fpt - fpts.mean()) ** 2  # for testing
+
+        records.append((pdr, fpt, snr))
+        print(f"pdr: {pdr:.3e}, fpt: {fpt:.3e}, snr: {np.abs(snr):.3e}")
+
+        return -np.abs(snr)
+
+    # set again in case of change
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+
+    init_point = (0.5 * (pdrs[0] + pdrs[-1]), 0.5 * (fpts[0] + fpts[-1]))
+    res = minimize(
+        loss_func,
+        init_point,
+        args=(cfg,),
+        method=method,
+        bounds=[(pdrs[0], pdrs[-1]), (fpts[0], fpts[-1])],
+        options={
+            "maxfun": (len(pdrs) * len(fpts)) // 10,  # 10% of total points
+            "xatol": min(pdrs[1] - pdrs[0], fpts[1] - fpts[0]),
+            # "disp": True,
+        },
+    )
+
+    return res.x, records
 
 
 def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):

@@ -5,7 +5,7 @@ import numpy as np
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import PowerDepProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow
+from zcu_tools.schedule.instant_show import InstantShow2D
 from zcu_tools.schedule.tools import sweep2array
 
 
@@ -21,7 +21,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
 
     signals2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
     if instant_show:
-        viewer = InstantShow(
+        viewer = InstantShow2D(
             pdrs, fpts, x_label="Power (a.u.)", y_label="Frequency (MHz)"
         )
 

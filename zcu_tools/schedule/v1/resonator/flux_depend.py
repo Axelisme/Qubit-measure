@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow
+from zcu_tools.schedule.instant_show import InstantShow2D
 from zcu_tools.schedule.tools import map2adcfreq, sweep2array
 
 
@@ -32,7 +32,7 @@ def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):
     freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
     if instant_show:
-        viewer = InstantShow(
+        viewer = InstantShow2D(
             flxs, fpts, x_label="Flux (a.u.)", y_label="Frequency (MHz)"
         )
 

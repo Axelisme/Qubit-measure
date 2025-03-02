@@ -3,10 +3,9 @@ from typing import Any, Callable, Dict
 from numpy import ndarray
 from tqdm.auto import tqdm
 
-
 from qick.averager_program import AveragerProgram, RAveragerProgram
-from zcu_tools.schedule.instant_show import InstantShow
 from zcu_tools.schedule.flux import set_flux
+from zcu_tools.schedule.instant_show import InstantShow1D
 
 
 def sweep1D_hard_template(
@@ -28,7 +27,7 @@ def sweep1D_hard_template(
     xs = init_xs.copy()
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel, prog=prog)
+        viewer = InstantShow1D(xs, x_label=xlabel, y_label=ylabel, prog=prog)
 
         def callback(ir, sum_d):
             nonlocal signals
@@ -73,7 +72,7 @@ def sweep1D_soft_template(
 ):
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel)
+        viewer = InstantShow1D(xs, x_label=xlabel, y_label=ylabel)
         show_period = int(len(xs[0]) / 20 + 0.99)
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])

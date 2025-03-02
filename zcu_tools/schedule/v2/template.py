@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 
 from qick.asm_v2 import AveragerProgramV2
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow
+from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
 
 
 def default_raw2signals(ir, sum_d, *_) -> ndarray:
@@ -36,11 +36,16 @@ def sweep_hard_template(
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
-
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(*ticks, x_label=xlabel, y_label=ylabel)
+        if len(ticks) == 1:
+            xs = ticks[0]
+            viewer = InstantShow1D(xs, xlabel, ylabel)
+        elif len(ticks) == 2:
+            xs, ys = ticks
+            viewer = InstantShow2D(xs, ys, xlabel, ylabel)
+        else:
+            raise ValueError("ticks should be 1D or 2D")
 
         def callback(*args):
             nonlocal signals
@@ -48,6 +53,8 @@ def sweep_hard_template(
             viewer.update_show(signals)
     else:
         callback = None
+
+    prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
 
     try:
         result = prog.acquire(soc, progress=progress, callback=callback, **kwargs)
@@ -88,11 +95,9 @@ def sweep1D_soft_template(
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
-
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow(xs, x_label=xlabel, y_label=ylabel)
+        viewer = InstantShow1D(xs, x_label=xlabel, y_label=ylabel)
         show_period = int(len(xs) / 20 + 0.99)
 
     try:
@@ -102,6 +107,7 @@ def sweep1D_soft_template(
             # set again in case of change
             set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
+            prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
             result = prog.acquire(soc, progress=False, **kwargs)
             signals[i] = result2signals(result)
 

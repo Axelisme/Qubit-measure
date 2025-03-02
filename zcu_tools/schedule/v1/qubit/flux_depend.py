@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow
+from zcu_tools.schedule.instant_show import InstantShow2D
 from zcu_tools.schedule.tools import sweep2array
 
 
@@ -33,7 +33,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
     flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
     avgs_tqdm = tqdm(total=cfg["soft_avgs"], desc="Soft_avgs", smoothing=0)
     if instant_show:
-        viewer = InstantShow(
+        viewer = InstantShow2D(
             flxs, fpts, x_label="Flux (a.u.)", y_label="Frequency (MHz)"
         )
 
@@ -61,9 +61,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
                 else RFreqTwoToneProgramWithRedReset
             )
             prog = prog_cls(soccfg, make_cfg(cfg))
-            fpts, avgi, avgq = prog.acquire(
-                soc, progress=False, callback=callback
-            )
+            fpts, avgi, avgq = prog.acquire(soc, progress=False, callback=callback)
             signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
 
             avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)

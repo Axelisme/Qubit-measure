@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow
+from zcu_tools.schedule.instant_show import InstantShow2D
 from zcu_tools.schedule.tools import map2adcfreq, sweep2array
 
 
@@ -33,7 +33,7 @@ def measure_res_pdr_dep(
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     if instant_show:
-        viewer = InstantShow(
+        viewer = InstantShow2D(
             fpts, pdrs, x_label="Frequency (MHz)", y_label="Power (a.u.)"
         )
 

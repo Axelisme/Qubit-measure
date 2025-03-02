@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow
+from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
 from zcu_tools.schedule.tools import check_time_sweep, map2adcfreq, sweep2array
 
 
@@ -48,7 +48,7 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     if instant_show:
-        viewer = InstantShow(
+        viewer = InstantShow2D(
             fpts, pdrs, x_label="Frequency (MHz)", y_label="Power (a.u.)"
         )
 
@@ -101,7 +101,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 
     if instant_show:
         show_period = int(len(ro_lens) / 20 + 0.99999)
-        viewer = InstantShow(
+        viewer = InstantShow1D(
             ro_lens, x_label="Readout Length (us)", y_label="SNR (a.u.)"
         )
 
@@ -141,7 +141,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
     if instant_show:
         show_period = int(len(offsets) / 20 + 0.99999)
-        viewer = InstantShow(
+        viewer = InstantShow1D(
             offsets, x_label="Trigger Offset (us)", y_label="SNR (a.u.)"
         )
 
