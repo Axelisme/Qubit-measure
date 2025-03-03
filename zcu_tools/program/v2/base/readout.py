@@ -44,5 +44,5 @@ class BaseReadout(AbsReadout):
 
         prog.send_readoutconfig(ro_ch, "readout_adc", t=0)
         prog.pulse(prog.res_pulse["ch"], "res_pulse", t="auto")  # pyright: ignore[reportArgumentType]
-        prog.delay_auto(t=prog.adc["trig_offset"], ros=False, tag="trig_offset")
+        prog.delay_auto(t=prog.adc["trig_offset"], gens=False, tag="trig_offset")
         prog.trigger([ro_ch], t=None)
