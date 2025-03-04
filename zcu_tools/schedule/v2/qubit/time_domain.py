@@ -1,3 +1,5 @@
+# type: ignore
+
 from typing import Tuple
 
 import numpy as np
@@ -84,7 +86,7 @@ def measure_t2echo(
         prog, signals = sweep_hard_template(*args, ticks=(ts,), **kwargs)
 
         # get the actual times
-        ts: np.ndarray = 2 * prog.get_time_param("t2e_half", "t", as_array=True)
+        ts: np.ndarray = 2 * prog.get_time_param("t2e_half", "t", as_array=True)  # type: ignore
     else:
         raise ValueError("Invalid sweep configuration")
 

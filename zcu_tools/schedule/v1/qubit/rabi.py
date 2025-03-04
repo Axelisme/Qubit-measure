@@ -2,9 +2,14 @@ from copy import deepcopy
 
 import numpy as np
 
+from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import RGainTwoToneProgram, TwoToneProgram
 from zcu_tools.schedule.tools import sweep2array
 from zcu_tools.schedule.v1.template import sweep1D_hard_template, sweep1D_soft_template
+
+
+def signals2real(signals: np.ndarray) -> np.ndarray:
+    return np.abs(minus_background(signals))
 
 
 def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
@@ -29,6 +34,7 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
         updateCfg=update_cfg,
         xlabel="Length (us)",
         ylabel="Amplitude",
+        signals2real=signals2real,
     )
 
     return lens, signals
@@ -50,6 +56,7 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False):
         instant_show=instant_show,
         xlabel="Pulse Power (a.u.)",
         ylabel="Amplitude",
+        signals2real=signals2real,
     )
 
     return pdrs, signals

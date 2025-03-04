@@ -4,10 +4,15 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
+from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow2D
 from zcu_tools.schedule.tools import sweep2array
+
+
+def signal2real(signals):
+    return np.abs(minus_background(signals, axis=1))
 
 
 def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
@@ -53,7 +58,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
                 avgs_tqdm.refresh()
                 if instant_show:
                     _signals2D[i] = sum_d[0][0].dot([1, 1j]) / (ir + 1)
-                    viewer.update_show(_signals2D.T)
+                    viewer.update_show(signal2real(_signals2D))
 
             prog_cls = (
                 RFreqTwoToneProgram
@@ -68,7 +73,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
             avgs_tqdm.refresh()
 
             if instant_show:
-                viewer.update_show(signals2D.T, ticks=(flxs, fpts))
+                viewer.update_show(signal2real(signals2D), (flxs, fpts))
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -76,7 +81,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(signals2D.T, ticks=(flxs, fpts))
+            viewer.update_show(signal2real(signals2D), (flxs, fpts))
             viewer.close_show()
         flux_tqdm.close()
         avgs_tqdm.close()

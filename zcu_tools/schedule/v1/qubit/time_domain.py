@@ -1,8 +1,13 @@
 import numpy as np
 
+from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import T1Program, T2EchoProgram, T2RamseyProgram
 from zcu_tools.schedule.tools import check_time_sweep, sweep2array
 from zcu_tools.schedule.v1.template import sweep1D_hard_template
+
+
+def signals2real(signals: np.ndarray) -> np.ndarray:
+    return np.abs(minus_background(signals))
 
 
 def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
@@ -21,6 +26,7 @@ def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
         instant_show=instant_show,
         xlabel="Time (us)",
         ylabel="Amplitude",
+        signals2real=signals2real,
     )
 
     return ts, signals
@@ -41,6 +47,7 @@ def measure_t1(soc, soccfg, cfg, instant_show=False):
         instant_show=instant_show,
         xlabel="Time (us)",
         ylabel="Amplitude",
+        signals2real=signals2real,
     )
 
     return ts, signals
@@ -61,6 +68,7 @@ def measure_t2echo(soc, soccfg, cfg, instant_show=False):
         instant_show=instant_show,
         xlabel="Time (us)",
         ylabel="Amplitude",
+        signals2real=signals2real,
     )
 
     return 2 * ts, signals

@@ -49,7 +49,11 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
 
     if instant_show:
         viewer = InstantShow2D(
-            fpts, pdrs, x_label="Frequency (MHz)", y_label="Power (a.u.)"
+            fpts,
+            pdrs,
+            x_label="Frequency (MHz)",
+            y_label="Power (a.u.)",
+            title="Maximum SNR: 0.00",
         )
 
     snr2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
@@ -69,8 +73,10 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
                 freq_tqdm.update()
 
             if instant_show:
-                viewer.ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")
-                viewer.update_show(snr2D)
+                abs_snr = np.abs(snr2D)
+                viewer.update_show(
+                    abs_snr, title=f"Maximum SNR: {np.nanmax(abs_snr):.2f}"
+                )
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -78,8 +84,8 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.ax.set_title(f"Maximum SNR: {np.nanmax(np.abs(snr2D)):.2f}")
-            viewer.update_show(snr2D)
+            abs_snr = np.abs(snr2D)
+            viewer.update_show(abs_snr, title=f"Maximum SNR: {np.nanmax(abs_snr):.2f}")
             viewer.close_show()
 
     return pdrs, fpts, snr2D  # (pdrs, freqs)
@@ -114,7 +120,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
             snrs[i] = measure_one(soc, soccfg, cfg)
 
             if instant_show and i % show_period == 0:
-                viewer.update_show(snrs)
+                viewer.update_show(np.abs(snrs))
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -122,7 +128,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(snrs)
+            viewer.update_show(np.abs(snrs))
             viewer.close_show()
 
     return ro_lens, snrs
@@ -154,7 +160,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
             snrs[i] = measure_one(soc, soccfg, cfg)
 
             if instant_show and i % show_period == 0:
-                viewer.update_show(snrs)
+                viewer.update_show(np.abs(snrs))
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")
@@ -162,7 +168,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(snrs)
+            viewer.update_show(np.abs(snrs))
             viewer.close_show()
 
     return offsets, snrs

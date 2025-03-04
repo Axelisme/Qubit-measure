@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 
 
@@ -36,6 +38,67 @@ def rotate2real(signals: np.ndarray):
     return rot_signals
 
 
+def minus_background(signals: np.ndarray, axis=None, method="median") -> np.ndarray:
+    """
+    Subtract the background from the signals
+
+    Parameters
+    ----------
+    signals : np.ndarray
+        The signals to process, can be 1-D or 2-D
+    axis : int, None
+        The axis to process, if None, process the whole signals
+    method : str
+        The method to calculate the background, 'median' or 'mean'
+
+    Returns
+    -------
+    np.ndarray
+        The signals with background subtracted
+    """
+
+    if method == "median":
+        return minus_median(signals, axis)
+    elif method == "mean":
+        return minus_mean(signals, axis)
+    else:
+        raise ValueError(f"Invalid method: {method}")
+
+
+def minus_median(signals: np.ndarray, axis=None) -> np.ndarray:
+    signals = signals.copy()  # prevent in-place modification
+
+    if np.all(np.isnan(signals)):
+        return signals
+
+    if axis is None:
+        if signals.dtype == complex:  # perform on real & imag part
+            signals.real -= np.nanmedian(signals.real)
+            signals.imag -= np.nanmedian(signals.imag)
+        else:
+            signals -= np.nanmedian(signals)
+
+    elif isinstance(axis, int):
+        signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
+
+        # minus the median
+        val_mask = ~np.all(np.isnan(signals), axis=0)
+        val_signals = signals[:, val_mask]
+        if val_signals.dtype == complex:
+            val_signals.real -= np.nanmedian(val_signals.real, axis=0, keepdims=True)
+            val_signals.imag -= np.nanmedian(val_signals.imag, axis=0, keepdims=True)
+        else:
+            val_signals -= np.nanmedian(val_signals, axis=0, keepdims=True)
+        signals[:, val_mask] = val_signals
+
+        signals = np.swapaxes(signals, 0, axis)  # move the axis back
+
+    else:
+        raise ValueError(f"Invalid axis: {axis} for minus_median")
+
+    return signals
+
+
 def minus_mean(signals: np.ndarray, axis=None) -> np.ndarray:
     signals = signals.copy()  # prevent in-place modification
 
@@ -46,45 +109,49 @@ def minus_mean(signals: np.ndarray, axis=None) -> np.ndarray:
         signals -= np.nanmean(signals)
 
     elif isinstance(axis, int):
-        _signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
+        signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
-        # minus the mean
-        where = ~np.all(np.isnan(_signals), axis=0)
-        _signals[:, where] -= np.nanmean(_signals[:, where], axis=0, keepdims=True)
+        # minus the median
+        val_mask = ~np.all(np.isnan(signals), axis=0)
+        signals[:, val_mask] -= np.nanmean(signals[:, val_mask], axis=0, keepdims=True)
 
-        signals = np.swapaxes(_signals, 0, axis)  # move the axis back
+        signals = np.swapaxes(signals, 0, axis)  # move the axis back
+
     else:
-        raise ValueError(f"Invalid axis: {axis} for minus_mean")
+        raise ValueError(f"Invalid axis: {axis} for minus_median")
 
     return signals
 
 
 def rescale(signals: np.ndarray, axis=None) -> np.ndarray:
     signals = signals.copy()  # prevent in-place modification
-    nan_mask = np.isnan(signals)
 
-    if np.all(nan_mask):
+    if signals.dtype == complex:
+        warnings.warn("Rescale complex signals is not supported, do nothing")
+        return signals
+
+    if np.all(np.isnan(signals)):
         return signals
 
     if axis is None:
-        if np.sum(~nan_mask) > 1:  # at least 2 non-nan values
+        if np.sum(~np.isnan(signals)) > 1:  # at least 2 non-nan values
             signals /= np.nanstd(signals)
 
     elif isinstance(axis, int):
-        _signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
+        signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
-        where = np.sum(~np.isnan(_signals), axis=0) > 1
-        _signals[:, where] /= np.nanstd(_signals[:, where], axis=0, keepdims=True)
+        val_mask = np.sum(~np.isnan(signals), axis=0) > 1
+        signals[:, val_mask] /= np.nanstd(signals[:, val_mask], axis=0, keepdims=True)
 
-        signals = np.swapaxes(_signals, 0, axis)  # move the axis back
+        signals = np.swapaxes(signals, 0, axis)  # move the axis back
     else:
         raise ValueError(f"Invalid axis: {axis} for rescale")
 
     return signals
 
 
-def rotate_phase(fpts, y, phase_slope):
-    Is, Qs = y.real, y.imag
+def rotate_phase(fpts, signals, phase_slope):
+    Is, Qs = signals.real, signals.imag
 
     angles = fpts * phase_slope * np.pi / 180
     Is_rot = Is * np.cos(angles) - Qs * np.sin(angles)

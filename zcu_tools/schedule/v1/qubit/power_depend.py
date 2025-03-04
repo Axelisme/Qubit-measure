@@ -3,10 +3,15 @@ from copy import deepcopy
 import numpy as np
 
 from zcu_tools import make_cfg
+from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import PowerDepProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow2D
 from zcu_tools.schedule.tools import sweep2array
+
+
+def signals2reals(signals: np.ndarray) -> np.ndarray:
+    return np.abs(minus_background(signals, axis=0))
 
 
 def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
@@ -28,9 +33,9 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
         def callback(ir, sum_d):
             nonlocal signals2D
             signals2D = sum_d[0][0].dot([1, 1j]) / (ir + 1)
-            viewer.update_show(signals2D)
+            viewer.update_show(signals2reals(signals2D))
     else:
-        callback = None
+        callback = None  # type: ignore
 
     try:
         prog = PowerDepProgram(soccfg, make_cfg(cfg))
@@ -44,7 +49,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
         print("Error during measurement:", e)
     finally:
         if instant_show:
-            viewer.update_show(signals2D)
+            viewer.update_show(signals2reals(signals2D))
             viewer.close_show()
 
     return fpts, pdrs, signals2D  # (pdrs, freqs)

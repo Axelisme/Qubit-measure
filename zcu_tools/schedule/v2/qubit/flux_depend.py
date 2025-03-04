@@ -2,7 +2,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import minus_mean
+from zcu_tools.analysis import minus_background
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow2D
@@ -10,7 +10,7 @@ from zcu_tools.schedule.tools import sweep2array, sweep2param
 
 
 def signal2real(signals):
-    return np.abs(minus_mean(signals, axis=1))
+    return np.abs(minus_background(signals, axis=1))
 
 
 def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
@@ -63,13 +63,12 @@ def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
 
             IQlist = prog.acquire(soc, progress=False, callback=callback)
             signals2D[i] = IQlist[0][0].dot([1, 1j])
-            print(np.nanmax(np.abs(signals2D)))
 
             avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
             avgs_tqdm.refresh()
 
             if instant_show:
-                viewer.update_show(signal2real(_signals2D), (flxs, fpts))
+                viewer.update_show(signal2real(signals2D), (flxs, fpts))
 
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")

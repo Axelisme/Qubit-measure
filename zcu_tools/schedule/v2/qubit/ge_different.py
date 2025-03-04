@@ -99,7 +99,8 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=False, method="Nelder
 
     from scipy.optimize import minimize
 
-    viewer = InstantShowScatter("Readout Gain", "Frequency (MHz)", title="SNR")
+    if instant_show:
+        viewer = InstantShowScatter("Readout Gain", "Frequency (MHz)", title="SNR")
 
     records = []
 
@@ -114,14 +115,10 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=False, method="Nelder
         result = prog.acquire(soc, progress=False, ret_std=True)
         snr = ge_result2signals(result)
 
-        # snr = 1 - (
-        #     1e-1 * ((2 * pdr - pdrs[0] - pdrs[-1]) / (pdrs[-1] - pdrs[0])) ** 2
-        #     + 1e-1 * ((2 * fpt - fpts[0] - fpts[-1]) / (fpts[-1] - fpts[0])) ** 2
-        # ) # fake loss
-
         records.append((pdr, fpt, snr))
 
-        viewer.append_spot(pdr, fpt, np.abs(snr), title=f"SNR: {np.abs(snr):.3e}")
+        if instant_show:
+            viewer.append_spot(pdr, fpt, np.abs(snr), title=f"SNR: {np.abs(snr):.3e}")
 
         return -np.abs(snr)
 
@@ -133,8 +130,8 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=False, method="Nelder
     if method in ["Nelder-Mead", "Powell"]:
         options["xatol"] = min(pdrs[1] - pdrs[0], fpts[1] - fpts[0])
     elif method in ["L-BFGS-B"]:
-        options["ftol"] = 1e-3
-        options["maxfun"] = (len(pdrs) * len(fpts)) // 5
+        options["ftol"] = 1e-4  # type: ignore
+        options["maxfun"] = options["maxiter"]
 
     init_point = (0.5 * (pdrs[0] + pdrs[-1]), 0.5 * (fpts[0] + fpts[-1]))
     res = minimize(
@@ -146,7 +143,8 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=False, method="Nelder
         options=options,
     )
 
-    viewer.close_show()
+    if instant_show:
+        viewer.close_show()
 
     return res.x, records
 

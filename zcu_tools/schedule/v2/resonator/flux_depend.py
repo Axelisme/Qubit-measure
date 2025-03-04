@@ -2,7 +2,7 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from zcu_tools import make_cfg
-from zcu_tools.analysis import minus_mean
+from zcu_tools.analysis import minus_background
 from zcu_tools.program.v2 import OneToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow2D
@@ -10,7 +10,7 @@ from zcu_tools.schedule.tools import map2adcfreq, sweep2array, sweep2param
 
 
 def signal2real(signals):
-    return minus_mean(np.abs(signals), axis=1)
+    return minus_background(np.abs(signals), axis=1)
 
 
 def measure_res_flux_dep(soc, soccfg, cfg, instant_show=False):

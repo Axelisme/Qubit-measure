@@ -1,9 +1,14 @@
 import numpy as np
 
 from zcu_tools import make_cfg
+from zcu_tools.analysis import minus_background
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_hard_template
+
+
+def signals2reals(signals: np.ndarray) -> np.ndarray:
+    return np.abs(minus_background(signals, axis=0))
 
 
 def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
@@ -34,6 +39,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
         instant_show=instant_show,
         xlabel="Frequency (MHz)",
         ylabel="Pulse Gain",
+        signals2real=signals2reals,
     )
 
     # get the actual pulse gains and frequency points

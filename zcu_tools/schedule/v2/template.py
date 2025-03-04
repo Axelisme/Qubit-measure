@@ -10,11 +10,11 @@ from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
 
 
-def default_result2signals(IQlist) -> ndarray:
-    return IQlist[0][0].dot([1, 1j])
+def default_result2signals(result) -> ndarray:
+    return result[0][0].dot([1, 1j])
 
 
-def default_signals2real(signals) -> ndarray:
+def default_signals2real(signals: ndarray) -> ndarray:
     return np.abs(signals)
 
 
@@ -54,14 +54,14 @@ def sweep_hard_template(
                 (sum_d,) = args
                 avg_d = [d / (ir + 1) for d in sum_d]
                 signals = result2signals(avg_d)
-            else:
+            else:  # if ret_std == True
                 sum_d, sum2_d = args
                 avg_d = [d / (ir + 1) for d in sum_d]
                 std_d = [np.sqrt(d2 / (ir + 1) - d**2) for d, d2 in zip(avg_d, sum2_d)]
                 signals = result2signals((avg_d, std_d))
             viewer.update_show(signals2real(signals))
     else:
-        callback = None
+        callback = None  # type: ignore
 
     prog: AveragerProgramV2 = prog_cls(soccfg, cfg)
 
@@ -74,13 +74,12 @@ def sweep_hard_template(
         print("Error during measurement:")
         err_msg = sys.exc_info()[1]
         if hasattr(err_msg, "_pyroTraceback"):
-            print("".join(err_msg._pyroTraceback))
+            print("".join(err_msg._pyroTraceback))  # type: ignore
         else:
             print(err_msg)
     finally:
         if instant_show:
-            amps = signals2real(signals)
-            viewer.update_show(amps)
+            viewer.update_show(signals2real(signals))
             viewer.close_show()
 
     return prog, signals
