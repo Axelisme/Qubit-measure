@@ -38,6 +38,7 @@ class YokoDevControl:
         if config.YOKO_DRY_RUN:
             print("Dry run mode, skip connecting to Yoko")
             cls.yoko = tuple()  # dummy object that are not None
+            cls.cur_val = 0.0
             return
 
         cls.yoko = InstrManager(server_ip=dev_cfg["host_ip"], timeout=cls.TIMEOUT)
@@ -102,7 +103,10 @@ class YokoDevControl:
             raise RuntimeError("YokoDevControl not initialized")
 
         if config.YOKO_DRY_RUN:
-            print(f"DRY RUN: Set current to {value}\r")
+            if cls.cur_val != value:
+                cls.cur_val = value
+                print(f"DRY RUN: Set current to {value}\r")
+            return
 
         try:
             cls._set_current_smart(value)

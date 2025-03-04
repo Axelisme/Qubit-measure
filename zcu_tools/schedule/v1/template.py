@@ -39,12 +39,10 @@ def sweep1D_hard_template(
     signals2real: Callable = default_signals2real,
     **kwargs,
 ):
-    prog: RAveragerProgram = prog_cls(soccfg, cfg)
-
     xs = init_xs.copy()
     signals = init_signals.copy()
     if instant_show:
-        viewer = InstantShow1D(xs, x_label=xlabel, y_label=ylabel, prog=prog)
+        viewer = InstantShow1D(xs, x_label=xlabel, y_label=ylabel)
 
         def callback(ir, *args):
             nonlocal signals
@@ -61,6 +59,7 @@ def sweep1D_hard_template(
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     try:
+        prog: RAveragerProgram = prog_cls(soccfg, cfg)
         result = prog.acquire(soc, progress=progress, callback=callback, **kwargs)
         xs, signals = result2signals(result)
     except KeyboardInterrupt:
@@ -95,17 +94,17 @@ def sweep1D_soft_template(
     signals = init_signals.copy()
     if instant_show:
         viewer = InstantShow1D(xs, x_label=xlabel, y_label=ylabel)
-        show_period = int(len(xs[0]) / 20 + 0.99)
+        show_period = int(len(xs) / 20 + 0.99)
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    prog: AveragerProgram = prog_cls(soccfg, cfg)
     try:
         for i, x in enumerate(tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)):
             updateCfg(cfg, i, x)
 
             set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
+            prog: AveragerProgram = prog_cls(soccfg, cfg)
             result = prog.acquire(soc, progress=False, **kwargs)
             signals[i] = result2signals(result)
 
