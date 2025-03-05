@@ -3,7 +3,7 @@ from .twotone import RGainTwoToneProgram
 
 class SingleShotProgram(RGainTwoToneProgram):
     def __init__(self, soccfg, cfg):
-        cfg["sweep"] = dict(start=0, step=1, expts=2 * cfg["reps"])
+        cfg["sweep"] = dict(start=0, step=1, expts=2 * cfg["shots"])
         cfg["soft_avgs"] = 1  # force soft avgs to 1
         cfg["reps"] = 1  # force reps to 1
         super().__init__(soccfg, cfg)
