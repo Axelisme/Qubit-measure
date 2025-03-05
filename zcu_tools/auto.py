@@ -138,5 +138,11 @@ def auto_derive(exp_cfg: Dict[str, Any]):
         dev_cfg.setdefault("flux", flux_value)
 
     # round to soft_avgs
-    if "rounds" in exp_cfg:
-        exp_cfg["soft_avgs"] = exp_cfg["rounds"]
+    if "soft_avgs" not in exp_cfg:
+        if "rounds" in exp_cfg:
+            exp_cfg["soft_avgs"] = exp_cfg["rounds"]
+        else:
+            exp_cfg["soft_avgs"] = 1
+    elif "rounds" in exp_cfg:
+        if exp_cfg["soft_avgs"] != exp_cfg["rounds"]:
+            raise ValueError("soft_avgs and rounds should be the same")

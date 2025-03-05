@@ -5,7 +5,8 @@ from .base import TimeProgram
 
 class T2EchoProgram(TimeProgram):
     def initialize(self):
-        super().initialize()
+        self.resetM.init(self)
+        self.readoutM.init(self)
 
         declare_pulse(self, self.pi_pulse, "pi")
         declare_pulse(self, self.pi2_pulse, "pi2")

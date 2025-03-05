@@ -5,7 +5,7 @@ import numpy as np
 from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.tools import sweep2array
-from zcu_tools.schedule.v1.template import sweep2D_soft_soft_template
+from zcu_tools.schedule.v1.template import sweep2D_soft_hard_template
 
 
 def signal2real(signals):
@@ -23,28 +23,24 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
         assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
         cfg["r_f"] = reset_rf
 
-    fpt_sweep = cfg["sweep"]["freq"]
     flx_sweep = cfg["sweep"]["flux"]
-    fpts = sweep2array(fpt_sweep, allow_array=True)
+    fpt_sweep = cfg["sweep"]["freq"]
     flxs = sweep2array(flx_sweep, allow_array=True)
+    fpts = sweep2array(fpt_sweep)
 
-    del cfg["sweep"]  # remove sweep for program use
+    cfg["sweep"] = cfg["sweep"]["freq"]  # change sweep to freq
 
-    def x_updateCfg(cfg, _, flx):
+    def updateCfg(cfg, _, flx):
         cfg["dev"]["flux"] = flx
 
-    def y_updateCfg(cfg, _, fpt):
-        cfg["dac"]["qub_pulse"]["freq"] = fpt
-
-    flxs, fpts, signals2D = sweep2D_soft_soft_template(
+    flxs, fpts, signals2D = sweep2D_soft_hard_template(
         soc,
         soccfg,
         cfg,
         RFreqTwoToneProgram if reset_rf is None else RFreqTwoToneProgramWithRedReset,
         xs=flxs,
         ys=fpts,
-        x_updateCfg=x_updateCfg,
-        y_updateCfg=y_updateCfg,
+        updateCfg=updateCfg,
         xlabel="Flux (a.u.)",
         ylabel="Frequency (MHz)",
         signal2real=signal2real,

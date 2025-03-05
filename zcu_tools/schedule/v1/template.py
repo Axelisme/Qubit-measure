@@ -56,7 +56,7 @@ def sweep1D_hard_template(
     xlabel: str,
     ylabel: str,
     result2signals: Callable = default_result2signals,
-    signals2real: Callable = default_signal2real,
+    signal2real: Callable = default_signal2real,
     progress: bool = True,
     **kwargs,
 ) -> Tuple[ndarray, ndarray]:
@@ -70,7 +70,7 @@ def sweep1D_hard_template(
         def callback(ir, *args):
             nonlocal signals
             signals = result2signals(raw2result(ir, *args))
-            viewer.update_show(signals2real(signals))
+            viewer.update_show(signal2real(signals))
 
         try:
             prog = prog_cls(soccfg, cfg)
@@ -85,7 +85,7 @@ def sweep1D_hard_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signals2real(signals))
+            viewer.update_show(signal2real(signals))
 
     return xs, signals
 
