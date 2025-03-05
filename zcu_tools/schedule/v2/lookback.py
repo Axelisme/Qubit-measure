@@ -22,7 +22,7 @@ def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
 
 
 def measure_lookback(
-    soc, soccfg, cfg, progress=True, instant_show=False, qub_pulse=False
+    soc, soccfg, cfg, progress=True, qub_pulse=False
 ) -> Tuple[np.ndarray, np.ndarray]:
     cfg = make_cfg(cfg)
 
@@ -47,16 +47,15 @@ def measure_lookback(
             disable=not progress,
         )
 
-        if instant_show:
-            total_num = soccfg.us2cycles(total_len, ro_ch=cfg["adc"]["chs"][0])
-            viewer = InstantShow1D(
-                np.linspace(0, total_len, total_num, endpoint=False),
-                x_label="Time (us)",
-                y_label="Amplitude",
-                title="Readout",
-                linestyle="-",
-                marker=None,
-            )
+        total_num = soccfg.us2cycles(total_len, ro_ch=cfg["adc"]["chs"][0])
+        viewer = InstantShow1D(
+            np.linspace(0, total_len, total_num, endpoint=False),
+            x_label="Time (us)",
+            y_label="Amplitude",
+            title="Readout",
+            linestyle="-",
+            marker=None,
+        )
 
         Ts = []
         signals = []
@@ -70,8 +69,7 @@ def measure_lookback(
             Ts.append(Ts_)
             signals.append(singals_)
 
-            if instant_show:
-                viewer.update_show(np.abs(np.concatenate(signals)), np.concatenate(Ts))
+            viewer.update_show(np.abs(np.concatenate(signals)), np.concatenate(Ts))
 
             trig_offset += MAX_LEN
             bar.update()
@@ -84,8 +82,7 @@ def measure_lookback(
         Ts = Ts[sort_idxs]
         signals = signals[sort_idxs]
 
-        if instant_show:
-            viewer.update_show(np.abs(signals), Ts)
-            viewer.close_show()
+        viewer.update_show(np.abs(signals), Ts)
+        viewer.close_show()
 
     return Ts, signals

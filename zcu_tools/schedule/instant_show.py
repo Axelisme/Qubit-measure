@@ -7,15 +7,8 @@ import numpy as np
 from IPython.display import display
 
 
-class InstantShow1D:
-    def __init__(
-        self, xs, x_label: str, y_label: str, title: Optional[str] = None, **kwargs
-    ):
-        self._init_fig(xs, x_label, y_label, title, **kwargs)
-
-        self.dh = display(self.fig, display_id=True)
-
-    def _init_fig(self, xs, x_label: str, y_label: str, title: Optional[str], **kwargs):
+class BaseInstantShow:
+    def __init__(self, x_label: str, y_label: str, title: Optional[str] = None):
         fig, ax = plt.subplots()
         fig.tight_layout(pad=3)
         ax.set_xlabel(x_label)
@@ -25,9 +18,29 @@ class InstantShow1D:
 
         self.fig = fig
         self.ax = ax
+
+    def close_show(self):
+        if hasattr(self, "fig"):
+            plt.close(self.fig)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close_show()
+
+
+class InstantShow1D(BaseInstantShow):
+    def __init__(
+        self, xs, x_label: str, y_label: str, title: Optional[str] = None, **kwargs
+    ):
+        super().__init__(x_label, y_label, title)
+
         kwargs.setdefault("linestyle", "-")
         kwargs.setdefault("marker", ".")
-        self.contain = ax.plot(xs, np.zeros_like(xs), **kwargs)[0]
+        self.contain = self.ax.plot(xs, np.zeros_like(xs), **kwargs)[0]
+
+        self.dh = display(self.fig, display_id=True)
 
     def update_show(self, signals_real: np.ndarray, ticks=None, title=None):
         if len(signals_real.shape) != 1:
@@ -50,39 +63,24 @@ class InstantShow1D:
 
         self.dh.update(self.fig)
 
-    def close_show(self):
-        plt.close(self.fig)
 
-
-class InstantShow2D:
+class InstantShow2D(BaseInstantShow):
     def __init__(
         self, xs, ys, x_label: str, y_label: str, title: Optional[str] = None, **kwargs
     ):
-        self._init_fig(xs, ys, x_label, y_label, title, **kwargs)
+        super().__init__(x_label, y_label, title)
 
-        self.dh = display(self.fig, display_id=True)
-
-    def _init_fig(
-        self, xs, ys, x_label: str, y_label: str, title: Optional[str], **kwargs
-    ):
-        fig, ax = plt.subplots()
-        fig.tight_layout(pad=3)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_label)
-        if title:
-            ax.set_title(title)
-
-        self.fig = fig
-        self.ax = ax
         kwargs.setdefault("origin", "lower")
         kwargs.setdefault("interpolation", "none")
         kwargs.setdefault("aspect", "auto")
 
-        self.contain = ax.imshow(
+        self.contain = self.ax.imshow(
             np.zeros((len(ys), len(xs))),
             extent=[xs[0], xs[-1], ys[0], ys[-1]],
             **kwargs,
         )
+
+        self.dh = display(self.fig, display_id=True)
 
     def update_show(self, signals_real: np.ndarray, ticks=None, title=None):
         if len(signals_real.shape) != 2:
@@ -102,33 +100,20 @@ class InstantShow2D:
 
         self.dh.update(self.fig)
 
-    def close_show(self):
-        plt.close(self.fig)
 
-
-class InstantShowScatter:
+class InstantShowScatter(BaseInstantShow):
     def __init__(
         self, x_label: str, y_label: str, title: Optional[str] = None, **kwargs
     ):
-        self._init_fig(x_label, y_label, title, **kwargs)
+        super().__init__(x_label, y_label, title)
+
+        self.contain = self.ax.scatter([], [], **kwargs)
 
         self.xs = []
         self.ys = []
         self.cs = []
 
         self.dh = display(self.fig, display_id=True)
-
-    def _init_fig(self, x_label: str, y_label: str, title: Optional[str], **kwargs):
-        fig, ax = plt.subplots()
-        fig.tight_layout(pad=3)
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_label)
-        if title:
-            ax.set_title(title)
-
-        self.fig = fig
-        self.ax = ax
-        self.contain = ax.scatter([], [], **kwargs)
 
     def append_spot(self, x, y, color, title=None):
         self.xs.append(x)
@@ -150,6 +135,3 @@ class InstantShowScatter:
         self.ax.set_ylim(min(y_min, y_max - 1e-6), max(y_max, y_min + 1e-6))
 
         self.dh.update(self.fig)
-
-    def close_show(self):
-        plt.close(self.fig)

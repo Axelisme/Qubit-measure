@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.optimize import minimize
 
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
@@ -32,7 +33,7 @@ def ge_result2signals(result):
     return calc_snr(avg_d, std_d).T
 
 
-def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
+def measure_ge_pdr_dep(soc, soccfg, cfg):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -65,8 +66,6 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
         TwoToneProgram,
         init_signals=np.full((len(pdrs), len(fpts)), np.nan, dtype=complex),
         ticks=(fpts, pdrs),
-        progress=True,
-        instant_show=instant_show,
         xlabel="Frequency (MHz)",
         ylabel="Readout Gain",
         result2signals=ge_result2signals,
@@ -80,7 +79,7 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
     return pdrs, fpts, snr2D  # (pdrs, fpts)
 
 
-def measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=False, method="Nelder-Mead"):
+def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -97,59 +96,51 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, instant_show=False, method="Nelder
     del cfg["sweep"]["gain"]  # program should not use this
     del cfg["sweep"]["freq"]  # program should not use this
 
-    from scipy.optimize import minimize
-
-    if instant_show:
-        viewer = InstantShowScatter("Readout Gain", "Frequency (MHz)", title="SNR")
-
-    records = []
-
-    def loss_func(point, cfg):
-        cfg = make_cfg(cfg)  # prevent in-place modification
-
-        pdr, fpt = point
-        cfg["dac"]["res_pulse"]["gain"] = pdr
-        cfg["dac"]["res_pulse"]["freq"] = fpt
-
-        prog = TwoToneProgram(soccfg, cfg)
-        result = prog.acquire(soc, progress=False, ret_std=True)
-        snr = ge_result2signals(result)
-
-        records.append((pdr, fpt, snr))
-
-        if instant_show:
-            viewer.append_spot(pdr, fpt, np.abs(snr), title=f"SNR: {np.abs(snr):.3e}")
-
-        return -np.abs(snr)
-
     # set again in case of change
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    options = dict(maxiter=(len(pdrs) * len(fpts)) // 5)
+    records = []
+    with InstantShowScatter("Readout Gain", "Frequency (MHz)", title="SNR") as viewer:
 
-    if method in ["Nelder-Mead", "Powell"]:
-        options["xatol"] = min(pdrs[1] - pdrs[0], fpts[1] - fpts[0])
-    elif method in ["L-BFGS-B"]:
-        options["ftol"] = 1e-4  # type: ignore
-        options["maxfun"] = options["maxiter"]
+        def loss_func(point, cfg):
+            cfg = make_cfg(cfg)  # prevent in-place modification
 
-    init_point = (0.5 * (pdrs[0] + pdrs[-1]), 0.5 * (fpts[0] + fpts[-1]))
-    res = minimize(
-        loss_func,
-        init_point,
-        args=(cfg,),
-        method=method,
-        bounds=[(pdrs[0], pdrs[-1]), (fpts[0], fpts[-1])],
-        options=options,
-    )
+            pdr, fpt = point
+            cfg["dac"]["res_pulse"]["gain"] = pdr
+            cfg["dac"]["res_pulse"]["freq"] = fpt
 
-    if instant_show:
-        viewer.close_show()
+            prog = TwoToneProgram(soccfg, cfg)
+            result = prog.acquire(soc, progress=False, ret_std=True)
+            snr = ge_result2signals(result)
+
+            records.append((pdr, fpt, snr))
+
+            viewer.append_spot(pdr, fpt, np.abs(snr), title=f"SNR: {np.abs(snr):.3e}")
+
+            return -np.abs(snr)
+
+        options = dict(maxiter=(len(pdrs) * len(fpts)) // 5)
+
+        if method in ["Nelder-Mead", "Powell"]:
+            options["xatol"] = min(pdrs[1] - pdrs[0], fpts[1] - fpts[0])
+        elif method in ["L-BFGS-B"]:
+            options["ftol"] = 1e-4  # type: ignore
+            options["maxfun"] = options["maxiter"]
+
+        init_point = (0.5 * (pdrs[0] + pdrs[-1]), 0.5 * (fpts[0] + fpts[-1]))
+        res = minimize(
+            loss_func,
+            init_point,
+            args=(cfg,),
+            method=method,
+            bounds=[(pdrs[0], pdrs[-1]), (fpts[0], fpts[-1])],
+            options=options,
+        )
 
     return res.x, records
 
 
-def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
+def measure_ge_ro_dep(soc, soccfg, cfg):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]
@@ -181,7 +172,6 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
         xs=lens,
         init_signals=np.full(len(lens), np.nan, dtype=complex),
         progress=True,
-        instant_show=instant_show,
         updateCfg=updateCfg,
         xlabel="Readout Length (us)",
         ylabel="Amplitude",
@@ -192,7 +182,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
     return lens, snrs
 
 
-def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
+def measure_ge_trig_dep(soc, soccfg, cfg):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]
@@ -228,7 +218,6 @@ def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
         xs=offsets,
         init_signals=np.full(len(offsets), np.nan, dtype=complex),
         progress=True,
-        instant_show=instant_show,
         updateCfg=updateCfg,
         xlabel="Trigger Offset (us)",
         ylabel="Amplitude",

@@ -6,7 +6,7 @@ from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
-def measure_qub_freq(soc, soccfg, cfg, progress=True, instant_show=False):
+def measure_qub_freq(soc, soccfg, cfg, progress=True):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
@@ -24,7 +24,6 @@ def measure_qub_freq(soc, soccfg, cfg, progress=True, instant_show=False):
         init_signals=np.full(len(fpts), np.nan, dtype=complex),
         ticks=(fpts,),
         progress=progress,
-        instant_show=instant_show,
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
     )
@@ -35,9 +34,7 @@ def measure_qub_freq(soc, soccfg, cfg, progress=True, instant_show=False):
     return fpts, signals
 
 
-def measure_qub_freq_with_reset(
-    soc, soccfg, cfg, r_f, progress=True, instant_show=False
-):
+def measure_qub_freq_with_reset(soc, soccfg, cfg, r_f, progress=True):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
@@ -60,7 +57,6 @@ def measure_qub_freq_with_reset(
         init_signals=np.full(len(fpts), np.nan, dtype=complex),
         ticks=(fpts,),
         progress=progress,
-        instant_show=instant_show,
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
     )

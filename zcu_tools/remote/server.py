@@ -78,8 +78,10 @@ class ProgramServer:
     def test_callback(self, cb: RemoteCallback):
         print("Server received callback test...")
         self._before_run_program((), {})
-        callback = unwrap_callback(cb)
-        assert callback is not None  # of course
-        callback(0)  # test callback
-        self._after_run_program()
+        try:
+            callback = unwrap_callback(cb)
+            assert callback is not None  # of course
+            callback(0)  # test callback
+        finally:
+            self._after_run_program()
         print("Finished callback test")

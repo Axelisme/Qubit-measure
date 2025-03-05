@@ -24,9 +24,7 @@ def measure_one(soc, soccfg, cfg, progress, qub_pulse):
     return Ts, signals
 
 
-def measure_lookback(
-    soc, soccfg, cfg, progress=True, instant_show=False, qub_pulse=False
-):
+def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
     assert cfg.get("reps", 1) == 1, "Only one rep is allowed for lookback"
 
@@ -51,44 +49,41 @@ def measure_lookback(
             disable=not progress,
         )
 
-        if instant_show:
-            total_num = soccfg.us2cycles(total_len, ro_ch=cfg["adc"]["chs"][0])
-            viewer = InstantShow1D(
-                np.linspace(0, total_len, total_num, endpoint=False),
-                x_label="Time (us)",
-                y_label="Amplitude",
-                linestyle="-",
-                marker=None,
-            )
+        total_num = soccfg.us2cycles(total_len, ro_ch=cfg["adc"]["chs"][0])
+        viewer = InstantShow1D(
+            np.linspace(0, total_len, total_num, endpoint=False),
+            x_label="Time (us)",
+            y_label="Amplitude",
+            linestyle="-",
+            marker=None,
+        )
 
-        Ts = []
-        signals = []
-        while trig_offset < total_len:
-            cfg["adc"]["trig_offset"] = trig_offset
+        with viewer:
+            Ts = []
+            signals = []
+            while trig_offset < total_len:
+                cfg["adc"]["trig_offset"] = trig_offset
 
-            Ts_, signals_ = measure_one(
-                soc, soccfg, cfg, progress=False, qub_pulse=qub_pulse
-            )
+                Ts_, signals_ = measure_one(
+                    soc, soccfg, cfg, progress=False, qub_pulse=qub_pulse
+                )
 
-            Ts.append(Ts_)
-            signals.append(signals_)
+                Ts.append(Ts_)
+                signals.append(signals_)
 
-            if instant_show:
                 viewer.update_show(np.abs(np.concatenate(signals)), np.concatenate(Ts))
 
-            trig_offset += MAX_LEN
-            bar.update()
+                trig_offset += MAX_LEN
+                bar.update()
 
-        bar.close()
-        Ts = np.concatenate(Ts)
-        signals = np.concatenate(signals)
+            bar.close()
+            Ts = np.concatenate(Ts)
+            signals = np.concatenate(signals)
 
-        sort_idxs = np.argsort(Ts, kind="stable")
-        Ts = Ts[sort_idxs]
-        signals = signals[sort_idxs]
+            sort_idxs = np.argsort(Ts, kind="stable")
+            Ts = Ts[sort_idxs]
+            signals = signals[sort_idxs]
 
-        if instant_show:
             viewer.update_show(np.abs(signals), Ts)
-            viewer.close_show()
 
     return Ts, signals

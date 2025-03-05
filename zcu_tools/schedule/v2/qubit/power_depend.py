@@ -11,7 +11,7 @@ def signals2reals(signals: np.ndarray) -> np.ndarray:
     return np.abs(minus_background(signals, axis=0))
 
 
-def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
+def measure_qub_pdr_dep(soc, soccfg, cfg):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     # make sure gain is the outer loop
@@ -36,7 +36,6 @@ def measure_qub_pdr_dep(soc, soccfg, cfg, instant_show=False):
         init_signals=np.full((len(pdrs), len(fpts)), np.nan, dtype=complex),
         ticks=(fpts, pdrs),
         progress=True,
-        instant_show=instant_show,
         xlabel="Frequency (MHz)",
         ylabel="Pulse Gain",
         signals2real=signals2reals,

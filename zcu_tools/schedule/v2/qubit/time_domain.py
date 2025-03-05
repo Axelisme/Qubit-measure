@@ -11,7 +11,7 @@ from zcu_tools.schedule.v2.template import sweep1D_soft_template, sweep_hard_tem
 
 
 def measure_t2ramsey(
-    soc, soccfg, cfg, instant_show=False, soft_loop=False
+    soc, soccfg, cfg, soft_loop=False
 ) -> Tuple[np.ndarray, np.ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
@@ -23,8 +23,6 @@ def measure_t2ramsey(
     args = (soc, soccfg, cfg, T2RamseyProgram)
     kwargs = dict(
         init_signals=np.full(len(ts), np.nan, dtype=complex),
-        instant_show=instant_show,
-        progress=True,
         xlabel="Time (us)",
         ylabel="Amplitude",
     )
@@ -52,9 +50,7 @@ def measure_t2ramsey(
     return ts, signals
 
 
-def measure_t2echo(
-    soc, soccfg, cfg, instant_show=False, soft_loop=False
-) -> Tuple[np.ndarray, np.ndarray]:
+def measure_t2echo(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -65,8 +61,6 @@ def measure_t2echo(
     args = (soc, soccfg, cfg, T2EchoProgram)
     kwargs = dict(
         init_signals=np.full(len(ts), np.nan, dtype=complex),
-        instant_show=instant_show,
-        progress=True,
         xlabel="Time (us)",
         ylabel="Amplitude",
     )
@@ -93,9 +87,7 @@ def measure_t2echo(
     return ts, signals
 
 
-def measure_t1(
-    soc, soccfg, cfg, instant_show=False, soft_loop=False
-) -> Tuple[np.ndarray, np.ndarray]:
+def measure_t1(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -106,8 +98,6 @@ def measure_t1(
     args = (soc, soccfg, cfg, T1Program)
     kwargs = dict(
         init_signals=np.full(len(ts), np.nan, dtype=complex),
-        instant_show=instant_show,
-        progress=True,
         xlabel="Time (us)",
         ylabel="Amplitude",
     )

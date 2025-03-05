@@ -1,4 +1,6 @@
+import sys
 import time
+import traceback
 from typing import Any, Callable, Dict, Literal, Optional, Union
 
 
@@ -81,10 +83,24 @@ def get_ip_address(iface):
     )
 
 
+def print_traceback():
+    err_msg = sys.exc_info()[1]
+    if hasattr(err_msg, "_pyroTraceback"):
+        print("".join(err_msg._pyroTraceback))
+    else:
+        print(traceback.format_exc())
+
+
 class AsyncFunc:
-    def __init__(self, func: Optional[Callable], min_interval: float = 0.1):
+    def __init__(
+        self,
+        func: Optional[Callable],
+        min_interval: float = 0.1,
+        include_idx: bool = True,
+    ):
         self.func = func
         self.min_interval = min_interval
+        self.include_idx = include_idx
 
         if min_interval <= 0:
             raise ValueError("min_interval must be greater than 0")
@@ -113,6 +129,7 @@ class AsyncFunc:
         if self.func is None:
             return  # do nothing
 
+        self.last_job = None
         with self.lock:
             self.acquiring = False
             self.have_new_job.set()  # notify worker thread to exit
@@ -143,9 +160,13 @@ class AsyncFunc:
                 assert job is not None, "Job should not be None"
                 ir, args, kwargs = job
                 prev_start = time.time()
-                self.func(ir, *args, **kwargs)
-            except Exception as e:
-                print(f"Error in callback: {e}")
+                if self.include_idx:
+                    self.func(ir, *args, **kwargs)
+                else:
+                    self.func(*args, **kwargs)
+            except Exception:
+                print("Error in callback:")
+                print_traceback()
 
     def __call__(self, ir: int, *args, **kwargs):
         # this method may be called concurrently, so we need to protect it
