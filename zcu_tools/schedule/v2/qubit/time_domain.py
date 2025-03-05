@@ -22,7 +22,6 @@ def measure_t2ramsey(
 
     args = (soc, soccfg, cfg, T2RamseyProgram)
     kwargs = dict(
-        init_signals=np.full(len(ts), np.nan, dtype=complex),
         xlabel="Time (us)",
         ylabel="Amplitude",
     )
@@ -60,7 +59,6 @@ def measure_t2echo(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.nd
 
     args = (soc, soccfg, cfg, T2EchoProgram)
     kwargs = dict(
-        init_signals=np.full(len(ts), np.nan, dtype=complex),
         xlabel="Time (us)",
         ylabel="Amplitude",
     )
@@ -97,7 +95,6 @@ def measure_t1(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.ndarra
 
     args = (soc, soccfg, cfg, T1Program)
     kwargs = dict(
-        init_signals=np.full(len(ts), np.nan, dtype=complex),
         xlabel="Time (us)",
         ylabel="Amplitude",
     )

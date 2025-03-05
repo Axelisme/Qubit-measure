@@ -10,7 +10,7 @@ def signals2real(signals: np.ndarray) -> np.ndarray:
     return np.abs(minus_background(signals))
 
 
-def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
+def measure_t2ramsey(soc, soccfg, cfg):
     ts = sweep2array(cfg["sweep"])
     check_time_sweep(soccfg, ts)
 
@@ -20,13 +20,10 @@ def measure_t2ramsey(soc, soccfg, cfg, instant_show=False):
         soccfg,
         cfg,
         T2RamseyProgram,
-        init_xs=ts,
-        init_signals=np.full(len(ts), np.nan, dtype=np.complex128),
-        progress=True,
-        instant_show=instant_show,
+        xs=ts,
         xlabel="Time (us)",
         ylabel="Amplitude",
-        signals2real=signals2real,
+        signal2real=signals2real,
     )
 
     return ts, signals
@@ -41,13 +38,10 @@ def measure_t1(soc, soccfg, cfg, instant_show=False):
         soccfg,
         cfg,
         T1Program,
-        init_xs=ts,
-        init_signals=np.full(len(ts), np.nan, dtype=np.complex128),
-        progress=True,
-        instant_show=instant_show,
+        xs=ts,
         xlabel="Time (us)",
         ylabel="Amplitude",
-        signals2real=signals2real,
+        signal2real=signals2real,
     )
 
     return ts, signals
@@ -62,13 +56,10 @@ def measure_t2echo(soc, soccfg, cfg, instant_show=False):
         soccfg,
         cfg,
         T2EchoProgram,
-        init_xs=2 * ts,
-        init_signals=np.full(len(ts), np.nan, dtype=np.complex128),
-        progress=True,
-        instant_show=instant_show,
+        xs=2 * ts,
         xlabel="Time (us)",
         ylabel="Amplitude",
-        signals2real=signals2real,
+        signal2real=signals2real,
     )
 
     return 2 * ts, signals

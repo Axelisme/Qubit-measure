@@ -38,7 +38,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg):
         progress=True,
         xlabel="Frequency (MHz)",
         ylabel="Pulse Gain",
-        signals2real=signals2reals,
+        signal2real=signals2reals,
     )
 
     # get the actual pulse gains and frequency points

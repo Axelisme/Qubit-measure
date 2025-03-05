@@ -46,7 +46,6 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
         ys=fpts,
         xlabel="Flux (a.u.)",
         ylabel="Frequency (MHz)",
-        init_signals=np.full((len(flxs), len(fpts)), np.nan, dtype=complex),
         updateCfg=updateCfg,
         signal2real=signal2real,
     )

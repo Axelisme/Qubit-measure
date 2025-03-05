@@ -1,13 +1,11 @@
 from copy import deepcopy
 
-import numpy as np
-
 from zcu_tools.program.v1 import OneToneProgram
 from zcu_tools.schedule.tools import map2adcfreq, sweep2array
 from zcu_tools.schedule.v1.template import sweep1D_soft_template
 
 
-def measure_res_freq(soc, soccfg, cfg, instant_show=False):
+def measure_res_freq(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -17,7 +15,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
 
     del cfg["sweep"]  # remove sweep for program
 
-    def update_cfg(cfg, _, f):
+    def updateCfg(cfg, _, f):
         cfg["dac"]["res_pulse"]["freq"] = f
 
     fpts, signals = sweep1D_soft_template(
@@ -26,10 +24,7 @@ def measure_res_freq(soc, soccfg, cfg, instant_show=False):
         cfg,
         OneToneProgram,
         xs=fpts,
-        init_signals=np.full(len(fpts), np.nan, dtype=np.complex128),
-        progress=True,
-        instant_show=instant_show,
-        updateCfg=update_cfg,
+        updateCfg=updateCfg,
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
     )

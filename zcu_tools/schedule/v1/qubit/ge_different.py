@@ -3,23 +3,25 @@ from copy import deepcopy
 import numpy as np
 from tqdm.auto import tqdm
 
-from zcu_tools import make_cfg
 from zcu_tools.program.v1 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
 from zcu_tools.schedule.tools import check_time_sweep, map2adcfreq, sweep2array
+from zcu_tools.tools import AsyncFunc, print_traceback
 
 
 def measure_one(soc, soccfg, cfg):
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
     qub_pulse = cfg["dac"]["qub_pulse"]
     pi_gain = qub_pulse["gain"]
 
     qub_pulse["gain"] = 0
-    prog = TwoToneProgram(soccfg, make_cfg(cfg))
+    prog = TwoToneProgram(soccfg, cfg)
     avggi, avggq, stdgi, stdgq = prog.acquire(soc, progress=False, ret_std=True)
 
     qub_pulse["gain"] = pi_gain
-    prog = TwoToneProgram(soccfg, make_cfg(cfg))
+    prog = TwoToneProgram(soccfg, cfg)
     avgei, avgeq, stdei, stdeq = prog.acquire(soc, progress=False, ret_std=True)
 
     dist_i = avgei[0][0] - avggi[0][0]
@@ -32,7 +34,7 @@ def measure_one(soc, soccfg, cfg):
     return contrast / noise
 
 
-def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
+def measure_ge_pdr_dep(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -45,56 +47,44 @@ def measure_ge_pdr_dep(soc, soccfg, cfg, instant_show=False):
 
     del cfg["sweep"]  # remove sweep from cfg
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])  # set initial flux
 
-    if instant_show:
-        viewer = InstantShow2D(
-            fpts,
-            pdrs,
-            x_label="Frequency (MHz)",
-            y_label="Power (a.u.)",
-            title="Maximum SNR: 0.00",
-        )
+    snr2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=complex)
+    with InstantShow2D(pdrs, fpts, "Power (a.u)", "Frequency (MHz)") as viewer:
+        try:
+            pdrs_tqdm = tqdm(pdrs, desc="Gain", smoothing=0)
+            fpts_tqdm = tqdm(fpts, desc="Freq", smoothing=0)
+            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
+                for i, pdr in enumerate(pdrs):
+                    cfg["dac"]["res_pulse"]["gain"] = pdr
 
-    snr2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=np.complex128)
-    try:
-        pdr_tqdm = tqdm(pdrs, desc="Power", smoothing=0)
-        freq_tqdm = tqdm(fpts, desc="Frequency", smoothing=0)
+                    fpts_tqdm.reset()
+                    fpts_tqdm.refresh()
+                    for j, fpt in enumerate(fpts):
+                        cfg["dac"]["res_pulse"]["freq"] = fpt
 
-        for i, pdr in enumerate(pdr_tqdm):
-            res_pulse["gain"] = pdr
+                        snr2D[i, j] = measure_one(soc, soccfg, cfg)
 
-            freq_tqdm.reset()
-            freq_tqdm.refresh()
-            for j, fpt in enumerate(fpts):
-                res_pulse["freq"] = fpt
+                        fpts_tqdm.update()
 
-                snr2D[i, j] = measure_one(soc, soccfg, cfg)
-                freq_tqdm.update()
+                        async_draw(i * len(fpts) + j, np.abs(snr2D))
+                    pdrs_tqdm.update()
 
-            if instant_show:
-                abs_snr = np.abs(snr2D)
-                viewer.update_show(
-                    abs_snr, title=f"Maximum SNR: {np.nanmax(abs_snr):.2f}"
-                )
+        except KeyboardInterrupt:
+            print("Received KeyboardInterrupt, early stopping the program")
+        except Exception:
+            print("Error during measurement:")
+            print_traceback()
+        finally:
+            viewer.update_show(np.abs(snr2D), (pdrs, fpts))
+            pdrs_tqdm.close()
+            fpts_tqdm.close()
 
-    except KeyboardInterrupt:
-        print("Received KeyboardInterrupt, early stopping the program")
-    except Exception as e:
-        print("Error during measurement:", e)
-    finally:
-        if instant_show:
-            abs_snr = np.abs(snr2D)
-            viewer.update_show(abs_snr, title=f"Maximum SNR: {np.nanmax(abs_snr):.2f}")
-            viewer.close_show()
-
-    return pdrs, fpts, snr2D  # (pdrs, freqs)
+    return pdrs, fpts, snr2D
 
 
-def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
+def measure_ge_ro_dep(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
-
-    res_pulse = cfg["dac"]["res_pulse"]
 
     ro_lens = sweep2array(cfg["sweep"], allow_array=True)
     check_time_sweep(soccfg, ro_lens, ro_ch=cfg["adc"]["chs"][0])
@@ -103,72 +93,66 @@ def measure_ge_ro_dep(soc, soccfg, cfg, instant_show=False):
 
     trig_offset = cfg["adc"]["trig_offset"]
 
+    # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    if instant_show:
-        show_period = int(len(ro_lens) / 20 + 0.99999)
-        viewer = InstantShow1D(
-            ro_lens, x_label="Readout Length (us)", y_label="SNR (a.u.)"
-        )
-
     snrs = np.full(len(ro_lens), np.nan, dtype=np.complex128)
-    try:
-        for i, ro_len in enumerate(tqdm(ro_lens, desc="ro length", smoothing=0)):
-            cfg["adc"]["ro_length"] = ro_len
-            res_pulse["length"] = trig_offset + ro_len + 1.0
+    with InstantShow1D(ro_lens, "Readout Length (us)", "SNR") as viewer:
+        try:
+            lens_tqdm = tqdm(ro_lens, desc="Readout Length (us)", smoothing=0)
+            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
+                for i, ro_len in enumerate(lens_tqdm):
+                    cfg["adc"]["ro_length"] = ro_len
+                    cfg["dac"]["res_pulse"]["length"] = trig_offset + ro_len + 1.0
 
-            snrs[i] = measure_one(soc, soccfg, cfg)
+                    snrs[i] = measure_one(soc, soccfg, cfg)
 
-            if instant_show and i % show_period == 0:
-                viewer.update_show(np.abs(snrs))
+                    async_draw(i, np.abs(snrs))
 
-    except KeyboardInterrupt:
-        print("Received KeyboardInterrupt, early stopping the program")
-    except Exception as e:
-        print("Error during measurement:", e)
-    finally:
-        if instant_show:
+        except KeyboardInterrupt:
+            print("Received KeyboardInterrupt, early stopping the program")
+        except Exception:
+            print("Error during measurement:")
+            print_traceback()
+        finally:
             viewer.update_show(np.abs(snrs))
-            viewer.close_show()
 
     return ro_lens, snrs
 
 
-def measure_ge_trig_dep(soc, soccfg, cfg, instant_show=False):
+def measure_ge_trig_dep(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     offsets = sweep2array(cfg["sweep"], allow_array=True)
-    check_time_sweep(soccfg, offsets)
-    ro_len = cfg["adc"]["ro_length"]
-    orig_offset = cfg["adc"]["trig_offset"]
+    check_time_sweep(soccfg, offsets, ro_ch=cfg["adc"]["chs"][0])
 
     del cfg["sweep"]  # remove sweep from cfg
 
+    ro_len = cfg["adc"]["ro_length"]
+    orig_offset = cfg["adc"]["trig_offset"]
+
+    # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
-    if instant_show:
-        show_period = int(len(offsets) / 20 + 0.99999)
-        viewer = InstantShow1D(
-            offsets, x_label="Trigger Offset (us)", y_label="SNR (a.u.)"
-        )
 
     snrs = np.full(len(offsets), np.nan, dtype=np.complex128)
-    try:
-        for i, offset in enumerate(tqdm(offsets, desc="trig offset", smoothing=0)):
-            cfg["adc"]["trig_offset"] = offset
-            cfg["adc"]["ro_length"] = ro_len + offset - orig_offset
+    with InstantShow1D(offsets, "Readout offset (us)", "SNR") as viewer:
+        try:
+            offsets_tqdm = tqdm(offsets, desc="Readout offset (us)", smoothing=0)
+            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
+                for i, offset in enumerate(offsets_tqdm):
+                    cfg["adc"]["trig_offset"] = offset
+                    cfg["adc"]["ro_length"] = ro_len + offset - orig_offset
 
-            snrs[i] = measure_one(soc, soccfg, cfg)
+                    snrs[i] = measure_one(soc, soccfg, cfg)
 
-            if instant_show and i % show_period == 0:
-                viewer.update_show(np.abs(snrs))
+                    async_draw(i, np.abs(snrs))
 
-    except KeyboardInterrupt:
-        print("Received KeyboardInterrupt, early stopping the program")
-    except Exception as e:
-        print("Error during measurement:", e)
-    finally:
-        if instant_show:
+        except KeyboardInterrupt:
+            print("Received KeyboardInterrupt, early stopping the program")
+        except Exception:
+            print("Error during measurement:")
+            print_traceback()
+        finally:
             viewer.update_show(np.abs(snrs))
-            viewer.close_show()
 
     return offsets, snrs

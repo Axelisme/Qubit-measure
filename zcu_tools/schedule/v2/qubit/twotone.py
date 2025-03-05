@@ -1,5 +1,3 @@
-import numpy as np
-
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
@@ -21,7 +19,6 @@ def measure_qub_freq(soc, soccfg, cfg, progress=True):
         soccfg,
         cfg,
         TwoToneProgram,
-        init_signals=np.full(len(fpts), np.nan, dtype=complex),
         ticks=(fpts,),
         progress=progress,
         xlabel="Frequency (MHz)",
@@ -54,7 +51,6 @@ def measure_qub_freq_with_reset(soc, soccfg, cfg, r_f, progress=True):
         soccfg,
         cfg,
         TwoToneProgram,
-        init_signals=np.full(len(fpts), np.nan, dtype=complex),
         ticks=(fpts,),
         progress=progress,
         xlabel="Frequency (MHz)",

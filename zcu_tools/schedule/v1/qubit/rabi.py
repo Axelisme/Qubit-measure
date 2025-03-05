@@ -8,18 +8,18 @@ from zcu_tools.schedule.tools import sweep2array
 from zcu_tools.schedule.v1.template import sweep1D_hard_template, sweep1D_soft_template
 
 
-def signals2real(signals: np.ndarray) -> np.ndarray:
+def signal2real(signals: np.ndarray) -> np.ndarray:
     return np.abs(minus_background(signals))
 
 
-def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
+def measure_lenrabi(soc, soccfg, cfg):
     cfg = deepcopy(cfg)
 
     lens = sweep2array(cfg["sweep"], allow_array=True)
 
     del cfg["sweep"]  # remove sweep for program use
 
-    def update_cfg(cfg, _, length):
+    def updateCfg(cfg, _, length):
         cfg["dac"]["qub_pulse"]["length"] = length
 
     lens, signals = sweep1D_soft_template(
@@ -28,19 +28,16 @@ def measure_lenrabi(soc, soccfg, cfg, instant_show=False):
         cfg,
         TwoToneProgram,
         xs=lens,
-        init_signals=np.full(len(lens), np.nan, dtype=np.complex128),
-        progress=True,
-        instant_show=instant_show,
-        updateCfg=update_cfg,
+        updateCfg=updateCfg,
         xlabel="Length (us)",
         ylabel="Amplitude",
-        signals2real=signals2real,
+        signal2real=signal2real,
     )
 
     return lens, signals
 
 
-def measure_amprabi(soc, soccfg, cfg, instant_show=False):
+def measure_amprabi(soc, soccfg, cfg):
     cfg = deepcopy(cfg)
 
     pdrs = sweep2array(cfg["sweep"])
@@ -50,13 +47,10 @@ def measure_amprabi(soc, soccfg, cfg, instant_show=False):
         soccfg,
         cfg,
         RGainTwoToneProgram,
-        init_xs=pdrs,
-        init_signals=np.full(len(pdrs), np.nan, dtype=np.complex128),
-        progress=True,
-        instant_show=instant_show,
+        xs=pdrs,
         xlabel="Pulse Power (a.u.)",
         ylabel="Amplitude",
-        signals2real=signals2real,
+        signal2real=signal2real,
     )
 
     return pdrs, signals

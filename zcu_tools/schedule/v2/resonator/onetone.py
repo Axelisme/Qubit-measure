@@ -1,5 +1,3 @@
-import numpy as np
-
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import OneToneProgram
 from zcu_tools.schedule.tools import (
@@ -29,12 +27,10 @@ def measure_res_freq(soc, soccfg, cfg, progress=True):
         soccfg,
         cfg,
         OneToneProgram,
-        init_signals=np.full(len(fpts), np.nan, dtype=complex),
         ticks=(fpts,),
         progress=progress,
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
-        signals2real=np.abs,
     )
 
     # get the actual frequency points

@@ -1,89 +1,53 @@
 from copy import deepcopy
 
 import numpy as np
-from tqdm.auto import tqdm
 
-from zcu_tools import make_cfg
 from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
-from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow2D
 from zcu_tools.schedule.tools import sweep2array
+from zcu_tools.schedule.v1.template import sweep2D_soft_soft_template
 
 
 def signal2real(signals):
     return np.abs(minus_background(signals, axis=1))
 
 
-def measure_qub_flux_dep(soc, soccfg, cfg, instant_show=False, reset_rf=None):
+def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
     cfg = deepcopy(cfg)  # prevent in-place modification
-
-    if reset_rf is not None:
-        cfg["r_f"] = reset_rf
-        assert cfg.get("reset") == "pulse", "Need reset=pulse for conjugate reset"
-        assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
 
     if cfg["dev"]["flux_dev"] == "none":
         raise ValueError("Flux sweep but get flux_dev == 'none'")
 
-    freq_cfg = cfg["sweep"]["freq"]
-    flux_cfg = cfg["sweep"]["flux"]
-    fpts = sweep2array(freq_cfg)
-    flxs = sweep2array(flux_cfg, allow_array=True)
+    if reset_rf is not None:
+        assert cfg.get("reset") == "pulse", "Need reset=pulse for conjugate reset"
+        assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
+        cfg["r_f"] = reset_rf
 
-    cfg["sweep"] = cfg["sweep"]["freq"]  # remain only freq sweep in cfg
+    fpt_sweep = cfg["sweep"]["freq"]
+    flx_sweep = cfg["sweep"]["flux"]
+    fpts = sweep2array(fpt_sweep, allow_array=True)
+    flxs = sweep2array(flx_sweep, allow_array=True)
 
-    set_flux(cfg["dev"]["flux_dev"], flxs[0])  # set initial flux
+    del cfg["sweep"]  # remove sweep for program use
 
-    flux_tqdm = tqdm(flxs, desc="Flux", smoothing=0)
-    avgs_tqdm = tqdm(total=cfg["soft_avgs"], desc="Soft_avgs", smoothing=0)
-    if instant_show:
-        viewer = InstantShow2D(
-            flxs, fpts, x_label="Flux (a.u.)", y_label="Frequency (MHz)"
-        )
+    def x_updateCfg(cfg, _, flx):
+        cfg["dev"]["flux"] = flx
 
-    signals2D = np.full((len(flxs), len(fpts)), np.nan, dtype=np.complex128)
-    try:
-        for i, flx in enumerate(flux_tqdm):
-            cfg["dev"]["flux"] = flx
-            set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    def y_updateCfg(cfg, _, fpt):
+        cfg["dac"]["qub_pulse"]["freq"] = fpt
 
-            avgs_tqdm.reset()
-            avgs_tqdm.refresh()
-
-            _signals2D = signals2D.copy()  # prevent overwrite
-
-            def callback(ir, sum_d):
-                avgs_tqdm.update(max(ir + 1 - avgs_tqdm.n, 0))
-                avgs_tqdm.refresh()
-                if instant_show:
-                    _signals2D[i] = sum_d[0][0].dot([1, 1j]) / (ir + 1)
-                    viewer.update_show(signal2real(_signals2D))
-
-            prog_cls = (
-                RFreqTwoToneProgram
-                if reset_rf is None
-                else RFreqTwoToneProgramWithRedReset
-            )
-            prog = prog_cls(soccfg, make_cfg(cfg))
-            fpts, avgi, avgq = prog.acquire(soc, progress=False, callback=callback)
-            signals2D[i] = avgi[0][0] + 1j * avgq[0][0]
-
-            avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
-            avgs_tqdm.refresh()
-
-            if instant_show:
-                viewer.update_show(signal2real(signals2D), (flxs, fpts))
-
-    except KeyboardInterrupt:
-        print("Received KeyboardInterrupt, early stopping the program")
-    except Exception as e:
-        print("Error during measurement:", e)
-    finally:
-        if instant_show:
-            viewer.update_show(signal2real(signals2D), (flxs, fpts))
-            viewer.close_show()
-        flux_tqdm.close()
-        avgs_tqdm.close()
+    flxs, fpts, signals2D = sweep2D_soft_soft_template(
+        soc,
+        soccfg,
+        cfg,
+        RFreqTwoToneProgram if reset_rf is None else RFreqTwoToneProgramWithRedReset,
+        xs=flxs,
+        ys=fpts,
+        x_updateCfg=x_updateCfg,
+        y_updateCfg=y_updateCfg,
+        xlabel="Flux (a.u.)",
+        ylabel="Frequency (MHz)",
+        signal2real=signal2real,
+    )
 
     return flxs, fpts, signals2D

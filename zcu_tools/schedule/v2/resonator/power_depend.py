@@ -48,7 +48,6 @@ def measure_res_pdr_dep(soc, soccfg, cfg, dynamic_reps=False, gain_ref=0.1):
         ys=fpts,
         xlabel="Power (a.u.)",
         ylabel="Frequency (MHz)",
-        init_signals=np.full((len(pdrs), len(fpts)), np.nan, dtype=complex),
         updateCfg=updateCfg,
         signal2real=signal2real,
     )
