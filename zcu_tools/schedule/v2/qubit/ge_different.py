@@ -100,8 +100,10 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
 
     records = []
     with InstantShowScatter("Readout Gain", "Frequency (MHz)", title="SNR") as viewer:
+        count = 0
 
         def loss_func(point, cfg):
+            nonlocal count
             cfg = make_cfg(cfg)  # prevent in-place modification
 
             pdr, fpt = point
@@ -111,10 +113,13 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
             prog = TwoToneProgram(soccfg, cfg)
             result = prog.acquire(soc, progress=False, ret_std=True)
             snr = ge_result2signals(result)
+            count += 1
 
             records.append((pdr, fpt, snr))
 
-            viewer.append_spot(pdr, fpt, np.abs(snr), title=f"SNR: {np.abs(snr):.3e}")
+            viewer.append_spot(
+                pdr, fpt, np.abs(snr), title=f"SNR_{count}: {np.abs(snr):.3e}"
+            )
 
             return -np.abs(snr)
 

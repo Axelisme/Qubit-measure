@@ -1,11 +1,16 @@
 from copy import deepcopy
 
 import numpy as np
+from scipy.optimize import minimize
 from tqdm.auto import tqdm
 
 from zcu_tools.program.v1 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
+from zcu_tools.schedule.instant_show import (
+    InstantShow1D,
+    InstantShow2D,
+    InstantShowScatter,
+)
 from zcu_tools.schedule.tools import check_time_sweep, map2adcfreq, sweep2array
 from zcu_tools.tools import AsyncFunc, print_traceback
 
@@ -81,6 +86,65 @@ def measure_ge_pdr_dep(soc, soccfg, cfg):
             fpts_tqdm.close()
 
     return pdrs, fpts, snr2D
+
+
+def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
+    res_pulse = cfg["dac"]["res_pulse"]
+
+    pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
+    fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+    fpts = map2adcfreq(soc, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
+
+    del cfg["sweep"]["gain"]  # program should not use this
+    del cfg["sweep"]["freq"]  # program should not use this
+
+    # set again in case of change
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+
+    records = []
+    with InstantShowScatter("Readout Gain", "Frequency (MHz)", title="SNR") as viewer:
+        count = 0
+
+        def loss_func(point, cfg):
+            nonlocal count
+            cfg = deepcopy(cfg)  # prevent in-place modification
+
+            pdr, fpt = point
+            cfg["dac"]["res_pulse"]["gain"] = int(pdr)
+            cfg["dac"]["res_pulse"]["freq"] = fpt
+
+            snr = measure_one(soc, soccfg, cfg)
+            count += 1
+
+            records.append((pdr, fpt, snr))
+
+            viewer.append_spot(
+                pdr, fpt, np.abs(snr), title=f"SNR_{count}: {np.abs(snr):.3e}"
+            )
+
+            return -np.abs(snr)
+
+        options = dict(maxiter=(len(pdrs) * len(fpts)) // 5)
+
+        if method in ["Nelder-Mead", "Powell"]:
+            options["xatol"] = min(pdrs[1] - pdrs[0], fpts[1] - fpts[0])
+        elif method in ["L-BFGS-B"]:
+            options["ftol"] = 1e-4  # type: ignore
+            options["maxfun"] = options["maxiter"]
+
+        init_point = (0.5 * (pdrs[0] + pdrs[-1]), 0.5 * (fpts[0] + fpts[-1]))
+        res = minimize(
+            loss_func,
+            init_point,
+            args=(cfg,),
+            method=method,
+            bounds=[(pdrs[0], pdrs[-1]), (fpts[0], fpts[-1])],
+            options=options,
+        )
+
+    return res.x, records
 
 
 def measure_ge_ro_dep(soc, soccfg, cfg):
