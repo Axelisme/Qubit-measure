@@ -1,6 +1,7 @@
 import sys
 import time
 import traceback
+from copy import deepcopy
 from typing import Any, Callable, Dict, Literal, Optional, Union
 
 
@@ -175,5 +176,5 @@ class AsyncFunc:
             # only keep the latest job
             if ir > self.last_ir and self.acquiring:
                 self.last_ir = ir
-                self.last_job = (ir, args, kwargs)
+                self.last_job = deepcopy((ir, args, kwargs))
                 self.have_new_job.set()  # notify worker thread
