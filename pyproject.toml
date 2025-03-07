@@ -5,18 +5,16 @@ description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-    "attrdict",
-    "dill",
+    "qick",
+    "labber",
     "h5py",
     "ipykernel",
     "ipywidgets",
-    "matplotlib==3.6",
-    "numpy==1.19.5",
+    "matplotlib",
+    "numpy",
     "pandas",
-    "pyro4",
-    "requests",
     "scikit-learn",
-    "scipy==1.10",
+    "scipy",
     "scqubits",
     "tqdm",
 ]
