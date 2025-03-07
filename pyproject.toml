@@ -1,2 +1,25 @@
+[project]
+name = "qubit-measure"
+version = "0.1.0"
+description = "Tools and Scripts for Qubit Measurement"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "attrdict",
+    "dill",
+    "h5py",
+    "ipykernel",
+    "ipywidgets",
+    "matplotlib==3.6",
+    "numpy==1.19.5",
+    "pandas",
+    "pyro4",
+    "requests",
+    "scikit-learn",
+    "scipy==1.10",
+    "scqubits",
+    "tqdm",
+]
+
 [tool.ruff.lint]
 ignore = ["E402"]
