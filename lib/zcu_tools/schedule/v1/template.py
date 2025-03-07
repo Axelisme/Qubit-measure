@@ -4,7 +4,6 @@ from typing import Any, Callable, Dict, Tuple, Type
 import numpy as np
 from numpy import ndarray
 from tqdm.auto import tqdm
-
 from zcu_tools.program.v1 import (
     MyAveragerProgram,
     MyNDAveragerProgram,
@@ -235,7 +234,7 @@ def sweep2D_soft_hard_template(
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
 
-                    async_draw(i, signal2real(signals2D))
+                    async_draw(i, signal2real(signals2D), (xs, ys))
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")

@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from qick.asm_v2 import AveragerProgramV2
+from myqick.asm_v2 import AveragerProgramV2
 from zcu_tools.program.base import MyProgram
 
 from .readout import make_readout

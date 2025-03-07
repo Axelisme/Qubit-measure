@@ -19,7 +19,7 @@ def get_bitfile(version):
     }
     if version not in version_dict:
         raise ValueError(f"Invalid version {version}")
-    return os.path.join(os.path.dirname(qick.__file__), version_dict[version])
+    return os.path.join(os.path.dirname(myqick.__file__), version_dict[version])
 
 
 def get_program_module(version):
