@@ -1,5 +1,6 @@
-import numpy as np
+from copy import deepcopy
 
+import numpy as np
 from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import T1Program, T2EchoProgram, T2RamseyProgram
 from zcu_tools.schedule.tools import check_time_sweep, sweep2array
@@ -10,9 +11,13 @@ def signals2real(signals: np.ndarray) -> np.ndarray:
     return np.abs(minus_background(signals))
 
 
-def measure_t2ramsey(soc, soccfg, cfg):
+def measure_t2ramsey(soc, soccfg, cfg, detune=0.0):
+    cfg = deepcopy(cfg)
+
     ts = sweep2array(cfg["sweep"])
     check_time_sweep(soccfg, ts)
+
+    cfg["detune"] = detune
 
     # linear hard sweep
     ts, signals = sweep1D_hard_template(

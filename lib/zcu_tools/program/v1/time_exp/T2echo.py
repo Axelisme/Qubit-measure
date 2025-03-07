@@ -1,22 +1,30 @@
-from ..base import set_pulse
-from ..twotone import PULSE_DELAY, SYNC_TIME, declare_pulse
-from .base import TimeProgram
+from ..base import SYNC_TIME, MyRAveragerProgram, set_pulse
+from ..twotone import PULSE_DELAY, declare_pulse
 
 
-class T2EchoProgram(TimeProgram):
+class T2EchoProgram(MyRAveragerProgram):
+    def declare_wait_reg(self):
+        self.q_wait = 3
+        self.regwi(self.q_rp, self.q_wait, self.us2cycles(self.cfg["start"]))
+        self.q_wait_s = self.us2cycles(self.cfg["step"])
+
     def initialize(self):
         self.resetM.init(self)
         self.readoutM.init(self)
 
-        declare_pulse(self, self.pi_pulse, "pi")
-        declare_pulse(self, self.pi2_pulse, "pi2")
-
         assert self.pi_pulse["ch"] == self.pi2_pulse["ch"], (
             "pi and pi/2 pulse must be on the same channel"
         )
-        self.declare_wait_reg(self.pi_pulse["ch"])
+        declare_pulse(self, self.pi_pulse, "pi")
+        declare_pulse(self, self.pi2_pulse, "pi2")
+
+        self.q_rp = self.ch_page(self.pi_pulse["ch"])
+        self.declare_wait_reg()
 
         self.synci(SYNC_TIME)
+
+    def update(self):
+        self.mathi(self.q_rp, self.q_wait, self.q_wait, "+", self.q_wait_s)
 
     def body(self):
         # reset
