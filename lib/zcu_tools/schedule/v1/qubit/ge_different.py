@@ -3,7 +3,6 @@ from copy import deepcopy
 import numpy as np
 from scipy.optimize import minimize
 from tqdm.auto import tqdm
-
 from zcu_tools.program.v1 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import (
@@ -144,6 +143,8 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
             options=options,
         )
 
+    if isinstance(res, np.ndarray):
+        return res, records
     return res.x, records
 
 

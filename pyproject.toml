@@ -4,20 +4,19 @@ version = "0.1.0"
 description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
 requires-python = ">=3.8"
-dependencies = [
-    "qick",
+dependencies = ["qick", "h5py", "numpy", "tqdm"]
+
+[project.optional-dependencies]
+client = [
     "labber",
-    "h5py",
     "ipykernel",
     "ipywidgets",
     "matplotlib",
-    "numpy",
     "pandas",
     "scikit-learn",
     "scipy",
-    "scqubits",
-    "tqdm",
 ]
+fit = ["scqubits", "matplotlib", "plotly", "scipy", "ipympl", "nbformat>=4.2.0"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

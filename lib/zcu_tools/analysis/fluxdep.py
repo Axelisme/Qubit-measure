@@ -660,7 +660,11 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
 
     def callback(intermediate_result):
         pbar.update(1)
-        cur_params = intermediate_result.x
+        if isinstance(intermediate_result, np.ndarray):
+            # old version
+            cur_params = intermediate_result
+        else:
+            cur_params = intermediate_result.x
         pbar.set_description(
             f"({cur_params[0]:.2f}, {cur_params[1]:.2f}, {cur_params[2]:.2f})"
         )
@@ -734,4 +738,6 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
 
     scq.settings.PROGRESSBAR_DISABLED = old
 
+    if isinstance(res, np.ndarray):  # old version
+        return res
     return res.x

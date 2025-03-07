@@ -1,6 +1,5 @@
 import numpy as np
 from scipy.optimize import minimize
-
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
@@ -141,6 +140,8 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
             options=options,
         )
 
+    if isinstance(res, np.ndarray):
+        return res, records
     return res.x, records
 
 
