@@ -8,6 +8,8 @@ from .datasaver import (
 )
 from .tools import make_sweep
 
+__version__ = "0.1.0"
+
 __all__ = [
     "make_cfg",
     "DefaultCfg",

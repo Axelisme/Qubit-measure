@@ -10,6 +10,7 @@ backup
 __pycache__
 assembler.log
 test.py
+*.egg-info
 *.bak
 *.ipynb
 *.yaml
