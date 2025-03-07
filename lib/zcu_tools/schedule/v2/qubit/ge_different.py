@@ -186,7 +186,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg):
     return lens, snrs
 
 
-def measure_ge_trig_dep(soc, soccfg, cfg):
+def measure_ge_trig_dep_soft(soc, soccfg, cfg):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]
@@ -203,16 +203,12 @@ def measure_ge_trig_dep(soc, soccfg, cfg):
 
     del cfg["sweep"]["offset"]  # program should not use this
 
+    res_len = cfg["dac"]["res_pulse"]["length"]
     orig_offset = cfg["adc"]["trig_offset"]
 
     def updateCfg(cfg, _, offset):
         cfg["adc"]["trig_offset"] = offset
-        cfg["adc"]["ro_length"] = (
-            cfg["adc"]["ro_length"] - cfg["adc"]["trig_offset"] + orig_offset
-        )
-
-        if cfg["adc"]["ro_length"] < 0:
-            raise ValueError("Readout length cannot be negative")
+        cfg["dac"]["res_pulse"]["length"] = res_len + offset - orig_offset
 
     offsets, snrs = sweep1D_soft_template(
         soc,
@@ -227,5 +223,40 @@ def measure_ge_trig_dep(soc, soccfg, cfg):
         result2signals=ge_result2signals,
         ret_std=True,
     )
+
+    return offsets, snrs
+
+
+def measure_ge_trig_dep(soc, soccfg, cfg):
+    cfg = make_cfg(cfg)  # prevent in-place modification
+
+    qub_pulse = cfg["dac"]["qub_pulse"]
+    res_len = cfg["dac"]["res_pulse"]["length"]
+    orig_offset = cfg["adc"]["trig_offset"]
+
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "offset")
+
+    offsets = sweep2param("offset", cfg["sweep"]["offset"])
+    cfg["adc"]["trig_offset"] = offsets
+    cfg["dac"]["res_pulse"]["length"] = res_len + offsets - orig_offset
+
+    # append ge sweep to inner loop
+    # set with / without pi length for qubit pulse
+    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+    qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+
+    prog, snrs = sweep_hard_template(
+        soc,
+        soccfg,
+        cfg,
+        TwoToneProgram,
+        xs=sweep2array(cfg["sweep"]["offset"]),
+        xlabel="Trigger Offset (us)",
+        ylabel="Amplitude",
+        result2signals=ge_result2signals,
+        ret_std=True,
+    )
+
+    offsets = prog.get_pulse_param("readout_adc", "trig_offset", as_array=True)
 
     return offsets, snrs

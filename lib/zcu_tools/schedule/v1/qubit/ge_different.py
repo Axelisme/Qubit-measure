@@ -193,7 +193,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg):
 
     del cfg["sweep"]  # remove sweep from cfg
 
-    ro_len = cfg["adc"]["ro_length"]
+    res_len = cfg["dac"]["res_pulse"]["length"]
     orig_offset = cfg["adc"]["trig_offset"]
 
     # set flux first
@@ -206,7 +206,7 @@ def measure_ge_trig_dep(soc, soccfg, cfg):
             with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
                 for i, offset in enumerate(offsets_tqdm):
                     cfg["adc"]["trig_offset"] = offset
-                    cfg["adc"]["ro_length"] = ro_len + offset - orig_offset
+                    cfg["dac"]["res_pulse"]["length"] = offset - orig_offset + res_len
 
                     snrs[i] = measure_one(soc, soccfg, cfg)
 
