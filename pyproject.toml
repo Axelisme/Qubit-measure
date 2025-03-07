@@ -4,9 +4,10 @@ version = "0.1.0"
 description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
 requires-python = ">=3.8"
-dependencies = ["qick", "h5py", "numpy", "tqdm"]
+dependencies = ["myqick", "h5py", "numpy", "tqdm"]
 
 [project.optional-dependencies]
+data = ["flask"]
 client = [
     "labber",
     "ipykernel",

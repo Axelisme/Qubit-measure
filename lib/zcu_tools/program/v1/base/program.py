@@ -1,4 +1,4 @@
-from qick import AveragerProgram, NDAveragerProgram, RAveragerProgram
+from myqick import AveragerProgram, NDAveragerProgram, RAveragerProgram
 from zcu_tools.program.base import MyProgram
 
 from .readout import make_readout

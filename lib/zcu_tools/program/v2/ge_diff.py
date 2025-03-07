@@ -2,8 +2,8 @@ import warnings
 from typing import Tuple
 
 import numpy as np
+from myqick.asm_v2 import QickSweep1D
 from numpy import ndarray
-from qick.asm_v2 import QickSweep1D
 
 from .twotone import TwoToneProgram
 

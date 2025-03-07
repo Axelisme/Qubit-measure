@@ -1,11 +1,7 @@
-from typing import Optional, Dict, Any
-
-from qick.asm_v1 import AcquireProgram
+from typing import Any, Dict, Optional
 
 
-def declare_pulse(
-    prog: AcquireProgram, pulse: Any, waveform: str, ro_ch: Optional[int] = None
-):
+def declare_pulse(prog, pulse: Any, waveform: str, ro_ch: Optional[int] = None):
     prog.declare_gen(pulse["ch"], nqz=pulse["nqz"])
     create_waveform(prog, waveform, pulse)
 
@@ -14,7 +10,7 @@ def declare_pulse(
     set_pulse(prog, pulse, ro_ch=ro_ch, waveform=waveform, set_default=(times == 1))
 
 
-def create_waveform(prog: AcquireProgram, name: str, pulse_cfg: Dict[str, Any]):
+def create_waveform(prog, name: str, pulse_cfg: Dict[str, Any]):
     ch = pulse_cfg["ch"]
     style = pulse_cfg["style"]
 
@@ -47,7 +43,7 @@ def create_waveform(prog: AcquireProgram, name: str, pulse_cfg: Dict[str, Any]):
 
 
 def set_pulse(
-    prog: AcquireProgram,
+    prog,
     pulse_cfg: dict,
     ro_ch: Optional[int] = None,
     waveform: Optional[str] = None,

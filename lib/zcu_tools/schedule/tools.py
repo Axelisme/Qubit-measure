@@ -2,8 +2,7 @@ import warnings
 from typing import Any, Dict, Union
 
 import numpy as np
-
-from qick.asm_v2 import QickParam, QickSweep1D
+from myqick.asm_v2 import QickParam, QickSweep1D
 
 
 def format_sweep1D(

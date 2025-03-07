@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 
-from qick.asm_v1 import AcquireProgram
-
 from .pulse import declare_pulse, set_pulse
 
 
@@ -14,16 +12,16 @@ def make_readout(name: str):
 
 class AbsReadout(ABC):
     @abstractmethod
-    def init(self, prog: AcquireProgram):
+    def init(self, prog):
         pass
 
     @abstractmethod
-    def readout_qubit(self, prog: AcquireProgram):
+    def readout_qubit(self, prog):
         pass
 
 
 class BaseReadout(AbsReadout):
-    def init(self, prog: AcquireProgram):
+    def init(self, prog):
         res_ch = prog.res_pulse["ch"]
         ro_chs = prog.adc["chs"]
 
@@ -37,7 +35,7 @@ class BaseReadout(AbsReadout):
                 gen_ch=res_ch,
             )
 
-    def readout_qubit(self, prog: AcquireProgram, before_readout=None):
+    def readout_qubit(self, prog, before_readout=None):
         res_ch = prog.res_pulse["ch"]
         ro_chs = prog.adc["chs"]
         if prog.ch_count[res_ch] > 1:

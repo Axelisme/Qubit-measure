@@ -1,9 +1,8 @@
-from qick.asm_v2 import AveragerProgramV2
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 
 def declare_pulse(
-    prog: AveragerProgramV2,
+    prog,
     pulse: Dict[str, Any],
     waveform: str,
     ro_ch: Optional[int] = None,
@@ -15,7 +14,7 @@ def declare_pulse(
     add_pulse(prog, pulse, waveform=waveform, ro_ch=ro_ch, **kwargs)
 
 
-def create_waveform(prog: AveragerProgramV2, name: str, pulse: Dict[str, Any]):
+def create_waveform(prog, name: str, pulse: Dict[str, Any]):
     ch: int = pulse["ch"]
     style: str = pulse["style"]
 
@@ -49,7 +48,7 @@ def create_waveform(prog: AveragerProgramV2, name: str, pulse: Dict[str, Any]):
 
 
 def add_pulse(
-    prog: AveragerProgramV2,
+    prog,
     pulse: Dict[str, Any],
     waveform: str,
     ro_ch: Optional[int] = None,

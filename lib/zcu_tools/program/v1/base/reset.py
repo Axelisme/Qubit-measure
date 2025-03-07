@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 
-from qick.asm_v1 import AcquireProgram
-
-from .pulse import set_pulse, declare_pulse
+from .pulse import declare_pulse, set_pulse
 
 
 def make_reset(name: str):
@@ -16,29 +14,29 @@ def make_reset(name: str):
 
 class AbsReset(ABC):
     @abstractmethod
-    def init(self, prog: AcquireProgram):
+    def init(self, prog):
         pass
 
     @abstractmethod
-    def reset_qubit(self, prog: AcquireProgram):
+    def reset_qubit(self, prog):
         pass
 
 
 class NoneReset(AbsReset):
-    def init(self, prog: AcquireProgram):
+    def init(self, prog):
         pass
 
-    def reset_qubit(self, prog: AcquireProgram):
+    def reset_qubit(self, prog):
         pass
 
 
 class PulseReset(AbsReset):
     DEFAULT_RESET_DELAY = 1.0
 
-    def init(self, prog: AcquireProgram):
+    def init(self, prog):
         declare_pulse(prog, prog.reset_pulse, waveform="reset")
 
-    def reset_qubit(self, prog: AcquireProgram):
+    def reset_qubit(self, prog):
         reset_pulse = prog.reset_pulse
         if prog.ch_count[reset_pulse["ch"]] > 1:
             set_pulse(prog, reset_pulse, waveform="reset")

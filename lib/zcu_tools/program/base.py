@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
-from qick.qick_asm import AcquireMixin
+from myqick.qick_asm import AcquireMixin
 from zcu_tools.config import config
 from zcu_tools.tools import AsyncFunc
 

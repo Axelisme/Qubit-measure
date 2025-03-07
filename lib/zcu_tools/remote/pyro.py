@@ -1,10 +1,9 @@
 import os
 
+import myqick
 import Pyro4
 import Pyro4.naming
-
-import qick
-from qick import QickConfig
+from myqick import QickConfig
 
 # use dill instead of pickle
 Pyro4.config.SERIALIZER = "dill"
@@ -39,7 +38,8 @@ def start_nameserver(ns_port):
 
 
 def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs):
-    from qick import QickSoc
+    from myqick import QickSoc
+
     from zcu_tools.remote.server import ProgramServer
 
     print("looking for nameserver . . .")

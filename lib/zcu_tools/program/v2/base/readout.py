@@ -1,18 +1,16 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 
-from qick.asm_v2 import AveragerProgramV2
-
 from .pulse import declare_pulse
 
 
 class AbsReadout(ABC):
     @abstractmethod
-    def init(self, prog: AveragerProgramV2):
+    def init(self, prog):
         pass
 
     @abstractmethod
-    def readout_qubit(self, prog: AveragerProgramV2):
+    def readout_qubit(self, prog):
         pass
 
 
@@ -24,7 +22,7 @@ def make_readout(name: str) -> AbsReadout:
 
 
 class BaseReadout(AbsReadout):
-    def init(self, prog: AveragerProgramV2):
+    def init(self, prog):
         res_pulse: Dict[str, Any] = prog.res_pulse
         res_ch: int = res_pulse["ch"]
         ro_chs: List[int] = prog.adc["chs"]
@@ -39,7 +37,7 @@ class BaseReadout(AbsReadout):
             ch=ro_ch, name="readout_adc", freq=res_pulse["freq"], gen_ch=res_ch
         )
 
-    def readout_qubit(self, prog: AveragerProgramV2):
+    def readout_qubit(self, prog):
         ro_ch = prog.adc["chs"][0]
 
         prog.send_readoutconfig(ro_ch, "readout_adc", t=0)

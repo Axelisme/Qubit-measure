@@ -1,4 +1,4 @@
-from qick.averager_program import QickSweep, merge_sweeps
+from myqick.averager_program import QickSweep, merge_sweeps
 
 from .base import (
     SYNC_TIME,
