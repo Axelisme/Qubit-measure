@@ -484,11 +484,15 @@ class InteractiveLines:
         return float(self.cflx), float(self.eflx)
 
 
-def calculate_energy(flxs, EJ, EC, EL, cutoff=50):
+def calculate_energy(flxs, EJ, EC, EL, cutoff=50, evals_count=10):
     from scqubits import Fluxonium
 
-    fluxonium = Fluxonium(EJ, EC, EL, flux=0.0, cutoff=cutoff, truncated_dim=10)
-    spectrumData = fluxonium.get_spectrum_vs_paramvals("flux", flxs, evals_count=10)
+    fluxonium = Fluxonium(
+        EJ, EC, EL, flux=0.0, cutoff=cutoff, truncated_dim=evals_count
+    )
+    spectrumData = fluxonium.get_spectrum_vs_paramvals(
+        "flux", flxs, evals_count=evals_count
+    )
 
     return spectrumData.energy_table
 
@@ -640,17 +644,14 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
 
     scq.settings.PROGRESSBAR_DISABLED, old = True, scq.settings.PROGRESSBAR_DISABLED
 
-    max_level = int(
-        np.max(
-            [
-                np.max(np.array(allows.get("transitions", [])), initial=0),
-                np.max(np.array(allows.get("mirror", [])), initial=0),
-            ]
-        )
-        + 1
-    )
+    max_level = 0
+    for lvl in allows.values():
+        if not isinstance(lvl, list):
+            continue
+        max_level = max(max_level, *[max(lv) for lv in lvl])
+    max_level += 1
     fluxonium = scq.Fluxonium(
-        *init_params, flux=0.0, truncated_dim=max_level, cutoff=40
+        *init_params, flux=0.0, truncated_dim=max_level, cutoff=50
     )
 
     pbar = tqdm(

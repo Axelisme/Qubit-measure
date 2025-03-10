@@ -9,24 +9,25 @@ import scqubits as scq
 from tqdm.auto import tqdm
 
 # parameters
-data_path = "database/fluxonium_1.h5"
-num_per = 15
-EJb = (2.0, 10.0)
-ECb = (0.5, 3.0)
-ELb = (0.1, 2.0)
+data_path = "simulation_data/fluxonium_int3.h5"
+num_per = 20
+EJb = (2.0, 6.0)
+ECb = (0.8, 2.0)
+ELb = (0.01, 0.2)
 # EJb = (3.0, 6.5)
 # ECb = (0.3, 2.0)
 # ELb = (0.5, 3.5)
 
 DRY_RUN = False
-scq.settings.PROGRESSBAR_DISABLED = True  
+scq.settings.PROGRESSBAR_DISABLED = True
 
-level_num = 10
-cutoff = 40
+level_num = 20
+max_level = 15
+cutoff = 50
 flxs = np.linspace(0.0, 0.5, 120)
 
 
-fluxonium = scq.Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=40)  
+fluxonium = scq.Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=cutoff)
 
 
 def calculate_spectrum(flxs, EJ, EC, EL):
@@ -34,7 +35,9 @@ def calculate_spectrum(flxs, EJ, EC, EL):
     fluxonium.EJ = EJ
     fluxonium.EC = EC
     fluxonium.EL = EL
-    spectrumData = fluxonium.get_spectrum_vs_paramvals("flux", flxs, evals_count=4)
+    spectrumData = fluxonium.get_spectrum_vs_paramvals(
+        "flux", flxs, evals_count=max_level
+    )
 
     return spectrumData.energy_table
 
@@ -104,7 +107,7 @@ for EJ in tqdm(np.linspace(EJb[0], EJb[1], num_per + 1)):
 
 print("Total data points:", len(params))
 
-scq.settings.PROGRESSBAR_DISABLED = False  
+scq.settings.PROGRESSBAR_DISABLED = False
 
 # we can flip the data around 0.5 to make the other half
 # since the fluxonium is symmetric
