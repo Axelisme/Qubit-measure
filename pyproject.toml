@@ -17,7 +17,15 @@ client = [
     "scikit-learn",
     "scipy",
 ]
-fit = ["scqubits", "matplotlib", "plotly", "scipy", "ipympl", "nbformat>=4.2.0"]
+fit = [
+    "scqubits",
+    "matplotlib",
+    "plotly",
+    "scipy",
+    "ipympl",
+    "nbformat>=4.2.0",
+    "joblib",
+]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

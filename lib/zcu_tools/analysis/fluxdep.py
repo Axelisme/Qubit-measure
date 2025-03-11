@@ -4,7 +4,7 @@ import numpy as np
 from IPython.display import display
 from matplotlib.animation import FuncAnimation
 from scipy.signal import find_peaks
-from tqdm.auto import tqdm, trange
+from tqdm.auto import tqdm
 
 
 class InteractiveSelector:
@@ -357,7 +357,7 @@ class InteractiveLines:
             return
 
         if self.active_line == self.rline:
-            # 如果已經在移動紅線，則停止移動
+            # 如果已經在移動紅線, 則停止移動
             self.stop_tracking()
         else:
             # 開始移動紅線
@@ -371,7 +371,7 @@ class InteractiveLines:
             return
 
         if self.active_line == self.bline:
-            # 如果已經在移動藍線，則停止移動
+            # 如果已經在移動藍線, 則停止移動
             self.stop_tracking()
         else:
             # 開始移動藍線
@@ -397,7 +397,7 @@ class InteractiveLines:
         red_dist = abs(event.xdata - red_x)
         blue_dist = abs(event.xdata - blue_x)
 
-        # 如果已經有活動的線條，點擊任何位置都停止追蹤
+        # 如果已經有活動的線條, 點擊任何位置都停止追蹤
         if self.active_line is not None:
             self.stop_tracking()
             return
@@ -602,8 +602,59 @@ def energy2transition(energies, allows):
     return np.array(fs).T, labels, names
 
 
-def search_in_database(flxs, fpts, datapath, allows):
+def candidate_breakpoint_search(A, B):
+    """
+    使用候選斷點法尋找最佳的 a 值, 使得目標函數最小化
+    目標函數: F(a) = sum_i(min_j(|A[i] - a * B[j, i]|))
+
+    輸入:
+      A: 目標向量, numpy 陣列, 形狀 (N,)
+      B: 候選向量矩陣, numpy 陣列, 形狀 (M, N), 其中每一列代表一個候選向量
+
+    輸出:
+      best_distance: 最小的目標函數值
+      best_a: 使得目標函數最小的 a 值
+    """
+    N = A.shape[0]
+    M = B.shape[0]
+
+    if B.shape[1] != N:
+        raise ValueError(
+            f"A and B must have the same number of columns, but got A={A.shape} and B={B.shape}"
+        )
+
+    # 收集所有候選的 a 值
+    candidate_as = []
+    for i in range(N):
+        for j in range(M):
+            # 若 B[j, i] 為 0 則略過
+            if B[j, i] != 0:
+                a_candidate = A[i] / B[j, i]
+                # 只考慮正的 a
+                if a_candidate > 0:
+                    candidate_as.append(a_candidate)
+
+    # 若沒有候選點, 則返回 None
+    if len(candidate_as) == 0:
+        return None, None
+
+    # 去除重複並排序
+    candidate_as = np.unique(np.array(candidate_as))  # shape (K,)
+
+    # 對每個候選 a 評估目標函數
+    # use broadcasting to calculate a * B, shape (K, M, N)
+    aB = candidate_as[:, None, None] * B[None, ...]
+    # calculate the minimum difference for each i
+    min_diff = np.min(np.abs(aB - A), axis=1)  # shape (K, N)
+    total_distance = np.sum(min_diff, axis=1)  # shape (K,)
+
+    best_idx = np.argmin(total_distance)
+    return total_distance[best_idx], candidate_as[best_idx]
+
+
+def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
     from h5py import File
+    from joblib import Parallel, delayed
 
     with File(datapath, "r") as file:
         h_flxs = file["flxs"][:]
@@ -612,28 +663,31 @@ def search_in_database(flxs, fpts, datapath, allows):
 
     def dist_to_curve(energies):
         fs, *_ = energy2transition(energies, allows)
+        return candidate_breakpoint_search(fpts, fs.T)  # (distance, a)
 
-        dist = np.abs(fs - fpts[:, None])  # (n, m)
-        dist = np.nanmin(dist, axis=1)  # (n, )
-
-        return np.nansum(dist)
-
-    # find the closest index in energy to s_fs
+    # 找到最接近的 energy index
     flxs = np.mod(flxs, 1.0)
-    d2 = (h_flxs[:, None] - flxs[None, :]) ** 2  # (m, m')
-    idxs = np.argmin(d2, axis=0)  # (m', )
+    d2 = (h_flxs[:, None] - flxs[None, :]) ** 2
+    idxs = np.argmin(d2, axis=0)
 
-    best_params = None
-    best_energy = None
-    best_dist = float("inf")
-    for i in trange(h_params.shape[0]):
+    # 平行計算距離
+    def process_energy(i):
         energy = h_energies[i, idxs]
+        dist, a = dist_to_curve(energy)
+        if dist is not None:
+            return dist, h_energies[i], h_params[i] * a
+        return float("inf"), None, None
 
-        dist = dist_to_curve(energy)
-        if dist < best_dist:
-            best_dist = dist
-            best_energy = h_energies[i]
-            best_params = h_params[i]
+    # compile candidate_breakpoint_search
+    dist_to_curve(h_energies[0, idxs])
+
+    results = Parallel(n_jobs=n_jobs)(
+        delayed(process_energy)(i)
+        for i in tqdm(range(h_params.shape[0]), desc="Searching...")
+    )
+
+    # 找到最佳結果
+    _, best_energy, best_params = min(results, key=lambda x: x[0])
 
     return best_params, h_flxs, best_energy
 
