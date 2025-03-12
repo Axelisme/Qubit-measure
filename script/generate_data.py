@@ -10,16 +10,16 @@ from joblib import Parallel, delayed
 from tqdm.auto import tqdm
 
 # parameters
-data_path = "simulation_data/fluxonium_test.h5"
-num_sample = 5000
-EJb = (2.0, 6.0)
-ECb = (0.8, 2.0)
-ELb = (0.01, 0.2)
+data_path = "simulation_data/fluxonium_1.h5"
+num_sample = 4000
+EJb = (3.0, 15.0)
+ECb = (0.2, 2.0)
+ELb = (0.5, 2.0)
 # EJb = (3.0, 6.5)
 # ECb = (0.3, 2.0)
 # ELb = (0.5, 3.5)
 
-DRY_RUN = True
+DRY_RUN = False
 scq.settings.PROGRESSBAR_DISABLED = True
 
 cutoff = 40
@@ -134,7 +134,7 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
     """
     # 初始生成較多的候選射線，確保能找到足夠多的相交射線
     K = N  # 初始候選數量設為 N
-    max_attempts = 6  # 最多嘗試 5 次增加 K
+    max_attempts = 10  # 最多嘗試 5 次增加 K
 
     def check_direction(direction):
         if ray_intersects_box(direction, x_range, y_range, z_range):
@@ -145,9 +145,9 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
         # 生成 Fibonacci lattice 上的方向
         directions = fibonacci_lattice_positive_vectorized(K)  # (K, 3)
 
-        directions[:, 0] *= (x_range[1] + x_range[0]) / 2
-        directions[:, 1] *= (y_range[1] + y_range[0]) / 2
-        directions[:, 2] *= (z_range[1] + z_range[0]) / 2
+        directions[:, 0] *= x_range[1]
+        directions[:, 1] *= y_range[1]
+        directions[:, 2] *= z_range[1]
 
         # 使用並行化篩選與長方體相交的射線
         results = Parallel(n_jobs=n_jobs, batch_size=2**14)(
@@ -169,19 +169,14 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
                 for y in y_range:
                     for z in z_range:
                         ax.scatter(x, y, z, color="r")
-                        nx = x / (x_range[1] + x_range[0]) * 2
-                        ny = y / (y_range[1] + y_range[0]) * 2
-                        nz = z / (z_range[1] + z_range[0]) * 2
-                        r = np.sqrt(nx**2 + ny**2 + nz**2)
-                        ax.scatter(x / r, y / r, z / r, color="g")
             ax.scatter(0, 0, 0, color="b")
-            plt.show(block=False)
+            plt.show()
 
             return np.array(intersecting_directions)
         else:
             # 如果不夠，增加候選數量 K
             orig_K = K
-            K = int(K * min(max(N // max(len(intersecting_directions), 1), 1.1), 100))
+            K = int(K * min(max(N / max(len(intersecting_directions), 1), 1.01), 100))
             print(
                 f"Attempt {attempt + 1}: Found {len(intersecting_directions)} intersecting rays, less than {N}. Increasing K from {orig_K} to {K}."
             )
@@ -215,6 +210,9 @@ for i in range(len(params)):
 params = np.array(params)
 energies = np.array(energies)
 Ebounds = np.array((EJb, ECb, ELb))
+
+if DRY_RUN:
+    data_path = "simulation_data/fluxonium_test.h5"
 
 os.makedirs(os.path.dirname(data_path), exist_ok=True)
 dump_data(data_path, flxs, params, energies, Ebounds)

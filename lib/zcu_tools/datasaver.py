@@ -71,7 +71,7 @@ def save_data_local(
         print("DRY RUN: Save data to ", filepath)
         return
 
-    import Labber
+    import Labber  # type: ignore
 
     fObj = Labber.createLogFile_ForData(filepath, log_channels, step_channels)
     if y_info:
