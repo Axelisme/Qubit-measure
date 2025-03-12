@@ -10,8 +10,8 @@ from joblib import Parallel, delayed
 from tqdm.auto import tqdm
 
 # parameters
-data_path = "simulation_data/fluxonium_int.h5"
-num_sample = 1000
+data_path = "simulation_data/fluxonium_test.h5"
+num_sample = 5000
 EJb = (2.0, 6.0)
 ECb = (0.8, 2.0)
 ELb = (0.01, 0.2)
@@ -19,10 +19,10 @@ ELb = (0.01, 0.2)
 # ECb = (0.3, 2.0)
 # ELb = (0.5, 3.5)
 
-DRY_RUN = False
+DRY_RUN = True
 scq.settings.PROGRESSBAR_DISABLED = True
 
-cutoff = 50
+cutoff = 40
 max_level = 15
 flxs = np.linspace(0.0, 0.5, 120)
 
@@ -80,7 +80,7 @@ def fibonacci_lattice(K):
 def fibonacci_lattice_positive_vectorized(K):
     """
     使用 numpy 向量化生成約均勻分布在球面上的點，並篩選出 xyz 坐標都大於 0 的點，
-    最後返回 K 個點。
+    最後返回最少 K 個點。
     """
     while True:
         directions = fibonacci_lattice(8 * K)
@@ -97,9 +97,7 @@ def fibonacci_lattice_positive_vectorized(K):
         print(f"Generating more points..., from {K} to {int(K * 1.1)}")
         K = int(K * 1.1)  # 增加候選點數量
 
-    # random remove points to make sure we have exactly K points
-    np.random.shuffle(valid_directions)
-    return valid_directions[:K]
+    return valid_directions
 
 
 def ray_intersects_box(direction, x_range, y_range, z_range):
@@ -115,35 +113,14 @@ def ray_intersects_box(direction, x_range, y_range, z_range):
 
     # 對每個坐標軸計算 t 的範圍
     for d, rng in [(d_x, x_range), (d_y, y_range), (d_z, z_range)]:
-        if abs(d) < 1e-6:  # 如果方向分量幾乎為 0
-            if rng[0] <= 0 <= rng[1]:  # 原點在範圍內，射線可能無限長
-                continue
-            else:
-                return False
-        else:
-            # 計算射線與邊界的交點
-            t1 = rng[0] / d
-            t2 = rng[1] / d
-            if d > 0:
-                t_min = max(t_min, t1)
-                t_max = min(t_max, t2)
-            else:
-                t_min = max(t_min, t2)
-                t_max = min(t_max, t1)
+        # 計算射線與邊界的交點
+        t1 = rng[0] / d
+        t2 = rng[1] / d
+        t_min = max(t_min, t1)
+        t_max = min(t_max, t2)
 
-    # 如果 t_min <= t_max 且 t_min >= 0，則射線與長方體相交
-    return t_min <= t_max and t_max >= 0
-
-
-def check_direction(direction, x_range, y_range, z_range):
-    """
-    檢查方向是否有效（不過濾完全負方向）並與長方體相交。
-    返回：(是否相交, 方向)。如果不相交，方向為 None。
-    """
-    # 這裡可以選擇是否過濾完全負方向，為了通用性，先不過濾
-    if ray_intersects_box(direction, x_range, y_range, z_range):
-        return True, direction
-    return False, None
+    # 如果 t_min <= t_max, 則射線與長方體相交
+    return t_min <= t_max
 
 
 def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
@@ -156,18 +133,25 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
     返回：與長方體相交的射線方向列表，形狀為 (N, 3)。
     """
     # 初始生成較多的候選射線，確保能找到足夠多的相交射線
-    K = N * 10  # 初始候選數量設為 N 的 10 倍
-    max_attempts = 5  # 最多嘗試 10 次增加 K
+    K = N  # 初始候選數量設為 N
+    max_attempts = 6  # 最多嘗試 5 次增加 K
+
+    def check_direction(direction):
+        if ray_intersects_box(direction, x_range, y_range, z_range):
+            return True, direction
+        return False, None
 
     for attempt in range(max_attempts):
         # 生成 Fibonacci lattice 上的方向
-        directions = fibonacci_lattice_positive_vectorized(K)
+        directions = fibonacci_lattice_positive_vectorized(K)  # (K, 3)
+
+        directions[:, 0] *= (x_range[1] + x_range[0]) / 2
+        directions[:, 1] *= (y_range[1] + y_range[0]) / 2
+        directions[:, 2] *= (z_range[1] + z_range[0]) / 2
 
         # 使用並行化篩選與長方體相交的射線
-        delayed_check = delayed(check_direction)
-        results = Parallel(n_jobs=n_jobs)(
-            delayed_check(direction, x_range, y_range, z_range)
-            for direction in directions
+        results = Parallel(n_jobs=n_jobs, batch_size=2**14)(
+            delayed(check_direction)(direction) for direction in directions
         )
 
         # 提取相交的方向
@@ -175,8 +159,25 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
 
         # 檢查是否找到足夠多的相交射線
         if len(intersecting_directions) >= N:
-            # 如果找到的相交射線數量 >= N，則選取前 N 條
-            return np.array(intersecting_directions[:N])
+            # # plot directions in 3D space for debugging
+            import matplotlib.pyplot as plt
+
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection="3d")
+            ax.scatter(*np.array(intersecting_directions).T)
+            for x in x_range:
+                for y in y_range:
+                    for z in z_range:
+                        ax.scatter(x, y, z, color="r")
+                        nx = x / (x_range[1] + x_range[0]) * 2
+                        ny = y / (y_range[1] + y_range[0]) * 2
+                        nz = z / (z_range[1] + z_range[0]) * 2
+                        r = np.sqrt(nx**2 + ny**2 + nz**2)
+                        ax.scatter(x / r, y / r, z / r, color="g")
+            ax.scatter(0, 0, 0, color="b")
+            plt.show(block=False)
+
+            return np.array(intersecting_directions)
         else:
             # 如果不夠，增加候選數量 K
             orig_K = K
@@ -192,6 +193,8 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
 
 
 params = get_intersecting_rays(EJb, ECb, ELb, num_sample)
+num_sample = len(params)  # update to the actual number of samples
+print(f"Generated {num_sample} samples.")
 if DRY_RUN:
     energies = [np.random.randn(max_level) for _ in range(num_sample)]
 else:

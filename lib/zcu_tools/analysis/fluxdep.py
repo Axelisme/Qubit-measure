@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import display
 from matplotlib.animation import FuncAnimation
+from numba import njit
 from scipy.signal import find_peaks
 from tqdm.auto import tqdm
 
@@ -602,23 +603,24 @@ def energy2transition(energies, allows):
     return np.array(fs).T, labels, names
 
 
+@njit(cache=True)
 def candidate_breakpoint_search(A, B):
     """
     使用候選斷點法尋找最佳的 a 值, 使得目標函數最小化
-    目標函數: F(a) = sum_i(min_j(|A[i] - a * B[j, i]|))
+    目標函數: F(a) = sum_i(min_j(|A[i] - a * B[i, j]|))
 
     輸入:
       A: 目標向量, numpy 陣列, 形狀 (N,)
-      B: 候選向量矩陣, numpy 陣列, 形狀 (M, N), 其中每一列代表一個候選向量
+      B: 候選向量矩陣, numpy 陣列, 形狀 (N, M), 其中每一列代表一個候選向量
 
     輸出:
       best_distance: 最小的目標函數值
       best_a: 使得目標函數最小的 a 值
     """
     N = A.shape[0]
-    M = B.shape[0]
+    M = B.shape[1]
 
-    if B.shape[1] != N:
+    if B.shape[0] != N:
         raise ValueError(
             f"A and B must have the same number of columns, but got A={A.shape} and B={B.shape}"
         )
@@ -627,9 +629,9 @@ def candidate_breakpoint_search(A, B):
     candidate_as = []
     for i in range(N):
         for j in range(M):
-            # 若 B[j, i] 為 0 則略過
-            if B[j, i] != 0:
-                a_candidate = A[i] / B[j, i]
+            # 若 B[i, j] 為 0 則略過
+            if B[i, j] != 0:
+                a_candidate = A[i] / B[i, j]
                 # 只考慮正的 a
                 if a_candidate > 0:
                     candidate_as.append(a_candidate)
@@ -641,15 +643,26 @@ def candidate_breakpoint_search(A, B):
     # 去除重複並排序
     candidate_as = np.unique(np.array(candidate_as))  # shape (K,)
 
-    # 對每個候選 a 評估目標函數
-    # use broadcasting to calculate a * B, shape (K, M, N)
-    aB = candidate_as[:, None, None] * B[None, ...]
-    # calculate the minimum difference for each i
-    min_diff = np.min(np.abs(aB - A), axis=1)  # shape (K, N)
-    total_distance = np.sum(min_diff, axis=1)  # shape (K,)
+    # make numba happy
+    best_distance = float("inf")
+    best_a = None
+    for a in candidate_as:
+        distances = np.zeros_like(A)
+        for i in range(N):
+            min_diff = float("inf")
+            for j in range(M):
+                diff = np.abs(A[i] - a * B[i, j])
+                if diff < min_diff:
+                    min_diff = diff
+            distances[i] = min_diff
 
-    best_idx = np.argmin(total_distance)
-    return total_distance[best_idx], candidate_as[best_idx]
+        # use median instead of sum
+        median_distance = np.median(distances)
+        if median_distance < best_distance:
+            best_distance = median_distance
+            best_a = a
+
+    return best_distance, best_a
 
 
 def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
@@ -661,35 +674,34 @@ def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
         h_params = file["params"][:]
         h_energies = file["energies"][:]
 
-    def dist_to_curve(energies):
-        fs, *_ = energy2transition(energies, allows)
-        return candidate_breakpoint_search(fpts, fs.T)  # (distance, a)
-
     # 找到最接近的 energy index
     flxs = np.mod(flxs, 1.0)
     d2 = (h_flxs[:, None] - flxs[None, :]) ** 2
     idxs = np.argmin(d2, axis=0)
 
     # 平行計算距離
-    def process_energy(i):
-        energy = h_energies[i, idxs]
-        dist, a = dist_to_curve(energy)
+    def process_energy(energy, params):
+        fs, *_ = energy2transition(energy, allows)
+        dist, factor = candidate_breakpoint_search(fpts, fs)
         if dist is not None:
-            return dist, h_energies[i], h_params[i] * a
-        return float("inf"), None, None
-
-    # compile candidate_breakpoint_search
-    dist_to_curve(h_energies[0, idxs])
+            return dist, params * factor
+        return float("inf"), None
 
     results = Parallel(n_jobs=n_jobs)(
-        delayed(process_energy)(i)
+        delayed(process_energy)(h_energies[i, idxs], h_params[i])
         for i in tqdm(range(h_params.shape[0]), desc="Searching...")
     )
 
     # 找到最佳結果
-    _, best_energy, best_params = min(results, key=lambda x: x[0])
+    best_dist, best_params = min(results, key=lambda x: x[0])
+    print(f"Best distance: {best_dist:.2g}")
 
-    return best_params, h_flxs, best_energy
+    # plot the dist distribution
+    plt.hist([r[0] for r in results], bins=100)
+    plt.axvline(best_dist, color="r")
+    plt.show()
+
+    return best_params
 
 
 def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
@@ -705,7 +717,7 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
         max_level = max(max_level, *[max(lv) for lv in lvl])
     max_level += 1
     fluxonium = scq.Fluxonium(
-        *init_params, flux=0.0, truncated_dim=max_level, cutoff=50
+        *init_params, flux=0.0, truncated_dim=max_level, cutoff=40
     )
 
     pbar = tqdm(
