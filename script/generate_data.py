@@ -10,7 +10,7 @@ from joblib import Parallel, delayed
 from tqdm.auto import tqdm
 
 # parameters
-data_path = "simulation_data/fluxonium_1.h5"
+data_path = "simulation_data/fluxonium_test.h5"
 num_sample = 4000
 EJb = (3.0, 15.0)
 ECb = (0.2, 2.0)
@@ -19,7 +19,7 @@ ELb = (0.5, 2.0)
 # ECb = (0.3, 2.0)
 # ELb = (0.5, 3.5)
 
-DRY_RUN = False
+DRY_RUN = True
 scq.settings.PROGRESSBAR_DISABLED = True
 
 cutoff = 40
