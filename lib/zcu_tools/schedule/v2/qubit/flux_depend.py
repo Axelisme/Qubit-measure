@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools import make_cfg
 from zcu_tools.analysis import minus_background
 from zcu_tools.program.v2 import TwoToneProgram
@@ -7,7 +6,7 @@ from zcu_tools.schedule.tools import sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep2D_soft_hard_template
 
 
-def signal2real(signals):
+def signals2reals(signals):
     return np.abs(minus_background(signals, axis=1))
 
 
@@ -47,7 +46,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
         xlabel="Flux (a.u.)",
         ylabel="Frequency (MHz)",
         updateCfg=updateCfg,
-        signal2real=signal2real,
+        signal2real=signals2reals,
     )
 
     # get the actual frequency points

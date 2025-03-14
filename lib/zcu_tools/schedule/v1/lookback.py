@@ -2,7 +2,6 @@ from copy import deepcopy
 
 import numpy as np
 from tqdm.auto import tqdm
-
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import OneToneProgram, TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
@@ -71,7 +70,9 @@ def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
                 Ts.append(Ts_)
                 signals.append(signals_)
 
-                viewer.update_show(np.abs(np.concatenate(signals)), np.concatenate(Ts))
+                viewer.update_show(
+                    np.abs(np.concatenate(signals)), ticks=np.concatenate(Ts)
+                )
 
                 trig_offset += MAX_LEN
                 bar.update()
@@ -84,6 +85,6 @@ def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
             Ts = Ts[sort_idxs]
             signals = signals[sort_idxs]
 
-            viewer.update_show(np.abs(signals), Ts)
+            viewer.update_show(np.abs(signals), ticks=Ts)
 
     return Ts, signals

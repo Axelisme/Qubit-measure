@@ -14,35 +14,29 @@ from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
 from zcu_tools.tools import AsyncFunc, print_traceback
 
 
-def default_result2signals(result) -> ndarray:
-    avgi, avgq, *_ = result
-    return avgi[0][0] + 1j * avgq[0][0]  # type: ignore
+def default_result2signals(avgi, avgq, stdi, stdq) -> ndarray:
+    signals = avgi[0][0] + 1j * avgq[0][0]
+    stds = stdi[0][0] + 1j * stdq[0][0]
+    return signals, stds
 
 
 def default_signal2real(signals) -> ndarray:
     return np.abs(signals)
 
 
-def raw2result(ir, *args):
-    if len(args) == 1:
-        (sum_d,) = args
-    else:
-        sum_d, sum2_d = args
-
+def raw2result(ir, sum_d, sum2_d):
     sum_d = [d.dot([1, 1j]) for d in sum_d]
+    sum2_d = [d.dot([1, 1j]) for d in sum2_d]
+
     avg_d = [d / (ir + 1) for d in sum_d]
-    avgi_d = [d.real for d in avg_d]
-    avgq_d = [d.imag for d in avg_d]
+    avgi = [d.real for d in avg_d]
+    avgq = [d.imag for d in avg_d]
 
-    if len(args) == 1:
-        return avgi_d, avgq_d
-    else:
-        sum2_d = [d.dot([1, 1j]) for d in sum2_d]
-        std_d = [np.sqrt(d2 / (ir + 1) - d**2) for d, d2 in zip(avg_d, sum2_d)]
-        stdi_d = [d.real for d in std_d]
-        stdq_d = [d.imag for d in std_d]
+    std_d = [np.sqrt(s2 / (ir + 1) - u**2) for u, s2 in zip(avg_d, sum2_d)]
+    stdi = [d.real for d in std_d]
+    stdq = [d.imag for d in std_d]
 
-        return avgi_d, avgq_d, stdi_d, stdq_d
+    return avgi, avgq, stdi, stdq
 
 
 def sweep1D_hard_template(
@@ -66,9 +60,9 @@ def sweep1D_hard_template(
 
     with InstantShow1D(xs, xlabel, ylabel) as viewer:
 
-        def callback(ir, *args):
+        def callback(ir, sum_d, sum2_d):
             nonlocal signals
-            signals = result2signals(raw2result(ir, *args))
+            signals = result2signals(raw2result(ir, sum_d, sum2_d))
             viewer.update_show(signal2real(signals))
 
         try:
@@ -84,7 +78,7 @@ def sweep1D_hard_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signal2real(signals))
+            viewer.update_show(signal2real(signals), ticks=xs)
 
     return xs, signals
 

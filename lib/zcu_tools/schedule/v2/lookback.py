@@ -2,7 +2,6 @@ from typing import Tuple
 
 import numpy as np
 from tqdm.auto import tqdm
-
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
@@ -69,7 +68,9 @@ def measure_lookback(
             Ts.append(Ts_)
             signals.append(singals_)
 
-            viewer.update_show(np.abs(np.concatenate(signals)), np.concatenate(Ts))
+            viewer.update_show(
+                np.abs(np.concatenate(signals)), ticks=np.concatenate(Ts)
+            )
 
             trig_offset += MAX_LEN
             bar.update()
@@ -82,7 +83,7 @@ def measure_lookback(
         Ts = Ts[sort_idxs]
         signals = signals[sort_idxs]
 
-        viewer.update_show(np.abs(signals), Ts)
+        viewer.update_show(np.abs(signals), ticks=Ts)
         viewer.close_show()
 
     return Ts, signals

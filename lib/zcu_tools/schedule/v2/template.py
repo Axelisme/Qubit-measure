@@ -4,29 +4,26 @@ from typing import Any, Callable, Dict, Tuple, Type
 import numpy as np
 from numpy import ndarray
 from tqdm.auto import tqdm
-
 from zcu_tools.program.v2 import MyProgramV2
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
 from zcu_tools.tools import AsyncFunc, print_traceback
 
 
-def default_result2signals(result) -> ndarray:
-    return result[0][0].dot([1, 1j])
+def default_result2signals(*result) -> ndarray:
+    avg_d = result[0][0][0].dot([1, 1j])
+    if len(result) == 1:
+        return avg_d
+    else:
+        std_d = np.abs(result[1][0][0].dot([1, 1j]))
+        return avg_d, std_d
 
 
 def default_signal2real(signals: ndarray) -> ndarray:
     return np.abs(signals)
 
 
-def raw2result(ir, *args):
-    if len(args) == 1:
-        (sum_d,) = args
-        avg_d = [d / (ir + 1) for d in sum_d]
-        return avg_d
-
-    # if ret_std == True
-    sum_d, sum2_d = args
+def raw2result(ir, sum_d, sum2_d):
     avg_d = [d / (ir + 1) for d in sum_d]
     std_d = [np.sqrt(d2 / (ir + 1) - d**2) for d, d2 in zip(avg_d, sum2_d)]
     return avg_d, std_d
@@ -48,17 +45,18 @@ def sweep_hard_template(
 ) -> Tuple[MyProgramV2, ndarray]:
     signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
 
-    ViewerCls = {1: InstantShow1D, 2: InstantShow2D}[len(ticks)]
+    ViewerCls = [InstantShow1D, InstantShow2D][len(ticks) - 1]
 
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     with ViewerCls(*ticks, xlabel, ylabel) as viewer:
 
-        def callback(ir, *args):
+        def callback(*raw):
             nonlocal signals
-            signals = result2signals(raw2result(ir, *args))
-            viewer.update_show(signal2real(signals))
+            print(raw)
+            signals, stds = result2signals(raw2result(*raw))
+            viewer.update_show(signal2real(signals), stds=stds)
 
         try:
             prog = prog_cls(soccfg, cfg)

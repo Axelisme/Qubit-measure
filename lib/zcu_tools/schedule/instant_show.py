@@ -1,7 +1,7 @@
 # type: ignore
 
-from typing import Optional
 from threading import Lock
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -42,18 +42,38 @@ class InstantShow1D(BaseInstantShow):
         kwargs.setdefault("marker", ".")
         self.contain = self.ax.plot(xs, np.zeros_like(xs), **kwargs)[0]
 
+        err_kwargs = {"linestyle": "--", "color": "gray"}
+        self.err_up = self.ax.plot(xs, np.zeros_like(xs), **err_kwargs)[0]
+        self.err_dn = self.ax.plot(xs, np.zeros_like(xs), **err_kwargs)[0]
+
         self.dh = display(self.fig, display_id=True)
 
-    def update_show(self, signals_real: np.ndarray, ticks=None, title=None):
+    def update_show(
+        self,
+        signals_real: np.ndarray,
+        *,
+        stds: np.ndarray = None,
+        ticks=None,
+        title=None,
+    ):
+        if len(signals_real.shape) != 1:
+            raise ValueError(
+                f"Invalid shape of signals: {signals_real.shape}, expect 1D"
+            )
+
         with self.update_lock:
-            if len(signals_real.shape) != 1:
-                raise ValueError(
-                    f"Invalid shape of signals: {signals_real.shape}, expect 1D"
-                )
+            self.contain.set_ydata(signals_real)
+            if stds is not None:
+                self.err_up.set_ydata(signals_real + stds)
+                self.err_dn.set_ydata(signals_real - stds)
+            else:
+                self.err_up.set_ydata(np.full_like(signals_real, np.nan))
+                self.err_dn.set_ydata(np.full_like(signals_real, np.nan))
 
             if ticks is not None:
                 self.contain.set_xdata(ticks)
-            self.contain.set_ydata(signals_real)
+                self.err_up.set_xdata(ticks)
+                self.err_dn.set_xdata(ticks)
 
             if title:
                 self.ax.set_title(title)
@@ -85,7 +105,7 @@ class InstantShow2D(BaseInstantShow):
 
         self.dh = display(self.fig, display_id=True)
 
-    def update_show(self, signals_real: np.ndarray, ticks=None, title=None):
+    def update_show(self, signals_real: np.ndarray, *, ticks=None, title=None):
         with self.update_lock:
             if len(signals_real.shape) != 2:
                 raise ValueError(
@@ -119,7 +139,7 @@ class InstantShowScatter(BaseInstantShow):
 
         self.dh = display(self.fig, display_id=True)
 
-    def append_spot(self, x, y, color, title=None):
+    def append_spot(self, x, y, color, *, title=None):
         with self.update_lock:
             self.xs.append(x)
             self.ys.append(y)

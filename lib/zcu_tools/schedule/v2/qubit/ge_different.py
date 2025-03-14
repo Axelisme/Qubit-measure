@@ -24,8 +24,7 @@ def calc_snr(avg_d, std_d):
     return contrast / noise
 
 
-def ge_result2signals(result):
-    avg_d, std_d = result
+def ge_result2signals(avg_d, std_d):
     avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep, ge)
     std_d = std_d[0][0].dot([1, 1j])  # (*sweep, ge)
 
@@ -110,8 +109,8 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
             cfg["dac"]["res_pulse"]["freq"] = fpt
 
             prog = TwoToneProgram(soccfg, cfg)
-            result = prog.acquire(soc, progress=False, ret_std=True)
-            snr = ge_result2signals(result)
+            avg_d, std_d = prog.acquire(soc, progress=False, ret_std=True)
+            snr = ge_result2signals(avg_d, std_d)
             count += 1
 
             records.append((pdr, fpt, snr))
