@@ -40,15 +40,28 @@ class InstantShow1D(BaseInstantShow):
 
         self.xs = xs
 
+        err_kwargs = {"linestyle": "--", "color": "lightgray"}
+        self.err_up = self.ax.plot(xs, np.zeros_like(xs), **err_kwargs)[0]
+        self.err_dn = self.ax.plot(xs, np.zeros_like(xs), **err_kwargs)[0]
+
         kwargs.setdefault("linestyle", "-")
         kwargs.setdefault("marker", ".")
         self.contain = self.ax.plot(xs, np.zeros_like(xs), **kwargs)[0]
 
-        err_kwargs = {"linestyle": "--", "color": "gray"}
-        self.err_up = self.ax.plot(xs, np.zeros_like(xs), **err_kwargs)[0]
-        self.err_dn = self.ax.plot(xs, np.zeros_like(xs), **err_kwargs)[0]
-
         self.dh = display(self.fig, display_id=True)
+
+    def _smooth_errs(self, errs):
+        s_len = max(len(errs) // 20, 1)
+        _errs = np.full_like(errs, np.nan)
+        for i in range(len(errs)):
+            start = max(0, i - s_len)
+            end = min(len(errs), i + s_len)
+            if start == end:
+                _errs[i] = np.nan
+            else:
+                _errs[i] = np.nanmedian(errs[start:end])
+        _errs[np.isnan(errs)] = np.nan
+        return _errs
 
     def update_show(
         self,
@@ -62,10 +75,14 @@ class InstantShow1D(BaseInstantShow):
             errs = np.full_like(signals_real, np.nan)
 
         # smooth error bars
-        s_len = max(len(errs) // 10, 1)
-        s_kernel = np.ones(s_len) / s_len
-        errs_up = np.convolve(signals_real + errs, s_kernel, mode="same")
-        errs_dn = np.convolve(signals_real - errs, s_kernel, mode="same")
+        errs_up = self._smooth_errs(signals_real + 2 * errs)
+        errs_dn = self._smooth_errs(signals_real - 2 * errs)
+
+        # make errs_up and errs_dn inclusive signals_real
+        move_up = np.clip(signals_real - errs_up, 0, None)
+        move_dn = np.clip(errs_dn - signals_real, 0, None)
+        errs_up = errs_up + move_up - move_dn
+        errs_dn = errs_dn + move_up - move_dn
 
         if ticks is not None:
             self.xs = ticks

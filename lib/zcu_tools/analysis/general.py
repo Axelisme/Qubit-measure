@@ -119,6 +119,10 @@ def freq_analyze(fpts, signals, asym=False, plot_fit=True, max_contrast=False) -
     fpts: 1D array, frequency points (MHz)
     signals: 1D array, signal points
     """
+    val_mask = ~np.isnan(signals)
+    fpts = fpts[val_mask]
+    signals = signals[val_mask]
+
     if max_contrast:
         y = rotate2real(signals).real
     else:

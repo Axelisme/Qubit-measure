@@ -11,7 +11,7 @@ from zcu_tools.tools import AsyncFunc, print_traceback
 
 
 def default_result2signals(
-    avg_d: ndarray, std_d: ndarray
+    avg_d: list, std_d: list
 ) -> Tuple[ndarray, Optional[ndarray]]:
     avg_d = avg_d[0][0].dot([1, 1j])
     std_d = np.max(std_d[0][0], axis=-1)
@@ -23,7 +23,7 @@ def default_signal2real(signals: ndarray) -> ndarray:
     return np.abs(signals)
 
 
-def std2err(stds: ndarray, N: int) -> ndarray:
+def std2err(stds: Optional[ndarray], N: int) -> Optional[ndarray]:
     if stds is None:
         return None
     return stds / np.sqrt(N)
@@ -45,7 +45,7 @@ def sweep_hard_template(
     xlabel: str,
     ylabel: str,
     result2signals: Callable[
-        [ndarray, ndarray], Tuple[ndarray, Optional[ndarray]]
+        [list, list], Tuple[ndarray, Optional[ndarray]]
     ] = default_result2signals,
     signal2real: Callable[[ndarray], ndarray] = default_signal2real,
     progress: bool = True,
@@ -102,7 +102,7 @@ def sweep1D_soft_template(
     xlabel: str,
     ylabel: str,
     result2signals: Callable[
-        [ndarray, ndarray], Tuple[ndarray, Optional[ndarray]]
+        [list, list], Tuple[ndarray, Optional[ndarray]]
     ] = default_result2signals,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
@@ -155,7 +155,9 @@ def sweep2D_soft_hard_template(
     updateCfg: Callable,
     xlabel: str,
     ylabel: str,
-    result2signals: Callable = default_result2signals,
+    result2signals: Callable[
+        [list, list], Tuple[ndarray, Optional[ndarray]]
+    ] = default_result2signals,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
     **kwargs,
