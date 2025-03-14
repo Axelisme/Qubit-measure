@@ -31,7 +31,7 @@ class GEProgram(TwoToneProgram):
         return avgi.T, avgq.T  # (2, reps)
 
     def acquire_snr(self, soc, **kwargs):
-        avg_d, std_d = super().acquire(soc, ret_std=True, **kwargs)
+        avg_d, std_d = super().acquire(soc, **kwargs)
         avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep, ge)
         std_d = std_d[0][0].dot([1, 1j])  # (*sweep, ge)
 

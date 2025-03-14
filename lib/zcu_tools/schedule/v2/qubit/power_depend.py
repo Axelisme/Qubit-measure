@@ -1,5 +1,4 @@
 import numpy as np
-
 from zcu_tools import make_cfg
 from zcu_tools.analysis import minus_background
 from zcu_tools.program.v2 import TwoToneProgram
@@ -33,11 +32,10 @@ def measure_qub_pdr_dep(soc, soccfg, cfg):
         soccfg,
         cfg,
         TwoToneProgram,
-        init_signals=np.full((len(pdrs), len(fpts)), np.nan, dtype=complex),
-        ticks=(fpts, pdrs),
+        ticks=(pdrs, fpts),
         progress=True,
-        xlabel="Frequency (MHz)",
-        ylabel="Pulse Gain",
+        xlabel="Pulse Gain",
+        ylabel="Frequency (MHz)",
         signal2real=signals2reals,
     )
 

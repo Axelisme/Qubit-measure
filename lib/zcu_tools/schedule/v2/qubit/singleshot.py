@@ -3,7 +3,6 @@ from typing import Literal
 from warnings import warn
 
 import numpy as np
-
 from zcu_tools.analysis import singleshot_analysis
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
@@ -22,9 +21,10 @@ def measure_fid_auto(
 
     if cfg.setdefault("soft_avgs", 1) != 1:
         warn("soft_avgs will be overwritten to 1 for singleshot measurement")
+
     if "reps" in cfg:
         warn("reps will be overwritten by singleshot measurement shots")
-        cfg["reps"] = cfg["shots"]
+    cfg["reps"] = cfg["shots"]
 
     if "sweep" in cfg:
         warn("sweep will be overwritten by singleshot measurement")

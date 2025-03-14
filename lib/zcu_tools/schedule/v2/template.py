@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Callable, Dict, Tuple, Type
+from typing import Any, Callable, Dict, Optional, Tuple, Type
 
 import numpy as np
 from numpy import ndarray
@@ -10,20 +10,26 @@ from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
 from zcu_tools.tools import AsyncFunc, print_traceback
 
 
-def default_result2signals(*result) -> ndarray:
-    avg_d = result[0][0][0].dot([1, 1j])
-    if len(result) == 1:
-        return avg_d
-    else:
-        std_d = np.abs(result[1][0][0].dot([1, 1j]))
-        return avg_d, std_d
+def default_result2signals(
+    avg_d: ndarray, std_d: ndarray
+) -> Tuple[ndarray, Optional[ndarray]]:
+    avg_d = avg_d[0][0].dot([1, 1j])
+    std_d = np.max(std_d[0][0], axis=-1)
+
+    return avg_d, std_d
 
 
 def default_signal2real(signals: ndarray) -> ndarray:
     return np.abs(signals)
 
 
-def raw2result(ir, sum_d, sum2_d):
+def std2err(stds: ndarray, N: int) -> ndarray:
+    if stds is None:
+        return None
+    return stds / np.sqrt(N)
+
+
+def raw2result(ir, sum_d, sum2_d) -> Tuple[np.ndarray, np.ndarray]:
     avg_d = [d / (ir + 1) for d in sum_d]
     std_d = [np.sqrt(d2 / (ir + 1) - d**2) for d, d2 in zip(avg_d, sum2_d)]
     return avg_d, std_d
@@ -38,38 +44,49 @@ def sweep_hard_template(
     ticks: Tuple[ndarray, ...],
     xlabel: str,
     ylabel: str,
-    result2signals: Callable = default_result2signals,
-    signal2real: Callable = default_signal2real,
+    result2signals: Callable[
+        [ndarray, ndarray], Tuple[ndarray, Optional[ndarray]]
+    ] = default_result2signals,
+    signal2real: Callable[[ndarray], ndarray] = default_signal2real,
     progress: bool = True,
     **kwargs,
 ) -> Tuple[MyProgramV2, ndarray]:
     signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
+    stds = np.full_like(signals, np.nan, dtype=float)
+
+    reps = cfg["reps"]
 
     ViewerCls = [InstantShow1D, InstantShow2D][len(ticks) - 1]
 
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
+    prog = None
     with ViewerCls(*ticks, xlabel, ylabel) as viewer:
 
-        def callback(*raw):
-            nonlocal signals
-            print(raw)
-            signals, stds = result2signals(raw2result(*raw))
-            viewer.update_show(signal2real(signals), stds=stds)
+        def callback(ir, sum_d, sum2_d):
+            nonlocal signals, stds
+            signals, stds = result2signals(*raw2result(ir, sum_d, sum2_d))
+            viewer.update_show(
+                signal2real(signals), errs=std2err(stds, (ir + 1) * reps)
+            )
 
         try:
             prog = prog_cls(soccfg, cfg)
 
-            result = prog.acquire(soc, progress=progress, callback=callback, **kwargs)
-            signals: ndarray = result2signals(result)
+            avg_d, std_d = prog.acquire(
+                soc, progress=progress, callback=callback, **kwargs
+            )
+            signals, stds = result2signals(avg_d, std_d)
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
         except Exception:
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signal2real(signals))
+            viewer.update_show(
+                signal2real(signals), errs=std2err(stds, cfg["soft_avgs"] * reps)
+            )
 
     return prog, signals
 
@@ -84,13 +101,18 @@ def sweep1D_soft_template(
     updateCfg: Callable,
     xlabel: str,
     ylabel: str,
-    result2signals: Callable = default_result2signals,
+    result2signals: Callable[
+        [ndarray, ndarray], Tuple[ndarray, Optional[ndarray]]
+    ] = default_result2signals,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
     **kwargs,
 ) -> Tuple[ndarray, ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals = np.full_like(xs, np.nan, dtype=complex)
+    stds = np.full_like(xs, np.nan, dtype=float)
+
+    N = cfg["soft_avgs"] * cfg["reps"]
 
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
@@ -106,10 +128,10 @@ def sweep1D_soft_template(
                     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
                     prog = prog_cls(soccfg, cfg)
-                    result = prog.acquire(soc, progress=False, **kwargs)
-                    signals[i] = result2signals(result)
+                    avg_d, std_d = prog.acquire(soc, progress=False, **kwargs)
+                    signals[i], stds[i] = result2signals(avg_d, std_d)
 
-                    async_draw(i, signal2real(signals))
+                    async_draw(i, signal2real(signals), errs=std2err(stds, N))
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
@@ -117,7 +139,7 @@ def sweep1D_soft_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signal2real(signals))
+            viewer.update_show(signal2real(signals), errs=std2err(stds, N))
 
     return xs, signals
 
@@ -158,19 +180,21 @@ def sweep2D_soft_hard_template(
 
                     _signals2D = signals2D.copy()  # prevent overwrite
 
-                    def callback(ir, *args):
+                    def callback(ir, sum_d, sum2_d):
                         nonlocal _signals2D
                         avgs_tqdm.update(max(ir + 1 - avgs_tqdm.n, 0))
                         avgs_tqdm.refresh()
 
-                        _signals2D[i] = result2signals(raw2result(ir, *args))
+                        _signals2D[i], _ = result2signals(
+                            *raw2result(ir, sum_d, sum2_d)
+                        )
                         viewer.update_show(signal2real(_signals2D))
 
                     prog = prog_cls(soccfg, cfg)
-                    result = prog.acquire(
+                    avg_d, std_d = prog.acquire(
                         soc, progress=False, callback=callback, **kwargs
                     )
-                    signals2D[i] = result2signals(result)
+                    signals2D[i], _ = result2signals(avg_d, std_d)
 
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
@@ -183,7 +207,7 @@ def sweep2D_soft_hard_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signal2real(signals2D), (xs, ys))
+            viewer.update_show(signal2real(signals2D), ticks=(xs, ys))
             xs_tqdm.close()
             avgs_tqdm.close()
 

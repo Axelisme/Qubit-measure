@@ -38,6 +38,8 @@ class InstantShow1D(BaseInstantShow):
     ):
         super().__init__(x_label, y_label, title)
 
+        self.xs = xs
+
         kwargs.setdefault("linestyle", "-")
         kwargs.setdefault("marker", ".")
         self.contain = self.ax.plot(xs, np.zeros_like(xs), **kwargs)[0]
@@ -52,37 +54,32 @@ class InstantShow1D(BaseInstantShow):
         self,
         signals_real: np.ndarray,
         *,
-        stds: np.ndarray = None,
+        errs: np.ndarray = None,
         ticks=None,
         title=None,
     ):
-        if len(signals_real.shape) != 1:
-            raise ValueError(
-                f"Invalid shape of signals: {signals_real.shape}, expect 1D"
-            )
+        if errs is None:
+            errs = np.full_like(signals_real, np.nan)
+
+        # smooth error bars
+        s_len = max(len(errs) // 10, 1)
+        s_kernel = np.ones(s_len) / s_len
+        errs_up = np.convolve(signals_real + errs, s_kernel, mode="same")
+        errs_dn = np.convolve(signals_real - errs, s_kernel, mode="same")
+
+        if ticks is not None:
+            self.xs = ticks
 
         with self.update_lock:
-            self.contain.set_ydata(signals_real)
-            if stds is not None:
-                self.err_up.set_ydata(signals_real + stds)
-                self.err_dn.set_ydata(signals_real - stds)
-            else:
-                self.err_up.set_ydata(np.full_like(signals_real, np.nan))
-                self.err_dn.set_ydata(np.full_like(signals_real, np.nan))
-
-            if ticks is not None:
-                self.contain.set_xdata(ticks)
-                self.err_up.set_xdata(ticks)
-                self.err_dn.set_xdata(ticks)
+            self.contain.set_data(self.xs, signals_real)
+            self.err_up.set_data(self.xs, errs_up)
+            self.err_dn.set_data(self.xs, errs_dn)
 
             if title:
                 self.ax.set_title(title)
 
             self.ax.relim(visible_only=True)
-            if ticks is None:
-                self.ax.autoscale(axis="y")
-            else:
-                self.ax.autoscale_view()
+            self.ax.autoscale_view()
 
             self.dh.update(self.fig)
 
@@ -105,7 +102,9 @@ class InstantShow2D(BaseInstantShow):
 
         self.dh = display(self.fig, display_id=True)
 
-    def update_show(self, signals_real: np.ndarray, *, ticks=None, title=None):
+    def update_show(
+        self, signals_real: np.ndarray, *, errs=None, ticks=None, title=None
+    ):
         with self.update_lock:
             if len(signals_real.shape) != 2:
                 raise ValueError(

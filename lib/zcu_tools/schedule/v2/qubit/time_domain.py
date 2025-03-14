@@ -3,7 +3,6 @@
 from typing import Tuple
 
 import numpy as np
-
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import T1Program, T2EchoProgram, T2RamseyProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
@@ -11,10 +10,11 @@ from zcu_tools.schedule.v2.template import sweep1D_soft_template, sweep_hard_tem
 
 
 def measure_t2ramsey(
-    soc, soccfg, cfg, soft_loop=False
+    soc, soccfg, cfg, soft_loop=False, detune: float = 0
 ) -> Tuple[np.ndarray, np.ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
+    cfg["detune"] = detune
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
     sweep_cfg = cfg["sweep"]["length"]

@@ -28,7 +28,7 @@ def ge_result2signals(avg_d, std_d):
     avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep, ge)
     std_d = std_d[0][0].dot([1, 1j])  # (*sweep, ge)
 
-    return calc_snr(avg_d, std_d).T
+    return calc_snr(avg_d, std_d).T, None
 
 
 def measure_ge_pdr_dep(soc, soccfg, cfg):
@@ -66,7 +66,6 @@ def measure_ge_pdr_dep(soc, soccfg, cfg):
         xlabel="Frequency (MHz)",
         ylabel="Readout Gain",
         result2signals=ge_result2signals,
-        ret_std=True,
     )
 
     # get the actual pulse gains and frequency points
@@ -109,8 +108,8 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
             cfg["dac"]["res_pulse"]["freq"] = fpt
 
             prog = TwoToneProgram(soccfg, cfg)
-            avg_d, std_d = prog.acquire(soc, progress=False, ret_std=True)
-            snr = ge_result2signals(avg_d, std_d)
+            avg_d, std_d = prog.acquire(soc, progress=False)
+            snr, _ = ge_result2signals(avg_d, std_d)
             count += 1
 
             records.append((pdr, fpt, snr))
@@ -179,7 +178,6 @@ def measure_ge_ro_dep(soc, soccfg, cfg):
         xlabel="Readout Length (us)",
         ylabel="Amplitude",
         result2signals=ge_result2signals,
-        ret_std=True,
     )
 
     return lens, snrs
@@ -220,7 +218,6 @@ def measure_ge_trig_dep_soft(soc, soccfg, cfg):
         xlabel="Trigger Offset (us)",
         ylabel="Amplitude",
         result2signals=ge_result2signals,
-        ret_std=True,
     )
 
     return offsets, snrs
@@ -249,13 +246,12 @@ def measure_ge_trig_dep(soc, soccfg, cfg):
         soccfg,
         cfg,
         TwoToneProgram,
-        xs=sweep2array(cfg["sweep"]["offset"]),
+        ticks=(sweep2array(cfg["sweep"]["offset"]),),
         xlabel="Trigger Offset (us)",
         ylabel="Amplitude",
         result2signals=ge_result2signals,
-        ret_std=True,
     )
 
-    offsets = prog.get_pulse_param("readout_adc", "trig_offset", as_array=True)
+    offsets = prog.get_time_param("trig_offset", "t", as_array=True)
 
     return offsets, snrs
