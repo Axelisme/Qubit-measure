@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple, Type
+from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 
 import numpy as np
 from numpy import ndarray
@@ -10,7 +10,11 @@ from zcu_tools.program.v1 import (
     MyRAveragerProgram,
 )
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
+from zcu_tools.schedule.instant_show import (
+    InstantShow1D,
+    InstantShow2D,
+    InstantShowScatter,
+)
 from zcu_tools.tools import AsyncFunc, print_traceback
 
 
@@ -103,7 +107,7 @@ def sweep1D_soft_template(
     soc,
     soccfg,
     cfg: Dict[str, Any],
-    prog_cls: Type[MyAveragerProgram],
+    prog_or_fn: Union[Type[MyAveragerProgram], Callable],
     *,
     xs: ndarray,
     updateCfg: Callable,
@@ -135,9 +139,16 @@ def sweep1D_soft_template(
                     # set again in case of change
                     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-                    prog = prog_cls(soccfg, cfg)
-                    avgi, avgq, stdi, stdq = prog.acquire(soc, progress=False, **kwargs)
-                    signals[i], stds[i] = result2signals(avgi, avgq, stdi, stdq)
+                    if isinstance(prog_or_fn, type):
+                        prog = prog_or_fn(soccfg, cfg)
+                        avgi, avgq, stdi, stdq = prog.acquire(
+                            soc, progress=False, **kwargs
+                        )
+                        signals[i], stds[i] = result2signals(avgi, avgq, stdi, stdq)
+                    elif isinstance(prog_or_fn, Callable):
+                        signals[i], stds[i] = prog_or_fn(soc, soccfg, cfg)
+                    else:
+                        raise ValueError("prog_or_fn must be a type or a callable")
 
                     async_draw(i, signal2real(signals), errs=std2err(stds, N))
 
@@ -275,7 +286,7 @@ def sweep2D_soft_soft_template(
     soc,
     soccfg,
     cfg: Dict[str, Any],
-    prog_cls: Type[MyAveragerProgram],
+    prog_or_fn: Union[Type[MyAveragerProgram], Callable],
     *,
     xs: ndarray,
     ys: ndarray,
@@ -310,9 +321,14 @@ def sweep2D_soft_soft_template(
 
                         set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-                        prog = prog_cls(soccfg, cfg)
-                        result = prog.acquire(soc, progress=False, **kwargs)
-                        signals2D[i, j], _ = result2signals(*result)
+                        if isinstance(prog_or_fn, type):
+                            prog = prog_or_fn(soccfg, cfg)
+                            result = prog.acquire(soc, progress=False, **kwargs)
+                            signals2D[i, j], _ = result2signals(*result)
+                        elif isinstance(prog_or_fn, Callable):
+                            signals2D[i, j], _ = prog_or_fn(soc, soccfg, cfg)
+                        else:
+                            raise ValueError("prog_or_fn must be a type or a callable")
 
                         ys_tqdm.update()
 
@@ -330,3 +346,51 @@ def sweep2D_soft_soft_template(
             ys_tqdm.close()
 
     return xs, ys, signals2D
+
+
+def sweep2D_maximize_template(
+    measure_fn: Callable,
+    *,
+    xs: ndarray,
+    ys: ndarray,
+    xlabel: str,
+    ylabel: str,
+    signals2reals: Callable = default_signal2real,
+    method: str = "Nelder-Mead",
+    **kwargs,
+):
+    from scipy.optimize import minimize
+
+    with InstantShowScatter(xlabel, ylabel) as viewer:
+
+        def loss_func(param):
+            x, y = param
+
+            signals, _ = measure_fn(x, y)
+            score = signals2reals(signals)
+
+            viewer.append_spot(x, y, score)
+
+            return -score
+
+        options = dict(maxiter=(len(xs) * len(ys)) // 5)
+
+        if method in ["Nelder-Mead", "Powell"]:
+            options["xatol"] = min(xs[1] - xs[0], ys[1] - ys[0])
+        elif method in ["L-BFGS-B"]:
+            options["ftol"] = 1e-4  # type: ignore
+
+        options.update(kwargs)
+
+        init_point = (0.5 * (xs[0] + xs[-1]), 0.5 * (ys[0] + ys[-1]))
+        res = minimize(
+            loss_func,
+            init_point,
+            method=method,
+            bounds=[(xs[0], xs[-1]), (ys[0], ys[-1])],
+            options=options,
+        )
+
+    if isinstance(res, ndarray):
+        return res
+    return res.x

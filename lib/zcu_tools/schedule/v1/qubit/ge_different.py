@@ -1,17 +1,14 @@
 from copy import deepcopy
 
 import numpy as np
-from scipy.optimize import minimize
-from tqdm.auto import tqdm
 from zcu_tools.program.v1 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import (
-    InstantShow1D,
-    InstantShow2D,
-    InstantShowScatter,
-)
 from zcu_tools.schedule.tools import check_time_sweep, map2adcfreq, sweep2array
-from zcu_tools.tools import AsyncFunc, print_traceback
+from zcu_tools.schedule.v1.template import (
+    sweep1D_soft_template,
+    sweep2D_maximize_template,
+    sweep2D_soft_soft_template,
+)
 
 
 def measure_one(soc, soccfg, cfg):
@@ -22,11 +19,11 @@ def measure_one(soc, soccfg, cfg):
 
     qub_pulse["gain"] = 0
     prog = TwoToneProgram(soccfg, cfg)
-    avggi, avggq, stdgi, stdgq = prog.acquire(soc, progress=False, ret_std=True)
+    avggi, avggq, stdgi, stdgq = prog.acquire(soc, progress=False)
 
     qub_pulse["gain"] = pi_gain
     prog = TwoToneProgram(soccfg, cfg)
-    avgei, avgeq, stdei, stdeq = prog.acquire(soc, progress=False, ret_std=True)
+    avgei, avgeq, stdei, stdeq = prog.acquire(soc, progress=False)
 
     dist_i = avgei[0][0] - avggi[0][0]
     dist_q = avgeq[0][0] - avggq[0][0]
@@ -35,7 +32,7 @@ def measure_one(soc, soccfg, cfg):
     noise2_q = stdgq[0][0] ** 2 + stdeq[0][0] ** 2
     noise = np.sqrt(noise2_i * dist_i**2 + noise2_q * dist_q**2) / np.abs(contrast)
 
-    return contrast / noise
+    return contrast / noise, None
 
 
 def measure_ge_pdr_dep(soc, soccfg, cfg):
@@ -51,38 +48,24 @@ def measure_ge_pdr_dep(soc, soccfg, cfg):
 
     del cfg["sweep"]  # remove sweep from cfg
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])  # set initial flux
+    def x_updateCfg(cfg, i, pdr):
+        cfg["dac"]["res_pulse"]["gain"] = pdr
 
-    snr2D = np.full((len(pdrs), len(fpts)), np.nan, dtype=complex)
-    with InstantShow2D(pdrs, fpts, "Power (a.u)", "Frequency (MHz)") as viewer:
-        try:
-            pdrs_tqdm = tqdm(pdrs, desc="Gain", smoothing=0)
-            fpts_tqdm = tqdm(fpts, desc="Freq", smoothing=0)
-            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
-                for i, pdr in enumerate(pdrs):
-                    cfg["dac"]["res_pulse"]["gain"] = pdr
+    def y_updateCfg(cfg, j, fpt):
+        cfg["dac"]["res_pulse"]["freq"] = fpt
 
-                    fpts_tqdm.reset()
-                    fpts_tqdm.refresh()
-                    for j, fpt in enumerate(fpts):
-                        cfg["dac"]["res_pulse"]["freq"] = fpt
-
-                        snr2D[i, j] = measure_one(soc, soccfg, cfg)
-
-                        fpts_tqdm.update()
-
-                        async_draw(i * len(fpts) + j, np.abs(snr2D))
-                    pdrs_tqdm.update()
-
-        except KeyboardInterrupt:
-            print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
-            print("Error during measurement:")
-            print_traceback()
-        finally:
-            viewer.update_show(np.abs(snr2D), (pdrs, fpts))
-            pdrs_tqdm.close()
-            fpts_tqdm.close()
+    pdrs, fpts, snr2D = sweep2D_soft_soft_template(
+        soc,
+        soccfg,
+        cfg,
+        measure_one,
+        xs=pdrs,
+        ys=fpts,
+        x_updateCfg=x_updateCfg,
+        y_updateCfg=y_updateCfg,
+        xlabel="Power (a.u)",
+        ylabel="Frequency (MHz)",
+    )
 
     return pdrs, fpts, snr2D
 
@@ -99,53 +82,21 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
     del cfg["sweep"]["gain"]  # program should not use this
     del cfg["sweep"]["freq"]  # program should not use this
 
-    # set again in case of change
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    records = []
-    with InstantShowScatter("Readout Gain", "Frequency (MHz)", title="SNR") as viewer:
-        count = 0
+    def measure_signals(pdr, fpt):
+        cfg["dac"]["res_pulse"]["gain"] = int(pdr)
+        cfg["dac"]["res_pulse"]["freq"] = float(fpt)
+        return measure_one(soc, soccfg, cfg)
 
-        def loss_func(point, cfg):
-            nonlocal count
-            cfg = deepcopy(cfg)  # prevent in-place modification
-
-            pdr, fpt = point
-            cfg["dac"]["res_pulse"]["gain"] = int(pdr)
-            cfg["dac"]["res_pulse"]["freq"] = fpt
-
-            snr = measure_one(soc, soccfg, cfg)
-            count += 1
-
-            records.append((pdr, fpt, snr))
-
-            viewer.append_spot(
-                pdr, fpt, np.abs(snr), title=f"SNR_{count}: {np.abs(snr):.3e}"
-            )
-
-            return -np.abs(snr)
-
-        options = dict(maxiter=(len(pdrs) * len(fpts)) // 5)
-
-        if method in ["Nelder-Mead", "Powell"]:
-            options["xatol"] = min(pdrs[1] - pdrs[0], fpts[1] - fpts[0])
-        elif method in ["L-BFGS-B"]:
-            options["ftol"] = 1e-4  # type: ignore
-            options["maxfun"] = options["maxiter"]
-
-        init_point = (0.5 * (pdrs[0] + pdrs[-1]), 0.5 * (fpts[0] + fpts[-1]))
-        res = minimize(
-            loss_func,
-            init_point,
-            args=(cfg,),
-            method=method,
-            bounds=[(pdrs[0], pdrs[-1]), (fpts[0], fpts[-1])],
-            options=options,
-        )
-
-    if isinstance(res, np.ndarray):
-        return res, records
-    return res.x, records
+    return sweep2D_maximize_template(
+        measure_signals,
+        xs=pdrs,
+        ys=fpts,
+        xlabel="Power (a.u)",
+        ylabel="Frequency (MHz)",
+        method=method,
+    )
 
 
 def measure_ge_ro_dep(soc, soccfg, cfg):
@@ -158,29 +109,20 @@ def measure_ge_ro_dep(soc, soccfg, cfg):
 
     trig_offset = cfg["adc"]["trig_offset"]
 
-    # set flux first
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    def updateCfg(cfg, i, ro_len):
+        cfg["adc"]["ro_length"] = ro_len
+        cfg["dac"]["res_pulse"]["length"] = trig_offset + ro_len + 1.0
 
-    snrs = np.full(len(ro_lens), np.nan, dtype=np.complex128)
-    with InstantShow1D(ro_lens, "Readout Length (us)", "SNR") as viewer:
-        try:
-            lens_tqdm = tqdm(ro_lens, desc="Readout Length (us)", smoothing=0)
-            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
-                for i, ro_len in enumerate(lens_tqdm):
-                    cfg["adc"]["ro_length"] = ro_len
-                    cfg["dac"]["res_pulse"]["length"] = trig_offset + ro_len + 1.0
-
-                    snrs[i] = measure_one(soc, soccfg, cfg)
-
-                    async_draw(i, np.abs(snrs))
-
-        except KeyboardInterrupt:
-            print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
-            print("Error during measurement:")
-            print_traceback()
-        finally:
-            viewer.update_show(np.abs(snrs))
+    ro_lens, snrs = sweep1D_soft_template(
+        soc,
+        soccfg,
+        cfg,
+        measure_one,
+        xs=ro_lens,
+        updateCfg=updateCfg,
+        xlabel="Readout Length (us)",
+        ylabel="SNR",
+    )
 
     return ro_lens, snrs
 
@@ -196,28 +138,19 @@ def measure_ge_trig_dep(soc, soccfg, cfg):
     res_len = cfg["dac"]["res_pulse"]["length"]
     orig_offset = cfg["adc"]["trig_offset"]
 
-    # set flux first
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    def updateCfg(cfg, i, offset):
+        cfg["adc"]["trig_offset"] = offset
+        cfg["dac"]["res_pulse"]["length"] = offset - orig_offset + res_len
 
-    snrs = np.full(len(offsets), np.nan, dtype=np.complex128)
-    with InstantShow1D(offsets, "Readout offset (us)", "SNR") as viewer:
-        try:
-            offsets_tqdm = tqdm(offsets, desc="Readout offset (us)", smoothing=0)
-            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
-                for i, offset in enumerate(offsets_tqdm):
-                    cfg["adc"]["trig_offset"] = offset
-                    cfg["dac"]["res_pulse"]["length"] = offset - orig_offset + res_len
-
-                    snrs[i] = measure_one(soc, soccfg, cfg)
-
-                    async_draw(i, np.abs(snrs))
-
-        except KeyboardInterrupt:
-            print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
-            print("Error during measurement:")
-            print_traceback()
-        finally:
-            viewer.update_show(np.abs(snrs))
+    offsets, snrs = sweep1D_soft_template(
+        soc,
+        soccfg,
+        cfg,
+        measure_one,
+        xs=offsets,
+        updateCfg=updateCfg,
+        xlabel="Readout offset (us)",
+        ylabel="SNR",
+    )
 
     return offsets, snrs

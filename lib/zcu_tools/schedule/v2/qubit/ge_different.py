@@ -1,15 +1,14 @@
 import numpy as np
-from scipy.optimize import minimize
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShowScatter
 from zcu_tools.schedule.tools import (
     format_sweep1D,
     map2adcfreq,
     sweep2array,
     sweep2param,
 )
+from zcu_tools.schedule.v1.template import sweep2D_maximize_template
 from zcu_tools.schedule.v2.template import sweep1D_soft_template, sweep_hard_template
 
 
@@ -95,52 +94,23 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
     # set again in case of change
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-    records = []
-    with InstantShowScatter("Readout Gain", "Frequency (MHz)", title="SNR") as viewer:
-        count = 0
+    def measure_signals(pdr, fpt):
+        cfg["dac"]["res_pulse"]["gain"] = int(pdr)
+        cfg["dac"]["res_pulse"]["freq"] = float(fpt)
 
-        def loss_func(point, cfg):
-            nonlocal count
-            cfg = make_cfg(cfg)  # prevent in-place modification
+        prog = TwoToneProgram(soccfg, cfg)
+        avg_d, std_d = prog.acquire(soc, progress=False)
 
-            pdr, fpt = point
-            cfg["dac"]["res_pulse"]["gain"] = pdr
-            cfg["dac"]["res_pulse"]["freq"] = fpt
+        return ge_result2signals(avg_d, std_d)
 
-            prog = TwoToneProgram(soccfg, cfg)
-            avg_d, std_d = prog.acquire(soc, progress=False)
-            snr, _ = ge_result2signals(avg_d, std_d)
-            count += 1
-
-            records.append((pdr, fpt, snr))
-
-            viewer.append_spot(
-                pdr, fpt, np.abs(snr), title=f"SNR_{count}: {np.abs(snr):.3e}"
-            )
-
-            return -np.abs(snr)
-
-        options = dict(maxiter=(len(pdrs) * len(fpts)) // 5)
-
-        if method in ["Nelder-Mead", "Powell"]:
-            options["xatol"] = min(pdrs[1] - pdrs[0], fpts[1] - fpts[0])
-        elif method in ["L-BFGS-B"]:
-            options["ftol"] = 1e-4  # type: ignore
-            options["maxfun"] = options["maxiter"]
-
-        init_point = (0.5 * (pdrs[0] + pdrs[-1]), 0.5 * (fpts[0] + fpts[-1]))
-        res = minimize(
-            loss_func,
-            init_point,
-            args=(cfg,),
-            method=method,
-            bounds=[(pdrs[0], pdrs[-1]), (fpts[0], fpts[-1])],
-            options=options,
-        )
-
-    if isinstance(res, np.ndarray):
-        return res, records
-    return res.x, records
+    return sweep2D_maximize_template(
+        measure_signals,
+        xs=pdrs,
+        ys=fpts,
+        xlabel="Power (a.u)",
+        ylabel="Frequency (MHz)",
+        method=method,
+    )
 
 
 def measure_ge_ro_dep(soc, soccfg, cfg):
@@ -183,7 +153,7 @@ def measure_ge_ro_dep(soc, soccfg, cfg):
     return lens, snrs
 
 
-def measure_ge_trig_dep_soft(soc, soccfg, cfg):
+def measure_ge_trig_dep(soc, soccfg, cfg):
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]
@@ -219,39 +189,5 @@ def measure_ge_trig_dep_soft(soc, soccfg, cfg):
         ylabel="Amplitude",
         result2signals=ge_result2signals,
     )
-
-    return offsets, snrs
-
-
-def measure_ge_trig_dep(soc, soccfg, cfg):
-    cfg = make_cfg(cfg)  # prevent in-place modification
-
-    qub_pulse = cfg["dac"]["qub_pulse"]
-    res_len = cfg["dac"]["res_pulse"]["length"]
-    orig_offset = cfg["adc"]["trig_offset"]
-
-    cfg["sweep"] = format_sweep1D(cfg["sweep"], "offset")
-
-    offsets = sweep2param("offset", cfg["sweep"]["offset"])
-    cfg["adc"]["trig_offset"] = offsets
-    cfg["dac"]["res_pulse"]["length"] = res_len + offsets - orig_offset
-
-    # append ge sweep to inner loop
-    # set with / without pi length for qubit pulse
-    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
-    qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
-
-    prog, snrs = sweep_hard_template(
-        soc,
-        soccfg,
-        cfg,
-        TwoToneProgram,
-        ticks=(sweep2array(cfg["sweep"]["offset"]),),
-        xlabel="Trigger Offset (us)",
-        ylabel="Amplitude",
-        result2signals=ge_result2signals,
-    )
-
-    offsets = prog.get_time_param("trig_offset", "t", as_array=True)
 
     return offsets, snrs

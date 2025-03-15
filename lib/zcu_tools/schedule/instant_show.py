@@ -51,6 +51,9 @@ class InstantShow1D(BaseInstantShow):
         self.dh = display(self.fig, display_id=True)
 
     def _smooth_errs(self, errs):
+        if np.all(np.isnan(errs)):
+            return errs
+
         s_len = max(len(errs) // 20, 1)
         _errs = np.full_like(errs, np.nan)
         for i in range(len(errs)):

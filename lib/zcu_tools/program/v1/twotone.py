@@ -191,7 +191,7 @@ class PowerDepProgram(MyNDAveragerProgram):
         twotone_body(self)
 
     def acquire(self, *args, **kwargs):
-        pdrs_fpts, avgi, avgq = super().acquire(*args, **kwargs)
+        pdrs_fpts, *result = super().acquire(*args, **kwargs)
         # because we sweep gain and gain2, only select the first value
         pdrs_fpts[1] = pdrs_fpts[1][0]
-        return pdrs_fpts, avgi, avgq
+        return pdrs_fpts, *result
