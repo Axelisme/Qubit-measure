@@ -15,10 +15,11 @@ pip install .
 ```
 
 這將安裝以下核心依賴：
-- myqick
 - h5py
 - numpy
 - tqdm
+
+其中依賴`myqick`需要自行手動安裝，請參考[myqick](https://github.com/Axelisme/myqick)。
 
 ### 資料伺服器擴展
 
@@ -40,13 +41,14 @@ pip install ".[client]"
 ```
 
 這將安裝以下依賴：
-- labber
 - ipykernel
 - ipywidgets
 - matplotlib
 - pandas
 - scikit-learn
 - scipy
+
+其中依賴`labber`需要自行手動安裝，請參考[labber](https://github.com/Axelisme/labber_api)。
 
 ### 數據擬合擴展
 
