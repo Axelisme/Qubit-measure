@@ -10,7 +10,7 @@ from joblib import Parallel, delayed
 from tqdm.auto import tqdm
 
 # parameters
-data_path = "simulation_data/fluxonium_test.h5"
+data_path = "Database/simulation/fluxonium_test.h5"
 num_sample = 4000
 EJb = (3.0, 15.0)
 ECb = (0.2, 2.0)
@@ -212,7 +212,7 @@ energies = np.array(energies)
 Ebounds = np.array((EJb, ECb, ELb))
 
 if DRY_RUN:
-    data_path = "simulation_data/fluxonium_test.h5"
+    data_path = data_path.replace(".h5", "_dryrun.h5")
 
 os.makedirs(os.path.dirname(data_path), exist_ok=True)
 dump_data(data_path, flxs, params, energies, Ebounds)

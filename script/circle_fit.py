@@ -7,11 +7,10 @@ import numpy as np
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/..")
 
-from resonator_tools import circuit  
+from resonator_tools import circuit
 from zcu_tools.datasaver import load_data
 
-
-filepath = "data/res/res_freq_r5_g300.hdf5"
+filepath = "Database/xxx"
 signals, fpts, _ = load_data(filepath)
 signals = signals.conj()
 amps = abs(signals)

@@ -7,10 +7,9 @@ wheels/
 .ipynb_checkpoints
 .env
 
-Database
-simulation_data
+Database/
 notebook/
-result
+result/
 test.py
 
 *.bak
