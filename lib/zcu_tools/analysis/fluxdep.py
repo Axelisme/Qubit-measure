@@ -1,6 +1,7 @@
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
 from IPython.display import display
 from matplotlib.animation import FuncAnimation
 from numba import njit
@@ -483,6 +484,120 @@ class InteractiveLines:
         if not self.is_finished:
             self.on_finish(None)
         return float(self.cflx), float(self.eflx)
+
+
+class VisualizeSpet:
+    def __init__(self, s_points, s_flxs, s_fpts, flxs, energies, allows):
+        self.s_points = s_points
+        self.s_flxs = s_flxs
+        self.s_fpts = s_fpts
+        self.flxs = flxs
+        self.energies = energies
+        self.allows = allows
+
+        # Default scatter point styling
+        self.scatter_size = 3
+        self.scatter_color = "red"
+        self.scatter_color_array = None  # 用於存儲顏色陣列
+
+    def set_scatter_style(self, size=None, color=None):
+        if size is not None:
+            self.scatter_size = size
+        if color is not None:
+            # 可以是顏色名稱或數值陣列
+            self.scatter_color = color
+            # 檢查是否為陣列
+            if isinstance(color, (list, np.ndarray)):
+                self.scatter_color_array = color
+
+        return self  # For method chaining
+
+    def create_figure(self):
+        fig = go.Figure()
+
+        flx_bound = (
+            np.nanmin([np.nanmin(s["spectrum"][0]) for s in self.s_points.values()]),
+            np.nanmax([np.nanmax(s["spectrum"][0]) for s in self.s_points.values()]),
+        )
+        fpt_bound = (
+            np.nanmin([np.nanmin(s["spectrum"][1]) for s in self.s_points.values()]),
+            np.nanmax([np.nanmax(s["spectrum"][1]) for s in self.s_points.values()]),
+        )
+
+        # Add heatmap traces for each spectrum in s_points
+        for spect in self.s_points.values():
+            # Get corresponding data and range
+            data = spect["spectrum"][2] ** 1.5
+            flx_mask = np.any(~np.isnan(data), axis=0)
+            fpt_mask = np.any(~np.isnan(data), axis=1)
+            data = data[fpt_mask, :][:, flx_mask]
+
+            # Normalize data
+            data = np.abs(data - np.mean(data, axis=0, keepdims=True))
+            data /= np.std(data, axis=0, keepdims=True)
+
+            # Add heatmap trace
+            fig.add_trace(
+                go.Heatmap(
+                    z=data,
+                    x=spect["spectrum"][0][flx_mask],
+                    y=spect["spectrum"][1][fpt_mask],
+                    colorscale="Greys",
+                    showscale=False,
+                )
+            )
+
+        # Calculate transitions
+        fs, _, labels = energy2transition(self.energies, self.allows)
+
+        # Add transition line traces
+        for i, label in enumerate(labels):
+            fig.add_trace(go.Scatter(x=self.flxs, y=fs[:, i], mode="lines", name=label))
+
+        marker_dict = {"size": self.scatter_size}
+
+        # 處理顏色設置
+        if self.scatter_color_array is not None:
+            # 如果提供了顏色陣列，使用它並指定顏色範圍
+            marker_dict["color"] = self.scatter_color_array
+            marker_dict["colorscale"] = "Viridis"
+            marker_dict["showscale"] = True  # 顯示顏色刻度
+            marker_dict["colorbar"] = dict(
+                x=-0.1,  # 將顏色條放置在左側
+                xanchor="left",  # 錨點在左側
+            )
+            hovertext = self.scatter_color_array
+        else:
+            # 否則使用單一顏色
+            marker_dict["color"] = self.scatter_color
+            hovertext = None
+
+        # Add scatter points
+        fig.add_trace(
+            go.Scatter(
+                x=self.s_flxs,
+                y=self.s_fpts,
+                mode="markers",
+                marker=marker_dict,
+                hovertext=hovertext,
+            )
+        )
+
+        # Update layout
+        fig.update_layout(
+            legend_title_text="Transition",
+            title_x=0.5,
+            xaxis=dict(title="Flux"),
+            yaxis=dict(title="Frequency"),
+            legend=dict(x=1, y=0.5),
+            height=1600,
+        )
+
+        # Set x and y axis range
+        fig.update_xaxes(range=[flx_bound[0], flx_bound[1]])
+        fig.update_yaxes(range=[fpt_bound[0], fpt_bound[1]])
+
+        return fig
 
 
 def calculate_energy(flxs, EJ, EC, EL, cutoff=50, evals_count=10):
