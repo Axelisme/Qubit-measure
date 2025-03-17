@@ -21,6 +21,7 @@ fit = [
     "scqubits",
     "matplotlib",
     "plotly",
+    "kaleido",
     "scipy",
     "ipympl",
     "nbformat>=4.2.0",
