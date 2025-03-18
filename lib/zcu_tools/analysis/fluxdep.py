@@ -6,7 +6,7 @@ from IPython.display import display
 from matplotlib.animation import FuncAnimation
 from numba import njit
 from scipy.signal import find_peaks
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm, trange
 
 
 class InteractiveSelector:
@@ -664,159 +664,319 @@ def remove_close_points(flxs, fpts, dist_ratio):
     return flxs[mask], fpts[mask]
 
 
+def energy2linearform(energies, allows):
+    """
+    將能量E轉換為線性形式B,C的躍遷頻率,使得aE的能量對應到|aB+C|的躍遷頻率,其中a可以是任意實數
+
+    Parameters:
+    energies: numpy 陣列, 形狀 (N, M), 其中 N 是通量數量, M 是能量級別
+    allows: dict, 允許的過渡
+
+    Returns:
+    B: numpy 陣列, 形狀 (N, K), 其中 N 是通量數量, K 是過渡數量
+    C: numpy 陣列, 形狀 (N, K), 其中 N 是通量數量, K 是過渡數量
+    names: list, 過渡名稱
+    """
+    N, M = energies.shape
+    K = np.sum([len(v) for v in allows.values() if isinstance(v, list)])
+    Bs = np.empty((N, K))
+    Cs = np.empty((N, K))
+    idx = 0
+    for i, j in allows.get("transitions", []):  # E = E_ji
+        Bs[:, idx] = energies[:, j] - energies[:, i]
+        Cs[:, idx] = 0.0
+        idx += 1
+    for i, j in allows.get("blue side", []):  # E = E_ji + r_f
+        Bs[:, idx] = energies[:, j] - energies[:, i]
+        Cs[:, idx] = allows["r_f"]
+        idx += 1
+    for i, j in allows.get("red side", []):  # E = abs(E_ji - r_f)
+        Bs[:, idx] = energies[:, j] - energies[:, i]
+        Cs[:, idx] = -allows["r_f"]
+        idx += 1
+    for i, j in allows.get("mirror", []):  # E = 2 * sample_f - E_ji
+        Bs[:, idx] = -1 * (energies[:, j] - energies[:, i])
+        Cs[:, idx] = 2 * allows["sample_f"]
+        idx += 1
+    for i, j in allows.get("transitions2", []):  # E = 0.5 * E_ji
+        Bs[:, idx] = 0.5 * (energies[:, j] - energies[:, i])
+        Cs[:, idx] = 0.0
+        idx += 1
+    for i, j in allows.get("blue side2", []):  # E = 0.5 * E_ji + r_f
+        Bs[:, idx] = 0.5 * (energies[:, j] - energies[:, i])
+        Cs[:, idx] = allows["r_f"]
+        idx += 1
+    for i, j in allows.get("red side2", []):  # E = 0.5 * abs(E_ji - r_f)
+        Bs[:, idx] = 0.5 * (energies[:, j] - energies[:, i])
+        Cs[:, idx] = -0.5 * allows["r_f"]
+        idx += 1
+    for i, j in allows.get("mirror2", []):  # E = sample_f - 0.5 * E_ji
+        Bs[:, idx] = -0.5 * (energies[:, j] - energies[:, i])
+        Cs[:, idx] = allows["sample_f"]
+        idx += 1
+
+    return Bs, Cs
+
+
 def energy2transition(energies, allows):
-    # energies: shape (n, m)
-    fs = []
+    """
+    將能量E轉換為躍遷頻率。
+
+    Parameters:
+    energies: numpy 陣列, 形狀 (N, M), 其中 N 是通量數量, M 是能量級別
+    allows: dict, 允許的過渡
+
+    Returns:
+    fs: numpy 陣列, 形狀 (N, K), 其中 N 是通量數量, K 是過渡數量
+    labels: list, 過渡標籤
+    names: list, 過渡名稱
+    """
+    N, M = energies.shape
+
+    B, C = energy2linearform(energies, allows)
+    fs = np.abs(B + C)
     labels = []
     names = []
-    for i, j in allows.get("transitions", []):
-        freq = energies[:, j] - energies[:, i]
-        fs.append(freq)
-        labels.append(((i, -np.ones_like(freq)), (j, np.ones_like(freq))))
+    for i, j in allows.get("transitions", []):  # E = E_ji
+        labels.append(((i, -np.ones(N)), (j, np.ones(N))))
         names.append(f"{i} -> {j}")
-    for i, j in allows.get("blue side", []):
-        freq = energies[:, j] - energies[:, i]
-        fs.append(allows["r_f"] + freq)
-        labels.append(((i, -np.ones_like(freq)), (j, np.ones_like(freq))))
+    for i, j in allows.get("blue side", []):  # E = E_ji + r_f
+        labels.append(((i, -np.ones(N)), (j, np.ones(N))))
         names.append(f"{i} -> {j} blue side")
-    for i, j in allows.get("red side", []):
+    for i, j in allows.get("red side", []):  # E = abs(E_ji - r_f)
         freq = energies[:, j] - energies[:, i]
-        red_f = allows["r_f"] - freq
-        fs.append(np.abs(red_f))
-        mask = np.where(red_f > 0, 1, -1)
-        # labels.append([(i, mask), (j, -mask)])
-        labels.append(((i, mask), (j, -mask)))
+        mask = np.where(freq > allows["r_f"], 1, -1)
+        labels.append(((i, -mask), (j, mask)))
         names.append(f"{i} -> {j} red side")
-    for i, j in allows.get("mirror", []):
-        freq = energies[:, j] - energies[:, i]
-        fs.append(2 * allows["sample_f"] - freq)
-        labels.append(((i, np.ones_like(freq)), (j, -np.ones_like(freq))))
+    for i, j in allows.get("mirror", []):  # E = 2 * sample_f - E_ji
+        labels.append(((i, np.ones(N)), (j, -np.ones(N))))
         names.append(f"{i} -> {j} mirror")
-    for i, j in allows.get("transitions2", []):
+    for i, j in allows.get("transitions2", []):  # E = 0.5 * E_ji
+        labels.append(((i, -0.5 * np.ones(N)), (j, 0.5 * np.ones(N))))
+        names.append(f"2 {i} -> {j}")
+    for i, j in allows.get("blue side2", []):  # E = 0.5 * E_ji + r_f
+        labels.append(((i, -0.5 * np.ones(N)), (j, 0.5 * np.ones(N))))
+        names.append(f"2 {i} -> {j} blue side")
+    for i, j in allows.get("red side2", []):  # E = 0.5 * abs(E_ji - r_f)
         freq = energies[:, j] - energies[:, i]
-        fs.append(0.5 * freq)
-        labels.append(((i, -0.5 * np.ones_like(freq)), (j, 0.5 * np.ones_like(freq))))
-        names.append(f"{i} -> {j} 2")
-    for i, j in allows.get("blue side2", []):
-        freq = energies[:, j] - energies[:, i]
-        fs.append(0.5 * (allows["r_f"] + freq))
-        labels.append(((i, -0.5 * np.ones_like(freq)), (j, 0.5 * np.ones_like(freq))))
-        names.append(f"{i} -> {j} blue side 2")
-    for i, j in allows.get("red side2", []):
-        freq = energies[:, j] - energies[:, i]
-        red_f = allows["r_f"] - freq
-        fs.append(0.5 * np.abs(red_f))
-        mask = np.where(red_f > 0, 1, -1)
-        labels.append(((i, 0.5 * np.ones_like(freq)), (j, -0.5 * np.ones_like(freq))))
-        names.append(f"{i} -> {j} red side 2")
-    for i, j in allows.get("mirror2", []):
-        freq = energies[:, j] - energies[:, i]
-        fs.append(allows["sample_f"] - 0.5 * freq)
-        labels.append(((i, 0.5 * np.ones_like(freq)), (j, -0.5 * np.ones_like(freq))))
-        names.append(f"{i} -> {j} mirror 2")
+        mask = np.where(freq > allows["r_f"], 0.5, -0.5)
+        labels.append(((i, -0.5 * mask), (j, 0.5 * mask)))
+        names.append(f"2 {i} -> {j} red side")
+    for i, j in allows.get("mirror2", []):  # E = sample_f - 0.5 * E_ji
+        labels.append(((i, 0.5 * np.ones(N)), (j, -0.5 * np.ones(N))))
+        names.append(f"2 {i} -> {j} mirror")
 
-    return np.array(fs).T, labels, names
+    return fs, labels, names
 
 
 @njit(cache=True)
-def candidate_breakpoint_search(A, B):
+def candidate_breakpoint_search(A, B, C):
     """
     使用候選斷點法尋找最佳的 a 值, 使得目標函數最小化
-    目標函數: F(a) = sum_i(min_j(|A[i] - a * B[i, j]|))
+    目標函數: F(a) = sum_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
+    假設: A 中所有值都是正的
 
-    輸入:
-      A: 目標向量, numpy 陣列, 形狀 (N,)
-      B: 候選向量矩陣, numpy 陣列, 形狀 (N, M), 其中每一列代表一個候選向量
+    Parameters:
+    A: 目標向量, numpy 陣列, 形狀 (N,), 所有元素均為正數
+    B: 候選向量矩陣, numpy 陣列, 形狀 (N, K)
+    C: 偏移矩陣, numpy 陣列, 形狀 (N, K)
 
-    輸出:
-      best_distance: 最小的目標函數值
-      best_a: 使得目標函數最小的 a 值
+    Returns:
+    best_distance: 最小的目標函數值
+    best_a: 使得目標函數最小的 a 值
     """
     N = A.shape[0]
-    M = B.shape[1]
+    K = B.shape[1]
 
     if B.shape[0] != N:
         raise ValueError(
-            f"A and B must have the same number of columns, but got A={A.shape} and B={B.shape}"
+            f"A and B must have the same number of rows, but got A={A.shape} and B={B.shape}"
         )
+
+    if C.shape != B.shape:
+        raise ValueError(
+            f"B and C must have the same shape, but got B={B.shape} and C={C.shape}"
+        )
+
+    # 驗證 A 中的值都是正的
+    if np.any(A <= 0):
+        raise ValueError("All values in A must be positive")
 
     # 收集所有候選的 a 值
     candidate_as = []
+
     for i in range(N):
-        for j in range(M):
-            # 若 B[i, j] 為 0 則略過
-            if B[i, j] != 0:
-                a_candidate = A[i] / B[i, j]
-                # 只考慮正的 a
-                if a_candidate > 0:
-                    candidate_as.append(a_candidate)
+        for j in range(K):
+            if B[i, j] == 0:
+                continue
+
+            # 考慮兩種情況：
+            # 情況1：A[i] = a * B[i, j] + C[i,j]
+            a_c1 = (A[i] - C[i, j]) / B[i, j]
+            if a_c1 >= 0:
+                candidate_as.append(a_c1)
+
+            # 情況2：A[i] = -(a * B[i, j] + C[i,j])
+            a_c2 = (-A[i] - C[i, j]) / B[i, j]
+            if a_c2 >= 0:
+                candidate_as.append(a_c2)
 
     # 若沒有候選點, 則返回 None
     if len(candidate_as) == 0:
         return None, None
 
     # 去除重複並排序
-    candidate_as = np.unique(np.array(candidate_as))  # shape (K,)
+    candidate_as = np.unique(np.array(candidate_as))
 
-    # make numba happy
+    # 找出最佳的 a 值
     best_distance = float("inf")
     best_a = None
+
     for a in candidate_as:
-        distances = np.zeros_like(A)
+        distances = np.zeros(N)
+        predicts = np.abs(a * B + C)
         for i in range(N):
             min_diff = float("inf")
-            for j in range(M):
-                diff = np.abs(A[i] - a * B[i, j])
+            for j in range(K):
+                # 計算距離
+                diff = np.abs(A[i] - predicts[i, j])
                 if diff < min_diff:
                     min_diff = diff
             distances[i] = min_diff
 
-        # use median instead of sum
-        median_distance = np.median(distances)
-        if median_distance < best_distance:
-            best_distance = median_distance
+        total_distance = np.sum(distances)
+        if total_distance < best_distance:
+            best_distance = total_distance
             best_a = a
 
     return best_distance, best_a
 
 
 def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
+    """
+    使用改進的線性形式和候選斷點搜索來尋找最佳參數
+
+    Parameters:
+    flxs: numpy 陣列, 通量值
+    fpts: numpy 陣列, 目標躍遷頻率
+    datapath: str, 資料庫文件路徑
+    allows: dict, 允許的過渡
+    n_jobs: int, 平行運算的工作數，默認為-1（使用所有可用核心）
+
+    Returns:
+    best_params: numpy 陣列, 最佳參數
+    best_dist: float, 最佳距離
+    best_factor: float, 最佳縮放因子
+    best_idx: int, 最佳參數在原始數據中的索引
+    """
     from h5py import File
     from joblib import Parallel, delayed
 
     with File(datapath, "r") as file:
-        h_flxs = file["flxs"][:]
-        h_params = file["params"][:]
-        h_energies = file["energies"][:]
+        f_flxs = file["flxs"][:]  # (f_flxs, )
+        f_params = file["params"][:]  # (N, 3)
+        f_energies = file["energies"][:]  # (N, f_flxs, M)
 
-    # 找到最接近的 energy index
-    flxs = np.mod(flxs, 1.0)
-    d2 = (h_flxs[:, None] - flxs[None, :]) ** 2
-    idxs = np.argmin(d2, axis=0)
+    # 使用插值獲取能量
+    flxs = np.mod(flxs, 1.0)  # (flxs, )
+    sf_energies = np.empty((f_params.shape[0], len(flxs), f_energies.shape[2]))
+    for n in range(f_params.shape[0]):
+        for m in range(f_energies.shape[2]):
+            sf_energies[n, :, m] = np.interp(flxs, f_flxs, f_energies[n, :, m])
 
     # 平行計算距離
-    def process_energy(energy, params):
-        fs, *_ = energy2transition(energy, allows)
-        dist, factor = candidate_breakpoint_search(fpts, fs)
+    def process_energy(i):
+        energy = sf_energies[i]
+        # 使用新的線性形式函數
+        Bs, Cs = energy2linearform(energy, allows)
+        # 使用新的候選斷點搜索
+        dist, factor = candidate_breakpoint_search(fpts, Bs, Cs)
         if dist is not None:
-            return dist, params * factor
-        return float("inf"), None
+            return i, dist, factor
+        return i, float("inf"), None
+
+    # 熱身，確保第一次運行時不會因為JIT編譯而變慢
+    process_energy(0)
 
     results = Parallel(n_jobs=n_jobs)(
-        delayed(process_energy)(h_energies[i, idxs], h_params[i])
-        for i in tqdm(range(h_params.shape[0]), desc="Searching...")
+        delayed(process_energy)(i)
+        for i in trange(f_params.shape[0], desc="Searching...")
     )
 
     # 找到最佳結果
-    best_dist, best_params = min(results, key=lambda x: x[0])
-    print(f"Best distance: {best_dist:.2g}")
+    best_idx, best_dist, best_factor = min(results, key=lambda x: x[1])
+    best_params = f_params[best_idx] * best_factor
 
-    # plot the dist distribution
-    plt.hist([r[0] for r in results], bins=100)
-    plt.axvline(best_dist, color="r")
-    plt.show()
+    # 計算最佳結果的頻率預測
+    best_energy = sf_energies[best_idx]
+    Bs, Cs = energy2linearform(best_energy, allows)
+    predicted_freqs = np.abs(best_factor * Bs + Cs)
 
-    return best_params
+    # 找到每個目標頻率最接近的預測頻率
+    best_matches = np.zeros(len(fpts), dtype=int)
+    min_diffs = np.zeros(len(fpts))
+    for i in range(len(fpts)):
+        diffs = np.abs(fpts[i] - predicted_freqs[i])
+        best_matches[i] = np.argmin(diffs)
+        min_diffs[i] = diffs[best_matches[i]]
+
+    # 創建一個具有4個子圖的圖形：左邊是頻率對比圖，右邊垂直排列3個參數散點圖
+    fig = plt.figure(figsize=(7, 5))
+
+    # 設置網格佈局
+    gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
+
+    # 頻率對比圖 (左邊，佔據整個左列)
+    ax_freq = fig.add_subplot(gs[:, 0])
+    ax_freq.scatter(range(len(fpts)), fpts, label="Target", color="blue", marker="o")
+    ax_freq.scatter(
+        range(len(fpts)),
+        [predicted_freqs[i, best_matches[i]] for i in range(len(fpts))],
+        label="Predicted",
+        color="red",
+        marker="x",
+    )
+
+    # 添加誤差線
+    for i in range(len(fpts)):
+        ax_freq.plot(
+            [i, i], [fpts[i], predicted_freqs[i, best_matches[i]]], "k-", alpha=0.3
+        )
+
+    ax_freq.set_xlabel("Flux")
+    ax_freq.set_ylabel("Frequency (GHz)")
+    ax_freq.legend()
+    ax_freq.grid(True)
+
+    # 篩選有效的結果
+    valid_results = [r for r in results if r[2] is not None]
+    valid_indices = [r[0] for r in valid_results]
+    valid_dists = [r[1] for r in valid_results]
+    param_names = ["EJ", "EC", "EL"]
+
+    # 建立右側的三個參數散點圖
+    for i in range(3):
+        ax_param = fig.add_subplot(gs[i, 1])
+        # 獲取參數值
+        param_values = [f_params[idx, i] for idx in valid_indices]
+        # 繪製散點圖
+        ax_param.scatter(param_values, valid_dists, s=2)
+        ax_param.scatter(best_params[i], best_dist, color="red", s=50, marker="*")
+        ax_param.set_xlabel(param_names[i])
+        ax_param.set_ylabel("Distance")
+        ax_param.grid()
+
+    # Add overall title
+    fig.suptitle(
+        f"Best Distance: {best_dist:.2g}, Best Params: EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}",
+        fontsize=14,
+    )
+
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.93)  # Leave space for overall title
+
+    # Return best parameters
+    return best_params, fig
 
 
 def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):

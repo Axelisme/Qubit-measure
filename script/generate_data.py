@@ -8,6 +8,7 @@ import numpy as np
 import scqubits as scq
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
+from zcu_tools.analysis.fluxdep import calculate_energy
 
 # parameters
 data_path = "Database/simulation/fluxonium_test.h5"
@@ -23,23 +24,11 @@ DRY_RUN = True
 scq.settings.PROGRESSBAR_DISABLED = True
 
 cutoff = 40
-max_level = 15
+evals_count = 15
 flxs = np.linspace(0.0, 0.5, 120)
 
 
 fluxonium = scq.Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=cutoff)
-
-
-def calculate_spectrum(flxs, EJ, EC, EL):
-    global fluxonium
-    fluxonium.EJ = EJ
-    fluxonium.EC = EC
-    fluxonium.EL = EL
-    spectrumData = fluxonium.get_spectrum_vs_paramvals(
-        "flux", flxs, evals_count=max_level
-    )
-
-    return spectrumData.energy_table
 
 
 def dump_data(filepath, flxs, params, energies, Ebounds):
@@ -191,10 +180,10 @@ params = get_intersecting_rays(EJb, ECb, ELb, num_sample)
 num_sample = len(params)  # update to the actual number of samples
 print(f"Generated {num_sample} samples.")
 if DRY_RUN:
-    energies = [np.random.randn(max_level) for _ in range(num_sample)]
+    energies = [np.random.randn(evals_count) for _ in range(num_sample)]
 else:
     energies = [
-        calculate_spectrum(flxs, EJ, EC, EL)
+        calculate_energy(flxs, EJ, EC, EL, cutoff, evals_count)
         for EJ, EC, EL in tqdm(params, desc="Calculating")
     ]
 
