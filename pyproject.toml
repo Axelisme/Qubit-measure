@@ -4,26 +4,31 @@ version = "0.1.0"
 description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
 requires-python = ">=3.8"
-dependencies = ["myqick", "h5py", "numpy", "tqdm"]
+dependencies = ["h5py", "numpy", "tqdm", "dill", "matplotlib"]
 
 [project.optional-dependencies]
 data = ["flask"]
+server = ["myqick"]
 client = [
+    "myqick",
     "labber",
     "ipykernel",
     "ipywidgets",
-    "matplotlib",
+    "ipympl",
+    "pyyaml",
     "pandas",
     "scikit-learn",
     "scipy",
 ]
 fit = [
+    "ipykernel",
+    "ipywidgets",
+    "ipympl",
+    "pandas",
     "scqubits",
-    "matplotlib",
     "plotly",
     "kaleido",
     "scipy",
-    "ipympl",
     "nbformat>=4.2.0",
     "joblib",
 ]
