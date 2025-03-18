@@ -1,3 +1,5 @@
+from typing import Optional, Tuple
+
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
@@ -769,8 +771,14 @@ def energy2transition(energies, allows):
     return fs, labels, names
 
 
-@njit(cache=True)
-def candidate_breakpoint_search(A, B, C):
+@njit(
+    "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:])",
+    cache=True,
+    nogil=True,
+)
+def candidate_breakpoint_search(
+    A: np.ndarray, B: np.ndarray, C: np.ndarray
+) -> Tuple[float, Optional[float]]:
     """
     使用候選斷點法尋找最佳的 a 值, 使得目標函數最小化
     目標函數: F(a) = sum_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
@@ -823,14 +831,14 @@ def candidate_breakpoint_search(A, B, C):
 
     # 若沒有候選點, 則返回 None
     if len(candidate_as) == 0:
-        return None, None
+        return float("inf"), np.nan
 
     # 去除重複並排序
     candidate_as = np.unique(np.array(candidate_as))
 
     # 找出最佳的 a 值
     best_distance = float("inf")
-    best_a = None
+    best_a = np.nan
 
     for a in candidate_as:
         distances = np.zeros(N)
@@ -886,39 +894,30 @@ def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
 
     # 平行計算距離
     def process_energy(i):
-        energy = sf_energies[i]
-        # 使用新的線性形式函數
-        Bs, Cs = energy2linearform(energy, allows)
-        # 使用新的候選斷點搜索
-        dist, factor = candidate_breakpoint_search(fpts, Bs, Cs)
-        if dist is not None:
-            return i, dist, factor
-        return i, float("inf"), None
-
-    # 熱身，確保第一次運行時不會因為JIT編譯而變慢
-    process_energy(0)
+        Bs, Cs = energy2linearform(sf_energies[i], allows)
+        return i, *candidate_breakpoint_search(fpts, Bs, Cs)
 
     results = Parallel(n_jobs=n_jobs)(
         delayed(process_energy)(i)
         for i in trange(f_params.shape[0], desc="Searching...")
     )
+    results = np.array(results)  # (N, 3)
+    results = results[~np.isnan(results[:, 1])]
 
     # 找到最佳結果
-    best_idx, best_dist, best_factor = min(results, key=lambda x: x[1])
+    best_idx = np.argmin(results[:, 1])
+    best_dist = results[best_idx, 1]
+    best_factor = results[best_idx, 2]
     best_params = f_params[best_idx] * best_factor
 
     # 計算最佳結果的頻率預測
     best_energy = sf_energies[best_idx]
     Bs, Cs = energy2linearform(best_energy, allows)
-    predicted_freqs = np.abs(best_factor * Bs + Cs)
+    pred_fpts = np.abs(best_factor * Bs + Cs)
 
     # 找到每個目標頻率最接近的預測頻率
-    best_matches = np.zeros(len(fpts), dtype=int)
-    min_diffs = np.zeros(len(fpts))
-    for i in range(len(fpts)):
-        diffs = np.abs(fpts[i] - predicted_freqs[i])
-        best_matches[i] = np.argmin(diffs)
-        min_diffs[i] = diffs[best_matches[i]]
+    diffs = np.abs(fpts[:, None] - pred_fpts)
+    best_matches = np.argmin(diffs, axis=1)
 
     # 創建一個具有4個子圖的圖形：左邊是頻率對比圖，右邊垂直排列3個參數散點圖
     fig = plt.figure(figsize=(7, 5))
@@ -931,7 +930,7 @@ def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
     ax_freq.scatter(range(len(fpts)), fpts, label="Target", color="blue", marker="o")
     ax_freq.scatter(
         range(len(fpts)),
-        [predicted_freqs[i, best_matches[i]] for i in range(len(fpts))],
+        [pred_fpts[i, best_matches[i]] for i in range(len(fpts))],
         label="Predicted",
         color="red",
         marker="x",
@@ -939,30 +938,20 @@ def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
 
     # 添加誤差線
     for i in range(len(fpts)):
-        ax_freq.plot(
-            [i, i], [fpts[i], predicted_freqs[i, best_matches[i]]], "k-", alpha=0.3
-        )
+        ax_freq.plot([i, i], [fpts[i], pred_fpts[i, best_matches[i]]], "k-", alpha=0.3)
 
     ax_freq.set_xlabel("Flux")
     ax_freq.set_ylabel("Frequency (GHz)")
     ax_freq.legend()
     ax_freq.grid(True)
 
-    # 篩選有效的結果
-    valid_results = [r for r in results if r[2] is not None]
-    valid_indices = [r[0] for r in valid_results]
-    valid_dists = [r[1] for r in valid_results]
-    param_names = ["EJ", "EC", "EL"]
-
     # 建立右側的三個參數散點圖
-    for i in range(3):
+    for i, name in enumerate(["EJ", "EC", "EL"]):
         ax_param = fig.add_subplot(gs[i, 1])
-        # 獲取參數值
-        param_values = [f_params[idx, i] for idx in valid_indices]
-        # 繪製散點圖
-        ax_param.scatter(param_values, valid_dists, s=2)
+        ax_param.scatter(f_params[results[:, 0].astype(int), i], results[:, 1], s=2)
         ax_param.scatter(best_params[i], best_dist, color="red", s=50, marker="*")
-        ax_param.set_xlabel(param_names[i])
+        ax_param.set_xlabel(name)  # Restore the xlabel setting
+
         ax_param.set_ylabel("Distance")
         ax_param.grid()
 
