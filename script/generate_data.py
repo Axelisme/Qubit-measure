@@ -4,6 +4,7 @@
 import os
 
 import h5py as h5
+import matplotlib.pyplot as plt
 import numpy as np
 import scqubits as scq
 from joblib import Parallel, delayed
@@ -126,9 +127,7 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
     max_attempts = 10  # 最多嘗試 5 次增加 K
 
     def check_direction(direction):
-        if ray_intersects_box(direction, x_range, y_range, z_range):
-            return True, direction
-        return False, None
+        return direction, ray_intersects_box(direction, x_range, y_range, z_range)
 
     for attempt in range(max_attempts):
         # 生成 Fibonacci lattice 上的方向
@@ -144,16 +143,15 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
         )
 
         # 提取相交的方向
-        intersecting_directions = [result[1] for result in results if result[0]]
+        intersect_dirs = [result[0] for result in results if result[1]]
 
         # 檢查是否找到足夠多的相交射線
-        if len(intersecting_directions) >= N:
-            # # plot directions in 3D space for debugging
-            import matplotlib.pyplot as plt
+        if len(intersect_dirs) >= N:
+            # plot directions in 3D space for debugging
 
             fig = plt.figure()
             ax = fig.add_subplot(111, projection="3d")
-            ax.scatter(*np.array(intersecting_directions).T)
+            ax.scatter(*np.array(intersect_dirs).T)
             for x in x_range:
                 for y in y_range:
                     for z in z_range:
@@ -161,18 +159,18 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
             ax.scatter(0, 0, 0, color="b")
             plt.show()
 
-            return np.array(intersecting_directions)
+            return np.array(intersect_dirs)
         else:
             # 如果不夠，增加候選數量 K
             orig_K = K
-            K = int(K * min(max(N / max(len(intersecting_directions), 1), 1.01), 100))
+            K = int(K * min(max(N / max(len(intersect_dirs), 1), 1.01), 100))
             print(
-                f"Attempt {attempt + 1}: Found {len(intersecting_directions)} intersecting rays, less than {N}. Increasing K from {orig_K} to {K}."
+                f"Attempt {attempt + 1}: Found {len(intersect_dirs)} intersecting rays, less than {N}. Increasing K from {orig_K} to {K}."
             )
 
     # 如果多次嘗試後仍不足 N 條，拋出錯誤
     raise ValueError(
-        f"Unable to find {N} intersecting rays after {max_attempts} attempts. Found only {len(intersecting_directions)} intersecting rays."
+        f"Unable to find {N} intersecting rays after {max_attempts} attempts. Found only {len(intersect_dirs)} intersecting rays."
     )
 
 
