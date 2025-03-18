@@ -31,6 +31,8 @@ fit = [
     "scipy",
     "nbformat>=4.2.0",
     "joblib",
+    "numba",
+    "requests",
 ]
 
 [build-system]

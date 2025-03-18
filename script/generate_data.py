@@ -15,9 +15,9 @@ num_sample = 4000
 EJb = (3.0, 15.0)
 ECb = (0.2, 2.0)
 ELb = (0.5, 2.0)
-# EJb = (3.0, 6.5)
-# ECb = (0.3, 2.0)
-# ELb = (0.5, 3.5)
+# EJb = (2.0, 6.0)
+# ECb = (0.8, 2.0)
+# ELb = (0.01, 0.2)
 
 DRY_RUN = True
 scq.settings.PROGRESSBAR_DISABLED = True
