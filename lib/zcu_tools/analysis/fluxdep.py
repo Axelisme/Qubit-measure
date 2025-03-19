@@ -117,7 +117,7 @@ class InteractiveSelector:
 
     def init_points(self, flxs, fpts, spectrum):
         threshold = self.threshold_slider.value
-        self.s_flxs, self.s_fpts, self.s_ids = spectrum_analyze(
+        self.s_flxs, self.s_fpts = spectrum_analyze(
             flxs, fpts, spectrum, threshold, weight=self.mask
         )
         self.scatter = self.ax.scatter(self.s_flxs, self.s_fpts, color="r", s=2)
@@ -128,7 +128,7 @@ class InteractiveSelector:
 
     def update_points(self):
         threshold = self.threshold_slider.value
-        self.s_flxs, self.s_fpts, _ = spectrum_analyze(
+        self.s_flxs, self.s_fpts = spectrum_analyze(
             self.flxs, self.fpts, self.spectrum, threshold, weight=self.mask
         )
         self.scatter.set_offsets(np.column_stack((self.s_flxs, self.s_fpts)))
@@ -690,13 +690,11 @@ def spectrum_analyze(flxs, fpts, signals, threshold, weight=None):
 
     s_flxs = []
     s_fpts = []
-    s_ids = []
     for i in range(amps.shape[1]):
         peaks, _ = find_peaks(amps[:, i], height=threshold)
         s_flxs.extend(flxs[i] * np.ones(len(peaks)))
         s_fpts.extend(fpts[peaks])
-        s_ids.extend([(i, j) for j in peaks])
-    return np.array(s_flxs), np.array(s_fpts), np.array(s_ids)
+    return np.array(s_flxs), np.array(s_fpts)
 
 
 def remove_close_points(flxs, fpts, dist_ratio):

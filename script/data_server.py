@@ -1,9 +1,13 @@
+import argparse
 import os
 from os.path import abspath, dirname, join
 
 from flask import Flask, request, send_file
 
-ROOT_DIR = abspath(join(dirname(dirname(__file__)), "Database"))
+KEYWORD = "Database"
+ROOT_DIR = abspath(join(dirname(dirname(__file__)), KEYWORD))
+DEFAULT_IP = "0.0.0.0"
+DEFAULT_PORT = 4999
 
 
 def is_allowed_file(filename: str):
@@ -40,11 +44,9 @@ def save_file(file):
     remote_path = remote_path.replace("/", "\\")
 
     # check root directory
-    if "Database\\" not in remote_path:
-        return "Cannot find root directory in given path", 400
-
-    # remove path before root directory
-    relpath = remote_path.split("Database\\")[1]
+    relpath = remote_path
+    if KEYWORD + "\\" in relpath:  # remove path before root directory
+        relpath = relpath.split(KEYWORD + "\\")[1]
 
     # save file
     filepath = safe_filepath(os.path.join(ROOT_DIR, relpath))
@@ -59,11 +61,9 @@ def load_file(remote_path):
     remote_path = remote_path.replace("/", "\\")
 
     # check root directory
-    if "Database\\" not in remote_path:
-        return "Cannot find root directory in given path", 400
-
-    # remove path before root directory
-    relpath = remote_path.split("Database\\")[1]
+    relpath = remote_path
+    if KEYWORD + "\\" not in relpath:  # remove path before root directory
+        relpath = relpath.split(KEYWORD + "\\")[1]
 
     # load file
     filepath = os.path.join(ROOT_DIR, relpath)
@@ -101,8 +101,14 @@ def server2remote():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root_dir", type=str, default=ROOT_DIR)
+    parser.add_argument("--ip", type=str, default=DEFAULT_IP)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    args = parser.parse_args()
+
+    ROOT_DIR = args.root_dir
+
     # localPC_ip check by cmd > ipconfig
-    localPC_ip = "0.0.0.0"
-    port = 4999
     print(f"Save data to {ROOT_DIR}")
-    app.run(host=localPC_ip, port=port)
+    app.run(host=args.ip, port=args.port)
