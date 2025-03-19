@@ -4,11 +4,15 @@ import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
+from h5py import File
 from IPython.display import display
+from joblib import Parallel, delayed
 from matplotlib.animation import FuncAnimation
 from numba import njit
 from scipy.signal import find_peaks
 from tqdm.auto import tqdm, trange
+
+from zcu_tools.tools import AsyncFunc
 
 
 class InteractiveSelector:
@@ -489,13 +493,16 @@ class InteractiveLines:
 
 
 class VisualizeSpet:
-    def __init__(self, s_points, s_flxs, s_fpts, flxs, energies, allows):
+    def __init__(
+        self, s_points, s_flxs, s_fpts, flxs, energies, allows, auto_hide=False
+    ):
         self.s_points = s_points
         self.s_flxs = s_flxs
         self.s_fpts = s_fpts
         self.flxs = flxs
         self.energies = energies
         self.allows = allows
+        self.auto_hide = auto_hide  # 新增參數，預設為 False
 
         # Default scatter point styling
         self.scatter_size = 3
@@ -552,9 +559,19 @@ class VisualizeSpet:
         # Calculate transitions
         fs, _, labels = energy2transition(self.energies, self.allows)
 
+        # 計算哪些線需要隱藏
+        visible_lines = self._filter_nearby_lines(
+            fs, self.flxs, self.s_fpts, self.s_flxs
+        )
+
         # Add transition line traces
         for i, label in enumerate(labels):
-            fig.add_trace(go.Scatter(x=self.flxs, y=fs[:, i], mode="lines", name=label))
+            visible = "legendonly" if not visible_lines[i] else True
+            fig.add_trace(
+                go.Scatter(
+                    x=self.flxs, y=fs[:, i], mode="lines", name=label, visible=visible
+                )
+            )
 
         marker_dict = {"size": self.scatter_size}
 
@@ -600,6 +617,42 @@ class VisualizeSpet:
         fig.update_yaxes(range=[fpt_bound[0], fpt_bound[1]])
 
         return fig
+
+    def _filter_nearby_lines(self, fs, flxs, s_fpts, s_flxs):
+        """
+        計算哪些轉換線靠近散點，並返回布林陣列，決定要顯示哪些線。
+
+        Parameters:
+        fs: numpy array, 所有轉換線的頻率數據 (M, K)
+        flxs: numpy array, 所有轉換線對應的通量數據 (M, )
+        s_fpts: numpy array, 所有散點的頻率數據 (N, )
+        s_flxs: numpy array, 所有散點的通量數據 (N, )
+
+        Returns:
+        visible_lines: numpy array, 形狀 (K, ), True 表示該線要顯示, False 表示要隱藏
+        """
+        K = fs.shape[1]
+
+        THRESHOLD = 2
+
+        if self.auto_hide:
+            # interpolate flux points
+            s_fs = np.array(
+                [np.interp(s_flxs, flxs, fs[:, i]) for i in range(fs.shape[1])]
+            ).T  # (N, K)
+
+            # 計算散點與所有線之間的距離
+            dists = np.abs(s_fs - s_fpts[:, None])  # (N, K)
+            matchs = np.argmin(dists, axis=1)  # (N, )
+
+            # if only one or two points are matched this line, make it invisible
+            visible_lines = (
+                np.sum(matchs[:, None] == np.arange(K)[None, :], axis=0) > THRESHOLD
+            )
+        else:
+            visible_lines = np.full(K, True)
+
+        return visible_lines
 
 
 def calculate_energy(flxs, EJ, EC, EL, cutoff=50, evals_count=10):
@@ -852,7 +905,7 @@ def candidate_breakpoint_search(
                     min_diff = diff
             distances[i] = min_diff
 
-        total_distance = np.sum(distances)
+        total_distance = np.mean(distances)
         if total_distance < best_distance:
             best_distance = total_distance
             best_a = a
@@ -861,110 +914,133 @@ def candidate_breakpoint_search(
 
 
 def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
-    """
-    使用改進的線性形式和候選斷點搜索來尋找最佳參數
-
-    Parameters:
-    flxs: numpy 陣列, 通量值
-    fpts: numpy 陣列, 目標躍遷頻率
-    datapath: str, 資料庫文件路徑
-    allows: dict, 允許的過渡
-    n_jobs: int, 平行運算的工作數，默認為-1（使用所有可用核心）
-
-    Returns:
-    best_params: numpy 陣列, 最佳參數
-    best_dist: float, 最佳距離
-    best_factor: float, 最佳縮放因子
-    best_idx: int, 最佳參數在原始數據中的索引
-    """
-    from h5py import File
-    from joblib import Parallel, delayed
-
+    # Load data from database
     with File(datapath, "r") as file:
         f_flxs = file["flxs"][:]  # (f_flxs, )
         f_params = file["params"][:]  # (N, 3)
         f_energies = file["energies"][:]  # (N, f_flxs, M)
 
-    # 使用插值獲取能量
-    flxs = np.mod(flxs, 1.0)  # (flxs, )
+    # Interpolate points
+    flxs = np.mod(flxs, 1.0)
+    idxs = np.arange(len(flxs))
     sf_energies = np.empty((f_params.shape[0], len(flxs), f_energies.shape[2]))
     for n in range(f_params.shape[0]):
         for m in range(f_energies.shape[2]):
             sf_energies[n, :, m] = np.interp(flxs, f_flxs, f_energies[n, :, m])
 
-    # 平行計算距離
-    def process_energy(i):
-        Bs, Cs = energy2linearform(sf_energies[i], allows)
-        return i, *candidate_breakpoint_search(fpts, Bs, Cs)
+    # Initialize variables
+    best_idx = 0
+    best_factor = 1.0
+    best_dist = np.inf
+    best_params = np.full(3, np.nan)
+    results = np.full((f_params.shape[0], 2), np.nan)  # (N, 2)
 
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(process_energy)(i)
-        for i in trange(f_params.shape[0], desc="Searching...")
-    )
-    results = np.array(results)  # (N, 3)
-    results = results[~np.isnan(results[:, 1])]
-
-    # 找到最佳結果
-    best_idx = np.argmin(results[:, 1])
-    best_dist = results[best_idx, 1]
-    best_factor = results[best_idx, 2]
-    best_params = f_params[best_idx] * best_factor
-
-    # 計算最佳結果的頻率預測
-    best_energy = sf_energies[best_idx]
-    Bs, Cs = energy2linearform(best_energy, allows)
-    pred_fpts = np.abs(best_factor * Bs + Cs)
-
-    # 找到每個目標頻率最接近的預測頻率
-    diffs = np.abs(fpts[:, None] - pred_fpts)
-    best_matches = np.argmin(diffs, axis=1)
-
-    # 創建一個具有4個子圖的圖形：左邊是頻率對比圖，右邊垂直排列3個參數散點圖
-    fig = plt.figure(figsize=(7, 5))
-
-    # 設置網格佈局
+    fig = plt.figure(figsize=(10, 7))
     gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
 
-    # 頻率對比圖 (左邊，佔據整個左列)
+    # Frequency comparison plot
     ax_freq = fig.add_subplot(gs[:, 0])
-    ax_freq.scatter(range(len(fpts)), fpts, label="Target", color="blue", marker="o")
-    ax_freq.scatter(
-        range(len(fpts)),
-        [pred_fpts[i, best_matches[i]] for i in range(len(fpts))],
-        label="Predicted",
-        color="red",
-        marker="x",
+    ax_freq.scatter(idxs, fpts, label="Target", color="blue", marker="o")
+    pred_scatter = ax_freq.scatter(
+        idxs, np.zeros_like(fpts), label="Predicted", color="red", marker="x"
     )
-
     # 添加誤差線
+    err_lines = []
     for i in range(len(fpts)):
-        ax_freq.plot([i, i], [fpts[i], pred_fpts[i, best_matches[i]]], "k-", alpha=0.3)
+        err_lines.append(ax_freq.plot([i, i], [fpts[i], np.nan], "k-", alpha=0.3)[0])
 
-    ax_freq.set_xlabel("Flux")
     ax_freq.set_ylabel("Frequency (GHz)")
     ax_freq.legend()
     ax_freq.grid(True)
 
-    # 建立右側的三個參數散點圖
+    # Create scatter plots for EJ, EC,
+    param_axs = []
+    param_scatters = []
+    best_param_scatters = []
     for i, name in enumerate(["EJ", "EC", "EL"]):
         ax_param = fig.add_subplot(gs[i, 1])
-        ax_param.scatter(f_params[results[:, 0].astype(int), i], results[:, 1], s=2)
-        ax_param.scatter(best_params[i], best_dist, color="red", s=50, marker="*")
-        ax_param.set_xlabel(name)  # Restore the xlabel setting
-
+        ax_param.set_xlabel(name)
         ax_param.set_ylabel("Distance")
         ax_param.grid()
+        scatter = ax_param.scatter(
+            range(f_params.shape[0]), np.zeros(f_params.shape[0]), s=2
+        )
+        best_scatter = ax_param.scatter([0], [0], color="red", s=50, marker="*")
+        param_axs.append(ax_param)
+        param_scatters.append(scatter)
+        best_param_scatters.append(best_scatter)
 
-    # Add overall title
-    fig.suptitle(
-        f"Best Distance: {best_dist:.2g}, Best Params: EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}",
-        fontsize=14,
-    )
+    dh = display(fig, display_id=True)
 
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.93)  # Leave space for overall title
+    def find_close_points(fpts, energies, factor, allows):
+        Bs, Cs = energy2linearform(energies, allows)
+        fs = np.abs(factor * Bs + Cs)
+        dists = np.abs(fs - fpts[:, None])
+        min_idx = np.argmin(dists, axis=1)
+        return fs[range(len(fpts)), min_idx]
 
-    # Return best parameters
+    prev_draw_idx = -1
+
+    def update_plot(i, dist, factor):
+        nonlocal best_dist, best_params, results, prev_draw_idx
+
+        # Update best result
+        if best_idx != prev_draw_idx:
+            p_fpts = find_close_points(fpts, sf_energies[i], factor, allows)
+            pred_scatter.set_offsets(np.c_[idxs, p_fpts])
+            ax_freq.set_ylim(np.min([fpts, p_fpts]), np.max([fpts, p_fpts]))
+
+            fig.suptitle(
+                f"Best Distance: {dist:.2g}, EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}"
+            )
+            prev_draw_idx = best_idx
+
+        # Update scatter plots
+        if np.sum(~np.isnan(results[:, 0])) > 1:
+            for j, (ax, scatter, best_scatter) in enumerate(
+                zip(param_axs, param_scatters, best_param_scatters)
+            ):
+                params_j = f_params[:, j] * results[:, 1]
+                scatter.set_offsets(np.c_[params_j, results[:, 0]])
+                best_scatter.set_offsets(np.c_[best_params[j], best_dist])
+                ax.set_xlim(np.nanmin(params_j), np.nanmax(params_j))
+                ax.set_ylim(0.0, np.nanmax(results[:, 0]))
+
+        dh.update(fig)
+
+    def process_energy(i):
+        Bs, Cs = energy2linearform(sf_energies[i], allows)
+        return i, *candidate_breakpoint_search(fpts, Bs, Cs)
+
+    idx_bar = trange(f_params.shape[0], desc="Searching...")
+    try:
+        with AsyncFunc(update_plot) as async_plot:
+            for i, dist, factor in Parallel(
+                return_as="generator_unordered", n_jobs=n_jobs, require="sharedmem"
+            )(delayed(process_energy)(i) for i in idx_bar):
+                results[i] = dist, factor
+
+                if not np.isnan(dist) and dist < best_dist:
+                    # Update best result
+                    best_idx = i
+                    best_factor = factor
+                    best_params = f_params[i] * factor
+                    best_dist = dist
+
+                # Update plot
+                async_plot(i, dist, factor)
+            else:
+                idx_bar.set_description_str("Done! ")
+        update_plot(best_idx, best_dist, best_factor)
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        idx_bar.close()
+        plt.close(fig)  # Move plt.close(fig) inside finally block
+
+    plt.ion()
+
     return best_params, fig
 
 
@@ -1016,7 +1092,6 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
         dist = fs - fpts[:, None]  # (n, m)
         dist2 = dist**2
 
-        idxs = np.arange(len(energies))
         min_idx = np.argmin(dist2, axis=1)  # (n, )
         grad_energies = np.zeros_like(energies)
         for i, min_id in enumerate(min_idx):
@@ -1024,7 +1099,7 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
             grad_energies[i, f[0]] += 2 * dist[i, min_idx[i]] * f[1][i]
             grad_energies[i, t[0]] += 2 * dist[i, min_idx[i]] * t[1][i]
 
-        return np.sum(dist2[idxs, min_idx]), grad_energies
+        return np.sum(dist2[range(len(energies)), min_idx]), grad_energies
 
     def get_dH_dE(fluxonium, params, spect):
         fluxonium.EJ = params[0]
