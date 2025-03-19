@@ -922,7 +922,6 @@ def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
 
     # Interpolate points
     flxs = np.mod(flxs, 1.0)
-    idxs = np.arange(len(flxs))
     sf_energies = np.empty((f_params.shape[0], len(flxs), f_energies.shape[2]))
     for n in range(f_params.shape[0]):
         for m in range(f_energies.shape[2]):
@@ -940,14 +939,10 @@ def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
 
     # Frequency comparison plot
     ax_freq = fig.add_subplot(gs[:, 0])
-    ax_freq.scatter(idxs, fpts, label="Target", color="blue", marker="o")
+    ax_freq.scatter(flxs, fpts, label="Target", color="blue", marker="o")
     pred_scatter = ax_freq.scatter(
-        idxs, np.zeros_like(fpts), label="Predicted", color="red", marker="x"
+        flxs, np.zeros_like(fpts), label="Predicted", color="red", marker="x"
     )
-    # 添加誤差線
-    err_lines = []
-    for i in range(len(fpts)):
-        err_lines.append(ax_freq.plot([i, i], [fpts[i], np.nan], "k-", alpha=0.3)[0])
 
     ax_freq.set_ylabel("Frequency (GHz)")
     ax_freq.legend()
@@ -981,17 +976,17 @@ def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
 
     prev_draw_idx = -1
 
-    def update_plot(i, dist, factor):
-        nonlocal best_dist, best_params, results, prev_draw_idx
+    def update_plot(_):
+        nonlocal best_dist, best_params, results, prev_draw_idx, best_idx
 
         # Update best result
         if best_idx != prev_draw_idx:
-            p_fpts = find_close_points(fpts, sf_energies[i], factor, allows)
-            pred_scatter.set_offsets(np.c_[idxs, p_fpts])
+            p_fpts = find_close_points(fpts, sf_energies[best_idx], best_factor, allows)
+            pred_scatter.set_offsets(np.c_[flxs, p_fpts])
             ax_freq.set_ylim(np.min([fpts, p_fpts]), np.max([fpts, p_fpts]))
 
             fig.suptitle(
-                f"Best Distance: {dist:.2g}, EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}"
+                f"Best Distance: {best_dist:.2g}, EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}"
             )
             prev_draw_idx = best_idx
 
@@ -1028,10 +1023,10 @@ def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
                     best_dist = dist
 
                 # Update plot
-                async_plot(i, dist, factor)
+                async_plot(i)
             else:
                 idx_bar.set_description_str("Done! ")
-        update_plot(best_idx, best_dist, best_factor)
+        update_plot(best_idx)
 
     except KeyboardInterrupt:
         pass
