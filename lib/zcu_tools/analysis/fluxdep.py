@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Tuple
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
@@ -823,13 +823,12 @@ def energy2transition(energies, allows):
 
 
 @njit(
-    "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:])",
-    cache=True,
+    "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:], float64, float64)",
     nogil=True,
 )
 def candidate_breakpoint_search(
-    A: np.ndarray, B: np.ndarray, C: np.ndarray
-) -> Tuple[float, Optional[float]]:
+    A: np.ndarray, B: np.ndarray, C: np.ndarray, a_min: float, a_max: float
+) -> Tuple[float, float]:
     """
     使用候選斷點法尋找最佳的 a 值, 使得目標函數最小化
     目標函數: F(a) = sum_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
@@ -839,79 +838,52 @@ def candidate_breakpoint_search(
     A: 目標向量, numpy 陣列, 形狀 (N,), 所有元素均為正數
     B: 候選向量矩陣, numpy 陣列, 形狀 (N, K)
     C: 偏移矩陣, numpy 陣列, 形狀 (N, K)
+    a_min: 最小的 a 值
+    a_max: 最大的 a 值
 
     Returns:
-    best_distance: 最小的目標函數值
-    best_a: 使得目標函數最小的 a 值
+    best_distance: 最小的目標函數值, 如果沒有找到則返回 inf
+    best_a: 使得目標函數最小的 a 值, 如果沒有找到則返回 1.0
     """
     N = A.shape[0]
     K = B.shape[1]
 
-    if B.shape[0] != N:
-        raise ValueError(
-            f"A and B must have the same number of rows, but got A={A.shape} and B={B.shape}"
-        )
+    # 找出最佳的 a 值
+    best_distance = float("inf")
+    best_a = 1.0
 
-    if C.shape != B.shape:
-        raise ValueError(
-            f"B and C must have the same shape, but got B={B.shape} and C={C.shape}"
-        )
-
-    # 驗證 A 中的值都是正的
-    if np.any(A <= 0):
-        raise ValueError("All values in A must be positive")
-
-    # 收集所有候選的 a 值
-    candidate_as = []
-
+    distances = np.empty(N, dtype=np.float64)
     for i in range(N):
         for j in range(K):
             if B[i, j] == 0:
                 continue
 
-            # 考慮兩種情況：
-            # 情況1：A[i] = a * B[i, j] + C[i,j]
-            a_c1 = (A[i] - C[i, j]) / B[i, j]
-            if a_c1 >= 0:
-                candidate_as.append(a_c1)
+            a1 = (A[i] - C[i, j]) / B[i, j]
+            a2 = (-A[i] - C[i, j]) / B[i, j]
 
-            # 情況2：A[i] = -(a * B[i, j] + C[i,j])
-            a_c2 = (-A[i] - C[i, j]) / B[i, j]
-            if a_c2 >= 0:
-                candidate_as.append(a_c2)
+            for a in (a1, a2):
+                if a < a_min or a > a_max:
+                    continue
 
-    # 若沒有候選點, 則返回 None
-    if len(candidate_as) == 0:
-        return float("inf"), np.nan
+                predicts = np.abs(a * B + C)
+                for i in range(N):
+                    min_diff = float("inf")
+                    for j in range(K):
+                        # 計算距離
+                        diff = np.abs(A[i] - predicts[i, j])
+                        if diff < min_diff:
+                            min_diff = diff
+                    distances[i] = min_diff
 
-    # 去除重複並排序
-    candidate_as = np.unique(np.array(candidate_as))
-
-    # 找出最佳的 a 值
-    best_distance = float("inf")
-    best_a = np.nan
-
-    for a in candidate_as:
-        distances = np.zeros(N)
-        predicts = np.abs(a * B + C)
-        for i in range(N):
-            min_diff = float("inf")
-            for j in range(K):
-                # 計算距離
-                diff = np.abs(A[i] - predicts[i, j])
-                if diff < min_diff:
-                    min_diff = diff
-            distances[i] = min_diff
-
-        total_distance = np.mean(distances)
-        if total_distance < best_distance:
-            best_distance = total_distance
-            best_a = a
+                total_distance = np.mean(distances)
+                if total_distance < best_distance:
+                    best_distance = total_distance
+                    best_a = a
 
     return best_distance, best_a
 
 
-def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
+def search_in_database(flxs, fpts, datapath, allows, EJb, ECb, ELb, n_jobs=-1):
     # Load data from database
     with File(datapath, "r") as file:
         f_flxs = file["flxs"][:]  # (f_flxs, )
@@ -950,8 +922,11 @@ def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
     param_axs = []
     param_scatters = []
     best_param_scatters = []
-    for i, name in enumerate(["EJ", "EC", "EL"]):
+    name_bounds = [("EJ", EJb), ("EC", ECb), ("EL", ELb)]
+    for i in range(3):
+        name, bound = name_bounds[i]
         ax_param = fig.add_subplot(gs[i, 1])
+        ax_param.set_xlim(bound[0], bound[1])
         ax_param.set_xlabel(name)
         ax_param.set_ylabel("Distance")
         ax_param.grid()
@@ -990,20 +965,27 @@ def search_in_database(flxs, fpts, datapath, allows, n_jobs=-1):
 
         # Update scatter plots
         if np.sum(~np.isnan(results[:, 0])) > 1:
+            dists, factors = results[:, 0], results[:, 1]
             for j, (ax, scatter, best_scatter) in enumerate(
                 zip(param_axs, param_scatters, best_param_scatters)
             ):
-                params_j = f_params[:, j] * results[:, 1]
-                scatter.set_offsets(np.c_[params_j, results[:, 0]])
+                params_j = f_params[:, j] * factors
+                scatter.set_offsets(np.c_[params_j, dists])
                 best_scatter.set_offsets(np.c_[best_params[j], best_dist])
-                ax.set_xlim(np.nanmin(params_j), np.nanmax(params_j))
-                ax.set_ylim(0.0, np.nanmax(results[:, 0]))
+                ax.set_ylim(0.0, np.nanmax(dists[np.isfinite(dists)]) * 1.1)
 
         dh.update(fig)
 
     def process_energy(i):
+        nonlocal f_params, sf_energies, fpts, allows
+        param = f_params[i]
+        a_min = max(EJb[0] / param[0], ECb[0] / param[1], ELb[0] / param[2])
+        a_max = min(EJb[1] / param[0], ECb[1] / param[1], ELb[1] / param[2])
+        if a_min > a_max:
+            return i, np.inf, 1.0
+
         Bs, Cs = energy2linearform(sf_energies[i], allows)
-        return i, *candidate_breakpoint_search(fpts, Bs, Cs)
+        return i, *candidate_breakpoint_search(fpts, Bs, Cs, a_min, a_max)
 
     idx_bar = trange(f_params.shape[0], desc="Searching...")
     try:
@@ -1081,14 +1063,14 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
 
     def energies2loss(energies, fpts, allows):
         # energies: (n, l)
-        fs, labels, _ = energy2transition(energies, allows)
+        fs, grad_labels, _ = energy2transition(energies, allows)
         dist = fs - fpts[:, None]  # (n, m)
         dist2 = dist**2
 
         min_idx = np.argmin(dist2, axis=1)  # (n, )
         grad_energies = np.zeros_like(energies)
         for i, min_id in enumerate(min_idx):
-            f, t = labels[min_id]
+            f, t = grad_labels[min_id]
             grad_energies[i, f[0]] += 2 * dist[i, min_idx[i]] * f[1][i]
             grad_energies[i, t[0]] += 2 * dist[i, min_idx[i]] * t[1][i]
 
