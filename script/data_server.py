@@ -3,6 +3,7 @@ import os
 from os.path import abspath, dirname, join
 
 from flask import Flask, request, send_file
+from zcu_tools.datasaver import safe_labber_filepath
 
 KEYWORD = "Database"
 ROOT_DIR = abspath(join(dirname(dirname(__file__)), KEYWORD))
@@ -13,28 +14,6 @@ DEFAULT_PORT = 4999
 def is_allowed_file(filename: str):
     allowed_ls = ["hdf5", "h5"]
     return "." in filename and filename.split(".")[-1].lower() in allowed_ls
-
-
-def safe_filepath(filepath: str):
-    filepath = os.path.abspath(filepath)
-
-    def parse_filepath(filepath):
-        filename, ext = os.path.splitext(filepath)
-        count = filename.split("_")[-1]
-        if count.isdigit():
-            filename = "_".join(filename.split("_")[:-1])  # remove number
-            return filename, int(count), ext
-        else:
-            return filename, 1, ext
-
-    filename, count, ext = parse_filepath(filepath)
-
-    filepath = filename + f"_{count}" + ext
-    while os.path.exists(filepath):
-        count += 1
-        filepath = filename + f"_{count}" + ext
-
-    return filepath
 
 
 def save_file(file):
@@ -49,7 +28,7 @@ def save_file(file):
         relpath = relpath.split(KEYWORD + "\\")[1]
 
     # save file
-    filepath = safe_filepath(os.path.join(ROOT_DIR, relpath))
+    filepath = safe_labber_filepath(os.path.join(ROOT_DIR, relpath))
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     file.save(filepath)
 
