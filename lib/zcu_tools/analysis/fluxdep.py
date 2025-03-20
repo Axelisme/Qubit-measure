@@ -534,6 +534,14 @@ class VisualizeSpet:
             np.nanmin([np.nanmin(s["spectrum"][1]) for s in self.s_points.values()]),
             np.nanmax([np.nanmax(s["spectrum"][1]) for s in self.s_points.values()]),
         )
+        flx_bound = (
+            0.9 * min(flx_bound[0], self.s_flxs.min()),
+            1.1 * max(flx_bound[1], self.s_flxs.max()),
+        )
+        fpt_bound = (
+            0.9 * min(fpt_bound[0], self.s_fpts.min()),
+            1.1 * max(fpt_bound[1], self.s_fpts.max()),
+        )
 
         # Add heatmap traces for each spectrum in s_points
         for spect in self.s_points.values():
