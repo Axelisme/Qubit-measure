@@ -567,7 +567,7 @@ class VisualizeSpet:
             )
 
         # Calculate transitions
-        fs, _, labels = energy2transition(self.energies, self.allows)
+        fs, labels = energy2transition(self.energies, self.allows)
 
         # 計算哪些線需要隱藏
         visible_lines = self._filter_nearby_lines(
@@ -798,38 +798,25 @@ def energy2transition(energies, allows):
 
     B, C = energy2linearform(energies, allows)
     fs = np.abs(B + C)
-    labels = []
     names = []
     for i, j in allows.get("transitions", []):  # E = E_ji
-        labels.append(((i, -np.ones(N)), (j, np.ones(N))))
         names.append(f"{i} -> {j}")
     for i, j in allows.get("blue side", []):  # E = E_ji + r_f
-        labels.append(((i, -np.ones(N)), (j, np.ones(N))))
         names.append(f"{i} -> {j} blue side")
     for i, j in allows.get("red side", []):  # E = abs(E_ji - r_f)
-        freq = energies[:, j] - energies[:, i]
-        mask = np.where(freq > allows["r_f"], 1, -1)
-        labels.append(((i, -mask), (j, mask)))
         names.append(f"{i} -> {j} red side")
     for i, j in allows.get("mirror", []):  # E = 2 * sample_f - E_ji
-        labels.append(((i, np.ones(N)), (j, -np.ones(N))))
         names.append(f"{i} -> {j} mirror")
     for i, j in allows.get("transitions2", []):  # E = 0.5 * E_ji
-        labels.append(((i, -0.5 * np.ones(N)), (j, 0.5 * np.ones(N))))
         names.append(f"2 {i} -> {j}")
     for i, j in allows.get("blue side2", []):  # E = 0.5 * E_ji + r_f
-        labels.append(((i, -0.5 * np.ones(N)), (j, 0.5 * np.ones(N))))
         names.append(f"2 {i} -> {j} blue side")
     for i, j in allows.get("red side2", []):  # E = 0.5 * abs(E_ji - r_f)
-        freq = energies[:, j] - energies[:, i]
-        mask = np.where(freq > allows["r_f"], 0.5, -0.5)
-        labels.append(((i, -0.5 * mask), (j, 0.5 * mask)))
         names.append(f"2 {i} -> {j} red side")
     for i, j in allows.get("mirror2", []):  # E = sample_f - 0.5 * E_ji
-        labels.append(((i, 0.5 * np.ones(N)), (j, -0.5 * np.ones(N))))
         names.append(f"2 {i} -> {j} mirror")
 
-    return fs, labels, names
+    return fs, names
 
 
 @njit(
@@ -1073,47 +1060,18 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
 
     def energies2loss(energies, fpts, allows):
         # energies: (n, l)
-        fs, grad_labels, _ = energy2transition(energies, allows)
+        fs, _ = energy2transition(energies, allows)
         dist = fs - fpts[:, None]  # (n, m)
         dist2 = dist**2
 
         min_idx = np.argmin(dist2, axis=1)  # (n, )
-        grad_energies = np.zeros_like(energies)
-        for i, min_id in enumerate(min_idx):
-            f, t = grad_labels[min_id]
-            grad_energies[i, f[0]] += 2 * dist[i, min_idx[i]] * f[1][i]
-            grad_energies[i, t[0]] += 2 * dist[i, min_idx[i]] * t[1][i]
-
-        return np.sum(dist2[range(len(energies)), min_idx]), grad_energies
-
-    def get_dH_dE(fluxonium, params, spect):
-        fluxonium.EJ = params[0]
-        fluxonium.EC = params[1]
-        fluxonium.EL = params[2]
-        # H = 4Ec*n^2 - EJ*cos(phi) + 0.5*EL phi^2
-        dH_dE = np.empty((*spect.energy_table.shape, 3))
-        for i in range(len(spect.energy_table)):
-            flx = spect.param_vals[i]
-            eval, estate = spect.energy_table[i], spect.state_table[i]
-            cosphi_op = fluxonium.cos_phi_operator(1, 2 * np.pi * flx, (eval, estate))
-            n_op = fluxonium.n_operator((eval, estate))
-            phi_op = fluxonium.phi_operator((eval, estate))
-            dH_dE[i, :, 0] = -np.diag(cosphi_op).real
-            dH_dE[i, :, 1] = 4 * np.sum(n_op * n_op.T, axis=1).real
-            dH_dE[i, :, 2] = 0.5 * np.sum(phi_op * phi_op.T, axis=1).real
-        return dH_dE
+        return np.sum(dist2[range(len(energies)), min_idx])
 
     def loss_func(params):
         nonlocal fluxonium, flxs, allows, fpts
 
         spectrumData = params2spec(fluxonium, flxs, params)
-        loss, grad = energies2loss(spectrumData.energy_table, fpts, allows)
-
-        dH_dE = get_dH_dE(fluxonium, params, spectrumData)  # (n, l, 3)
-
-        grad_params = np.sum(grad[:, :, None] * dH_dE, axis=(0, 1))
-
-        return loss, grad_params
+        return energies2loss(spectrumData.energy_table, fpts, allows)
 
     res = minimize(
         loss_func,
@@ -1121,7 +1079,6 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
         bounds=params_b,
         method="L-BFGS-B",
         options={"maxfun": maxfun},
-        jac=True,
         callback=callback,
     )
 
