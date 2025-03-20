@@ -14,7 +14,7 @@ def measure_qub_freq(soc, soccfg, cfg, reset_rf=None, remove_bg=False):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     if reset_rf is not None:
-        assert cfg.get("reset") == "pulse", "Need reset=pulse for conjugate reset"
+        assert cfg["dac"]["reset"] == "pulse", "Need reset=pulse for conjugate reset"
         assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
         cfg["r_f"] = reset_rf
 
