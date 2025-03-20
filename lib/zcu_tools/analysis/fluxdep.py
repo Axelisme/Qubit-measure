@@ -1,3 +1,5 @@
+import json
+import os
 from typing import Tuple
 
 import ipywidgets as widgets
@@ -964,8 +966,8 @@ def search_in_database(flxs, fpts, datapath, allows, EJb, ECb, ELb, n_jobs=-1):
             prev_draw_idx = best_idx
 
         # Update scatter plots
-        if np.sum(~np.isnan(results[:, 0])) > 1:
-            dists, factors = results[:, 0], results[:, 1]
+        dists, factors = results[:, 0], results[:, 1]
+        if np.sum(np.isfinite(dists)) > 1:
             for j, (ax, scatter, best_scatter) in enumerate(
                 zip(param_axs, param_scatters, best_param_scatters)
             ):
@@ -1122,3 +1124,37 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
     if isinstance(res, np.ndarray):  # old version
         return res
     return res.x
+
+
+def dump_result(path, name, params, cflx, period, allows):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    with open(path, "w") as f:
+        json.dump(
+            {
+                "name": name,
+                "params": {
+                    "EJ": params[0],
+                    "EC": params[1],
+                    "EL": params[2],
+                },
+                "half flux": cflx,
+                "period": period,
+                "allows": allows,
+            },
+            f,
+            indent=4,
+        )
+
+
+def load_result(path):
+    with open(path, "r") as f:
+        data = json.load(f)
+
+    return (
+        data["name"],
+        np.array([data["params"]["EJ"], data["params"]["EC"], data["params"]["EL"]]),
+        data["half flux"],
+        data["period"],
+        data["allows"],
+    )
