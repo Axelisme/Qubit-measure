@@ -1045,7 +1045,7 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
         else:
             cur_params = intermediate_result.x
         pbar.set_description(
-            f"({cur_params[0]:.2f}, {cur_params[1]:.2f}, {cur_params[2]:.2f})"
+            f"({cur_params[0]:.4f}, {cur_params[1]:.4f}, {cur_params[2]:.4f})"
         )
 
     def params2spec(fluxonium, flxs, params):
@@ -1061,11 +1061,10 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
     def energies2loss(energies, fpts, allows):
         # energies: (n, l)
         fs, _ = energy2transition(energies, allows)
-        dist = fs - fpts[:, None]  # (n, m)
-        dist2 = dist**2
+        dist = np.sqrt(np.abs(fs - fpts[:, None]))  # (n, m)
 
-        min_idx = np.argmin(dist2, axis=1)  # (n, )
-        return np.sum(dist2[range(len(energies)), min_idx])
+        min_idx = np.argmin(dist, axis=1)  # (n, )
+        return np.sum(dist[range(len(energies)), min_idx])
 
     def loss_func(params):
         nonlocal fluxonium, flxs, allows, fpts
