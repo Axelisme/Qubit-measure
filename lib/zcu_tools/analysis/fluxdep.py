@@ -17,7 +17,7 @@ from tqdm.auto import tqdm, trange
 from zcu_tools.tools import AsyncFunc
 
 
-class InteractiveSelector:
+class InteractiveFindPoints:
     def __init__(self, spectrum, flxs, fpts, threshold=1.0, brush_width=0.05):
         self.spectrum = spectrum
         self.flxs = flxs
@@ -494,11 +494,156 @@ class InteractiveLines:
         return float(self.cflx), float(self.eflx)
 
 
+class InteractiveSelector:
+    def __init__(self, s_pects, selected=None, brush_width=0.05):
+        self.s_spects = s_pects
+
+        self.s_flxs = np.concatenate(
+            [
+                self.get_flxs(s["points"]["mAs"], s["mA_c"], s["period"])
+                for s in s_pects.values()
+            ]
+        )
+        self.s_fpts = np.concatenate([s["points"]["fpts"] for s in s_pects.values()])
+        self.selected = (
+            selected if selected is not None else np.ones_like(self.s_flxs, dtype=bool)
+        )
+
+        self.is_finished = False
+
+        plt.ioff()  # to avoid showing the plot immediately
+        self.fig, self.ax = plt.subplots()
+        self.fig.tight_layout()
+        plt.ion()
+
+        # 顯示 widget
+        self.create_widgets(brush_width)
+
+        # 顯示頻譜
+        self.init_background(s_pects)
+
+        # 顯示發現的點
+        self.init_points(self.s_flxs, self.s_fpts, self.selected)
+
+        # 設置 x 和 y 軸範圍
+        self.set_plot_limit()
+
+        # 準備手繪曲線
+        self.fig.canvas.mpl_connect("button_press_event", self.on_press)
+
+        display(
+            widgets.HBox(
+                [
+                    self.fig.canvas,
+                    widgets.VBox(
+                        [self.width_slider, self.operation_tb, self.finish_button]
+                    ),
+                ]
+            )
+        )
+
+    def get_flxs(self, mAs, mA_c, period):
+        return (mAs - mA_c) / period
+
+    def create_widgets(self, brush_width):
+        self.width_slider = widgets.FloatSlider(
+            value=brush_width, min=0.01, max=0.1, step=1e-4, description="Brush Width:"
+        )
+        self.operation_tb = widgets.Dropdown(
+            options=["Select", "Erase"], value="Select", description="Operation:"
+        )
+        self.finish_button = widgets.Button(
+            description="Finish", button_style="success"
+        )
+        self.finish_button.on_click(self.on_finish)
+
+    def init_background(self, s_pects):
+        for spect in s_pects.values():
+            # Get corresponding data and range
+            data = spect["spectrum"]["data"] ** 1.5
+            flx_mask = np.any(~np.isnan(data), axis=0)
+            fpt_mask = np.any(~np.isnan(data), axis=1)
+            data = data[fpt_mask, :][:, flx_mask]
+
+            # Normalize data
+            data = np.abs(data - np.mean(data, axis=0, keepdims=True))
+            data /= np.std(data, axis=0, keepdims=True)
+
+            # Add heatmap trace
+            sp_flxs = self.get_flxs(
+                spect["spectrum"]["mAs"][flx_mask], spect["mA_c"], spect["period"]
+            )
+            sp_fpts = spect["spectrum"]["fpts"][fpt_mask]
+            self.ax.imshow(
+                data,
+                aspect="auto",
+                origin="lower",
+                interpolation="none",
+                extent=(sp_flxs[0], sp_flxs[-1], sp_fpts[0], sp_fpts[-1]),
+            )
+
+    def init_points(self, flxs, s_fpts, selected):
+        self.scatter = self.ax.scatter(
+            flxs, s_fpts, c=selected.astype(float), s=2, vmax=1, vmin=0
+        )
+
+    def set_plot_limit(self):
+        sp_flxs = np.concatenate(
+            [
+                self.get_flxs(s["points"]["mAs"], s["mA_c"], s["period"])
+                for s in self.s_spects.values()
+            ]
+        )
+        sp_fpts = np.concatenate([s["points"]["fpts"] for s in self.s_spects.values()])
+        flxs_bound = (
+            min(np.nanmin(sp_flxs), self.s_flxs.min()),
+            max(np.nanmax(sp_flxs), self.s_flxs.max()),
+        )
+        fpt_bound = (
+            min(np.nanmin(sp_fpts), self.s_fpts.min()),
+            max(np.nanmax(sp_fpts), self.s_fpts.max()),
+        )
+
+        # Set x and y axis range
+        self.ax.set_xlim(flxs_bound[0], flxs_bound[1])
+        self.ax.set_ylim(fpt_bound[0], fpt_bound[1])
+
+    def update_points(self, selected):
+        self.scatter.set_array(selected.astype(float))
+
+    def toggle_near_mask(self, x, y, width):
+        x_d = np.abs(self.s_flxs - x) / (self.s_flxs[-1] - self.s_flxs[0])
+        y_d = np.abs(self.s_fpts - y) / (self.s_fpts[-1] - self.s_fpts[0])
+        toggle_mask = x_d**2 + y_d**2 <= width**2
+
+        self.selected[toggle_mask] = self.operation_tb.value == "Select"
+
+    def on_press(self, event):
+        if event.inaxes != self.ax or self.is_finished:
+            return
+
+        # 計算靠近滑鼠點擊的點
+        self.toggle_near_mask(event.xdata, event.ydata, self.width_slider.value)
+
+        self.update_points(self.selected)
+        self.fig.canvas.draw_idle()
+
+    def on_finish(self, _):
+        plt.close(self.fig)
+        self.is_finished = True
+
+    def get_positions(self):
+        if not self.is_finished:
+            self.on_finish(None)
+
+        return self.s_flxs[self.selected], self.s_fpts[self.selected], self.selected
+
+
 class VisualizeSpet:
     def __init__(
-        self, s_points, s_flxs, s_fpts, flxs, energies, allows, auto_hide=False
+        self, s_spects, s_flxs, s_fpts, flxs, energies, allows, auto_hide=False
     ):
-        self.s_points = s_points
+        self.s_spects = s_spects
         self.s_flxs = s_flxs
         self.s_fpts = s_fpts
         self.flxs = flxs
@@ -510,6 +655,9 @@ class VisualizeSpet:
         self.scatter_size = 3
         self.scatter_color = "red"
         self.scatter_color_array = None  # 用於存儲顏色陣列
+
+    def get_flxs(self, mAs, mA_c, period):
+        return (mAs - mA_c) / period
 
     def set_scatter_style(self, size=None, color=None):
         if size is not None:
@@ -526,27 +674,10 @@ class VisualizeSpet:
     def create_figure(self):
         fig = go.Figure()
 
-        flx_bound = (
-            np.nanmin([np.nanmin(s["spectrum"][0]) for s in self.s_points.values()]),
-            np.nanmax([np.nanmax(s["spectrum"][0]) for s in self.s_points.values()]),
-        )
-        fpt_bound = (
-            np.nanmin([np.nanmin(s["spectrum"][1]) for s in self.s_points.values()]),
-            np.nanmax([np.nanmax(s["spectrum"][1]) for s in self.s_points.values()]),
-        )
-        flx_bound = (
-            0.9 * min(flx_bound[0], self.s_flxs.min()),
-            1.1 * max(flx_bound[1], self.s_flxs.max()),
-        )
-        fpt_bound = (
-            0.9 * min(fpt_bound[0], self.s_fpts.min()),
-            1.1 * max(fpt_bound[1], self.s_fpts.max()),
-        )
-
-        # Add heatmap traces for each spectrum in s_points
-        for spect in self.s_points.values():
+        # Add heatmap traces for each spectrum in s_spects
+        for spect in self.s_spects.values():
             # Get corresponding data and range
-            data = spect["spectrum"][2] ** 1.5
+            data = spect["spectrum"]["data"] ** 1.5
             flx_mask = np.any(~np.isnan(data), axis=0)
             fpt_mask = np.any(~np.isnan(data), axis=1)
             data = data[fpt_mask, :][:, flx_mask]
@@ -556,11 +687,16 @@ class VisualizeSpet:
             data /= np.std(data, axis=0, keepdims=True)
 
             # Add heatmap trace
+
+            sp_flxs = self.get_flxs(
+                spect["spectrum"]["mAs"], spect["mA_c"], spect["period"]
+            )
+            sp_fpts = spect["spectrum"]["fpts"]
             fig.add_trace(
                 go.Heatmap(
                     z=data,
-                    x=spect["spectrum"][0][flx_mask],
-                    y=spect["spectrum"][1][fpt_mask],
+                    x=sp_flxs[flx_mask],
+                    y=sp_fpts[fpt_mask],
                     colorscale="Greys",
                     showscale=False,
                 )
@@ -622,6 +758,22 @@ class VisualizeSpet:
             height=1600,
         )
 
+        sp_flxs = np.concatenate(
+            [
+                self.get_flxs(s["points"]["mAs"], s["mA_c"], s["period"])
+                for s in self.s_spects.values()
+            ]
+        )
+        sp_fpts = np.concatenate([s["points"]["fpts"] for s in self.s_spects.values()])
+        flx_bound = (
+            min(np.nanmin(sp_flxs), self.s_flxs.min()),
+            max(np.nanmax(sp_flxs), self.s_flxs.max()),
+        )
+        fpt_bound = (
+            min(np.nanmin(sp_fpts), self.s_fpts.min()),
+            max(np.nanmax(sp_fpts), self.s_fpts.max()),
+        )
+
         # Set x and y axis range
         fig.update_xaxes(range=[flx_bound[0], flx_bound[1]])
         fig.update_yaxes(range=[fpt_bound[0], fpt_bound[1]])
@@ -665,6 +817,50 @@ class VisualizeSpet:
         return visible_lines
 
 
+def remove_close_points(sp_flxs, sp_fpts, min_fpt_dist=0.005):
+    """
+    Remove points on the same flux line that are too close to each other.
+
+    Parameters:
+    sp_flxs: numpy array, 通量數據 (N, )
+    sp_fpts: numpy array, 頻率數據 (N, )
+    min_fpt_dist: float, 最小頻率距離
+
+    Returns:
+    sp_flxs: numpy array, 去除後的通量數據 (N, )
+    sp_fpts: numpy array, 去除後的頻率數據 (N, )
+    """
+    if len(sp_flxs) == 0:
+        return sp_flxs, sp_fpts
+
+    # Sort by frequency first
+    sorted_indices = np.argsort(sp_fpts)
+    sp_flxs = sp_flxs[sorted_indices]
+    sp_fpts = sp_fpts[sorted_indices]
+
+    # stable sort by flux
+    sorted_indices = np.argsort(sp_flxs, stable=True)
+    sp_flxs = sp_flxs[sorted_indices]
+    sp_fpts = sp_fpts[sorted_indices]
+
+    # Remove close points
+    prev_i = 0
+    mask = np.ones(len(sp_flxs), dtype=bool)
+    for i in range(1, len(sp_flxs)):
+        if sp_flxs[i] != sp_flxs[prev_i]:
+            prev_i = i
+            continue
+
+        # Check if the distance is less than the minimum
+
+        if np.abs(sp_fpts[i] - sp_fpts[prev_i]) < min_fpt_dist:
+            mask[i] = False
+        else:
+            prev_i = i
+
+    return sp_flxs[mask], sp_fpts[mask]
+
+
 def calculate_energy(flxs, EJ, EC, EL, cutoff=50, evals_count=10):
     from scqubits import Fluxonium
 
@@ -705,26 +901,6 @@ def spectrum_analyze(flxs, fpts, signals, threshold, weight=None):
         s_flxs.extend(flxs[i] * np.ones(len(peaks)))
         s_fpts.extend(fpts[peaks])
     return np.array(s_flxs), np.array(s_fpts)
-
-
-def remove_close_points(flxs, fpts, dist_ratio):
-    # remove some close points
-    if len(flxs) < 2:
-        return flxs, fpts  # ignore in edge case
-
-    mask = np.ones(len(flxs), dtype=bool)
-    t_d2 = np.sqrt((flxs[-1] - flxs[0]) ** 2 + (fpts[-1] - fpts[0]) ** 2) * dist_ratio
-    prev = 0
-    for i in range(1, len(flxs)):
-        d_flx = flxs[i] - flxs[prev]
-        d_fs = fpts[i] - fpts[prev]
-        d2 = np.sqrt(d_flx**2 + d_fs**2)
-        if d2 < t_d2:
-            mask[i] = False
-        else:
-            prev = i
-
-    return flxs[mask], fpts[mask]
 
 
 def energy2linearform(energies, allows):

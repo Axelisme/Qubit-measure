@@ -12,14 +12,21 @@ from tqdm.auto import tqdm
 from zcu_tools.analysis.fluxdep import calculate_energy
 
 # parameters
-data_path = "Database/simulation/fluxonium_test.h5"
-num_sample = 4000
-EJb = (3.0, 15.0)
-ECb = (0.2, 2.0)
-ELb = (0.5, 2.0)
+data_path = "Database/simulation/fluxonium_all.h5"
+num_sample = 10000
+# normal
+# EJb = (3.0, 15.0)
+# ECb = (0.2, 2.0)
+# ELb = (0.5, 2.0)
+# integer
 # EJb = (2.0, 6.0)
 # ECb = (0.8, 2.0)
 # ELb = (0.01, 0.2)
+# all
+EJb = (1.0, 20.0)
+ECb = (0.1, 4.0)
+ELb = (0.01, 3.0)
+
 
 DRY_RUN = True
 scq.settings.PROGRESSBAR_DISABLED = True
