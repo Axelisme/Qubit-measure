@@ -862,12 +862,11 @@ def candidate_breakpoint_search(
                 if a < a_min or a > a_max:
                     continue
 
-                predicts = np.abs(a * B + C)
                 for i in range(N):
                     min_diff = float("inf")
                     for j in range(K):
                         # 計算距離
-                        diff = np.abs(A[i] - predicts[i, j])
+                        diff = np.abs(A[i] - np.abs(a * B[i, j] + C[i, j]))
                         if diff < min_diff:
                             min_diff = diff
                     distances[i] = min_diff
@@ -1016,20 +1015,21 @@ def search_in_database(flxs, fpts, datapath, allows, EJb, ECb, ELb, n_jobs=-1):
     return best_params, fig
 
 
-def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
+def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
     import scqubits as scq
     from scipy.optimize import minimize
 
     scq.settings.PROGRESSBAR_DISABLED, old = True, scq.settings.PROGRESSBAR_DISABLED
 
-    max_level = 0
+    evals_count = 0
     for lvl in allows.values():
         if not isinstance(lvl, list):
             continue
-        max_level = max(max_level, *[max(lv) for lv in lvl])
-    max_level += 1
+        evals_count = max(evals_count, *[max(lv) for lv in lvl])
+    evals_count += 1
+
     fluxonium = scq.Fluxonium(
-        *init_params, flux=0.0, truncated_dim=max_level, cutoff=40
+        *init_params, flux=0.0, truncated_dim=evals_count, cutoff=40
     )
 
     pbar = tqdm(
@@ -1048,34 +1048,31 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
             f"({cur_params[0]:.4f}, {cur_params[1]:.4f}, {cur_params[2]:.4f})"
         )
 
-    def params2spec(fluxonium, flxs, params):
-        nonlocal max_level
+    def params2energy(flxs, params):
+        nonlocal fluxonium, evals_count
 
         fluxonium.EJ = params[0]
         fluxonium.EC = params[1]
         fluxonium.EL = params[2]
         return fluxonium.get_spectrum_vs_paramvals(
-            "flux", flxs, evals_count=max_level, get_eigenstates=True
-        )
+            "flux", flxs, evals_count=evals_count, get_eigenstates=True
+        ).energy_table
 
-    def energies2loss(energies, fpts, allows):
-        # energies: (n, l)
-        fs, _ = energy2transition(energies, allows)
-        dist = np.sqrt(np.abs(fs - fpts[:, None]))  # (n, m)
+    # Find unique values in flxs and map original indices to unique indices
+    uni_flxs, uni_idxs = np.unique(flxs, return_inverse=True)
 
-        min_idx = np.argmin(dist, axis=1)  # (n, )
-        return np.sum(dist[range(len(energies)), min_idx])
+    def loss_func(param):
+        nonlocal fluxonium, flxs, uni_flxs, uni_idxs, allows, fpts
 
-    def loss_func(params):
-        nonlocal fluxonium, flxs, allows, fpts
-
-        spectrumData = params2spec(fluxonium, flxs, params)
-        return energies2loss(spectrumData.energy_table, fpts, allows)
+        energies = params2energy(uni_flxs, param)
+        Bs, Cs = energy2linearform(energies, allows)
+        fs = np.abs(Bs + Cs)[uni_idxs, :]
+        return np.sum(np.sqrt(np.min(np.abs(fpts[:, None] - fs), axis=1)))
 
     res = minimize(
         loss_func,
         init_params,
-        bounds=params_b,
+        bounds=param_b,
         method="L-BFGS-B",
         options={"maxfun": maxfun},
         callback=callback,
@@ -1086,8 +1083,11 @@ def fit_spectrum(flxs, fpts, init_params, allows, params_b=None, maxfun=1000):
     scq.settings.PROGRESSBAR_DISABLED = old
 
     if isinstance(res, np.ndarray):  # old version
-        return res
-    return res.x
+        best_params = res
+    else:
+        best_params = res.x
+
+    return best_params
 
 
 def dump_result(path, name, params, cflx, period, allows):
