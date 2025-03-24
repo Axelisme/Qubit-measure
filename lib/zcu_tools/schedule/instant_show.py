@@ -39,14 +39,15 @@ class InstantShow1D(BaseInstantShow):
         super().__init__(x_label, y_label, title)
 
         self.xs = xs
+        sorted_xs = xs[np.argsort(xs)]
 
         err_kwargs = {"linestyle": "--", "color": "lightgray"}
-        self.err_up = self.ax.plot(xs, np.zeros_like(xs), **err_kwargs)[0]
-        self.err_dn = self.ax.plot(xs, np.zeros_like(xs), **err_kwargs)[0]
+        self.err_up = self.ax.plot(sorted_xs, np.zeros_like(xs), **err_kwargs)[0]
+        self.err_dn = self.ax.plot(sorted_xs, np.zeros_like(xs), **err_kwargs)[0]
 
         kwargs.setdefault("linestyle", "-")
         kwargs.setdefault("marker", ".")
-        self.contain = self.ax.plot(xs, np.zeros_like(xs), **kwargs)[0]
+        self.contain = self.ax.plot(sorted_xs, np.zeros_like(xs), **kwargs)[0]
 
         self.dh = display(self.fig, display_id=True)
 
@@ -77,23 +78,28 @@ class InstantShow1D(BaseInstantShow):
         if errs is None:
             errs = np.full_like(signals_real, np.nan)
 
+        if ticks is not None:
+            self.xs = ticks
+            sorted_idxs = np.argsort(self.xs)
+
+        sorted_xs = self.xs[sorted_idxs]
+        signals_real = signals_real[sorted_idxs]
+        errs = errs[sorted_idxs]
+
         # smooth error bars
         errs_up = self._smooth_errs(signals_real + 2 * errs)
         errs_dn = self._smooth_errs(signals_real - 2 * errs)
 
         # make errs_up and errs_dn inclusive signals_real
-        move_up = np.clip(signals_real - errs_up, 0, None)
-        move_dn = np.clip(errs_dn - signals_real, 0, None)
-        errs_up = errs_up + move_up - move_dn
-        errs_dn = errs_dn + move_up - move_dn
-
-        if ticks is not None:
-            self.xs = ticks
+        # move_up = np.clip(signals_real - errs_up, 0, None)
+        # move_dn = np.clip(errs_dn - signals_real, 0, None)
+        # errs_up = errs_up + move_up - move_dn
+        # errs_dn = errs_dn + move_up - move_dn
 
         with self.update_lock:
-            self.contain.set_data(self.xs, signals_real)
-            self.err_up.set_data(self.xs, errs_up)
-            self.err_dn.set_data(self.xs, errs_dn)
+            self.contain.set_data(sorted_xs, signals_real)
+            self.err_up.set_data(sorted_xs, errs_up)
+            self.err_dn.set_data(sorted_xs, errs_dn)
 
             if title:
                 self.ax.set_title(title)
