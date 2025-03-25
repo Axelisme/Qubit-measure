@@ -1,22 +1,13 @@
 from copy import deepcopy
-from typing import Literal
 from warnings import warn
 
 import numpy as np
-from zcu_tools.analysis import singleshot_analysis
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.tools import sweep2param
 
 
-def measure_fid_auto(
-    soc,
-    soccfg,
-    cfg,
-    plot=False,
-    progress=False,
-    backend: Literal["center", "regression"] = "regression",
-):
+def measure_singleshot(soc, soccfg, cfg):
     cfg = deepcopy(cfg)  # avoid in-place modification
 
     if cfg.setdefault("soft_avgs", 1) != 1:
@@ -40,10 +31,9 @@ def measure_fid_auto(
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     prog = TwoToneProgram(soccfg, deepcopy(cfg))
-    prog.acquire(soc, progress=progress)
+    prog.acquire(soc, progress=False)
     acc_buf = prog.acc_buf[0]
     avgiq = acc_buf / prog.get_time_axis(0)[-1]  # (reps, 2, 1, 2)
     i0, q0 = avgiq[..., 0, 0].T, avgiq[..., 0, 1].T  # (reps, 2)
 
-    fid, threhold, angle = singleshot_analysis(i0, q0, plot=plot, backend=backend)
-    return fid, threhold, angle, np.array(i0 + 1j * q0)
+    return np.array(i0 + 1j * q0)

@@ -1,6 +1,6 @@
 import numpy as np
 
-from .base import fitting_and_plot
+from .base import fitting_ge_and_plot
 
 
 def get_rotate_angle(Ig, Qg, Ie, Qe):
@@ -24,5 +24,5 @@ def get_rotate_angle(Ig, Qg, Ie, Qe):
     return {"theta": theta, "threshold": threshold}
 
 
-def fit_by_regression(Is, Qs, plot=True):
-    return fitting_and_plot(Is, Qs, get_rotate_angle, plot)
+def fit_ge_by_regression(signals, plot=True):
+    return fitting_ge_and_plot(signals, get_rotate_angle, plot)

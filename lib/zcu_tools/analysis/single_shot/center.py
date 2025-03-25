@@ -1,6 +1,6 @@
 import numpy as np
 
-from .base import fitting_and_plot
+from .base import fitting_ge_and_plot
 
 
 def get_rotate_angle(Ig, Qg, Ie, Qe):
@@ -10,5 +10,5 @@ def get_rotate_angle(Ig, Qg, Ie, Qe):
     return {"theta": theta}
 
 
-def fit_by_center(Is, Qs, plot=True):
-    return fitting_and_plot(Is, Qs, get_rotate_angle, plot)
+def fit_ge_by_center(signals, plot=True):
+    return fitting_ge_and_plot(signals, get_rotate_angle, plot)

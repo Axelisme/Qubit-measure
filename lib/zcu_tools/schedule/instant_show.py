@@ -80,8 +80,8 @@ class InstantShow1D(BaseInstantShow):
 
         if ticks is not None:
             self.xs = ticks
-            sorted_idxs = np.argsort(self.xs)
 
+        sorted_idxs = np.argsort(self.xs)
         sorted_xs = self.xs[sorted_idxs]
         signals_real = signals_real[sorted_idxs]
         errs = errs[sorted_idxs]

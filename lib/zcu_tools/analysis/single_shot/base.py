@@ -10,7 +10,7 @@ def rotate(I_orig, Q_orig, theta):
     return I_new, Q_new
 
 
-def scatter_plot(Is, Qs, ax, title=None):
+def scatter_ge_plot(Is, Qs, ax, title=None):
     Ig, Ie = Is
     Qg, Qe = Qs
     xg, yg = np.median(Ig), np.median(Qg)
@@ -50,7 +50,7 @@ def hist(Ig, Ie, numbins=200, ax=None, title=None):
     return ng, ne, bins
 
 
-def cumulate_plot(ng, ne, bins, ax, title=None):
+def cumulate_ge_plot(ng, ne, bins, ax, title=None):
     ax.plot(bins[:-1], np.cumsum(ng), "b", label="g")
     ax.plot(bins[:-1], np.cumsum(ne), "r", label="e")
     if title is not None:
@@ -82,15 +82,16 @@ def calculate_fidelity(ng, ne, bins):
     return fid, bins[tind]
 
 
-def fitting_and_plot(
-    Is, Qs, classify_func, plot=True, numbins=200
+def fitting_ge_and_plot(
+    signals, classify_func, plot=True, numbins=200
 ) -> Tuple[float, float, float]:
-    Ig, Ie = Is
-    Qg, Qe = Qs
+    print(signals.shape)
+    Ig, Ie = signals.real
+    Qg, Qe = signals.imag
 
     if plot:
         _, axs = plt.subplots(2, 2, figsize=(8, 8))
-        scatter_plot((Ig, Ie), (Qg, Qe), axs[0, 0], "Unrotated")
+        scatter_ge_plot((Ig, Ie), (Qg, Qe), axs[0, 0], "Unrotated")
 
     # Calculate the angle of rotation
     out_dict = classify_func(Ig, Qg, Ie, Qe)
@@ -101,7 +102,7 @@ def fitting_and_plot(
     Ie, Qe = rotate(Ie, Qe, theta)
 
     if plot:
-        scatter_plot((Ig, Ie), (Qg, Qe), axs[0, 1], "Rotated")
+        scatter_ge_plot((Ig, Ie), (Qg, Qe), axs[0, 1], "Rotated")
         ng, ne, bins = hist(Ig, Ie, numbins, axs[1, 0])
     else:
         ng, ne, bins = hist(Ig, Ie, numbins)
@@ -115,7 +116,7 @@ def fitting_and_plot(
         axs[1, 0].set_title(f"Histogram ({title}: {fid:.3%})", fontsize=14)
         axs[1, 0].axvline(threshold, color="0.2", linestyle="--")
 
-        cumulate_plot(ng, ne, bins, axs[1, 1], "Cumulative Counts")
+        cumulate_ge_plot(ng, ne, bins, axs[1, 1], "Cumulative Counts")
         axs[1, 1].axvline(threshold, color="0.2", linestyle="--")
 
         plt.subplots_adjust(hspace=0.25, wspace=0.15)
