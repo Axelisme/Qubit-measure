@@ -60,7 +60,7 @@ class InstantShow1D(BaseInstantShow):
         for i in range(len(errs)):
             start = max(0, i - s_len)
             end = min(len(errs), i + s_len)
-            if start == end:
+            if start == end or np.all(np.isnan(errs[start:end])):
                 _errs[i] = np.nan
             else:
                 _errs[i] = np.nanmedian(errs[start:end])
@@ -87,14 +87,10 @@ class InstantShow1D(BaseInstantShow):
         errs = errs[sorted_idxs]
 
         # smooth error bars
-        errs_up = self._smooth_errs(signals_real + 2 * errs)
-        errs_dn = self._smooth_errs(signals_real - 2 * errs)
-
-        # make errs_up and errs_dn inclusive signals_real
-        # move_up = np.clip(signals_real - errs_up, 0, None)
-        # move_dn = np.clip(errs_dn - signals_real, 0, None)
-        # errs_up = errs_up + move_up - move_dn
-        # errs_dn = errs_dn + move_up - move_dn
+        errs_up = signals_real + 2 * errs
+        errs_dn = signals_real - 2 * errs
+        # errs_up = self._smooth_errs(signals_real + 2 * errs)
+        # errs_dn = self._smooth_errs(signals_real - 2 * errs)
 
         with self.update_lock:
             self.contain.set_data(sorted_xs, signals_real)

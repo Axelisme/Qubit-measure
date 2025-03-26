@@ -1,4 +1,5 @@
 import threading
+import time
 from typing import Any, Dict
 
 import Pyro4
@@ -110,6 +111,7 @@ class ProgramClient(AbsProxy):
         print("Sending callback to server...", end="   ")
         with RemoteCallback(self, set_success) as cb:
             self._remote_call("test_callback", cb)
+            time.sleep(0.5)
         print("Callback test ", "passed" if success_flag else "failed", "!")
         return success_flag
 
