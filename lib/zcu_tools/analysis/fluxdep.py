@@ -1,5 +1,6 @@
 import json
 import os
+from threading import Timer
 from typing import Tuple
 
 import ipywidgets as widgets
@@ -10,6 +11,7 @@ from h5py import File
 from IPython.display import display
 from joblib import Parallel, delayed
 from matplotlib.animation import FuncAnimation
+from matplotlib.patches import Ellipse
 from numba import njit
 from scipy.signal import find_peaks
 from tqdm.auto import tqdm, trange
@@ -542,6 +544,10 @@ class InteractiveSelector:
             )
         )
 
+        # 新增: 用於儲存暫時性圓圈和計時器的變數
+        self.temp_circle = None
+        self.temp_circle_timer = None
+
     def get_flxs(self, mAs, mA_c, period):
         return (mAs - mA_c) / period
 
@@ -595,38 +601,28 @@ class InteractiveSelector:
             ]
         )
         sp_fpts = np.concatenate([s["points"]["fpts"] for s in self.s_spects.values()])
-        flxs_bound = (
+        self.flxs_bound = (
             min(np.nanmin(sp_flxs), self.s_flxs.min()),
             max(np.nanmax(sp_flxs), self.s_flxs.max()),
         )
-        fpt_bound = (
+        self.fpt_bound = (
             min(np.nanmin(sp_fpts), self.s_fpts.min()),
             max(np.nanmax(sp_fpts), self.s_fpts.max()),
         )
 
         # Set x and y axis range
-        self.ax.set_xlim(flxs_bound[0], flxs_bound[1])
-        self.ax.set_ylim(fpt_bound[0], fpt_bound[1])
+        self.ax.set_xlim(self.flxs_bound[0], self.flxs_bound[1])
+        self.ax.set_ylim(self.fpt_bound[0], self.fpt_bound[1])
 
     def update_points(self, selected):
         self.scatter.set_array(selected.astype(float))
 
     def toggle_near_mask(self, x, y, width):
-        x_d = np.abs(self.s_flxs - x) / (self.s_flxs[-1] - self.s_flxs[0])
-        y_d = np.abs(self.s_fpts - y) / (self.s_fpts[-1] - self.s_fpts[0])
+        x_d = np.abs(self.s_flxs - x) / (self.flxs_bound[1] - self.flxs_bound[0])
+        y_d = np.abs(self.s_fpts - y) / (self.fpt_bound[1] - self.fpt_bound[0])
         toggle_mask = x_d**2 + y_d**2 <= width**2
 
         self.selected[toggle_mask] = self.operation_tb.value == "Select"
-
-    def on_press(self, event):
-        if event.inaxes != self.ax or self.is_finished:
-            return
-
-        # 計算靠近滑鼠點擊的點
-        self.toggle_near_mask(event.xdata, event.ydata, self.width_slider.value)
-
-        self.update_points(self.selected)
-        self.fig.canvas.draw_idle()
 
     def on_finish(self, _):
         plt.close(self.fig)
@@ -637,6 +633,62 @@ class InteractiveSelector:
             self.on_finish(None)
 
         return self.s_flxs[self.selected], self.s_fpts[self.selected], self.selected
+
+    def on_press(self, event):
+        if event.inaxes != self.ax or self.is_finished:
+            return
+
+        # 計算靠近滑鼠點擊的點
+        width = self.width_slider.value
+        self.toggle_near_mask(event.xdata, event.ydata, width)
+
+        # 新增: 顯示暫時性圓圈（並取消舊的計時器）
+        self.show_temp_circle(event.xdata, event.ydata, width)
+
+        self.update_points(self.selected)
+        self.fig.canvas.draw_idle()
+
+    def show_temp_circle(self, x, y, width):
+        """顯示暫時性圓圈，一秒後消失"""
+        # 移除現有的暫時性圓圈和計時器
+        if self.temp_circle is not None:
+            self.temp_circle.remove()
+            self.temp_circle = None
+        if self.temp_circle_timer is not None:
+            self.temp_circle_timer.cancel()
+            self.temp_circle_timer = None
+
+        # 計算圓圈的寬度和高度（考慮座標軸比例）
+        x_range = self.flxs_bound[1] - self.flxs_bound[0]
+        y_range = self.fpt_bound[1] - self.fpt_bound[0]
+
+        # 根據當前模式決定顏色
+        circle_color = "yellow" if self.operation_tb.value == "Select" else "black"
+
+        # 使用 Ellipse 確保視覺上是正圓
+        self.temp_circle = Ellipse(
+            (x, y),
+            width=width * x_range * 2,  # 直徑 = 半徑 * 2
+            height=width * y_range * 2,
+            angle=0,
+            fill=False,
+            color=circle_color,  # 修改這裡，根據模式選擇顏色
+            linestyle="--",
+            linewidth=1,
+        )
+        self.ax.add_patch(self.temp_circle)
+
+        # 設置計時器一秒後移除圓圈
+        self.temp_circle_timer = Timer(1.0, self.remove_temp_circle)
+        self.temp_circle_timer.start()
+
+    def remove_temp_circle(self):
+        """移除暫時性圓圈"""
+        if self.temp_circle is not None:
+            self.temp_circle.remove()
+            self.temp_circle = None
+            self.fig.canvas.draw_idle()
+        self.temp_circle_timer = None
 
 
 class VisualizeSpet:
@@ -1199,7 +1251,7 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
 
     evals_count = 0
     for lvl in allows.values():
-        if not isinstance(lvl, list):
+        if not isinstance(lvl, list) or len(lvl) == 0:
             continue
         evals_count = max(evals_count, *[max(lv) for lv in lvl])
     evals_count += 1
