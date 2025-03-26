@@ -949,7 +949,12 @@ def spectrum_analyze(flxs, fpts, signals, threshold, weight=None):
     s_flxs = []
     s_fpts = []
     for i in range(amps.shape[1]):
-        peaks, _ = find_peaks(amps[:, i], height=threshold)
+        peaks, _ = find_peaks(amps[:, i], height=threshold, width=(3, 10), distance=5)
+
+        # If too many peaks, take the top 3
+        if len(peaks) > 3:
+            peaks = np.argsort(amps[peaks, i])[-3:]
+
         s_flxs.extend(flxs[i] * np.ones(len(peaks)))
         s_fpts.extend(fpts[peaks])
     return np.array(s_flxs), np.array(s_fpts)
