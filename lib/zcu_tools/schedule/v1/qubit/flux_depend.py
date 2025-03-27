@@ -1,7 +1,7 @@
 from copy import deepcopy
 
 import numpy as np
-
+from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.tools import sweep2array
@@ -9,10 +9,11 @@ from zcu_tools.schedule.v1.template import sweep2D_soft_hard_template
 
 
 def signal2real(signals):
+    signals = gaussian_filter1d(signals, sigma=1, axis=1)
     return np.abs(minus_background(signals, axis=1))
 
 
-def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
+def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     if cfg["dev"]["flux_dev"] == "none":
@@ -44,6 +45,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
         xlabel="Flux (a.u.)",
         ylabel="Frequency (MHz)",
         signal2real=signal2real,
+        earlystop_snr=earlystop_snr,
     )
 
     return flxs, fpts, signals2D
