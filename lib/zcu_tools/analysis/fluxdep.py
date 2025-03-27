@@ -13,6 +13,7 @@ from joblib import Parallel, delayed
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Ellipse
 from numba import njit
+from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 from tqdm.auto import tqdm, trange
 
@@ -940,7 +941,9 @@ def preprocess_data(flxs, fpts, spectrum):
 
 
 def spectrum_analyze(flxs, fpts, signals, threshold, weight=None):
-    amps = np.abs(signals - np.ma.mean(signals, axis=0))
+    signals = signals - np.ma.mean(signals, axis=0)
+    signals = gaussian_filter1d(signals, sigma=1, axis=0)
+    amps = np.abs(signals)
     amps /= np.ma.std(amps, axis=0)
 
     if weight is not None:
