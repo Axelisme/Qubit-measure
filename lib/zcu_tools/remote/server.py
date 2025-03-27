@@ -3,7 +3,6 @@ from typing import Optional
 import Pyro4
 import Pyro4.errors
 
-from zcu_tools.config import config
 from zcu_tools.program.base import MyProgram
 from zcu_tools.tools import AsyncFunc
 
@@ -20,9 +19,6 @@ class ProgramServer:
         self.acquiring = False
 
     def _make_prog(self, name: str, cfg: dict) -> MyProgram:
-        if config.ZCU_DRY_RUN:
-            print("Running zcu program in dry run mode")
-            name = "DoNothingProgram"  # force use DoNothingProgram
         return getattr(self.zp, name)(self.soc, cfg)
 
     def _before_run_program(self, prog: MyProgram, kwargs):
@@ -67,10 +63,6 @@ class ProgramServer:
 
         if self.last_prog is None:
             raise RuntimeError("No program has been run")
-
-        last_name = self.last_prog.__class__.__name__
-        if prog_name != last_name and last_name != "DoNothingProgram":
-            raise ValueError(f"Program name mismatch: {prog_name} != {last_name}")
 
         return self.last_prog.acc_buf
 
