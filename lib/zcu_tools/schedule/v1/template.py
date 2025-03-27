@@ -52,11 +52,22 @@ def raw2result(ir, sum_d, sum2_d):
 
 def calculate_snr1d(signals):
     signals = minus_background(signals)
-    smoothed_data = gaussian_filter1d(signals, sigma=1)
+    m_signals = gaussian_filter1d(signals, sigma=1)
 
-    noise_amps = np.abs(signals - smoothed_data)
+    amps = np.abs(m_signals)
+    noise_amps = np.abs(signals - m_signals)
 
-    return np.abs(smoothed_data).max() / noise_amps.mean()
+    # use avg of highest three point as signal contrast
+    max1_idx = np.argmax(amps)
+    max1, amps[max1_idx] = amps[max1_idx], 0
+    max2_idx = np.argmax(amps)
+    max2, amps[max2_idx] = amps[max2_idx], 0
+    max3_idx = np.argmax(amps)
+    max3 = amps[max3_idx]
+
+    contrast = (max1 + max2 + max3) / 3
+
+    return contrast / noise_amps.mean()
 
 
 def sweep1D_hard_template(
