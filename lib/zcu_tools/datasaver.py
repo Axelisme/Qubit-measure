@@ -50,7 +50,7 @@ def safe_labber_filepath(filepath: str):
     return filepath
 
 
-def save_data_local(
+def save_local_data(
     filepath: str,
     x_info: dict,
     z_info: dict,
@@ -95,7 +95,7 @@ def save_data_local(
         pass
 
 
-def load_data_local(
+def load_local_data(
     file_path: str,
 ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     import h5py
@@ -108,7 +108,7 @@ def load_data_local(
         if data.shape[2] == 1:  # 1D data,
             x_data = data[:, 0, 0][:]
             y_data = None
-            z_data = data[:, 1, 0][:] + 1j * data[:, 2, 0][:]
+            z_data = data[:, -2, 0][:] + 1j * data[:, -1, 0][:]
         else:  # 2D data
             x_data = data[:, 0, 0][:]
             y_data = data[0, 1, :][:]
@@ -138,7 +138,7 @@ def load_data_local(
     return z_data, x_data, y_data
 
 
-def upload_file2server(filepath: str, server_ip: str, port: int):
+def upload_to_server(filepath: str, server_ip: str, port: int):
     import requests
 
     if config.DATA_DRY_RUN:
@@ -154,7 +154,7 @@ def upload_file2server(filepath: str, server_ip: str, port: int):
     print(response.text)
 
 
-def download_file2server(filepath: str, server_ip: str, port: int):
+def download_from_server(filepath: str, server_ip: str, port: int):
     import requests
 
     if config.DATA_DRY_RUN:
@@ -184,13 +184,13 @@ def save_data(
 ):
     filepath = safe_labber_filepath(filepath)
     if server_ip is not None:
-        save_data_local(filepath, x_info, z_info, y_info, comment, tag)
+        save_local_data(filepath, x_info, z_info, y_info, comment, tag)
         if not filepath.endswith(".hdf5") or not filepath.endswith(".h5"):
             filepath += ".hdf5"
-        upload_file2server(filepath, server_ip, port)
+        upload_to_server(filepath, server_ip, port)
         os.remove(filepath)
     else:
-        save_data_local(filepath, x_info, z_info, y_info, comment, tag)
+        save_local_data(filepath, x_info, z_info, y_info, comment, tag)
 
 
 def load_data(
@@ -202,6 +202,6 @@ def load_data(
         filepath += ".hdf5"
     if server_ip is not None:
         if not os.path.exists(filepath):
-            download_file2server(filepath, server_ip, port)
-    z_data, x_data, y_data = load_data_local(filepath)
+            download_from_server(filepath, server_ip, port)
+    z_data, x_data, y_data = load_local_data(filepath)
     return z_data, x_data, y_data
