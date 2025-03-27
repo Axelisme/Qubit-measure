@@ -41,12 +41,13 @@ def load_file(remote_path):
 
     # check root directory
     relpath = remote_path
-    if KEYWORD + "\\" not in relpath:  # remove path before root directory
+    if KEYWORD + "\\" in relpath:  # remove path before root directory
         relpath = relpath.split(KEYWORD + "\\")[1]
 
     # load file
     filepath = os.path.join(ROOT_DIR, relpath)
     if not os.path.exists(filepath):
+        print(f"File not found: {filepath}")
         return "File not found", 404
 
     # send file to client
