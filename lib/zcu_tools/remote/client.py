@@ -75,15 +75,18 @@ class ProgramClient(AbsProxy):
 
         return kwargs, bar
 
-    def _remote_call(self, func_name: str, *args, timeout=None, **kwargs):
+    def _remote_call(self, func_name: str, *args, timeout=None, copy_=False, **kwargs):
         # call server-side method with kwargs
         prog_s = self.prog_server
+        if copy_:
+            prog_s = Pyro4.Proxy(prog_s._pyroUri)
+
         if timeout is None:
             timeout = prog_s._pyroTimeout
 
         try:
             prog_s._pyroTimeout, old = timeout, prog_s._pyroTimeout
-            return getattr(self.prog_server, func_name)(*args, **kwargs)
+            return getattr(prog_s, func_name)(*args, **kwargs)
         except Pyro4.errors.CommunicationError as e:
             print("Connection error:", e)
             raise e
@@ -138,7 +141,7 @@ class ProgramClient(AbsProxy):
         return self._remote_call("get_acc_buf", prog.__class__.__name__, timeout=5)
 
     def set_early_stop(self) -> None:
-        self._remote_call("set_early_stop", timeout=2)
+        self._remote_call("set_early_stop", copy_=True, timeout=4)
 
     def acquire(self, prog, decimated=False, **kwargs):
         return self._remote_acquire(prog, decimated=decimated, **kwargs)
