@@ -17,7 +17,7 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Ellipse
 
 from .models import energy2transition
-from .processing import cast2real_and_norm, spectrum_analyze
+from .processing import cast2real_and_norm, mA2flx, spectrum_analyze
 
 
 class InteractiveFindPoints:
@@ -696,11 +696,8 @@ class VisualizeSpet:
 
         first_spect = next(iter(self.s_spects.values()))
         mA_c, period = first_spect["mA_c"], first_spect["period"]
-        self.s_flxs = self.get_flxs(self.s_mAs, mA_c, period)
-        self.flxs = self.get_flxs(self.mAs, mA_c, period)
-
-    def get_flxs(self, mAs, mA_c, period):
-        return (mAs - mA_c) / period + 0.5
+        self.s_flxs = mA2flx(self.s_mAs, mA_c, period)
+        self.flxs = mA2flx(self.mAs, mA_c, period)
 
     def set_scatter_style(self, size=None, color=None):
         if size is not None:

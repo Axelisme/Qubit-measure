@@ -22,7 +22,7 @@ from .models import calculate_energy, energy2linearform, energy2transition
 from .persistence import dump_result, load_result
 
 # Data processing
-from .processing import format_rawdata, spectrum_analyze
+from .processing import flx2mA, format_rawdata, mA2flx, spectrum_analyze
 
 __all__ = [
     # Interactive tools
@@ -31,7 +31,9 @@ __all__ = [
     "InteractiveSelector",
     "VisualizeSpet",
     # Data processing
+    "flx2mA",
     "format_rawdata",
+    "mA2flx",
     "spectrum_analyze",
     # Physical models
     "calculate_energy",

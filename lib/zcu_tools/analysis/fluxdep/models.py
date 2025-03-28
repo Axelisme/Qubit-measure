@@ -11,14 +11,26 @@ from scqubits import Fluxonium
 
 
 def calculate_energy(flxs, EJ, EC, EL, cutoff=50, evals_count=10):
+    # because erergy is periodic, remove repeated values and record index
+    flxs = flxs % 1.0
+    flxs = np.where(flxs < 0.5, flxs, 1.0 - flxs)
+
+    flxs, uni_idxs = np.unique(flxs, return_inverse=True)
+    sort_idxs = np.argsort(flxs)
+    flxs = flxs[sort_idxs]
+
     fluxonium = Fluxonium(
         EJ, EC, EL, flux=0.0, cutoff=cutoff, truncated_dim=evals_count
     )
-    spectrumData = fluxonium.get_spectrum_vs_paramvals(
+    energies = fluxonium.get_spectrum_vs_paramvals(
         "flux", flxs, evals_count=evals_count
-    )
+    ).energy_table
 
-    return spectrumData.energy_table
+    # rearrange energies to match the original order
+    energies[sort_idxs, :] = energies
+    energies = energies[uni_idxs, :]
+
+    return energies
 
 
 def energy2linearform(energies, allows):
