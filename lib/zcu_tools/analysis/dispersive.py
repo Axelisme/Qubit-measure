@@ -6,6 +6,26 @@ from .general import figsize
 
 
 def dispersive1D_analyze(xs, snrs, xlabel=None):
+    """
+    Analyze 1D dispersive measurement data to find the maximum SNR position.
+
+    This function processes 1D signal-to-noise ratio data, applies Gaussian smoothing,
+    finds the position of maximum SNR, and visualizes the results.
+
+    Parameters
+    ----------
+    xs : array-like
+        X-axis values (e.g., frequency, power, etc.)
+    snrs : array-like
+        Signal-to-noise ratio values corresponding to xs
+    xlabel : str, optional
+        Label for the x-axis in the plot
+
+    Returns
+    -------
+    float
+        The x-value corresponding to the maximum SNR
+    """
     snrs = np.abs(snrs)
 
     # fill NaNs with zeros
@@ -29,6 +49,30 @@ def dispersive1D_analyze(xs, snrs, xlabel=None):
 
 
 def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
+    """
+    Analyze 2D dispersive measurement data to find the maximum SNR position.
+
+    This function processes 2D signal-to-noise ratio data, applies Gaussian smoothing,
+    finds the position of maximum SNR in the 2D space, and visualizes the results as a heatmap.
+
+    Parameters
+    ----------
+    xs : array-like
+        X-axis values (e.g., frequency, power, etc.)
+    ys : array-like
+        Y-axis values (e.g., time, bias, etc.)
+    snr2D : 2D array-like
+        2D grid of signal-to-noise ratio values
+    xlabel : str, optional
+        Label for the x-axis in the plot
+    ylabel : str, optional
+        Label for the y-axis in the plot
+
+    Returns
+    -------
+    tuple
+        (x_max, y_max) coordinates corresponding to the maximum SNR
+    """
     snr2D = np.abs(snr2D)
 
     # fill NaNs with zeros
@@ -63,6 +107,29 @@ def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
 
 
 def ge_lookback_analyze(Ts, signal_g, signal_e, pulse_cfg=None):
+    """
+    Analyze ground and excited state signals over time to evaluate measurement contrast.
+
+    This function processes time-series data for ground and excited state signals,
+    applies Gaussian smoothing, calculates the magnitude and contrast between states,
+    and visualizes the results.
+
+    Parameters
+    ----------
+    Ts : array-like
+        Time points in microseconds
+    signal_g : array-like
+        Signal data for ground state
+    signal_e : array-like
+        Signal data for excited state
+    pulse_cfg : dict, optional
+        Configuration parameters for the pulse (not used in current implementation)
+
+    Returns
+    -------
+    None
+        This function only produces a plot but doesn't return a value
+    """
     signal_g = gaussian_filter1d(signal_g, 1)
     signal_e = gaussian_filter1d(signal_e, 1)
 

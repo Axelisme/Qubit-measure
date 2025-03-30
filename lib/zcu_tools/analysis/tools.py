@@ -5,17 +5,25 @@ import numpy as np
 
 def rotate2real(signals: np.ndarray):
     """
-    Rotate the signals to maximize the contrast on real axis
+    Rotate the signals to maximize the contrast on real axis by performing
+    principal component analysis (PCA) on complex data
 
     Parameters
     ----------
     signals : np.ndarray
-        The 1-D complex signals
+        The 1-D complex signals to be rotated. Must be a 1D array of complex values.
 
     Returns
     -------
     np.ndarray
-        The rotated signals
+        The rotated signals with maximum variance aligned along the real axis
+
+    Notes
+    -----
+    This function:
+    1. Calculates the covariance matrix between real and imaginary parts
+    2. Finds the eigenvector corresponding to the largest eigenvalue
+    3. Rotates the signal to align this principal component with the real axis
     """
 
     if len(signals.shape) != 1:
@@ -66,6 +74,28 @@ def minus_background(signals: np.ndarray, axis=None, method="median") -> np.ndar
 
 
 def minus_median(signals: np.ndarray, axis=None) -> np.ndarray:
+    """
+    Subtract the median from signals, useful for background removal
+
+    Parameters
+    ----------
+    signals : np.ndarray
+        The signals array to process. Can be real or complex valued.
+    axis : int, optional
+        The axis along which to calculate the median.
+        If None, calculate the median of the entire array.
+
+    Returns
+    -------
+    np.ndarray
+        A copy of the signals with the median subtracted. Original
+        array is not modified.
+
+    Notes
+    -----
+    For complex arrays, real and imaginary parts are processed separately.
+    NaN values are handled using numpy's nanmedian function.
+    """
     signals = signals.copy()  # prevent in-place modification
 
     if np.all(np.isnan(signals)):
@@ -100,6 +130,27 @@ def minus_median(signals: np.ndarray, axis=None) -> np.ndarray:
 
 
 def minus_mean(signals: np.ndarray, axis=None) -> np.ndarray:
+    """
+    Subtract the mean from signals, useful for baseline correction
+
+    Parameters
+    ----------
+    signals : np.ndarray
+        The signals array to process. Can be real or complex valued.
+    axis : int, optional
+        The axis along which to calculate the mean.
+        If None, calculate the mean of the entire array.
+
+    Returns
+    -------
+    np.ndarray
+        A copy of the signals with the mean subtracted. Original
+        array is not modified.
+
+    Notes
+    -----
+    NaN values are handled using numpy's nanmean function.
+    """
     signals = signals.copy()  # prevent in-place modification
 
     if np.all(np.isnan(signals)):
@@ -111,19 +162,43 @@ def minus_mean(signals: np.ndarray, axis=None) -> np.ndarray:
     elif isinstance(axis, int):
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
-        # minus the median
+        # minus the mean
         val_mask = ~np.all(np.isnan(signals), axis=0)
         signals[:, val_mask] -= np.nanmean(signals[:, val_mask], axis=0, keepdims=True)
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
 
     else:
-        raise ValueError(f"Invalid axis: {axis} for minus_median")
+        raise ValueError(f"Invalid axis: {axis} for minus_mean")
 
     return signals
 
 
 def rescale(signals: np.ndarray, axis=None) -> np.ndarray:
+    """
+    Rescale signals by dividing by the standard deviation
+
+    Parameters
+    ----------
+    signals : np.ndarray
+        The signals array to process. Must be real valued (not complex).
+    axis : int, optional
+        The axis along which to calculate the standard deviation.
+        If None, calculate the standard deviation of the entire array.
+
+    Returns
+    -------
+    np.ndarray
+        A copy of the signals rescaled by standard deviation. Original
+        array is not modified.
+
+    Notes
+    -----
+    - This function does not support complex signals and will return the
+      original array with a warning if complex input is provided.
+    - NaN values are handled using numpy's nanstd function.
+    - At least 2 non-NaN values are required for rescaling.
+    """
     signals = signals.copy()  # prevent in-place modification
 
     if signals.dtype == complex:
@@ -151,6 +226,28 @@ def rescale(signals: np.ndarray, axis=None) -> np.ndarray:
 
 
 def rotate_phase(fpts, signals, phase_slope):
+    """
+    Rotate the phase of complex signals based on frequency points
+
+    Parameters
+    ----------
+    fpts : np.ndarray
+        Frequency points array
+    signals : np.ndarray
+        Complex signal array to be phase-rotated
+    phase_slope : float
+        Phase rotation slope in degrees per frequency unit
+
+    Returns
+    -------
+    np.ndarray
+        Phase-rotated complex signals
+
+    Notes
+    -----
+    This function applies a frequency-dependent phase rotation to complex signals.
+    The rotation angle is calculated as: angle = fpts * phase_slope * π/180
+    """
     Is, Qs = signals.real, signals.imag
 
     angles = fpts * phase_slope * np.pi / 180

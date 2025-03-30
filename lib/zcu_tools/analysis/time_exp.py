@@ -17,8 +17,28 @@ def rabi_analyze(
     xlabel=None,
 ) -> Tuple[float, float]:
     """
-    x: 1D array, sweep points
-    signals: 1D array, signal points
+    Analyzes Rabi oscillation measurements and extracts pi and pi/2 pulse times.
+
+    Parameters
+    ----------
+    xs : np.ndarray
+        1D array of time (or other sweep parameter) values
+    signals : np.ndarray
+        1D array of complex measurement signals corresponding to xs values
+    plot_fit : bool, optional
+        If True, plots the fit results. Default is True.
+    decay : bool, optional
+        If True, uses a decaying cosine fit function. Default is False.
+    max_contrast : bool, optional
+        If True, rotates the signal to the real axis before analysis. Default is False.
+    xlabel : str, optional
+        Label for the x-axis on the plot. Default is None.
+
+    Returns
+    -------
+    Tuple[float, float]
+        pi_x: Duration for a pi pulse
+        pi2_x: Duration for a pi/2 pulse
     """
     if max_contrast:
         signals = rotate2real(signals)
@@ -75,6 +95,30 @@ def T1_analyze(
     max_contrast=False,
     dual_exp=False,
 ):
+    """
+    Analyzes T1 relaxation measurements and extracts the relaxation time.
+
+    Parameters
+    ----------
+    xs : np.ndarray
+        1D array of delay times in microseconds
+    signals : np.ndarray
+        1D array of complex measurement signals corresponding to xs values
+    plot : bool, optional
+        If True, plots the fit results. Default is True.
+    max_contrast : bool, optional
+        If True, rotates the signal to the real axis before analysis. Default is False.
+    dual_exp : bool, optional
+        If True, fits to a dual exponential model for two relaxation mechanisms.
+        Default is False.
+
+    Returns
+    -------
+    float
+        T1: Relaxation time in microseconds
+    float
+        T1err: Error in the relaxation time
+    """
     if max_contrast:
         signals = rotate2real(signals)
         y = signals.real
@@ -126,6 +170,31 @@ def T1_analyze(
 def T2fringe_analyze(
     xs: np.ndarray, signals: np.ndarray, plot=True, max_contrast=False
 ):
+    """
+    Analyzes T2 Ramsey fringe measurements and extracts dephasing time and frequency detuning.
+
+    Parameters
+    ----------
+    xs : np.ndarray
+        1D array of delay times in microseconds
+    signals : np.ndarray
+        1D array of complex measurement signals corresponding to xs values
+    plot : bool, optional
+        If True, plots the fit results. Default is True.
+    max_contrast : bool, optional
+        If True, rotates the signal to the real axis before analysis. Default is False.
+
+    Returns
+    -------
+    float
+        T2f: Dephasing time in microseconds
+    float
+        detune: Frequency detuning in MHz
+    float
+        T2f_err: Error in the dephasing time
+    float
+        detune_err: Error in the detuning frequency
+    """
     if max_contrast:
         signals = rotate2real(signals)
         y = signals.real
@@ -158,6 +227,27 @@ def T2fringe_analyze(
 
 
 def T2decay_analyze(xs: np.ndarray, signals: np.ndarray, plot=True, max_contrast=False):
+    """
+    Analyzes T2 echo decay measurements and extracts the coherence time.
+
+    Parameters
+    ----------
+    xs : np.ndarray
+        1D array of delay times in microseconds
+    signals : np.ndarray
+        1D array of complex measurement signals corresponding to xs values
+    plot : bool, optional
+        If True, plots the fit results. Default is True.
+    max_contrast : bool, optional
+        If True, rotates the signal to the real axis before analysis. Default is False.
+
+    Returns
+    -------
+    float
+        T2e: Echo coherence time in microseconds
+    float
+        T2e_err: Error in the coherence time
+    """
     if max_contrast:
         signals = rotate2real(signals)
         y = signals.real
