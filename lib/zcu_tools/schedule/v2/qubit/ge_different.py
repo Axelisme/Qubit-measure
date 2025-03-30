@@ -13,6 +13,21 @@ from zcu_tools.schedule.v2.template import sweep1D_soft_template, sweep_hard_tem
 
 
 def calc_snr(avg_d, std_d):
+    """
+    Calculate signal-to-noise ratio from average and standard deviation data.
+
+    Parameters
+    ----------
+    avg_d : ndarray
+        Average data with shape (*sweep, 2) where last dimension represents ground and excited states
+    std_d : ndarray
+        Standard deviation data with same shape as avg_d
+
+    Returns
+    -------
+    ndarray
+        Signal-to-noise ratio calculated as contrast divided by noise
+    """
     contrast = avg_d[..., 1] - avg_d[..., 0]  # (*sweep)
     noise2_i = np.sum(std_d.real**2, axis=-1)  # (*sweep)
     noise2_q = np.sum(std_d.imag**2, axis=-1)  # (*sweep)
@@ -24,6 +39,21 @@ def calc_snr(avg_d, std_d):
 
 
 def ge_result2signals(avg_d, std_d):
+    """
+    Convert raw measurement results to signal-to-noise ratio for ground/excited state discrimination.
+
+    Parameters
+    ----------
+    avg_d : ndarray
+        Average data from measurement
+    std_d : ndarray
+        Standard deviation data from measurement
+
+    Returns
+    -------
+    tuple
+        (SNR matrix transposed, None)
+    """
     avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep, ge)
     std_d = std_d[0][0].dot([1, 1j])  # (*sweep, ge)
 
@@ -31,6 +61,24 @@ def ge_result2signals(avg_d, std_d):
 
 
 def measure_ge_pdr_dep(soc, soccfg, cfg):
+    """
+    Measure ground/excited state discrimination as a function of pulse drive and frequency.
+
+    Parameters
+    ----------
+    soc : object
+        System-on-chip object for hardware control
+    soccfg : object
+        System-on-chip configuration
+    cfg : dict
+        Configuration dictionary with DAC, sweep, and other settings
+
+    Returns
+    -------
+    tuple
+        (pulse_drive_values, frequency_points, snr_2D_matrix)
+        Returns actual pulse drive values, frequency points, and the resulting SNR matrix
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -75,6 +123,27 @@ def measure_ge_pdr_dep(soc, soccfg, cfg):
 
 
 def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
+    """
+    Automatically optimize pulse drive and frequency for ground/excited state discrimination.
+
+    Uses optimization algorithm to find the best parameters for maximizing SNR.
+
+    Parameters
+    ----------
+    soc : object
+        System-on-chip object for hardware control
+    soccfg : object
+        System-on-chip configuration
+    cfg : dict
+        Configuration dictionary with DAC, sweep, and other settings
+    method : str, optional
+        Optimization method, default is "Nelder-Mead"
+
+    Returns
+    -------
+    tuple
+        Result from sweep2D_maximize_template, containing optimal parameters and SNR values
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -114,6 +183,24 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
 
 
 def measure_ge_ro_dep(soc, soccfg, cfg):
+    """
+    Measure ground/excited state discrimination as a function of readout length.
+
+    Parameters
+    ----------
+    soc : object
+        System-on-chip object for hardware control
+    soccfg : object
+        System-on-chip configuration
+    cfg : dict
+        Configuration dictionary with DAC, sweep, and other settings
+
+    Returns
+    -------
+    tuple
+        (readout_lengths, signal_to_noise_ratios)
+        Returns the readout length values and corresponding SNR values
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]
@@ -154,6 +241,24 @@ def measure_ge_ro_dep(soc, soccfg, cfg):
 
 
 def measure_ge_trig_dep(soc, soccfg, cfg):
+    """
+    Measure ground/excited state discrimination as a function of trigger offset.
+
+    Parameters
+    ----------
+    soc : object
+        System-on-chip object for hardware control
+    soccfg : object
+        System-on-chip configuration
+    cfg : dict
+        Configuration dictionary with DAC, sweep, and other settings
+
+    Returns
+    -------
+    tuple
+        (trigger_offsets, signal_to_noise_ratios)
+        Returns the trigger offset values and corresponding SNR values
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]

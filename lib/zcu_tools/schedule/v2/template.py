@@ -13,6 +13,18 @@ from zcu_tools.tools import AsyncFunc, print_traceback
 def default_result2signals(
     avg_d: list, std_d: list
 ) -> Tuple[ndarray, Optional[ndarray]]:
+    """
+    Convert raw measurement results to complex signals and standard deviations.
+
+    Args:
+        avg_d: List containing average measurement data
+        std_d: List containing standard deviation data
+
+    Returns:
+        Tuple containing:
+            - Complex signal array (combining I and Q quadratures)
+            - Standard deviation array (maximum across dimensions)
+    """
     avg_d = avg_d[0][0].dot([1, 1j])
     std_d = np.max(std_d[0][0], axis=-1)
 
@@ -20,16 +32,48 @@ def default_result2signals(
 
 
 def default_signal2real(signals: ndarray) -> ndarray:
+    """
+    Convert complex signals to real values by taking the absolute value.
+
+    Args:
+        signals: Array of complex signal values
+
+    Returns:
+        Array of real values (magnitudes of complex signals)
+    """
     return np.abs(signals)
 
 
 def std2err(stds: Optional[ndarray], N: int) -> Optional[ndarray]:
+    """
+    Convert standard deviation to standard error by dividing by square root of N.
+
+    Args:
+        stds: Array of standard deviations (can be None)
+        N: Number of measurements
+
+    Returns:
+        Array of standard errors or None if stds is None
+    """
     if stds is None:
         return None
     return stds / np.sqrt(N)
 
 
 def raw2result(ir, sum_d, sum2_d) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Convert raw measurement sums to average and standard deviation.
+
+    Args:
+        ir: Current repetition index
+        sum_d: List of cumulative sums of measurements
+        sum2_d: List of cumulative sums of squared measurements
+
+    Returns:
+        Tuple containing:
+            - List of average values
+            - List of standard deviation values
+    """
     avg_d = [d / (ir + 1) for d in sum_d]
     std_d = [np.sqrt(d2 / (ir + 1) - d**2) for d, d2 in zip(avg_d, sum2_d)]
     return avg_d, std_d
@@ -51,6 +95,27 @@ def sweep_hard_template(
     progress: bool = True,
     **kwargs,
 ) -> Tuple[MyProgramV2, ndarray]:
+    """
+    Template for hardware-based parameter sweeps in measurements.
+
+    Args:
+        soc: Socket object for hardware communication
+        soccfg: Socket configuration
+        cfg: Measurement configuration dictionary
+        prog_cls: Program class for measurement execution
+        ticks: Tuple of arrays representing parameter sweep points
+        xlabel: Label for x-axis in visualization
+        ylabel: Label for y-axis in visualization
+        result2signals: Function to convert raw results to signal data
+        signal2real: Function to convert complex signals to real values
+        progress: Whether to show progress bars
+        **kwargs: Additional arguments passed to the acquire method
+
+    Returns:
+        Tuple containing:
+            - Program instance
+            - Complex signal array from measurements
+    """
     signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
     stds = np.full_like(signals, np.nan, dtype=float)
 
@@ -108,6 +173,28 @@ def sweep1D_soft_template(
     progress: bool = True,
     **kwargs,
 ) -> Tuple[ndarray, ndarray]:
+    """
+    Template for 1D software-based parameter sweeps in measurements.
+
+    Args:
+        soc: Socket object for hardware communication
+        soccfg: Socket configuration
+        cfg: Measurement configuration dictionary
+        prog_cls: Program class for measurement execution
+        xs: Array of x-axis parameter values to sweep
+        updateCfg: Function to update configuration for each step
+        xlabel: Label for x-axis in visualization
+        ylabel: Label for y-axis in visualization
+        result2signals: Function to convert raw results to signal data
+        signal2real: Function to convert complex signals to real values
+        progress: Whether to show progress bars
+        **kwargs: Additional arguments passed to the acquire method
+
+    Returns:
+        Tuple containing:
+            - Array of x-axis parameters
+            - Complex signal array from measurements
+    """
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals = np.full_like(xs, np.nan, dtype=complex)
     stds = np.full_like(xs, np.nan, dtype=float)
@@ -162,6 +249,29 @@ def sweep2D_soft_hard_template(
     progress: bool = True,
     **kwargs,
 ) -> Tuple[ndarray, ndarray, ndarray]:
+    """
+    Template for 2D parameter sweeps with software and hardware components.
+
+    Args:
+        soc: Socket object for hardware communication
+        soccfg: Socket configuration
+        cfg: Measurement configuration dictionary
+        prog_cls: Program class for measurement execution
+        xs: Array of x-axis parameter values to sweep (software)
+        ys: Array of y-axis parameter values (hardware)
+        updateCfg: Function to update configuration for each x step
+        xlabel: Label for x-axis in visualization
+        ylabel: Label for y-axis in visualization
+        result2signals: Function to convert raw results to signal data
+        signal2real: Function to convert complex signals to real values
+        progress: Whether to show progress bars
+        **kwargs: Additional arguments passed to the acquire method
+
+    Returns:
+        Tuple containing:
+            - Program instance
+            - 2D complex signal array from measurements
+    """
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
 

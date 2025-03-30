@@ -9,6 +9,33 @@ from zcu_tools.schedule.instant_show import InstantShow1D
 
 
 def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
+    """
+    Performs a decimated one-tone or two-tone measurement.
+
+    This function acquires a single-shot measurement using either OneToneProgram or
+    TwoToneProgram depending on whether a qubit pulse is included.
+
+    Parameters
+    ----------
+    soc : object
+        Socket object for communication with the FPGA.
+    soccfg : object
+        Socket configuration object.
+    cfg : dict
+        Configuration dictionary for the measurement.
+    progress : bool, optional
+        Whether to show a progress bar during measurement, defaults to True.
+    qub_pulse : bool, optional
+        If True, uses TwoToneProgram (with qubit pulse); otherwise uses
+        OneToneProgram (without qubit pulse), defaults to False.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        A tuple containing:
+        - Time axis (in microseconds)
+        - Complex signal data (I + 1j*Q)
+    """
     cfg = make_cfg(cfg, reps=1)
 
     prog = TwoToneProgram(soccfg, cfg) if qub_pulse else OneToneProgram(soccfg, cfg)
@@ -23,6 +50,42 @@ def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
 def measure_lookback(
     soc, soccfg, cfg, progress=True, qub_pulse=False
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Performs a lookback measurement, handling both short and long readout lengths.
+
+    For readout lengths exceeding MAX_LEN (3.32 us), this function automatically splits
+    the acquisition into multiple segments and combines them appropriately.
+
+    Parameters
+    ----------
+    soc : object
+        Socket object for communication with the FPGA.
+    soccfg : object
+        Socket configuration object.
+    cfg : dict
+        Configuration dictionary for the measurement, should contain:
+        - 'dev': device settings with 'flux_dev' and 'flux' values
+        - 'adc': ADC settings including 'ro_length', 'trig_offset', and 'chs'
+    progress : bool, optional
+        Whether to show a progress bar during measurement, defaults to True.
+    qub_pulse : bool, optional
+        If True, uses TwoToneProgram (with qubit pulse); otherwise uses
+        OneToneProgram (without qubit pulse), defaults to False.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        A tuple containing:
+        - Time axis (in microseconds)
+        - Complex signal data (I + 1j*Q)
+
+    Notes
+    -----
+    For long measurements (ro_length > MAX_LEN), the function:
+    1. Splits the acquisition into multiple segments
+    2. Shows real-time data visualization using InstantShow1D
+    3. Sorts and concatenates all measurements into a continuous data trace
+    """
     cfg = make_cfg(cfg)
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])

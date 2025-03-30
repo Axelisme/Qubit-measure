@@ -6,10 +6,40 @@ from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
 def qub_signals2reals(signals):
+    """
+    Convert complex qubit signals to real amplitudes by removing mean background.
+
+    Args:
+        signals (ndarray): Raw complex qubit measurement signals.
+
+    Returns:
+        ndarray: Absolute values of signals after subtracting the mean.
+    """
     return np.abs(signals - np.mean(signals))
 
 
 def measure_qub_freq(soc, soccfg, cfg, reset_rf=None, remove_bg=False):
+    """
+    Perform a frequency sweep measurement of a qubit using two-tone spectroscopy.
+
+    Args:
+        soc (object): Socket object for communication with hardware.
+        soccfg (object): Socket configuration object.
+        cfg (dict): Configuration dictionary containing measurement parameters.
+        reset_rf (float, optional): Reset frequency for conjugate reset pulse. If None,
+                                   conjugate reset is not used. Defaults to None.
+        remove_bg (bool, optional): Whether to remove background from signals.
+                                   Defaults to False.
+
+    Returns:
+        tuple:
+            - fpts (ndarray): Array of frequency points used in the measurement.
+            - signals (ndarray): Measured signals at each frequency point.
+
+    Notes:
+        The function sets up a frequency sweep for two-tone spectroscopy and
+        can optionally implement a conjugate reset protocol when reset_rf is provided.
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")

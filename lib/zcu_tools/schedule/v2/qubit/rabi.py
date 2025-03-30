@@ -1,7 +1,6 @@
 from typing import Tuple
 
 import numpy as np
-
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
@@ -9,6 +8,31 @@ from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
 def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
+    """Measure Rabi oscillation by sweeping pulse length.
+
+    This function performs a Rabi measurement experiment by varying the length of the qubit pulse
+    and measuring the amplitude response. It allows for characterization of qubit control through
+    the observation of Rabi oscillations.
+
+    Parameters
+    ----------
+    soc : object
+        The system-on-chip object that controls the hardware.
+    soccfg : object
+        Configuration for the system-on-chip.
+    cfg : dict
+        Configuration dictionary containing experiment parameters.
+        Must include:
+        - sweep: dict with length sweep parameters
+        - dac: dict with qubit pulse settings
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        A tuple containing:
+        - First element: Array of actual pulse lengths used (in microseconds)
+        - Second element: Array of measured amplitude responses
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -36,6 +60,31 @@ def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
+    """Measure Rabi oscillation by sweeping pulse amplitude (gain).
+
+    This function performs a Rabi measurement experiment by varying the amplitude/gain of the
+    qubit pulse and measuring the response. It allows for characterization of qubit control
+    by observing how the system responds to different pulse powers.
+
+    Parameters
+    ----------
+    soc : object
+        The system-on-chip object that controls the hardware.
+    soccfg : object
+        Configuration for the system-on-chip.
+    cfg : dict
+        Configuration dictionary containing experiment parameters.
+        Must include:
+        - sweep: dict with gain sweep parameters
+        - dac: dict with qubit pulse settings
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        A tuple containing:
+        - First element: Array of actual pulse gains/amplitudes used
+        - Second element: Array of measured amplitude responses
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")

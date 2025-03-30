@@ -7,10 +7,39 @@ from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
 def signals2reals(signals: np.ndarray) -> np.ndarray:
+    """
+    Convert complex measurement signals to real-valued magnitudes by removing background noise.
+
+    Args:
+        signals (np.ndarray): Complex-valued measurement signals array.
+
+    Returns:
+        np.ndarray: Absolute values of the background-corrected signals.
+    """
     return np.abs(minus_background(signals, axis=0))
 
 
 def measure_qub_pdr_dep(soc, soccfg, cfg):
+    """
+    Measure qubit power dependency by performing a 2D sweep of pulse gain and frequency.
+
+    This function prepares and executes a two-tone spectroscopy experiment that sweeps both
+    the gain (power) and frequency of the qubit pulse. The gain sweep is set as the outer loop
+    for efficient measurement.
+
+    Args:
+        soc: System-on-chip interface object for hardware control.
+        soccfg: Configuration for the system-on-chip.
+        cfg (dict): Configuration dictionary containing sweep parameters and pulse settings.
+                    Must include 'sweep' with 'gain' and 'freq' parameters, and 'dac' with
+                    'qub_pulse' settings.
+
+    Returns:
+        tuple: Three elements:
+            - pdrs (np.ndarray): Actual pulse gain values used in the measurement.
+            - fpts (np.ndarray): Actual frequency points used in the measurement.
+            - signals (np.ndarray): Measurement signal data with dimensions matching the sweep.
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     # make sure gain is the outer loop

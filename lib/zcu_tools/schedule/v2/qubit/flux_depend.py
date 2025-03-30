@@ -7,10 +7,46 @@ from zcu_tools.schedule.v2.template import sweep2D_soft_hard_template
 
 
 def signals2reals(signals):
+    """
+    Convert complex signals to real values by taking the absolute value after background subtraction.
+
+    Args:
+        signals (numpy.ndarray): Complex measurement signals array.
+
+    Returns:
+        numpy.ndarray: Real-valued signals with background subtracted.
+    """
     return np.abs(minus_background(signals, axis=1))
 
 
 def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
+    """
+    Measure qubit frequency as a function of flux bias.
+
+    This function performs a two-dimensional sweep over flux values and qubit frequencies
+    using a two-tone spectroscopy technique. It measures the qubit response at different
+    flux biases to characterize flux dependence of the qubit frequency.
+
+    Args:
+        soc: System-on-chip controller object.
+        soccfg: System-on-chip configuration object.
+        cfg (dict): Configuration dictionary containing measurement settings.
+            Required keys:
+            - dev: Device configuration with flux_dev and flux settings.
+            - dac: DAC configuration with qub_pulse settings.
+            - sweep: Sweep parameters for freq and flux.
+        reset_rf (float, optional): Reset frequency for conjugate reset pulse.
+            If provided, enables reset pulse with conjugate frequency. Defaults to None.
+
+    Returns:
+        tuple: Three-element tuple containing:
+            - flxs (numpy.ndarray): Array of flux values used in the sweep.
+            - fpts (numpy.ndarray): Array of frequency points actually used in the measurement.
+            - signals2D (numpy.ndarray): 2D array of measured signals, with shape (len(flxs), len(fpts)).
+
+    Raises:
+        ValueError: If cfg["dev"]["flux_dev"] is set to "none" while attempting a flux sweep.
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     if cfg["dev"]["flux_dev"] == "none":
@@ -34,6 +70,14 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
     cfg["dev"]["flux"] = flxs[0]  # set initial flux
 
     def updateCfg(cfg, i, flx):
+        """
+        Update configuration with new flux value during sweep.
+
+        Args:
+            cfg (dict): Configuration dictionary to update.
+            i (int): Current index in the sweep.
+            flx (float): Flux value to set.
+        """
         cfg["dev"]["flux"] = flx
 
     prog, signals2D = sweep2D_soft_hard_template(

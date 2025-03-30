@@ -12,6 +12,32 @@ from zcu_tools.schedule.v2.template import sweep1D_soft_template, sweep_hard_tem
 def measure_t2ramsey(
     soc, soccfg, cfg, soft_loop=False, detune: float = 0
 ) -> Tuple[np.ndarray, np.ndarray]:
+    """Perform a T2* Ramsey measurement on a qubit.
+
+    This function measures the phase coherence time (T2*) of a qubit using the Ramsey
+    protocol, which involves applying two π/2 pulses separated by variable delay times.
+
+    Parameters
+    ----------
+    soc : object
+        The socket object for communication with the hardware.
+    soccfg : object
+        The socket configuration object.
+    cfg : dict
+        Configuration dictionary containing measurement settings.
+        Must include 'sweep' with 'length' parameter.
+    soft_loop : bool, optional
+        If True, uses software loop instead of hardware sweep, by default False.
+    detune : float, optional
+        Frequency detune value for the Ramsey experiment in MHz, by default 0.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        A tuple containing:
+        - ts: Array of time points in microseconds
+        - signals: Array of measured amplitude values
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["detune"] = detune
@@ -50,6 +76,31 @@ def measure_t2ramsey(
 
 
 def measure_t2echo(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.ndarray]:
+    """Perform a T2 Echo measurement on a qubit.
+
+    This function measures the phase coherence time (T2) using the Hahn echo technique,
+    which adds a π pulse between two π/2 pulses to refocus dephasing caused by low-frequency
+    noise.
+
+    Parameters
+    ----------
+    soc : object
+        The socket object for communication with the hardware.
+    soccfg : object
+        The socket configuration object.
+    cfg : dict
+        Configuration dictionary containing measurement settings.
+        Must include 'sweep' with 'length' parameter.
+    soft_loop : bool, optional
+        If True, uses software loop instead of hardware sweep, by default False.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        A tuple containing:
+        - ts: Array of time points in microseconds
+        - signals: Array of measured amplitude values
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -86,6 +137,30 @@ def measure_t2echo(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.nd
 
 
 def measure_t1(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.ndarray]:
+    """Perform a T1 measurement on a qubit.
+
+    This function measures the energy relaxation time (T1) of a qubit by applying a π pulse
+    to excite the qubit and measuring the decay after variable delay times.
+
+    Parameters
+    ----------
+    soc : object
+        The socket object for communication with the hardware.
+    soccfg : object
+        The socket configuration object.
+    cfg : dict
+        Configuration dictionary containing measurement settings.
+        Must include 'sweep' with 'length' parameter.
+    soft_loop : bool, optional
+        If True, uses software loop instead of hardware sweep, by default False.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        A tuple containing:
+        - ts: Array of time points in microseconds
+        - signals: Array of measured amplitude values
+    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")

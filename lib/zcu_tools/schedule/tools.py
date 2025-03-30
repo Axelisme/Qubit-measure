@@ -9,14 +9,18 @@ def format_sweep1D(
     sweep: Union[Dict[str, Any], np.ndarray], name: str
 ) -> Dict[str, Any]:
     """
-    Convert abbreviated single sweep to regular format
+    Convert abbreviated single sweep to regular format.
+
+    This function takes a sweep parameter in different formats and converts it
+    to a standardized dictionary format with a specified key name.
 
     Args:
-        sweeps: dict, single sweep dict, abbreviated or not
-        name: str, expected key name
+        sweep: A dictionary containing sweep parameters (with 'start' and 'stop' keys)
+               or a numpy array of values to sweep through
+        name: Expected key name for the sweep in the returned dictionary
 
     Returns:
-        dict, regular format of the sweep
+        A dictionary in regular format with 'name' as the key
     """
 
     if isinstance(sweep, np.ndarray):
@@ -38,13 +42,17 @@ def format_sweep1D(
 
 def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):
     """
-    Check if time points are duplicated
+    Check if time points are duplicated when converted to machine cycles.
+
+    This function converts the given time points to cycles using the soccfg
+    and checks if any cycles are duplicated, which would indicate that the
+    sweep step size is too small.
 
     Args:
-        soccfg: SocCfg, soc configuration
-        ts: list, time points in us
-        gen_ch: int, generator channel
-        ro_ch: int, readout channel
+        soccfg: SocCfg object containing the system configuration
+        ts: List of time points in microseconds (us)
+        gen_ch: Generator channel number (optional)
+        ro_ch: Readout channel number (optional)
 
     Returns:
         None
@@ -58,16 +66,19 @@ def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):
 
 def map2adcfreq(soccfg, fpts, gen_ch, ro_ch):
     """
-    Map frequencies to adc frequencies
+    Map frequencies to ADC frequencies.
+
+    This function converts the input frequencies to ADC frequencies using the
+    system configuration and checks for any duplicated frequencies after conversion.
 
     Args:
-        soccfg: SocCfg, soc configuration
-        fpts: array, frequencies in MHz
-        gen_ch: int, generator channel
-        ro_ch: array, readout channel
+        soccfg: SocCfg object containing the system configuration
+        fpts: Array of frequencies in MHz
+        gen_ch: Generator channel number
+        ro_ch: Readout channel number or array of readout channels
 
     Returns:
-        mapped_fpts: list, adc frequencies in Hz
+        Array of mapped ADC frequencies in Hz
     """
     fpts = soccfg.adcfreq(fpts, gen_ch=gen_ch, ro_ch=ro_ch)
     if len(set(fpts)) != len(fpts):
@@ -79,15 +90,18 @@ def map2adcfreq(soccfg, fpts, gen_ch, ro_ch):
 
 def sweep2array(sweep, allow_array=False) -> np.ndarray:
     """
-    Convert sweep to array
+    Convert sweep parameter to a numpy array.
+
+    This function converts different sweep parameter formats into a numpy array
+    of values to sweep through.
 
     Args:
-        sweep: dict or array, sweep
-        soft_loop: bool, whether to allow array sweep
-        err_str: str, error message
+        sweep: Dictionary with 'start', 'step', and 'expts' keys defining the sweep,
+               or a list/array of explicit sweep values
+        allow_array: Whether to allow direct array input for custom sweeps (default: False)
 
     Returns:
-        array, sweep array
+        numpy.ndarray: Array of sweep values
     """
     if isinstance(sweep, dict):
         return sweep["start"] + np.arange(sweep["expts"]) * sweep["step"]
@@ -101,14 +115,17 @@ def sweep2array(sweep, allow_array=False) -> np.ndarray:
 
 def sweep2param(name: str, sweep: Dict[str, Any]) -> QickParam:
     """
-    Convert formatted sweep to qick v2 sweep param
+    Convert formatted sweep dictionary to a QickSweep1D parameter.
+
+    This function creates a QickSweep1D parameter from a formatted sweep dictionary,
+    which is used in Qick v2 assembly programming.
 
     Args:
-        name: str, name of the sweep
-        sweep: dict, formatted sweep
+        name: Name of the sweep parameter
+        sweep: Dictionary containing 'start' and 'stop' values for the sweep
 
     Returns:
-        QickParam, qick v2 sweep param
+        QickSweep1D: Qick v2 sweep parameter object
     """
     # convert formatted sweep to qick v2 sweep param
     return QickSweep1D(name, sweep["start"], sweep["stop"])
