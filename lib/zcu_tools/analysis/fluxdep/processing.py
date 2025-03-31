@@ -52,7 +52,7 @@ def spectrum_analyze(mAs, fpts, signals, threshold, weight=None):
 
         # If too many peaks, take the top 3
         if len(peaks) > 3:
-            peaks = np.argsort(amps[peaks, i])[-3:]
+            peaks = peaks[np.argsort(amps[peaks, i])[-3:]]
 
         s_mAs.extend(mAs[i] * np.ones(len(peaks)))
         s_fpts.extend(fpts[peaks])
