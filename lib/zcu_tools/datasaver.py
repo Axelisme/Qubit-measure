@@ -10,6 +10,16 @@ KEYWORD = "Database"
 
 
 def create_datafolder(root_dir: str, prefix: str = "") -> str:
+    """
+    Create a data folder structure based on the current date.
+
+    Args:
+        root_dir (str): The root directory where the data folder will be created.
+        prefix (str, optional): An optional prefix for the folder structure. Defaults to "".
+
+    Returns:
+        str: The absolute path to the created data folder.
+    """
     root_dir = os.path.abspath(os.path.join(root_dir, KEYWORD))
     yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
     save_dir = os.path.join(root_dir, prefix, f"{yy}/{mm}/Data_{mm}{dd}")
@@ -19,6 +29,16 @@ def create_datafolder(root_dir: str, prefix: str = "") -> str:
 
 
 def make_comment(cfg: dict, append: str = "") -> str:
+    """
+    Generate a formatted comment string from a configuration dictionary.
+
+    Args:
+        cfg (dict): Configuration dictionary to be converted to a string.
+        append (str, optional): Additional string to append to the comment. Defaults to "".
+
+    Returns:
+        str: A formatted comment string.
+    """
     # pretty convert cfg to string
     import json
 
@@ -29,6 +49,15 @@ def make_comment(cfg: dict, append: str = "") -> str:
 
 
 def safe_labber_filepath(filepath: str):
+    """
+    Ensure a unique file path by appending a numeric suffix if the file already exists.
+
+    Args:
+        filepath (str): The initial file path.
+
+    Returns:
+        str: A unique file path with a numeric suffix if necessary.
+    """
     filepath = os.path.abspath(filepath)
 
     def parse_filepath(filepath):
@@ -58,6 +87,17 @@ def save_local_data(
     comment: Optional[str] = None,
     tag: Optional[str] = None,
 ):
+    """
+    Save data locally in a Labber-compatible format.
+
+    Args:
+        filepath (str): The file path where the data will be saved.
+        x_info (dict): Information about the x-axis data.
+        z_info (dict): Information about the z-axis data.
+        y_info (Optional[dict], optional): Information about the y-axis data. Defaults to None.
+        comment (Optional[str], optional): A comment to include in the saved file. Defaults to None.
+        tag (Optional[str], optional): Tags to include in the saved file. Defaults to None.
+    """
     zdata = z_info["values"]
     z_info.update({"complex": True, "vector": False})
     log_channels = [z_info]
@@ -98,6 +138,15 @@ def save_local_data(
 def load_local_data(
     file_path: str,
 ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    """
+    Load data from a local HDF5 file.
+
+    Args:
+        file_path (str): The path to the HDF5 file.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]: The loaded z, x, and y data arrays.
+    """
     import h5py
 
     if config.DATA_DRY_RUN:
@@ -139,6 +188,14 @@ def load_local_data(
 
 
 def upload_to_server(filepath: str, server_ip: str, port: int):
+    """
+    Upload a file to a remote server.
+
+    Args:
+        filepath (str): The path to the file to upload.
+        server_ip (str): The IP address of the server.
+        port (int): The port number of the server.
+    """
     import requests
 
     if config.DATA_DRY_RUN:
@@ -155,6 +212,14 @@ def upload_to_server(filepath: str, server_ip: str, port: int):
 
 
 def download_from_server(filepath: str, server_ip: str, port: int):
+    """
+    Download a file from a remote server.
+
+    Args:
+        filepath (str): The path where the downloaded file will be saved.
+        server_ip (str): The IP address of the server.
+        port (int): The port number of the server.
+    """
     import requests
 
     if config.DATA_DRY_RUN:
@@ -182,6 +247,19 @@ def save_data(
     server_ip: Optional[str] = None,
     port: int = 4999,
 ):
+    """
+    Save data either locally or to a remote server.
+
+    Args:
+        filepath (str): The file path where the data will be saved.
+        x_info (dict): Information about the x-axis data.
+        z_info (dict): Information about the z-axis data.
+        y_info (Optional[dict], optional): Information about the y-axis data. Defaults to None.
+        comment (Optional[str], optional): A comment to include in the saved file. Defaults to None.
+        tag (Optional[str], optional): Tags to include in the saved file. Defaults to None.
+        server_ip (Optional[str], optional): The IP address of the server. Defaults to None.
+        port (int, optional): The port number of the server. Defaults to 4999.
+    """
     filepath = safe_labber_filepath(filepath)
     if server_ip is not None:
         save_local_data(filepath, x_info, z_info, y_info, comment, tag)
@@ -198,6 +276,17 @@ def load_data(
     server_ip: Optional[str] = None,
     port: int = 4999,
 ):
+    """
+    Load data either locally or from a remote server.
+
+    Args:
+        filepath (str): The path to the file to load.
+        server_ip (Optional[str], optional): The IP address of the server. Defaults to None.
+        port (int, optional): The port number of the server. Defaults to 4999.
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]: The loaded z, x, and y data arrays.
+    """
     if not filepath.endswith(".hdf5") and not filepath.endswith(".h5"):
         filepath += ".hdf5"
     if server_ip is not None:
