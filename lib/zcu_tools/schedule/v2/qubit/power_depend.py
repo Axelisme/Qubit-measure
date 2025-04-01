@@ -16,7 +16,7 @@ def signals2reals(signals: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Absolute values of the background-corrected signals.
     """
-    return np.abs(minus_background(signals, axis=0))
+    return np.abs(minus_background(signals, axis=1))
 
 
 def measure_qub_pdr_dep(soc, soccfg, cfg):
