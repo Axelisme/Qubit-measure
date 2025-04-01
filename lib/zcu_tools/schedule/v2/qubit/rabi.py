@@ -56,7 +56,7 @@ def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         progress=True,
         xlabel="Length (us)",
         ylabel="Amplitude",
-        result2signals=qub_signals2reals,
+        signal2real=qub_signals2reals,
     )
 
     # get the actual lengths
@@ -109,7 +109,7 @@ def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         progress=True,
         xlabel="Pulse gain",
         ylabel="Amplitude",
-        result2signals=qub_signals2reals,
+        signal2real=qub_signals2reals,
     )
 
     # get the actual amplitudes
