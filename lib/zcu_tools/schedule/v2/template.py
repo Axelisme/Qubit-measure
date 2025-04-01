@@ -132,6 +132,7 @@ def sweep_hard_template(
         result2signals: Function to convert raw results to signal data
         signal2real: Function to convert complex signals to real values
         progress: Whether to show progress bars
+        earlystop_snr: Optional signal-to-noise ratio for early stopping
         **kwargs: Additional arguments passed to the acquire method
 
     Returns:
@@ -157,7 +158,7 @@ def sweep_hard_template(
     with ViewerCls(*ticks, xlabel, ylabel, title=title) as viewer:
 
         def callback(ir, sum_d, sum2_d):
-            nonlocal signals, stds
+            nonlocal signals, stds, title
             signals, stds = result2signals(*raw2result(ir, sum_d, sum2_d))
             if earlystop_snr is not None:
                 snr = calculate_snr1d(signals)
