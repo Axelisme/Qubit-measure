@@ -30,6 +30,8 @@ class YokoDevControl:
                 "Range (I)": "10 mA",
             }
         )
+        if dev_cfg["host_ip"] is None:
+            dev_cfg["host_ip"] = "127.0.0.1"
 
         sHardware = "Yokogawa GS200 DC Source"
         dComCfg = cls.dev_cfg["dComCfg"]

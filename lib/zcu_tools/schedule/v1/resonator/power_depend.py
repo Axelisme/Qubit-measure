@@ -39,6 +39,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, dynamic_avg=False, gain_ref=1000):
                 cfg["rounds"] = int(rounds_ref * dyn_factor)
                 if cfg["rounds"] < 0.1 * rounds_ref:
                     cfg["rounds"] = int(0.1 * rounds_ref + 0.99)
+                cfg["soft_avgs"] = cfg["rounds"]
 
     def y_updateCfg(cfg, _, fpt):
         cfg["dac"]["res_pulse"]["freq"] = fpt
