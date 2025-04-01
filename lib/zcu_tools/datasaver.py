@@ -22,7 +22,7 @@ def create_datafolder(root_dir: str, prefix: str = "") -> str:
     """
     root_dir = os.path.abspath(os.path.join(root_dir, KEYWORD))
     yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
-    save_dir = os.path.join(root_dir, prefix, f"{yy}/{mm}/Data_{mm}{dd}")
+    save_dir = os.path.join(root_dir, prefix, os.path.join(yy, mm, f"Data_{mm}{dd}"))
     if not config.DATA_DRY_RUN:
         os.makedirs(save_dir, exist_ok=True)
     return save_dir
@@ -48,6 +48,40 @@ def make_comment(cfg: dict, append: str = "") -> str:
     return comment
 
 
+def format_ext(filepath: str) -> str:
+    """
+    Format the file extension to .hdf5 if not already present.
+
+    Args:
+        filepath (str): The file path to format.
+
+    Returns:
+        str: The formatted file path with .hdf5 extension.
+    """
+    if filepath.endswith(".h5"):
+        return filepath.replace(".h5", ".hdf5")
+    if filepath.endswith(".hdf5"):
+        return filepath
+    return filepath + ".hdf5"
+
+
+def remove_ext(filepath: str) -> str:
+    """
+    Remove the file extension from a file path.
+
+    Args:
+        filepath (str): The file path to format.
+
+    Returns:
+        str: The file path without the extension.
+    """
+    if filepath.endswith(".h5"):
+        return filepath.replace(".h5", "")
+    if filepath.endswith(".hdf5"):
+        return filepath.replace(".hdf5", "")
+    return filepath
+
+
 def safe_labber_filepath(filepath: str):
     """
     Ensure a unique file path by appending a numeric suffix if the file already exists.
@@ -59,6 +93,8 @@ def safe_labber_filepath(filepath: str):
         str: A unique file path with a numeric suffix if necessary.
     """
     filepath = os.path.abspath(filepath)
+
+    filepath = format_ext(filepath)
 
     def parse_filepath(filepath):
         filename, ext = os.path.splitext(filepath)
@@ -103,6 +139,8 @@ def save_local_data(
     log_channels = [z_info]
     step_channels = list(filter(None, [x_info, y_info]))
 
+    filepath = remove_ext(filepath)  # because labber will add .hdf5 automatically
+
     if config.DATA_DRY_RUN:
         print("DRY RUN: Save data to ", filepath)
         return
@@ -127,8 +165,8 @@ def save_local_data(
     try:
         yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
         if os.path.exists(yy):
-            os.rmdir(f"{yy}/{mm}/Data_{mm}{dd}")
-            os.rmdir(f"{yy}/{mm}")
+            os.rmdir(os.path.join(yy, mm, f"Data_{mm}{dd}"))
+            os.rmdir(os.path.join(yy, mm))
             os.rmdir(yy)
     except OSError as e:
         print("Fail to remove empty folder: ", e)
@@ -136,7 +174,7 @@ def save_local_data(
 
 
 def load_local_data(
-    file_path: str,
+    filepath: str,
 ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """
     Load data from a local HDF5 file.
@@ -149,8 +187,10 @@ def load_local_data(
     """
     import h5py
 
+    filepath = format_ext(filepath)
+
     if config.DATA_DRY_RUN:
-        print("DRY RUN: Load data from ", file_path)
+        print("DRY RUN: Load data from ", filepath)
         return np.array([]), np.array([]), None
 
     def parser_data(data):
@@ -165,7 +205,7 @@ def load_local_data(
 
         return z_data, x_data, y_data
 
-    with h5py.File(file_path, "r") as file:
+    with h5py.File(filepath, "r") as file:
         data: np.ndarray = file["Data"]["Data"]
         z_data, x_data, y_data = parser_data(data)
 
@@ -263,12 +303,11 @@ def save_data(
     filepath = safe_labber_filepath(filepath)
     if server_ip is not None:
         save_local_data(filepath, x_info, z_info, y_info, comment, tag)
-        if not filepath.endswith(".hdf5") or not filepath.endswith(".h5"):
-            filepath += ".hdf5"
         upload_to_server(filepath, server_ip, port)
         os.remove(filepath)
     else:
         save_local_data(filepath, x_info, z_info, y_info, comment, tag)
+    print("Successfully saved data to ", filepath)
 
 
 def load_data(
@@ -287,8 +326,6 @@ def load_data(
     Returns:
         Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]: The loaded z, x, and y data arrays.
     """
-    if not filepath.endswith(".hdf5") and not filepath.endswith(".h5"):
-        filepath += ".hdf5"
     if server_ip is not None:
         if not os.path.exists(filepath):
             download_from_server(filepath, server_ip, port)
