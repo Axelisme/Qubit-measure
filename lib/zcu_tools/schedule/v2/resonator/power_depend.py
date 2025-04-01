@@ -20,7 +20,7 @@ def signal2real(signals):
     return rescale(minus_background(np.abs(signals), axis=1), axis=1)
 
 
-def measure_res_pdr_dep(soc, soccfg, cfg, dynamic_reps=False, gain_ref=0.1):
+def measure_res_pdr_dep(soc, soccfg, cfg, dynamic_avg=False, gain_ref=0.1):
     """
     Measure the power dependency of a resonator by sweeping both power and frequency.
 
@@ -37,7 +37,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, dynamic_reps=False, gain_ref=0.1):
             - sweep.freq: Frequency sweep settings
             - reps: Number of measurement repetitions
             - adc.chs: ADC channels to use
-        dynamic_reps (bool, optional): Whether to dynamically adjust repetition count
+        dynamic_avg (bool, optional): Whether to dynamically adjust avg count
                                      based on power level. Defaults to False.
         gain_ref (float, optional): Reference gain value for dynamic repetition
                                    adjustment. Defaults to 0.1.
@@ -54,6 +54,7 @@ def measure_res_pdr_dep(soc, soccfg, cfg, dynamic_reps=False, gain_ref=0.1):
     pdr_sweep = cfg["sweep"]["gain"]
     fpt_sweep = cfg["sweep"]["freq"]
     reps_ref = cfg["reps"]
+    rounds_ref = cfg["rounds"]
 
     del cfg["sweep"]["gain"]  # use soft for loop here
 
@@ -74,14 +75,20 @@ def measure_res_pdr_dep(soc, soccfg, cfg, dynamic_reps=False, gain_ref=0.1):
             i (int): Current index in the power sweep.
             pdr (float): Current power/gain value.
         """
-        res_pulse["gain"] = pdr
+        cfg["dac"]["res_pulse"]["gain"] = pdr
 
-        if dynamic_reps:
-            cfg["reps"] = int(reps_ref * gain_ref / max(pdr, 1e-6))
-            if cfg["reps"] < 0.1 * reps_ref:
-                cfg["reps"] = int(0.1 * reps_ref + 0.99)
-            elif cfg["reps"] > 10 * reps_ref:
-                cfg["reps"] = int(10 * reps_ref)
+        if dynamic_avg:
+            dyn_factor = gain_ref / max(pdr, 1e-6)
+            if dyn_factor > 1:
+                # increase reps
+                cfg["reps"] = int(reps_ref * dyn_factor)
+                if cfg["reps"] > 100 * reps_ref:
+                    cfg["reps"] = int(10 * reps_ref)
+            else:
+                # decrease rounds
+                cfg["rounds"] = int(rounds_ref * dyn_factor)
+                if cfg["rounds"] < 0.1 * rounds_ref:
+                    cfg["rounds"] = int(0.1 * rounds_ref + 0.99)
 
     prog, signals2D = sweep2D_soft_hard_template(
         soc,
