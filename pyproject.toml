@@ -12,6 +12,7 @@ server = ["myqick", "dill"]
 client = [
     "myqick",
     "labber",
+    "numpy<=1.19.5",
     "h5py",
     "ipykernel",
     "ipywidgets",
