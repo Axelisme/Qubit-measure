@@ -1,21 +1,13 @@
 import numpy as np
 from zcu_tools import make_cfg
+from zcu_tools.analysis import minus_background
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
 def qub_signals2reals(signals):
-    """
-    Convert complex qubit signals to real amplitudes by removing mean background.
-
-    Args:
-        signals (ndarray): Raw complex qubit measurement signals.
-
-    Returns:
-        ndarray: Absolute values of signals after subtracting the mean.
-    """
-    return np.abs(signals - np.mean(signals))
+    return np.abs(minus_background(signals, method="mean"))
 
 
 def measure_qub_freq(

@@ -2,9 +2,14 @@ from typing import Tuple
 
 import numpy as np
 from zcu_tools import make_cfg
+from zcu_tools.analysis import minus_background
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_hard_template
+
+
+def qub_signals2reals(signals):
+    return np.abs(minus_background(signals, method="mean"))
 
 
 def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
@@ -51,6 +56,7 @@ def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         progress=True,
         xlabel="Length (us)",
         ylabel="Amplitude",
+        result2signals=qub_signals2reals,
     )
 
     # get the actual lengths
@@ -103,6 +109,7 @@ def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         progress=True,
         xlabel="Pulse gain",
         ylabel="Amplitude",
+        result2signals=qub_signals2reals,
     )
 
     # get the actual amplitudes
