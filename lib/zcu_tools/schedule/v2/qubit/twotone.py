@@ -18,7 +18,9 @@ def qub_signals2reals(signals):
     return np.abs(signals - np.mean(signals))
 
 
-def measure_qub_freq(soc, soccfg, cfg, reset_rf=None, remove_bg=False):
+def measure_qub_freq(
+    soc, soccfg, cfg, reset_rf=None, remove_bg=False, earlystop_snr=None
+):
     """
     Perform a frequency sweep measurement of a qubit using two-tone spectroscopy.
 
@@ -30,6 +32,8 @@ def measure_qub_freq(soc, soccfg, cfg, reset_rf=None, remove_bg=False):
                                    conjugate reset is not used. Defaults to None.
         remove_bg (bool, optional): Whether to remove background from signals.
                                    Defaults to False.
+        earlystop_snr (float, optional): Early stop signal-to-noise ratio threshold.
+                                         Defaults to None.
 
     Returns:
         tuple:
@@ -61,7 +65,13 @@ def measure_qub_freq(soc, soccfg, cfg, reset_rf=None, remove_bg=False):
         kwargs["signal2real"] = qub_signals2reals
 
     prog, signals = sweep_hard_template(
-        soc, soccfg, cfg, TwoToneProgram, ticks=(fpts,), **kwargs
+        soc,
+        soccfg,
+        cfg,
+        TwoToneProgram,
+        ticks=(fpts,),
+        earlystop_snr=earlystop_snr,
+        **kwargs,
     )
 
     # get the actual frequency points

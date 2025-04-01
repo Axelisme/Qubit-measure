@@ -19,7 +19,7 @@ def signals2reals(signals):
     return np.abs(minus_background(signals, axis=1))
 
 
-def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
+def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
     """
     Measure qubit frequency as a function of flux bias.
 
@@ -37,6 +37,9 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
             - sweep: Sweep parameters for freq and flux.
         reset_rf (float, optional): Reset frequency for conjugate reset pulse.
             If provided, enables reset pulse with conjugate frequency. Defaults to None.
+        earlystop_snr (float, optional): Early stop signal-to-noise ratio threshold.
+            If provided, the measurement will stop if the SNR exceeds this value.
+            Defaults to None.
 
     Returns:
         tuple: Three-element tuple containing:
@@ -91,6 +94,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None):
         ylabel="Frequency (MHz)",
         updateCfg=updateCfg,
         signal2real=signals2reals,
+        earlystop_snr=earlystop_snr,
     )
 
     # get the actual frequency points
