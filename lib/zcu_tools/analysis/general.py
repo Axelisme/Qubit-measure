@@ -2,6 +2,7 @@ from typing import Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.ndimage import gaussian_filter1d
 
 from . import fitting as ft
 from .tools import rotate2real
@@ -10,7 +11,13 @@ figsize = (8, 6)
 
 
 def lookback_show(
-    Ts, signals, plot_fit=True, ratio: float = 0.3, pulse_cfg: Optional[dict] = None
+    Ts,
+    signals,
+    *,
+    plot_fit=True,
+    smooth=None,
+    ratio: float = 0.3,
+    pulse_cfg: Optional[dict] = None,
 ) -> float:
     """
     Visualize time domain signals with lookback feature to identify signal onset.
@@ -36,6 +43,8 @@ def lookback_show(
     float
         The time point (offset) where the signal magnitude first exceeds the threshold ratio.
     """
+    if smooth is not None:
+        signals = gaussian_filter1d(signals, smooth)
     y = np.abs(signals)
 
     # find first idx where y is larger than ratio * max_y

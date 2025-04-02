@@ -91,7 +91,7 @@ def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
         aspect="auto",
         origin="lower",
         interpolation="none",
-        extent=(ys[0], ys[-1], xs[0], xs[-1]),
+        extent=(xs[0], xs[-1], ys[0], ys[-1]),
     )
     plt.scatter(
         x_max, y_max, color="r", label=f"max SNR = {snr2D[y_max_id, x_max_id]:.2e}"
@@ -107,7 +107,7 @@ def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
     return x_max, y_max
 
 
-def ge_lookback_analyze(Ts, signal_g, signal_e, pulse_cfg=None):
+def ge_lookback_analyze(Ts, signals_g, signals_e, *, pulse_cfg=None, smooth=None):
     """
     Analyze ground and excited state signals over time to evaluate measurement contrast.
 
@@ -131,17 +131,25 @@ def ge_lookback_analyze(Ts, signal_g, signal_e, pulse_cfg=None):
     None
         This function only produces a plot but doesn't return a value
     """
-    signal_g = gaussian_filter1d(signal_g, 1)
-    signal_e = gaussian_filter1d(signal_e, 1)
+    if smooth is not None:
+        signals_g = gaussian_filter1d(signals_g, smooth)
+        signals_e = gaussian_filter1d(signals_e, smooth)
 
-    amps_g = np.abs(signal_g)
-    amps_e = np.abs(signal_e)
-    contrast = np.abs(signal_g - signal_e)
+    amps_g = np.abs(signals_g)
+    amps_e = np.abs(signals_e)
+    contrast = np.abs(signals_g - signals_e)
 
     plt.figure(figsize=figsize)
     plt.plot(Ts, amps_g, label="g")
     plt.plot(Ts, amps_e, label="e")
     plt.plot(Ts, contrast, label="contrast")
+
+    if pulse_cfg is not None:
+        trig_offset = pulse_cfg["trig_offset"]
+        ro_length = pulse_cfg["ro_length"]
+        plt.axvline(trig_offset, color="g", linestyle="--", label="ro start")
+        plt.axvline(trig_offset + ro_length, color="g", linestyle="--", label="ro end")
+
     plt.xlabel("Time (us)")
     plt.ylabel("Magnitude (a.u.)")
     plt.legend()
