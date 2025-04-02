@@ -3,9 +3,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 
 import numpy as np
 from numpy import ndarray
-from scipy.ndimage import gaussian_filter1d
 from tqdm.auto import tqdm
-from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import (
     MyAveragerProgram,
     MyNDAveragerProgram,
@@ -50,26 +48,6 @@ def raw2result(ir, sum_d, sum2_d):
     return avgi, avgq, stdi, stdq
 
 
-def calculate_snr1d(signals):
-    signals = minus_background(signals)
-    m_signals = gaussian_filter1d(signals, sigma=1)
-
-    amps = np.abs(m_signals)
-    noise_amps = np.abs(signals - m_signals)
-
-    # use avg of highest three point as signal contrast
-    max1_idx = np.argmax(amps)
-    max1, amps[max1_idx] = amps[max1_idx], 0
-    max2_idx = np.argmax(amps)
-    max2, amps[max2_idx] = amps[max2_idx], 0
-    max3_idx = np.argmax(amps)
-    max3 = amps[max3_idx]
-
-    contrast = (max1 + max2 + max3) / 3
-
-    return contrast / noise_amps.mean()
-
-
 def sweep1D_hard_template(
     soc,
     soccfg,
@@ -84,7 +62,7 @@ def sweep1D_hard_template(
     ] = default_result2signals,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
-    earlystop_snr: Optional[float] = None,
+    early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,
     **kwargs,
 ) -> Tuple[ndarray, ndarray]:
     signals = np.full_like(xs, np.nan, dtype=complex)
@@ -96,18 +74,17 @@ def sweep1D_hard_template(
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     title = None
-    with InstantShow1D(xs, xlabel, ylabel) as viewer:
+    with InstantShow1D(xs, xlabel, ylabel, title=title) as viewer:
         try:
             prog = prog_cls(soccfg, cfg)
 
             def callback(ir, sum_d, sum2_d):
-                nonlocal signals, stds
+                nonlocal signals, stds, title
                 signals, stds = result2signals(*raw2result(ir, sum_d, sum2_d))
-                if earlystop_snr is not None:
-                    snr = calculate_snr1d(signals)
-                    if snr > earlystop_snr:
+                if early_stop_checker is not None:
+                    stop, title = early_stop_checker(signals)
+                    if stop:
                         prog.set_early_stop()
-                    title = f"Current SNR: {snr:.2f}"
                 viewer.update_show(
                     signal2real(signals),
                     errs=std2err(stds, (ir + 1) * reps),
@@ -257,7 +234,7 @@ def sweep2D_soft_hard_template(
     ] = default_result2signals,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
-    earlystop_snr: Optional[float] = None,
+    early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,
     **kwargs,
 ) -> Tuple[ndarray, ndarray, ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
@@ -265,9 +242,9 @@ def sweep2D_soft_hard_template(
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])  # set initial flux
 
-    with InstantShow2D(xs, ys, xlabel, ylabel) as viewer:
+    title = None
+    with InstantShow2D(xs, ys, xlabel, ylabel, title=title) as viewer:
         try:
-            title = None
             xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
             avgs_tqdm = tqdm(total=cfg["soft_avgs"], smoothing=0, disable=not progress)
             with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
@@ -279,23 +256,22 @@ def sweep2D_soft_hard_template(
                     avgs_tqdm.reset()
                     avgs_tqdm.refresh()
 
-                    _signals2D = signals2D.copy()  # prevent overwrite
-
                     prog = prog_cls(soccfg, cfg)
 
+                    _signals2D = signals2D.copy()  # prevent overwrite
+
                     def callback(ir, sum_d, sum2_d):
-                        nonlocal _signals2D
+                        nonlocal _signals2D, avgs_tqdm, title
                         avgs_tqdm.update(max(ir + 1 - avgs_tqdm.n, 0))
                         avgs_tqdm.refresh()
 
                         _signals2D[i], _ = result2signals(
                             *raw2result(ir, sum_d, sum2_d)
                         )
-                        if earlystop_snr is not None:
-                            snr = calculate_snr1d(_signals2D[i])
-                            if snr > earlystop_snr:
+                        if early_stop_checker is not None:
+                            stop, title = early_stop_checker(_signals2D[i])
+                            if stop:
                                 prog.set_early_stop()
-                            title = f"Current SNR: {snr:.2f}"
 
                         viewer.update_show(signal2real(_signals2D), title=title)
 
@@ -395,7 +371,7 @@ def sweep2D_maximize_template(
     ys: ndarray,
     xlabel: str,
     ylabel: str,
-    signals2reals: Callable = default_signal2real,
+    signals2score: Callable,
     method: str = "Nelder-Mead",
     **kwargs,
 ):
@@ -407,7 +383,7 @@ def sweep2D_maximize_template(
             x, y = param
 
             signals, _ = measure_fn(x, y)
-            score = signals2reals(signals)
+            score = signals2score(signals)
 
             viewer.append_spot(x, y, score)
 

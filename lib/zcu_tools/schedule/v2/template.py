@@ -8,6 +8,7 @@ from zcu_tools.program.v2 import MyProgramV2
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
 from zcu_tools.tools import AsyncFunc, print_traceback
+from zcu_tools.schedule.v1.template import sweep2D_maximize_template  # noqa
 
 
 def default_result2signals(
@@ -93,7 +94,7 @@ def sweep_hard_template(
     ] = default_result2signals,
     signal2real: Callable[[ndarray], ndarray] = default_signal2real,
     progress: bool = True,
-    early_stop_checker: Optional[Callable[ndarray, ndarray], [bool, str]] = None,
+    early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,
     **kwargs,
 ) -> Tuple[MyProgramV2, ndarray]:
     """
@@ -256,7 +257,7 @@ def sweep2D_soft_hard_template(
     ] = default_result2signals,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
-    early_stop_checker: Optional[Callable[ndarray, ndarray], [bool, str]] = None,
+    early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,
     **kwargs,
 ) -> Tuple[ndarray, ndarray, ndarray]:
     """

@@ -6,6 +6,7 @@ from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.tools import sweep2array
 from zcu_tools.schedule.v1.template import sweep2D_soft_hard_template
+from zcu_tools.schedule.v1.qubit.twotone import qub_signal2snr
 
 
 def signal2real(signals):
@@ -34,6 +35,15 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
     def updateCfg(cfg, _, flx):
         cfg["dev"]["flux"] = flx
 
+    if earlystop_snr is not None:
+
+        def checker(signals):
+            snr = qub_signal2snr(signals)
+            return snr >= earlystop_snr, f"Current SNR: {snr:.2g}"
+
+    else:
+        checker = None
+
     flxs, fpts, signals2D = sweep2D_soft_hard_template(
         soc,
         soccfg,
@@ -45,7 +55,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
         xlabel="Flux (a.u.)",
         ylabel="Frequency (MHz)",
         signal2real=signal2real,
-        earlystop_snr=earlystop_snr,
+        early_stop_checker=checker,
     )
 
     return flxs, fpts, signals2D

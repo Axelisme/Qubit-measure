@@ -8,8 +8,11 @@ from zcu_tools.schedule.tools import (
     sweep2array,
     sweep2param,
 )
-from zcu_tools.schedule.v1.template import sweep2D_maximize_template
-from zcu_tools.schedule.v2.template import sweep1D_soft_template, sweep_hard_template
+from zcu_tools.schedule.v2.template import (
+    sweep1D_soft_template,
+    sweep_hard_template,
+    sweep2D_maximize_template,
+)
 
 
 def calc_snr(avg_d, std_d):
