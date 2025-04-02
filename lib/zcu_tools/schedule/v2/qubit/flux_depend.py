@@ -4,18 +4,10 @@ from zcu_tools.analysis import minus_background
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep2D_soft_hard_template
+from zcu_tools.schedule.v2.qubit.twotone import qub_signal2snr
 
 
-def signals2reals(signals):
-    """
-    Convert complex signals to real values by taking the absolute value after background subtraction.
-
-    Args:
-        signals (numpy.ndarray): Complex measurement signals array.
-
-    Returns:
-        numpy.ndarray: Real-valued signals with background subtracted.
-    """
+def qub_signals2reals(signals):
     return np.abs(minus_background(signals, axis=1))
 
 
@@ -72,16 +64,17 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
 
     cfg["dev"]["flux"] = flxs[0]  # set initial flux
 
-    def updateCfg(cfg, i, flx):
-        """
-        Update configuration with new flux value during sweep.
-
-        Args:
-            cfg (dict): Configuration dictionary to update.
-            i (int): Current index in the sweep.
-            flx (float): Flux value to set.
-        """
+    def updateCfg(cfg, _, flx):
         cfg["dev"]["flux"] = flx
+
+    if earlystop_snr is not None:
+
+        def checker(signals):
+            snr = qub_signal2snr(signals)
+            return snr >= earlystop_snr, f"Current SNR: {snr:.2g}"
+
+    else:
+        checker = None
 
     prog, signals2D = sweep2D_soft_hard_template(
         soc,
@@ -93,8 +86,8 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
         xlabel="Flux (a.u.)",
         ylabel="Frequency (MHz)",
         updateCfg=updateCfg,
-        signal2real=signals2reals,
-        earlystop_snr=earlystop_snr,
+        signal2real=qub_signals2reals,
+        early_stop_checker=checker,
     )
 
     # get the actual frequency points

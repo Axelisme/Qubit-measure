@@ -3,9 +3,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Type
 
 import numpy as np
 from numpy import ndarray
-from scipy.ndimage import gaussian_filter1d
 from tqdm.auto import tqdm
-from zcu_tools.analysis import minus_background
 from zcu_tools.program.v2 import MyProgramV2
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
@@ -81,26 +79,6 @@ def raw2result(ir, sum_d, sum2_d) -> Tuple[np.ndarray, np.ndarray]:
     return avg_d, std_d
 
 
-def calculate_snr1d(signals):
-    signals = minus_background(signals)
-    m_signals = gaussian_filter1d(signals, sigma=1)
-
-    amps = np.abs(m_signals)
-    noise_amps = np.abs(signals - m_signals)
-
-    # use avg of highest three point as signal contrast
-    max1_idx = np.argmax(amps)
-    max1, amps[max1_idx] = amps[max1_idx], 0
-    max2_idx = np.argmax(amps)
-    max2, amps[max2_idx] = amps[max2_idx], 0
-    max3_idx = np.argmax(amps)
-    max3 = amps[max3_idx]
-
-    contrast = (max1 + max2 + max3) / 3
-
-    return contrast / noise_amps.mean()
-
-
 def sweep_hard_template(
     soc,
     soccfg,
@@ -115,7 +93,7 @@ def sweep_hard_template(
     ] = default_result2signals,
     signal2real: Callable[[ndarray], ndarray] = default_signal2real,
     progress: bool = True,
-    earlystop_snr: Optional[float] = None,
+    early_stop_checker: Optional[Callable[ndarray, ndarray], [bool, str]] = None,
     **kwargs,
 ) -> Tuple[MyProgramV2, ndarray]:
     """
@@ -132,7 +110,7 @@ def sweep_hard_template(
         result2signals: Function to convert raw results to signal data
         signal2real: Function to convert complex signals to real values
         progress: Whether to show progress bars
-        earlystop_snr: Optional signal-to-noise ratio for early stopping
+        early_stop_checker: Optional function to check for early stopping
         **kwargs: Additional arguments passed to the acquire method
 
     Returns:
@@ -142,9 +120,6 @@ def sweep_hard_template(
     """
     signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
     stds = np.full_like(signals, np.nan, dtype=float)
-
-    if earlystop_snr is not None and len(ticks) != 1:
-        raise ValueError("Early stopping SNR only supports 1D sweep")
 
     reps = cfg["reps"]
 
@@ -160,11 +135,10 @@ def sweep_hard_template(
         def callback(ir, sum_d, sum2_d):
             nonlocal signals, stds, title
             signals, stds = result2signals(*raw2result(ir, sum_d, sum2_d))
-            if earlystop_snr is not None:
-                snr = calculate_snr1d(signals)
-                if snr > earlystop_snr:
+            if early_stop_checker is not None:
+                stop, title = early_stop_checker(signals)
+                if stop:
                     prog.set_early_stop()
-                title = f"Current SNR: {snr:.2f}"
             viewer.update_show(
                 signal2real(signals), errs=std2err(stds, (ir + 1) * reps), title=title
             )
@@ -282,7 +256,7 @@ def sweep2D_soft_hard_template(
     ] = default_result2signals,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
-    earlystop_snr: Optional[float] = None,
+    early_stop_checker: Optional[Callable[ndarray, ndarray], [bool, str]] = None,
     **kwargs,
 ) -> Tuple[ndarray, ndarray, ndarray]:
     """
@@ -301,7 +275,7 @@ def sweep2D_soft_hard_template(
         result2signals: Function to convert raw results to signal data
         signal2real: Function to convert complex signals to real values
         progress: Whether to show progress bars
-        earlystop_snr: Optional signal-to-noise ratio for early stopping
+        early_stop_checker: Optional function to check for early stopping
         **kwargs: Additional arguments passed to the acquire method
 
     Returns:
@@ -338,11 +312,10 @@ def sweep2D_soft_hard_template(
                         _signals2D[i], _ = result2signals(
                             *raw2result(ir, sum_d, sum2_d)
                         )
-                        if earlystop_snr is not None:
-                            snr = calculate_snr1d(_signals2D[i])
-                            if snr > earlystop_snr:
+                        if early_stop_checker is not None:
+                            stop, title = early_stop_checker(_signals2D[i])
+                            if stop:
                                 prog.set_early_stop()
-                            title = f"Current SNR: {snr:.2f}"
                         viewer.update_show(signal2real(_signals2D), title=title)
 
                     prog = prog_cls(soccfg, cfg)
@@ -354,7 +327,7 @@ def sweep2D_soft_hard_template(
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
 
-                    async_draw(i, signal2real(signals2D))
+                    async_draw(i, signal2real(signals2D), title=title)
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")

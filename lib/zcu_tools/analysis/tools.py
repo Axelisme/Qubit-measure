@@ -1,21 +1,24 @@
+from typing import Tuple
 import warnings
 
 import numpy as np
+from numpy import ndarray
+from scipy.ndimage import gaussian_filter1d
 
 
-def rotate2real(signals: np.ndarray):
+def rotate2real(signals: ndarray):
     """
     Rotate the signals to maximize the contrast on real axis by performing
     principal component analysis (PCA) on complex data
 
     Parameters
     ----------
-    signals : np.ndarray
+    signals : ndarray
         The 1-D complex signals to be rotated. Must be a 1D array of complex values.
 
     Returns
     -------
-    np.ndarray
+    ndarray
         The rotated signals with maximum variance aligned along the real axis
 
     Notes
@@ -46,13 +49,13 @@ def rotate2real(signals: np.ndarray):
     return rot_signals
 
 
-def minus_background(signals: np.ndarray, axis=None, method="median") -> np.ndarray:
+def minus_background(signals: ndarray, axis=None, method="median") -> ndarray:
     """
     Subtract the background from the signals
 
     Parameters
     ----------
-    signals : np.ndarray
+    signals : ndarray
         The signals to process, can be 1-D or 2-D
     axis : int, None
         The axis to process, if None, process the whole signals
@@ -61,7 +64,7 @@ def minus_background(signals: np.ndarray, axis=None, method="median") -> np.ndar
 
     Returns
     -------
-    np.ndarray
+    ndarray
         The signals with background subtracted
     """
 
@@ -73,13 +76,13 @@ def minus_background(signals: np.ndarray, axis=None, method="median") -> np.ndar
         raise ValueError(f"Invalid method: {method}")
 
 
-def minus_median(signals: np.ndarray, axis=None) -> np.ndarray:
+def minus_median(signals: ndarray, axis=None) -> ndarray:
     """
     Subtract the median from signals, useful for background removal
 
     Parameters
     ----------
-    signals : np.ndarray
+    signals : ndarray
         The signals array to process. Can be real or complex valued.
     axis : int, optional
         The axis along which to calculate the median.
@@ -87,7 +90,7 @@ def minus_median(signals: np.ndarray, axis=None) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    ndarray
         A copy of the signals with the median subtracted. Original
         array is not modified.
 
@@ -129,13 +132,13 @@ def minus_median(signals: np.ndarray, axis=None) -> np.ndarray:
     return signals
 
 
-def minus_mean(signals: np.ndarray, axis=None) -> np.ndarray:
+def minus_mean(signals: ndarray, axis=None) -> ndarray:
     """
     Subtract the mean from signals, useful for baseline correction
 
     Parameters
     ----------
-    signals : np.ndarray
+    signals : ndarray
         The signals array to process. Can be real or complex valued.
     axis : int, optional
         The axis along which to calculate the mean.
@@ -143,7 +146,7 @@ def minus_mean(signals: np.ndarray, axis=None) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    ndarray
         A copy of the signals with the mean subtracted. Original
         array is not modified.
 
@@ -174,13 +177,13 @@ def minus_mean(signals: np.ndarray, axis=None) -> np.ndarray:
     return signals
 
 
-def rescale(signals: np.ndarray, axis=None) -> np.ndarray:
+def rescale(signals: ndarray, axis=None) -> ndarray:
     """
     Rescale signals by dividing by the standard deviation
 
     Parameters
     ----------
-    signals : np.ndarray
+    signals : ndarray
         The signals array to process. Must be real valued (not complex).
     axis : int, optional
         The axis along which to calculate the standard deviation.
@@ -188,7 +191,7 @@ def rescale(signals: np.ndarray, axis=None) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    ndarray
         A copy of the signals rescaled by standard deviation. Original
         array is not modified.
 
@@ -225,22 +228,46 @@ def rescale(signals: np.ndarray, axis=None) -> np.ndarray:
     return signals
 
 
+def calculate_noise(signals: ndarray) -> Tuple[float, ndarray]:
+    """
+    Calculate the noise level of the signals
+    by comparing the signals with a smoothed version of themselves
+    using Gaussian filtering.
+
+    Parameters
+    ----------
+    signals : ndarray
+        The signals array to process. Can be real or complex valued.
+
+    Returns
+    -------
+    float
+        The noise level of the signals, defined as the mean absolute difference
+        between the original signals and the smoothed signals.
+    ndarray
+        The smoothed signals obtained by applying Gaussian filtering.
+    """
+    m_signals = gaussian_filter1d(signals, sigma=1)
+
+    return np.abs(signals - m_signals).mean(), m_signals
+
+
 def rotate_phase(fpts, signals, phase_slope):
     """
     Rotate the phase of complex signals based on frequency points
 
     Parameters
     ----------
-    fpts : np.ndarray
+    fpts : ndarray
         Frequency points array
-    signals : np.ndarray
+    signals : ndarray
         Complex signal array to be phase-rotated
     phase_slope : float
         Phase rotation slope in degrees per frequency unit
 
     Returns
     -------
-    np.ndarray
+    ndarray
         Phase-rotated complex signals
 
     Notes
