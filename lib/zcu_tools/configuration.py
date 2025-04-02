@@ -127,7 +127,7 @@ class DefaultCfg:
             dac_pulses[k] = v
 
     @classmethod
-    def get_pulse(cls, name: str) -> dict:
+    def get_pulse(cls, name: str, raise_err=True) -> dict:
         """
         Retrieve a specific pulse configuration by name.
 
@@ -137,7 +137,10 @@ class DefaultCfg:
         Returns:
             dict: The pulse configuration if found, otherwise an empty dictionary.
         """
-        return cls.dac_cfgs.get("pulses", {}).get(name, {})
+        pulses_cfg = cls.dac_cfgs.get("pulses", {})
+        if name not in pulses_cfg and raise_err:
+            raise KeyError(f"Pulse {name} not found in DAC configurations.")
+        return pulses_cfg.get(name, {})
 
     @classmethod
     def clear_pulses(cls):
