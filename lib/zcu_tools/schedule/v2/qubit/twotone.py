@@ -6,14 +6,15 @@ from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
-def qub_signals2reals(signals):
+def qub_signal2real(signals):
     return np.abs(minus_background(signals, method="mean"))
 
 
 def qub_signal2snr(signals):
     noise, m_signals = calculate_noise(signals)
 
-    contrast = peak_n_avg(np.abs(m_signals), n=3, mode="max")
+    m_amps = qub_signal2real(m_signals)
+    contrast = peak_n_avg(m_amps, n=3, mode="max")
 
     return contrast / noise
 
@@ -62,7 +63,7 @@ def measure_qub_freq(
 
     kwargs = {"xlabel": "Frequency (MHz)", "ylabel": "Amplitude"}
     if remove_bg:
-        kwargs["signal2real"] = qub_signals2reals
+        kwargs["signal2real"] = qub_signal2real
 
     if earlystop_snr is not None:
 

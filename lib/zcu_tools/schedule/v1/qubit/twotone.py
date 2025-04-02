@@ -1,7 +1,7 @@
 from copy import deepcopy
 
 import numpy as np
-from zcu_tools.analysis import minus_background, calculate_noise
+from zcu_tools.analysis import minus_background, calculate_noise, peak_n_avg
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.tools import sweep2array
 from zcu_tools.schedule.v1.template import sweep1D_hard_template
@@ -14,17 +14,8 @@ def signal2real(signals):
 def qub_signal2snr(signals):
     noise, m_signals = calculate_noise(signals)
 
-    amps = np.abs(m_signals)
-
-    # use avg of highest three point as signal contrast
-    max1_idx = np.argmax(amps)
-    max1, amps[max1_idx] = amps[max1_idx], 0
-    max2_idx = np.argmax(amps)
-    max2, amps[max2_idx] = amps[max2_idx], 0
-    max3_idx = np.argmax(amps)
-    max3 = amps[max3_idx]
-
-    contrast = (max1 + max2 + max3) / 3
+    m_amps = signal2real(m_signals)
+    contrast = peak_n_avg(m_amps, n=3, mode="max")
 
     return contrast / noise
 

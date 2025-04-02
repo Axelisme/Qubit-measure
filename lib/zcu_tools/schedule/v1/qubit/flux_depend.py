@@ -1,7 +1,6 @@
 from copy import deepcopy
 
 import numpy as np
-from scipy.ndimage import gaussian_filter1d
 from zcu_tools.analysis import minus_background
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.tools import sweep2array
@@ -10,7 +9,6 @@ from zcu_tools.schedule.v1.qubit.twotone import qub_signal2snr
 
 
 def signal2real(signals):
-    signals = gaussian_filter1d(signals, sigma=1, axis=1)
     return np.abs(minus_background(signals, axis=1))
 
 
