@@ -2,7 +2,7 @@ from typing import Tuple
 
 import numpy as np
 from zcu_tools import make_cfg
-from zcu_tools.analysis import rotate2real
+from zcu_tools.analysis import rotate2real, calculate_noise, peak_n_avg
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_hard_template
@@ -12,7 +12,18 @@ def qub_signals2reals(signals):
     return rotate2real(signals).real
 
 
-def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
+def qub_signal2snr(signals):
+    noise, m_signals = calculate_noise(signals)
+
+    m_real = rotate2real(m_signals).real
+    contrast = peak_n_avg(m_real, n=3, mode="max") - peak_n_avg(m_real, n=3, mode="min")
+
+    return contrast / noise
+
+
+def measure_lenrabi(
+    soc, soccfg, cfg, *, earlystop_snr=None
+) -> Tuple[np.ndarray, np.ndarray]:
     """Measure Rabi oscillation by sweeping pulse length.
 
     This function performs a Rabi measurement experiment by varying the length of the qubit pulse
@@ -30,6 +41,9 @@ def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         Must include:
         - sweep: dict with length sweep parameters
         - dac: dict with qubit pulse settings
+    earlystop_snr : float, optional
+        Early stop signal-to-noise ratio threshold. If provided, the measurement will stop
+        when the SNR exceeds this value.
 
     Returns
     -------
@@ -45,8 +59,16 @@ def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     sweep_cfg = cfg["sweep"]["length"]
     cfg["dac"]["qub_pulse"]["length"] = sweep2param("length", sweep_cfg)
 
-    lens = sweep2array(sweep_cfg)  # predicted lengths
+    if earlystop_snr is not None:
 
+        def checker(signals):
+            snr = qub_signal2snr(signals)
+            return snr > earlystop_snr, f"SNR: {snr:.2g}"
+
+    else:
+        checker = None
+
+    lens = sweep2array(sweep_cfg)  # predicted lengths
     prog, signals = sweep_hard_template(
         soc,
         soccfg,
@@ -57,6 +79,7 @@ def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         xlabel="Length (us)",
         ylabel="Amplitude",
         signal2real=qub_signals2reals,
+        early_stop_checker=checker,
     )
 
     # get the actual lengths
@@ -65,7 +88,9 @@ def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     return lens, signals
 
 
-def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
+def measure_amprabi(
+    soc, soccfg, cfg, earlystop_snr=None
+) -> Tuple[np.ndarray, np.ndarray]:
     """Measure Rabi oscillation by sweeping pulse amplitude (gain).
 
     This function performs a Rabi measurement experiment by varying the amplitude/gain of the
@@ -83,6 +108,9 @@ def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         Must include:
         - sweep: dict with gain sweep parameters
         - dac: dict with qubit pulse settings
+    earlystop_snr : float, optional
+        Early stop signal-to-noise ratio threshold. If provided, the measurement will stop
+        when the SNR exceeds this value.
 
     Returns
     -------
@@ -98,8 +126,16 @@ def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     sweep_cfg = cfg["sweep"]["gain"]
     cfg["dac"]["qub_pulse"]["gain"] = sweep2param("gain", sweep_cfg)
 
-    amps = sweep2array(sweep_cfg)  # predicted amplitudes
+    if earlystop_snr is not None:
 
+        def checker(signals):
+            snr = qub_signal2snr(signals)
+            return snr > earlystop_snr, f"SNR: {snr:.2g}"
+
+    else:
+        checker = None
+
+    amps = sweep2array(sweep_cfg)  # predicted amplitudes
     prog, signals = sweep_hard_template(
         soc,
         soccfg,
@@ -110,6 +146,7 @@ def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         xlabel="Pulse gain",
         ylabel="Amplitude",
         signal2real=qub_signals2reals,
+        early_stop_checker=checker,
     )
 
     # get the actual amplitudes

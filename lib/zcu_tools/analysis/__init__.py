@@ -8,7 +8,14 @@ from .general import (
 )
 from .single_shot import fidelity_func, singleshot_ge_analysis, singleshot_visualize
 from .time_exp import T1_analyze, T2decay_analyze, T2fringe_analyze, rabi_analyze
-from .tools import minus_background, rescale, rotate2real, rotate_phase, calculate_noise
+from .tools import (
+    minus_background,
+    rescale,
+    rotate2real,
+    rotate_phase,
+    calculate_noise,
+    peak_n_avg,
+)
 
 __all__ = [
     "freq_analyze",
@@ -31,4 +38,5 @@ __all__ = [
     "calculate_noise",
     "minus_background",
     "rescale",
+    "peak_n_avg",
 ]

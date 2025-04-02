@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Literal
 import warnings
 
 import numpy as np
@@ -250,6 +250,43 @@ def calculate_noise(signals: ndarray) -> Tuple[float, ndarray]:
     m_signals = gaussian_filter1d(signals, sigma=1)
 
     return np.abs(signals - m_signals).mean(), m_signals
+
+
+def peak_n_avg(data: ndarray, n: int, mode: Literal["max", "min"] = "max"):
+    """
+    Find the first n max/min points in the data, and return their average
+    Parameters
+    ----------
+    data : ndarray
+        The data to process.
+    n : int
+        The number of points to find.
+    mode : str
+        The mode to find, either "max" or "min". Default is "max".
+    Returns
+
+    -------
+    float
+        The average of the first n max/min points.
+    """
+
+    assert mode in ["max", "min"], f"Invalid mode: {mode}"
+
+    if n <= 0:
+        raise ValueError(f"n should be positive, but get {n}")
+
+    if np.sum(~np.isnan(data)) <= n:
+        return np.nanmean(data)
+
+    peak_fn = np.nanargmax if mode == "max" else np.nanargmin
+
+    peaks = np.empty(n, dtype=data.dtype)
+    _data = data.copy().flatten()  # prevent in-place modification
+    for i in range(n):
+        peak_idx = peak_fn(_data)
+        peaks[i], _data[peak_idx] = _data[peak_idx], np.nan
+
+    return np.mean(peaks)
 
 
 def rotate_phase(fpts, signals, phase_slope):
