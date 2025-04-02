@@ -23,7 +23,7 @@ def set_flux(flux_dev: str, flux):
         If the specified flux device is not supported.
     """
     if flux_dev == "yoko":
-        YokoDevControl.set_current(flux)
+        YokoDevControl.set_current(flux, progress=False)
     elif flux_dev == "none":
         pass
     else:

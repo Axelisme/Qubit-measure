@@ -1,5 +1,7 @@
 from typing import Union
 
+from tqdm.auto import tqdm
+
 from zcu_tools.config import config
 
 from .manager import InstrManager
@@ -71,10 +73,21 @@ class YokoDevControl:
         cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.SWEEP_RATE)
 
     @classmethod
-    def _set_current_smart(cls, value):
+    def _set_current_smart(cls, value, progress=True):
         # sweep to the target value step by step
         step = 1e-4
         cur = cls.get_current()
+
+        if cur == value:
+            return
+
+        if progress:
+            pbar = tqdm(
+                total=1e3 * abs(cur - value),
+                desc=f"{1e3 * cur:.3f} / {1e3 * value:.3f}",
+                unit="mA",
+            )
+
         while cur != value:
             if value > cur:
                 cur += step
@@ -85,9 +98,15 @@ class YokoDevControl:
                 if cur < value:
                     cur = value
             cls._set_current_direct(cur)
+            if progress:
+                pbar.update(1e3 * step)
+
+        if progress:
+            pbar.update(1e3 * value - pbar.n)
+            pbar.close()
 
     @classmethod
-    def set_current(cls, value: Union[int, float]) -> None:
+    def set_current(cls, value: Union[int, float], progress=True) -> None:
         # cast numpy float to python float
         if hasattr(value, "item"):
             value = value.item()
@@ -111,7 +130,7 @@ class YokoDevControl:
             return
 
         try:
-            cls._set_current_smart(value)
+            cls._set_current_smart(value, progress=progress)
         except KeyboardInterrupt:
             # don't catch KeyboardInterrupt
             raise KeyboardInterrupt
@@ -120,4 +139,4 @@ class YokoDevControl:
             print(f"Error in setting current, reconnect and try again: {e}")
             cls.connect_server(cls.dev_cfg, reinit=True)
 
-            cls._set_current_smart(value)
+            cls._set_current_smart(value, progress=progress)
