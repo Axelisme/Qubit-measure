@@ -39,28 +39,120 @@ def calc_snr(avg_d, std_d):
 
 
 def ge_result2signals(avg_d, std_d):
-    """
-    Convert raw measurement results to signal-to-noise ratio for ground/excited state discrimination.
-
-    Parameters
-    ----------
-    avg_d : ndarray
-        Average data from measurement
-    std_d : ndarray
-        Standard deviation data from measurement
-
-    Returns
-    -------
-    tuple
-        (SNR matrix transposed, None)
-    """
     avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep, ge)
     std_d = std_d[0][0].dot([1, 1j])  # (*sweep, ge)
 
     return calc_snr(avg_d, std_d).T, None
 
 
+def measure_ge_freq_dep(soc, soccfg, cfg):
+    """
+    Measure ground/excited state discrimination as a function of frequency.
+
+    Parameters
+    ----------
+    soc : object
+        System-on-chip object for hardware control
+    soccfg : object
+        System-on-chip configuration
+    cfg : dict
+        Configuration dictionary with DAC, sweep, and other settings
+
+    Returns
+    -------
+    tuple
+        (frequency_points, snrs)
+        Returns frequency points, and the resulting SNR matrix
+    """
+    cfg = make_cfg(cfg)  # prevent in-place modification
+
+    res_pulse = cfg["dac"]["res_pulse"]
+    qub_pulse = cfg["dac"]["qub_pulse"]
+
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
+
+    # append ge sweep to inner loop
+    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+
+    # set with / without pi gain for qubit pulse
+    qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+
+    res_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
+
+    fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+    fpts = map2adcfreq(soc, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
+
+    prog, snrs = sweep_hard_template(
+        soc,
+        soccfg,
+        cfg,
+        TwoToneProgram,
+        ticks=(fpts,),
+        xlabel="Frequency (MHz)",
+        ylabel="SNR",
+        result2signals=ge_result2signals,
+    )
+
+    # get the actual pulse gains and frequency points
+    fpts = prog.get_pulse_param("res_pulse", "freq", as_array=True)
+
+    return fpts, snrs  # fpts
+
+
 def measure_ge_pdr_dep(soc, soccfg, cfg):
+    """
+    Measure ground/excited state discrimination as a function of pulse drive.
+
+    Parameters
+    ----------
+    soc : object
+        System-on-chip object for hardware control
+    soccfg : object
+        System-on-chip configuration
+    cfg : dict
+        Configuration dictionary with DAC, sweep, and other settings
+
+    Returns
+    -------
+    tuple
+        (pdrs, snrs)
+        Returns pulse drive, and the resulting SNR matrix
+    """
+    cfg = make_cfg(cfg)  # prevent in-place modification
+
+    res_pulse = cfg["dac"]["res_pulse"]
+    qub_pulse = cfg["dac"]["qub_pulse"]
+
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
+
+    # append ge sweep to inner loop
+    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+
+    # set with / without pi gain for qubit pulse
+    qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+
+    res_pulse["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+
+    pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
+
+    prog, snrs = sweep_hard_template(
+        soc,
+        soccfg,
+        cfg,
+        TwoToneProgram,
+        ticks=(pdrs,),
+        xlabel="Power (a.u)",
+        ylabel="SNR",
+        result2signals=ge_result2signals,
+    )
+
+    # get the actual pulse gains and frequency points
+    pdrs = prog.get_pulse_param("res_pulse", "gain", as_array=True)
+
+    return pdrs, snrs  # pdrs
+
+
+def measure_ge_pdr_dep2D(soc, soccfg, cfg):
     """
     Measure ground/excited state discrimination as a function of pulse drive and frequency.
 
@@ -122,7 +214,7 @@ def measure_ge_pdr_dep(soc, soccfg, cfg):
     return pdrs, fpts, snr2D  # (pdrs, fpts)
 
 
-def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
+def measure_ge_pdr_dep2D_auto(soc, soccfg, cfg, method="Nelder-Mead"):
     """
     Automatically optimize pulse drive and frequency for ground/excited state discrimination.
 

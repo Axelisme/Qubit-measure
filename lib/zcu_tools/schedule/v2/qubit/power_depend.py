@@ -7,15 +7,6 @@ from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
 def signals2reals(signals: np.ndarray) -> np.ndarray:
-    """
-    Convert complex measurement signals to real-valued magnitudes by removing background noise.
-
-    Args:
-        signals (np.ndarray): Complex-valued measurement signals array.
-
-    Returns:
-        np.ndarray: Absolute values of the background-corrected signals.
-    """
     return np.abs(minus_background(signals, axis=1))
 
 

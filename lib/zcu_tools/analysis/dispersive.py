@@ -91,7 +91,7 @@ def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
         aspect="auto",
         origin="lower",
         interpolation="none",
-        extent=[xs[0], xs[-1], ys[0], ys[-1]],
+        extent=(ys[0], ys[-1], xs[0], xs[-1]),
     )
     plt.scatter(
         x_max, y_max, color="r", label=f"max SNR = {snr2D[y_max_id, x_max_id]:.2e}"
@@ -100,6 +100,7 @@ def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
         plt.xlabel(xlabel)
     if ylabel is not None:
         plt.ylabel(ylabel)
+    plt.colorbar(label="SNR (a.u.)")
     plt.legend()
     plt.show()
 
