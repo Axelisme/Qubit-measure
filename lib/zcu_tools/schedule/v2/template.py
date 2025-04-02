@@ -290,7 +290,7 @@ def sweep2D_soft_hard_template(
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])  # set initial flux
 
     title = None
-    with InstantShow2D(xs, ys, xlabel, ylabel, title=title) as viewer:
+    with InstantShow2D(xs, ys, xlabel, ylabel, title=title, with_1D_axis="y") as viewer:
         try:
             xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
             avgs_tqdm = tqdm(total=cfg["soft_avgs"], smoothing=0, disable=not progress)
@@ -317,7 +317,10 @@ def sweep2D_soft_hard_template(
                             stop, title = early_stop_checker(_signals2D[i])
                             if stop:
                                 prog.set_early_stop()
-                        viewer.update_show(signal2real(_signals2D), title=title)
+                        signals_real = signal2real(_signals2D)
+                        viewer.update_show(
+                            signals_real, title=title, signals_real_1D=signals_real[i]
+                        )
 
                     prog = prog_cls(soccfg, cfg)
                     avg_d, std_d = prog.acquire(
@@ -328,7 +331,10 @@ def sweep2D_soft_hard_template(
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
 
-                    async_draw(i, signal2real(signals2D), title=title)
+                    signals_real = signal2real(signals2D)
+                    async_draw(
+                        i, signals_real, title=title, signals_real_1D=signals_real[i]
+                    )
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
@@ -336,7 +342,10 @@ def sweep2D_soft_hard_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signal2real(signals2D), ticks=(xs, ys), title=title)
+            signals_real = signal2real(signals2D)
+            viewer.update_show(
+                signals_real, title=title, signals_real_1D=signals_real[i]
+            )
             xs_tqdm.close()
             avgs_tqdm.close()
 

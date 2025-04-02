@@ -7,7 +7,7 @@ including 1D line plots, 2D heatmaps, and scatter plots.
 """
 
 from threading import Lock
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -160,8 +160,6 @@ class InstantShow1D(BaseInstantShow):
         # smooth error bars
         errs_up = signals_real + 2 * errs
         errs_dn = signals_real - 2 * errs
-        # errs_up = self._smooth_errs(signals_real + 2 * errs)
-        # errs_dn = self._smooth_errs(signals_real - 2 * errs)
 
         with self.update_lock:
             self.contain.set_data(sorted_xs, signals_real)
@@ -190,7 +188,14 @@ class InstantShow2D(BaseInstantShow):
     """
 
     def __init__(
-        self, xs, ys, x_label: str, y_label: str, title: Optional[str] = None, **kwargs
+        self,
+        xs,
+        ys,
+        x_label: str,
+        y_label: str,
+        title: Optional[str] = None,
+        with_1D_axis: Literal["x", "y", "none"] = "none",
+        **kwargs,
     ):
         """
         Initialize a 2D instant show plot.
@@ -201,57 +206,105 @@ class InstantShow2D(BaseInstantShow):
             x_label: Label for the x-axis
             y_label: Label for the y-axis
             title: Optional title for the plot
+            with_1D: Optional flag to include 1D line plots
             **kwargs: Additional keyword arguments to pass to matplotlib's imshow function
         """
-        super().__init__(x_label, y_label, title)
+        if with_1D_axis == "none":
+            fig, ax2D = plt.subplots()
+        else:
+            fig, (ax2D, ax1D) = plt.subplots(1, 2)
+        fig.tight_layout(pad=3)
+        if title:
+            fig.suptitle(title)
+
+        ax2D.set_xlabel(x_label)
+        ax2D.set_ylabel(y_label)
+
+        self.fig = fig
+        self.ax2D = ax2D
+        self.with_1D_axis = with_1D_axis
+        if with_1D_axis != "none":
+            self.ax1D = ax1D
 
         kwargs.setdefault("origin", "lower")
         kwargs.setdefault("interpolation", "none")
         kwargs.setdefault("aspect", "auto")
 
-        self.contain = self.ax.imshow(
+        self.contain = ax2D.imshow(
             np.zeros((len(ys), len(xs))),
             extent=[xs[0], xs[-1], ys[0], ys[-1]],
             **kwargs,
         )
 
+        if with_1D_axis == "x":
+            self.contain1D = ax1D.plot(
+                xs, np.zeros_like(xs), linestyle="-", marker="."
+            )[0]
+        elif with_1D_axis == "y":
+            self.contain1D = ax1D.plot(
+                ys, np.zeros_like(ys), linestyle="-", marker="."
+            )[0]
+
+        self.update_lock = Lock()
         self.dh = display(self.fig, display_id=True)
 
     def update_show(
         self,
         signals_real: np.ndarray,
         *,
-        errs: Optional[np.ndarray] = None,
         ticks: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         title: Optional[str] = None,
+        signals_real_1D: Optional[np.ndarray] = None,
     ):
         """
         Update the 2D heatmap with new data.
 
         Args:
             signals_real: 2D array of values to display as a heatmap
-            errs: Optional error values (not used in 2D plots)
             ticks: Optional tuple of (X, Y) arrays to update axis extents
             title: Optional new title for the plot
+            signals_real_1D: Optional 1D array of values to display as a line plot
 
         Raises:
             ValueError: If signals_real is not a 2D array
         """
-        with self.update_lock:
-            if len(signals_real.shape) != 2:
+        if len(signals_real.shape) != 2:
+            raise ValueError(
+                f"Invalid shape of signals: {signals_real.shape}, expect 2D"
+            )
+
+        if signals_real_1D is not None:
+            if self.with_1D_axis == "x":
+                expect_len = signals_real.shape[0]
+            elif self.with_1D_axis == "y":
+                expect_len = signals_real.shape[1]
+            else:
+                raise ValueError("with_1D_axis == 'none' but received 1D data")
+            if len(signals_real_1D) != expect_len:
                 raise ValueError(
-                    f"Invalid shape of signals: {signals_real.shape}, expect 2D"
+                    f"Invalid shape of signals_1D: {signals_real_1D.shape}, "
+                    f"expect {expect_len}"
                 )
 
+        with self.update_lock:
             if ticks is not None:
                 X, Y = ticks
                 self.contain.set_extent([X[0], X[-1], Y[0], Y[-1]])
 
+                if self.with_1D_axis != "none":
+                    ticks1D = X if self.with_1D_axis == "x" else Y
+                    self.contain1D.set_xdata(ticks1D)
+                    self.ax1D.set_xlim(ticks1D.min(), ticks1D.max())
+
             if title:
-                self.ax.set_title(title)
+                self.fig.suptitle(title)
 
             self.contain.set_data(signals_real.T)
             self.contain.autoscale()
+
+            if signals_real_1D is not None:
+                self.contain1D.set_ydata(signals_real_1D)
+                self.ax1D.relim()
 
             self.dh.update(self.fig)
 
