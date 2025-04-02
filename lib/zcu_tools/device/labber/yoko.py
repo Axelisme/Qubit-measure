@@ -83,7 +83,7 @@ class YokoDevControl:
 
         if progress:
             dist = 1e3 * abs(cur - value)
-            pbar = tqdm(total=round(dist, 2), unit="mA")
+            pbar = tqdm(total=round(dist, 2), unit="mA", leave=False)
 
         step = 0.5 * cls.SWEEP_RATE  # ~0.5 second a step
         while cur != value:
@@ -100,7 +100,7 @@ class YokoDevControl:
 
             if progress:
                 cur_dist = 1e3 * abs(cur - value)
-                pbar.update(round(cur_dist, 2) - pbar.n)
+                pbar.update(round(dist - cur_dist, 2) - pbar.n)
 
         if progress:
             pbar.close()
