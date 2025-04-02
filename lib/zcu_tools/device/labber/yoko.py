@@ -84,7 +84,6 @@ class YokoDevControl:
         if progress:
             pbar = tqdm(
                 total=1e3 * abs(cur - value),
-                desc=f"{1e3 * cur:.3f} / {1e3 * value:.3f}",
                 unit="mA",
             )
 
@@ -99,10 +98,9 @@ class YokoDevControl:
                     cur = value
             cls._set_current_direct(cur)
             if progress:
-                pbar.update(1e3 * step)
+                pbar.update(1e3 * cur - pbar.n)
 
         if progress:
-            pbar.update(1e3 * value - pbar.n)
             pbar.close()
 
     @classmethod
