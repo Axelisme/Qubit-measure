@@ -269,7 +269,6 @@ class AsyncFunc:
             try:
                 assert job is not None, "Job should not be None"
                 ir, args, kwargs = job
-                prev_start = time.time()
                 if self.include_idx:
                     self.func(ir, *args, **kwargs)
                 else:
@@ -277,6 +276,8 @@ class AsyncFunc:
             except Exception:
                 print("Error in callback:")
                 print_traceback()
+            finally:
+                prev_start = time.time()
 
     def __call__(self, ir: int, *args, **kwargs):
         """
