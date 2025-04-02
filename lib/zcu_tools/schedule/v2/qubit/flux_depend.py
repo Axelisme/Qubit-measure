@@ -83,7 +83,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
         TwoToneProgram,
         xs=flxs,
         ys=fpts,
-        xlabel="Flux (a.u.)",
+        xlabel="Flux (mA)",
         ylabel="Frequency (MHz)",
         updateCfg=updateCfg,
         signal2real=qub_signals2reals,
