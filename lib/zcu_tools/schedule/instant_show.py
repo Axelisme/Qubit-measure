@@ -212,13 +212,16 @@ class InstantShow2D(BaseInstantShow):
         if with_1D_axis == "none":
             fig, ax2D = plt.subplots()
         else:
-            fig, (ax2D, ax1D) = plt.subplots(1, 2)
+            fig, (ax2D, ax1D) = plt.subplots(1, 2, figsize=(10, 5))
         fig.tight_layout(pad=3)
         if title:
             fig.suptitle(title)
 
         ax2D.set_xlabel(x_label)
         ax2D.set_ylabel(y_label)
+
+        self.xs = xs
+        self.ys = ys
 
         self.fig = fig
         self.ax2D = ax2D
@@ -280,6 +283,7 @@ class InstantShow2D(BaseInstantShow):
                 expect_len = signals_real.shape[1]
             else:
                 raise ValueError("with_1D_axis == 'none' but received 1D data")
+
             if len(signals_real_1D) != expect_len:
                 raise ValueError(
                     f"Invalid shape of signals_1D: {signals_real_1D.shape}, "
@@ -291,10 +295,8 @@ class InstantShow2D(BaseInstantShow):
                 X, Y = ticks
                 self.contain.set_extent([X[0], X[-1], Y[0], Y[-1]])
 
-                if self.with_1D_axis != "none":
-                    ticks1D = X if self.with_1D_axis == "x" else Y
-                    self.contain1D.set_xdata(ticks1D)
-                    self.ax1D.set_xlim(ticks1D.min(), ticks1D.max())
+                self.xs = X
+                self.ys = Y
 
             if title:
                 self.fig.suptitle(title)
@@ -303,8 +305,10 @@ class InstantShow2D(BaseInstantShow):
             self.contain.autoscale()
 
             if signals_real_1D is not None:
-                self.contain1D.set_ydata(signals_real_1D)
-                self.ax1D.relim()
+                tick1D = self.xs if self.with_1D_axis == "x" else self.ys
+                self.contain1D.set_data(tick1D, signals_real_1D)
+                self.ax1D.relim(visible_only=True)
+                self.ax1D.autoscale_view()
 
             self.dh.update(self.fig)
 
