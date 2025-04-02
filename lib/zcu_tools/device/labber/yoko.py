@@ -98,7 +98,7 @@ class YokoDevControl:
                     cur = value
             cls._set_current_direct(cur)
             if progress:
-                pbar.update(1e3 * cur - pbar.n)
+                pbar.update(1e3 * abs(cur - value) - pbar.n)
 
         if progress:
             pbar.close()
