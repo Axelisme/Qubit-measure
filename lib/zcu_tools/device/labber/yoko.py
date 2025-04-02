@@ -10,7 +10,7 @@ from .manager import InstrManager
 class YokoDevControl:
     yoko = None
     TIMEOUT = 5 * 60  # 5 minutes
-    SWEEP_RATE = None  # 10 mA/s
+    SWEEP_RATE = None  # A/s
     dev_cfg = {}
 
     @classmethod
@@ -69,24 +69,23 @@ class YokoDevControl:
     @classmethod
     def _set_current_direct(cls, value):
         if config.YOKO_DRY_RUN:
+            if cls.cur_val != value:
+                cls.cur_val = value
             return
         cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.SWEEP_RATE)
 
     @classmethod
     def _set_current_smart(cls, value, progress=True):
         # sweep to the target value step by step
-        step = 1e-4
         cur = cls.get_current()
-
         if cur == value:
             return
 
         if progress:
-            pbar = tqdm(
-                total=1e3 * abs(cur - value),
-                unit="mA",
-            )
+            dist = 1e3 * abs(cur - value)
+            pbar = tqdm(total=round(dist, 2), unit="mA")
 
+        step = 0.5 * cls.SWEEP_RATE  # ~0.5 second a step
         while cur != value:
             if value > cur:
                 cur += step
@@ -96,9 +95,12 @@ class YokoDevControl:
                 cur -= step
                 if cur < value:
                     cur = value
+
             cls._set_current_direct(cur)
+
             if progress:
-                pbar.update(1e3 * abs(cur - value) - pbar.n)
+                cur_dist = 1e3 * abs(cur - value)
+                pbar.update(round(cur_dist, 2) - pbar.n)
 
         if progress:
             pbar.close()
@@ -122,10 +124,7 @@ class YokoDevControl:
             raise RuntimeError("YokoDevControl not initialized")
 
         if config.YOKO_DRY_RUN:
-            if cls.cur_val != value:
-                cls.cur_val = value
-                print(f"DRY RUN: Set current to {value}\r")
-            return
+            print(f"DRY RUN: Set current to {value}\r")
 
         try:
             cls._set_current_smart(value, progress=progress)
