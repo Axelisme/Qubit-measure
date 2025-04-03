@@ -63,7 +63,7 @@ def measure_lenrabi(
 
         def checker(signals):
             snr = qub_signal2snr(signals)
-            return snr >= earlystop_snr, f"SNR: {snr:.2g}"
+            return snr >= earlystop_snr, f"SNR: {snr:.2f}"
 
     else:
         checker = None

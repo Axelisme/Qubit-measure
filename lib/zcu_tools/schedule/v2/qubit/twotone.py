@@ -69,7 +69,7 @@ def measure_qub_freq(
 
         def checker(signals):
             snr = qub_signal2snr(signals)
-            return snr >= earlystop_snr, f"SNR: {snr:.2g}"
+            return snr >= earlystop_snr, f"SNR: {snr:.2f}"
 
         kwargs["early_stop_checker"] = checker
 

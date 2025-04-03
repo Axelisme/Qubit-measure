@@ -71,7 +71,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
 
         def checker(signals):
             snr = qub_signal2snr(signals)
-            return snr >= earlystop_snr, f"Current SNR: {snr:.2g}"
+            return snr >= earlystop_snr, f"Current SNR: {snr:.2f}"
 
     else:
         checker = None
