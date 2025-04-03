@@ -17,8 +17,8 @@ from zcu_tools.schedule.v2.template import (
 
 def calc_snr(avg_d, std_d):
     contrast = avg_d[1, ...] - avg_d[0, ...]  # (*sweep)
-    noise2_i = np.sum(std_d.real**2, axis=-1)  # (*sweep)
-    noise2_q = np.sum(std_d.imag**2, axis=-1)  # (*sweep)
+    noise2_i = np.sum(std_d.real**2, axis=0)  # (*sweep)
+    noise2_q = np.sum(std_d.imag**2, axis=0)  # (*sweep)
     noise = np.sqrt(noise2_i * contrast.real**2 + noise2_q * contrast.imag**2) / np.abs(
         contrast
     )
