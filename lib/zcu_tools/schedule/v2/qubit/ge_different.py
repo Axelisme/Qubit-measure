@@ -16,22 +16,7 @@ from zcu_tools.schedule.v2.template import (
 
 
 def calc_snr(avg_d, std_d):
-    """
-    Calculate signal-to-noise ratio from average and standard deviation data.
-
-    Parameters
-    ----------
-    avg_d : ndarray
-        Average data with shape (*sweep, 2) where last dimension represents ground and excited states
-    std_d : ndarray
-        Standard deviation data with same shape as avg_d
-
-    Returns
-    -------
-    ndarray
-        Signal-to-noise ratio calculated as contrast divided by noise
-    """
-    contrast = avg_d[..., 1] - avg_d[..., 0]  # (*sweep)
+    contrast = avg_d[1, ...] - avg_d[0, ...]  # (*sweep)
     noise2_i = np.sum(std_d.real**2, axis=-1)  # (*sweep)
     noise2_q = np.sum(std_d.imag**2, axis=-1)  # (*sweep)
     noise = np.sqrt(noise2_i * contrast.real**2 + noise2_q * contrast.imag**2) / np.abs(
@@ -74,8 +59,11 @@ def measure_ge_freq_dep(soc, soccfg, cfg):
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
 
-    # append ge sweep to inner loop
-    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+    # prepend ge sweep to inner loop
+    cfg["sweep"] = {
+        "ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2},
+        "freq": cfg["sweep"]["freq"],
+    }
 
     # set with / without pi gain for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
@@ -128,8 +116,11 @@ def measure_ge_pdr_dep(soc, soccfg, cfg):
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
 
-    # append ge sweep to inner loop
-    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+    # prepend ge sweep to inner loop
+    cfg["sweep"] = {
+        "ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2},
+        "gain": cfg["sweep"]["gain"],
+    }
 
     # set with / without pi gain for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
@@ -179,15 +170,12 @@ def measure_ge_pdr_dep2D(soc, soccfg, cfg):
     res_pulse = cfg["dac"]["res_pulse"]
     qub_pulse = cfg["dac"]["qub_pulse"]
 
-    # make sure gain is the outer loop
-    if list(cfg["sweep"].keys())[0] == "freq":
-        cfg["sweep"] = {
-            "gain": cfg["sweep"]["gain"],
-            "freq": cfg["sweep"]["freq"],
-        }
-
-    # append ge sweep to inner loop
-    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+    # prepend ge sweep to inner loop
+    cfg["sweep"] = {
+        "ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2},
+        "gain": cfg["sweep"]["gain"],
+        "freq": cfg["sweep"]["freq"],
+    }
 
     # set with / without pi gain for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
@@ -244,8 +232,13 @@ def measure_ge_pdr_dep2D_auto(soc, soccfg, cfg, method="Nelder-Mead"):
     res_pulse = cfg["dac"]["res_pulse"]
     qub_pulse = cfg["dac"]["qub_pulse"]
 
-    # append ge sweep to inner loop
-    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+    # prepend ge sweep to inner loop
+    cfg["sweep"] = {
+        "ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2},
+        "gain": cfg["sweep"]["gain"],
+        "freq": cfg["sweep"]["freq"],
+    }
+
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
     pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
@@ -302,8 +295,11 @@ def measure_ge_ro_dep(soc, soccfg, cfg):
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
-    # append ge sweep to inner loop
-    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+    # prepend ge sweep to inner loop
+    cfg["sweep"] = {
+        "ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2},
+        "length": cfg["sweep"]["length"],
+    }
 
     # set with / without pi length for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
@@ -360,8 +356,11 @@ def measure_ge_trig_dep(soc, soccfg, cfg):
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "offset")
 
-    # append ge sweep to inner loop
-    cfg["sweep"]["ge"] = {"start": 0, "stop": qub_pulse["gain"], "expts": 2}
+    # prepend ge sweep to inner loop
+    cfg["sweep"] = {
+        "ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2},
+        "offset": cfg["sweep"]["offset"],
+    }
 
     # set with / without pi length for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
