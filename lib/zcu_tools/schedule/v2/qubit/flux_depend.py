@@ -59,13 +59,13 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
         assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
         cfg["dac"]["reset_pulse"]["freq"] = reset_rf - qub_pulse["freq"]
 
-    flxs = sweep2array(flx_sweep, allow_array=True)
+    mAs = sweep2array(flx_sweep, allow_array=True)
     fpts = sweep2array(fpt_sweep)
 
-    cfg["dev"]["flux"] = flxs[0]  # set initial flux
+    cfg["dev"]["flux"] = mAs[0]  # set initial flux
 
-    def updateCfg(cfg, _, flx):
-        cfg["dev"]["flux"] = flx
+    def updateCfg(cfg, _, mA):
+        cfg["dev"]["flux"] = mA * 1e-3  # convert to A
 
     if earlystop_snr is not None:
 
@@ -81,7 +81,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
         soccfg,
         cfg,
         TwoToneProgram,
-        xs=flxs,
+        xs=1e3 * mAs,
         ys=fpts,
         xlabel="Flux (mA)",
         ylabel="Frequency (MHz)",
@@ -93,4 +93,4 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
     # get the actual frequency points
     fpts = prog.get_pulse_param("qub_pulse", "freq", as_array=True)
 
-    return flxs, fpts, signals2D
+    return mAs, fpts, signals2D

@@ -212,7 +212,7 @@ class InstantShow2D(BaseInstantShow):
         if with_1D_axis == "none":
             fig, ax2D = plt.subplots()
         else:
-            fig, (ax2D, ax1D) = plt.subplots(1, 2, figsize=(10, 5))
+            fig, (ax2D, ax1D) = plt.subplots(1, 2, figsize=(12, 5))
         fig.tight_layout(pad=3)
         if title:
             fig.suptitle(title)
