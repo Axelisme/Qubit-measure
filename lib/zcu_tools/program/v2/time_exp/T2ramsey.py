@@ -7,7 +7,9 @@ class T2RamseyProgram(MyProgramV2):
     def _initialize(self, cfg):
         qub_pulse = deepcopy(self.qub_pulse)
         declare_pulse(self, qub_pulse, "pi2_pulse1")
-        qub_pulse["phase"] = qub_pulse["phase"] + cfg["detune"] * self.dac["t2r_length"]
+        qub_pulse["phase"] = (
+            qub_pulse["phase"] + 360 * cfg["detune"] * self.dac["t2r_length"]
+        )
         declare_pulse(self, qub_pulse, "pi2_pulse2")
         super()._initialize(cfg)
 
