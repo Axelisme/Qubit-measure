@@ -4,9 +4,14 @@ from typing import Tuple
 
 import numpy as np
 from zcu_tools import make_cfg
+from zcu_tools.analysis import rotate2real
 from zcu_tools.program.v2 import T1Program, T2EchoProgram, T2RamseyProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep1D_soft_template, sweep_hard_template
+
+
+def qub_signals2reals(signals):
+    return rotate2real(signals).real
 
 
 def measure_t2ramsey(
@@ -50,6 +55,7 @@ def measure_t2ramsey(
     kwargs = dict(
         xlabel="Time (us)",
         ylabel="Amplitude",
+        signal2real=qub_signals2reals,
     )
     if isinstance(sweep_cfg, np.ndarray) or isinstance(sweep_cfg, list) or soft_loop:
         # custom soft sweep
@@ -113,6 +119,7 @@ def measure_t2echo(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.nd
     kwargs = dict(
         xlabel="Time (us)",
         ylabel="Amplitude",
+        signal2real=qub_signals2reals,
     )
     if isinstance(sweep_cfg, np.ndarray) or isinstance(sweep_cfg, list) or soft_loop:
         # custom soft sweep
@@ -174,6 +181,7 @@ def measure_t1(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.ndarra
     kwargs = dict(
         xlabel="Time (us)",
         ylabel="Amplitude",
+        signal2real=qub_signals2reals,
     )
 
     if isinstance(sweep_cfg, np.ndarray) or isinstance(sweep_cfg, list) or soft_loop:

@@ -34,8 +34,13 @@ def rotate2real(signals: ndarray):
     if signals.dtype != complex:
         raise ValueError(f"Expect complex signals, but get dtype {signals.dtype}")
 
+    val_signals = signals[~np.isnan(signals)]
+
+    if len(val_signals) < 2:
+        return signals
+
     # calculate the covariance matrix
-    cov = np.cov(signals.real, signals.imag)  # (2, 2)
+    cov = np.cov(val_signals.real, val_signals.imag)  # (2, 2)
 
     # calculate the eigenvalues and eigenvectors
     eigenvalues, eigenvectors = np.linalg.eig(cov)  # (2,), (2, 2)
