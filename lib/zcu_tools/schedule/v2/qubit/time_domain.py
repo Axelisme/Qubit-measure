@@ -68,7 +68,8 @@ def measure_t2ramsey(
         prog, signals = sweep_hard_template(*args, ticks=(ts,), **kwargs)
 
         # get the actual times
-        ts: np.ndarray = prog.get_time_param("t2r_length", "t", as_array=True)
+        _ts: np.ndarray = prog.get_time_param("t2r_length", "t", as_array=True)
+        ts = _ts + ts[0] - _ts[0]  # adjust to start from the first time
     else:
         raise ValueError("Invalid sweep configuration")
 
@@ -129,7 +130,8 @@ def measure_t2echo(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.nd
         prog, signals = sweep_hard_template(*args, ticks=(ts,), **kwargs)
 
         # get the actual times
-        ts: np.ndarray = 2 * prog.get_time_param("t2e_half", "t", as_array=True)  # type: ignore
+        _ts: np.ndarray = 2 * prog.get_time_param("t2e_half", "t", as_array=True)  # type: ignore
+        ts = _ts + ts[0] - _ts[0]  # adjust to start from the first time
     else:
         raise ValueError("Invalid sweep configuration")
 
@@ -190,7 +192,8 @@ def measure_t1(soc, soccfg, cfg, soft_loop=False) -> Tuple[np.ndarray, np.ndarra
         prog, signals = sweep_hard_template(*args, ticks=(ts,), **kwargs)
 
         # get the actual times
-        ts: np.ndarray = prog.get_time_param("t1_length", "t", as_array=True)
+        _ts: np.ndarray = prog.get_time_param("t1_length", "t", as_array=True)
+        ts = _ts + ts[0] - _ts[0]
     else:
         raise ValueError("Invalid sweep configuration")
 
