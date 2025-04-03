@@ -257,6 +257,7 @@ class InstantShow2D(BaseInstantShow):
         *,
         ticks: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         title: Optional[str] = None,
+        errs: Optional[np.ndarray] = None,
         signals_real_1D: Optional[np.ndarray] = None,
     ):
         """
@@ -266,6 +267,7 @@ class InstantShow2D(BaseInstantShow):
             signals_real: 2D array of values to display as a heatmap
             ticks: Optional tuple of (X, Y) arrays to update axis extents
             title: Optional new title for the plot
+            errs: Optional array of error values (not used in this class)
             signals_real_1D: Optional 1D array of values to display as a line plot
 
         Raises:
