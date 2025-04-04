@@ -2,6 +2,7 @@ import warnings
 from typing import Any, Dict, Union
 
 import numpy as np
+from numpy import ndarray
 from myqick.asm_v2 import QickParam, QickSweep1D
 
 
@@ -88,7 +89,7 @@ def map2adcfreq(soccfg, fpts, gen_ch, ro_ch):
     return fpts
 
 
-def sweep2array(sweep, allow_array=False) -> np.ndarray:
+def sweep2array(sweep, allow_array=False) -> ndarray:
     """
     Convert sweep parameter to a numpy array.
 

@@ -7,15 +7,15 @@ from tqdm.auto import tqdm
 from zcu_tools.program.v2 import MyProgramV2
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
-from zcu_tools.tools import AsyncFunc, print_traceback
 from zcu_tools.schedule.v1.template import sweep2D_maximize_template  # noqa
+from zcu_tools.tools import AsyncFunc, print_traceback
 
 
-def default_result2signals(
+def default_result2signal(
     avg_d: list, std_d: list
 ) -> Tuple[ndarray, Optional[ndarray]]:
-    avg_d = avg_d[0][0].dot([1, 1j])
-    std_d = np.max(std_d[0][0], axis=-1)
+    avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep)
+    std_d = np.max(std_d[0][0], axis=-1)  # (*sweep)
 
     return avg_d, std_d
 
@@ -30,7 +30,7 @@ def std2err(stds: Optional[ndarray], N: int) -> Optional[ndarray]:
     return stds / np.sqrt(N)
 
 
-def raw2result(ir, sum_d, sum2_d) -> Tuple[np.ndarray, np.ndarray]:
+def raw2result(ir, sum_d, sum2_d) -> Tuple[ndarray, ndarray]:
     avg_d = [d / (ir + 1) for d in sum_d]
     std_d = [np.sqrt(d2 / (ir + 1) - d**2) for d, d2 in zip(avg_d, sum2_d)]
     return avg_d, std_d
@@ -47,7 +47,7 @@ def sweep_hard_template(
     ylabel: str,
     result2signals: Callable[
         [list, list], Tuple[ndarray, Optional[ndarray]]
-    ] = default_result2signals,
+    ] = default_result2signal,
     signal2real: Callable[[ndarray], ndarray] = default_signal2real,
     progress: bool = True,
     early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,
@@ -134,7 +134,7 @@ def sweep1D_soft_template(
     ylabel: str,
     result2signals: Callable[
         [list, list], Tuple[ndarray, Optional[ndarray]]
-    ] = default_result2signals,
+    ] = default_result2signal,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
     **kwargs,
@@ -210,7 +210,7 @@ def sweep2D_soft_hard_template(
     ylabel: str,
     result2signals: Callable[
         [list, list], Tuple[ndarray, Optional[ndarray]]
-    ] = default_result2signals,
+    ] = default_result2signal,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
     early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,

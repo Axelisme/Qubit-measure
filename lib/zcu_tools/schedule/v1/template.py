@@ -21,8 +21,8 @@ from zcu_tools.tools import AsyncFunc, print_traceback
 def default_result2signals(
     avgi: list, avgq: list, stdi: list, stdq: list
 ) -> Tuple[ndarray, Optional[ndarray]]:
-    signals = avgi[0][0] + 1j * avgq[0][0]
-    stds = np.maximum(stdi[0][0], stdq[0][0])
+    signals = avgi[0][0] + 1j * avgq[0][0]  # (*sweep)
+    stds = np.maximum(stdi[0][0], stdq[0][0])  # (*sweep)
     return signals, stds
 
 
