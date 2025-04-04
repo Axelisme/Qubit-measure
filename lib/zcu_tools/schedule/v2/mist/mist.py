@@ -66,7 +66,7 @@ def mist_pdr_result2signal(avg_d: list, std_d: list):
     std_d = std_d[0][0].dot([1, 1j])  # (pdr, *)
 
     avg_d -= avg_d[0]  # (pdr, *)
-    std_d = np.sqrt(std_d**2 + std_d[0] ** 2)  # (pdr, *)
+    std_d = np.sqrt(np.abs(std_d) ** 2 + np.abs(std_d)[0] ** 2)  # (pdr, *)
 
     return avg_d, std_d
 
