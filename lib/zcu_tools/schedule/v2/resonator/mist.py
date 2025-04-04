@@ -36,7 +36,9 @@ def measure_mist_len_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
     qub_pulse["gain"] = sweep2param("w/o", cfg["sweep"]["w/o"])
     qub_pulse["length"] = sweep2param("length", len_sweep)
 
-    max_length = max(len_sweep["start"], len_sweep["stop"], qub_pulse["pre_delay"])
+    max_length = max(
+        len_sweep["start"], len_sweep["stop"], qub_pulse.get("pre_delay", 0.0)
+    )
     qub_pulse["pre_delay"] = max_length - qub_pulse["length"]
 
     lens = sweep2array(len_sweep)  # predicted lengths

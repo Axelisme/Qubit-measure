@@ -2,7 +2,7 @@ from typing import Tuple
 
 import numpy as np
 from zcu_tools import make_cfg
-from zcu_tools.analysis import rotate2real, calculate_noise, peak_n_avg
+from zcu_tools.analysis import calculate_noise, peak_n_avg, rotate2real
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_hard_template
@@ -65,7 +65,9 @@ def measure_lenrabi(
     qub_pulse["length"] = sweep2param("length", len_sweep)
 
     if force_align:
-        max_length = max(len_sweep["start"], len_sweep["stop"], qub_pulse["length"])
+        max_length = max(
+            len_sweep["start"], len_sweep["stop"], qub_pulse.get("pre_delay", 0.0)
+        )
         qub_pulse["pre_delay"] = max_length - qub_pulse["length"]
 
     if earlystop_snr is not None:
