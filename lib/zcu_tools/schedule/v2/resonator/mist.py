@@ -51,7 +51,7 @@ def measure_mist_len_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
         progress=True,
         xlabel="Length (us)",
         ylabel="MIST",
-        signal2real=mist_len_result2signal,
+        result2signals=mist_len_result2signal,
     )
 
     # get the actual lengths
@@ -92,7 +92,7 @@ def measure_mist_pdr_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
         progress=True,
         xlabel="Pulse gain",
         ylabel="MIST",
-        signal2real=mist_pdr_result2signal,
+        result2signals=mist_pdr_result2signal,
     )
 
     # get the actual amplitudes
