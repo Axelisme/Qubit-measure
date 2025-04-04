@@ -15,7 +15,7 @@ def mist_len_result2signal(
     std_d = std_d[0][0].dot([1, 1j])  # (ge, *sweep)
 
     avg_d = avg_d[1, ...] - avg_d[0, ...]  # (*sweep)
-    std_d = np.sqrt(np.sum(std_d**2, axis=0))  # (*sweep)
+    std_d = np.sqrt(np.sum(np.abs(std_d) ** 2, axis=0))  # (*sweep)
 
     return avg_d, std_d
 
