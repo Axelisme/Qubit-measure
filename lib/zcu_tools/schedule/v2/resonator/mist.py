@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import numpy as np
 from numpy import ndarray
@@ -33,7 +33,7 @@ def measure_mist_len_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
         "length": len_sweep,
     }
 
-    qub_pulse["gain"] = sweep2param("w/o", cfg["sweep"]["ge"])
+    qub_pulse["gain"] = sweep2param("w/o", cfg["sweep"]["w/o"])
     qub_pulse["length"] = sweep2param("length", len_sweep)
 
     max_length = max(len_sweep["start"], len_sweep["stop"], qub_pulse["pre_delay"])
