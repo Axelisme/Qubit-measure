@@ -9,27 +9,30 @@ from .base import (
     set_pulse,
 )
 
-PULSE_DELAY = 0.01  # us
+
+class BaseTwoToneProgram:
+    PULSE_DELAY = 0.01  # us
+
+    @classmethod
+    def twotone_body(cls, prog, before_pulse=None):
+        # reset
+        prog.resetM.reset_qubit(prog)
+
+        # qubit pulse
+        ch = prog.qub_pulse["ch"]
+        if prog.ch_count[ch] > 1:
+            set_pulse(prog, prog.qub_pulse, waveform="qub_pulse")
+        if before_pulse is not None:
+            before_pulse()
+        prog.sync_all(prog.us2cycles(prog.qub_pulse.get("pre_delay", cls.PULSE_DELAY)))
+        prog.pulse(ch=ch)
+        prog.sync_all(prog.us2cycles(prog.qub_pulse.get("post_delay", cls.PULSE_DELAY)))
+
+        # measure
+        prog.readoutM.readout_qubit(prog)
 
 
-def twotone_body(prog, before_pulse=None):
-    # reset
-    prog.resetM.reset_qubit(prog)
-
-    # qubit pulse
-    ch = prog.qub_pulse["ch"]
-    if prog.ch_count[ch] > 1:
-        set_pulse(prog, prog.qub_pulse, waveform="qub_pulse")
-    if before_pulse is not None:
-        before_pulse()
-    prog.pulse(ch=ch)
-    prog.sync_all(prog.us2cycles(PULSE_DELAY))
-
-    # measure
-    prog.readoutM.readout_qubit(prog)
-
-
-class TwoToneProgram(MyAveragerProgram):
+class TwoToneProgram(BaseTwoToneProgram, MyAveragerProgram):
     def initialize(self):
         super().initialize()
         declare_pulse(self, self.qub_pulse, "qub_pulse")
@@ -37,10 +40,10 @@ class TwoToneProgram(MyAveragerProgram):
         self.synci(SYNC_TIME)
 
     def body(self):
-        twotone_body(self)
+        BaseTwoToneProgram.twotone_body(self)
 
 
-class RGainTwoToneProgram(MyRAveragerProgram):
+class RGainTwoToneProgram(BaseTwoToneProgram, MyRAveragerProgram):
     def declare_gain_reg(self):
         ch = self.qub_pulse["ch"]
         self.q_rp = self.ch_page(ch)
@@ -60,7 +63,7 @@ class RGainTwoToneProgram(MyRAveragerProgram):
         self.synci(SYNC_TIME)
 
     def body(self):
-        twotone_body(self, self.set_gain_reg)
+        BaseTwoToneProgram.twotone_body(self, self.set_gain_reg)
 
     def set_gain_reg(self):
         self.mathi(self.q_rp, self.q_gain, self.q_gain_t, "+", 0)
@@ -70,7 +73,7 @@ class RGainTwoToneProgram(MyRAveragerProgram):
         self.mathi(self.q_rp, self.q_gain_t, self.q_gain_t, "+", self.q_step)
 
 
-class RFreqTwoToneProgram(MyRAveragerProgram):
+class RFreqTwoToneProgram(BaseTwoToneProgram, MyRAveragerProgram):
     def declare_freq_reg(self):
         ch = self.qub_pulse["ch"]
         self.q_rp = self.ch_page(ch)
@@ -89,7 +92,7 @@ class RFreqTwoToneProgram(MyRAveragerProgram):
         self.synci(SYNC_TIME)
 
     def body(self):
-        twotone_body(self, self.set_freq_reg)
+        BaseTwoToneProgram.twotone_body(self, self.set_freq_reg)
 
     def set_freq_reg(self):
         self.mathi(self.q_rp, self.q_freq, self.q_freq_t, "+", 0)
@@ -98,7 +101,7 @@ class RFreqTwoToneProgram(MyRAveragerProgram):
         self.mathi(self.q_rp, self.q_freq_t, self.q_freq_t, "+", self.q_step)
 
 
-class RFreqTwoToneProgramWithRedReset(MyRAveragerProgram):
+class RFreqTwoToneProgramWithRedReset(BaseTwoToneProgram, MyRAveragerProgram):
     def declare_freq_reg(self):
         qub_ch = self.qub_pulse["ch"]
         reset_ch = self.reset_pulse["ch"]
@@ -126,7 +129,7 @@ class RFreqTwoToneProgramWithRedReset(MyRAveragerProgram):
         self.synci(SYNC_TIME)
 
     def body(self):
-        twotone_body(self, self.set_freq_reg)
+        BaseTwoToneProgram.twotone_body(self, self.set_freq_reg)
 
     def set_freq_reg(self):
         self.mathi(self.q_rp, self.q_freq, self.q_freq_t, "+", 0)
@@ -137,7 +140,7 @@ class RFreqTwoToneProgramWithRedReset(MyRAveragerProgram):
         self.mathi(self.s_rp, self.s_freq_t, self.s_freq_t, "-", self.s_step)
 
 
-class PowerDepProgram(MyNDAveragerProgram):
+class PowerDepProgram(BaseTwoToneProgram, MyNDAveragerProgram):
     def add_freq_sweep(self):
         sweep_cfg = self.sweep_cfg["freq"]
         r_freq = self.get_gen_reg(self.qub_pulse["ch"], "freq")
@@ -188,7 +191,7 @@ class PowerDepProgram(MyNDAveragerProgram):
         self.synci(SYNC_TIME)
 
     def body(self):
-        twotone_body(self)
+        BaseTwoToneProgram.twotone_body(self)
 
     def acquire(self, *args, **kwargs):
         pdrs_fpts, *result = super().acquire(*args, **kwargs)
