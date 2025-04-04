@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 import traceback
@@ -112,6 +113,18 @@ def make_sweep(
     assert step != 0, f"step must not be zero, but got {step}"
 
     return {"start": start, "stop": stop, "expts": expts, "step": step}
+
+
+def get_bitfile(version):
+    import myqick
+
+    version_dict = {
+        "v1": "qick_216.bit",
+        "v2": "qick_216_v2.bit",
+    }
+    if version not in version_dict:
+        raise ValueError(f"Invalid version {version}")
+    return os.path.join(os.path.dirname(myqick.__file__), version_dict[version])
 
 
 def get_ip_address(iface):

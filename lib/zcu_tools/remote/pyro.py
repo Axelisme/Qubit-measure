@@ -1,25 +1,13 @@
-import os
-
-import myqick
 import Pyro4
 import Pyro4.naming
 from myqick import QickConfig
+from zcu_tools.tools import get_bitfile
 
 # use dill instead of pickle
 Pyro4.config.SERIALIZER = "dill"
 Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill"])
 Pyro4.config.DILL_PROTOCOL_VERSION = 5
 Pyro4.config.REQUIRE_EXPOSE = False
-
-
-def get_bitfile(version):
-    version_dict = {
-        "v1": "qick_216.bit",
-        "v2": "qick_216_v2.bit",
-    }
-    if version not in version_dict:
-        raise ValueError(f"Invalid version {version}")
-    return os.path.join(os.path.dirname(myqick.__file__), version_dict[version])
 
 
 def get_program_module(version):
