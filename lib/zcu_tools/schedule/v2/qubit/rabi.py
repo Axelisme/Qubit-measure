@@ -22,7 +22,7 @@ def qub_signal2snr(signals):
 
 
 def measure_lenrabi(
-    soc, soccfg, cfg, *, earlystop_snr=None
+    soc, soccfg, cfg, *, force_align=True, earlystop_snr=None
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Measure Rabi oscillation by sweeping pulse length.
 
@@ -41,6 +41,9 @@ def measure_lenrabi(
         Must include:
         - sweep: dict with length sweep parameters
         - dac: dict with qubit pulse settings
+    force_align : bool, optional
+        If True, add alignment delay time before qub_pulse to ensure the total length is
+        consistent.
     earlystop_snr : float, optional
         Early stop signal-to-noise ratio threshold. If provided, the measurement will stop
         when the SNR exceeds this value.
@@ -54,10 +57,16 @@ def measure_lenrabi(
     """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
-    cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+    qub_pulse = cfg["dac"]["qub_pulse"]
 
-    sweep_cfg = cfg["sweep"]["length"]
-    cfg["dac"]["qub_pulse"]["length"] = sweep2param("length", sweep_cfg)
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+    len_sweep = cfg["sweep"]["length"]
+
+    qub_pulse["length"] = sweep2param("length", len_sweep)
+
+    if force_align:
+        max_length = max(len_sweep["start"], len_sweep["stop"], qub_pulse["length"])
+        qub_pulse["pre_delay"] = max_length - qub_pulse["length"]
 
     if earlystop_snr is not None:
 
@@ -68,7 +77,7 @@ def measure_lenrabi(
     else:
         checker = None
 
-    lens = sweep2array(sweep_cfg)  # predicted lengths
+    lens = sweep2array(len_sweep)  # predicted lengths
     prog, signals = sweep_hard_template(
         soc,
         soccfg,
