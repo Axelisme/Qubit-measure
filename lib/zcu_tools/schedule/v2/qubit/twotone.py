@@ -1,13 +1,12 @@
-import numpy as np
 from zcu_tools import make_cfg
-from zcu_tools.analysis import minus_background, calculate_noise, peak_n_avg
+from zcu_tools.analysis import calculate_noise, peak_n_avg, rotate2real
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_hard_template
 
 
 def qub_signal2real(signals):
-    return np.abs(minus_background(signals, method="mean"))
+    return rotate2real(signals).real
 
 
 def qub_signal2snr(signals):

@@ -1,14 +1,13 @@
 from copy import deepcopy
 
-import numpy as np
-from zcu_tools.analysis import minus_background, calculate_noise, peak_n_avg
+from zcu_tools.analysis import calculate_noise, peak_n_avg, rotate2real
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
 from zcu_tools.schedule.tools import sweep2array
 from zcu_tools.schedule.v1.template import sweep1D_hard_template
 
 
 def signal2real(signals):
-    return np.abs(minus_background(signals))
+    return rotate2real(signals).real
 
 
 def qub_signal2snr(signals):
