@@ -215,7 +215,7 @@ def sweep2D_soft_hard_template(
     progress: bool = True,
     early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,
     **kwargs,
-) -> Tuple[ndarray, ndarray, ndarray]:
+) -> Tuple[MyProgramV2, ndarray]:
     """
     Template for 2D parameter sweeps with software and hardware components.
 

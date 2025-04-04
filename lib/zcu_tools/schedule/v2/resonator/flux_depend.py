@@ -7,18 +7,6 @@ from zcu_tools.schedule.v2.template import sweep2D_soft_hard_template
 
 
 def signal2real(signals):
-    """
-    Converts complex signals to real values by removing background noise.
-
-    This function takes the absolute value of signals and subtracts the background
-    along axis 1.
-
-    Args:
-        signals (numpy.ndarray): Complex signal data array.
-
-    Returns:
-        numpy.ndarray: Real signal values with background removed.
-    """
     return minus_background(np.abs(signals), axis=1)
 
 
