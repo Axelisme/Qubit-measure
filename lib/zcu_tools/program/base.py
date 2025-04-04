@@ -4,7 +4,6 @@ from collections import defaultdict
 from typing import Any, Dict, Optional
 
 from myqick.qick_asm import AcquireMixin
-from zcu_tools.config import config
 from zcu_tools.tools import AsyncFunc
 
 
@@ -116,11 +115,6 @@ class MyProgram(AcquireMixin):
                 self.acc_buf = None  # clear local acc_buf
                 self.buf_expired = True
                 return self.proxy.acquire(self, decimated=decimated, **kwargs)
-
-            if config.ZCU_DRY_RUN:
-                raise NotImplementedError(
-                    "ZCU_DRY_RUN is enabled, but not supported in local mode"
-                )
 
             return self._local_acquire(soc, decimated=decimated, **kwargs)
 

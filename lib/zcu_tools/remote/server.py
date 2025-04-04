@@ -1,7 +1,6 @@
 from typing import Optional
 
 import Pyro4
-import Pyro4.errors
 
 from zcu_tools.program.base import MyProgram
 from zcu_tools.tools import AsyncFunc
