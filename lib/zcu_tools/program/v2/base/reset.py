@@ -33,7 +33,7 @@ class NoneReset(AbsReset):
 
 
 class PulseReset(AbsReset):
-    DEFAULT_RESET_DELAY = 1.0  # us
+    DEFAULT_RESET_DELAY = 0.1  # us
 
     def init(self, prog):
         declare_pulse(prog, prog.reset_pulse, "reset")
