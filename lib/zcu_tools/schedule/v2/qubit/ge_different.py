@@ -1,4 +1,6 @@
+from typing import Tuple, Optional
 import numpy as np
+from numpy import ndarray
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
@@ -15,7 +17,7 @@ from zcu_tools.schedule.v2.template import (
 )
 
 
-def calc_snr(avg_d, std_d):
+def calc_snr(avg_d: ndarray, std_d: ndarray) -> ndarray:
     contrast = avg_d[1, ...] - avg_d[0, ...]  # (*sweep)
     noise2_i = np.sum(std_d.real**2, axis=0)  # (*sweep)
     noise2_q = np.sum(std_d.imag**2, axis=0)  # (*sweep)
@@ -26,11 +28,11 @@ def calc_snr(avg_d, std_d):
     return contrast / noise
 
 
-def ge_result2signals(avg_d, std_d):
-    avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep, ge)
-    std_d = std_d[0][0].dot([1, 1j])  # (*sweep, ge)
+def ge_result2signals(avg_d: list, std_d: list) -> Tuple[ndarray, Optional[ndarray]]:
+    avg_d = avg_d[0][0].dot([1, 1j])  # (ge, *sweep)
+    std_d = std_d[0][0].dot([1, 1j])  # (ge, *sweep)
 
-    return calc_snr(avg_d, std_d).T, None
+    return calc_snr(avg_d, std_d), None
 
 
 def measure_ge_freq_dep(soc, soccfg, cfg):
@@ -192,9 +194,9 @@ def measure_ge_pdr_dep2D(soc, soccfg, cfg):
         soccfg,
         cfg,
         TwoToneProgram,
-        ticks=(fpts, pdrs),
-        xlabel="Frequency (MHz)",
-        ylabel="Readout Gain",
+        ticks=(pdrs, fpts),
+        xlabel="Readout Gain",
+        ylabel="Frequency (MHz)",
         result2signals=ge_result2signals,
     )
 
