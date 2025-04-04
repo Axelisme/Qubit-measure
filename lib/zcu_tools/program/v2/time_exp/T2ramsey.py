@@ -4,6 +4,8 @@ from ..base import MyProgramV2, declare_pulse
 
 
 class T2RamseyProgram(MyProgramV2):
+    PULSE_DELAY = 0.01  # us
+
     def _initialize(self, cfg):
         qub_pulse = deepcopy(self.qub_pulse)
         declare_pulse(self, qub_pulse, "pi2_pulse1")
@@ -26,7 +28,7 @@ class T2RamseyProgram(MyProgramV2):
 
         # qub pi2 pulse
         self.pulse(qub_ch, "pi2_pulse2", t="auto")
-        self.delay_auto()
+        self.delay_auto(self.qub_pulse.get("post_delay", self.PULSE_DELAY), ros=False)
 
         # measure
         self.readoutM.readout_qubit(self)

@@ -1,8 +1,10 @@
 from ..base import SYNC_TIME, MyRAveragerProgram
-from ..twotone import PULSE_DELAY, declare_pulse, set_pulse  # noqa
+from ..twotone import declare_pulse, set_pulse  # noqa
 
 
 class T2RamseyProgram(MyRAveragerProgram):
+    PULSE_DELAY = 0.01  # us
+
     def declare_wait_reg(self):
         self.q_wait = 3
         self.regwi(self.q_rp, self.q_wait, self.us2cycles(self.cfg["start"]))
@@ -52,7 +54,7 @@ class T2RamseyProgram(MyRAveragerProgram):
 
         self.overwrite_phase(self.q_phase_t)
         self.pulse(ch=ch)
-        self.sync_all(self.us2cycles(PULSE_DELAY))
+        self.sync_all(self.us2cycles(self.PULSE_DELAY))
 
         # measure
         self.readoutM.readout_qubit(self)

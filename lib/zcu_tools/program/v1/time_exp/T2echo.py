@@ -1,8 +1,10 @@
 from ..base import SYNC_TIME, MyRAveragerProgram, set_pulse
-from ..twotone import PULSE_DELAY, declare_pulse
+from ..twotone import declare_pulse
 
 
 class T2EchoProgram(MyRAveragerProgram):
+    PULSE_DELAY = 0.01  # us
+
     def declare_wait_reg(self):
         self.q_wait = 3
         self.regwi(self.q_rp, self.q_wait, self.us2cycles(self.cfg["start"]))
@@ -46,7 +48,7 @@ class T2EchoProgram(MyRAveragerProgram):
 
         set_pulse(self, self.pi2_pulse, waveform="pi2")
         self.pulse(ch=ch)
-        self.sync_all(self.us2cycles(PULSE_DELAY))
+        self.sync_all(self.us2cycles(self.PULSE_DELAY))
 
         # readout
         self.readoutM.readout_qubit(self)

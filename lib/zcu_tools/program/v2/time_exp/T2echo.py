@@ -2,6 +2,8 @@ from ..base import MyProgramV2, declare_pulse
 
 
 class T2EchoProgram(MyProgramV2):
+    PULSE_DELAY = 0.01  # us
+
     def _initialize(self, cfg):
         declare_pulse(self, self.pi_pulse, "pi_pulse")
         declare_pulse(self, self.pi2_pulse, "pi2_pulse")
@@ -25,7 +27,7 @@ class T2EchoProgram(MyProgramV2):
 
         # qub pi2 pulse
         self.pulse(self.pi2_pulse["ch"], "pi2_pulse", t="auto")
-        self.delay_auto()
+        self.delay_auto(self.pi2_pulse.get("post_delay", self.PULSE_DELAY), ros=False)
 
         # measure
         self.readoutM.readout_qubit(self)
