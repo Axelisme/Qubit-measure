@@ -1,7 +1,7 @@
 from zcu_tools.device import YokoDevControl
 
 
-def set_flux(flux_dev: str, flux):
+def set_flux(flux_dev: str, flux, progress: bool = False):
     """Set flux/current to the specified flux device.
 
     This function controls the flux bias for superconducting qubit experiments
@@ -23,7 +23,7 @@ def set_flux(flux_dev: str, flux):
         If the specified flux device is not supported.
     """
     if flux_dev == "yoko":
-        YokoDevControl.set_current(flux, progress=False)
+        YokoDevControl.set_current(flux, progress=progress)
     elif flux_dev == "none":
         pass
     else:

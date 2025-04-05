@@ -71,7 +71,7 @@ def sweep1D_hard_template(
     reps = cfg["reps"]
 
     # set flux first
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     title = None
     with InstantShow1D(xs, xlabel, ylabel, title=title) as viewer:
@@ -135,7 +135,7 @@ def sweep1D_soft_template(
     N = cfg["soft_avgs"] * cfg["reps"]
 
     # set flux first
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     with InstantShow1D(xs, xlabel, ylabel) as viewer:
         try:
@@ -191,7 +191,8 @@ def sweep2D_hard_template(
 ) -> Tuple[ndarray, ndarray, ndarray]:
     signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])  # set initial flux
+    # set initial flux
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     with InstantShow2D(xs, ys, xlabel, ylabel) as viewer:
 
@@ -240,7 +241,8 @@ def sweep2D_soft_hard_template(
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])  # set initial flux
+    # set initial flux
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     title = None
     with InstantShow2D(xs, ys, xlabel, ylabel, title=title) as viewer:
@@ -320,7 +322,8 @@ def sweep2D_soft_soft_template(
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])  # set initial flux
+    # set initial flux
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     with InstantShow2D(xs, ys, xlabel, ylabel) as viewer:
         try:

@@ -83,7 +83,7 @@ def sweep_hard_template(
     ViewerCls = [InstantShow1D, InstantShow2D][len(ticks) - 1]
 
     # set flux first
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     prog = None
     title = None
@@ -168,7 +168,7 @@ def sweep1D_soft_template(
     N = cfg["soft_avgs"] * cfg["reps"]
 
     # set flux first
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     with InstantShow1D(xs, xlabel, ylabel) as viewer:
         try:
@@ -243,7 +243,8 @@ def sweep2D_soft_hard_template(
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])  # set initial flux
+    # set initial flux
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     title = None
     with InstantShow2D(xs, ys, xlabel, ylabel, title=title, with_1D_axis="y") as viewer:
