@@ -68,7 +68,7 @@ def measure_singleshot(soc, soccfg, cfg):
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     prog = TwoToneProgram(soccfg, deepcopy(cfg))
-    prog.acquire(soc, progress=False)
+    prog.acquire(soc, progress=True)
     acc_buf = prog.acc_buf[0]
     avgiq = acc_buf / prog.get_time_axis(0)[-1]  # (reps, 2, 1, 2)
     i0, q0 = avgiq[..., 0, 0].T, avgiq[..., 0, 1].T  # (reps, 2)
