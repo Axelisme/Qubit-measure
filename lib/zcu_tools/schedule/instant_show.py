@@ -7,7 +7,7 @@ including 1D line plots, 2D heatmaps, and scatter plots.
 """
 
 from threading import Lock
-from typing import Optional, Tuple, Literal
+from typing import Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -41,7 +41,7 @@ class BaseInstantShow:
         ax.set_xlabel(x_label)
         ax.set_ylabel(y_label)
         if title:
-            ax.set_title(title)
+            fig.suptitle(title)
 
         self.fig = fig
         self.ax = ax
@@ -167,7 +167,7 @@ class InstantShow1D(BaseInstantShow):
             self.err_dn.set_data(sorted_xs, errs_dn)
 
             if title:
-                self.ax.set_title(title)
+                self.fig.suptitle(title)
 
             self.ax.relim(visible_only=True)
             self.ax.autoscale_view()
@@ -352,6 +352,51 @@ class InstantShowScatter(BaseInstantShow):
 
         self.dh = display(self.fig, display_id=True)
 
+    def set_spots(
+        self,
+        xs: np.ndarray,
+        ys: np.ndarray,
+        cs: np.ndarray,
+        *,
+        title: Optional[str] = None,
+    ):
+        """
+        Set the scatter plot with new data.
+
+        Args:
+            xs: Array of x-coordinates
+            ys: Array of y-coordinates
+            cs: Array of color values (used for colormap)
+            title: Optional new title for the plot
+        """
+        with self.update_lock:
+            self.xs = xs
+            self.ys = ys
+            self.cs = cs
+
+            # downsample if too many points
+            if len(xs) > 1e5:
+                step = len(xs) // 1e5
+                xs = xs[::step]
+                ys = ys[::step]
+                cs = cs[::step]
+
+            self.contain.set_offsets(np.column_stack((xs, ys)))
+            self.contain.set_array(np.array(cs))
+            self.contain.set_clim(min(cs), max(cs))
+
+            if title:
+                self.fig.suptitle(title)
+
+            self.ax.relim(visible_only=True)
+            self.ax.autoscale_view()
+            # x_min, x_max = min(self.xs), max(self.xs)
+            # y_min, y_max = min(self.ys), max(self.ys)
+            # self.ax.set_xlim(min(x_min, x_max - 1e-6), max(x_max, x_min + 1e-6))
+            # self.ax.set_ylim(min(y_min, y_max - 1e-6), max(y_max, y_min + 1e-6))
+
+            self.dh.update(self.fig)
+
     def append_spot(
         self, x: float, y: float, color: float, *, title: Optional[str] = None
     ):
@@ -364,23 +409,68 @@ class InstantShowScatter(BaseInstantShow):
             color: Color value for the new point (used for colormap)
             title: Optional new title for the plot
         """
+        self.xs.append(x)
+        self.ys.append(y)
+        self.cs.append(color)
+        self.set_spots(self.xs, self.ys, self.cs, title=title)
+
+
+class InstantShowHist(BaseInstantShow):
+    """
+    Class for real-time visualization of histograms.
+
+    This class creates an interactive histogram plot that can be updated
+    with new data points.
+
+    Attributes:
+        contain: The histogram plot object
+        dh: The IPython display handle
+    """
+
+    def __init__(
+        self, x_label: str, y_label: str, title: Optional[str] = None, **kwargs
+    ):
+        """
+        Initialize a histogram instant show plot.
+
+        Args:
+            x_label: Label for the x-axis
+            y_label: Label for the y-axis
+            title: Optional title for the plot
+            **kwargs: Additional keyword arguments to pass to matplotlib's hist function
+        """
+        super().__init__(x_label, y_label, title)
+        self.xlabel = x_label
+        self.ylabel = y_label
+        self.kwargs = kwargs
+
+        self.dh = display(self.fig, display_id=True)
+
+    def update_show(
+        self,
+        signals_real: np.ndarray,
+        *,
+        bins: Optional[np.ndarray] = None,
+        title: Optional[str] = None,
+    ):
+        """
+        Update the histogram with new data.
+
+        Args:
+            signals_real: Array of values to display as a histogram
+            ticks: Optional new x-axis values to replace the existing ones
+            title: Optional new title for the plot
+        """
+        if bins is not None:
+            self.bins = bins
+
         with self.update_lock:
-            self.xs.append(x)
-            self.ys.append(y)
-            self.cs.append(color)
-
-            self.contain.set_offsets(np.column_stack((self.xs, self.ys)))
-            self.contain.set_array(np.array(self.cs))
-            self.contain.set_clim(min(self.cs), max(self.cs))
-
-            # print(f"x: {x:.1e}, y: {y:.1e}, color: {color:.1e}", end="\r")
-
             if title:
-                self.ax.set_title(title)
+                self.fig.suptitle(title)
 
-            x_min, x_max = min(self.xs), max(self.xs)
-            y_min, y_max = min(self.ys), max(self.ys)
-            self.ax.set_xlim(min(x_min, x_max - 1e-6), max(x_max, x_min + 1e-6))
-            self.ax.set_ylim(min(y_min, y_max - 1e-6), max(y_max, y_min + 1e-6))
+            self.ax.cla()
+            self.ax.hist(signals_real, bins=self.bins, **self.kwargs)
+            self.ax.set_xlabel(self.xlabel)
+            self.ax.set_ylabel(self.ylabel)
 
             self.dh.update(self.fig)

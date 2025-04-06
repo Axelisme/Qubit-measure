@@ -181,8 +181,8 @@ def sweep1D_soft_template(
                     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
                     prog = prog_cls(soccfg, cfg)
-                    avg_d, std_d = prog.acquire(soc, progress=False, **kwargs)
-                    signals[i], stds[i] = result2signals(avg_d, std_d)
+                    result = prog.acquire(soc, progress=False, **kwargs)
+                    signals[i], stds[i] = result2signals(*result)
 
                     async_draw(i, signal2real(signals), errs=std2err(stds, N))
 
