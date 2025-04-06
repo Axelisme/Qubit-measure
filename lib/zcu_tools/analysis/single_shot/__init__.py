@@ -136,7 +136,7 @@ def singleshot_rabi_analysis(xs, signals, normalize=True):
     if not normalize:
         ax.plot(xs, n_g + n_e, label="g+e")
     ax.set_ylim(0, None)
-    fig.legend()
+    ax.legend()
     plt.show()
 
     return n_g, n_e
