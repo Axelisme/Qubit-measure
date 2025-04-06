@@ -132,7 +132,7 @@ def singleshot_rabi_analysis(xs, signals):
     fig, ax = plt.subplots()
     ax.plot(xs, n_g, label="g")
     ax.plot(xs, n_e, label="e")
-    fig.show()
+    plt.show()
 
     return n_g, n_e
 
