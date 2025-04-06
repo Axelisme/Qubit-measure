@@ -127,13 +127,12 @@ def singleshot_rabi_analysis(xs, signals):
     list_params = np.array(list_params)
 
     n_g, n_e = list_params[:, 0], list_params[:, 3]
-    n_g = n_g / (n_g + n_e)
-    n_e = n_e / (n_g + n_e)
+    n_g, n_e = n_g / (n_g + n_e), n_e / (n_g + n_e)
 
     fig, ax = plt.subplots()
     ax.plot(xs, n_g, label="g")
     ax.plot(xs, n_e, label="e")
-    plt.show()
+    fig.show()
 
     return n_g, n_e
 
