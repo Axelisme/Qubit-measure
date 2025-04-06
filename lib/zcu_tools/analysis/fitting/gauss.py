@@ -74,10 +74,10 @@ def fit_dual_gauss(xdata, ydata, fixedparams=None):
     # bounds
     bounds = (
         [
-            -2 * np.abs(fitparams[0]),
+            0.0,
             xdata.min(),
             0,
-            -2 * np.abs(fitparams[3]),
+            0.0,
             xdata.min(),
             0,
         ],
@@ -129,10 +129,10 @@ def batch_fit_dual_gauss(list_xdata, list_ydata, fixedparams=None):
         list_bounds.append(
             (
                 [
-                    -2 * np.abs(params[0]),
+                    0.0,
                     xdata.min(),
                     0,
-                    -2 * np.abs(params[3]),
+                    0.0,
                     xdata.min(),
                     0,
                 ],
