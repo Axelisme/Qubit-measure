@@ -3,6 +3,8 @@ from typing import Literal, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ..fitting import batch_fit_dual_gauss
+from ..tools import rotate2real
 from .base import fidelity_func
 from .center import fit_ge_by_center
 from .regression import fit_ge_by_regression
@@ -113,4 +115,32 @@ def singleshot_ge_analysis(
         return fit_ge_by_regression(signals, plot=plot)
 
 
-__all__ = ["singleshot_visualize", "singleshot_ge_analysis", "fidelity_func"]
+def singleshot_rabi_analysis(xs, signals):
+    signals = rotate2real(signals).real
+
+    bins = np.linspace(signals.min(), signals.max(), 201)
+
+    list_xdata = [bins[:-1]] * len(xs)
+    list_ydata = [np.histogram(signals[i], bins=bins)[0] for i in range(len(xs))]
+
+    list_params, _ = batch_fit_dual_gauss(list_xdata, list_ydata)
+    list_params = np.array(list_params)
+
+    n_g, n_e = list_params[:, 0], list_params[:, 3]
+    n_g = n_g / (n_g + n_e)
+    n_e = n_e / (n_g + n_e)
+
+    fig, ax = plt.subplots()
+    ax.plot(xs, n_g, label="g")
+    ax.plot(xs, n_e, label="e")
+    plt.show()
+
+    return n_g, n_e
+
+
+__all__ = [
+    "singleshot_visualize",
+    "singleshot_ge_analysis",
+    "fidelity_func",
+    "singleshot_rabi_analysis",
+]

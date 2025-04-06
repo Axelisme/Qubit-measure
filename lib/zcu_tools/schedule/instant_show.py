@@ -427,6 +427,8 @@ class InstantShowHist(BaseInstantShow):
         dh: The IPython display handle
     """
 
+    DEFAULT_BINS = 200
+
     def __init__(
         self, x_label: str, y_label: str, title: Optional[str] = None, **kwargs
     ):
@@ -443,8 +445,21 @@ class InstantShowHist(BaseInstantShow):
         self.xlabel = x_label
         self.ylabel = y_label
         self.kwargs = kwargs
+        self.bins = self.DEFAULT_BINS
 
         self.dh = display(self.fig, display_id=True)
+
+    def update_bins(self, signals_real: np.ndarray):
+        max_x, min_x = np.max(signals_real), np.min(signals_real)
+
+        if isinstance(self.bins, int):
+            self.bins = np.linspace(min_x, max_x, self.bins)
+        elif self.bins.min() > min_x or self.bins.max() < max_x:
+            self.bins = np.linspace(
+                min(self.bins.min(), min_x),
+                max(self.bins.max(), max_x),
+                self.DEFAULT_BINS,
+            )
 
     def update_show(
         self,
@@ -463,6 +478,8 @@ class InstantShowHist(BaseInstantShow):
         """
         if bins is not None:
             self.bins = bins
+        else:
+            self.update_bins(signals_real)
 
         with self.update_lock:
             if title:

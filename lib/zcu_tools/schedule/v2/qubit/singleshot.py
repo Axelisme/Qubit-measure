@@ -1,10 +1,28 @@
 from copy import deepcopy
+from typing import Tuple
 from warnings import warn
 
 import numpy as np
+from tqdm.auto import tqdm
+from zcu_tools.analysis import rotate2real
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.tools import sweep2param
+from zcu_tools.schedule.instant_show import InstantShowHist
+from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
+from zcu_tools.tools import AsyncFunc, print_traceback
+
+
+def acquire_singleshot(prog, soc):
+    prog.acquire(soc, progress=False)
+    acc_buf = prog.acc_buf[0]
+    avgiq = acc_buf / prog.get_time_axis(0)[-1]  # (reps, *sweep, 1, 2)
+    i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, *sweep)
+    signals = np.array(i0 + 1j * q0)  # (reps, *sweep)
+
+    # swap axes to (*sweep, reps)
+    signals = np.swapaxes(signals, 0, -1)
+
+    return signals  # (reps, *sweep)
 
 
 def measure_singleshot(soc, soccfg, cfg):
@@ -68,9 +86,46 @@ def measure_singleshot(soc, soccfg, cfg):
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
     prog = TwoToneProgram(soccfg, deepcopy(cfg))
-    prog.acquire(soc, progress=True)
-    acc_buf = prog.acc_buf[0]
-    avgiq = acc_buf / prog.get_time_axis(0)[-1]  # (reps, 2, 1, 2)
-    i0, q0 = avgiq[..., 0, 0].T, avgiq[..., 0, 1].T  # (reps, 2)
+    return acquire_singleshot(prog, soc)
 
-    return np.array(i0 + 1j * q0)
+
+def measure_amprabi_singleshot(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
+    if cfg.setdefault("soft_avgs", 1) != 1:
+        warn("soft_avgs will be overwritten to 1 for singleshot measurement")
+
+    if "reps" in cfg:
+        warn("reps will be overwritten by singleshot measurement shots")
+    cfg["reps"] = cfg["shots"]
+
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
+    pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
+
+    del cfg["sweep"]  # use soft loop here
+
+    cfg["dac"]["qub_pulse"]["gain"] = pdrs[0]
+
+    signals = np.full((len(pdrs), cfg["shots"]), np.nan, dtype=complex)  # (pdr, shots)
+
+    # set flux first
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
+
+    with InstantShowHist("rototed I", "Count", title="Rabi SingleShot") as viewer:
+        try:
+            pdr_tqdm = tqdm(pdrs, desc="Power", smoothing=0)
+            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
+                for i, pdr in enumerate(pdr_tqdm):
+                    cfg["dac"]["qub_pulse"]["gain"] = pdr
+
+                    prog = TwoToneProgram(soccfg, cfg)
+                    signals[i] = acquire_singleshot(prog, soc)
+                    async_draw(i, rotate2real(signals)[i].real)
+
+        except KeyboardInterrupt:
+            print("Received KeyboardInterrupt, early stopping the program")
+        except Exception:
+            print("Error during measurement:")
+            print_traceback()
+
+    return pdrs, signals
