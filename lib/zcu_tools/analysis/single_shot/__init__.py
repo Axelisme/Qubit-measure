@@ -115,7 +115,7 @@ def singleshot_ge_analysis(
         return fit_ge_by_regression(signals, plot=plot)
 
 
-def singleshot_rabi_analysis(xs, signals):
+def singleshot_rabi_analysis(xs, signals, normalize=True):
     signals = rotate2real(signals).real
 
     bins = np.linspace(signals.min(), signals.max(), 201)
@@ -127,7 +127,8 @@ def singleshot_rabi_analysis(xs, signals):
     list_params = np.array(list_params)
 
     n_g, n_e = list_params[:, 0], list_params[:, 3]
-    n_g, n_e = n_g / (n_g + n_e), n_e / (n_g + n_e)
+    if normalize:
+        n_g, n_e = n_g / (n_g + n_e), n_e / (n_g + n_e)
 
     fig, ax = plt.subplots()
     ax.plot(xs, n_g, label="g")
