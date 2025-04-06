@@ -126,17 +126,21 @@ def singleshot_rabi_analysis(xs, signals, normalize=True):
     list_params, _ = batch_fit_dual_gauss(list_xdata, list_ydata)
     list_params = np.array(list_params)
 
+    mean_signals = np.mean(signals, axis=1)
+
     n_g, n_e = list_params[:, 0], list_params[:, 3]
     if normalize:
         n_g, n_e = n_g / (n_g + n_e), n_e / (n_g + n_e)
 
-    fig, ax = plt.subplots()
-    ax.plot(xs, n_g, label="g")
-    ax.plot(xs, n_e, label="e")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    ax1.plot(xs, n_g, label="g")
+    ax1.plot(xs, n_e, label="e")
     if not normalize:
-        ax.plot(xs, n_g + n_e, label="g+e")
-    ax.set_ylim(0, None)
-    ax.legend()
+        ax1.plot(xs, n_g + n_e, label="g+e")
+    ax1.set_ylim(0, None)
+    ax1.legend()
+    ax2.plot(xs, mean_signals, label="mean")
+    ax2.legend()
     plt.show()
 
     return n_g, n_e
