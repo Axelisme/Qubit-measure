@@ -43,12 +43,12 @@ def get_rotate_angle(
 
     # ax + by + c = 0
     a, b = model.coef_[0]
-    c = model.intercept_[0]
+    # c = model.intercept_[0]
 
     theta = -np.arctan2(b, a)
-    threshold = -c / np.sqrt(a**2 + b**2)
+    # threshold = -c / np.sqrt(a**2 + b**2)
 
-    return {"theta": theta, "threshold": threshold}
+    return {"theta": theta}
 
 
 def fit_ge_by_regression(signals: np.ndarray, plot: bool = True) -> tuple:

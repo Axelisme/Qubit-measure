@@ -3,6 +3,8 @@ from typing import Callable, Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ..fitting import batch_fit_dual_gauss, gauss_func
+
 
 def rotate(
     I_orig: np.ndarray, Q_orig: np.ndarray, theta: float
@@ -117,41 +119,6 @@ def hist(
     return ng, ne, bins
 
 
-def cumulate_ge_plot(
-    ng: np.ndarray,
-    ne: np.ndarray,
-    bins: np.ndarray,
-    ax: plt.Axes,
-    title: Optional[str] = None,
-) -> None:
-    """
-    Create a cumulative histogram plot for ground and excited state data.
-
-    Parameters
-    ----------
-    ng : np.ndarray
-        Histogram counts for ground state.
-    ne : np.ndarray
-        Histogram counts for excited state.
-    bins : np.ndarray
-        Bin edges for the histogram.
-    ax : plt.Axes
-        Matplotlib axes object to plot on.
-    title : Optional[str], default=None
-        Title for the plot. If None, no title is set.
-
-    Returns
-    -------
-    None
-    """
-    ax.plot(bins[:-1], np.cumsum(ng), "b", label="g")
-    ax.plot(bins[:-1], np.cumsum(ne), "r", label="e")
-    if title is not None:
-        ax.set_title(title, fontsize=14)
-    ax.legend()
-    ax.set_xlabel("I [ADC levels]", fontsize=14)
-
-
 def fidelity_func(tp: float, tn: float, fp: float, fn: float) -> float:
     """
     Calculate classification fidelity from confusion matrix values.
@@ -252,32 +219,64 @@ def fitting_ge_and_plot(
         - threshold: Optimal threshold value for state discrimination
         - theta_deg: Optimal rotation angle in degrees
     """
-    print(signals.shape)
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
-    if plot:
-        _, axs = plt.subplots(2, 2, figsize=(8, 8))
-        scatter_ge_plot((Ig, Ie), (Qg, Qe), axs[0, 0], "Unrotated")
+
     # Calculate the angle of rotation
     out_dict = classify_func(Ig, Qg, Ie, Qe)
     theta = out_dict["theta"]
+
     # Rotate the IQ data
     Ig, Qg = rotate(Ig, Qg, theta)
     Ie, Qe = rotate(Ie, Qe, theta)
+
     if plot:
-        scatter_ge_plot((Ig, Ie), (Qg, Qe), axs[0, 1], "Rotated")
+        _, axs = plt.subplots(2, 2, figsize=(8, 8))
+        scatter_ge_plot((Ig, Ie), (Qg, Qe), axs[0, 0], "Rotated")
+
         ng, ne, bins = hist(Ig, Ie, numbins, axs[1, 0])
+
+        xs = bins[:-1]
+        axs[0, 1].hist(xs, bins=bins, weights=ng, color="b", alpha=0.5)
+        axs[1, 1].hist(xs, bins=bins, weights=ne, color="r", alpha=0.5)
+
+        ge_params, _ = batch_fit_dual_gauss([xs, xs], [ng, ne])
+        g_params, e_params = ge_params
+
+        n_gg, n_ge = g_params[0], g_params[3]
+        n_eg, n_ee = e_params[0], e_params[3]
+        n_gg, n_ge = n_gg / (n_gg + n_ge), n_ge / (n_gg + n_ge)
+        n_eg, n_ee = n_eg / (n_eg + n_ee), n_ee / (n_eg + n_ee)
+
+        gg_fit = gauss_func(xs, *g_params[:3])
+        ge_fit = gauss_func(xs, *g_params[3:])
+        eg_fit = gauss_func(xs, *e_params[:3])
+        ee_fit = gauss_func(xs, *e_params[3:])
+        axs[0, 1].plot(xs, gg_fit, "b-", label="g")
+        axs[0, 1].plot(xs, ge_fit, "b--", label="g")
+        axs[0, 1].plot(xs, gg_fit + ge_fit, "k-", label="g")
+        axs[0, 1].set_title(f"{n_gg:.1%} / {n_ge:.1%}", fontsize=14)
+        axs[1, 1].plot(xs, eg_fit, "r-", label="e")
+        axs[1, 1].plot(xs, ee_fit, "r--", label="e")
+        axs[1, 1].plot(xs, eg_fit + ee_fit, "k-", label="e")
+        axs[1, 1].set_title(f"{n_eg:.1%} / {n_ee:.1%}", fontsize=14)
+
+        axs[1, 0].plot(xs, gg_fit + ge_fit, "k-", label="g")
+        axs[1, 0].plot(xs, eg_fit + ee_fit, "k-", label="e")
     else:
         ng, ne, bins = hist(Ig, Ie, numbins)
+
     fid, threshold = calculate_fidelity(ng, ne, bins)
+
     if plot:
-        axs[0, 1].axvline(threshold, color="0.2", linestyle="--")
         title = "${F}_{ge}$"
         axs[1, 0].set_title(f"Histogram ({title}: {fid:.3%})", fontsize=14)
-        axs[1, 0].axvline(threshold, color="0.2", linestyle="--")
-        cumulate_ge_plot(ng, ne, bins, axs[1, 1], "Cumulative Counts")
-        axs[1, 1].axvline(threshold, color="0.2", linestyle="--")
+
+        for ax in axs.flat:
+            ax.axvline(threshold, color="0.2", linestyle="--")
+
         plt.subplots_adjust(hspace=0.25, wspace=0.15)
         plt.tight_layout()
         plt.show()
+
     return fid, threshold, theta * 180 / np.pi  # fids: ge, gf, ef

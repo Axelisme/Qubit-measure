@@ -37,12 +37,17 @@ def singleshot_visualize(
     for i in range(signals.shape[0]):
         Is, Qs = signals[i].real, signals[i].imag
 
+        MAX_POINTS = 1e5
+        if len(Is) > MAX_POINTS:
+            Is = Is[:: len(Is) // int(MAX_POINTS)]
+            Qs = Qs[:: len(Qs) // int(MAX_POINTS)]
+
         ax.scatter(
             Is,
             Qs,
             marker=".",
             edgecolor="None",
-            alpha=0.5,
+            alpha=0.1,
             label=f"shot {i}",
             c=f"C{i}",
         )
