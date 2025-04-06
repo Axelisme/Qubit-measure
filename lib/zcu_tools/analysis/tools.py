@@ -1,5 +1,5 @@
-from typing import Tuple, Literal
 import warnings
+from typing import Literal, Tuple
 
 import numpy as np
 from numpy import ndarray
@@ -14,7 +14,7 @@ def rotate2real(signals: ndarray):
     Parameters
     ----------
     signals : ndarray
-        The 1-D complex signals to be rotated. Must be a 1D array of complex values.
+        The complex signals to be rotated. Must be a array of complex values.
 
     Returns
     -------
@@ -29,10 +29,12 @@ def rotate2real(signals: ndarray):
     3. Rotates the signal to align this principal component with the real axis
     """
 
-    if len(signals.shape) != 1:
-        raise ValueError(f"Expect 1-D signals, but get shape {signals.shape}")
     if signals.dtype != complex:
         raise ValueError(f"Expect complex signals, but get dtype {signals.dtype}")
+
+    orig_shape = signals.shape
+    if len(orig_shape) != 1:
+        signals = signals.flatten()
 
     val_signals = signals[~np.isnan(signals)]
 
@@ -50,6 +52,9 @@ def rotate2real(signals: ndarray):
 
     # rotate the signals to maximize the contrast on real axis
     rot_signals = signals * eigenvectors.dot([1, -1j])
+
+    if len(orig_shape) != 1:
+        rot_signals = rot_signals.reshape(orig_shape)
 
     return rot_signals
 
