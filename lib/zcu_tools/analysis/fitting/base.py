@@ -127,8 +127,8 @@ def batch_fit_func(
 
     # 組合 bounds（若有）
     if list_bounds is not None:
-        lower_shared = [max(b[0][j] for b in list_bounds) for j in shared_idxs]
-        upper_shared = [min(b[1][j] for b in list_bounds) for j in shared_idxs]
+        lower_shared = [min(b[0][j] for b in list_bounds) for j in shared_idxs]
+        upper_shared = [max(b[1][j] for b in list_bounds) for j in shared_idxs]
         lower_local = []
         upper_local = []
         for b in list_bounds:

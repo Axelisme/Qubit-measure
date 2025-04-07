@@ -140,7 +140,7 @@ def batch_fit_dual_gauss(list_xdata, list_ydata, fixedparams=None):
                     2 * np.abs(params[0]),
                     xdata.max(),
                     xdata.max() - xdata.min(),
-                    2 * np.abs(params[3]),
+                    np.abs(params[0]),
                     xdata.max(),
                     xdata.max() - xdata.min(),
                 ],
