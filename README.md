@@ -15,11 +15,9 @@ pip install .
 ```
 
 這將安裝以下核心依賴：
-- h5py
 - numpy
 - tqdm
-
-其中依賴`myqick`需要自行手動安裝，請參考[myqick](https://github.com/Axelisme/myqick)。
+- matplotlib
 
 ### 資料伺服器擴展
 
@@ -30,7 +28,22 @@ pip install ".[data]"
 ```
 
 這將安裝基本依賴外加：
+- h5py
 - flask
+
+### ZCU伺服器擴展
+
+如果您需要伺服器功能，可以使用：
+
+```bash
+pip install ".[server]"
+```
+
+這將安裝基本依賴外加：
+- myqick
+- dill
+
+其中依賴`myqick`需要自行手動安裝，請參考[myqick](https://github.com/Axelisme/myqick)。
 
 ### 客戶端工具擴展
 
@@ -41,14 +54,20 @@ pip install ".[client]"
 ```
 
 這將安裝以下依賴：
+- myqick
+- labber
+- numpy (<=1.19.5)
+- h5py
 - ipykernel
 - ipywidgets
-- matplotlib
+- ipympl
+- pyyaml
 - pandas
 - scikit-learn
 - scipy
+- dill
 
-其中依賴`labber`需要自行手動安裝，請參考[labber](https://github.com/Axelisme/labber_api)。
+其中依賴`labber`和`myqick`需要自行手動安裝，請參考[labber](https://github.com/Axelisme/labber_api)和[myqick](https://github.com/Axelisme/myqick)。
 
 ### 數據擬合擴展
 
@@ -59,21 +78,26 @@ pip install ".[fit]"
 ```
 
 這將安裝以下依賴：
+- h5py
+- ipykernel
+- ipywidgets
+- ipympl
+- pandas
 - scqubits
-- matplotlib
 - plotly
 - kaleido
 - scipy
-- ipympl
 - nbformat (>=4.2.0)
 - joblib
+- numba
+- requests
 
 ### 全部功能安裝
 
 如果您想安裝所有功能，可以使用：
 
 ```bash
-pip install ".[data,client,fit]"
+pip install ".[data,server,client,fit]"
 ```
 
 ## 系統需求
