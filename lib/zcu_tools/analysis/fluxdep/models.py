@@ -59,14 +59,24 @@ def energy2linearform(energies, allows):
         Bs[:, idx] = energies[:, j] - energies[:, i]
         Cs[:, idx] = allows["r_f"]
         idx += 1
-    for i, j in allows.get("red side", []):  # E = abs(E_ji - r_f)
-        Bs[:, idx] = energies[:, j] - energies[:, i]
-        Cs[:, idx] = -allows["r_f"]
+    for i, j in allows.get("red side", []):  # E = abs(r_f - E_ji)
+        Bs[:, idx] = -1 * (energies[:, j] - energies[:, i])
+        Cs[:, idx] = allows["r_f"]
         idx += 1
+
     for i, j in allows.get("mirror", []):  # E = 2 * sample_f - E_ji
         Bs[:, idx] = -1 * (energies[:, j] - energies[:, i])
         Cs[:, idx] = 2 * allows["sample_f"]
         idx += 1
+    for i, j in allows.get("mirror blue", []):  # E = 2 * sample_f - E_ji - r_f
+        Bs[:, idx] = -1 * (energies[:, j] - energies[:, i])
+        Cs[:, idx] = 2 * allows["sample_f"] - allows["r_f"]
+        idx += 1
+    for i, j in allows.get("mirror red", []):  # E = 2 * sample_f - r_f + E_ji
+        Bs[:, idx] = energies[:, j] - energies[:, i]
+        Cs[:, idx] = 2 * allows["sample_f"] - allows["r_f"]
+        idx += 1
+
     for i, j in allows.get("transitions2", []):  # E = 0.5 * E_ji
         Bs[:, idx] = 0.5 * (energies[:, j] - energies[:, i])
         Cs[:, idx] = 0.0
@@ -76,9 +86,10 @@ def energy2linearform(energies, allows):
         Cs[:, idx] = allows["r_f"]
         idx += 1
     for i, j in allows.get("red side2", []):  # E = 0.5 * abs(E_ji - r_f)
-        Bs[:, idx] = 0.5 * (energies[:, j] - energies[:, i])
-        Cs[:, idx] = -0.5 * allows["r_f"]
+        Bs[:, idx] = -0.5 * (energies[:, j] - energies[:, i])
+        Cs[:, idx] = 0.5 * allows["r_f"]
         idx += 1
+
     for i, j in allows.get("mirror2", []):  # E = sample_f - 0.5 * E_ji
         Bs[:, idx] = -0.5 * (energies[:, j] - energies[:, i])
         Cs[:, idx] = allows["sample_f"]
@@ -113,6 +124,10 @@ def energy2transition(energies, allows):
         names.append(f"{i} -> {j} red side")
     for i, j in allows.get("mirror", []):  # E = 2 * sample_f - E_ji
         names.append(f"{i} -> {j} mirror")
+    for i, j in allows.get("mirror blue", []):  # E = 2 * sample_f - E_ji - r_f
+        names.append(f"{i} -> {j} mirror blue")
+    for i, j in allows.get("mirror red", []):  # E = 2 * sample_f - r_f + E_ji
+        names.append(f"{i} -> {j} mirror red")
     for i, j in allows.get("transitions2", []):  # E = 0.5 * E_ji
         names.append(f"2 {i} -> {j}")
     for i, j in allows.get("blue side2", []):  # E = 0.5 * E_ji + r_f
