@@ -89,7 +89,9 @@ def auto_derive_pulse(
     """
     # load pulse configuration if it is a string
     if isinstance(pulse_cfg, str):
-        pulse_cfg = deepcopy(DefaultCfg.get_pulse(pulse_cfg))
+        name = pulse_cfg
+        pulse_cfg = deepcopy(DefaultCfg.get_pulse(name))
+        pulse_cfg["pulse_name"] = name
 
     ch = None
     if name == "res_pulse":
