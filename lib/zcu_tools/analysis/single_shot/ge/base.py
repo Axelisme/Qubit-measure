@@ -3,7 +3,7 @@ from typing import Callable, Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ..fitting import batch_fit_dual_gauss, gauss_func
+from ...fitting import batch_fit_dual_gauss, fit_gauss, gauss_func
 
 
 def rotate(
@@ -225,13 +225,16 @@ def fitting_ge_and_plot(
     # Calculate the angle of rotation
     out_dict = classify_func(Ig, Qg, Ie, Qe)
     theta = out_dict["theta"]
+    theta = (theta + np.pi / 2) % np.pi - np.pi / 2
 
     # Rotate the IQ data
     Ig, Qg = rotate(Ig, Qg, theta)
     Ie, Qe = rotate(Ie, Qe, theta)
 
     if plot:
-        _, axs = plt.subplots(2, 2, figsize=(8, 8))
+        fig, axs = plt.subplots(2, 2, figsize=(8, 8))
+        fig.suptitle(f"Rotation angle: {180 * theta / np.pi:.3f} deg")
+
         scatter_ge_plot((Ig, Ie), (Qg, Qe), axs[0, 0], "Rotated")
 
         ng, ne, bins = hist(Ig, Ie, numbins, axs[1, 0])
@@ -240,7 +243,12 @@ def fitting_ge_and_plot(
         axs[0, 1].hist(xs, bins=bins, weights=ng, color="b", alpha=0.5)
         axs[1, 1].hist(xs, bins=bins, weights=ne, color="r", alpha=0.5)
 
-        ge_params, _ = batch_fit_dual_gauss([xs, xs], [ng, ne])
+        guess_g_params, _ = fit_gauss(xs, ng)
+        guess_e_params, _ = fit_gauss(xs, ne)
+
+        fixedparams = [None, *guess_g_params[1:3], None, *guess_e_params[1:3]]
+
+        ge_params, _ = batch_fit_dual_gauss([xs, xs], [ng, ne], fixedparams=fixedparams)
         g_params, e_params = ge_params
 
         n_gg, n_ge = g_params[0], g_params[3]
@@ -252,17 +260,17 @@ def fitting_ge_and_plot(
         ge_fit = gauss_func(xs, *g_params[3:])
         eg_fit = gauss_func(xs, *e_params[:3])
         ee_fit = gauss_func(xs, *e_params[3:])
+        axs[0, 1].plot(xs, gg_fit + ge_fit, "k-", label="total")
         axs[0, 1].plot(xs, gg_fit, "b-", label="g")
-        axs[0, 1].plot(xs, ge_fit, "b--", label="g")
-        axs[0, 1].plot(xs, gg_fit + ge_fit, "k-", label="g")
+        axs[0, 1].plot(xs, ge_fit, "b--", label="e")
         axs[0, 1].set_title(f"{n_gg:.1%} / {n_ge:.1%}", fontsize=14)
-        axs[1, 1].plot(xs, eg_fit, "r-", label="e")
+        axs[1, 1].plot(xs, eg_fit + ee_fit, "k-", label="total")
+        axs[1, 1].plot(xs, eg_fit, "r-", label="g")
         axs[1, 1].plot(xs, ee_fit, "r--", label="e")
-        axs[1, 1].plot(xs, eg_fit + ee_fit, "k-", label="e")
         axs[1, 1].set_title(f"{n_eg:.1%} / {n_ee:.1%}", fontsize=14)
 
-        axs[1, 0].plot(xs, gg_fit + ge_fit, "k-", label="g")
-        axs[1, 0].plot(xs, eg_fit + ee_fit, "k-", label="e")
+        axs[1, 0].plot(xs, gg_fit + ge_fit, "b-", label="g")
+        axs[1, 0].plot(xs, eg_fit + ee_fit, "r-", label="e")
     else:
         ng, ne, bins = hist(Ig, Ie, numbins)
 

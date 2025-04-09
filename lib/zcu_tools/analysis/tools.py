@@ -6,7 +6,7 @@ from numpy import ndarray
 from scipy.ndimage import gaussian_filter1d
 
 
-def rotate2real(signals: ndarray):
+def rotate2real(signals: ndarray, ret_angle=False):
     """
     Rotate the signals to maximize the contrast on real axis by performing
     principal component analysis (PCA) on complex data
@@ -15,11 +15,14 @@ def rotate2real(signals: ndarray):
     ----------
     signals : ndarray
         The complex signals to be rotated. Must be a array of complex values.
+    ret_angle : bool, default=False
+        If True, return the rotation angle in radians.
 
     Returns
     -------
-    ndarray
+    Tuple[ndarray, float]
         The rotated signals with maximum variance aligned along the real axis
+        and the rotation angle in radians.
 
     Notes
     -----
@@ -50,12 +53,17 @@ def rotate2real(signals: ndarray):
     # sort the eigenvectors by decreasing eigenvalues
     eigenvectors = eigenvectors[:, eigenvalues.argmax()]  # (2,)
 
+    if eigenvectors[0] < 0:
+        eigenvectors = -eigenvectors  # make rotation angle from -90 to 90 deg
+
     # rotate the signals to maximize the contrast on real axis
     rot_signals = signals * eigenvectors.dot([1, -1j])
 
     if len(orig_shape) != 1:
         rot_signals = rot_signals.reshape(orig_shape)
 
+    if ret_angle:
+        return rot_signals, np.arctan2(eigenvectors[1], eigenvectors[0])
     return rot_signals
 
 

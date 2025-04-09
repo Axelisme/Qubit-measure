@@ -42,25 +42,30 @@ def dual_gauss_func(x, *p):
 
 
 def guess_dual_gauss_params(xdata, ydata):
+    abs_ydata = np.abs(ydata)
+
     # guess initial parameters
-    max_idx = np.argmax(np.abs(ydata))
-    yscale1 = ydata[max_idx]
+    max_idx = np.argmax(abs_ydata)
+    yscale1 = abs_ydata[max_idx]
     x_c1 = xdata[max_idx]
     sigma1 = (
         0.25
         * (xdata.max() - xdata.min())
-        * np.sum(np.abs(ydata) > np.abs(yscale1) / 2)
+        * np.sum(abs_ydata > yscale1 / 2)
         / len(xdata)
     )
 
-    mean_x = np.sum(ydata * xdata) / np.sum(ydata)
+    mean_x = np.sum(abs_ydata * xdata) / np.sum(abs_ydata)
 
     x_c2 = 2 * mean_x - x_c1
     c2_idx = np.argmin(np.abs(xdata - x_c2))
-    yscale2 = ydata[c2_idx]
+    yscale2 = abs_ydata[c2_idx]
     sigma2 = sigma1
 
-    return [yscale1, x_c1, sigma1, yscale2, x_c2, sigma2]
+    if x_c1 < x_c2:  # make first peak left
+        return [yscale1, x_c1, sigma1, yscale2, x_c2, sigma2]
+    else:
+        return [yscale2, x_c2, sigma2, yscale1, x_c1, sigma1]
 
 
 def fit_dual_gauss(xdata, ydata, fixedparams=None):
@@ -78,14 +83,14 @@ def fit_dual_gauss(xdata, ydata, fixedparams=None):
             xdata.min(),
             0,
             0.0,
-            xdata.min(),
+            fitparams[4],
             0,
         ],
         [
-            2 * np.abs(fitparams[0]),
-            xdata.max(),
+            2 * max(fitparams[0], fitparams[3]),
+            fitparams[1],
             xdata.max() - xdata.min(),
-            2 * np.abs(fitparams[3]),
+            2 * max(fitparams[0], fitparams[3]),
             xdata.max(),
             xdata.max() - xdata.min(),
         ],
@@ -95,35 +100,25 @@ def fit_dual_gauss(xdata, ydata, fixedparams=None):
         xdata, ydata, dual_gauss_func, fitparams, bounds, fixedparams
     )
 
-    # swap the two peaks to make sure the first peak is the left one
-    if params[1] > params[4]:
-        params[0], params[3] = params[3], params[0]
-        params[1], params[4] = params[4], params[1]
-        params[2], params[5] = params[5], params[2]
-
-        pcov[0, :], pcov[3, :] = pcov[3, :], pcov[0, :]
-        pcov[:, 0], pcov[:, 3] = pcov[:, 3], pcov[:, 0]
-        pcov[1, :], pcov[4, :] = pcov[4, :], pcov[1, :]
-        pcov[:, 1], pcov[:, 4] = pcov[:, 4], pcov[:, 1]
-        pcov[2, :], pcov[5, :] = pcov[5, :], pcov[2, :]
-        pcov[:, 2], pcov[:, 5] = pcov[:, 5], pcov[:, 2]
-
     return params, pcov
 
 
-def batch_fit_dual_gauss(list_xdata, list_ydata, fixedparams=None):
-    if fixedparams is not None and len(fixedparams) != 6:
-        raise ValueError(
-            "Fixed parameters must be a list of six elements: [yscale1, x_c1, sigma1, yscale2, x_c2, sigma2]"
-        )
+def batch_fit_dual_gauss(list_xdata, list_ydata, list_init_p0=None, fixedparams=None):
+    if list_init_p0 is None:
+        list_init_p0 = [None] * len(list_xdata)
 
     # guess initial parameters
     list_fitparams = []
     list_bounds = []
-    # for i in range(len(list_xdata)):
-    for i, (xdata, ydata) in enumerate(zip(list_xdata, list_ydata)):
+    for xdata, ydata, init_p0 in zip(list_xdata, list_ydata, list_init_p0):
         # guess initial parameters
         params = guess_dual_gauss_params(xdata, ydata)
+
+        if init_p0 is not None:
+            for i, p0 in enumerate(init_p0):
+                if p0 is not None:
+                    params[i] = p0
+
         list_fitparams.append(params)
 
         list_bounds.append(
@@ -133,14 +128,14 @@ def batch_fit_dual_gauss(list_xdata, list_ydata, fixedparams=None):
                     xdata.min(),
                     0,
                     0.0,
-                    xdata.min(),
+                    params[4],
                     0,
                 ],
                 [
-                    2 * np.abs(params[0]),
-                    xdata.max(),
+                    2 * max(params[0], params[3]),
+                    params[1],
                     xdata.max() - xdata.min(),
-                    np.abs(params[0]),
+                    2 * max(params[0], params[3]),
                     xdata.max(),
                     xdata.max() - xdata.min(),
                 ],
@@ -151,7 +146,7 @@ def batch_fit_dual_gauss(list_xdata, list_ydata, fixedparams=None):
     # and yscale1, yscale2 be local
     shared_idxs = [1, 2, 4, 5]
 
-    return batch_fit_func(
+    list_popts, list_covs = batch_fit_func(
         list_xdata,
         list_ydata,
         dual_gauss_func,
@@ -160,3 +155,7 @@ def batch_fit_dual_gauss(list_xdata, list_ydata, fixedparams=None):
         list_bounds=list_bounds,
         fixedparams=fixedparams,
     )
+    list_popts = np.array(list_popts)
+    list_covs = np.array(list_covs)
+
+    return list_popts, list_covs
