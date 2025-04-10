@@ -296,26 +296,21 @@ def measure_ge_ro_dep(soc, soccfg, cfg):
     qub_pulse = cfg["dac"]["qub_pulse"]
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+    length_sweep = cfg["sweep"]["length"]
 
-    # prepend ge sweep to inner loop
-    cfg["sweep"] = {
-        "ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2},
-        "length": cfg["sweep"]["length"],
-    }
+    # replace ge sweep to sweep, and use soft loop for length
+    cfg["sweep"] = {"ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2}}
 
     # set with / without pi length for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
-    lens = sweep2array(cfg["sweep"]["length"])  # predicted readout lengths
+    lens = sweep2array(length_sweep)  # predicted readout lengths
 
     cfg["adc"]["ro_length"] = lens[0]
-    cfg["dac"]["res_pulse"]["length"] = lens[0] + cfg["adc"]["trig_offset"] + 1.0
-
-    del cfg["sweep"]["length"]  # program should not use this
+    cfg["dac"]["res_pulse"]["length"] = lens.max() + cfg["adc"]["trig_offset"] + 0.1
 
     def updateCfg(cfg, _, ro_len):
         cfg["adc"]["ro_length"] = ro_len
-        cfg["dac"]["res_pulse"]["length"] = ro_len + cfg["adc"]["trig_offset"] + 1.0
 
     lens, snrs = sweep1D_soft_template(
         soc,
@@ -357,26 +352,21 @@ def measure_ge_trig_dep(soc, soccfg, cfg):
     qub_pulse = cfg["dac"]["qub_pulse"]
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "offset")
+    offset_sweep = cfg["sweep"]["offset"]
 
-    # prepend ge sweep to inner loop
-    cfg["sweep"] = {
-        "ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2},
-        "offset": cfg["sweep"]["offset"],
-    }
+    # replace ge sweep to loop, and use soft loop for offset
+    cfg["sweep"] = {"ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2}}
 
     # set with / without pi length for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
-    offsets = sweep2array(cfg["sweep"]["offset"])  # predicted trigger offsets
+    offsets = sweep2array(offset_sweep)  # predicted trigger offsets
 
-    del cfg["sweep"]["offset"]  # program should not use this
-
-    res_len = cfg["dac"]["res_pulse"]["length"]
-    orig_offset = cfg["adc"]["trig_offset"]
+    cfg["adc"]["trig_offset"] = offsets[0]
+    cfg["dac"]["res_pulse"]["length"] = offsets.max() + cfg["adc"]["ro_length"] + 0.1
 
     def updateCfg(cfg, _, offset):
         cfg["adc"]["trig_offset"] = offset
-        cfg["dac"]["res_pulse"]["length"] = res_len + offset - orig_offset
 
     offsets, snrs = sweep1D_soft_template(
         soc,
