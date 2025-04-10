@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Literal
 
 import numpy as np
 from zcu_tools import make_cfg
@@ -22,7 +22,13 @@ def qub_signal2snr(signals):
 
 
 def measure_lenrabi(
-    soc, soccfg, cfg, *, force_align=True, earlystop_snr=None
+    soc,
+    soccfg,
+    cfg,
+    *,
+    force_align=True,
+    align_type: Literal["pre_delay", "post_delay"] = "post_delay",
+    earlystop_snr=None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Measure Rabi oscillation by sweeping pulse length.
 
@@ -66,9 +72,9 @@ def measure_lenrabi(
 
     if force_align:
         max_length = max(
-            len_sweep["start"], len_sweep["stop"], qub_pulse.get("pre_delay", 0.0)
+            len_sweep["start"], len_sweep["stop"], qub_pulse.get(align_type, 0.0)
         )
-        qub_pulse["pre_delay"] = max_length - qub_pulse["length"]
+        qub_pulse[align_type] = max_length - qub_pulse["length"]
 
     if earlystop_snr is not None:
 

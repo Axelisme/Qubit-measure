@@ -1,4 +1,5 @@
 from copy import deepcopy
+from typing import Literal
 
 import numpy as np
 
@@ -9,7 +10,7 @@ from zcu_tools.analysis import (
     peak_n_avg,
 )
 from zcu_tools.program.v1 import RGainTwoToneProgram, TwoToneProgram
-from zcu_tools.schedule.tools import sweep2array
+from zcu_tools.schedule.tools import sweep2array, format_sweep1D
 from zcu_tools.schedule.v1.template import sweep1D_hard_template, sweep1D_soft_template
 
 
@@ -26,20 +27,36 @@ def qub_signal2snr(signals):
     return contrast / noise
 
 
-def measure_lenrabi(soc, soccfg, cfg, *, force_align=False, earlystop_snr=None):
+def measure_lenrabi(
+    soc,
+    soccfg,
+    cfg,
+    *,
+    force_align=False,
+    align_type: Literal["pre_delay", "post_delay"] = "post_delay",
+    earlystop_snr=None,
+):
     cfg = deepcopy(cfg)
 
-    if force_align:
-        raise NotImplementedError("force_align is not implemented for v1 yet")
     if earlystop_snr is not None:
         raise NotImplementedError("earlystop_snr is not implemented for v1 yet")
+    if force_align:
+        align_type = align_type  # make ruff happy
+        raise NotImplementedError("force_align is not implemented for v1 yet")
 
-    lens = sweep2array(cfg["sweep"], allow_array=True)
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+    len_sweep = cfg["sweep"]["length"]
+
+    lens = sweep2array(len_sweep, allow_array=True)
 
     del cfg["sweep"]  # remove sweep for program use
 
+    if force_align:
+        max_length = max(lens.max(), cfg["dac"]["qub_pulse"].get(align_type, 0.0))
+
     def updateCfg(cfg, _, length):
         cfg["dac"]["qub_pulse"]["length"] = length
+        cfg["dac"]["qub_pulse"][align_type] = max_length - length
 
     lens, signals = sweep1D_soft_template(
         soc,

@@ -48,10 +48,10 @@ def measure_ge_pdr_dep(soc, soccfg, cfg):
 
     del cfg["sweep"]  # remove sweep from cfg
 
-    def x_updateCfg(cfg, i, pdr):
+    def x_updateCfg(cfg, _, pdr):
         cfg["dac"]["res_pulse"]["gain"] = pdr
 
-    def y_updateCfg(cfg, j, fpt):
+    def y_updateCfg(cfg, _, fpt):
         cfg["dac"]["res_pulse"]["freq"] = fpt
 
     pdrs, fpts, snr2D = sweep2D_soft_soft_template(
@@ -79,8 +79,7 @@ def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
     fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
     fpts = map2adcfreq(soc, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    del cfg["sweep"]["gain"]  # program should not use this
-    del cfg["sweep"]["freq"]  # program should not use this
+    del cfg["sweep"]  # remove sweep from cfg
 
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
@@ -107,11 +106,10 @@ def measure_ge_ro_dep(soc, soccfg, cfg):
 
     del cfg["sweep"]  # remove sweep from cfg
 
-    trig_offset = cfg["adc"]["trig_offset"]
+    cfg["dac"]["res_pulse"]["length"] = cfg["adc"]["trig_offset"] + ro_lens.max() + 0.1
 
-    def updateCfg(cfg, i, ro_len):
+    def updateCfg(cfg, _, ro_len):
         cfg["adc"]["ro_length"] = ro_len
-        cfg["dac"]["res_pulse"]["length"] = trig_offset + ro_len + 1.0
 
     ro_lens, snrs = sweep1D_soft_template(
         soc,
@@ -135,12 +133,10 @@ def measure_ge_trig_dep(soc, soccfg, cfg):
 
     del cfg["sweep"]  # remove sweep from cfg
 
-    res_len = cfg["dac"]["res_pulse"]["length"]
-    orig_offset = cfg["adc"]["trig_offset"]
+    cfg["dac"]["res_pulse"]["length"] = offsets.max() + cfg["adc"]["ro_length"] + 0.1
 
-    def updateCfg(cfg, i, offset):
+    def updateCfg(cfg, _, offset):
         cfg["adc"]["trig_offset"] = offset
-        cfg["dac"]["res_pulse"]["length"] = offset - orig_offset + res_len
 
     offsets, snrs = sweep1D_soft_template(
         soc,
