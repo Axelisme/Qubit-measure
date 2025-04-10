@@ -1,4 +1,4 @@
-from myqick.asm_v2 import WithFixedLength
+from myqick.asm_v2 import WithMinLength
 
 from .base import MyProgramV2, declare_pulse
 
@@ -21,7 +21,7 @@ class TwoToneProgram(MyProgramV2):
         # RuntimeError: requested sweep step is smaller than the available resolution
         # if qub_pulse + post_delay = constant
         # so use WithFixedLength for patched
-        with WithFixedLength(self, qub_pulse.get("force_total_length")):
+        with WithMinLength(self, qub_pulse.get("force_total_length")):
             self.delay_auto(qub_pulse.get("pre_delay", self.PULSE_DELAY), ros=False)
             self.pulse(qub_pulse["ch"], "qub_pulse")
             self.delay_auto(qub_pulse.get("post_delay", self.PULSE_DELAY), ros=False)
