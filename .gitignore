@@ -9,7 +9,7 @@ wheels/
 
 Database/
 notebook/
-result/
+result
 test.py
 test.ipynb
 
