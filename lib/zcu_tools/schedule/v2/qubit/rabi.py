@@ -1,4 +1,4 @@
-from typing import Tuple, Literal
+from typing import Literal, Tuple
 
 import numpy as np
 from zcu_tools import make_cfg
@@ -74,7 +74,13 @@ def measure_lenrabi(
         max_length = max(
             len_sweep["start"], len_sweep["stop"], qub_pulse.get(align_type, 0.0)
         )
-        qub_pulse[align_type] = max_length - qub_pulse["length"]
+        if align_type == "pre_delay":
+            qub_pulse[align_type] = max_length - qub_pulse["length"]
+        elif align_type == "post_delay":
+            # sweep on post_delay may cause error, use this instead
+            qub_pulse["force_total_length"] = max_length
+        else:
+            raise ValueError("Unknown align_type: ", align_type)
 
     if earlystop_snr is not None:
 
