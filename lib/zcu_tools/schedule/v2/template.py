@@ -257,6 +257,7 @@ def sweep2D_soft_hard_template(
 
                     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
+                    avgs_tqdm.total = cfg["soft_avgs"]
                     avgs_tqdm.reset()
                     avgs_tqdm.refresh()
 
