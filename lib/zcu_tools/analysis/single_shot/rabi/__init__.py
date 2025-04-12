@@ -1,5 +1,11 @@
+import threading
+import time
+
+import ipywidgets as widgets
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+from IPython.display import display
 
 from ...fitting import batch_fit_dual_gauss, fit_gauss, gauss_func
 from ...tools import rotate2real
@@ -101,14 +107,6 @@ def visualize_singleshot_rabi(xs, signals, list_params):
     Before first user interaction, the slider automatically moves back and forth
     with a 10-second period.
     """
-    import threading
-    import time
-
-    import ipywidgets as widgets
-    import matplotlib as mpl
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from IPython.display import display
 
     # Pre-process data - do these calculations only once
     signals_real = rotate2real(signals).real
