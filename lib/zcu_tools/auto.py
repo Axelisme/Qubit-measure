@@ -49,7 +49,7 @@ def auto_derive_waveform(pulse_cfg: Dict[str, Any]):
     length: Optional[float] = pulse_cfg.get("length")
     if style == "flat_top":
         raise_cfg: Dict[str, Any] = pulse_cfg.setdefault("raise_pulse", {})
-        raise_cfg.setdefault("style", "cosine")
+        raise_cfg.setdefault("style", "cosine")  # default use cosine
         if length is not None:
             # default raise pulse is 10% of the total length
             # the minimum length is 15 ns
@@ -93,23 +93,6 @@ def auto_derive_pulse(
         pulse_cfg = deepcopy(DefaultCfg.get_pulse(name))
         pulse_cfg["pulse_name"] = name
 
-    ch = None
-    if name == "res_pulse":
-        ch = DefaultCfg.get_dac("res_ch")
-    else:
-        ch = DefaultCfg.get_dac("qub_ch")
-
-    # fill ch if not provided
-    if ch is not None:
-        pulse_cfg.setdefault("ch", ch)
-
-    # fill nqz if not provided
-    if "nqz" not in pulse_cfg:
-        if "freq" in pulse_cfg:
-            # use NQZ_THRESHOLD as the threshold
-            nqz = 2 if pulse_cfg["freq"] > NQZ_THRESHOLD else 1
-            pulse_cfg.setdefault("nqz", nqz)
-
     # phase
     pulse_cfg.setdefault("phase", 0.0)  # deg
 
@@ -140,7 +123,7 @@ def auto_derive(exp_cfg: Dict[str, Any]):
     # dac
     ## derive each pulse
     for name, pulse_cfg in dac_cfg.items():
-        # check if it is a pulse
+        # check if it is a pulse by postfix
         if name.endswith("_pulse"):
             dac_cfg[name] = auto_derive_pulse(name, pulse_cfg)
 
@@ -171,11 +154,6 @@ def auto_derive(exp_cfg: Dict[str, Any]):
         if "trig_offset" in res_pulse:
             adc_cfg.setdefault("trig_offset", res_pulse["trig_offset"])
 
-        # or, use the timeFly
-        timeFly: Optional[float] = DefaultCfg.get_adc("timeFly")
-        if timeFly is not None:
-            adc_cfg.setdefault("trig_offset", timeFly)
-
     ## relax delay
     adc_cfg.setdefault("relax_delay", 0.0)  # us
 
@@ -185,8 +163,9 @@ def auto_derive(exp_cfg: Dict[str, Any]):
     if flux_dev is not None:
         # if default flux_dev is provided, use it
         dev_cfg.setdefault("flux_dev", flux_dev)
-    # use none if not provided
-    dev_cfg.setdefault("flux_dev", "none")
+    else:
+        # use none if not provided
+        dev_cfg.setdefault("flux_dev", "none")
 
     # other
     flux_value: Optional[float] = DefaultCfg.get_dev("flux")
