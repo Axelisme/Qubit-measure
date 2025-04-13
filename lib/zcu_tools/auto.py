@@ -143,9 +143,6 @@ def auto_derive(exp_cfg: Dict[str, Any]):
         if "ro_length" in res_pulse:
             # if pulse cfg has set ro_length, use it
             adc_cfg.setdefault("ro_length", res_pulse["ro_length"])
-        if "length" in res_pulse:
-            # or, use the length of the readout pulse
-            adc_cfg.setdefault("ro_length", res_pulse["length"])
 
     ## trig_offset
     if "trig_offset" not in adc_cfg:
@@ -154,18 +151,12 @@ def auto_derive(exp_cfg: Dict[str, Any]):
         if "trig_offset" in res_pulse:
             adc_cfg.setdefault("trig_offset", res_pulse["trig_offset"])
 
-    ## relax delay
-    adc_cfg.setdefault("relax_delay", 0.0)  # us
-
     # dev
     ## flux dev
     flux_dev: Optional[str] = DefaultCfg.get_dev("flux_dev")
     if flux_dev is not None:
         # if default flux_dev is provided, use it
         dev_cfg.setdefault("flux_dev", flux_dev)
-    else:
-        # use none if not provided
-        dev_cfg.setdefault("flux_dev", "none")
 
     # other
     flux_value: Optional[float] = DefaultCfg.get_dev("flux")
@@ -176,8 +167,6 @@ def auto_derive(exp_cfg: Dict[str, Any]):
     if "soft_avgs" not in exp_cfg:
         if "rounds" in exp_cfg:
             exp_cfg["soft_avgs"] = exp_cfg["rounds"]
-        else:
-            exp_cfg["soft_avgs"] = 1
     elif "rounds" in exp_cfg:
         if exp_cfg["soft_avgs"] != exp_cfg["rounds"]:
             raise ValueError("soft_avgs and rounds should be the same")
