@@ -45,11 +45,10 @@ def candidate_breakpoint_search(
     N = A.shape[0]
     K = B.shape[1]
 
-    # 找出最佳的 a 值
-    best_distance = float("inf")
-    best_a = 1.0
+    # 收集所有可能的 a 值
+    cand_as = np.empty(N * K * 2, dtype=float)
+    count = 0
 
-    distances = np.empty(N, dtype=np.float64)
     for i in range(N):
         for j in range(K):
             if B[i, j] == 0:
@@ -58,23 +57,43 @@ def candidate_breakpoint_search(
             a1 = (A[i] - C[i, j]) / B[i, j]
             a2 = (-A[i] - C[i, j]) / B[i, j]
 
-            for a in (a1, a2):
-                if a < a_min or a > a_max:
-                    continue
+            if a_min <= a1 <= a_max:
+                cand_as[count] = a1
+                count += 1
+            if a_min <= a2 <= a_max:
+                cand_as[count] = a2
+                count += 1
+    cand_as = cand_as[:count]
+    np.sort(cand_as)  # 排序候選值
 
-                for i in range(N):
-                    min_diff = float("inf")
-                    for j in range(K):
-                        # 計算距離
-                        diff = np.abs(A[i] - np.abs(a * B[i, j] + C[i, j]))
-                        if diff < min_diff:
-                            min_diff = diff
-                    distances[i] = min_diff
+    # 評估篩選後的 a 值
+    best_distance = float("inf")
+    best_a = 1.0
 
-                total_distance = np.mean(distances)
-                if total_distance < best_distance:
-                    best_distance = total_distance
-                    best_a = a
+    # 如果沒有候選值，添加一些均勻分佈的點
+    if len(cand_as) != 0:
+        # 過濾太接近的值
+        A_THRESHOLD = np.std(cand_as) / 1000
+
+        prev_a = a_min - A_THRESHOLD  # ensure first
+        distances = np.empty(N, dtype=np.float64)
+        for a in cand_as:
+            if a - prev_a < A_THRESHOLD:
+                continue
+            prev_a = a
+
+            for i in range(N):
+                min_diff = float("inf")
+                for j in range(K):
+                    diff = np.abs(A[i] - np.abs(a * B[i, j] + C[i, j]))
+                    if diff < min_diff:
+                        min_diff = diff
+                distances[i] = min_diff
+
+            total_distance = np.mean(distances)
+            if total_distance < best_distance:
+                best_distance = total_distance
+                best_a = a
 
     return best_distance, best_a
 

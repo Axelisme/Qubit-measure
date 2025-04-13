@@ -784,6 +784,13 @@ class VisualizeSpet:
             )
         )
 
+    def plot_constant_freqs(self, fig):
+        if "r_f" in self.allows:
+            fig.add_hline(y=self.allows["r_f"], line_dash="dash", name="r_f")
+
+        if "sample_f" in self.allows:
+            fig.add_hline(y=self.allows["sample_f"], line_dash="dash", name="sample_f")
+
     def _set_axis_limit(self, fig):
         sp_mAs = np.concatenate([s["spectrum"]["mAs"] for s in self.s_spects.values()])
         sp_fpts = np.concatenate(
@@ -794,19 +801,30 @@ class VisualizeSpet:
             max(np.nanmax(sp_mAs), self.s_mAs.max(), self.mAs.max()),
         )
         fpt_bound = (
-            min(np.nanmin(sp_fpts), self.s_fpts.min()),
-            max(np.nanmax(sp_fpts), self.s_fpts.max()),
+            min(
+                np.nanmin(sp_fpts),
+                self.s_fpts.min(),
+                self.allows.get("r_f", np.inf) - 0.1,
+                self.allows.get("sample_f", np.inf) - 0.1,
+            ),
+            max(
+                np.nanmax(sp_fpts),
+                self.s_fpts.max(),
+                self.allows.get("r_f", 0.0) + 0.1,
+                self.allows.get("sample_f", 0.0) + 0.1,
+            ),
         )
 
         # Set x and y axis range
         fig.update_xaxes(range=[mA_bound[0], mA_bound[1]])
-        fig.update_yaxes(range=[fpt_bound[0], fpt_bound[1]])
+        fig.update_yaxes(range=[0.0, fpt_bound[1]])
 
     def create_figure(self):
         fig = go.Figure()
 
         self.plot_background(fig)
         self.plot_predict_lines(fig)
+        self.plot_constant_freqs(fig)
         self.plot_scatter_point(fig)
 
         self._set_axis_limit(fig)
@@ -855,7 +873,7 @@ class VisualizeSpet:
         """
         K = fs.shape[1]
 
-        THRESHOLD = 2
+        THRESHOLD = 5
 
         if self.auto_hide:
             # interpolate flux points
