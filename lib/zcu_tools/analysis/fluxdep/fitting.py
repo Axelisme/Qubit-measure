@@ -73,7 +73,7 @@ def candidate_breakpoint_search(
     # 如果沒有候選值，添加一些均勻分佈的點
     if len(cand_as) != 0:
         # 過濾太接近的值
-        A_THRESHOLD = np.std(cand_as) / 1000
+        A_THRESHOLD = 1e-3 * (a_max - a_min)
 
         prev_a = a_min - A_THRESHOLD  # ensure first
         distances = np.empty(N, dtype=np.float64)
