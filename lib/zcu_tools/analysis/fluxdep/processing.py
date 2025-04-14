@@ -57,3 +57,27 @@ def spectrum_analyze(mAs, fpts, signals, threshold, weight=None):
         s_mAs.extend(mAs[i] * np.ones(len(peaks)))
         s_fpts.extend(fpts[peaks])
     return np.array(s_mAs), np.array(s_fpts)
+
+
+def downsample_points(xs: np.ndarray, ys: np.ndarray, threshold: float) -> np.ndarray:
+    selected = []
+    mask = np.zeros_like(xs, dtype=bool)
+
+    # np.random.seed(0)
+    idxs = np.random.Generator(np.random.PCG64(0)).permutation(len(xs))
+    for i in idxs:
+        too_close = False
+        for j in selected:
+            # allow same x
+            if xs[i] == xs[j]:
+                continue
+
+            if (xs[i] - xs[j]) ** 2 + (ys[i] - ys[j]) ** 2 < threshold**2:
+                too_close = True
+                break
+
+        if not too_close:
+            selected.append(i)
+            mask[i] = True
+
+    return mask

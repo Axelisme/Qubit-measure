@@ -17,7 +17,7 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Ellipse
 
 from .models import energy2transition
-from .processing import cast2real_and_norm, mA2flx, spectrum_analyze
+from .processing import cast2real_and_norm, downsample_points, mA2flx, spectrum_analyze
 
 
 class InteractiveFindPoints:
@@ -507,6 +507,7 @@ class InteractiveSelector:
         self.selected = (
             selected if selected is not None else np.ones_like(self.s_mAs, dtype=bool)
         )
+        self.filter_mask = np.ones_like(self.selected, dtype=bool)
 
         self.is_finished = False
 
@@ -515,19 +516,11 @@ class InteractiveSelector:
         self.fig.tight_layout()
         plt.ion()
 
-        # 顯示 widget
+        self.set_plot_limit()
         self.create_widgets(brush_width)
-
-        # 顯示頻譜
         self.init_background(s_pects)
-
-        # 顯示發現的點
         self.init_points(self.s_mAs, self.s_fpts, self.selected)
 
-        # 設置 x 和 y 軸範圍
-        self.set_plot_limit()
-
-        # 準備手繪曲線
         self.fig.canvas.mpl_connect("button_press_event", self.on_press)
 
         display(
@@ -535,7 +528,13 @@ class InteractiveSelector:
                 [
                     self.fig.canvas,
                     widgets.VBox(
-                        [self.width_slider, self.operation_tb, self.finish_button]
+                        [
+                            self.width_slider,
+                            self.thresh_slider,
+                            self.operation_tb,
+                            self.perform_all_bt,
+                            self.finish_button,
+                        ]
                     ),
                 ]
             )
@@ -545,17 +544,59 @@ class InteractiveSelector:
         self.temp_circle = None
         self.temp_circle_timer = None
 
+    def create_thresh_silders(self):
+        self.thresh_slider = widgets.FloatSlider(
+            value=0.0, min=0.0, max=0.1, step=1e-3, description="Min distance:"
+        )
+
+        self.thresh_slider.observe(
+            lambda _: self.apply_filter_and_redraw(), names="value"
+        )
+
     def create_widgets(self, brush_width):
         self.width_slider = widgets.FloatSlider(
             value=brush_width, min=0.01, max=0.1, step=1e-4, description="Brush Width:"
         )
+
+        self.create_thresh_silders()
+
         self.operation_tb = widgets.Dropdown(
             options=["Select", "Erase"], value="Select", description="Operation:"
         )
+
+        self.perform_all_bt = widgets.Button(
+            description="Perform on All", button_style="warning"
+        )
+        self.perform_all_bt.on_click(self.on_perform_all)
+
         self.finish_button = widgets.Button(
             description="Finish", button_style="success"
         )
         self.finish_button.on_click(self.on_finish)
+
+    def apply_filter_and_redraw(self):
+        if self.is_finished:
+            return
+
+        sel_x = self.s_mAs[self.selected] / (self.mA_bound[1] - self.mA_bound[0])
+        sel_y = self.s_fpts[self.selected] / (self.fpt_bound[1] - self.fpt_bound[0])
+        thresh = self.thresh_slider.value
+
+        self.filter_mask = downsample_points(sel_x, sel_y, thresh)
+        self.update_points()
+        self.fig.canvas.draw_idle()
+
+    def on_perform_all(self, _):
+        if self.is_finished:
+            return
+
+        mode = self.operation_tb.value
+        if mode == "Select":
+            self.selected[:] = True
+        elif mode == "Erase":
+            self.selected[:] = False
+
+        self.apply_filter_and_redraw()
 
     def init_background(self, s_pects):
         for spect in s_pects.values():
@@ -601,8 +642,13 @@ class InteractiveSelector:
         self.ax.set_xlim(self.mA_bound[0], self.mA_bound[1])
         self.ax.set_ylim(self.fpt_bound[0], self.fpt_bound[1])
 
-    def update_points(self, selected):
-        self.scatter.set_array(selected.astype(float))
+    def get_cur_selected(self):
+        cur_selected = np.zeros_like(self.selected)
+        cur_selected[np.where(self.selected)[0][self.filter_mask]] = True
+        return cur_selected
+
+    def update_points(self):
+        self.scatter.set_array(self.get_cur_selected().astype(float))
 
     def toggle_near_mask(self, x, y, width):
         x_d = np.abs(self.s_mAs - x) / (self.mA_bound[1] - self.mA_bound[0])
@@ -619,7 +665,8 @@ class InteractiveSelector:
         if not self.is_finished:
             self.on_finish(None)
 
-        return (self.s_mAs[self.selected], self.s_fpts[self.selected], self.selected)
+        cur_selected = self.get_cur_selected()
+        return (self.s_mAs[cur_selected], self.s_fpts[cur_selected], cur_selected)
 
     def on_press(self, event):
         if event.inaxes != self.ax or self.is_finished:
@@ -631,9 +678,7 @@ class InteractiveSelector:
 
         # 新增: 顯示暫時性圓圈（並取消舊的計時器）
         self.show_temp_circle(event.xdata, event.ydata, width)
-
-        self.update_points(self.selected)
-        self.fig.canvas.draw_idle()
+        self.apply_filter_and_redraw()
 
     def show_temp_circle(self, x, y, width):
         """顯示暫時性圓圈，一秒後消失"""
