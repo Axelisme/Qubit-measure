@@ -17,7 +17,13 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Ellipse
 
 from .models import energy2transition
-from .processing import cast2real_and_norm, downsample_points, mA2flx, spectrum_analyze
+from .processing import (
+    cast2real_and_norm,
+    diff_mirror,
+    downsample_points,
+    mA2flx,
+    spectrum_analyze,
+)
 
 
 class InteractiveFindPoints:
@@ -259,6 +265,7 @@ class InteractiveLines:
                                 [
                                     self.status_text,
                                     self.finish_button,
+                                    self.conjugate_checkbox,
                                 ]
                             ),
                             self.fig_zoom.canvas,
@@ -284,6 +291,9 @@ class InteractiveLines:
             description="完成",
             button_style="success",
             tooltip="完成選擇並返回結果",
+        )
+        self.conjugate_checkbox = widgets.Checkbox(
+            value=False, description="Conjugate Line", indent=False
         )
         self.position_text = widgets.HTML(value=self.get_info())
         self.status_text = widgets.HTML(
@@ -337,7 +347,7 @@ class InteractiveLines:
 
     def create_zoom(self, mAs, fpts, amps):
         """創建放大視圖"""
-        self.ax_zoom.set_title("Zoom View")
+        self.ax_zoom.set_title(f"mirror loss: {None}")
         self.zoom_im = self.ax_zoom.imshow(
             amps,
             aspect="auto",
@@ -445,14 +455,16 @@ class InteractiveLines:
         elif new_x < other_x and other_x - new_x < self.min_dist:
             new_x = other_x - self.min_dist
 
-        # 確保不超出邊界
-        if new_x > self.mAs[-1]:
-            new_x = self.mAs[-1]
-        elif new_x < self.mAs[0]:
-            new_x = self.mAs[0]
-
         # 更新線的位置
-        self.picked.set_xdata([new_x, new_x])
+        if self.conjugate_checkbox.value:
+            # 同步移動
+            dx = new_x - self.picked.get_xdata()[0]
+            # 更新兩條線的位置
+            self.rline.set_xdata([self.rline.get_xdata()[0] + dx])
+            self.bline.set_xdata([self.bline.get_xdata()[0] + dx])
+        else:
+            # 單獨移動
+            self.picked.set_xdata([new_x])
 
         # 更新位置文字
         self.mA_c = self.rline.get_xdata()[0]
@@ -467,11 +479,17 @@ class InteractiveLines:
         if x is None or y is None or self.active_line is None:
             return []  # out of axes or not dragging, do nothing
 
+        diff_amps = diff_mirror(self.mAs, self.amps.T, x).T
+        self.zoom_im.set_data(diff_amps)
+
+        mirror_loss = np.mean(diff_amps[diff_amps != 0.0])
+
         # set axis limits to simulate zoom
-        Dx = 0.1 * (self.mAs[-1] - self.mAs[0])
-        Dy = 0.1 * (self.fpts[-1] - self.fpts[0])
+        Dx = 0.3 * (self.mAs[-1] - self.mAs[0])
+        Dy = 0.3 * (self.fpts[-1] - self.fpts[0])
         self.ax_zoom.set_xlim(x - Dx, x + Dx)
         self.ax_zoom.set_ylim(y - Dy, y + Dy)
+        self.ax_zoom.set_title(f"mirror loss: {mirror_loss}")
 
         self.zoom_dot.set_xdata([x])
         self.zoom_dot.set_ydata([y])

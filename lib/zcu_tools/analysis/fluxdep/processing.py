@@ -81,3 +81,27 @@ def downsample_points(xs: np.ndarray, ys: np.ndarray, threshold: float) -> np.nd
             mask[i] = True
 
     return mask
+
+
+def diff_mirror(xs: np.ndarray, data: np.ndarray, center: float) -> np.ndarray:
+    """
+    計算 data 對於 center 位置的鏡像反轉與原本的差值
+
+    參數:
+        xs: 1D 座標陣列，形狀為 (N,)
+        data: 數據陣列，形狀為 (N, ...)
+        center: 鏡像中心的座標值
+
+    返回:
+        差值陣列，形狀與 data 相同
+    """
+    # 找到最接近 center 的索引
+    c_idx = (len(xs) - 1) * (center - xs.min()) / (xs.max() - xs.min())
+
+    diff_data = np.zeros_like(data)
+    for i in range(data.shape[0]):
+        j = int(2 * c_idx - i + 0.5)
+        if 0 <= j < data.shape[0]:
+            diff_data[i] = np.abs(data[i] - data[j])
+
+    return diff_data
