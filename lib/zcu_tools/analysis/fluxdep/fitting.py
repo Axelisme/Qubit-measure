@@ -215,6 +215,7 @@ def search_in_database(
     )
 
     ax_freq.set_ylabel("Frequency (GHz)")
+    ax_freq.set_xlabel("Flux")
     ax_freq.legend()
     ax_freq.grid(True)
 

@@ -5,6 +5,7 @@ from .gauss import (
     batch_fit_dual_gauss,
     dual_gauss_func,
     fit_dual_gauss,
+    fit_dual_gauss_gmm,
     fit_gauss,
     gauss_func,
 )
@@ -28,5 +29,6 @@ __all__ = [
     "fit_gauss",
     "dual_gauss_func",
     "fit_dual_gauss",
+    "fit_dual_gauss_gmm",
     "batch_fit_dual_gauss",
 ]
