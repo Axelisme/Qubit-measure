@@ -19,7 +19,10 @@ from zcu_tools.tools import AsyncFunc
 from .models import energy2linearform
 
 
-@njit(nogil=True)
+@njit(
+    "float64(float64[:], float64, float64[:,:], float64[:,:])",
+    nogil=True,
+)
 def eval_dist(A: np.ndarray, a: float, B: np.ndarray, C: np.ndarray):
     """
     計算: mean_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
@@ -27,19 +30,22 @@ def eval_dist(A: np.ndarray, a: float, B: np.ndarray, C: np.ndarray):
     N = A.shape[0]
     K = B.shape[1]
 
-    distances = 0.0
+    dist = 0.0
     for i in range(N):
         min_diff = float("inf")
         for j in range(K):
             diff = np.abs(A[i] - np.abs(a * B[i, j] + C[i, j]))
             if diff < min_diff:
                 min_diff = diff
-        distances += min_diff
+        dist += min_diff
 
-    return distances / N
+    return dist / N
 
 
-@njit(nogil=True)
+@njit(
+    "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:], float64, float64)",
+    nogil=True,
+)
 def candidate_breakpoint_search(
     A: np.ndarray, B: np.ndarray, C: np.ndarray, a_min: float, a_max: float
 ) -> Tuple[float, float]:
@@ -85,7 +91,10 @@ def candidate_breakpoint_search(
     return best_distance, best_a
 
 
-@njit(nogil=True)
+@njit(
+    "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:], float64, float64)",
+    nogil=True,
+)
 def smart_fuzzy_search(
     A: np.ndarray, B: np.ndarray, C: np.ndarray, a_min: float, a_max: float
 ) -> Tuple[float, float]:

@@ -936,7 +936,7 @@ class VisualizeSpet:
         """
         K = fs.shape[1]
 
-        THRESHOLD = 5
+        THRESHOLD = 4
 
         if self.auto_hide:
             # interpolate flux points
