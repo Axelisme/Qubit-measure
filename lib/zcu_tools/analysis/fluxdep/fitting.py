@@ -337,13 +337,13 @@ def search_in_database(
 
 def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
     import scqubits as scq
-    from scipy.optimize import minimize
+    from scipy.optimize import least_squares
 
     scq.settings.PROGRESSBAR_DISABLED, old = True, scq.settings.PROGRESSBAR_DISABLED
 
     evals_count = count_max_evals(allows)
     fluxonium = scq.Fluxonium(
-        *init_params, flux=0.0, truncated_dim=evals_count, cutoff=40
+        *init_params, flux=0.0, truncated_dim=evals_count, cutoff=45
     )
 
     pbar = tqdm(
@@ -351,28 +351,33 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
         total=maxfun,
     )
 
-    def loss_func(params):
-        nonlocal fluxonium, flxs, allows, fpts, evals_count
-
-        energies = calculate_energy(
-            flxs, *params, evals_count=evals_count, fluxonium=fluxonium
-        )
-        Bs, Cs = energy2linearform(energies, allows)
-        return eval_dist(fpts, 1.0, Bs, Cs)
-
     def callback(result):
         nonlocal pbar
         pbar.update(1)
         params = result if isinstance(result, np.ndarray) else result.x
         pbar.set_description(f"({params[0]:.4f}, {params[1]:.4f}, {params[2]:.4f})")
 
-    res = minimize(
-        loss_func,
+    # 使用 least_squares 進行參數最佳化
+    def residuals(params):
+        nonlocal fluxonium, flxs, allows, fpts, evals_count
+
+        callback(params)
+
+        # 計算能量並轉成線性形式
+        energies = calculate_energy(
+            flxs, *params, evals_count=evals_count, fluxonium=fluxonium
+        )
+        Bs, Cs = energy2linearform(energies, allows)
+        # 計算每個點的最小誤差
+        return np.min(np.abs(fpts[:, None] - np.abs(Bs + Cs)), axis=1)
+
+    EJb, ECb, ELb = param_b
+    res = least_squares(
+        residuals,
         init_params,
-        bounds=param_b,
-        method="L-BFGS-B",
-        options={"maxfun": maxfun},
-        callback=callback,
+        bounds=((EJb[0], ECb[0], ELb[0]), (EJb[1], ECb[1], ELb[1])),
+        max_nfev=maxfun,
+        loss="soft_l1",
     )
 
     pbar.close()
