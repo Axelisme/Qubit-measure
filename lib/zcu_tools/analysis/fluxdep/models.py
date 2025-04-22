@@ -6,11 +6,13 @@ This module provides functions for calculating physical models related to
 flux-dependent spectroscopy, including energy calculations and transition models.
 """
 
+import warnings
+
 import numpy as np
 from scqubits import Fluxonium
 
 
-def calculate_energy(flxs, EJ, EC, EL, cutoff=50, evals_count=10):
+def calculate_energy(flxs, EJ, EC, EL, cutoff=None, evals_count=10, fluxonium=None):
     # because erergy is periodic, remove repeated values and record index
     flxs = flxs % 1.0
     flxs = np.where(flxs < 0.5, flxs, 1.0 - flxs)
@@ -19,9 +21,20 @@ def calculate_energy(flxs, EJ, EC, EL, cutoff=50, evals_count=10):
     sort_idxs = np.argsort(flxs)
     flxs = flxs[sort_idxs]
 
-    fluxonium = Fluxonium(
-        EJ, EC, EL, flux=0.0, cutoff=cutoff, truncated_dim=evals_count
-    )
+    if fluxonium is None:
+        if cutoff is None:
+            cutoff = 50
+        fluxonium = Fluxonium(
+            EJ, EC, EL, flux=0.0, cutoff=cutoff, truncated_dim=evals_count
+        )
+    else:
+        if cutoff is not None:
+            warnings.warn(
+                "cutoff is ignored when fluxonium is provided, use fluxonium.cutoff instead"
+            )
+        fluxonium.EJ = EJ
+        fluxonium.EC = EC
+        fluxonium.EL = EL
     energies = fluxonium.get_spectrum_vs_paramvals(
         "flux", flxs, evals_count=evals_count
     ).energy_table
@@ -31,6 +44,17 @@ def calculate_energy(flxs, EJ, EC, EL, cutoff=50, evals_count=10):
     energies = energies[uni_idxs, :]
 
     return energies
+
+
+def count_max_evals(allows):
+    evals_count = 0
+    for name, lvl in allows.items():
+        if not isinstance(lvl, list) or len(lvl) == 0 or name == "r_f":
+            continue
+        evals_count = max(evals_count, *[max(lv) for lv in lvl])
+    evals_count += 1
+
+    return evals_count
 
 
 def energy2linearform(energies, allows):

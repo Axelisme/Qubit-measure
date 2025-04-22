@@ -16,7 +16,7 @@ from tqdm.auto import tqdm, trange
 
 from zcu_tools.tools import AsyncFunc
 
-from .models import energy2linearform
+from .models import calculate_energy, count_max_evals, energy2linearform
 
 
 @njit(
@@ -341,13 +341,7 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
 
     scq.settings.PROGRESSBAR_DISABLED, old = True, scq.settings.PROGRESSBAR_DISABLED
 
-    evals_count = 0
-    for lvl in allows.values():
-        if not isinstance(lvl, list) or len(lvl) == 0:
-            continue
-        evals_count = max(evals_count, *[max(lv) for lv in lvl])
-    evals_count += 1
-
+    evals_count = count_max_evals(allows)
     fluxonium = scq.Fluxonium(
         *init_params, flux=0.0, truncated_dim=evals_count, cutoff=40
     )
@@ -357,37 +351,20 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
         total=maxfun,
     )
 
-    def callback(intermediate_result):
-        pbar.update(1)
-        if isinstance(intermediate_result, np.ndarray):
-            # old version
-            cur_params = intermediate_result
-        else:
-            cur_params = intermediate_result.x
-        pbar.set_description(
-            f"({cur_params[0]:.4f}, {cur_params[1]:.4f}, {cur_params[2]:.4f})"
+    def loss_func(params):
+        nonlocal fluxonium, flxs, allows, fpts, evals_count
+
+        energies = calculate_energy(
+            flxs, *params, evals_count=evals_count, fluxonium=fluxonium
         )
-
-    def params2energy(flxs, params):
-        nonlocal fluxonium, evals_count
-
-        fluxonium.EJ = params[0]
-        fluxonium.EC = params[1]
-        fluxonium.EL = params[2]
-        return fluxonium.get_spectrum_vs_paramvals(
-            "flux", flxs, evals_count=evals_count, get_eigenstates=True
-        ).energy_table
-
-    # Find unique values in flxs and map original indices to unique indices
-    uni_flxs, uni_idxs = np.unique(flxs, return_inverse=True)
-
-    def loss_func(param):
-        nonlocal fluxonium, flxs, uni_flxs, uni_idxs, allows, fpts
-
-        energies = params2energy(uni_flxs, param)
         Bs, Cs = energy2linearform(energies, allows)
-        fs = np.abs(Bs + Cs)[uni_idxs, :]
-        return np.sum(np.sqrt(np.min(np.abs(fpts[:, None] - fs), axis=1)))
+        return eval_dist(fpts, 1.0, Bs, Cs)
+
+    def callback(result):
+        nonlocal pbar
+        pbar.update(1)
+        params = result if isinstance(result, np.ndarray) else result.x
+        pbar.set_description(f"({params[0]:.4f}, {params[1]:.4f}, {params[2]:.4f})")
 
     res = minimize(
         loss_func,

@@ -63,22 +63,22 @@ def downsample_points(xs: np.ndarray, ys: np.ndarray, threshold: float) -> np.nd
     selected = []
     mask = np.zeros_like(xs, dtype=bool)
 
-    # np.random.seed(0)
     idxs = np.random.Generator(np.random.PCG64(0)).permutation(len(xs))
     for i in idxs:
+        if i in selected:
+            continue
+
         too_close = False
         for j in selected:
-            # allow same x
-            if xs[i] == xs[j]:
-                continue
-
             if (xs[i] - xs[j]) ** 2 + (ys[i] - ys[j]) ** 2 < threshold**2:
                 too_close = True
                 break
 
         if not too_close:
-            selected.append(i)
-            mask[i] = True
+            for j in idxs:
+                if xs[i] == xs[j] and j not in selected:
+                    selected.append(j)
+                    mask[j] = True
 
     return mask
 
