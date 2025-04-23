@@ -346,22 +346,18 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
         *init_params, flux=0.0, truncated_dim=evals_count, cutoff=45
     )
 
-    pbar = tqdm(
-        desc=f"({init_params[0]:.2f}, {init_params[1]:.2f}, {init_params[2]:.2f})",
-        total=maxfun,
-    )
+    pbar = tqdm(desc="Distance: nan", total=maxfun)
 
-    def callback(result):
+    def update_pbar(params, dist):
         nonlocal pbar
-        pbar.update(1)
-        params = result if isinstance(result, np.ndarray) else result.x
-        pbar.set_description(f"({params[0]:.4f}, {params[1]:.4f}, {params[2]:.4f})")
+
+        pbar.set_postfix_str(f"({params[0]:.3f}, {params[1]:.3f}, {params[2]:.2f})")
+        pbar.set_description_str(f"Distance: {dist:.2g}")
+        pbar.update()
 
     # 使用 least_squares 進行參數最佳化
     def residuals(params):
         nonlocal fluxonium, flxs, allows, fpts, evals_count
-
-        callback(params)
 
         # 計算能量並轉成線性形式
         energies = calculate_energy(
@@ -369,7 +365,11 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
         )
         Bs, Cs = energy2linearform(energies, allows)
         # 計算每個點的最小誤差
-        return np.min(np.abs(fpts[:, None] - np.abs(Bs + Cs)), axis=1)
+        dists = np.min(np.abs(fpts[:, None] - np.abs(Bs + Cs)), axis=1)
+
+        update_pbar(params, np.mean(dists))
+
+        return dists
 
     EJb, ECb, ELb = param_b
     res = least_squares(

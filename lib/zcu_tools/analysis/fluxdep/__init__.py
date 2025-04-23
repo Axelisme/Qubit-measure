@@ -19,7 +19,7 @@ from .interactive import (
 from .models import calculate_energy, energy2linearform, energy2transition
 
 # Persistence functions
-from .persistence import dump_result, load_result
+from .persistence import dump_result, dump_spects, load_result, load_spects
 
 # Data processing
 from .processing import flx2mA, format_rawdata, mA2flx, spectrum_analyze
@@ -45,4 +45,6 @@ __all__ = [
     # Persistence functions
     "dump_result",
     "load_result",
+    "dump_spects",
+    "load_spects",
 ]

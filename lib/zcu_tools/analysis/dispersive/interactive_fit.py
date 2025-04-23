@@ -64,13 +64,21 @@ def search_proper_g(params, r_f, sp_flxs, sp_fpts, signals, g_bound, g_init=None
     # Pre-calculate signal amplitude for plotting
     signal_amp = np.abs(signals)
 
+    CUTOFF = 40
+    EVALS_COUNT = 20
     STEP = 0.001
     cache_rfs = {}
 
     if g_init is None:
         g_init = round(0.5 * (g_bound[0] + g_bound[1]), 3)
     rf_0, rf_1 = calculate_dispersive(
-        params, r_f, g_init, sp_flxs, cutoff=40, evals_count=20, progress=False
+        params,
+        r_f,
+        g_init,
+        sp_flxs,
+        cutoff=CUTOFF,
+        evals_count=EVALS_COUNT,
+        progress=False,
     )
     cache_rfs[g_init] = (rf_0, rf_1)
 
@@ -119,7 +127,13 @@ def search_proper_g(params, r_f, sp_flxs, sp_fpts, signals, g_bound, g_init=None
         else:
             # Calculate dispersive shift
             rf_0, rf_1 = calculate_dispersive(
-                params, r_f, g, sp_flxs, cutoff=40, evals_count=20, progress=False
+                params,
+                r_f,
+                g,
+                sp_flxs,
+                cutoff=CUTOFF,
+                evals_count=EVALS_COUNT,
+                progress=False,
             )
             cache_rfs[g] = (rf_0, rf_1)
 

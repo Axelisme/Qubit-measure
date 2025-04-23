@@ -762,6 +762,9 @@ class VisualizeSpet:
         self.s_flxs = mA2flx(self.s_mAs, mA_c, period)
         self.flxs = mA2flx(self.mAs, mA_c, period)
 
+        self.mA_c = mA_c
+        self.period = period
+
     def set_scatter_style(self, size=None, color=None):
         if size is not None:
             self.scatter_size = size
@@ -956,3 +959,15 @@ class VisualizeSpet:
             visible_lines = np.full(K, True)
 
         return visible_lines
+
+    def add_onetone(self, fig, mAs, fpts, spectrum):
+        for shift in [-self.period, 0, self.period]:
+            fig.add_trace(
+                go.Heatmap(
+                    z=np.abs(spectrum),
+                    x=mAs + shift,
+                    y=fpts,
+                    colorscale="Greys",
+                    showscale=False,
+                )
+            )
