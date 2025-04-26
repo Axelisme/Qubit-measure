@@ -243,12 +243,7 @@ def fitting_ge_and_plot(
         axs[0, 1].hist(xs, bins=bins, weights=ng, color="b", alpha=0.5)
         axs[1, 1].hist(xs, bins=bins, weights=ne, color="r", alpha=0.5)
 
-        guess_g_params, _ = fit_gauss(xs, ng)
-        guess_e_params, _ = fit_gauss(xs, ne)
-
-        fixedparams = [None, *guess_g_params[1:3], None, *guess_e_params[1:3]]
-
-        ge_params, _ = batch_fit_dual_gauss([xs, xs], [ng, ne], fixedparams=fixedparams)
+        ge_params, _ = batch_fit_dual_gauss([xs, xs], [ng, ne])
         g_params, e_params = ge_params
 
         n_gg, n_ge = g_params[0], g_params[3]
