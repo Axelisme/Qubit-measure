@@ -1,6 +1,7 @@
-from scqubits import Fluxonium
+import json
 
-from .fluxdep.persistence import load_result
+import numpy as np
+from scqubits import Fluxonium
 
 
 def predict01(result_path: str, mA: float, mA_c: float = None):
@@ -13,8 +14,14 @@ def predict01(result_path: str, mA: float, mA_c: float = None):
     Returns:
         f01 (float): 0-1 transition frequency in GHz.
     """
-    # Load the result file
-    _, params, _mA_c, period, _ = load_result(result_path)
+    with open(result_path, "r") as f:
+        data = json.load(f)
+    params = np.array(
+        [data["params"]["EJ"], data["params"]["EC"], data["params"]["EL"]]
+    )
+    _mA_c = data["half flux"]
+    period = data["period"]
+
     if mA_c is not None:
         _mA_c = mA_c
     # Convert mA to flux
