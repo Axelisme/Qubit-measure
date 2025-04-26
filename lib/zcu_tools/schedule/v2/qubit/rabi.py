@@ -106,9 +106,10 @@ def measure_lenrabi(
     )
 
     # get the actual lengths
-    lens: np.ndarray = prog.get_pulse_param("qub_pulse", "length", as_array=True)  # type: ignore
+    real_lens: np.ndarray = prog.get_pulse_param("qub_pulse", "length", as_array=True)  # type: ignore
+    real_lens += lens[0] - real_lens[0]  # adjust to the first length
 
-    return lens, signals
+    return real_lens, signals
 
 
 def measure_amprabi(
