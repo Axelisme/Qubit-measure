@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-from ..general import figsize
+from .general import figsize
 
 
 def dispersive1D_analyze(xs, snrs, xlabel=None):

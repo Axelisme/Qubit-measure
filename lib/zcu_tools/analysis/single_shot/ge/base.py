@@ -3,7 +3,7 @@ from typing import Callable, Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ...fitting import batch_fit_dual_gauss, fit_gauss, gauss_func
+from ...fitting import batch_fit_dual_gauss, gauss_func
 
 
 def rotate(
