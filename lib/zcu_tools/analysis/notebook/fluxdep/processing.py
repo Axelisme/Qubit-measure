@@ -9,28 +9,6 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
 
-def mA2flx(mAs, mA_c, period):
-    return (mAs - mA_c) / period + 0.5
-
-
-def flx2mA(flxs, mA_c, period):
-    return (flxs - 0.5) * period + mA_c
-
-
-def format_rawdata(mAs, fpts, spectrum):
-    fpts = fpts / 1e9  # convert to GHz
-    mAs = mAs * 1e3  # convert to mA
-
-    if mAs[0] > mAs[-1]:  # Ensure that the fluxes are in increasing
-        mAs = mAs[::-1]
-        spectrum = spectrum[:, ::-1]
-    if fpts[0] > fpts[-1]:  # Ensure that the frequencies are in increasing
-        fpts = fpts[::-1]
-        spectrum = spectrum[::-1, :]
-
-    return mAs, fpts, spectrum
-
-
 def cast2real_and_norm(signals):
     signals = signals - np.ma.mean(signals, axis=0)
     signals = gaussian_filter1d(signals, sigma=1, axis=0)

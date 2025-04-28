@@ -1,16 +1,30 @@
-# Persistence functions (load/save) for flux-dependent analysis
-
-"""Persistence functions for flux-dependent analysis.
-
-This module provides functions for loading and saving results from
-flux-dependent spectroscopy analysis.
-"""
-
 import json
 import os
 
 import h5py as h5
 import numpy as np
+
+
+def mA2flx(mAs, mA_c, period):
+    return (mAs - mA_c) / period + 0.5
+
+
+def flx2mA(flxs, mA_c, period):
+    return (flxs - 0.5) * period + mA_c
+
+
+def format_rawdata(mAs, fpts, spectrum):
+    fpts = fpts / 1e9  # convert to GHz
+    mAs = mAs * 1e3  # convert to mA
+
+    if mAs[0] > mAs[-1]:  # Ensure that the fluxes are in increasing
+        mAs = mAs[::-1]
+        spectrum = spectrum[:, ::-1]
+    if fpts[0] > fpts[-1]:  # Ensure that the frequencies are in increasing
+        fpts = fpts[::-1]
+        spectrum = spectrum[::-1, :]
+
+    return mAs, fpts, spectrum
 
 
 def dump_result(path, name, params, cflx, period, allows):

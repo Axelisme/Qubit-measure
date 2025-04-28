@@ -13,7 +13,7 @@ from scqubits import Fluxonium
 
 
 def calculate_energy(flxs, EJ, EC, EL, cutoff=None, evals_count=10, fluxonium=None):
-    # because erergy is periodic, remove repeated values and record index
+    # because energy is periodic, remove repeated values and record index
     flxs = flxs % 1.0
     flxs = np.where(flxs < 0.5, flxs, 1.0 - flxs)
 

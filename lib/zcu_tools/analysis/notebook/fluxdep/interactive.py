@@ -16,12 +16,12 @@ from IPython.display import display
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Ellipse
 
+from ..tools import mA2flx
 from .models import energy2transition
 from .processing import (
     cast2real_and_norm,
     diff_mirror,
     downsample_points,
-    mA2flx,
     spectrum_analyze,
 )
 

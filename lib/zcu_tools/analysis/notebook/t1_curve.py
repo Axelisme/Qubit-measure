@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scqubits as scq
 
-from zcu_tools.analysis.fluxdep import flx2mA, mA2flx
+from .tools import flx2mA, mA2flx
 
 
 def get_eff_t1(flxs, fluxonium, noise_channels, Temp):
