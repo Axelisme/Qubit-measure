@@ -19,7 +19,7 @@ class DefaultCfg:
         Raises:
             AssertionError: If the loaded configuration is not a dictionary.
         """
-        import yaml
+        import yaml  # type: ignore[import]
 
         with open(filepath, "r") as f:
             cfg = yaml.safe_load(f)
@@ -40,7 +40,7 @@ class DefaultCfg:
         Args:
             filepath (Optional[str]): Path to save the YAML configuration file. If None, a timestamped file will be created.
         """
-        import yaml
+        import yaml  # type: ignore[import]
 
         if filepath is None:
             import time

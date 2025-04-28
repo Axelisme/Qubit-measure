@@ -1,7 +1,7 @@
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, Union
 
-from .configuration import DefaultCfg
+from .default_cfg import DefaultCfg
 from .tools import deepupdate, numpy2number
 
 NQZ_THRESHOLD = 2000  # MHz
