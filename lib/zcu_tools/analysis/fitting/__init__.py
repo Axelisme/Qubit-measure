@@ -10,6 +10,7 @@ from .gauss import (
     gauss_func,
 )
 from .lor import asym_lorfunc, fit_asym_lor, fitlor, lorfunc
+from .sinc import fitsinc, sincfunc
 
 __all__ = [
     "fit_line",
@@ -31,4 +32,6 @@ __all__ = [
     "fit_dual_gauss",
     "fit_dual_gauss_gmm",
     "batch_fit_dual_gauss",
+    "sincfunc",
+    "fitsinc",
 ]

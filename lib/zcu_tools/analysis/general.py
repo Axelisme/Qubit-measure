@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Tuple
+from typing import Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -221,7 +221,12 @@ def phase_analyze(
 
 
 def freq_analyze(
-    fpts: np.ndarray, signals: np.ndarray, asym=False, plot_fit=True, max_contrast=False
+    fpts: np.ndarray,
+    signals: np.ndarray,
+    type: Literal["lor", "sinc"] = "lor",
+    asym=False,
+    plot_fit=True,
+    max_contrast=False,
 ) -> float:
     """
     Analyze resonance frequency in spectroscopy data by fitting Lorentzian functions.
@@ -258,15 +263,24 @@ def freq_analyze(
     else:
         y = np.abs(signals)
 
-    if asym:
-        pOpt, err = ft.fit_asym_lor(fpts, y)
-        curve = ft.asym_lorfunc(fpts, *pOpt)
-    else:
-        pOpt, err = ft.fitlor(fpts, y)
-        curve = ft.lorfunc(fpts, *pOpt)
-    freq: float = pOpt[3]
-    kappa: float = 2 * pOpt[4]
-    freq_err = np.sqrt(np.diag(err))[3]
+    if type == "lor":
+        if asym:
+            pOpt, err = ft.fit_asym_lor(fpts, y)
+            curve = ft.asym_lorfunc(fpts, *pOpt)
+        else:
+            pOpt, err = ft.fitlor(fpts, y)
+            curve = ft.lorfunc(fpts, *pOpt)
+        freq: float = pOpt[3]
+        kappa: float = 2 * pOpt[4]
+        freq_err = np.sqrt(np.diag(err))[3]
+    elif type == "sinc":
+        if asym:
+            raise ValueError("Asymmetric sinc fit is not supported.")
+        pOpt, err = ft.fitsinc(fpts, y)
+        curve = ft.sincfunc(fpts, *pOpt)
+        freq: float = pOpt[3]
+        kappa: float = 1.2067 * pOpt[4]  # sinc function hwm is 1.2067 * gamma
+        freq_err = np.sqrt(np.diag(err))[3]
 
     plt.figure(figsize=figsize)
     plt.tight_layout()
