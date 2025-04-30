@@ -1,12 +1,11 @@
 import argparse
-import os
-from os.path import abspath, dirname, join
+from pathlib import Path
 
 from flask import Flask, request, send_file
 from zcu_tools.datasaver import safe_labber_filepath
 
 KEYWORD = "Database"
-ROOT_DIR = abspath(join(dirname(dirname(__file__)), KEYWORD))
+ROOT_DIR = Path(__file__).resolve().parents[1] / KEYWORD
 DEFAULT_IP = "0.0.0.0"
 DEFAULT_PORT = 4999
 
@@ -16,42 +15,36 @@ def is_allowed_file(filename: str):
     return "." in filename and filename.split(".")[-1].lower() in allowed_ls
 
 
+def get_relpath(path_str: str) -> Path:
+    # normalize separators to POSIX style, handling both Windows and Unix inputs
+    normalized = path_str.replace("\\", "/")
+    segments = [seg for seg in normalized.split("/") if seg]
+    if KEYWORD in segments:
+        idx = segments.index(KEYWORD)
+        segments = segments[idx + 1 :]
+    return Path(*segments)
+
+
 def save_file(file):
-    remote_path = file.filename
-
-    # convert to windows path
-    remote_path = remote_path.replace("/", "\\")
-
-    # check root directory
-    relpath = remote_path
-    if KEYWORD + "\\" in relpath:  # remove path before root directory
-        relpath = relpath.split(KEYWORD + "\\")[1]
-
-    # save file
-    filepath = safe_labber_filepath(os.path.join(ROOT_DIR, relpath))
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    # determine destination relative path and full filepath
+    rel = get_relpath(file.filename)
+    dest = ROOT_DIR / rel
+    dest_str = str(dest)
+    filepath = safe_labber_filepath(dest_str)
+    Path(filepath).parent.mkdir(parents=True, exist_ok=True)
     file.save(filepath)
 
     return f"{filepath} uploaded successfully", 200
 
 
 def load_file(remote_path):
-    # convert to windows path
-    remote_path = remote_path.replace("/", "\\")
-
-    # check root directory
-    relpath = remote_path
-    if KEYWORD + "\\" in relpath:  # remove path before root directory
-        relpath = relpath.split(KEYWORD + "\\")[1]
-
-    # load file
-    filepath = os.path.join(ROOT_DIR, relpath)
-    if not os.path.exists(filepath):
+    # determine source relative path and full filepath
+    rel = get_relpath(remote_path)
+    filepath = ROOT_DIR / rel
+    if not filepath.exists():
         print(f"File not found: {filepath}")
         return "File not found", 404
-
-    # send file to client
-    return send_file(filepath, as_attachment=True)
+    return send_file(str(filepath), as_attachment=True)
 
 
 app = Flask(__name__)
