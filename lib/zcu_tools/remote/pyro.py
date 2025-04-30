@@ -1,6 +1,7 @@
 import Pyro4
 import Pyro4.naming
 from myqick import QickConfig
+
 from zcu_tools.tools import get_bitfile
 
 # use dill instead of pickle
@@ -63,15 +64,20 @@ def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs):
     daemon.requestLoop()  # this will run forever until interrupted
 
 
-def make_proxy(ns_host, ns_port, remote_traceback=True):
+def make_proxy(
+    ns_host, ns_port, remote_traceback=True, lookup_name="myqick", proxy_prog=False
+):
     from .client import ProgramClient
 
     ns = Pyro4.locateNS(host=ns_host, port=ns_port)
 
-    soc = Pyro4.Proxy(ns.lookup("myqick"))
+    soc = Pyro4.Proxy(ns.lookup(lookup_name))
     soccfg = QickConfig(soc.get_cfg())
-    prog_server = Pyro4.Proxy(ns.lookup("prog_server"))
-    prog_client = ProgramClient(prog_server)
+    if proxy_prog:
+        prog_server = Pyro4.Proxy(ns.lookup("prog_server"))
+        prog_client = ProgramClient(prog_server)
+    else:
+        prog_client = None
 
     # adapted from https://pyro4.readthedocs.io/en/stable/errors.html and https://stackoverflow.com/a/70433500
     if remote_traceback:
