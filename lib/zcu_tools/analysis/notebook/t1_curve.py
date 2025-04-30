@@ -7,7 +7,9 @@ import scqubits as scq
 from .tools import flx2mA, mA2flx
 
 
-def get_eff_t1(flxs, fluxonium, noise_channels, Temp):
+def get_eff_t1(
+    flxs: np.ndarray, fluxonium: scq.Fluxonium, noise_channels: list, Temp: float
+):
     plt.ioff()
     scq.settings.T1_DEFAULT_WARNING = False
     fig, ax = fluxonium.plot_t1_effective_vs_paramvals(
