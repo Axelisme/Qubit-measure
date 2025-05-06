@@ -14,10 +14,16 @@ def get_eff_t1(
     noise_channels: list,
     Temp: float | np.ndarray,
     esys: Optional[np.ndarray] = None,
+    flx_range: Optional[tuple] = None,
 ):
     scq.settings.T1_DEFAULT_WARNING = False
     t1_effs = []
     for i, flx in enumerate(flxs):
+        if flx_range is not None:
+            if flx < flx_range[0] or flx > flx_range[1]:
+                t1_effs.append(np.nan)
+                continue
+
         fluxonium.flux = flx
         temp = Temp if isinstance(Temp, (int, float)) else Temp[i]
         kwargs = {
@@ -75,11 +81,12 @@ def plot_eff_t1(
             noise_channels=[(noise_name, {name: v})],
             Temp=Temp,
             esys=esys,
+            flx_range=(s_flxs.min() - 0.1, s_flxs.max() + 0.1),
         )
         ax.plot(t_mAs, t1_eff, label=f"{name} = {v:.1e}", linestyle="--")
         t1_effs.append(t1_eff)
 
-    ax.set_xlim(-0.03, mA_c + 0.03)
+    ax.set_xlim(s_mAs.min() - 0.03, s_mAs.max() + 0.03)
     ax.set_ylim(
         min(s_T1s.min() * 0.5e3, np.array(t1_effs).max() * 0.7),
         max(s_T1s.max() * 3.0e3, np.array(t1_effs).min() * 1.4),
