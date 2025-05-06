@@ -9,6 +9,7 @@ from .gauss import (
     fit_gauss,
     gauss_func,
 )
+from .gauss2d import fit_gauss_2d, fit_gauss_2d_bayesian, gauss_2d
 from .lor import asym_lorfunc, fit_asym_lor, fitlor, lorfunc
 from .sinc import fitsinc, sincfunc
 
@@ -34,4 +35,7 @@ __all__ = [
     "batch_fit_dual_gauss",
     "sincfunc",
     "fitsinc",
+    "gauss_2d",
+    "fit_gauss_2d",
+    "fit_gauss_2d_bayesian",
 ]
