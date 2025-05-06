@@ -47,13 +47,19 @@ class BaseInstantShow:
         self.ax = ax
         self.update_lock = Lock()
 
+        self.dh = display(self.fig, display_id=True)
+
+    def refresh_show(self):
+        """Refresh the matplotlib figure to update the display."""
+        self.dh.update(self.fig)
+
     def close_show(self):
         """Close the matplotlib figure to free resources."""
-        if hasattr(self, "fig"):
-            plt.close(self.fig)
+        plt.close(self.fig)
 
     def __enter__(self):
         """Context manager entry point to support 'with' statement."""
+        self.refresh_show()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -101,8 +107,6 @@ class InstantShow1D(BaseInstantShow):
         kwargs.setdefault("linestyle", "-")
         kwargs.setdefault("marker", ".")
         self.contain = self.ax.plot(sorted_xs, np.zeros_like(xs), **kwargs)[0]
-
-        self.dh = display(self.fig, display_id=True)
 
     def _smooth_errs(self, errs):
         """
@@ -172,7 +176,7 @@ class InstantShow1D(BaseInstantShow):
             self.ax.relim(visible_only=True)
             self.ax.autoscale_view()
 
-            self.dh.update(self.fig)
+            self.refresh_show()
 
 
 class InstantShow2D(BaseInstantShow):
@@ -248,9 +252,6 @@ class InstantShow2D(BaseInstantShow):
                 ys, np.zeros_like(ys), linestyle="-", marker="."
             )[0]
 
-        self.update_lock = Lock()
-        self.dh = display(self.fig, display_id=True)
-
     def update_show(
         self,
         signals_real: np.ndarray,
@@ -312,7 +313,7 @@ class InstantShow2D(BaseInstantShow):
                 self.ax1D.relim(visible_only=True)
                 self.ax1D.autoscale_view()
 
-            self.dh.update(self.fig)
+            self.refresh_show()
 
 
 class InstantShowScatter(BaseInstantShow):
@@ -349,8 +350,6 @@ class InstantShowScatter(BaseInstantShow):
         self.xs = []
         self.ys = []
         self.cs = []
-
-        self.dh = display(self.fig, display_id=True)
 
     def set_spots(
         self,
@@ -390,12 +389,8 @@ class InstantShowScatter(BaseInstantShow):
 
             self.ax.relim(visible_only=True)
             self.ax.autoscale_view()
-            # x_min, x_max = min(self.xs), max(self.xs)
-            # y_min, y_max = min(self.ys), max(self.ys)
-            # self.ax.set_xlim(min(x_min, x_max - 1e-6), max(x_max, x_min + 1e-6))
-            # self.ax.set_ylim(min(y_min, y_max - 1e-6), max(y_max, y_min + 1e-6))
 
-            self.dh.update(self.fig)
+            self.refresh_show()
 
     def append_spot(
         self, x: float, y: float, color: float, *, title: Optional[str] = None
@@ -447,8 +442,6 @@ class InstantShowHist(BaseInstantShow):
         self.kwargs = kwargs
         self.bins = self.DEFAULT_BINS
 
-        self.dh = display(self.fig, display_id=True)
-
     def update_bins(self, signals_real: np.ndarray):
         max_x, min_x = np.max(signals_real), np.min(signals_real)
 
@@ -490,4 +483,4 @@ class InstantShowHist(BaseInstantShow):
             self.ax.set_xlabel(self.xlabel)
             self.ax.set_ylabel(self.ylabel)
 
-            self.dh.update(self.fig)
+            self.refresh_show()
