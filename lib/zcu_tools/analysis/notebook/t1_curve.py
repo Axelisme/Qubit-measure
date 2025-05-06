@@ -1,4 +1,5 @@
 from functools import partial
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,28 +9,51 @@ from .tools import flx2mA, mA2flx
 
 
 def get_eff_t1(
-    flxs: np.ndarray, fluxonium: scq.Fluxonium, noise_channels: list, Temp: float
+    flxs: np.ndarray,
+    fluxonium: scq.Fluxonium,
+    noise_channels: list,
+    Temp: float | np.ndarray,
+    esys: Optional[np.ndarray] = None,
 ):
-    plt.ioff()
     scq.settings.T1_DEFAULT_WARNING = False
-    fig, ax = fluxonium.plot_t1_effective_vs_paramvals(
-        param_name="flux",
-        param_vals=flxs,
-        xlim=([flxs.min(), flxs.max()]),
-        common_noise_options=dict(i=1, j=0, T=Temp),
-        noise_channels=noise_channels,
-    )
-    plt.close(fig)
-    plt.ion()
+    t1_effs = []
+    for i, flx in enumerate(flxs):
+        fluxonium.flux = flx
+        temp = Temp if isinstance(Temp, (int, float)) else Temp[i]
+        kwargs = {
+            "noise_channels": noise_channels,
+            "common_noise_options": dict(i=1, j=0, T=temp),
+        }
+        if esys is not None:
+            kwargs["esys"] = (esys[0][i], esys[1][i])
 
-    return ax.lines[0].get_data()[1]
+        t1_effs.append(fluxonium.t1_effective(**kwargs))
+    return np.array(t1_effs)
 
 
 def plot_eff_t1(
-    s_mAs, s_flxs, s_T1s, mA_c, period, fluxonium, name, noise_name, values, Temp
+    s_mAs,
+    s_flxs,
+    s_T1s,
+    s_T1errs,
+    mA_c,
+    period,
+    fluxonium,
+    name,
+    noise_name,
+    values,
+    Temp,
+    t_mAs=None,
+    t_flxs=None,
+    esys=None,
 ):
+    if t_mAs is None:
+        t_mAs = s_mAs
+    if t_flxs is None:
+        t_flxs = s_flxs
+
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
-    ax.errorbar(s_mAs, s_T1s * 1e3, fmt=".-", label="T1")
+    ax.errorbar(s_mAs, s_T1s * 1e3, yerr=s_T1errs * 1e3, fmt=".-", label="T1")
     ax.set_xlabel(r"Current (mA)")
     ax.set_ylabel(r"$T_1$ (ns)")
     ax.set_yscale("log")
@@ -46,15 +70,16 @@ def plot_eff_t1(
     t1_effs = []
     for v in values:
         t1_eff = get_eff_t1(
-            s_flxs,
+            t_flxs,
             fluxonium,
             noise_channels=[(noise_name, {name: v})],
             Temp=Temp,
+            esys=esys,
         )
-        ax.plot(s_mAs, t1_eff, label=f"{name} = {v:.1e}", linestyle="--")
+        ax.plot(t_mAs, t1_eff, label=f"{name} = {v:.1e}", linestyle="--")
         t1_effs.append(t1_eff)
 
-    ax.set_xlim(-0.01, mA_c)
+    ax.set_xlim(-0.03, mA_c + 0.03)
     ax.set_ylim(
         min(s_T1s.min() * 0.5e3, np.array(t1_effs).max() * 0.7),
         max(s_T1s.max() * 3.0e3, np.array(t1_effs).min() * 1.4),
