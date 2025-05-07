@@ -62,7 +62,11 @@ def fit_gauss_2d(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 2):
     sigmas = np.sqrt(covariances)
     weights = gmm.weights_
 
-    return np.column_stack((means[:, 0], means[:, 1], sigmas, weights))
+    params = np.column_stack((means[:, 0], means[:, 1], sigmas, weights))
+
+    params = params[np.argsort(-params[:, 3])]
+
+    return params
 
 
 def fit_gauss_2d_bayesian(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 3):
@@ -110,4 +114,8 @@ def fit_gauss_2d_bayesian(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 3):
     sigmas = np.sqrt(covariances)
     weights = bgmm.weights_
 
-    return np.column_stack((means[:, 0], means[:, 1], sigmas, weights))
+    params = np.column_stack((means[:, 0], means[:, 1], sigmas, weights))
+
+    params = params[np.argsort(-params[:, 3])]
+
+    return params

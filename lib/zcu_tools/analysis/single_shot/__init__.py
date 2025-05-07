@@ -47,7 +47,7 @@ def fit_singleshot2d(
     xs = all_signals.real
     ys = all_signals.imag
 
-    MAX_FIT_POINTS = 1e5
+    MAX_FIT_POINTS = 1e4
     if len(xs) > MAX_FIT_POINTS:
         idx = np.random.choice(len(xs), int(MAX_FIT_POINTS), replace=False)
         fit_xs = xs[idx]
@@ -69,16 +69,7 @@ def fit_singleshot2d(
     # 創建圖表
     fig, ax = plt.subplots(figsize=(10, 8))
 
-    # 為每個數據點分配最接近的高斯分佈
-    distances = np.zeros((len(xs), len(params)))
-    for i, (x0, y0, sigma, _) in enumerate(params):
-        # 計算每個點到各高斯中心的歸一化距離
-        distances[:, i] = np.sqrt((xs - x0) ** 2 + (ys - y0) ** 2) / sigma
-
-    # 獲得每個點最近的高斯分佈索引
-    closest_gaussian = np.argmin(distances, axis=1)
-
-    # 繪製數據點，按照最近的高斯分佈著色
+    # 繪製數據點，所有點使用統一黑色
     colors = list(TABLEAU_COLORS.values())
 
     # 限制最大顯示點數以提高性能
@@ -87,25 +78,20 @@ def fit_singleshot2d(
         idx = np.random.choice(len(xs), int(MAX_POINTS), replace=False)
         plot_xs = xs[idx]
         plot_ys = ys[idx]
-        plot_closest = closest_gaussian[idx]
     else:
         plot_xs = xs
         plot_ys = ys
-        plot_closest = closest_gaussian
 
-    # 繪製數據點
-    for i in range(len(params)):
-        mask = plot_closest == i
-        if np.any(mask):
-            ax.scatter(
-                plot_xs[mask],
-                plot_ys[mask],
-                marker=".",
-                alpha=0.3,
-                edgecolor="None",
-                c=colors[i % len(colors)],
-                label=f"Cluster {i + 1} ({params[i, 3]:.1%})",
-            )
+    # 繪製數據點（統一使用黑色）
+    ax.scatter(
+        plot_xs,
+        plot_ys,
+        marker=".",
+        alpha=0.1,
+        edgecolor="None",
+        c=colors[0],
+        label="Data points",
+    )
 
     # 標記高斯分佈中心
     for i, (x0, y0, sigma, weight) in enumerate(params):
@@ -115,16 +101,17 @@ def fit_singleshot2d(
             linestyle="",
             marker="o",
             markersize=10,
-            markerfacecolor=colors[i % len(colors)],
+            markerfacecolor=colors[i % len(colors) + 1],
             markeredgecolor="k",
             markeredgewidth=1.5,
+            label=f"Gaussian {i + 1}: {weight:.2%}",
         )
 
         # 繪製信心圓 (各向同性，sigma 為半徑)
         circle = Circle(
             xy=(x0, y0),
             radius=sigma,
-            edgecolor=colors[i % len(colors)],
+            edgecolor=colors[i % len(colors) + 1],
             fc="None",
             lw=2,
             alpha=0.7,
