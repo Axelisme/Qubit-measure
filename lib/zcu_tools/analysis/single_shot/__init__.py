@@ -65,6 +65,9 @@ def fit_singleshot2d(
             f"Unknown fitting method: {method}. Use 'standard' or 'bayesian'."
         )
 
+    sort_idxs = np.argsort(-params[:, 3])
+    params = params[sort_idxs]
+
     # 創建圖表
     fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -84,13 +87,9 @@ def fit_singleshot2d(
     # 根據GMM分配每個點的高斯分佈標籤
     labels = gmm.predict(np.column_stack([plot_xs, plot_ys]))
 
-    sort_idxs = np.argsort(-params[:, 3])
-    params = params[sort_idxs]
-    labels = labels[sort_idxs]
-
     # 按高斯分佈分組繪製點
-    for i in range(len(params)):
-        mask = labels == i
+    for i, idx in enumerate(sort_idxs):
+        mask = labels == idx
         ax.scatter(
             plot_xs[mask],
             plot_ys[mask],
@@ -98,7 +97,6 @@ def fit_singleshot2d(
             alpha=0.1,
             edgecolor="None",
             c=colors[i % len(colors)],
-            label=f"Data points (G{i + 1})" if i == 0 else None,
         )
 
     # 標記高斯分佈中心
