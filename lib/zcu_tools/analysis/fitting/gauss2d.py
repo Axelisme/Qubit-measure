@@ -68,15 +68,15 @@ def fit_gauss_2d(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 2):
 def fit_gauss_2d_bayesian(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 3):
     """
     使用 BayesianGaussianMixture 擬合二維各向同性高斯分佈。
-    模型會自動決定實際使用的成分數 m (m <= num_gauss)。
+    模型會自動決定實際使用的成分數。
 
     參數:
         xs (ndarray): 形狀為 (N,) 的x坐標。
         ys (ndarray): 形狀為 (N,) 的y坐標。
-        num_gauss (int): 最多允許的高斯分佈數量，預設為 5。
+        num_gauss (int): 最多允許的高斯分佈數量，預設為 3。
 
     返回:
-        params (ndarray): 形狀為 (m, 4) 的擬合結果。
+        params (ndarray): 形狀為 (num_gauss, 4) 的擬合結果。
                           每一行代表一個高斯分佈的參數 [x0, y0, sigma, n]。
     """
     from sklearn.mixture import BayesianGaussianMixture
@@ -110,10 +110,4 @@ def fit_gauss_2d_bayesian(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 3):
     sigmas = np.sqrt(covariances)
     weights = bgmm.weights_
 
-    # 過濾掉權重太小的分佈
-    threshold = 1e-3
-    mask = weights > threshold
-
-    return np.column_stack(
-        (means[mask, 0], means[mask, 1], sigmas[mask], weights[mask])
-    )
+    return np.column_stack((means[:, 0], means[:, 1], sigmas, weights))
