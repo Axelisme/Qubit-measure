@@ -22,7 +22,7 @@ from .processing import (
     cast2real_and_norm,
     diff_mirror,
     downsample_points,
-    spectrum_analyze,
+    spectrum2d_findpoint,
 )
 
 
@@ -128,7 +128,7 @@ class InteractiveFindPoints:
 
     def init_points(self, mAs, fpts, spectrum):
         threshold = self.threshold_slider.value
-        self.s_mAs, self.s_fpts = spectrum_analyze(
+        self.s_mAs, self.s_fpts = spectrum2d_findpoint(
             mAs, fpts, spectrum, threshold, weight=self.mask
         )
         self.scatter = self.ax.scatter(self.s_mAs, self.s_fpts, color="r", s=2)
@@ -139,7 +139,7 @@ class InteractiveFindPoints:
 
     def update_points(self):
         threshold = self.threshold_slider.value
-        self.s_mAs, self.s_fpts = spectrum_analyze(
+        self.s_mAs, self.s_fpts = spectrum2d_findpoint(
             self.mAs, self.fpts, self.spectrum, threshold, weight=self.mask
         )
         self.scatter.set_offsets(np.column_stack((self.s_mAs, self.s_fpts)))
@@ -959,15 +959,3 @@ class VisualizeSpet:
             visible_lines = np.full(K, True)
 
         return visible_lines
-
-    def add_onetone(self, fig, mAs, fpts, spectrum):
-        for shift in [-self.period, 0, self.period]:
-            fig.add_trace(
-                go.Heatmap(
-                    z=np.abs(spectrum),
-                    x=mAs + shift,
-                    y=fpts,
-                    colorscale="Greys",
-                    showscale=False,
-                )
-            )

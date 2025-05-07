@@ -96,7 +96,7 @@ def search_proper_g(params, r_f, sp_flxs, sp_fpts, signals, g_bound, g_init=None
 
     # Create figure and axes
     fig, ax = plt.subplots(figsize=(10, 6))
-    fig.tight_layout()
+    fig.tight_layout(pad=4.0)
 
     # Initial plot with empty data
     ax.imshow(

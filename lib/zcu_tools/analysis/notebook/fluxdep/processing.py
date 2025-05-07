@@ -17,7 +17,7 @@ def cast2real_and_norm(signals):
     return amps
 
 
-def spectrum_analyze(mAs, fpts, signals, threshold, weight=None):
+def spectrum2d_findpoint(mAs, fpts, signals, threshold, weight=None):
     amps = cast2real_and_norm(signals)
 
     if weight is not None:

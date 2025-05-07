@@ -17,9 +17,10 @@ from .interactive import (
 
 # Physical models
 from .models import calculate_energy, energy2linearform, energy2transition
+from .onetone import InteractiveOneTone
 
 # Data processing
-from .processing import spectrum_analyze
+from .processing import spectrum2d_findpoint
 
 __all__ = [
     # Interactive tools
@@ -27,8 +28,9 @@ __all__ = [
     "InteractiveLines",
     "InteractiveSelector",
     "VisualizeSpet",
+    "InteractiveOneTone",
     # Data processing
-    "spectrum_analyze",
+    "spectrum2d_findpoint",
     # Physical models
     "calculate_energy",
     "energy2linearform",
