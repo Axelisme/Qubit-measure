@@ -84,6 +84,10 @@ def fit_singleshot2d(
     # 根據GMM分配每個點的高斯分佈標籤
     labels = gmm.predict(np.column_stack([plot_xs, plot_ys]))
 
+    sort_idxs = np.argsort(-params[:, 3])
+    params = params[sort_idxs]
+    labels = labels[sort_idxs]
+
     # 按高斯分佈分組繪製點
     for i in range(len(params)):
         mask = labels == i
