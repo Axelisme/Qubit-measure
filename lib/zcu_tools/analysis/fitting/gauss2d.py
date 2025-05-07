@@ -23,6 +23,8 @@ def fit_gauss_2d(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 2):
                           x0, y0: 中心坐標
                           sigma: 標準差 (各向同性)
                           n: population (和為1)
+        gmm (GaussianMixture): 擬合的模型對象。
+                          可以用於進一步分析或預測。
     """
     from sklearn.mixture import GaussianMixture
 
@@ -51,7 +53,7 @@ def fit_gauss_2d(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 2):
             "or insufficient points for the number of components. "
             "Returning zero parameters."
         )
-        return np.zeros((num_gauss, 4))
+        return np.zeros((num_gauss, 4)), gmm
 
     if not gmm.converged_:
         print("Warning: GaussianMixture did not converge.")
@@ -66,7 +68,7 @@ def fit_gauss_2d(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 2):
 
     params = params[np.argsort(-params[:, 3])]
 
-    return params
+    return params, gmm
 
 
 def fit_gauss_2d_bayesian(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 3):
@@ -82,6 +84,8 @@ def fit_gauss_2d_bayesian(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 3):
     返回:
         params (ndarray): 形狀為 (num_gauss, 4) 的擬合結果。
                           每一行代表一個高斯分佈的參數 [x0, y0, sigma, n]。
+        bgmm (BayesianGaussianMixture): 擬合的模型對象。
+                          可以用於進一步分析或預測。
     """
     from sklearn.mixture import BayesianGaussianMixture
 
@@ -104,7 +108,7 @@ def fit_gauss_2d_bayesian(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 3):
         print(
             f"Error during Bayesian GMM fitting: {e}. Possibly due to degenerate data. Returning zero parameters."
         )
-        return np.zeros((1, 4))
+        return np.zeros((1, 4)), bgmm
 
     if not bgmm.converged_:
         print("Warning: BayesianGaussianMixture did not converge.")
@@ -118,4 +122,4 @@ def fit_gauss_2d_bayesian(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 3):
 
     params = params[np.argsort(-params[:, 3])]
 
-    return params
+    return params, bgmm

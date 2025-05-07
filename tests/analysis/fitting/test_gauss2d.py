@@ -49,7 +49,7 @@ class TestGauss2D(unittest.TestCase):
         ys = np.concatenate([y1, y2])
 
         # 擬合數據
-        params = fit_gauss_2d(xs, ys, num_gauss=2)
+        params, _ = fit_gauss_2d(xs, ys, num_gauss=2)
 
         # 檢查返回的參數數量是否正確
         self.assertEqual(params.shape, (2, 4))
@@ -92,7 +92,7 @@ class TestGauss2D(unittest.TestCase):
         ys = np.concatenate([y1, y2, y3])
 
         # 用貝葉斯方法擬合，設置最大高斯分佈數為3
-        params = fit_gauss_2d_bayesian(xs, ys, num_gauss=3)
+        params, _ = fit_gauss_2d_bayesian(xs, ys, num_gauss=3)
 
         # 檢查返回的參數數量是否正確
         self.assertLessEqual(params.shape[0], 3)

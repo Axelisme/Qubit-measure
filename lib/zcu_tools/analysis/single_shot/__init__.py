@@ -3,7 +3,6 @@ from typing import Literal
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import TABLEAU_COLORS
-from matplotlib.patches import Circle
 
 from ..fitting import fit_gauss_2d, fit_gauss_2d_bayesian
 from .ge import fidelity_func, singleshot_ge_analysis, singleshot_visualize
@@ -58,9 +57,9 @@ def fit_singleshot2d(
 
     # 根據方法選擇擬合函數
     if method == "standard":
-        params = fit_gauss_2d(fit_xs, fit_ys, num_gauss=num_gauss)
+        params, gmm = fit_gauss_2d(fit_xs, fit_ys, num_gauss=num_gauss)
     elif method == "bayesian":
-        params = fit_gauss_2d_bayesian(fit_xs, fit_ys, num_gauss=num_gauss)
+        params, gmm = fit_gauss_2d_bayesian(fit_xs, fit_ys, num_gauss=num_gauss)
     else:
         raise ValueError(
             f"Unknown fitting method: {method}. Use 'standard' or 'bayesian'."
@@ -82,19 +81,24 @@ def fit_singleshot2d(
         plot_xs = xs
         plot_ys = ys
 
-    # 繪製數據點（統一使用黑色）
-    ax.scatter(
-        plot_xs,
-        plot_ys,
-        marker=".",
-        alpha=0.1,
-        edgecolor="None",
-        c=colors[0],
-        label="Data points",
-    )
+    # 根據GMM分配每個點的高斯分佈標籤
+    labels = gmm.predict(np.column_stack([plot_xs, plot_ys]))
+
+    # 按高斯分佈分組繪製點
+    for i in range(len(params)):
+        mask = labels == i
+        ax.scatter(
+            plot_xs[mask],
+            plot_ys[mask],
+            marker=".",
+            alpha=0.1,
+            edgecolor="None",
+            c=colors[(i + 1) % len(colors)],
+            label=f"Data points (G{i + 1})" if i == 0 else None,
+        )
 
     # 標記高斯分佈中心
-    for i, (x0, y0, sigma, weight) in enumerate(params):
+    for i, (x0, y0, _, weight) in enumerate(params):
         ax.plot(
             x0,
             y0,
@@ -106,18 +110,6 @@ def fit_singleshot2d(
             markeredgewidth=1.5,
             label=f"Gaussian {i + 1}: {weight:.2%}",
         )
-
-        # 繪製信心圓 (各向同性，sigma 為半徑)
-        circle = Circle(
-            xy=(x0, y0),
-            radius=sigma,
-            edgecolor=colors[i % len(colors) + 1],
-            fc="None",
-            lw=2,
-            alpha=0.7,
-            linestyle="--",
-        )
-        ax.add_patch(circle)
 
     ax.set_title(f"Singleshot Fitting ({method})")
     ax.set_xlabel("I [ADC levels]")
