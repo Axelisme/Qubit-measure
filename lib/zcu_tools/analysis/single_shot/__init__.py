@@ -93,7 +93,7 @@ def fit_singleshot2d(
             marker=".",
             alpha=0.1,
             edgecolor="None",
-            c=colors[(i + 1) % len(colors)],
+            c=colors[i % len(colors)],
             label=f"Data points (G{i + 1})" if i == 0 else None,
         )
 
@@ -105,7 +105,7 @@ def fit_singleshot2d(
             linestyle="",
             marker="o",
             markersize=10,
-            markerfacecolor=colors[i % len(colors) + 1],
+            markerfacecolor=colors[i % len(colors)],
             markeredgecolor="k",
             markeredgewidth=1.5,
             label=f"Gaussian {i + 1}: {weight:.2%}",
