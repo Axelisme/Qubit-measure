@@ -14,9 +14,10 @@ from joblib import Parallel, delayed
 from numba import njit
 from tqdm.auto import tqdm, trange
 
+from zcu_tools.analysis.simulate import calculate_energy
 from zcu_tools.tools import AsyncFunc
 
-from .models import calculate_energy, count_max_evals, energy2linearform
+from .models import count_max_evals, energy2linearform
 
 
 @njit(
@@ -357,12 +358,10 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
 
     # 使用 least_squares 進行參數最佳化
     def residuals(params):
-        nonlocal fluxonium, flxs, allows, fpts, evals_count
+        nonlocal fluxonium, flxs, allows, fpts
 
         # 計算能量並轉成線性形式
-        energies = calculate_energy(
-            flxs, *params, evals_count=evals_count, fluxonium=fluxonium
-        )
+        energies = calculate_energy(flxs, *params, fluxonium=fluxonium)
         Bs, Cs = energy2linearform(energies, allows)
         # 計算每個點的最小誤差
         dists = np.min(np.abs(fpts[:, None] - np.abs(Bs + Cs)), axis=1)

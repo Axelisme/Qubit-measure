@@ -6,44 +6,7 @@ This module provides functions for calculating physical models related to
 flux-dependent spectroscopy, including energy calculations and transition models.
 """
 
-import warnings
-
 import numpy as np
-from scqubits import Fluxonium
-
-
-def calculate_energy(flxs, EJ, EC, EL, cutoff=None, evals_count=10, fluxonium=None):
-    # because energy is periodic, remove repeated values and record index
-    flxs = flxs % 1.0
-    flxs = np.where(flxs < 0.5, flxs, 1.0 - flxs)
-
-    flxs, uni_idxs = np.unique(flxs, return_inverse=True)
-    sort_idxs = np.argsort(flxs)
-    flxs = flxs[sort_idxs]
-
-    if fluxonium is None:
-        if cutoff is None:
-            cutoff = 50
-        fluxonium = Fluxonium(
-            EJ, EC, EL, flux=0.0, cutoff=cutoff, truncated_dim=evals_count
-        )
-    else:
-        if cutoff is not None:
-            warnings.warn(
-                "cutoff is ignored when fluxonium is provided, use fluxonium.cutoff instead"
-            )
-        fluxonium.EJ = EJ
-        fluxonium.EC = EC
-        fluxonium.EL = EL
-    energies = fluxonium.get_spectrum_vs_paramvals(
-        "flux", flxs, evals_count=evals_count
-    ).energy_table
-
-    # rearrange energies to match the original order
-    energies[sort_idxs, :] = energies
-    energies = energies[uni_idxs, :]
-
-    return energies
 
 
 def count_max_evals(allows):

@@ -16,7 +16,7 @@ from .interactive import (
 )
 
 # Physical models
-from .models import calculate_energy, energy2linearform, energy2transition
+from .models import energy2linearform, energy2transition
 from .onetone import InteractiveOneTone
 
 # Data processing
@@ -32,7 +32,6 @@ __all__ = [
     # Data processing
     "spectrum2d_findpoint",
     # Physical models
-    "calculate_energy",
     "energy2linearform",
     "energy2transition",
     # Fitting algorithms
