@@ -9,7 +9,7 @@ import numpy as np
 import scqubits as scq
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
-from zcu_tools.analysis.notebook.fluxdep import calculate_energy
+from zcu_tools.analysis.simulate import calculate_energy
 
 # parameters
 data_path = "Database/simulation/fluxonium_all.h5"

@@ -1,3 +1,5 @@
+from typing import Optional, Tuple
+
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,11 +8,28 @@ from IPython.display import display
 from scipy.optimize import minimize
 from tqdm.auto import tqdm
 
+from zcu_tools.config import config
+
 
 def calculate_dispersive(
-    params, r_f, g, flxs, cutoff=50, evals_count=40, progress=True
+    params: Tuple[float, float, float],
+    r_f: float,
+    g: float,
+    flxs: np.ndarray,
+    cutoff: Optional[int] = None,
+    evals_count: Optional[int] = None,
+    progress: bool = True,
 ):
+    """
+    Calculate the dispersive shift of ground and excited state vs. flux
+    """
+
     import scqubits as scq
+
+    if cutoff is None:
+        cutoff = config.DEFAULT_CUTOFF
+    if evals_count is None:
+        evals_count = config.DEFAULT_EVALS_COUNT
 
     resonator = scq.Oscillator(r_f, truncated_dim=2, id_str="resonator")
     fluxonium = scq.Fluxonium(
@@ -60,7 +79,19 @@ def calculate_dispersive(
     return rf_0, rf_1
 
 
-def search_proper_g(params, r_f, sp_flxs, sp_fpts, signals, g_bound, g_init=None):
+def search_proper_g(
+    params: Tuple[float, float, float],
+    r_f: float,
+    sp_flxs: np.ndarray,
+    sp_fpts: np.ndarray,
+    signals: np.ndarray,
+    g_bound: Tuple[float, float],
+    g_init: Optional[float] = None,
+) -> float:
+    """
+    Search the proper coupling strength g by plotting the dispersive shift of ground and excited state vs. flux
+    """
+
     # Pre-calculate signal amplitude for plotting
     signal_amp = np.abs(signals)
 
@@ -71,6 +102,7 @@ def search_proper_g(params, r_f, sp_flxs, sp_fpts, signals, g_bound, g_init=None
 
     if g_init is None:
         g_init = round(0.5 * (g_bound[0] + g_bound[1]), 3)
+
     rf_0, rf_1 = calculate_dispersive(
         params,
         r_f,
@@ -159,8 +191,18 @@ def search_proper_g(params, r_f, sp_flxs, sp_fpts, signals, g_bound, g_init=None
 
 
 def auto_fit_dispersive(
-    params, r_f, sp_flxs, sp_fpts, signals, g_bound=(0.01, 0.2), g_init=None
-):
+    params: Tuple[float, float, float],
+    r_f: float,
+    sp_flxs: np.ndarray,
+    sp_fpts: np.ndarray,
+    signals: np.ndarray,
+    g_bound: Tuple[float, float] = (0.01, 0.2),
+    g_init: Optional[float] = None,
+) -> float:
+    """
+    Auto fit the coupling strength g by maximizing the overlap of predicted ground state frequency with onetone spectrum
+    """
+
     MAX_ITER = 1000
 
     pbar = tqdm(total=MAX_ITER, desc="Auto fitting g", leave=False)
@@ -203,8 +245,21 @@ def auto_fit_dispersive(
 
 
 def plot_dispersive_with_onetone(
-    r_f, g, mAs, flxs, rf_0, rf_1, sp_mAs, sp_flxs, sp_fpts, signals
-):
+    r_f: float,
+    g: float,
+    mAs: np.ndarray,
+    flxs: np.ndarray,
+    rf_0: np.ndarray,
+    rf_1: np.ndarray,
+    sp_mAs: np.ndarray,
+    sp_flxs: np.ndarray,
+    sp_fpts: np.ndarray,
+    signals: np.ndarray,
+) -> go.Figure:
+    """
+    Plot the dispersive resonator frequency vs. flux with one tone signal
+    Contain the ground and excited state dispersive shift
+    """
     fig = go.Figure()
 
     # Add the signal as a heatmap
