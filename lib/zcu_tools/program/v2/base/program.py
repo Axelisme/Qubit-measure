@@ -3,11 +3,12 @@ from typing import Any, Dict
 from myqick.asm_v2 import AveragerProgramV2
 from zcu_tools.program.base import MyProgram
 
+from .simulate import SimulateV2
 from .readout import make_readout
 from .reset import make_reset
 
 
-class MyProgramV2(MyProgram, AveragerProgramV2):
+class MyProgramV2(SimulateV2, MyProgram, AveragerProgramV2):
     """
     Convert general config to qick v2 specific api calls
     """

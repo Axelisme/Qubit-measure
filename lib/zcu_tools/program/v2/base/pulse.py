@@ -13,6 +13,9 @@ def declare_pulse(
 
     add_pulse(prog, pulse, waveform=waveform, ro_ch=ro_ch, **kwargs)
 
+    # add map from waveform to pulse cfg in case we need to access it later
+    prog.pulse_map[waveform] = pulse
+
 
 def create_waveform(prog, name: str, pulse: Dict[str, Any]):
     ch: int = pulse["ch"]

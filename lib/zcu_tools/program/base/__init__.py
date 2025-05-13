@@ -35,7 +35,7 @@ class MyProgram(ProxyProgram, AcquireMixin):
                 raise ValueError(f"Pulse name {name} already exists")
             setattr(self, name, pulse)
 
-        # dac pulse channel count
+        # dac pulse channel check
         self.ch_count = defaultdict(int)
         nqzs = dict()
         for pulse in self.dac.values():
@@ -45,6 +45,11 @@ class MyProgram(ProxyProgram, AcquireMixin):
             self.ch_count[ch] += 1
             cur_nqz = nqzs.setdefault(ch, nqz)
             assert cur_nqz == nqz, "Found different nqz on the same channel"
+
+        # a map from waveform name to pulse config,
+        # it should record what pulse declare in function "declare_pulse"
+        # and be used in simulation
+        self.pulse_map = dict()
 
     def acquire(self, soc, **kwargs):
         # let callback be executd as a coroutine
