@@ -51,12 +51,12 @@ class ProgramServer:
 
                 # call original method from MyProgram instead of subclass method
                 # in case of multiple execution of overridden method
-                return prog._local_acquire(self.soc, decimated=decimated, **kwargs)
+                return prog.local_acquire(self.soc, decimated=decimated, **kwargs)
         finally:
             self._after_run_program()
 
     @Pyro4.expose
-    def get_acc_buf(self, prog_name: str):
+    def get_acc_buf(self):
         if self.acquiring:
             raise RuntimeError("Program is still running")
 
