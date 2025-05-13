@@ -24,6 +24,10 @@ class AbsProxy(ABC):
 
 
 class ProxyProgram(AcquireMixin):
+    """
+    Provide proxy support for acquire and acquire_decimated.
+    """
+
     proxy: Optional[AbsProxy] = None
 
     @classmethod
