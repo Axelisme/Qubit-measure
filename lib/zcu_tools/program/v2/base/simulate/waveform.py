@@ -9,7 +9,7 @@ def format_param(prog, param: Any) -> np.ndarray:
     if isinstance(param, QickParam):
         return param.to_array(prog.loop_dict, all_loops=True)
 
-    return np.full((1,) * len(prog.loop_dict), fill_value=param)
+    return np.full(tuple(prog.loop_dict.values()), fill_value=param)
 
 
 class WaveForm(ABC):
@@ -31,7 +31,7 @@ class ConstWaveForm(WaveForm):
     def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
         length = format_param(prog, self.length)
 
-        times = np.linspace(0.0, length, num_sample)
+        times = np.linspace(0.0, length, num_sample, axis=-1)
         signals = np.ones_like(times, dtype=complex)
 
         return times, signals
@@ -52,8 +52,9 @@ class GaussWaveForm(WaveForm):
         sigma = format_param(prog, self.sigma)
 
         # 生成高斯波形，振幅為1
-        times = np.linspace(0.0, length, num_sample)
-        signals = np.exp(-0.5 * ((times - length / 2) / sigma[..., None]) ** 2)
+        times = np.linspace(0.0, length, num_sample, axis=-1)
+        x = times - length[..., None] / 2
+        signals = np.exp(-0.5 * (x / sigma[..., None]) ** 2)
         signals = signals.astype(complex)
 
         return times, signals
@@ -70,8 +71,8 @@ class CosineWaveForm(WaveForm):
         length = format_param(prog, self.length)
 
         # 生成餘弦波形，從0到2pi，振幅為1
-        times = np.linspace(0.0, length, num_sample)
-        signals = 0.5 * (1 - np.cos(2 * np.pi * times / length))
+        times = np.linspace(0.0, length, num_sample, axis=-1)
+        signals = 0.5 * (1 - np.cos(2 * np.pi * times / length[..., None]))
         signals = signals.astype(complex)
 
         return times, signals
@@ -93,9 +94,9 @@ class DragWaveForm(WaveForm):
         sigma = format_param(prog, self.sigma)
         alpha = format_param(prog, self.alpha)
 
-        times = np.linspace(0.0, length, num_sample)
+        times = np.linspace(0.0, length, num_sample, axis=-1)
 
-        x = times - length / 2
+        x = times - length[..., None] / 2
         gauss = np.exp(-0.5 * (x / sigma[..., None]) ** 2)
         deriv = -x / (sigma[..., None] ** 2) * gauss
         signals = gauss + 1j * alpha[..., None] * deriv
@@ -127,21 +128,22 @@ class FlatTopWaveForm(WaveForm):
         length = format_param(prog, self.length)
         raise_length = format_param(prog, self.raise_length)
 
+        times = np.linspace(0.0, length, num_sample, axis=-1)
+
         # 計算平頂部分、上升和下降部分的點數
-        raise_samples = int(raise_length / length * num_sample)
-        raise_samples = np.clip(raise_samples, 0, None)
+        raise_nums = (0.5 * raise_length / length * num_sample).astype(int)
+        raise_nums = np.clip(raise_nums, 0, None)
 
-        flat_samples = num_sample - 2 * raise_samples
+        uni_nums, num_groups = np.unique(raise_nums.ravel(), return_inverse=True)
+        flat_signals = np.ones((length.size, num_sample), dtype=complex)
+        for i, num in enumerate(uni_nums):
+            _, raise_wave = self.raise_waveform.numpy(prog, 2 * num)
+            flat_raise_wave = raise_wave.reshape(-1, 2 * num)
 
-        times = np.linspace(0.0, length, num_sample)
-
-        # 生成上升部分波形
-        _, raise_wave = self.raise_waveform.numpy(prog, 2 * raise_samples)
-
-        raise_up_wave = raise_wave[..., :raise_samples]
-        flat_wave = np.ones((*length.shape, flat_samples), dtype=complex)
-        raise_down_wave = raise_wave[..., raise_samples:]
-        signals = np.concatenate([raise_up_wave, flat_wave, raise_down_wave], axis=-1)
+            num_idx = np.flatnonzero(num_groups == i)
+            flat_signals[num_idx, :num] = flat_raise_wave[num_idx, :num]
+            flat_signals[num_idx, -num:] = flat_raise_wave[num_idx, -num:]
+        signals = flat_signals.reshape(*length.shape, num_sample)
 
         return times, signals
 

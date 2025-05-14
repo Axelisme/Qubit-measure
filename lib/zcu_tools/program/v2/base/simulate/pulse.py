@@ -25,7 +25,7 @@ class Pulse:
         start_t = format_param(prog, self.start_t)
         gain = format_param(prog, self.gain)
 
-        num_samples = max(len(times), 513)
+        num_samples = len(times)
         w_times, w_signals = self.waveform.numpy(prog, num_samples)
         w_times += start_t
 

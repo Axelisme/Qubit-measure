@@ -15,8 +15,13 @@ from lib.zcu_tools.program.v2.base.simulate.waveform import (
 
 class TestWaveForm(unittest.TestCase):
     def setUp(self):
+        loop_dict = {"gain": 101, "freq": 30, "length": 11}
+
         self.mock_prog = Mock()
-        self.mock_prog.loop_dict = {}
+        self.mock_prog.loop_dict = loop_dict
+
+        self.SAMPLE_NUM = 100
+        self.EXPECTED_SHAPE = (*loop_dict.values(), self.SAMPLE_NUM)
 
     def test_const_waveform_init(self):
         # 測試有效初始化
@@ -36,12 +41,11 @@ class TestWaveForm(unittest.TestCase):
         waveform = ConstWaveForm(pulse_cfg)
 
         # 測試生成的波形
-        samples = 100
-        times, wave = waveform.numpy(self.mock_prog, samples)
+        times, wave = waveform.numpy(self.mock_prog, self.SAMPLE_NUM)
 
-        self.assertEqual(times.shape, (samples,))
-        self.assertEqual(wave.shape, (samples,))
-        self.assertTrue(np.allclose(wave, np.ones(samples, dtype=complex)))
+        self.assertEqual(times.shape, wave.shape)
+        self.assertEqual(wave.shape, self.EXPECTED_SHAPE)
+        self.assertTrue(np.allclose(wave, np.ones(self.EXPECTED_SHAPE, dtype=complex)))
         self.assertEqual(wave.dtype, np.complex128)
 
     def test_gauss_waveform_init(self):
@@ -62,18 +66,21 @@ class TestWaveForm(unittest.TestCase):
         pulse_cfg = {"length": 10, "sigma": 2}
         waveform = GaussWaveForm(pulse_cfg)
 
-        samples = 100
-        times, wave = waveform.numpy(self.mock_prog, samples)
+        times, wave = waveform.numpy(self.mock_prog, self.SAMPLE_NUM)
 
-        self.assertEqual(times.shape, (samples,))
-        self.assertEqual(wave.shape, (samples,))
+        self.assertEqual(times.shape, wave.shape)
+        self.assertEqual(wave.shape, self.EXPECTED_SHAPE)
         self.assertEqual(wave.dtype, np.complex128)
 
         # 檢查波形特性
-        # 中間點允許誤差0.01
-        self.assertAlmostEqual(abs(wave[samples // 2]), 1.0, delta=0.01)  # 中間點應為1
-        self.assertLess(abs(wave[0]), abs(wave[samples // 2]))  # 邊緣值應小於中間值
-        self.assertLess(abs(wave[-1]), abs(wave[samples // 2]))
+        self.assertTrue(
+            np.allclose(wave.real[..., self.SAMPLE_NUM // 2], 1.0, atol=0.01)
+        )
+        self.assertTrue(
+            np.allclose(wave.imag[..., self.SAMPLE_NUM // 2], 0.0, atol=0.01)
+        )
+        self.assertTrue(np.allclose(wave.real[..., 0], wave.real[..., -1], atol=0.01))
+        self.assertTrue(np.allclose(wave.imag[..., 0], wave.imag[..., -1], atol=0.01))
 
     def test_cosine_waveform_init(self):
         # 測試有效初始化
@@ -89,19 +96,21 @@ class TestWaveForm(unittest.TestCase):
         pulse_cfg = {"length": 10}
         waveform = CosineWaveForm(pulse_cfg)
 
-        samples = 101
-        times, wave = waveform.numpy(self.mock_prog, samples)
+        times, wave = waveform.numpy(self.mock_prog, self.SAMPLE_NUM)
 
-        self.assertEqual(times.shape, (samples,))
-        self.assertEqual(wave.shape, (samples,))
+        self.assertEqual(times.shape, wave.shape)
+        self.assertEqual(wave.shape, self.EXPECTED_SHAPE)
         self.assertEqual(wave.dtype, np.complex128)
 
         # 檢查波形特性
-        self.assertAlmostEqual(abs(wave[0]), 0.0, places=6)  # 起始點應為0
-        self.assertAlmostEqual(abs(wave[samples // 2]), 1.0, places=6)  # 中間點應為1
-        self.assertAlmostEqual(abs(wave[-1]), 0.0, places=6)  # 結束點應為0
-        max_index = np.argmax(np.abs(wave))
-        self.assertEqual(max_index, samples // 2)  # 最大值應在中間
+        self.assertTrue(
+            np.allclose(wave.real[..., self.SAMPLE_NUM // 2], 1.0, atol=0.01)
+        )
+        self.assertTrue(
+            np.allclose(wave.imag[..., self.SAMPLE_NUM // 2], 0.0, atol=0.01)
+        )
+        self.assertTrue(np.allclose(wave.real[..., 0], wave.real[..., -1], atol=0.01))
+        self.assertTrue(np.allclose(wave.imag[..., 0], wave.imag[..., -1], atol=0.01))
 
     def test_drag_waveform_init(self):
         # 測試有效初始化
@@ -122,26 +131,31 @@ class TestWaveForm(unittest.TestCase):
         pulse_cfg = {"length": 10, "sigma": 2, "alpha": 0.5}
         waveform = DragWaveForm(pulse_cfg)
 
-        samples = 100
-        times, wave = waveform.numpy(self.mock_prog, samples)
+        times, wave = waveform.numpy(self.mock_prog, self.SAMPLE_NUM)
 
-        self.assertEqual(times.shape, (samples,))
-        self.assertEqual(wave.shape, (samples,))
+        self.assertEqual(times.shape, wave.shape)
+        self.assertEqual(wave.shape, self.EXPECTED_SHAPE)
         self.assertEqual(wave.dtype, np.complex128)
 
         # 檢查波形特性
         # 實部應類似高斯波形，允許誤差0.01
-        self.assertAlmostEqual(abs(wave.real[samples // 2]), 1.0, delta=0.01)
+        self.assertTrue(
+            np.allclose(wave.real[..., self.SAMPLE_NUM // 2], 1.0, atol=0.01)
+        )
 
         # 中心點的虛部應為0（導數為0）
-        self.assertAlmostEqual(wave.imag[samples // 2], 0.0, delta=0.01)
+        self.assertTrue(
+            np.allclose(wave.imag[..., self.SAMPLE_NUM // 2], 0.0, atol=0.01)
+        )
 
         # 檢查虛部在中心兩側的對稱性（符號相反）
-        quarter = samples // 4
-        self.assertAlmostEqual(
-            wave.imag[samples // 2 - quarter],
-            -wave.imag[samples // 2 + quarter],
-            delta=0.01,
+        quarter = self.SAMPLE_NUM // 4
+        self.assertTrue(
+            np.allclose(
+                wave.imag[..., self.SAMPLE_NUM // 2 - quarter],
+                -wave.imag[..., self.SAMPLE_NUM // 2 + quarter],
+                atol=0.01,
+            )
         )
 
     def test_flat_top_waveform_init(self):
@@ -167,26 +181,25 @@ class TestWaveForm(unittest.TestCase):
         pulse_cfg = {"length": 10, "raise_pulse": raise_cfg}
         waveform = FlatTopWaveForm(pulse_cfg)
 
-        samples = 100
-        times, wave = waveform.numpy(self.mock_prog, samples)
+        times, wave = waveform.numpy(self.mock_prog, self.SAMPLE_NUM)
 
-        self.assertEqual(times.shape, (samples,))
-        self.assertEqual(wave.shape, (samples,))
+        self.assertEqual(times.shape, wave.shape)
+        self.assertEqual(wave.shape, self.EXPECTED_SHAPE)
         self.assertEqual(wave.dtype, np.complex128)
 
         # 檢查波形特性
         # 前20%應該是上升部分
-        rise_end = samples // 5
+        rise_end = self.SAMPLE_NUM // 5
         # 後20%應該是下降部分
-        fall_start = samples * 4 // 5
+        fall_start = self.SAMPLE_NUM * 4 // 5
 
         # 檢查平頂部分是否為1
-        flat_part = wave[rise_end:fall_start]
+        flat_part = wave[..., rise_end:fall_start]
         self.assertTrue(np.allclose(flat_part, np.ones_like(flat_part)))
 
         # 檢查起始和結束值
-        self.assertLess(abs(wave[0]), 0.1)  # 起始值應小於0.1
-        self.assertLess(abs(wave[-1]), 0.1)  # 結束值應小於0.1
+        self.assertTrue(np.allclose(wave[..., 0], wave[..., -1]))
+        self.assertTrue(np.all(np.abs(wave[..., 0]) < 0.1))
 
     def test_make_waveform(self):
         # 測試常數波形
