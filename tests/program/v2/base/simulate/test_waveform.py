@@ -1,8 +1,9 @@
 import unittest
+from unittest.mock import Mock
 
 import numpy as np
 
-from lib.zcu_tools.program.base.simulate.waveform import (
+from lib.zcu_tools.program.v2.base.simulate.waveform import (
     ConstWaveForm,
     CosineWaveForm,
     DragWaveForm,
@@ -13,6 +14,10 @@ from lib.zcu_tools.program.base.simulate.waveform import (
 
 
 class TestWaveForm(unittest.TestCase):
+    def setUp(self):
+        self.mock_prog = Mock()
+        self.mock_prog.loop_dict = {}
+
     def test_const_waveform_init(self):
         # 測試有效初始化
         pulse_cfg = {"length": 10}
@@ -32,9 +37,10 @@ class TestWaveForm(unittest.TestCase):
 
         # 測試生成的波形
         samples = 100
-        wave = waveform.numpy(samples)
+        times, wave = waveform.numpy(self.mock_prog, samples)
 
-        self.assertEqual(len(wave), samples)
+        self.assertEqual(times.shape, (samples,))
+        self.assertEqual(wave.shape, (samples,))
         self.assertTrue(np.allclose(wave, np.ones(samples, dtype=complex)))
         self.assertEqual(wave.dtype, np.complex128)
 
@@ -57,9 +63,10 @@ class TestWaveForm(unittest.TestCase):
         waveform = GaussWaveForm(pulse_cfg)
 
         samples = 100
-        wave = waveform.numpy(samples)
+        times, wave = waveform.numpy(self.mock_prog, samples)
 
-        self.assertEqual(len(wave), samples)
+        self.assertEqual(times.shape, (samples,))
+        self.assertEqual(wave.shape, (samples,))
         self.assertEqual(wave.dtype, np.complex128)
 
         # 檢查波形特性
@@ -83,9 +90,10 @@ class TestWaveForm(unittest.TestCase):
         waveform = CosineWaveForm(pulse_cfg)
 
         samples = 101
-        wave = waveform.numpy(samples)
+        times, wave = waveform.numpy(self.mock_prog, samples)
 
-        self.assertEqual(len(wave), samples)
+        self.assertEqual(times.shape, (samples,))
+        self.assertEqual(wave.shape, (samples,))
         self.assertEqual(wave.dtype, np.complex128)
 
         # 檢查波形特性
@@ -115,9 +123,10 @@ class TestWaveForm(unittest.TestCase):
         waveform = DragWaveForm(pulse_cfg)
 
         samples = 100
-        wave = waveform.numpy(samples)
+        times, wave = waveform.numpy(self.mock_prog, samples)
 
-        self.assertEqual(len(wave), samples)
+        self.assertEqual(times.shape, (samples,))
+        self.assertEqual(wave.shape, (samples,))
         self.assertEqual(wave.dtype, np.complex128)
 
         # 檢查波形特性
@@ -159,9 +168,10 @@ class TestWaveForm(unittest.TestCase):
         waveform = FlatTopWaveForm(pulse_cfg)
 
         samples = 100
-        wave = waveform.numpy(samples)
+        times, wave = waveform.numpy(self.mock_prog, samples)
 
-        self.assertEqual(len(wave), samples)
+        self.assertEqual(times.shape, (samples,))
+        self.assertEqual(wave.shape, (samples,))
         self.assertEqual(wave.dtype, np.complex128)
 
         # 檢查波形特性

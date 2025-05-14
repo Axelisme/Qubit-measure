@@ -1,7 +1,15 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import numpy as np
+from myqick.asm_v2 import QickParam
+
+
+def format_param(prog, param: Any) -> np.ndarray:
+    if isinstance(param, QickParam):
+        return param.to_array(prog.loop_dict, all_loops=True)
+
+    return np.full((1,) * len(prog.loop_dict), fill_value=param)
 
 
 class WaveForm(ABC):
@@ -10,7 +18,7 @@ class WaveForm(ABC):
         pass
 
     @abstractmethod
-    def numpy(self, num_sample: int) -> np.ndarray:
+    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
         pass
 
 
@@ -20,8 +28,13 @@ class ConstWaveForm(WaveForm):
         if self.length <= 0:
             raise ValueError(f"無效的波形長度: {self.length}")
 
-    def numpy(self, num_sample: int) -> np.ndarray:
-        return np.ones(num_sample, dtype=complex)
+    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+        length = format_param(prog, self.length)
+
+        times = np.linspace(0.0, length, num_sample)
+        signals = np.ones_like(times, dtype=complex)
+
+        return times, signals
 
 
 class GaussWaveForm(WaveForm):
@@ -34,10 +47,16 @@ class GaussWaveForm(WaveForm):
         if self.sigma <= 0:
             raise ValueError(f"無效的sigma值: {self.sigma}")
 
-    def numpy(self, num_sample: int) -> np.ndarray:
+    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+        length = format_param(prog, self.length)
+        sigma = format_param(prog, self.sigma)
+
         # 生成高斯波形，振幅為1
-        x = np.linspace(-self.length / 2, self.length / 2, num_sample, dtype=complex)
-        return np.exp(-0.5 * (x / self.sigma) ** 2)
+        times = np.linspace(0.0, length, num_sample)
+        signals = np.exp(-0.5 * ((times - length / 2) / sigma[..., None]) ** 2)
+        signals = signals.astype(complex)
+
+        return times, signals
 
 
 class CosineWaveForm(WaveForm):
@@ -47,10 +66,15 @@ class CosineWaveForm(WaveForm):
         if self.length <= 0:
             raise ValueError(f"無效的波形長度: {self.length}")
 
-    def numpy(self, num_sample: int) -> np.ndarray:
+    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+        length = format_param(prog, self.length)
+
         # 生成餘弦波形，從0到2pi，振幅為1
-        x = np.linspace(0, 2 * np.pi, num_sample, dtype=complex)
-        return 0.5 * (1 - np.cos(x))
+        times = np.linspace(0.0, length, num_sample)
+        signals = 0.5 * (1 - np.cos(2 * np.pi * times / length))
+        signals = signals.astype(complex)
+
+        return times, signals
 
 
 class DragWaveForm(WaveForm):
@@ -64,15 +88,19 @@ class DragWaveForm(WaveForm):
         if self.sigma <= 0:
             raise ValueError(f"無效的sigma值: {self.sigma}")
 
-    def numpy(self, num_sample: int) -> np.ndarray:
-        # 生成DRAG波形，包含實部和虛部
-        x = np.linspace(-self.length / 2, self.length / 2, num_sample, dtype=complex)
-        gauss = np.exp(-0.5 * (x / self.sigma) ** 2)
-        # DRAG修正項（虛部）
-        deriv = -x / (self.sigma**2) * gauss
+    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+        length = format_param(prog, self.length)
+        sigma = format_param(prog, self.sigma)
+        alpha = format_param(prog, self.alpha)
 
-        # 返回的是複數波形
-        return gauss + 1j * self.alpha * deriv
+        times = np.linspace(0.0, length, num_sample)
+
+        x = times - length / 2
+        gauss = np.exp(-0.5 * (x / sigma[..., None]) ** 2)
+        deriv = -x / (sigma[..., None] ** 2) * gauss
+        signals = gauss + 1j * alpha[..., None] * deriv
+
+        return times, signals
 
 
 class FlatTopWaveForm(WaveForm):
@@ -95,25 +123,27 @@ class FlatTopWaveForm(WaveForm):
         # 創建上升/下降波形
         self.raise_waveform = make_waveform(raise_cfg)
 
-    def numpy(self, num_sample: int) -> np.ndarray:
+    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+        length = format_param(prog, self.length)
+        raise_length = format_param(prog, self.raise_length)
+
         # 計算平頂部分、上升和下降部分的點數
-        raise_samples = int(self.raise_length / self.length * num_sample)
-        if raise_samples * 2 >= num_sample:  # 確保平頂部分有點數
-            raise_samples = num_sample // 2 - 1
+        raise_samples = int(raise_length / length * num_sample)
+        raise_samples = np.clip(raise_samples, 0, None)
 
         flat_samples = num_sample - 2 * raise_samples
 
+        times = np.linspace(0.0, length, num_sample)
+
         # 生成上升部分波形
-        raise_wave = self.raise_waveform.numpy(2 * raise_samples)
+        _, raise_wave = self.raise_waveform.numpy(prog, 2 * raise_samples)
 
-        # 平頂部分為常數1
-        flat_wave = np.ones(flat_samples, dtype=complex)
+        raise_up_wave = raise_wave[..., :raise_samples]
+        flat_wave = np.ones((*length.shape, flat_samples), dtype=complex)
+        raise_down_wave = raise_wave[..., raise_samples:]
+        signals = np.concatenate([raise_up_wave, flat_wave, raise_down_wave], axis=-1)
 
-        raise_up_wave = raise_wave[:raise_samples]
-        raise_down_wave = raise_wave[raise_samples:]
-
-        # 組合完整波形
-        return np.concatenate([raise_up_wave, flat_wave, raise_down_wave])
+        return times, signals
 
 
 def make_waveform(pulse_cfg: Dict[str, Any]) -> WaveForm:
