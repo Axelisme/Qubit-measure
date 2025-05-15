@@ -114,21 +114,22 @@ class TestWaveForm(unittest.TestCase):
 
     def test_drag_waveform_init(self):
         # 測試有效初始化
-        pulse_cfg = {"length": 10, "sigma": 2, "alpha": 0.5}
+        pulse_cfg = {"length": 10, "sigma": 2, "alpha": 0.5, "delta": 1.0}
         waveform = DragWaveForm(pulse_cfg)
         self.assertEqual(waveform.length, 10)
         self.assertEqual(waveform.sigma, 2)
         self.assertEqual(waveform.alpha, 0.5)
+        self.assertEqual(waveform.delta, 1.0)
 
         # 測試無效初始化
         with self.assertRaises(ValueError):
-            DragWaveForm({"length": -5, "sigma": 2, "alpha": 0.5})
+            DragWaveForm({"length": -5, "sigma": 2, "alpha": 0.5, "delta": 1.0})
 
         with self.assertRaises(ValueError):
-            DragWaveForm({"length": 10, "sigma": -1, "alpha": 0.5})
+            DragWaveForm({"length": 10, "sigma": -1, "alpha": 0.5, "delta": 1.0})
 
     def test_drag_waveform_numpy(self):
-        pulse_cfg = {"length": 10, "sigma": 2, "alpha": 0.5}
+        pulse_cfg = {"length": 10, "sigma": 2, "alpha": 0.5, "delta": 1.0}
         waveform = DragWaveForm(pulse_cfg)
 
         times, wave = waveform.numpy(self.mock_prog, self.SAMPLE_NUM)
@@ -218,7 +219,13 @@ class TestWaveForm(unittest.TestCase):
         self.assertIsInstance(waveform, CosineWaveForm)
 
         # 測試DRAG波形
-        drag_cfg = {"style": "drag", "length": 10, "sigma": 2, "alpha": 0.5}
+        drag_cfg = {
+            "style": "drag",
+            "length": 10,
+            "sigma": 2,
+            "alpha": 0.5,
+            "delta": 1.0,
+        }
         waveform = make_waveform(drag_cfg)
         self.assertIsInstance(waveform, DragWaveForm)
 

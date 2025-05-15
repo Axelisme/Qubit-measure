@@ -27,7 +27,7 @@ class Pulse:
 
         num_samples = len(times)
         w_times, w_signals = self.waveform.numpy(prog, num_samples)
-        w_times += start_t
+        w_times += start_t[..., None]
 
         # Interpolate the waveform at last axis
         flat_times = np.reshape(w_times, (-1, num_samples))
