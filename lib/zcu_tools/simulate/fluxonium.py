@@ -6,8 +6,6 @@ from scqubits import Fluxonium
 
 from zcu_tools.config import config
 
-from .predict import FluxoniumPredictor
-
 
 def calculate_energy(
     flxs: np.ndarray,
@@ -57,6 +55,3 @@ def calculate_energy(
     energies = energies[uni_idxs, :]
 
     return energies
-
-
-__all__ = ["calculate_energy", "FluxoniumPredictor"]

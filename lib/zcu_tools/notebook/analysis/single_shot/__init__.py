@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import TABLEAU_COLORS
 
-from ..fitting import fit_gauss_2d, fit_gauss_2d_bayesian
+from .gauss2d import fit_gauss_2d, fit_gauss_2d_bayesian
 from .ge import fidelity_func, singleshot_ge_analysis, singleshot_visualize
 from .rabi import singleshot_rabi_analysis, visualize_singleshot_rabi
 

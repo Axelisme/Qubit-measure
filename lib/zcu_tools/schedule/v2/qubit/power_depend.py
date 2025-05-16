@@ -1,6 +1,6 @@
 import numpy as np
-from zcu_tools import make_cfg
-from zcu_tools.analysis import minus_background
+from zcu_tools.auto import make_cfg
+from zcu_tools.notebook.analysis import minus_background
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep_hard_template

@@ -4,7 +4,7 @@ from warnings import warn
 
 import numpy as np
 from tqdm.auto import tqdm
-from zcu_tools.analysis import rotate2real
+from zcu_tools.notebook.analysis import rotate2real
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShowHist

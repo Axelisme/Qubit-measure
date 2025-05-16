@@ -1,10 +1,11 @@
 from copy import deepcopy
 
 import numpy as np
-from zcu_tools.analysis import minus_background
+from zcu_tools.notebook.analysis import minus_background
 from zcu_tools.program.v1 import PowerDepProgram
-from zcu_tools.schedule.tools import sweep2array
-from zcu_tools.schedule.v1.template import sweep2D_hard_template
+
+from ...tools import sweep2array
+from ..template import sweep2D_hard_template
 
 
 def signal2real(signals: np.ndarray) -> np.ndarray:

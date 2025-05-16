@@ -1,11 +1,11 @@
 from copy import deepcopy
 
 import numpy as np
-
-from zcu_tools.analysis import minus_background, rescale
+from zcu_tools.notebook.analysis import minus_background, rescale
 from zcu_tools.program.v1 import OneToneProgram
-from zcu_tools.schedule.tools import map2adcfreq, sweep2array
-from zcu_tools.schedule.v1.template import sweep2D_soft_soft_template
+
+from ...tools import map2adcfreq, sweep2array
+from ..template import sweep2D_soft_soft_template
 
 
 def signal2real(signals):

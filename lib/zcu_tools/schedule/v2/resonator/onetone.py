@@ -1,12 +1,8 @@
 from zcu_tools import make_cfg
 from zcu_tools.program.v2 import OneToneProgram
-from zcu_tools.schedule.tools import (
-    format_sweep1D,
-    map2adcfreq,
-    sweep2array,
-    sweep2param,
-)
-from zcu_tools.schedule.v2.template import sweep_hard_template
+
+from ...tools import format_sweep1D, map2adcfreq, sweep2array, sweep2param
+from ..template import sweep_hard_template
 
 
 def measure_res_freq(soc, soccfg, cfg, progress=True):

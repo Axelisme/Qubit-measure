@@ -1,6 +1,7 @@
 import numpy as np
 
-from ...tools import rotate2real
+from zcu_tools.notebook.analysis.process import rotate2real
+
 from .base import fitting_ge_and_plot
 
 

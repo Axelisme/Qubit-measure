@@ -1,9 +1,10 @@
 import numpy as np
-from zcu_tools import make_cfg
-from zcu_tools.analysis import minus_background, rescale
+from zcu_tools.auto import make_cfg
+from zcu_tools.notebook.analysis import minus_background, rescale
 from zcu_tools.program.v2 import OneToneProgram
-from zcu_tools.schedule.tools import map2adcfreq, sweep2array, sweep2param
-from zcu_tools.schedule.v2.template import sweep2D_soft_hard_template
+
+from ...tools import map2adcfreq, sweep2array, sweep2param
+from ..template import sweep2D_soft_hard_template
 
 
 def signal2real(signals):

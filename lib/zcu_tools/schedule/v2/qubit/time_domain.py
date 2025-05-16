@@ -3,8 +3,8 @@
 from typing import Tuple
 
 import numpy as np
-from zcu_tools import make_cfg
-from zcu_tools.analysis import rotate2real
+from zcu_tools.auto import make_cfg
+from zcu_tools.notebook.analysis import rotate2real
 from zcu_tools.program.v2 import T1Program, T2EchoProgram, T2RamseyProgram
 from zcu_tools.schedule.tools import format_sweep1D, sweep2array, sweep2param
 from zcu_tools.schedule.v2.template import sweep1D_soft_template, sweep_hard_template

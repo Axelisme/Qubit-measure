@@ -1,4 +1,4 @@
-from .base import MyProgramV2
+from .base import MyProgramV2, visualize_pulse
 from .onetone import OneToneProgram
 from .time_exp import T1Program, T2EchoProgram, T2RamseyProgram
 from .twotone import TwoToneProgram
@@ -10,4 +10,5 @@ __all__ = [
     "T1Program",
     "T2RamseyProgram",
     "T2EchoProgram",
+    "visualize_pulse",
 ]

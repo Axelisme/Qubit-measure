@@ -1,11 +1,11 @@
 import numpy as np
 from numpy import ndarray
 from zcu_tools import make_cfg
-from zcu_tools.analysis import minus_background
+from zcu_tools.notebook.analysis import minus_background
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.schedule.tools import sweep2array, sweep2param
-from zcu_tools.schedule.v2.template import sweep2D_soft_hard_template
 from zcu_tools.schedule.v2.qubit.twotone import qub_signal2snr
+from zcu_tools.schedule.v2.template import sweep2D_soft_hard_template
 
 
 def qub_signals2reals(signals):

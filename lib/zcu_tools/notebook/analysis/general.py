@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
-from . import fitting as ft
-from .tools import rotate2real
+from . import curve as ft
+from .process import rotate2real
 
 figsize = (8, 6)
 

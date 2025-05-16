@@ -3,9 +3,9 @@ from typing import Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from . import fitting as ft
+from . import curve as ft
 from .general import figsize
-from .tools import rotate2real
+from .process import rotate2real
 
 
 def rabi_analyze(

@@ -2,7 +2,7 @@ from typing import Tuple
 
 import numpy as np
 from tqdm.auto import tqdm
-from zcu_tools import make_cfg
+from zcu_tools.auto import make_cfg
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
 from zcu_tools.schedule.instant_show import InstantShow1D

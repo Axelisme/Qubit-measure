@@ -1,8 +1,9 @@
 from copy import deepcopy
 
 from zcu_tools.program.v1 import OneToneProgram
-from zcu_tools.schedule.tools import map2adcfreq, sweep2array
-from zcu_tools.schedule.v1.template import sweep1D_soft_template
+
+from ...tools import map2adcfreq, sweep2array
+from ..template import sweep1D_soft_template
 
 
 def measure_res_freq(soc, soccfg, cfg):

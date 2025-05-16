@@ -1,9 +1,10 @@
 from copy import deepcopy
 
-from zcu_tools.analysis import calculate_noise, peak_n_avg, rotate2real
+from zcu_tools.notebook.analysis import calculate_noise, peak_n_avg, rotate2real
 from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
-from zcu_tools.schedule.tools import sweep2array
-from zcu_tools.schedule.v1.template import sweep1D_hard_template
+
+from ...tools import sweep2array
+from ..template import sweep1D_hard_template
 
 
 def signal2real(signals):

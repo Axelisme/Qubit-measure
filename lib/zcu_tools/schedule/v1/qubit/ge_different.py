@@ -3,8 +3,9 @@ from copy import deepcopy
 import numpy as np
 from zcu_tools.program.v1 import TwoToneProgram
 from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.tools import check_time_sweep, map2adcfreq, sweep2array
-from zcu_tools.schedule.v1.template import (
+
+from ...tools import check_time_sweep, map2adcfreq, sweep2array
+from ..template import (
     sweep1D_soft_template,
     sweep2D_maximize_template,
     sweep2D_soft_soft_template,
