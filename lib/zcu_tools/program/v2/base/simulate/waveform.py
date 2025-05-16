@@ -111,7 +111,7 @@ class FlatTopWaveForm(WaveForm):
         self.raise_style = raise_cfg["style"]
         self.raise_length = raise_cfg["length"]
 
-        if self.raise_length * 2 > self.length:
+        if self.raise_length > self.length:
             raise ValueError(
                 f"上升/下降部分太長: {self.raise_length}, 應小於波形總長的一半: {self.length / 2}"
             )

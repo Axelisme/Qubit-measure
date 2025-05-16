@@ -170,7 +170,7 @@ class TestWaveForm(unittest.TestCase):
         # 測試無效初始化 - 上升/下降部分太長
         with self.assertRaises(ValueError):
             FlatTopWaveForm(
-                {"length": 10, "raise_pulse": {"style": "cosine", "length": 6}}
+                {"length": 10, "raise_pulse": {"style": "cosine", "length": 11}}
             )
 
     def test_flat_top_waveform_numpy(self):
