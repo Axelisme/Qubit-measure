@@ -137,8 +137,8 @@ class ProgramClient(AbsProxy):
 
         return ret
 
-    def get_acc_buf(self, prog) -> list:
-        return self._remote_call("get_acc_buf", prog.__class__.__name__, timeout=5)
+    def get_acc_buf(self) -> list:
+        return self._remote_call("get_acc_buf", timeout=5)
 
     def set_early_stop(self) -> None:
         self._remote_call("set_early_stop", copy_=True, timeout=4)

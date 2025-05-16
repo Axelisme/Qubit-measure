@@ -11,7 +11,7 @@ class AbsProxy(ABC):
         pass
 
     @abstractmethod
-    def get_acc_buf(self, prog) -> list:
+    def get_acc_buf(self) -> list:
         pass
 
     @abstractmethod
@@ -63,7 +63,7 @@ class ProxyProgram(AcquireMixin):
     def get_acc_buf(self):
         if self.is_use_proxy():
             if self.proxy_buf_expired:
-                self.acc_buf = self.proxy.get_acc_buf(self)
+                self.acc_buf = self.proxy.get_acc_buf()
                 self.proxy_buf_expired = False
         return self.acc_buf
 
