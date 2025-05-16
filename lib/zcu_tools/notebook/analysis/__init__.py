@@ -1,6 +1,7 @@
 from .dispersive import dispersive1D_analyze, dispersive2D_analyze, ge_lookback_analyze
 from .general import (
     contrast_plot,
+    effective_temperature,
     freq_analyze,
     lookback_fft,
     lookback_show,
@@ -43,4 +44,5 @@ __all__ = [
     "minus_background",
     "rescale",
     "peak_n_avg",
+    "effective_temperature",
 ]

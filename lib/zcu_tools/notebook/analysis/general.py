@@ -1,8 +1,10 @@
-from typing import Dict, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.constants as sc
 from scipy.ndimage import gaussian_filter1d
+from scipy.optimize import curve_fit
 
 from . import curve as ft
 from .process import rotate2real
@@ -298,3 +300,61 @@ def freq_analyze(
     plt.show()
 
     return freq
+
+
+def effective_temperature(
+    population: List[Tuple[float, float]], plot=True
+) -> Tuple[float, float]:
+    """
+    Calculate the effective temperature of a population of qubits.
+
+    Parameters
+    ----------
+    population : List[Tuple[float, float]]
+        A list of tuples of (population, energy).
+    plot : bool, default=True
+        Whether to plot the population and energy.
+
+    Returns
+    -------
+    Tuple[float, float]
+        The effective temperature and its error.
+    """
+
+    def boltzmann_distribution(energy: float, eff_T: float) -> float:
+        exp_term = np.exp(-energy / (sc.k * eff_T))
+        return exp_term / np.sum(exp_term)
+
+    # calculate the effective temperature
+    if len(population) < 2:
+        raise ValueError(
+            "At least two qubits are required to calculate effective temperature."
+        )
+
+    if len(population) == 2:
+        # directly calculate from two points
+        pop1, energy1 = population[0]
+        pop2, energy2 = population[1]
+        eff_T = (energy2 - energy1) / (sc.k * np.log(pop1 / pop2))
+        err_T = 0.0
+    else:
+        # fit the boltzmann distribution
+        energies, pops = zip(*population)
+        pOpt, err = curve_fit(boltzmann_distribution, energies, pops)
+        eff_T = pOpt[0]
+        err_T = np.sqrt(np.diag(err))[0]
+
+    if plot:
+        plt.figure(figsize=figsize)
+        plt.plot(energies, pops, label="data")
+        plt.plot(
+            energies,
+            boltzmann_distribution(energies, eff_T),
+            label=f"fit, $T_e$={eff_T:.1g} +/- {err_T:.1g} K",
+        )
+        plt.xlabel("Energy (a.u.)")
+        plt.ylabel("Population")
+        plt.legend()
+        plt.show()
+
+    return eff_T, err_T
