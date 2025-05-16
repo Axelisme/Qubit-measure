@@ -43,6 +43,23 @@ class Pulse:
         return {self.ch: gain[..., None] * signals}
 
 
+def visualize_pulse(pulse_cfg: Dict[str, Any]):
+    import matplotlib.pyplot as plt
+
+    pulse = Pulse(0.0, pulse_cfg)
+    loop_dict = {}
+    times = np.linspace(0.0, pulse_cfg["length"], 1001)
+    signal_dict = pulse.get_signal(loop_dict, times)
+    for ch, signal in signal_dict.items():
+        plt.plot(times, signal.real, label=f"ch {ch} real")
+        plt.plot(times, signal.imag, label=f"ch {ch} imag")
+    plt.legend()
+    plt.xlabel("Time (us)")
+    plt.ylabel("I/Q")
+    plt.grid(True)
+    plt.show()
+
+
 def pulses_to_signal(
     loop_dict, pulses: List[Pulse], times: np.ndarray
 ) -> Dict[int, np.ndarray]:

@@ -2,7 +2,7 @@ import numpy as np
 from myqick.asm_v2 import QickParam, QickProgramV2
 from zcu_tools.program.base import MyProgram
 
-from .pulse import Pulse, pulses_to_signal
+from .pulse import Pulse, pulses_to_signal, visualize_pulse
 from .waveform import format_param
 
 
@@ -200,3 +200,6 @@ class SimulateV2(MyProgram, QickProgramV2):
                 plot_func, {"plot_type": plot_type_dropdown}
             )
             display(ui, out)
+
+
+__all__ = ["SimulateV2", "visualize_pulse"]
