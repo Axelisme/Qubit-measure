@@ -29,7 +29,7 @@ class WaveForm(ABC):
 
     def get_phase(self, loop_dict) -> np.ndarray:
         phase = format_param(loop_dict, self.phase)
-        return np.exp(1j * phase[..., None])
+        return np.exp(1j * phase[..., None] / 180 * np.pi)
 
     @abstractmethod
     def numpy(self, loop_dict, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
