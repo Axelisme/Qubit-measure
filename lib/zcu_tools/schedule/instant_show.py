@@ -213,6 +213,7 @@ class InstantShow2D(BaseInstantShow):
             with_1D: Optional flag to include 1D line plots
             **kwargs: Additional keyword arguments to pass to matplotlib's imshow function
         """
+
         if with_1D_axis == "none":
             fig, ax2D = plt.subplots()
         else:
@@ -251,6 +252,9 @@ class InstantShow2D(BaseInstantShow):
             self.contain1D = ax1D.plot(
                 ys, np.zeros_like(ys), linestyle="-", marker="."
             )[0]
+
+        self.update_lock = Lock()
+        self.dh = display(self.fig, display_id=True)
 
     def update_show(
         self,

@@ -2,8 +2,8 @@ from collections import defaultdict
 from typing import Any, Dict
 
 from myqick.qick_asm import AcquireMixin
-
 from zcu_tools.tools import AsyncFunc
+
 from .proxy import AbsProxy, ProxyProgram
 
 

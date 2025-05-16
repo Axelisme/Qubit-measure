@@ -60,16 +60,12 @@ class ProxyProgram(AcquireMixin):
             self.proxy.set_early_stop()
         super().set_early_stop()  # set locally for safe
 
-    def __getattribute__(self, name):
-        # intercept acc_buf to fetch from proxy
-        if name == "acc_buf":
-            if self.is_use_proxy():
-                # fetch acc_buf from proxy
-                if self.proxy_buf_expired:
-                    self.acc_buf = self.proxy.get_acc_buf(self)
-                    self.proxy_buf_expired = False
-
-        return object.__getattribute__(self, name)
+    def get_acc_buf(self):
+        if self.is_use_proxy():
+            if self.proxy_buf_expired:
+                self.acc_buf = self.proxy.get_acc_buf(self)
+                self.proxy_buf_expired = False
+        return self.acc_buf
 
     def local_acquire(self, soc, decimated: bool, **kwargs) -> list:
         # non-override method, for ProgramServer to call
@@ -84,12 +80,12 @@ class ProxyProgram(AcquireMixin):
 
     def acquire(self, soc, **kwargs) -> list:
         if self.is_use_proxy():
-            return self.proxy_acquire(soc, decimated=False, **kwargs)
+            return self.proxy_acquire(decimated=False, **kwargs)
 
         return self.local_acquire(soc, decimated=False, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs) -> list:
         if self.is_use_proxy():
-            return self.proxy_acquire(soc, decimated=True, **kwargs)
+            return self.proxy_acquire(decimated=True, **kwargs)
 
         return self.local_acquire(soc, decimated=True, **kwargs)

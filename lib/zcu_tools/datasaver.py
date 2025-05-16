@@ -227,7 +227,7 @@ def load_local_data(
     return z_data, x_data, y_data
 
 
-def upload_to_server(filepath: str, server_ip: str, port: int):
+def upload_to_server(filepath: str, server_ip: str, port: int) -> bool:
     """
     Upload a file to a remote server.
 
@@ -235,20 +235,27 @@ def upload_to_server(filepath: str, server_ip: str, port: int):
         filepath (str): The path to the file to upload.
         server_ip (str): The IP address of the server.
         port (int): The port number of the server.
+
+    Returns:
+        bool: True if upload succeeded, False otherwise.
     """
     import requests
 
     if config.DATA_DRY_RUN:
         print(f"DRY RUN: Upload {filepath} to {server_ip}:{port}")
-        return
+        return True
 
     filepath = os.path.abspath(filepath)
     url = f"http://{server_ip}:{port}/upload"
-    with open(filepath, "rb") as file:
-        files = {"file": (filepath, file)}
-        response = requests.post(url, files=files)
-
-    print(response.text)
+    try:
+        with open(filepath, "rb") as file:
+            files = {"file": (filepath, file)}
+            response = requests.post(url, files=files)
+        print(response.text)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Upload failed: {e}")
+        return False
 
 
 def download_from_server(filepath: str, server_ip: str, port: int):
@@ -303,8 +310,13 @@ def save_data(
     filepath = safe_labber_filepath(filepath)
     if server_ip is not None:
         save_local_data(filepath, x_info, z_info, y_info, comment, tag)
-        upload_to_server(filepath, server_ip, port)
-        os.remove(filepath)
+        success = upload_to_server(filepath, server_ip, port)
+        if success:
+            os.remove(filepath)
+        else:
+            print(
+                f"Failed to upload {filepath} to server {server_ip}:{port}, file not deleted."
+            )
     else:
         save_local_data(filepath, x_info, z_info, y_info, comment, tag)
     print("Successfully saved data to ", filepath)

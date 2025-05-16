@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 import numpy as np
 
@@ -43,26 +43,32 @@ class Pulse:
         return {self.ch: gain[..., None] * signals}
 
 
-def visualize_pulse(pulse_cfg: Dict[str, Any], time_fly: float = 0.0):
+def visualize_pulse(
+    pulse_cfgs: Union[Dict[str, Any], List[Dict[str, Any]]], time_fly: float = 0.0
+):
     import matplotlib.pyplot as plt
 
-    pulse_cfg.setdefault("ch", 0)
-    pulse_cfg.setdefault("gain", 1.0)
+    if not isinstance(pulse_cfgs, list):
+        pulse_cfgs = [pulse_cfgs]
 
-    pulse = Pulse(0.0, pulse_cfg)
-    loop_dict = {}
-    times = np.linspace(0.0, pulse_cfg["length"], 1001)
-    signal_dict = pulse.get_signal(loop_dict, times)
-    for ch, signal in signal_dict.items():
-        plt.plot(times, signal.real, label=f"ch {ch} real")
-        plt.plot(times, signal.imag, label=f"ch {ch} imag")
+    for pulse_cfg in pulse_cfgs:
+        pulse_cfg.setdefault("ch", 0)
+        pulse_cfg.setdefault("gain", 1.0)
 
-    if "trig_offset" in pulse_cfg:
-        offset = pulse_cfg["trig_offset"]
-        plt.axvline(offset - time_fly, color="red", linestyle="--")
-        if "ro_length" in pulse_cfg:
-            ro_length = pulse_cfg["ro_length"]
-            plt.axvline(offset + ro_length - time_fly, color="red", linestyle="--")
+        pulse = Pulse(0.0, pulse_cfg)
+        loop_dict = {}
+        times = np.linspace(0.0, pulse_cfg["length"], 1001)
+        signal_dict = pulse.get_signal(loop_dict, times)
+        for ch, signal in signal_dict.items():
+            plt.plot(times, signal.real, label=f"ch {ch} real")
+            plt.plot(times, signal.imag, label=f"ch {ch} imag")
+
+        if "trig_offset" in pulse_cfg:
+            offset = pulse_cfg["trig_offset"]
+            plt.axvline(offset - time_fly, color="red", linestyle="--")
+            if "ro_length" in pulse_cfg:
+                ro_length = pulse_cfg["ro_length"]
+                plt.axvline(offset + ro_length - time_fly, color="red", linestyle="--")
 
     plt.legend()
     plt.xlabel("Time (us)")

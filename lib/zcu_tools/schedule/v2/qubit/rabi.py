@@ -1,4 +1,4 @@
-from typing import Literal, Tuple
+from typing import Tuple
 
 import numpy as np
 from zcu_tools.auto import make_cfg
@@ -27,7 +27,6 @@ def measure_lenrabi(
     cfg,
     *,
     force_align=True,
-    align_type: Literal["pre_delay", "post_delay"] = "post_delay",
     earlystop_snr=None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Measure Rabi oscillation by sweeping pulse length.
@@ -72,15 +71,9 @@ def measure_lenrabi(
 
     if force_align:
         max_length = max(
-            len_sweep["start"], len_sweep["stop"], qub_pulse.get(align_type, 0.0)
+            len_sweep["start"], len_sweep["stop"], qub_pulse.get("pre_delay", 0.0)
         )
-        if align_type == "pre_delay":
-            qub_pulse[align_type] = max_length - qub_pulse["length"]
-        elif align_type == "post_delay":
-            # sweep on post_delay may cause error, use this instead
-            qub_pulse["force_total_length"] = max_length
-        else:
-            raise ValueError("Unknown align_type: ", align_type)
+        qub_pulse["pre_delay"] = max_length - qub_pulse["length"]
 
     if earlystop_snr is not None:
 
