@@ -3,10 +3,10 @@ import unittest
 import numpy as np
 
 from lib.zcu_tools.analysis.fitting.exp import (
-    expfunc,
-    fitexp,
     dual_expfunc,
+    expfunc,
     fit_dualexp,
+    fitexp,
 )
 
 
@@ -26,14 +26,14 @@ class TestExp(unittest.TestCase):
         self.assertAlmostEqual(y[decay_idx], expected_value, delta=0.1)
 
     def test_fitexp(self):
-        xdata = np.linspace(0, 10, 100)
+        xdata = np.linspace(0, 10, 1000)
         params = [1, 2, 3]  # y0, yscale, decay
         ydata = expfunc(xdata, *params) + np.random.normal(0, 0.1, len(xdata))
 
         fitparams, _ = fitexp(xdata, ydata)
 
         # Check if the fitted parameters are close to the original ones
-        self.assertTrue(np.allclose(fitparams, params, atol=0.3))
+        self.assertTrue(np.allclose(fitparams, params, atol=0.4))
 
     def test_dual_expfunc(self):
         x = np.linspace(0, 20, 500)

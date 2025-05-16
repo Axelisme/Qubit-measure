@@ -5,9 +5,10 @@ from zcu_tools.program.base import MyProgram
 
 from .readout import make_readout
 from .reset import make_reset
+from .simulate import SimulateV2
 
 
-class MyProgramV2(MyProgram, AveragerProgramV2):
+class MyProgramV2(SimulateV2, MyProgram, AveragerProgramV2):
     """
     Convert general config to qick v2 specific api calls
     """
@@ -18,6 +19,7 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             soccfg,
             cfg=cfg,
             reps=cfg["reps"],
+            initial_delay=0.0,
             final_delay=cfg["adc"]["relax_delay"],
             **kwargs,
         )

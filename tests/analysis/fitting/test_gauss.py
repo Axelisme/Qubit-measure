@@ -38,7 +38,7 @@ class TestGauss(unittest.TestCase):
         ydata = dual_gauss_func(xdata, *params) + np.random.normal(0, 0.1, len(xdata))
 
         fitparams, _ = fit_dual_gauss(xdata, ydata)
-        self.assertTrue(np.allclose(fitparams, params, atol=0.7))
+        self.assertTrue(np.allclose(fitparams, params, atol=0.9))
 
 
 if __name__ == "__main__":

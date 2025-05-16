@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import Optional, Tuple
 
 import ipywidgets as widgets
@@ -95,24 +96,24 @@ def search_proper_g(
     # Pre-calculate signal amplitude for plotting
     signal_amp = np.abs(signals)
 
-    CUTOFF = 40
-    EVALS_COUNT = 20
     STEP = 0.001
-    cache_rfs = {}
 
     if g_init is None:
         g_init = round(0.5 * (g_bound[0] + g_bound[1]), 3)
 
-    rf_0, rf_1 = calculate_dispersive(
-        params,
-        r_f,
-        g_init,
-        sp_flxs,
-        cutoff=CUTOFF,
-        evals_count=EVALS_COUNT,
-        progress=False,
-    )
-    cache_rfs[g_init] = (rf_0, rf_1)
+    @lru_cache(maxsize=None)
+    def get_dispersive(g):
+        return calculate_dispersive(
+            params,
+            r_f,
+            g,
+            sp_flxs,
+            cutoff=config.DEFAULT_CUTOFF,
+            evals_count=config.DEFAULT_EVALS_COUNT,
+            progress=False,
+        )
+
+    rf_0, rf_1 = get_dispersive(g_init)
 
     # Create slider widget
     g_slider = widgets.FloatSlider(
@@ -154,20 +155,7 @@ def search_proper_g(
     def on_g_change(change):
         g = change["new"]
 
-        if g in cache_rfs:
-            rf_0, rf_1 = cache_rfs[g]
-        else:
-            # Calculate dispersive shift
-            rf_0, rf_1 = calculate_dispersive(
-                params,
-                r_f,
-                g,
-                sp_flxs,
-                cutoff=CUTOFF,
-                evals_count=EVALS_COUNT,
-                progress=False,
-            )
-            cache_rfs[g] = (rf_0, rf_1)
+        rf_0, rf_1 = get_dispersive(g)
 
         # Update the lines
         line_g.set_data(sp_flxs, rf_0)
