@@ -5,8 +5,7 @@ import numpy as np
 from myqick.asm_v2 import QickParam
 
 
-def format_param(prog, param: Any) -> np.ndarray:
-    loop_dict = prog.loop_dict
+def format_param(loop_dict, param: Any) -> np.ndarray:
     if isinstance(param, QickParam):
         values = param.start
         for name, count in loop_dict.items():
@@ -22,88 +21,77 @@ def format_param(prog, param: Any) -> np.ndarray:
 
 
 class WaveForm(ABC):
-    @abstractmethod
     def __init__(self, pulse_cfg: Dict[str, Any]):
-        pass
+        self.length = pulse_cfg["length"]
+        self.phase = pulse_cfg.get("phase", 0.0)  # raise pulse don't need this
+        if self.length < 0 or self.length == 0:
+            raise ValueError(f"無效的波形長度: {self.length}")
+
+    def get_phase(self, loop_dict) -> np.ndarray:
+        phase = format_param(loop_dict, self.phase)
+        return np.exp(1j * phase[..., None])
 
     @abstractmethod
-    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+    def numpy(self, loop_dict, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
         pass
 
 
 class ConstWaveForm(WaveForm):
-    def __init__(self, pulse_cfg: Dict[str, Any]):
-        self.length = pulse_cfg["length"]
-        if self.length < 0:
-            raise ValueError(f"無效的波形長度: {self.length}")
-
-    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
-        length = format_param(prog, self.length)
+    def numpy(self, loop_dict, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+        length = format_param(loop_dict, self.length)
 
         times = np.linspace(0.0, length, num_sample, axis=-1)
         signals = np.ones_like(times, dtype=complex)
 
-        return times, signals
+        return times, signals * self.get_phase(loop_dict)
 
 
 class GaussWaveForm(WaveForm):
     def __init__(self, pulse_cfg: Dict[str, Any]):
-        self.length = pulse_cfg["length"]
+        super().__init__(pulse_cfg)
         self.sigma = pulse_cfg["sigma"]
 
-        if self.length < 0:
-            raise ValueError(f"無效的波形長度: {self.length}")
         if self.sigma < 0:
             raise ValueError(f"無效的sigma值: {self.sigma}")
 
-    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
-        length = format_param(prog, self.length)
-        sigma = format_param(prog, self.sigma)
+    def numpy(self, loop_dict, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+        length = format_param(loop_dict, self.length)
+        sigma = format_param(loop_dict, self.sigma)
 
         # 生成高斯波形，振幅為1
         times = np.linspace(0.0, length, num_sample, axis=-1)
         x = times - length[..., None] / 2
         signals = np.exp(-0.5 * (x / sigma[..., None]) ** 2)
-        signals = signals.astype(complex)
 
-        return times, signals
+        return times, signals * self.get_phase(loop_dict)
 
 
 class CosineWaveForm(WaveForm):
-    def __init__(self, pulse_cfg: Dict[str, Any]):
-        self.length = pulse_cfg["length"]
-
-        if self.length < 0:
-            raise ValueError(f"無效的波形長度: {self.length}")
-
-    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
-        length = format_param(prog, self.length)
+    def numpy(self, loop_dict, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+        length = format_param(loop_dict, self.length)
 
         # 生成餘弦波形，從0到2pi，振幅為1
         times = np.linspace(0.0, length, num_sample, axis=-1)
         signals = 0.5 * (1 - np.cos(2 * np.pi * times / length[..., None]))
-        signals = signals.astype(complex)
 
-        return times, signals
+        return times, signals * self.get_phase(loop_dict)
 
 
 class DragWaveForm(WaveForm):
     def __init__(self, pulse_cfg: Dict[str, Any]):
-        self.length = pulse_cfg["length"]
+        super().__init__(pulse_cfg)
         self.sigma = pulse_cfg["sigma"]
         self.alpha = pulse_cfg["alpha"]
         self.delta = pulse_cfg["delta"]
 
-        if self.length < 0:
-            raise ValueError(f"無效的波形長度: {self.length}")
         if self.sigma < 0:
             raise ValueError(f"無效的sigma值: {self.sigma}")
 
-    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
-        length = format_param(prog, self.length)
-        sigma = format_param(prog, self.sigma)
-        alpha = format_param(prog, self.alpha)
-        delta = format_param(prog, self.delta)
+    def numpy(self, loop_dict, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+        length = format_param(loop_dict, self.length)
+        sigma = format_param(loop_dict, self.sigma)
+        alpha = format_param(loop_dict, self.alpha)
+        delta = format_param(loop_dict, self.delta)
         times = np.linspace(0.0, length, num_sample, axis=-1)
 
         x = times - length[..., None] / 2
@@ -111,16 +99,13 @@ class DragWaveForm(WaveForm):
         deriv = -x / (sigma[..., None] ** 2) * gauss
         signals = gauss - 1j * alpha[..., None] * deriv / delta[..., None]
 
-        return times, signals
+        return times, signals * self.get_phase(loop_dict)
 
 
 class FlatTopWaveForm(WaveForm):
     def __init__(self, pulse_cfg: Dict[str, Any]):
-        self.length = pulse_cfg["length"]
+        super().__init__(pulse_cfg)
         raise_cfg = pulse_cfg["raise_pulse"]
-
-        if self.length < 0:
-            raise ValueError(f"無效的波形長度: {self.length}")
 
         # 獲取上升/下降部分的波形類型和長度
         self.raise_style = raise_cfg["style"]
@@ -134,9 +119,9 @@ class FlatTopWaveForm(WaveForm):
         # 創建上升/下降波形
         self.raise_waveform = make_waveform(raise_cfg)
 
-    def numpy(self, prog, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
-        length = format_param(prog, self.length)
-        raise_length = format_param(prog, self.raise_length)
+    def numpy(self, loop_dict, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
+        length = format_param(loop_dict, self.length)
+        raise_length = format_param(loop_dict, self.raise_length)
 
         times = np.linspace(0.0, length, num_sample, axis=-1)
 
@@ -147,7 +132,7 @@ class FlatTopWaveForm(WaveForm):
         uni_nums, num_groups = np.unique(raise_nums.ravel(), return_inverse=True)
         flat_signals = np.ones((raise_nums.size, num_sample), dtype=complex)
         for i, num in enumerate(uni_nums):
-            _, raise_wave = self.raise_waveform.numpy(prog, 2 * num)
+            _, raise_wave = self.raise_waveform.numpy(loop_dict, 2 * num)
             flat_raise_wave = raise_wave.reshape(-1, 2 * num)
 
             num_idx = np.flatnonzero(num_groups == i)
@@ -155,7 +140,7 @@ class FlatTopWaveForm(WaveForm):
             flat_signals[num_idx, -num:] = flat_raise_wave[num_idx, -num:]
         signals = flat_signals.reshape(*raise_nums.shape, num_sample)
 
-        return times, signals
+        return times, signals * self.get_phase(loop_dict)
 
 
 def make_waveform(pulse_cfg: Dict[str, Any]) -> WaveForm:

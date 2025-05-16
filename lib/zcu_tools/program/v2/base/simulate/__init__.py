@@ -6,6 +6,16 @@ from .pulse import Pulse, pulses_to_signal
 from .waveform import format_param
 
 
+def update_t(ref_t, t):
+    t_a = ref_t
+    t_b = t
+    if isinstance(t_a, QickParam):
+        t_a = 0.5 * (t_a.minval() + t_a.maxval())
+    if isinstance(t_b, QickParam):
+        t_b = 0.5 * (t_b.minval() + t_b.maxval())
+    return t if t_b > t_a else ref_t
+
+
 class SimulateV2(MyProgram, QickProgramV2):
     """
     Record the pulse sequence in a list of Pulse objects, So we can plot them later.
@@ -27,37 +37,37 @@ class SimulateV2(MyProgram, QickProgramV2):
     def delay(self, t, tag=None):
         super().delay(t, tag=tag)
 
-        self.sim_ref_t = max(self.sim_ref_t, t)
+        self.sim_ref_t = update_t(self.sim_ref_t, t)
 
     def delay_auto(self, t=0, gens=True, ros=True, tag=None):
         super().delay_auto(t, gens=gens, ros=ros, tag=tag)
 
         last_end = self.sim_ref_t
         if gens and self.sim_last_gen_end_t is not None:
-            last_end = max(last_end, self.sim_last_gen_end_t)
+            last_end = update_t(last_end, self.sim_last_gen_end_t)
         if ros and self.sim_last_ro_end_t is not None:
-            last_end = max(last_end, self.sim_last_ro_end_t)
-        self.sim_ref_t = max(self.sim_ref_t, last_end + t)
+            last_end = update_t(last_end, self.sim_last_ro_end_t)
+        self.sim_ref_t = update_t(self.sim_ref_t, last_end + t)
 
     def pulse(self, ch, name, t=0, tag=None):
         super().pulse(ch, name, t=t, tag=tag)
 
-        start_t = self.sim_ref_t
+        start_t = 0.0
         if t == "auto":
             if self.sim_last_gen_end_t is not None:
                 start_t = self.sim_last_gen_end_t
         else:
             start_t = t
-        start_t = max(start_t, self.sim_ref_t)
+        start_t = update_t(start_t, self.sim_ref_t)
 
         pulse_cfg = self.pulse_map[name]
         self.pulse_list.append(Pulse(start_t, pulse_cfg))
 
-        if (
-            self.sim_last_gen_end_t is None
-            or start_t + pulse_cfg["length"] > self.sim_last_gen_end_t
-        ):
-            self.sim_last_gen_end_t = start_t + pulse_cfg["length"]
+        pulse_end = start_t + pulse_cfg["length"]
+        if self.sim_last_gen_end_t is None:
+            self.sim_last_gen_end_t = pulse_end
+        else:
+            self.sim_last_gen_end_t = update_t(self.sim_last_gen_end_t, pulse_end)
 
     def declare_readout(
         self,
@@ -91,63 +101,70 @@ class SimulateV2(MyProgram, QickProgramV2):
         super().trigger(ros=ros, pins=pins, t=t, width=width, ddr4=ddr4, mr=mr, tag=tag)
         if t is None:
             t = self.sim_ref_t
-        t = max(t, self.sim_ref_t)
+        t = update_t(t, self.sim_ref_t)
 
         # TODO: this only works for single readout pulse
         self.sim_last_ro_end_t = t + self.sim_ro_length
 
     def visualize(self, time_fly: float = 0.0):
-        total_length = max(self.sim_ref_t, self.sim_last_gen_end_t)
+        total_length = update_t(self.sim_ref_t, self.sim_last_gen_end_t)
         assert total_length is not None, "total_length is None"
         if isinstance(total_length, QickParam):
             total_length = total_length.maxval()
 
         NUM_SAMPLE = 1001
 
+        visualize_keywords = ["length", "sigma", "alpha", "gain"]
+        loop_dict = {
+            k: v
+            for k, v in self.loop_dict.items()
+            if any(kw in k for kw in visualize_keywords)
+        }
+
         times = np.linspace(0.0, total_length, NUM_SAMPLE)
-        signal_dict = pulses_to_signal(self, self.pulse_list, times)
+        signal_dict = pulses_to_signal(loop_dict, self.pulse_list, times)
 
         # remove unused dimensions
-        visualize_keywords = ["length", "sigma", "alpha", "gain"]
-        use_dims = [
-            i
-            for i, name in enumerate(self.loop_dict.keys())
-            if any(kw in name for kw in visualize_keywords)
-        ]
 
         import ipywidgets as widgets
         import matplotlib.pyplot as plt
         from IPython.display import display
 
-        signal_shape = next(iter(signal_dict.values())).shape
+        seq_lengths = format_param(loop_dict, self.sim_ref_t)
+        ro_start = self.sim_last_ro_end_t - self.sim_ro_length
+        ro_end = self.sim_last_ro_end_t
+        ro_start = format_param(loop_dict, ro_start)
+        ro_end = format_param(loop_dict, ro_end)
 
-        # 根據use_indices判斷哪些維度需要滑桿
-        slider_names = [list(self.loop_dict.keys())[i] for i in use_dims]
-        slider_counts = [self.loop_dict[name] for name in slider_names]
+        def plot_func(plot_type="abs", **slider_vals):
+            nonlocal seq_lengths, times, signal_dict, loop_dict
 
-        def plot_func(**slider_vals):
-            # 根據滑桿值組合index
-            indices = [0] * len(signal_shape)
-            indices[-1] = slice(None)
-            for i, val in zip(use_dims, slider_vals.values()):
-                indices[i] = val
-            indices = tuple(indices)
+            idxs = tuple(slider_vals.values())
 
             plt.figure(figsize=(10, 4))
             for ch, sig in signal_dict.items():
-                plt.plot(times, np.abs(sig[indices]), label=f"ch {ch}")
+                if plot_type == "abs":
+                    plt.plot(times, np.abs(sig[idxs]), label=f"ch {ch}")
+                elif plot_type == "real/imag":
+                    plt.plot(times, np.real(sig[idxs]), label=f"ch {ch} real")
+                    plt.plot(times, np.imag(sig[idxs]), label=f"ch {ch} imag")
+                else:
+                    raise ValueError(f"Invalid plot type: {plot_type}")
 
             if self.sim_ro_length is not None:
-                ro_start = self.sim_last_ro_end_t - self.sim_ro_length
-                ro_end = self.sim_last_ro_end_t
-                ro_start = format_param(self, ro_start)[indices[:-1]]
-                ro_end = format_param(self, ro_end)[indices[:-1]]
-                plt.axvline(ro_start - time_fly, color="red", linestyle="--")
-                plt.axvline(ro_end - time_fly, color="red", linestyle="--")
+                plt.axvline(ro_start[idxs] - time_fly, color="red", linestyle="--")
+                plt.axvline(ro_end[idxs] - time_fly, color="red", linestyle="--")
 
-            sim_ref_t = format_param(self, self.sim_ref_t)[indices[:-1]]
-            plt.axvline(sim_ref_t - time_fly, color="black", linestyle="--")
+            plt.axvline(seq_lengths[idxs], color="black", linestyle="--")
 
+            all_sig = np.stack(list(signal_dict.values()), axis=-1)
+            if plot_type == "abs":
+                plt.ylim(0.0, 1.1 * np.max(np.abs(all_sig)))
+            elif plot_type == "real/imag":
+                plt.ylim(
+                    1.1 * min(np.min(np.real(all_sig)), np.min(np.imag(all_sig)), 0.0),
+                    1.1 * max(np.max(np.real(all_sig)), np.max(np.imag(all_sig)), 0.0),
+                )
             plt.xlabel("Time (us)")
             plt.ylabel("Amplitude")
             plt.title(f"{type(self).__name__} Simulation")
@@ -155,15 +172,31 @@ class SimulateV2(MyProgram, QickProgramV2):
             plt.grid(True)
             plt.show()
 
+        # 根據use_indices判斷哪些維度需要滑桿
+        slider_names = list(loop_dict.keys())
+        slider_counts = list(loop_dict.values())
+
+        plot_type_dropdown = widgets.Dropdown(
+            options=["abs", "real/imag"],
+            value="abs",
+            description="Plot Type:",
+        )
+
         if len(slider_names) > 0:
             sliders = [
                 widgets.IntSlider(min=0, max=c - 1, step=1, description=n)
                 for n, c in zip(slider_names, slider_counts)
             ]
-            ui = widgets.HBox(sliders)
-            out = widgets.interactive_output(
-                plot_func, {n: s for n, s in zip(slider_names, sliders)}
-            )
+            slider_box = widgets.HBox(sliders)
+            ui = widgets.VBox([plot_type_dropdown, slider_box])
+            interactive_widgets = {n: s for n, s in zip(slider_names, sliders)}
+            interactive_widgets["plot_type"] = plot_type_dropdown
+            out = widgets.interactive_output(plot_func, interactive_widgets)
             display(ui, out)
         else:
-            plot_func()
+            # Even if there are no sliders, we still want the plot type dropdown
+            ui = widgets.VBox([plot_type_dropdown])
+            out = widgets.interactive_output(
+                plot_func, {"plot_type": plot_type_dropdown}
+            )
+            display(ui, out)

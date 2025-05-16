@@ -12,21 +12,21 @@ class Pulse:
         self.gain = pulse_cfg["gain"]
         self.waveform = make_waveform(pulse_cfg)
 
-    def get_signal(self, prog, times: np.ndarray) -> Dict[int, np.ndarray]:
+    def get_signal(self, loop_dict, times: np.ndarray) -> Dict[int, np.ndarray]:
         """
         Get the signal of the pulse at the given times using interpolation.
         Args:
-            prog: MyProgramV2
+            loop_dict: loop_dict
             times: The times at which to get the signal.
         Returns:
             A dictionary of signals, where the key is the channel number and the value is the signal array.
         """
 
-        start_t = format_param(prog, self.start_t)
-        gain = format_param(prog, self.gain)
+        start_t = format_param(loop_dict, self.start_t)
+        gain = format_param(loop_dict, self.gain)
 
         num_samples = len(times)
-        w_times, w_signals = self.waveform.numpy(prog, num_samples)
+        w_times, w_signals = self.waveform.numpy(loop_dict, num_samples)
         w_times += start_t[..., None]
 
         # Interpolate the waveform at last axis
@@ -44,7 +44,7 @@ class Pulse:
 
 
 def pulses_to_signal(
-    prog, pulses: List[Pulse], times: np.ndarray
+    loop_dict, pulses: List[Pulse], times: np.ndarray
 ) -> Dict[int, np.ndarray]:
     """
     Convert a list of pulses to dictionary of signals. In the dictionary, the key is the channel number and the value is the signal array.
@@ -52,7 +52,7 @@ def pulses_to_signal(
     signal_dict: Dict[int, np.ndarray] = {}
 
     for pulse in pulses:
-        pulse_signal_dict = pulse.get_signal(prog, times)
+        pulse_signal_dict = pulse.get_signal(loop_dict, times)
         for ch, signal in pulse_signal_dict.items():
             if ch not in signal_dict:
                 signal_dict[ch] = signal
