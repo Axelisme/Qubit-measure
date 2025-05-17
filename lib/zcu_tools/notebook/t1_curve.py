@@ -59,6 +59,7 @@ def plot_eff_t1(
         t_flxs = s_flxs
 
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
+    fig.suptitle(f"Temperature = {Temp * 1e3} mK")
     ax.errorbar(s_mAs, s_T1s * 1e3, yerr=s_T1errs * 1e3, fmt=".-", label="T1")
     ax.set_xlabel(r"Current (mA)")
     ax.set_ylabel(r"$T_1$ (ns)")
