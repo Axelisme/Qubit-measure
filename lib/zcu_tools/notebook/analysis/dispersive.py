@@ -95,7 +95,7 @@ def search_proper_g(
 
     def close_and_get_g():
         plt.draw()
-        plt.pause(0.1)
+        plt.pause(0.5)
         plt.close(fig)
         return g_slider.value
 
@@ -110,6 +110,7 @@ def auto_fit_dispersive(
     signals: np.ndarray,
     g_bound: Tuple[float, float] = (0.01, 0.2),
     g_init: Optional[float] = None,
+    fit_rf: bool = False,
 ) -> float:
     """
     Auto fit the coupling strength g by maximizing the overlap of predicted ground state frequency with onetone spectrum
@@ -125,35 +126,52 @@ def auto_fit_dispersive(
 
     amps = np.abs(signals)
 
-    def loss(g):
-        # g 是 array, 取第一個元素
-        g_val = float(g[0])
+    # determine whether fit the value to max or min
+    avg_amp = np.mean(amps)
+    max_amp, min_amp = np.max(amps), np.min(amps)
+    fit_factor = 1 if max_amp + min_amp > 2 * avg_amp else -1
 
-        update_pbar(g_val)
+    # derive the initial g value if not provided
+    if g_init is None:
+        g_init = 0.5 * (g_bound[0] + g_bound[1])
+
+    # derive the fitting tolerance
+    ftol = np.max(amps) * 1e-4
+
+    def loss_fn(g, r_f):
+        update_pbar(g)
 
         rf_0, _ = calculate_dispersive_vs_flx(
-            params, sp_flxs, r_f, g_val, cutoff=40, evals_count=20, progress=False
+            params, sp_flxs, r_f, g, cutoff=40, evals_count=20, progress=False
         )
 
         # 用線性插值取得每個 rf_0 對應的 signal
         vals = [np.interp(rf, sp_fpts, amps[i]) for i, rf in enumerate(rf_0)]
-        return -np.mean(vals)
+        return -fit_factor * np.mean(vals)
 
-    ftol = np.max(amps) * 1e-4
-
-    if g_init is None:
-        g_init = 0.5 * (g_bound[0] + g_bound[1])
-    res = minimize(
-        loss,
-        x0=[g_init],
-        bounds=[g_bound],
+    fit_kwargs = dict(
         method="L-BFGS-B",
         options={"disp": False, "maxiter": MAX_ITER, "ftol": ftol},
     )
-    if not isinstance(res, np.ndarray):
-        res = res.x  # compatibility with scipy < 1.7
+    if fit_rf:
+        res = minimize(
+            lambda p: loss_fn(p[0], p[1]),
+            x0=[g_init, r_f],
+            bounds=[g_bound, [r_f - 2e-3, r_f + 2e-3]],
+            **fit_kwargs,
+        )
+        if not isinstance(res, np.ndarray):
+            res = res.x  # compatibility with scipy < 1.7
 
-    return res[0].item()
+        return res[0].item(), res[1].item()
+    else:
+        res = minimize(
+            lambda p: loss_fn(p[0], r_f), x0=[g_init], bounds=[g_bound], **fit_kwargs
+        )
+        if not isinstance(res, np.ndarray):
+            res = res.x  # compatibility with scipy < 1.7
+
+        return res[0].item(), None
 
 
 def plot_dispersive_with_onetone(

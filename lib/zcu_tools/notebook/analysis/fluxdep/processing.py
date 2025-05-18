@@ -11,12 +11,13 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
 
-def cast2real_and_norm(signals: np.ndarray) -> np.ndarray:
+def cast2real_and_norm(signals: np.ndarray, minus_mean: bool = True) -> np.ndarray:
     """
     Convert complex signals to real with maximum snr
     """
 
-    signals = signals - np.ma.mean(signals, axis=0)
+    if minus_mean:
+        signals = signals - np.ma.mean(signals, axis=0)
     signals = gaussian_filter1d(signals, sigma=1, axis=0)
     amps = np.abs(signals)
     amps /= np.ma.std(amps, axis=0)

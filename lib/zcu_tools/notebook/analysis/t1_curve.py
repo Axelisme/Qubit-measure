@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Optional
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,13 +9,27 @@ from zcu_tools.simulate import flx2mA, mA2flx
 
 
 def get_eff_t1(
+    flx: float, fluxonium: scq.Fluxonium, noise_channels: list, Temp: float, esys=None
+) -> float:
+    scq.settings.T1_DEFAULT_WARNING = False
+    fluxonium.flux = flx
+    kwargs = {
+        "noise_channels": noise_channels,
+        "common_noise_options": dict(i=1, j=0, T=Temp),
+    }
+    if esys is not None:
+        kwargs["esys"] = esys
+    return fluxonium.t1_effective(**kwargs)
+
+
+def get_t1_vs_flx(
     flxs: np.ndarray,
     fluxonium: scq.Fluxonium,
     noise_channels: list,
     Temp: float | np.ndarray,
     esys: Optional[np.ndarray] = None,
     flx_range: Optional[tuple] = None,
-):
+) -> np.ndarray:
     scq.settings.T1_DEFAULT_WARNING = False
     t1_effs = []
     for i, flx in enumerate(flxs):
@@ -24,20 +38,14 @@ def get_eff_t1(
                 t1_effs.append(np.nan)
                 continue
 
-        fluxonium.flux = flx
         temp = Temp if isinstance(Temp, (int, float)) else Temp[i]
-        kwargs = {
-            "noise_channels": noise_channels,
-            "common_noise_options": dict(i=1, j=0, T=temp),
-        }
-        if esys is not None:
-            kwargs["esys"] = (esys[0][i], esys[1][i])
-
-        t1_effs.append(fluxonium.t1_effective(**kwargs))
+        esys_i = (esys[0][i], esys[1][i]) if esys is not None else None
+        t1 = get_eff_t1(flx, fluxonium, noise_channels, temp, esys_i)
+        t1_effs.append(t1)
     return np.array(t1_effs)
 
 
-def plot_eff_t1(
+def plot_t1_vs_flx(
     s_mAs,
     s_flxs,
     s_T1s,
@@ -52,7 +60,7 @@ def plot_eff_t1(
     t_mAs=None,
     t_flxs=None,
     esys=None,
-):
+) -> Tuple[plt.Figure, plt.Axes]:
     if t_mAs is None:
         t_mAs = s_mAs
     if t_flxs is None:
@@ -76,7 +84,7 @@ def plot_eff_t1(
 
     t1_effs = []
     for v in values:
-        t1_eff = get_eff_t1(
+        t1_eff = get_t1_vs_flx(
             t_flxs,
             fluxonium,
             noise_channels=[(noise_name, {name: v})],
@@ -95,3 +103,29 @@ def plot_eff_t1(
     ax.legend()
 
     return fig, ax
+
+
+def plot_sample_t1(
+    s_mAs: np.ndarray,
+    s_T1s: np.ndarray,
+    s_T1errs: np.ndarray,
+    mA_c: float,
+    period: float,
+) -> Tuple[plt.Figure, plt.Axes]:
+    fig, ax1 = plt.subplots(constrained_layout=True, figsize=(8, 4))
+
+    ax1.errorbar(s_mAs, s_T1s, yerr=s_T1errs, fmt=".-", label="Current")
+    ax1.grid()
+    ax1.set_xlabel(r"Current (mA)")
+
+    ax1.set_ylabel(r"$T_1$ ($\mu s$)")
+    ax2 = ax1.secondary_xaxis(
+        "top",
+        functions=(
+            partial(mA2flx, mA_c=mA_c, period=period),
+            partial(flx2mA, mA_c=mA_c, period=period),
+        ),
+    )
+    ax2.set_xlabel(r"$\phi_{ext}/\phi_0$")
+
+    return fig, ax1

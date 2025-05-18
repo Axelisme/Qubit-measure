@@ -1,5 +1,6 @@
+import os
 from itertools import product
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -13,6 +14,9 @@ from zcu_tools.simulate.fluxonium import (
     calculate_dispersive,
     calculate_dispersive_sweep,
 )
+
+DESIGN_CUTOFF = 40
+DESIGN_EVALS_COUNT = 10
 
 
 def generate_params_table(
@@ -56,20 +60,27 @@ def generate_params_table(
                 "EJ": eJ,
                 "EC": eC,
                 "EL": eL,
+                "valid": True,
             }
             for eJ, eC, eL in product(EJ, EC, EL)
         ]
     )
 
 
-def calculate_esys(params_table: pd.DataFrame, fluxonium: scq.Fluxonium) -> None:
+def calculate_esys(params_table: pd.DataFrame) -> None:
     """
     計算每個參數組合下的 fluxonium 能譜
 
     會在 params_table 中新增一個 "esys" 欄位
     """
 
+    fluxonium = scq.Fluxonium(
+        1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
+    )
+
     def calc_single_esys(row):
+        nonlocal fluxonium
+
         fluxonium.flux = row["flx"]
         fluxonium.EJ = row["EJ"]
         fluxonium.EC = row["EC"]
@@ -80,7 +91,7 @@ def calculate_esys(params_table: pd.DataFrame, fluxonium: scq.Fluxonium) -> None
     params_table["esys"] = params_table.progress_apply(calc_single_esys, axis=1)
 
 
-def calculate_f01(params_table: pd.DataFrame, fluxonium: scq.Fluxonium) -> None:
+def calculate_f01(params_table: pd.DataFrame) -> None:
     """
     計算每個參數組合下的 f01, 需要已經計算過 esys的params_table
 
@@ -98,7 +109,7 @@ def calculate_f01(params_table: pd.DataFrame, fluxonium: scq.Fluxonium) -> None:
     params_table["f01"] = params_table.apply(calc_single_f01, axis=1)
 
 
-def calculate_m01(params_table: pd.DataFrame, fluxonium: scq.Fluxonium) -> None:
+def calculate_m01(params_table: pd.DataFrame) -> None:
     """
     計算每個參數組合下的 m01, 需要已經計算過 esys的params_table
 
@@ -108,6 +119,10 @@ def calculate_m01(params_table: pd.DataFrame, fluxonium: scq.Fluxonium) -> None:
     # check if esys is calculated
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
+
+    fluxonium = scq.Fluxonium(
+        1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
+    )
 
     def calc_single_m01(row):
         return np.abs(fluxonium.n_operator(energy_esys=row["esys"])[0, 1])
@@ -133,7 +148,6 @@ def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) 
 
 def calculate_t1(
     params_table: pd.DataFrame,
-    fluxonium: scq.Fluxonium,
     noise_channels: List[Tuple[str, Dict[str, Any]]],
     Temp: float,
 ) -> None:
@@ -145,6 +159,10 @@ def calculate_t1(
 
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
+
+    fluxonium = scq.Fluxonium(
+        1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
+    )
 
     # Suppress the warning when calculating t1
     old, scq.settings.T1_DEFAULT_WARNING = scq.settings.T1_DEFAULT_WARNING, False
@@ -161,7 +179,9 @@ def calculate_t1(
     scq.settings.T1_DEFAULT_WARNING = old
 
 
-def calculate_collision(params_table: pd.DataFrame, avoid_freqs: List[float]) -> None:
+def avoid_collision(
+    params_table: pd.DataFrame, avoid_freqs: List[float], threshold: float = 0.3
+) -> None:
     """
     計算每個參數組合下的 collision, 需要已經計算過 esys 的params_table
 
@@ -172,8 +192,6 @@ def calculate_collision(params_table: pd.DataFrame, avoid_freqs: List[float]) ->
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
 
-    COLLI_THRESHOLD = 0.3
-
     freqs = np.array(avoid_freqs)[None, :]
 
     def calc_single_collision(row):
@@ -182,15 +200,31 @@ def calculate_collision(params_table: pd.DataFrame, avoid_freqs: List[float]) ->
         e1x = evals - evals[1]
 
         # 檢查能階差與避免頻率的差距是否小於閾值
-        e0x_collision = np.min(np.abs(e0x[:, None] - freqs), axis=0) < COLLI_THRESHOLD
-        e1x_collision = np.min(np.abs(e1x[:, None] - freqs), axis=0) < COLLI_THRESHOLD
+        e0x_collision = np.min(np.abs(e0x[:, None] - freqs), axis=0) < threshold
+        e1x_collision = np.min(np.abs(e1x[:, None] - freqs), axis=0) < threshold
 
-        return np.any(e0x_collision | e1x_collision)
+        return ~np.any(e0x_collision | e1x_collision)
 
-    params_table["collision"] = params_table.apply(calc_single_collision, axis=1)
+    params_table["valid"] &= params_table.apply(calc_single_collision, axis=1)
 
 
-def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
+def avoid_low_f01(params_table: pd.DataFrame, f01_threshold: float) -> None:
+    """
+    移除 f01 小於 f01_threshold 的參數組合
+    """
+
+    params_table["valid"] &= params_table["f01"] > f01_threshold
+
+
+def avoid_low_m01(params_table: pd.DataFrame, m01_threshold: float) -> None:
+    """
+    移除 m01 小於 m01_threshold 的參數組合
+    """
+
+    params_table["valid"] &= params_table["m01"] > m01_threshold
+
+
+def plot_scan_results(params_table: pd.DataFrame, title: str = "") -> go.Figure:
     plot_table = params_table.drop("esys", axis=1)
     plot_table["Label"] = plot_table.apply(
         lambda row: f"EJ={row['EJ']:.2f}, EC={row['EC']:.3f}, EL={row['EL']:.3f}",
@@ -202,8 +236,8 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
         plot_table,
         x="Chi",
         y="t1",
-        color="collision",
-        color_discrete_map={True: "red", False: "blue"},
+        color="valid",
+        color_discrete_map={True: "blue", False: "red"},
         log_x=True,
         log_y=True,
         hover_name="Label",
@@ -211,15 +245,18 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
     )
     fig.update_traces(marker=dict(size=3))
 
-    # 預設隱藏collision=True的點
+    # 預設隱藏valid=False的點
     fig.for_each_trace(
-        lambda trace: trace.update(visible="legendonly") if trace.name == "True" else ()
+        lambda trace: trace.update(visible="legendonly")
+        if trace.name == "False"
+        else ()
     )
 
     fig.update_layout(
+        title=title,
+        title_x=0.501,
         xaxis_title="Chi",
         yaxis_title="T1 (ns)",
-        title_x=0.501,
         template="plotly_white",
         showlegend=True,
         width=1100,
@@ -232,22 +269,79 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
 
 
 def annotate_best_point(fig, data: pd.DataFrame) -> Tuple[float, float, float]:
-    return None, None, None
+    """
+    Find and plot the best snr's param on the plot, the equation of snr is:
+        snr = Chi * sqrt(T1)
+    """
+
+    # filter out invalid params
+    valid_data = data[data["valid"]]
+
+    snrs = valid_data["Chi"] * np.sqrt(valid_data["t1"])
+    best_param = valid_data.iloc[np.argmax(snrs)]
+
+    EJ, EC, EL = (
+        float(best_param["EJ"]),
+        float(best_param["EC"]),
+        float(best_param["EL"]),
+    )
+
+    fig.add_annotation(
+        x=np.log10(best_param["Chi"]),
+        y=np.log10(best_param["t1"]),
+        text=f"{EJ:.2f}/{EC:.2f}/{EL:.2f}",
+        showarrow=True,
+        arrowhead=1,
+        arrowcolor="black",
+        ax=0,
+        ay=-20,
+    )
+
+    return EJ, EC, EL
 
 
 def add_real_sample(
-    fig: go.Figure, result_path: str, t1: float, t1_info, chi_info, flx: float = 0.5
+    fig: go.Figure,
+    chip_name: str,
+    noise_channels: List[Tuple[str, Dict[str, Any]]],
+    Temp: float,
+    flx: float = 0.5,
+    result_dir: Optional[str] = None,
 ) -> None:
-    name, param, *_ = load_result(result_path)
+    """
+    Add a real chip sample to the plot
 
-    r_f, g = chi_info
-    rf_0, rf_1 = calculate_dispersive(param, r_f, g, flx, cutoff=40, evals_count=20)
+    Args:
+        fig: plotly figure
+        chip_name: chip name
+        t1_info: t1 info
+        flx: flux
+        result_dir: result directory, default to "../../result"
+    """
+    if result_dir is None:
+        result_dir = os.path.join("..", "..", "result")
+
+    result_path = os.path.join(result_dir, chip_name, "params.json")
+    _, param, mA_c, _, _, result = load_result(result_path)
+
+    # unpack result
+    r_f, g = result["dispersive"]["r_f"], result["dispersive"]["g"]
+
+    # load freq data
+    freq_path = os.path.join(result_dir, chip_name, "freqs.csv")
+    freq_df = pd.read_csv(freq_path)
+    idx = np.argmin(np.abs(freq_df["Current (mA)"] - mA_c))
+    t1 = freq_df["T1 (μs)"].iloc[idx]
+
+    # calculate chi
+    rf_0, rf_1 = calculate_dispersive(
+        param, flx, r_f, g, cutoff=DESIGN_CUTOFF, evals_count=20
+    )
     chi = np.abs(rf_0 - rf_1)
 
+    # calculate t1
+    fluxonium = scq.Fluxonium(*param, flux=flx, cutoff=DESIGN_CUTOFF, truncated_dim=2)
     scq.settings.T1_DEFAULT_WARNING = False
-
-    noise_channels, Temp = t1_info
-    fluxonium = scq.Fluxonium(*param, flux=flx, cutoff=40, truncated_dim=2)
     predict_t1 = 1e-3 * fluxonium.t1_effective(
         noise_channels=noise_channels,
         common_noise_options=dict(i=1, j=0, T=Temp),
@@ -261,6 +355,9 @@ def add_real_sample(
         x1=chi,
         y1=1e3 * predict_t1,
         line=dict(color="red", width=1, dash="dot"),
+        name=chip_name,
+        legendgroup=chip_name,
+        showlegend=True,
     )
 
     # 添加實際t1的點
@@ -269,8 +366,9 @@ def add_real_sample(
         y=[1e3 * t1],
         mode="markers+text",
         marker=dict(symbol="x", size=5, color="black"),
-        text=[name],
+        text=[chip_name],
         textposition="top center",
+        legendgroup=chip_name,
         showlegend=False,
     )
 
@@ -280,5 +378,6 @@ def add_real_sample(
         y=[1e3 * predict_t1],
         mode="markers",
         marker=dict(symbol="x", size=5, color="red"),
+        legendgroup=chip_name,
         showlegend=False,
     )

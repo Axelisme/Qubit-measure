@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Any, Dict
 
 import h5py as h5
 import numpy as np
@@ -49,6 +50,8 @@ def load_result(path):
         params: np.ndarray
         half_flux: float
         period: float
+        allows: Dict[str, Any]
+        data: Dict[str, Any], raw dict contain all result
     """
 
     with open(path, "r") as f:
@@ -60,7 +63,18 @@ def load_result(path):
         data["half flux"],
         data["period"],
         data["allows"],
+        data,
     )
+
+
+def update_result(path, update_dict: Dict[str, Any]):
+    with open(path, "r") as f:
+        data = json.load(f)
+
+    data.update(update_dict)
+
+    with open(path, "w") as f:
+        json.dump(data, f, indent=4)
 
 
 def dump_spects(save_path, s_spects, mode="x"):

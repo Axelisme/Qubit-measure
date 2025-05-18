@@ -28,7 +28,7 @@ def create_datafolder(root_dir: str, prefix: str = "") -> str:
     return save_dir
 
 
-def make_comment(cfg: dict, append: str = "") -> str:
+def make_comment(cfg: dict, prepend: str = "") -> str:
     """
     Generate a formatted comment string from a configuration dictionary.
 
@@ -42,8 +42,8 @@ def make_comment(cfg: dict, append: str = "") -> str:
     # pretty convert cfg to string
     import json
 
-    comment = json.dumps(cfg, indent=2)
-    comment += "\n" + append
+    comment = prepend
+    comment = comment + "\n" + json.dumps(cfg, indent=2)
 
     return comment
 

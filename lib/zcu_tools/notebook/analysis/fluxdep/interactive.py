@@ -224,7 +224,7 @@ class InteractiveLines:
         "none": "<span style='color:gray'>未選擇線條</span>",
     }
 
-    def __init__(self, spectrum, mAs, fpts, mA_c=None, mA_e=None):
+    def __init__(self, spectrum, mAs, fpts, mA_c=None, mA_e=None, minus_mean=True):
         plt.ioff()  # 避免立即顯示圖表
         self.fig_main, self.ax_main = plt.subplots(num=None)
         self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(5, 5), num=None)
@@ -238,7 +238,7 @@ class InteractiveLines:
 
         self.mAs = mAs
         self.fpts = fpts
-        self.amps = cast2real_and_norm(spectrum)
+        self.amps = cast2real_and_norm(spectrum, minus_mean=minus_mean)
 
         self.mouse_x = None
         self.mouse_y = None
@@ -506,8 +506,8 @@ class InteractiveLines:
         # 停止動畫
         self.anim_main.event_source.stop()
         self.anim_zoom.event_source.stop()
-        plt.close(self.fig_main)
-        plt.close(self.fig_zoom)
+        # plt.close(self.fig_main)
+        # plt.close(self.fig_zoom)
 
     def get_positions(self):
         """運行交互式選擇器並返回兩條線的位置"""
