@@ -6,7 +6,8 @@ import scipy.constants as sc
 from scipy.ndimage import gaussian_filter1d
 from scipy.optimize import curve_fit
 
-from . import curve as ft
+import zcu_tools.notebook.util.fitting as ft
+
 from .process import rotate2real
 
 figsize = (8, 6)

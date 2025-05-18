@@ -1,4 +1,7 @@
+from typing import Tuple
+
 import numpy as np
+from sklearn.mixture import GaussianMixture
 
 
 def gauss_2d(
@@ -7,7 +10,9 @@ def gauss_2d(
     return n * np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma**2))
 
 
-def fit_gauss_2d(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 2):
+def fit_gauss_2d(
+    xs: np.ndarray, ys: np.ndarray, num_gauss: int = 2
+) -> Tuple[np.ndarray, GaussianMixture]:
     """
     擬合給定數量的二維各向同性高斯分佈到採樣點。
     使用 GaussianMixture 內建的 k-means 初始化。
@@ -26,7 +31,6 @@ def fit_gauss_2d(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 2):
         gmm (GaussianMixture): 擬合的模型對象。
                           可以用於進一步分析或預測。
     """
-    from sklearn.mixture import GaussianMixture
 
     # 使用 GaussianMixture (EM算法) 優化參數
     # covariance_type='spherical' 表示每個組件有自己的單一方差 (sigma^2)，即各向同性。

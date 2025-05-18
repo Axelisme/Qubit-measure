@@ -1,3 +1,5 @@
+from typing import Any, Tuple
+
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,7 +9,13 @@ from scipy.signal import find_peaks
 
 
 class InteractiveOneTone:
-    def __init__(self, mAs, fpts, spectrum, threshold=1.0):
+    def __init__(
+        self,
+        mAs: np.ndarray,
+        fpts: np.ndarray,
+        spectrum: np.ndarray,
+        threshold: float = 1.0,
+    ) -> None:
         self.mAs = mAs
         self.fpts = fpts
         self.spectrum = spectrum
@@ -47,7 +55,7 @@ class InteractiveOneTone:
             )
         )
 
-    def init_plots(self, threshold):
+    def init_plots(self, threshold: float) -> None:
         """初始化圖表"""
         # 顯示2D頻譜
         self.amps2d = np.abs(self.spectrum)  # (fpts, mAs)
@@ -83,7 +91,7 @@ class InteractiveOneTone:
         self.axes[1].set_xlabel("Current (mA)")
         self.axes[1].set_ylabel("Normalized Amplitude")
 
-    def update_peaks(self, threshold):
+    def update_peaks(self, threshold: float) -> None:
         """更新峰值點"""
 
         # 找出峰值
@@ -112,19 +120,19 @@ class InteractiveOneTone:
         # 更新圖表
         self.fig.canvas.draw_idle()
 
-    def on_threshold_change(self, change):
+    def on_threshold_change(self, change: Any) -> None:
         """當閾值變更時更新圖表"""
         if self.is_finished:
             return
 
         self.update_peaks(change.new)
 
-    def on_finish(self, _):
+    def on_finish(self, _: Any) -> None:
         """完成按鈕的回調函數"""
         plt.close(self.fig)
         self.is_finished = True
 
-    def get_positions(self):
+    def get_positions(self) -> Tuple[np.ndarray, np.ndarray]:
         """返回找到的點位置"""
         if not self.is_finished:
             self.on_finish(None)

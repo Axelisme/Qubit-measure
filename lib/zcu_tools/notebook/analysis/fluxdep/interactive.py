@@ -16,7 +16,8 @@ from IPython.display import display
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Ellipse
 
-from ..process import mA2flx
+from zcu_tools.simulate import mA2flx
+
 from .models import energy2transition
 from .processing import (
     cast2real_and_norm,

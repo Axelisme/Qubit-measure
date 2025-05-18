@@ -3,7 +3,8 @@ from typing import Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from . import curve as ft
+import zcu_tools.notebook.util.fitting as ft
+
 from .general import figsize
 from .process import rotate2real
 

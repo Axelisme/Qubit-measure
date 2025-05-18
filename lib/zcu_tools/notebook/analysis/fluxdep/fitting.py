@@ -8,13 +8,15 @@ from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import scqubits as scq
 from h5py import File
 from IPython.display import display
 from joblib import Parallel, delayed
 from numba import njit
+from scipy.optimize import least_squares
 from tqdm.auto import tqdm, trange
 
-from zcu_tools.analysis.simulate import calculate_energy
+from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 from zcu_tools.tools import AsyncFunc
 
 from .models import count_max_evals, energy2linearform
@@ -337,15 +339,9 @@ def search_in_database(
 
 
 def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
-    import scqubits as scq
-    from scipy.optimize import least_squares
-
     scq.settings.PROGRESSBAR_DISABLED, old = True, scq.settings.PROGRESSBAR_DISABLED
 
     evals_count = count_max_evals(allows)
-    fluxonium = scq.Fluxonium(
-        *init_params, flux=0.0, truncated_dim=evals_count, cutoff=45
-    )
 
     pbar = tqdm(desc="Distance: nan", total=maxfun)
 
@@ -358,10 +354,12 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
 
     # 使用 least_squares 進行參數最佳化
     def residuals(params):
-        nonlocal fluxonium, flxs, allows, fpts
+        nonlocal flxs, allows, fpts
 
         # 計算能量並轉成線性形式
-        energies = calculate_energy(flxs, *params, fluxonium=fluxonium)
+        energies = calculate_energy_vs_flx(
+            params, flxs, cutoff=45, evals_count=evals_count
+        )
         Bs, Cs = energy2linearform(energies, allows)
         # 計算每個點的最小誤差
         dists = np.min(np.abs(fpts[:, None] - np.abs(Bs + Cs)), axis=1)

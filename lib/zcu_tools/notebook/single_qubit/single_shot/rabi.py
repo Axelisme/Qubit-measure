@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import display
 
-from ..curve import batch_fit_dual_gauss, fit_gauss, gauss_func
-from ..process import rotate2real
+from zcu_tools.notebook.single_qubit.process import rotate2real
+from zcu_tools.notebook.util.fitting import batch_fit_dual_gauss, fit_gauss, gauss_func
 
 NUM_BINS = 201
 

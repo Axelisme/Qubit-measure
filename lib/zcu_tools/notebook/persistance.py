@@ -5,14 +5,6 @@ import h5py as h5
 import numpy as np
 
 
-def mA2flx(mAs, mA_c, period):
-    return (mAs - mA_c) / period + 0.5
-
-
-def flx2mA(flxs, mA_c, period):
-    return (flxs - 0.5) * period + mA_c
-
-
 def format_rawdata(mAs, fpts, spectrum):
     fpts = fpts / 1e9  # convert to GHz
     mAs = mAs * 1e3  # convert to mA
@@ -49,6 +41,16 @@ def dump_result(path, name, params, cflx, period, allows):
 
 
 def load_result(path):
+    """
+    Load the result from a json file
+
+    Returns:
+        name: str
+        params: np.ndarray
+        half_flux: float
+        period: float
+    """
+
     with open(path, "r") as f:
         data = json.load(f)
 
