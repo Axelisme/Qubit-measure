@@ -127,11 +127,7 @@ def plot_t1s(
     t1s = get_t1_vs_flx(flxs, fluxonium, noise_channels=noise_channels, Temp=Temp)
 
     fig.add_trace(go.Scatter(x=flxs, y=t1s, mode="lines", name="t1"))
-    fig.update_layout(
-        title=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
-        title_x=0.51,
-        yaxis_type="log",
-    )
+    fig.update_layout(title_x=0.51, yaxis_type="log")
     fig.update_yaxes(exponentformat="power")
 
     return fig

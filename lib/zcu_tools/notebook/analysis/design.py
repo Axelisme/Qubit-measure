@@ -224,7 +224,7 @@ def avoid_low_m01(params_table: pd.DataFrame, m01_threshold: float) -> None:
     params_table["valid"] &= params_table["m01"] > m01_threshold
 
 
-def plot_scan_results(params_table: pd.DataFrame, title: str = "") -> go.Figure:
+def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
     plot_table = params_table.drop("esys", axis=1)
     plot_table["Label"] = plot_table.apply(
         lambda row: f"EJ={row['EJ']:.2f}, EC={row['EC']:.3f}, EL={row['EL']:.3f}",
@@ -253,7 +253,6 @@ def plot_scan_results(params_table: pd.DataFrame, title: str = "") -> go.Figure:
     )
 
     fig.update_layout(
-        title=title,
         title_x=0.501,
         xaxis_title="Chi",
         yaxis_title="T1 (ns)",
