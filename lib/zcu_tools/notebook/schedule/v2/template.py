@@ -5,10 +5,11 @@ import numpy as np
 from numpy import ndarray
 from tqdm.auto import tqdm
 from zcu_tools.program.v2 import MyProgramV2
-from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow1D, InstantShow2D
-from zcu_tools.schedule.v1.template import sweep2D_maximize_template  # noqa
 from zcu_tools.tools import AsyncFunc, print_traceback
+
+from ..flux import set_flux
+from ..instant_show import InstantShow1D, InstantShow2D
+from ..v1.template import sweep2D_maximize_template  # noqa
 
 
 def default_result2signal(
@@ -281,6 +282,7 @@ def sweep2D_soft_hard_template(
                         )
 
                     prog = prog_cls(soccfg, cfg)
+
                     avg_d, std_d = prog.acquire(
                         soc, progress=False, callback=callback, **kwargs
                     )

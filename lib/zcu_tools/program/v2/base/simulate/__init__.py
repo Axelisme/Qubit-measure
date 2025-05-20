@@ -1,6 +1,5 @@
 import numpy as np
 from myqick.asm_v2 import QickParam, QickProgramV2
-from zcu_tools.program.base import MyProgram
 
 from .pulse import Pulse, pulses_to_signal, visualize_pulse
 from .waveform import format_param
@@ -16,30 +15,31 @@ def update_t(ref_t, t):
     return t if t_b > t_a else ref_t
 
 
-class SimulateV2(MyProgram, QickProgramV2):
+class SimulateV2(QickProgramV2):
     """
     Record the pulse sequence in a list of Pulse objects, So we can plot them later.
     It is performed by overriding the delay and pulse methods.
     It isn't very accurate, but it is enough for most cases.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         self.sim_ref_t = 0.0
 
         self.sim_last_gen_end_t = None
         self.sim_last_ro_end_t = None
 
         self.pulse_list = []
+        self.pulse_map = dict()
         self.sim_ro_length = None
 
         super().__init__(*args, **kwargs)
 
-    def delay(self, t, tag=None):
+    def delay(self, t, tag=None) -> None:
         super().delay(t, tag=tag)
 
         self.sim_ref_t = update_t(self.sim_ref_t, t)
 
-    def delay_auto(self, t=0, gens=True, ros=True, tag=None):
+    def delay_auto(self, t=0, gens=True, ros=True, tag=None) -> None:
         super().delay_auto(t, gens=gens, ros=ros, tag=tag)
 
         last_end = self.sim_ref_t
@@ -49,7 +49,7 @@ class SimulateV2(MyProgram, QickProgramV2):
             last_end = update_t(last_end, self.sim_last_ro_end_t)
         self.sim_ref_t = update_t(self.sim_ref_t, last_end + t)
 
-    def pulse(self, ch, name, t=0, tag=None):
+    def pulse(self, ch, name, t=0, tag=None) -> None:
         super().pulse(ch, name, t=t, tag=tag)
 
         start_t = 0.0
@@ -80,7 +80,7 @@ class SimulateV2(MyProgram, QickProgramV2):
         edge_counting=False,
         high_threshold=0,
         low_threshold=0,
-    ):
+    ) -> None:
         super().declare_readout(
             ch,
             length,
@@ -97,7 +97,7 @@ class SimulateV2(MyProgram, QickProgramV2):
 
     def trigger(
         self, ros=None, pins=None, t=0, width=None, ddr4=False, mr=False, tag=None
-    ):
+    ) -> None:
         super().trigger(ros=ros, pins=pins, t=t, width=width, ddr4=ddr4, mr=mr, tag=tag)
         if t is None:
             t = self.sim_ref_t
@@ -106,7 +106,7 @@ class SimulateV2(MyProgram, QickProgramV2):
         # TODO: this only works for single readout pulse
         self.sim_last_ro_end_t = t + self.sim_ro_length
 
-    def visualize(self, time_fly: float = 0.0):
+    def visualize(self, time_fly: float = 0.0) -> None:
         total_length = update_t(self.sim_ref_t, self.sim_last_gen_end_t)
         assert total_length is not None, "total_length is None"
         if isinstance(total_length, QickParam):
@@ -131,23 +131,25 @@ class SimulateV2(MyProgram, QickProgramV2):
         from IPython.display import display
 
         seq_lengths = format_param(loop_dict, self.sim_ref_t)
-        ro_start = self.sim_last_ro_end_t - self.sim_ro_length
-        ro_end = self.sim_last_ro_end_t
-        ro_start = format_param(loop_dict, ro_start)
-        ro_end = format_param(loop_dict, ro_end)
+        if self.sim_ro_length is not None:
+            ro_start = self.sim_last_ro_end_t - self.sim_ro_length
+            ro_end = self.sim_last_ro_end_t
+            ro_start = format_param(loop_dict, ro_start)
+            ro_end = format_param(loop_dict, ro_end)
 
-        def plot_func(plot_type="abs", **slider_vals):
+        def plot_func(plot_type="abs", **slider_vals) -> None:
             nonlocal seq_lengths, times, signal_dict, loop_dict
 
             idxs = tuple(slider_vals.values())
 
             plt.figure(figsize=(10, 4))
             for ch, sig in signal_dict.items():
+                sig = sig[idxs]
                 if plot_type == "abs":
-                    plt.plot(times, np.abs(sig[idxs]), label=f"ch {ch}")
+                    plt.plot(times, np.abs(sig), label=f"ch {ch}")
                 elif plot_type == "real/imag":
-                    plt.plot(times, np.real(sig[idxs]), label=f"ch {ch} real")
-                    plt.plot(times, np.imag(sig[idxs]), label=f"ch {ch} imag")
+                    plt.plot(times, np.real(sig), label=f"ch {ch} real")
+                    plt.plot(times, np.imag(sig), label=f"ch {ch} imag")
                 else:
                     raise ValueError(f"Invalid plot type: {plot_type}")
 

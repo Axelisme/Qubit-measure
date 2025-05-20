@@ -1,7 +1,7 @@
 from copy import deepcopy
 
 import numpy as np
-from zcu_tools.notebook.analysis import minus_background, rescale
+from zcu_tools.notebook.single_qubit.process import minus_background, rescale
 from zcu_tools.program.v1 import OneToneProgram
 
 from ...tools import map2adcfreq, sweep2array

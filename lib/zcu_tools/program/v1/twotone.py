@@ -101,45 +101,6 @@ class RFreqTwoToneProgram(BaseTwoToneProgram, MyRAveragerProgram):
         self.mathi(self.q_rp, self.q_freq_t, self.q_freq_t, "+", self.q_step)
 
 
-class RFreqTwoToneProgramWithRedReset(BaseTwoToneProgram, MyRAveragerProgram):
-    def declare_freq_reg(self):
-        qub_ch = self.qub_pulse["ch"]
-        reset_ch = self.reset_pulse["ch"]
-
-        self.q_rp = self.ch_page(qub_ch)
-        self.q_freq = self.sreg(qub_ch, "freq")
-        self.q_freq_t = 3
-        self.mathi(self.q_rp, self.q_freq_t, self.q_freq, "+", 0)
-        self.q_step = self.freq2reg(self.cfg["step"], gen_ch=qub_ch)
-
-        self.s_rp = self.ch_page(reset_ch)
-        self.s_freq = self.sreg(reset_ch, "freq")
-        self.s_freq_t = 4
-        self.mathi(self.s_rp, self.s_freq_t, self.s_freq, "+", 0)
-        self.s_step = self.freq2reg(self.cfg["step"], gen_ch=reset_ch)
-
-    def initialize(self):
-        self.qub_pulse["freq"] = self.cfg["start"]
-        self.reset_pulse["freq"] = self.cfg["r_f"] - self.cfg["start"]
-
-        super().initialize()
-        declare_pulse(self, self.qub_pulse, "qub_pulse")
-        self.declare_freq_reg()
-
-        self.synci(SYNC_TIME)
-
-    def body(self):
-        BaseTwoToneProgram.twotone_body(self, self.set_freq_reg)
-
-    def set_freq_reg(self):
-        self.mathi(self.q_rp, self.q_freq, self.q_freq_t, "+", 0)
-        self.mathi(self.s_rp, self.s_freq, self.s_freq_t, "+", 0)
-
-    def update(self):
-        self.mathi(self.q_rp, self.q_freq_t, self.q_freq_t, "+", self.q_step)
-        self.mathi(self.s_rp, self.s_freq_t, self.s_freq_t, "-", self.s_step)
-
-
 class PowerDepProgram(BaseTwoToneProgram, MyNDAveragerProgram):
     def add_freq_sweep(self):
         sweep_cfg = self.sweep_cfg["freq"]

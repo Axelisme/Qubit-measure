@@ -5,7 +5,6 @@ from .time_exp import T1Program, T2EchoProgram, T2RamseyProgram
 from .twotone import (
     PowerDepProgram,
     RFreqTwoToneProgram,
-    RFreqTwoToneProgramWithRedReset,
     RGainTwoToneProgram,
     TwoToneProgram,
 )

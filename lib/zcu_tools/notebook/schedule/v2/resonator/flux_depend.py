@@ -1,17 +1,19 @@
+from typing import Tuple
+
 import numpy as np
 from zcu_tools.auto import make_cfg
-from zcu_tools.notebook.analysis import minus_background
+from zcu_tools.notebook.single_qubit.process import minus_background
 from zcu_tools.program.v2 import OneToneProgram
 
 from ...tools import map2adcfreq, sweep2array, sweep2param
 from ..template import sweep2D_soft_hard_template
 
 
-def signal2real(signals):
+def signal2real(signals) -> np.ndarray:
     return minus_background(np.abs(signals), axis=1)
 
 
-def measure_res_flux_dep(soc, soccfg, cfg):
+def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Measures resonator frequency dependence on flux.
 

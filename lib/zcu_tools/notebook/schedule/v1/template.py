@@ -9,13 +9,14 @@ from zcu_tools.program.v1 import (
     MyNDAveragerProgram,
     MyRAveragerProgram,
 )
-from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import (
+from zcu_tools.tools import AsyncFunc, print_traceback
+
+from ..flux import set_flux
+from ..instant_show import (
     InstantShow1D,
     InstantShow2D,
     InstantShowScatter,
 )
-from zcu_tools.tools import AsyncFunc, print_traceback
 
 
 def default_result2signals(

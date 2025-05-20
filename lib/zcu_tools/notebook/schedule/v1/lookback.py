@@ -4,8 +4,9 @@ import numpy as np
 from tqdm.auto import tqdm
 from zcu_tools import make_cfg
 from zcu_tools.program.v1 import OneToneProgram, TwoToneProgram
-from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow1D
+
+from ..flux import set_flux
+from ..instant_show import InstantShow1D
 
 
 def measure_one(soc, soccfg, cfg, progress, qub_pulse):

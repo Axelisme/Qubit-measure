@@ -2,7 +2,8 @@ from copy import deepcopy
 
 import numpy as np
 from zcu_tools.program.v1 import SingleShotProgram
-from zcu_tools.schedule.flux import set_flux
+
+from ...flux import set_flux
 
 
 def measure_singleshot(soc, soccfg, cfg):

@@ -1,7 +1,11 @@
 from copy import deepcopy
 
-from zcu_tools.notebook.analysis import calculate_noise, peak_n_avg, rotate2real
-from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
+from zcu_tools.notebook.single_qubit.process import (
+    calculate_noise,
+    peak_n_avg,
+    rotate2real,
+)
+from zcu_tools.program.v1 import RFreqTwoToneProgram
 
 from ...tools import sweep2array
 from ..template import sweep1D_hard_template
@@ -20,15 +24,8 @@ def qub_signal2snr(signals):
     return contrast / noise
 
 
-def measure_qub_freq(
-    soc, soccfg, cfg, reset_rf=None, remove_bg=False, earlystop_snr=None
-):
+def measure_qub_freq(soc, soccfg, cfg, remove_bg=False, earlystop_snr=None):
     cfg = deepcopy(cfg)  # prevent in-place modification
-
-    if reset_rf is not None:
-        assert cfg["dac"]["reset"] == "pulse", "Need reset=pulse for conjugate reset"
-        assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
-        cfg["r_f"] = reset_rf
 
     fpts = sweep2array(cfg["sweep"])
 
@@ -48,7 +45,7 @@ def measure_qub_freq(
         soc,
         soccfg,
         cfg,
-        RFreqTwoToneProgram if reset_rf is None else RFreqTwoToneProgramWithRedReset,
+        RFreqTwoToneProgram,
         xs=fpts,
         **kwargs,
     )

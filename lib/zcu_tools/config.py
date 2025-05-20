@@ -9,7 +9,4 @@ config = Namespace(
     DATA_DRY_RUN=False,
     # Whether to run Yoko device in dry run mode
     YOKO_DRY_RUN=False,
-    # simulation config
-    DEFAULT_CUTOFF=40,
-    DEFAULT_EVALS_COUNT=10,
 )

@@ -2,7 +2,7 @@ from copy import deepcopy
 from typing import Literal
 
 import numpy as np
-from zcu_tools.notebook.analysis import (
+from zcu_tools.notebook.single_qubit.process import (
     calculate_noise,
     minus_background,
     peak_n_avg,

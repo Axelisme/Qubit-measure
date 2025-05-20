@@ -46,11 +46,6 @@ class MyProgram(ProxyProgram, AcquireMixin):
             cur_nqz = nqzs.setdefault(ch, nqz)
             assert cur_nqz == nqz, "Found different nqz on the same channel"
 
-        # a map from waveform name to pulse config,
-        # it should record what pulse declare in function "declare_pulse"
-        # and be used in simulation
-        self.pulse_map = dict()
-
     def acquire(self, soc, **kwargs):
         # let callback be executd as a coroutine
         with AsyncFunc(kwargs.get("callback")) as cb:

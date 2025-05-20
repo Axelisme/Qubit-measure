@@ -4,11 +4,14 @@ import numpy as np
 from tqdm.auto import tqdm
 from zcu_tools.auto import make_cfg
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
-from zcu_tools.schedule.flux import set_flux
-from zcu_tools.schedule.instant_show import InstantShow1D
+
+from ..flux import set_flux
+from ..instant_show import InstantShow1D
 
 
-def onetone_demimated(soc, soccfg, cfg, progress=True, qub_pulse=False):
+def onetone_demimated(
+    soc, soccfg, cfg, progress=True, qub_pulse=False
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Performs a decimated one-tone or two-tone measurement.
 

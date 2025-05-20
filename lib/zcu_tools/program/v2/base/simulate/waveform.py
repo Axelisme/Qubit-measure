@@ -132,6 +132,8 @@ class FlatTopWaveForm(WaveForm):
         uni_nums, num_groups = np.unique(raise_nums.ravel(), return_inverse=True)
         flat_signals = np.ones((raise_nums.size, num_sample), dtype=complex)
         for i, num in enumerate(uni_nums):
+            if num == 0:
+                continue
             _, raise_wave = self.raise_waveform.numpy(loop_dict, 2 * num)
             flat_raise_wave = raise_wave.reshape(-1, 2 * num)
 

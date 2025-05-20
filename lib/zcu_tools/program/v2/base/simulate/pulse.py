@@ -57,7 +57,7 @@ def visualize_pulse(
 
         pulse = Pulse(0.0, pulse_cfg)
         loop_dict = {}
-        times = np.linspace(0.0, pulse_cfg["length"], 1001)
+        times = np.linspace(0.0, pulse_cfg["length"], 3001)
         signal_dict = pulse.get_signal(loop_dict, times)
         for ch, signal in signal_dict.items():
             plt.plot(times, signal.real, label=f"ch {ch} real")
