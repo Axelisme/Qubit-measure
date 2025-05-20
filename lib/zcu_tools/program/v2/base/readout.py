@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 
-from .pulse import declare_pulse
-
 
 class AbsReadout(ABC):
     @abstractmethod
@@ -30,7 +28,7 @@ class BaseReadout(AbsReadout):
         assert len(ro_chs) == 1, "Only one readout channel is supported"
         ro_ch = ro_chs[0]
 
-        declare_pulse(prog, res_pulse, "res_pulse", ro_chs[0])
+        prog.declare_pulse(res_pulse, "res_pulse", ro_chs[0])
 
         prog.declare_readout(ch=ro_ch, length=prog.adc["ro_length"])
         prog.add_readoutconfig(

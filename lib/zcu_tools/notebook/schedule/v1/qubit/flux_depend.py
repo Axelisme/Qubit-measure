@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import numpy as np
 from zcu_tools.notebook.single_qubit.process import minus_background
-from zcu_tools.program.v1 import RFreqTwoToneProgram, RFreqTwoToneProgramWithRedReset
+from zcu_tools.program.v1 import RFreqTwoToneProgram
 
 from ...tools import sweep2array
 from ..template import sweep2D_soft_hard_template
@@ -13,16 +13,11 @@ def signal2real(signals):
     return np.abs(minus_background(signals, axis=1))
 
 
-def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
+def measure_qub_flux_dep(soc, soccfg, cfg, earlystop_snr=None):
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     if cfg["dev"]["flux_dev"] == "none":
         raise ValueError("Flux sweep but get flux_dev == 'none'")
-
-    if reset_rf is not None:
-        assert cfg.get("reset") == "pulse", "Need reset=pulse for conjugate reset"
-        assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
-        cfg["r_f"] = reset_rf
 
     flx_sweep = cfg["sweep"]["flux"]
     fpt_sweep = cfg["sweep"]["freq"]
@@ -47,7 +42,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
         soc,
         soccfg,
         cfg,
-        RFreqTwoToneProgram if reset_rf is None else RFreqTwoToneProgramWithRedReset,
+        RFreqTwoToneProgram,
         xs=flxs,
         ys=fpts,
         updateCfg=updateCfg,

@@ -8,6 +8,7 @@ from zcu_tools.notebook.single_qubit.process import (
     rotate2real,
 )
 from zcu_tools.program.v2 import TwoToneProgram
+from zcu_tools.program.v2.base.simulate import SimulateProgramV2
 
 from ...tools import format_sweep1D, sweep2array, sweep2param
 from ..template import sweep_hard_template
@@ -87,3 +88,16 @@ def measure_qub_freq(
     fpts = prog.get_pulse_param("qub_pulse", "freq", as_array=True)
 
     return fpts, signals
+
+
+def visualize_qub_freq(soccfg, cfg, time_fly=0.0) -> None:
+    cfg = make_cfg(cfg)  # prevent in-place modification
+
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
+
+    sweep_cfg = cfg["sweep"]["freq"]
+    params = sweep2param("freq", sweep_cfg)
+    cfg["dac"]["qub_pulse"]["freq"] = params
+
+    visualizer = SimulateProgramV2(TwoToneProgram, soccfg, cfg)
+    visualizer.visualize(time_fly=time_fly)

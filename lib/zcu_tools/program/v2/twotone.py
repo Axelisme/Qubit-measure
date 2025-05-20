@@ -2,7 +2,7 @@ from typing import Callable
 
 from myqick.asm_v2 import AsmV2, Macro
 
-from .base import MyProgramV2, declare_pulse
+from .base import MyProgramV2
 
 
 class RecordTime(Macro):
@@ -22,13 +22,13 @@ class WithMinLength:
         self.length = length
         self.start_t = 0.0
 
-    def set_start_time(self, t):
+    def set_start_time(self, t) -> None:
         self.start_t = t
 
-    def __enter__(self):
+    def __enter__(self) -> None:
         self.prog.append_macro(RecordTime(self.set_start_time))
 
-    def __exit__(self, exec_type, exec_value, exec_tb):
+    def __exit__(self, exec_type, exec_value, exec_tb) -> None:
         if self.length is not None:
             self.prog.delay(t=self.start_t + self.length)
 
@@ -36,11 +36,11 @@ class WithMinLength:
 class TwoToneProgram(MyProgramV2):
     PULSE_DELAY = 0.01  # us
 
-    def _initialize(self, cfg):
-        declare_pulse(self, self.qub_pulse, "qub_pulse")
+    def _initialize(self, cfg) -> None:
+        self.declare_pulse(self.qub_pulse, "qub_pulse")
         super()._initialize(cfg)
 
-    def _body(self, _):
+    def _body(self, _) -> None:
         # reset
         self.resetM.reset_qubit(self)
 

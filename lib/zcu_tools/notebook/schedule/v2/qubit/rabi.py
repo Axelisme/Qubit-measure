@@ -8,16 +8,17 @@ from zcu_tools.notebook.single_qubit.process import (
     rotate2real,
 )
 from zcu_tools.program.v2 import TwoToneProgram
+from zcu_tools.program.v2.base.simulate import SimulateProgramV2
 
 from ...tools import format_sweep1D, sweep2array, sweep2param
 from ..template import sweep_hard_template
 
 
-def qub_signals2reals(signals):
+def qub_signals2reals(signals: np.ndarray) -> np.ndarray:
     return rotate2real(signals).real
 
 
-def qub_signal2snr(signals):
+def qub_signal2snr(signals: np.ndarray) -> float:
     noise, m_signals = calculate_noise(signals)
 
     m_real = rotate2real(m_signals).real
@@ -27,12 +28,7 @@ def qub_signal2snr(signals):
 
 
 def measure_lenrabi(
-    soc,
-    soccfg,
-    cfg,
-    *,
-    force_align=True,
-    earlystop_snr=None,
+    soc, soccfg, cfg, *, force_align=True, earlystop_snr=None
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Measure Rabi oscillation by sweeping pulse length.
 
@@ -110,6 +106,26 @@ def measure_lenrabi(
     return real_lens, signals
 
 
+def visualize_lenrabi(soccfg, cfg, *, force_align=True, time_fly=0.0) -> None:
+    cfg = make_cfg(cfg)  # prevent in-place modification
+
+    qub_pulse = cfg["dac"]["qub_pulse"]
+
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+    len_sweep = cfg["sweep"]["length"]
+
+    qub_pulse["length"] = sweep2param("length", len_sweep)
+
+    if force_align:
+        max_length = max(
+            len_sweep["start"], len_sweep["stop"], qub_pulse.get("pre_delay", 0.0)
+        )
+        qub_pulse["pre_delay"] = max_length - qub_pulse["length"]
+
+    visualizer = SimulateProgramV2(TwoToneProgram, soccfg, cfg)
+    visualizer.visualize(time_fly=time_fly)
+
+
 def measure_amprabi(
     soc, soccfg, cfg, earlystop_snr=None
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -175,3 +191,15 @@ def measure_amprabi(
     amps: np.ndarray = prog.get_pulse_param("qub_pulse", "gain", as_array=True)  # type: ignore
 
     return amps, signals
+
+
+def visualize_amprabi(soccfg, cfg, *, time_fly=0.0) -> None:
+    cfg = make_cfg(cfg)  # prevent in-place modification
+
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
+
+    sweep_cfg = cfg["sweep"]["gain"]
+    cfg["dac"]["qub_pulse"]["gain"] = sweep2param("gain", sweep_cfg)
+
+    visualizer = SimulateProgramV2(TwoToneProgram, soccfg, cfg)
+    visualizer.visualize(time_fly=time_fly)

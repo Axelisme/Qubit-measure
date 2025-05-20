@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 
-from .pulse import declare_pulse
-
 
 class AbsReset(ABC):
     @abstractmethod
@@ -36,7 +34,7 @@ class PulseReset(AbsReset):
     DEFAULT_RESET_DELAY = 0.1  # us
 
     def init(self, prog):
-        declare_pulse(prog, prog.reset_pulse, "reset")
+        prog.declare_pulse(prog.reset_pulse, "reset")
 
     def reset_qubit(self, prog):
         reset_pulse = prog.reset_pulse
@@ -49,8 +47,8 @@ class TwoPulseReset(AbsReset):
     DEFAULT_RESET_DELAY2 = 0.1  # us
 
     def init(self, prog):
-        declare_pulse(prog, prog.reset_pulse, "reset")
-        declare_pulse(prog, prog.reset_pulse2, "reset2")
+        prog.declare_pulse(prog.reset_pulse, "reset")
+        prog.declare_pulse(prog.reset_pulse2, "reset2")
 
     def reset_qubit(self, prog):
         reset_pulse = prog.reset_pulse

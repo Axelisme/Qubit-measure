@@ -1,9 +1,9 @@
-from ..base import MyProgramV2, declare_pulse
+from ..base import MyProgramV2
 
 
 class T1Program(MyProgramV2):
     def _initialize(self, cfg):
-        declare_pulse(self, self.qub_pulse, "pi_pulse")
+        self.declare_pulse(self.qub_pulse, "pi_pulse")
         super()._initialize(cfg)
 
     def _body(self, _):

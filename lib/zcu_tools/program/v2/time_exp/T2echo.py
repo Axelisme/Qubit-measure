@@ -1,20 +1,20 @@
 from copy import deepcopy
 
-from ..base import MyProgramV2, declare_pulse
+from ..base import MyProgramV2
 
 
 class T2EchoProgram(MyProgramV2):
     PULSE_DELAY = 0.01  # us
 
     def _initialize(self, cfg):
-        declare_pulse(self, self.pi_pulse, "pi_pulse")
+        self.declare_pulse(self.pi_pulse, "pi_pulse")
 
         pi2_pulse = deepcopy(self.pi2_pulse)
-        declare_pulse(self, pi2_pulse, "pi2_pulse1")
+        self.declare_pulse(pi2_pulse, "pi2_pulse1")
         pi2_pulse["phase"] = (
             pi2_pulse["phase"] + 360 * cfg["detune"] * self.dac["t2e_half"]
         )
-        declare_pulse(self, pi2_pulse, "pi2_pulse2")
+        self.declare_pulse(pi2_pulse, "pi2_pulse2")
         super()._initialize(cfg)
 
     def _body(self, _):

@@ -4,6 +4,7 @@ from .dispersive import (
     calculate_dispersive_vs_flx,
 )
 from .model import calculate_energy, calculate_energy_vs_flx
+from .predict import FluxoniumPredictor
 
 __all__ = [
     "calculate_dispersive",
@@ -11,4 +12,5 @@ __all__ = [
     "calculate_dispersive_vs_flx",
     "calculate_energy",
     "calculate_energy_vs_flx",
+    "FluxoniumPredictor",
 ]

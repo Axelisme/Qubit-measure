@@ -13,7 +13,7 @@ def qub_signals2reals(signals):
     return np.abs(minus_background(signals, axis=1))
 
 
-def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
+def measure_qub_flux_dep(soc, soccfg, cfg, earlystop_snr=None):
     """
     Measure qubit frequency as a function of flux bias.
 
@@ -29,8 +29,6 @@ def measure_qub_flux_dep(soc, soccfg, cfg, reset_rf=None, earlystop_snr=None):
             - dev: Device configuration with flux_dev and flux settings.
             - dac: DAC configuration with qub_pulse settings.
             - sweep: Sweep parameters for freq and flux.
-        reset_rf (float, optional): Reset frequency for conjugate reset pulse.
-            If provided, enables reset pulse with conjugate frequency. Defaults to None.
         earlystop_snr (float, optional): Early stop signal-to-noise ratio threshold.
             If provided, the measurement will stop if the SNR exceeds this value.
             Defaults to None.

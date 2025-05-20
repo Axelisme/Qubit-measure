@@ -1,6 +1,11 @@
-import numpy as np
-from myqick.asm_v2 import QickParam, QickProgramV2
+from copy import deepcopy
+from functools import wraps
+from typing import Any, Callable, Dict, Type
 
+import numpy as np
+from myqick.asm_v2 import QickParam
+
+from ..program import MyProgramV2
 from .pulse import Pulse, pulses_to_signal, visualize_pulse
 from .waveform import format_param
 
@@ -15,14 +20,47 @@ def update_t(ref_t, t):
     return t if t_b > t_a else ref_t
 
 
-class SimulateV2(QickProgramV2):
+class HookWrapper:
+    def __init__(self, wrapped_type: Type, method_hooks: Dict[str, Callable]):
+        self.wrapped_type = wrapped_type
+        self.method_hooks = method_hooks
+        self.orig_methods: Dict[str, Callable] = {}
+
+    def __enter__(self) -> None:
+        for name, hook in self.method_hooks.items():
+            orig_method = getattr(self.wrapped_type, name)
+            self.orig_methods[name] = orig_method
+
+            def make_wrapper(orig_method, hook):
+                @wraps(orig_method)
+                def wrapped_method(self, *args, **kwargs) -> Any:
+                    result = orig_method(self, *args, **kwargs)
+                    hook(*args, **kwargs)  # don't need self
+                    return result
+
+                return wrapped_method
+
+            new_method = make_wrapper(orig_method, hook)
+
+            setattr(self.wrapped_type, name, new_method)
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        for name, orig_method in self.orig_methods.items():
+            setattr(self.wrapped_type, name, orig_method)
+
+        self.orig_methods.clear()
+
+
+class SimulateProgramV2:
     """
     Record the pulse sequence in a list of Pulse objects, So we can plot them later.
     It is performed by overriding the delay and pulse methods.
     It isn't very accurate, but it is enough for most cases.
     """
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(
+        self, prog_type: Type[MyProgramV2], soccfg: Dict[str, Any], cfg: Dict[str, Any]
+    ) -> None:
         self.sim_ref_t = 0.0
 
         self.sim_last_gen_end_t = None
@@ -32,16 +70,26 @@ class SimulateV2(QickProgramV2):
         self.pulse_map = dict()
         self.sim_ro_length = None
 
-        super().__init__(*args, **kwargs)
+        self.prog_type = prog_type
 
-    def delay(self, t, tag=None) -> None:
-        super().delay(t, tag=tag)
+        method_hooks = {
+            "declare_pulse": self.declare_pulse_hook,
+            "delay": self.delay_pulse_hook,
+            "delay_auto": self.delay_auto_hook,
+            "pulse": self.pulse_hook,
+            "declare_readout": self.declare_readout_hook,
+            "trigger": self.trigger_hook,
+        }
+        with HookWrapper(prog_type, method_hooks):
+            self.prog = prog_type(soccfg, cfg)
 
+    def declare_pulse_hook(self, pulse, name, *args, **kwargs) -> None:
+        self.pulse_map[(pulse["ch"], name)] = deepcopy(pulse)
+
+    def delay_pulse_hook(self, t, *args, **kwargs) -> None:
         self.sim_ref_t = update_t(self.sim_ref_t, t)
 
-    def delay_auto(self, t=0, gens=True, ros=True, tag=None) -> None:
-        super().delay_auto(t, gens=gens, ros=ros, tag=tag)
-
+    def delay_auto_hook(self, t=0, gens=True, ros=True, *args, **kwargs) -> None:
         last_end = self.sim_ref_t
         if gens and self.sim_last_gen_end_t is not None:
             last_end = update_t(last_end, self.sim_last_gen_end_t)
@@ -49,9 +97,7 @@ class SimulateV2(QickProgramV2):
             last_end = update_t(last_end, self.sim_last_ro_end_t)
         self.sim_ref_t = update_t(self.sim_ref_t, last_end + t)
 
-    def pulse(self, ch, name, t=0, tag=None) -> None:
-        super().pulse(ch, name, t=t, tag=tag)
-
+    def pulse_hook(self, ch, name, t=0, *args, **kwargs) -> None:
         start_t = 0.0
         if t == "auto":
             if self.sim_last_gen_end_t is not None:
@@ -60,7 +106,7 @@ class SimulateV2(QickProgramV2):
             start_t = t
         start_t = update_t(start_t, self.sim_ref_t)
 
-        pulse_cfg = self.pulse_map[name]
+        pulse_cfg = self.pulse_map[(ch, name)]
         self.pulse_list.append(Pulse(start_t, pulse_cfg))
 
         pulse_end = start_t + pulse_cfg["length"]
@@ -69,36 +115,11 @@ class SimulateV2(QickProgramV2):
         else:
             self.sim_last_gen_end_t = update_t(self.sim_last_gen_end_t, pulse_end)
 
-    def declare_readout(
-        self,
-        ch,
-        length,
-        freq=None,
-        phase=0,
-        sel="product",
-        gen_ch=None,
-        edge_counting=False,
-        high_threshold=0,
-        low_threshold=0,
-    ) -> None:
-        super().declare_readout(
-            ch,
-            length,
-            freq,
-            phase,
-            sel,
-            gen_ch,
-            edge_counting,
-            high_threshold,
-            low_threshold,
-        )
+    def declare_readout_hook(self, ch, length, *args, **kwargs) -> None:
         # TODO: this only works for single readout pulse
         self.sim_ro_length = length
 
-    def trigger(
-        self, ros=None, pins=None, t=0, width=None, ddr4=False, mr=False, tag=None
-    ) -> None:
-        super().trigger(ros=ros, pins=pins, t=t, width=width, ddr4=ddr4, mr=mr, tag=tag)
+    def trigger_hook(self, ros=None, pins=None, t=0, *args, **kwargs) -> None:
         if t is None:
             t = self.sim_ref_t
         t = update_t(t, self.sim_ref_t)
@@ -107,7 +128,10 @@ class SimulateV2(QickProgramV2):
         self.sim_last_ro_end_t = t + self.sim_ro_length
 
     def visualize(self, time_fly: float = 0.0) -> None:
-        total_length = update_t(self.sim_ref_t, self.sim_last_gen_end_t)
+        total_length = update_t(
+            self.sim_ref_t,
+            0.0 if self.sim_last_gen_end_t is None else self.sim_last_gen_end_t,
+        )
         assert total_length is not None, "total_length is None"
         if isinstance(total_length, QickParam):
             total_length = total_length.maxval()
@@ -117,7 +141,7 @@ class SimulateV2(QickProgramV2):
         visualize_keywords = ["length", "sigma", "alpha", "gain"]
         loop_dict = {
             k: v
-            for k, v in self.loop_dict.items()
+            for k, v in self.prog.loop_dict.items()
             if any(kw in k for kw in visualize_keywords)
         }
 
@@ -169,7 +193,7 @@ class SimulateV2(QickProgramV2):
                 )
             plt.xlabel("Time (us)")
             plt.ylabel("Amplitude")
-            plt.title(f"{type(self).__name__} Simulation")
+            plt.title(f"{self.prog_type.__name__} Simulation")
             plt.legend()
             plt.grid(True)
             plt.show()
@@ -204,4 +228,4 @@ class SimulateV2(QickProgramV2):
             display(ui, out)
 
 
-__all__ = ["SimulateV2", "visualize_pulse"]
+__all__ = ["SimulateProgramV2", "visualize_pulse"]

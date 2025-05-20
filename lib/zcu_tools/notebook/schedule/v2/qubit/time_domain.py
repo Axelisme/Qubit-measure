@@ -6,6 +6,7 @@ import numpy as np
 from zcu_tools.auto import make_cfg
 from zcu_tools.notebook.single_qubit.process import rotate2real
 from zcu_tools.program.v2 import T1Program, T2EchoProgram, T2RamseyProgram
+from zcu_tools.program.v2.base.simulate import SimulateProgramV2
 
 from ...tools import format_sweep1D, sweep2array, sweep2param
 from ..template import sweep_hard_template
@@ -180,3 +181,43 @@ def measure_t1(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     ts = _ts + ts[0] - _ts[0]  # adjust to start from the first time
 
     return ts, signals
+
+
+def visualize_t2ramsey(
+    soccfg, cfg, detune: float = 0.0, *, time_fly: float = 0.0
+) -> None:
+    cfg = make_cfg(cfg)  # prevent in-place modification
+
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+    sweep_cfg = cfg["sweep"]["length"]
+
+    cfg["detune"] = detune
+    cfg["dac"]["t2r_length"] = sweep2param("length", sweep_cfg)
+
+    visualizer = SimulateProgramV2(T2RamseyProgram, soccfg, cfg)
+    visualizer.visualize(time_fly=time_fly)
+
+
+def visualize_t2echo(
+    soccfg, cfg, detune: float = 0.0, *, time_fly: float = 0.0
+) -> None:
+    cfg = make_cfg(cfg)  # prevent in-place modification
+
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+    sweep_cfg = cfg["sweep"]["length"]
+
+    cfg["detune"] = detune
+    cfg["dac"]["t2e_half"] = sweep2param("length", sweep_cfg)
+
+    visualizer = SimulateProgramV2(T2EchoProgram, soccfg, cfg)
+    visualizer.visualize(time_fly=time_fly)
+
+
+def visualize_t1(soccfg, cfg, *, time_fly: float = 0.0) -> None:
+    cfg = make_cfg(cfg)  # prevent in-place modification
+
+    cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+    cfg["dac"]["t1_length"] = sweep2param("length", cfg["sweep"]["length"])
+
+    visualizer = SimulateProgramV2(T1Program, soccfg, cfg)
+    visualizer.visualize(time_fly=time_fly)
