@@ -11,22 +11,27 @@ from .base import (
 
 
 class BaseTwoToneProgram:
-    PULSE_DELAY = 0.01  # us
-
     @classmethod
     def twotone_body(cls, prog, before_pulse=None):
         # reset
         prog.resetM.reset_qubit(prog)
 
+        pre_delay = prog.qub_pulse.get("pre_delay")
+        post_delay = prog.qub_pulse.get("post_delay")
+
         # qubit pulse
+        if pre_delay is not None:
+            prog.sync_all(prog.us2cycles(pre_delay))
+
         ch = prog.qub_pulse["ch"]
         if prog.ch_count[ch] > 1:
             set_pulse(prog, prog.qub_pulse, waveform="qub_pulse")
         if before_pulse is not None:
             before_pulse()
-        prog.sync_all(prog.us2cycles(prog.qub_pulse.get("pre_delay", cls.PULSE_DELAY)))
         prog.pulse(ch=ch)
-        prog.sync_all(prog.us2cycles(prog.qub_pulse.get("post_delay", cls.PULSE_DELAY)))
+
+        if post_delay is not None:
+            prog.sync_all(prog.us2cycles(post_delay))
 
         # measure
         prog.readoutM.readout_qubit(prog)

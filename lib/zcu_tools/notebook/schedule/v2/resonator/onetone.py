@@ -5,7 +5,7 @@ from ...tools import format_sweep1D, map2adcfreq, sweep2array, sweep2param
 from ..template import sweep_hard_template
 
 
-def measure_res_freq(soc, soccfg, cfg, progress=True):
+def measure_res_freq(soc, soccfg, cfg):
     """
     Measures the resonator frequency by performing a one-tone spectroscopy.
 
@@ -58,7 +58,7 @@ def measure_res_freq(soc, soccfg, cfg, progress=True):
         cfg,
         OneToneProgram,
         ticks=(fpts,),
-        progress=progress,
+        progress=True,
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
     )
