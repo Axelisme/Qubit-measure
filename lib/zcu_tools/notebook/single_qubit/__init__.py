@@ -1,4 +1,5 @@
 from .dispersive import dispersive1D_analyze, dispersive2D_analyze, ge_lookback_analyze
+from .reset import mux_reset_analyze
 from .general import (
     contrast_plot,
     effective_temperature,
@@ -46,4 +47,6 @@ __all__ = [
     "dispersive1D_analyze",
     "dispersive2D_analyze",
     "ge_lookback_analyze",
+    # reset
+    "mux_reset_analyze"
 ]

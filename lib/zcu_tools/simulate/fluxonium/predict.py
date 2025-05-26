@@ -1,5 +1,5 @@
 import json
-from typing import Optional
+from typing import Optional, Tuple
 
 import numpy as np
 from scqubits import Fluxonium
@@ -28,21 +28,22 @@ class FluxoniumPredictor:
     def _A_to_flx(cur_A: float, mA_c: float, period: float) -> float:
         return (1e3 * cur_A - mA_c) / period + 0.5
 
-    def predict_f01(self, cur_A: float) -> float:
+    def predict_freq(self, cur_A: float, transition: Tuple[int, int] = (0, 1)) -> float:
         """
-        Predict the 0-1 transition frequency of a fluxonium qubit.
+        Predict the transition frequency of a fluxonium qubit.
         Args:
             cur_A (float): Current in A.
+            transition (Tuple[from, to]): transition between which level
         Returns:
-            float: 0-1 transition frequency in MHz.
+            float: transition frequency in MHz.
         """
 
         flx = self._A_to_flx(cur_A, self.mA_c, self.period)
 
         self.fluxonium.flux = flx
-        energies = self.fluxonium.eigenvals(evals_count=2)
+        energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 1)
 
-        return float(energies[1] - energies[0]) * 1e3  # MHz
+        return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
 
     def predict_lenrabi(self, cur_A: float, ref_A: float, ref_pilen: float) -> float:
         """

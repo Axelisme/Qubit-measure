@@ -5,7 +5,7 @@ from myqick.qick_asm import AcquireMixin
 from zcu_tools.tools import AsyncFunc
 
 from .proxy import AbsProxy, ProxyProgram
-
+from zcu_tools.auto import is_pulse_cfg
 
 class MyProgram(ProxyProgram, AcquireMixin):
     """
@@ -29,7 +29,7 @@ class MyProgram(ProxyProgram, AcquireMixin):
 
         # set dac pulse as attributes
         for name, pulse in self.dac.items():
-            if not isinstance(pulse, dict) or not name.endswith("_pulse"):
+            if not is_pulse_cfg(name, pulse):
                 continue
             if hasattr(self, name):
                 raise ValueError(f"Pulse name {name} already exists")
@@ -38,8 +38,8 @@ class MyProgram(ProxyProgram, AcquireMixin):
         # dac pulse channel check
         self.ch_count = defaultdict(int)
         nqzs = dict()
-        for pulse in self.dac.values():
-            if not isinstance(pulse, dict) or "ch" not in pulse:
+        for name, pulse in self.dac.items():
+            if not is_pulse_cfg(name, pulse):
                 continue
             ch, nqz = pulse["ch"], pulse["nqz"]
             self.ch_count[ch] += 1

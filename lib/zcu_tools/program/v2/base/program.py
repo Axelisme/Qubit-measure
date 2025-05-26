@@ -4,8 +4,8 @@ from myqick.asm_v2 import AveragerProgramV2
 from zcu_tools.program.base import MyProgram
 
 from .pulse import add_pulse, create_waveform
-from .readout import make_readout
-from .reset import make_reset
+from .readout import make_readout, AbsReadout
+from .reset import make_reset, AbsReset
 
 
 class MyProgramV2(MyProgram, AveragerProgramV2):
@@ -26,8 +26,8 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
 
     def _parse_cfg(self, cfg: Dict[str, Any]) -> None:
         # instaniate v2 reset and readout modules
-        self.resetM = make_reset(cfg["dac"]["reset"])
-        self.readoutM = make_readout(cfg["dac"]["readout"])
+        self.resetM: AbsReset = make_reset(cfg["dac"]["reset"])
+        self.readoutM: AbsReadout = make_readout(cfg["dac"]["readout"])
         return super()._parse_cfg(cfg)
 
     def declare_pulse(
@@ -44,7 +44,7 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             mux_freqs=pulse.get("mux_freqs"),
             mux_gains=pulse.get("mux_gains"),
             mux_phases=pulse.get("mux_phases"),
-            ro_ch=pulse.get("ro_ch")
+            ro_ch=pulse.get("ro_ch"),
         )
         create_waveform(self, waveform, pulse)
 
