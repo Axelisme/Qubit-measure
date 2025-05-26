@@ -242,6 +242,8 @@ class InteractiveLines:
 
         self.mouse_x = None
         self.mouse_y = None
+        self.prev_mouse_x = None
+        self.prev_mouse_y = None
 
         self.create_widgets()
         self.create_background(mAs, fpts, self.amps)
@@ -443,29 +445,29 @@ class InteractiveLines:
 
     def update_main_view(self, _):
         """更新動畫"""
-        if self.picked is None or self.mouse_x is None:
-            return [self.rline, self.bline]
+        x, y = self.mouse_x, self.mouse_y
+        if self.picked is None or x is None or y is None:
+            return []
 
-        new_x = self.mouse_x
         other_line = self.bline if self.picked is self.rline else self.rline
         other_x = other_line.get_xdata()[0]
 
         # 確保線之間保持最小距離
-        if new_x > other_x and new_x - other_x < self.min_dist:
-            new_x = other_x + self.min_dist
-        elif new_x < other_x and other_x - new_x < self.min_dist:
-            new_x = other_x - self.min_dist
+        if x > other_x and x - other_x < self.min_dist:
+            x = other_x + self.min_dist
+        elif x < other_x and other_x - x < self.min_dist:
+            x = other_x - self.min_dist
 
         # 更新線的位置
         if self.conjugate_checkbox.value:
             # 同步移動
-            dx = new_x - self.picked.get_xdata()[0]
+            dx = x - self.picked.get_xdata()[0]
             # 更新兩條線的位置
             self.rline.set_xdata([self.rline.get_xdata()[0] + dx])
             self.bline.set_xdata([self.bline.get_xdata()[0] + dx])
         else:
             # 單獨移動
-            self.picked.set_xdata([new_x])
+            self.picked.set_xdata([x])
 
         # 更新位置文字
         self.mA_c = self.rline.get_xdata()[0]
@@ -480,6 +482,12 @@ class InteractiveLines:
         if x is None or y is None or self.active_line is None:
             return []  # out of axes or not dragging, do nothing
 
+        if self.prev_mouse_x == x and self.prev_mouse_y == y:
+            return []
+
+        self.prev_mouse_x = x
+        self.prev_mouse_y = y
+
         diff_amps = diff_mirror(self.mAs, self.amps.T, x).T
         self.zoom_im.set_data(diff_amps)
 
@@ -490,7 +498,7 @@ class InteractiveLines:
         Dy = 0.3 * (self.fpts[-1] - self.fpts[0])
         self.ax_zoom.set_xlim(x - Dx, x + Dx)
         self.ax_zoom.set_ylim(y - Dy, y + Dy)
-        self.ax_zoom.set_title(f"mirror loss: {mirror_loss}")
+        self.ax_zoom.set_title(f"mirror loss: {mirror_loss:.4f}")
 
         self.zoom_dot.set_xdata([x])
         self.zoom_dot.set_ydata([y])
@@ -513,7 +521,10 @@ class InteractiveLines:
         """運行交互式選擇器並返回兩條線的位置"""
         if not self.is_finished:
             self.on_finish(None)
-        return float(self.mA_c), float(self.mA_e)
+        precision = 0.5 * (self.mAs[-1] - self.mAs[0]) / len(self.mAs)
+        mA_c = precision * round((self.mA_c - self.mAs[0]) / precision) + self.mAs[0]
+        mA_e = precision * round((self.mA_e - self.mAs[0]) / precision) + self.mAs[0]
+        return float(mA_c), float(mA_e)
 
 
 class InteractiveSelector:
@@ -864,23 +875,31 @@ class VisualizeSpet:
             [s["spectrum"]["fpts"] for s in self.s_spects.values()]
         )
         mA_bound = (
-            min(np.nanmin(sp_mAs), self.s_mAs.min(), self.mAs.min()),
-            max(np.nanmax(sp_mAs), self.s_mAs.max(), self.mAs.max()),
+            min(np.nanmin(sp_mAs), self.mAs.min()),
+            max(np.nanmax(sp_mAs), self.mAs.max()),
         )
         fpt_bound = (
             min(
                 np.nanmin(sp_fpts),
-                self.s_fpts.min(),
                 self.allows.get("r_f", np.inf) - 0.1,
                 self.allows.get("sample_f", np.inf) - 0.1,
             ),
             max(
                 np.nanmax(sp_fpts),
-                self.s_fpts.max(),
                 self.allows.get("r_f", 0.0) + 0.1,
                 self.allows.get("sample_f", 0.0) + 0.1,
             ),
         )
+
+        if len(self.s_fpts) > 0:
+            mA_bound = (
+                min(mA_bound[0], self.s_mAs.min()),
+                max(mA_bound[1], self.s_mAs.max()),
+            )
+            fpt_bound = (
+                min(fpt_bound[0], self.s_fpts.min()),
+                max(fpt_bound[1], self.s_fpts.max()),
+            )
 
         # Set x and y axis range
         fig.update_xaxes(range=[mA_bound[0], mA_bound[1]])

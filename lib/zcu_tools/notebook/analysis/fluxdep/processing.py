@@ -99,7 +99,7 @@ def diff_mirror(xs: np.ndarray, data: np.ndarray, center: float) -> np.ndarray:
 
     diff_data = np.zeros_like(data)
     for i in range(data.shape[0]):
-        j = int(2 * c_idx - i + 0.5)
+        j = int(2 * c_idx - i - 0.5)
         if 0 <= j < data.shape[0]:
             diff_data[i] = np.abs(data[i] - data[j])
 

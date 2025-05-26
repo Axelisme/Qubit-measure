@@ -5,42 +5,33 @@ import scqubits as scq
 
 
 def calculate_dispersive(
-    params: Tuple[float, float, float],
-    flx: float,
-    r_f: float,
-    g: float,
-    cutoff: int = 40,
-    evals_count: int = 20,
-) -> Tuple[float, float]:
+    params: Tuple[float, float, float], flx: float, r_f: float, g: float
+) -> Tuple[float, ...]:
     """
     Calculate the dispersive shift of ground and excited state
     """
 
-    resonator = scq.Oscillator(r_f, truncated_dim=2, id_str="resonator")
+    resonator_dim = 10
+    cutoff = 30
+    evals_count = 10
+
+    resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
     fluxonium = scq.Fluxonium(
-        *params,
-        flux=flx,
-        cutoff=cutoff,
-        truncated_dim=evals_count,
-        id_str="qubit",
+        *params, flux=flx, cutoff=cutoff, truncated_dim=evals_count
     )
     hilbertspace = scq.HilbertSpace([resonator, fluxonium])
     hilbertspace.add_interaction(
-        g=g,
-        op1=resonator.creation_operator,
-        op2=fluxonium.n_operator,
-        add_hc=True,
-        id_str="q-r coupling",
+        g=g, op1=resonator.creation_operator, op2=fluxonium.n_operator, add_hc=True
     )
     hilbertspace.generate_lookup(ordering="LX")
-
-    evals, _ = hilbertspace.eigensys(evals_count=2 * evals_count)
 
     idx_00 = hilbertspace.dressed_index((0, 0))
     idx_10 = hilbertspace.dressed_index((1, 0))
     idx_01 = hilbertspace.dressed_index((0, 1))
     idx_11 = hilbertspace.dressed_index((1, 1))
+    max_idx = max(idx_00, idx_10, idx_01, idx_11)
 
+    evals = hilbertspace.eigenvals(evals_count=max_idx + 1)
     rf_0 = evals[idx_10] - evals[idx_00]
     rf_1 = evals[idx_11] - evals[idx_01]
 
@@ -52,29 +43,23 @@ def calculate_dispersive_sweep(
     update_fn: Callable[[scq.Fluxonium, Any], None],
     g: float,
     r_f: float,
-    cutoff: int = 40,
-    evals_count: int = 20,
     progress: bool = True,
-) -> Tuple[np.ndarray, np.ndarray]:
+    resonator_dim: int = 10,
+    cutoff: int = 30,
+    evals_count: int = 10,
+    return_dim: int = 2,
+) -> Tuple[np.ndarray, ...]:
     """
     Calculate the dispersive shift of ground and excited state vs. params
     """
 
-    resonator = scq.Oscillator(r_f, truncated_dim=2, id_str="resonator")
+    resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
     fluxonium = scq.Fluxonium(
-        *(1.0, 1.0, 1.0),
-        flux=0.5,
-        cutoff=cutoff,
-        truncated_dim=evals_count,
-        id_str="qubit",
+        *(1.0, 1.0, 1.0), flux=0.5, cutoff=cutoff, truncated_dim=evals_count
     )
     hilbertspace = scq.HilbertSpace([resonator, fluxonium])
     hilbertspace.add_interaction(
-        g=g,
-        op1=resonator.creation_operator,
-        op2=fluxonium.n_operator,
-        add_hc=True,
-        id_str="q-r coupling",
+        g=g, op1=resonator.creation_operator, op2=fluxonium.n_operator, add_hc=True
     )
 
     def update_hilbertspace(sweep_param: Any) -> None:
@@ -88,7 +73,7 @@ def calculate_dispersive_sweep(
         hilbertspace,
         {"params": sweep_list},
         update_hilbertspace=update_hilbertspace,
-        evals_count=2 * evals_count,
+        evals_count=resonator_dim * evals_count,
         subsys_update_info={"params": [fluxonium]},
         labeling_scheme="LX",
     )
@@ -96,16 +81,13 @@ def calculate_dispersive_sweep(
 
     evals = sweep["evals"].toarray()
 
+    rf_list = []
     idxs = np.arange(len(sweep_list))
-    idx_00 = sweep.dressed_index((0, 0)).toarray()
-    idx_10 = sweep.dressed_index((1, 0)).toarray()
-    idx_01 = sweep.dressed_index((0, 1)).toarray()
-    idx_11 = sweep.dressed_index((1, 1)).toarray()
-
-    rf_0 = evals[idxs, idx_10] - evals[idxs, idx_00]
-    rf_1 = evals[idxs, idx_11] - evals[idxs, idx_01]
-
-    return rf_0, rf_1
+    for i in range(return_dim):
+        idx_0i = sweep.dressed_index((0, i)).toarray()
+        idx_1i = sweep.dressed_index((1, i)).toarray()
+        rf_list.append(evals[idxs, idx_1i] - evals[idxs, idx_0i])
+    return tuple(rf_list)
 
 
 def calculate_dispersive_vs_flx(
@@ -113,10 +95,12 @@ def calculate_dispersive_vs_flx(
     flxs: np.ndarray,
     r_f: float,
     g: float,
-    cutoff: int = 40,
-    evals_count: int = 20,
     progress: bool = True,
-) -> Tuple[np.ndarray, np.ndarray]:
+    resonator_dim: int = 10,
+    cutoff: int = 30,
+    evals_count: int = 10,
+    return_dim: int = 2,
+) -> Tuple[np.ndarray, ...]:
     """
     Calculate the dispersive shift of ground and excited state vs. flux
     """
@@ -128,5 +112,13 @@ def calculate_dispersive_vs_flx(
         fluxonium.EL = params[2]
 
     return calculate_dispersive_sweep(
-        flxs, update_hilbertspace, g, r_f, cutoff, evals_count, progress
+        flxs,
+        update_hilbertspace,
+        g,
+        r_f,
+        progress,
+        resonator_dim,
+        cutoff,
+        evals_count,
+        return_dim,
     )

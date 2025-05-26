@@ -34,8 +34,11 @@ def search_proper_g(
         g_init = round(0.5 * (g_bound[0] + g_bound[1]), 3)
 
     @lru_cache(maxsize=None)
-    def get_dispersive(g: float) -> Tuple[np.ndarray, np.ndarray]:
-        return calculate_dispersive_vs_flx(params, sp_flxs, r_f, g, progress=False)
+    def get_dispersive(g: float) -> Tuple[np.ndarray, ...]:
+        # only use 4 states to calculate the ground state dispersive shift for speed
+        return calculate_dispersive_vs_flx(
+            params, sp_flxs, r_f, g, progress=False, resonator_dim=4
+        )
 
     rf_0, rf_1 = get_dispersive(g_init)
 
@@ -80,10 +83,13 @@ def search_proper_g(
         g = change["new"]
 
         rf_0, rf_1 = get_dispersive(g)
+        # rf_list = get_dispersive(g)
 
         # Update the lines
         line_g.set_data(sp_flxs, rf_0)
         line_e.set_data(sp_flxs, rf_1)
+        # for i, line in enumerate(line_list):
+        #     line.set_data(sp_flxs, rf_list[i])
 
         # Update the title with current g value
         ax.set_title(f"g = {g:.3f} GHz")
@@ -127,9 +133,9 @@ def auto_fit_dispersive(
     amps = np.abs(signals)
 
     # determine whether fit the value to max or min
-    avg_amp = np.mean(amps)
-    max_amp, min_amp = np.max(amps), np.min(amps)
-    fit_factor = 1 if max_amp + min_amp > 2 * avg_amp else -1
+    avg_amp = np.mean(amps, axis=1)
+    max_amp, min_amp = np.max(amps, axis=1), np.min(amps, axis=1)
+    fit_factor = 1 if np.sum(max_amp + min_amp) > 2 * np.sum(avg_amp) else -1
 
     # derive the initial g value if not provided
     if g_init is None:
@@ -141,8 +147,9 @@ def auto_fit_dispersive(
     def loss_fn(g, r_f):
         update_pbar(g)
 
-        rf_0, _ = calculate_dispersive_vs_flx(
-            params, sp_flxs, r_f, g, cutoff=40, evals_count=20, progress=False
+        # only use 4 states to calculate the ground state dispersive shift for speed
+        rf_0, *_ = calculate_dispersive_vs_flx(
+            params, sp_flxs, r_f, g, progress=False, resonator_dim=4
         )
 
         # 用線性插值取得每個 rf_0 對應的 signal
@@ -179,8 +186,7 @@ def plot_dispersive_with_onetone(
     g: float,
     mAs: np.ndarray,
     flxs: np.ndarray,
-    rf_0: np.ndarray,
-    rf_1: np.ndarray,
+    rf_list: Tuple[np.ndarray, ...],
     sp_mAs: np.ndarray,
     sp_flxs: np.ndarray,
     sp_fpts: np.ndarray,
@@ -204,24 +210,16 @@ def plot_dispersive_with_onetone(
     )
 
     # Add the qubit at 0 and 1 as line plots
-    fig.add_trace(
-        go.Scatter(
-            x=mAs,
-            y=rf_0,
-            mode="lines",
-            line=dict(color="blue"),
-            name="ground",
+    colors = ["blue", "red", "green", "purple", "orange", "brown", "pink", "gray"]
+    if len(rf_list) <= len(colors):
+        kwargs = [dict(line=dict(color=colors[i])) for i in range(len(rf_list))]
+    else:
+        kwargs = [dict()] * len(rf_list)  # too many states, use default color
+
+    for i, rf in enumerate(rf_list):
+        fig.add_trace(
+            go.Scatter(x=mAs, y=rf, mode="lines", name=f"state {i}", **kwargs[i])
         )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=mAs,
-            y=rf_1,
-            mode="lines",
-            line=dict(color="red"),
-            name="excited",
-        )
-    )
 
     # plot a dash hline to indicate the 0 point, also add a xaxis2 to show mA
     fig.add_scatter(
