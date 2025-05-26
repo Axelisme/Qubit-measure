@@ -79,9 +79,6 @@ class ProxyProgram(AcquireMixin):
         return self.proxy.acquire(self, decimated=decimated, **kwargs)
 
     def acquire(self, soc, **kwargs) -> list:
-        if self.is_use_proxy():
-            return self.proxy_acquire(decimated=False, **kwargs)
-
         return self.local_acquire(soc, decimated=False, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs) -> list:
