@@ -4,58 +4,15 @@ import numpy as np
 import plotly.graph_objects as go
 import scqubits as scq
 
-from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flx
+from zcu_tools.simulate.fluxonium import (
+    calculate_dispersive_vs_flx,
+    calculate_n_oper_vs_flx,
+)
 
 from .t1_curve import get_t1_vs_flx
 
 PLOT_CUTOFF = 40
 PLOT_EVALS_COUNT = 10
-
-
-def plot_transitions(
-    params: Tuple[float, float, float],
-    flxs: np.ndarray,
-    show_idxs: List[Tuple[int, int]],
-    ref_freqs: Optional[List[float]] = None,
-    spectrum_data: Optional[scq.SpectrumData] = None,
-) -> go.Figure:
-    if spectrum_data is None:
-        max_level = max(j for _, j in show_idxs) + 1
-        fluxonium = scq.Fluxonium(
-            *params, flux=0.5, cutoff=PLOT_CUTOFF, truncated_dim=max_level
-        )
-        spectrum_data = fluxonium.get_spectrum_vs_paramvals(
-            param_name="flux", param_vals=flxs, evals_count=max_level
-        )
-    evals = spectrum_data.energy_table
-
-    fig = go.Figure()
-
-    # plot matrix elements
-    for i, j in show_idxs:
-        fig.add_trace(
-            go.Scatter(
-                x=flxs,
-                y=evals[:, j] - evals[:, i],
-                mode="lines",
-                name=f"{i} - {j}",
-                line=dict(width=2),
-            )
-        )
-
-    # plot avoid freqs
-    if ref_freqs is not None:
-        for freq in ref_freqs:
-            fig.add_hline(y=freq, line_color="black", line_width=2, line_dash="dash")
-
-    fig.update_layout(
-        title=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
-        title_x=0.5,
-        xaxis_title=r"$\phi_{ext}/\phi_0$",
-        yaxis_title="Energy (GHz)",
-    )
-
-    return fig
 
 
 def plot_matrix_elements(
@@ -64,17 +21,11 @@ def plot_matrix_elements(
     show_idxs: List[Tuple[int, int]],
     spectrum_data: Optional[scq.SpectrumData] = None,
 ) -> go.Figure:
-    if spectrum_data is None:
-        fluxonium = scq.Fluxonium(
-            *params, flux=0.5, cutoff=PLOT_CUTOFF, truncated_dim=PLOT_EVALS_COUNT
-        )
-        spectrum_data = fluxonium.get_matelements_vs_paramvals(
-            operator="n_operator",
-            param_name="flux",
-            param_vals=flxs,
-            evals_count=PLOT_EVALS_COUNT,
-        )
-    matrix_elements = spectrum_data.matrixelem_table
+    need_dim = max(max(i, j) for i, j in show_idxs) + 1
+
+    matrix_elements = calculate_n_oper_vs_flx(
+        params, flxs, return_dim=need_dim, spectrum_data=spectrum_data
+    )
 
     fig = go.Figure()
     for i, j in show_idxs:

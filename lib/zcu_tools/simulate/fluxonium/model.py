@@ -1,7 +1,7 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
-from scqubits import Fluxonium
+from scqubits import Fluxonium, SpectrumData
 
 
 def calculate_energy(
@@ -23,10 +23,13 @@ def calculate_energy_vs_flx(
     flxs: np.ndarray,
     cutoff: int = 40,
     evals_count: int = 20,
+    spectrum_data: Optional[SpectrumData] = None,
 ) -> np.ndarray:
     """
     Calculate the energy of a fluxonium qubit.
     """
+    if spectrum_data is not None:
+        return spectrum_data.energy_table  # early return
 
     # because energy is periodic, remove repeated values and record index
     flxs = flxs % 1.0

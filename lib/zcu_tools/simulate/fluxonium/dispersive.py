@@ -50,7 +50,7 @@ def calculate_dispersive_sweep(
     return_dim: int = 2,
 ) -> Tuple[np.ndarray, ...]:
     """
-    Calculate the dispersive shift of ground and excited state vs. params
+    Calculate the dispersive shift of ground and excited state vs. params of fluxonium
     """
 
     resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
@@ -65,10 +65,8 @@ def calculate_dispersive_sweep(
     def update_hilbertspace(sweep_param: Any) -> None:
         update_fn(fluxonium, sweep_param)
 
-    old, scq.settings.PROGRESSBAR_DISABLED = (
-        scq.settings.PROGRESSBAR_DISABLED,
-        not progress,
-    )
+    old = scq.settings.PROGRESSBAR_DISABLED
+    scq.settings.PROGRESSBAR_DISABLED = not progress
     sweep = scq.ParameterSweep(
         hilbertspace,
         {"params": sweep_list},

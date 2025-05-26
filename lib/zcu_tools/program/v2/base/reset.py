@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 
-
 from myqick.asm_v2 import AveragerProgramV2
 
 
@@ -20,7 +19,7 @@ def make_reset(name: str) -> AbsReset:
     elif name == "pulse":
         return PulseReset()
     elif name == "two_pulse":
-        return MuxPulseReset()
+        return TwoPulseReset()
     else:
         raise ValueError(f"Unknown reset type: {name}")
 
@@ -34,43 +33,55 @@ class NoneReset(AbsReset):
 
 
 class PulseReset(AbsReset):
-    DEFAULT_RESET_DELAY = 0.1  # us
-
     def init(self, prog: AveragerProgramV2):
         prog.declare_pulse(prog.reset_pulse, "reset")
 
     def reset_qubit(self, prog: AveragerProgramV2):
         reset_pulse = prog.reset_pulse
+
+        pre_delay = reset_pulse.get("pre_delay")
+        post_delay = reset_pulse.get("post_delay")
+
+        if pre_delay is not None:
+            prog.delay_auto(pre_delay)
+
         prog.pulse(reset_pulse["ch"], "reset")
-        prog.delay_auto(reset_pulse.get("post_delay", self.DEFAULT_RESET_DELAY))
+
+        if post_delay is not None:
+            prog.delay_auto(post_delay)
 
 
-class MuxPulseReset(AbsReset):
-    DEFAULT_RESET_DELAY = 0.1  # us
-
+class TwoPulseReset(AbsReset):
     def init(self, prog: AveragerProgramV2):
-        prog.declare_pulse(prog.reset_pulse1, "mux_reset")
-        prog.declare_pulse(prog.reset_pulse2, "mux_reset2")
+        prog.declare_pulse(prog.reset_pulse1, "reset1")
+        prog.declare_pulse(prog.reset_pulse2, "reset2")
 
         if prog.reset_pulse1["ch"] == prog.reset_pulse2["ch"]:
-            # TODO: Add support for mux reset on the same channel
             raise ValueError(
-                "MuxPulseReset requires different channels for both pulses."
+                "reset_pulse1 and reset_pulse2 cannot have the same channel"
             )
 
-        length1 = prog.reset_pulse1["length"]
-        length2 = prog.reset_pulse2["length"]
-        if length1 != length2:
-            raise ValueError("MuxPulseReset requires equal length for both pulses.")
+        if prog.reset_pulse1["length"] != prog.reset_pulse2["length"]:
+            raise ValueError("reset_pulse1 and reset_pulse2 must have the same length")
 
-        if prog.reset_pulse1["post_delay"] != 0.0:
-            raise ValueError(
-                "MuxPulseReset requires post_delay of result_pulse1 to be 0.0."
-            )
+        if prog.reset_pulse1.get("post_delay") is not None:
+            raise ValueError("reset_pulse1 cannot have a post_delay")
+
+        if prog.reset_pulse2.get("pre_delay") is not None:
+            raise ValueError("reset_pulse2 cannot have a pre_delay")
 
     def reset_qubit(self, prog: AveragerProgramV2):
         reset_pulse1 = prog.reset_pulse1
         reset_pulse2 = prog.reset_pulse2
-        prog.pulse(reset_pulse1["ch"], "mux_reset")
-        prog.pulse(reset_pulse2["ch"], "mux_reset2")
-        prog.delay_auto(reset_pulse2.get("post_delay", self.DEFAULT_RESET_DELAY))
+
+        pre_delay = reset_pulse1.get("pre_delay")
+        post_delay = reset_pulse2.get("post_delay")
+
+        if pre_delay is not None:
+            prog.delay_auto(pre_delay)
+
+        prog.pulse(reset_pulse1["ch"], "reset1")
+        prog.pulse(reset_pulse2["ch"], "reset2")
+
+        if post_delay is not None:
+            prog.delay_auto(post_delay)

@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 
+from myqick.asm_v1 import QickProgram
+
 from .pulse import declare_pulse, set_pulse
 
 
@@ -16,57 +18,79 @@ def make_reset(name: str):
 
 class AbsReset(ABC):
     @abstractmethod
-    def init(self, prog):
+    def init(self, prog: QickProgram):
         pass
 
     @abstractmethod
-    def reset_qubit(self, prog):
+    def reset_qubit(self, prog: QickProgram):
         pass
 
 
 class NoneReset(AbsReset):
-    def init(self, prog):
+    def init(self, prog: QickProgram):
         pass
 
-    def reset_qubit(self, prog):
+    def reset_qubit(self, prog: QickProgram):
         pass
 
 
 class PulseReset(AbsReset):
-    DEFAULT_RESET_DELAY = 0.1  # us
-
-    def init(self, prog):
+    def init(self, prog: QickProgram):
         declare_pulse(prog, prog.reset_pulse, waveform="reset")
 
-    def reset_qubit(self, prog):
+    def reset_qubit(self, prog: QickProgram):
         reset_pulse = prog.reset_pulse
+
+        pre_delay = reset_pulse.get("pre_delay")
+        post_delay = reset_pulse.get("post_delay")
+
+        if pre_delay is not None:
+            prog.sync_all(prog.us2cycles(pre_delay))
+
         if prog.ch_count[reset_pulse["ch"]] > 1:
             set_pulse(prog, reset_pulse, waveform="reset")
         prog.pulse(ch=reset_pulse["ch"])
-        delay = reset_pulse.get("delay", self.DEFAULT_RESET_DELAY)
-        prog.sync_all(prog.us2cycles(delay))
+
+        if post_delay is not None:
+            prog.sync_all(prog.us2cycles(post_delay))
 
 
 class TwoPulseReset(AbsReset):
-    DEFAULT_RESET_DELAY1 = 0.01  # us
-    DEFAULT_RESET_DELAY2 = 0.1  # us
-
-    def init(self, prog):
-        declare_pulse(prog, prog.reset_pulse, waveform="reset")
+    def init(self, prog: QickProgram):
+        declare_pulse(prog, prog.reset_pulse1, waveform="reset1")
         declare_pulse(prog, prog.reset_pulse2, waveform="reset2")
 
-    def reset_qubit(self, prog):
-        reset_pulse = prog.reset_pulse
+        if prog.reset_pulse1["ch"] == prog.reset_pulse2["ch"]:
+            raise ValueError(
+                "reset_pulse1 and reset_pulse2 cannot have the same channel"
+            )
+
+        if prog.reset_pulse1["length"] != prog.reset_pulse2["length"]:
+            raise ValueError("reset_pulse1 and reset_pulse2 must have the same length")
+
+        if prog.reset_pulse1.get("post_delay") is not None:
+            raise ValueError("reset_pulse1 cannot have a post_delay")
+
+        if prog.reset_pulse2.get("pre_delay") is not None:
+            raise ValueError("reset_pulse2 cannot have a pre_delay")
+
+    def reset_qubit(self, prog: QickProgram):
+        reset_pulse1 = prog.reset_pulse1
         reset_pulse2 = prog.reset_pulse2
 
-        if prog.ch_count[reset_pulse["ch"]] > 1:
-            set_pulse(prog, reset_pulse, waveform="reset")
-        prog.pulse(ch=reset_pulse["ch"])
-        delay1 = reset_pulse.get("delay1", self.DEFAULT_RESET_DELAY1)
-        prog.sync_all(prog.us2cycles(delay1))
+        pre_delay = reset_pulse1.get("pre_delay")
+        post_delay = reset_pulse2.get("post_delay")
+
+        if pre_delay is not None:
+            prog.sync_all(prog.us2cycles(pre_delay))
+
+        if prog.ch_count[reset_pulse1["ch"]] > 1:
+            set_pulse(prog, reset_pulse1, waveform="reset1")
+        prog.pulse(ch=reset_pulse1["ch"])
 
         if prog.ch_count[reset_pulse2["ch"]] > 1:
             set_pulse(prog, reset_pulse2, waveform="reset2")
         prog.pulse(ch=reset_pulse2["ch"])
-        delay2 = reset_pulse2.get("delay2", self.DEFAULT_RESET_DELAY2)
-        prog.sync_all(prog.us2cycles(delay2))
+
+        if post_delay is not None:
+            prog.sync_all(prog.us2cycles(post_delay))

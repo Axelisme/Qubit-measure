@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import Any, Dict, List, Union
 
 import numpy as np
@@ -48,23 +49,39 @@ def visualize_pulse(
 ):
     import matplotlib.pyplot as plt
 
+    pulse_cfgs = deepcopy(pulse_cfgs)
+
     if not isinstance(pulse_cfgs, list):
         pulse_cfgs = [pulse_cfgs]
 
+    max_length = 0.1
     for pulse_cfg in pulse_cfgs:
         pulse_cfg.setdefault("ch", 0)
         pulse_cfg.setdefault("gain", 1.0)
 
+        max_length = max(
+            max_length,
+            pulse_cfg.get("pre_delay", 0.0)
+            + pulse_cfg["length"]
+            + pulse_cfg.get("post_delay", 0.0),
+        )
+
+    max_gain = 0.0
+    min_gain = 0.0
+    loop_dict = {}
+    times = np.linspace(0.0, max_length, 3001)
+    for pulse_cfg in pulse_cfgs:
         pulse = Pulse(0.0, pulse_cfg)
-        loop_dict = {}
-        times = np.linspace(0.0, pulse_cfg["length"], 3001)
+
         signal_dict = pulse.get_signal(loop_dict, times)
         for ch, signal in signal_dict.items():
             plt.plot(times, signal.real, label=f"ch {ch} real")
             plt.plot(times, signal.imag, label=f"ch {ch} imag")
+            max_gain = max(max_gain, np.max(signal.real), np.max(signal.imag))
+            min_gain = min(min_gain, np.min(signal.real), np.min(signal.imag))
 
         if "trig_offset" in pulse_cfg:
-            offset = pulse_cfg["trig_offset"]
+            offset = pulse_cfg["trig_offset"] + pulse_cfg.get("pre_delay", 0.0)
             plt.axvline(offset - time_fly, color="red", linestyle="--")
             if "ro_length" in pulse_cfg:
                 ro_length = pulse_cfg["ro_length"]
@@ -73,6 +90,8 @@ def visualize_pulse(
     plt.legend()
     plt.xlabel("Time (us)")
     plt.ylabel("I/Q")
+    plt.ylim(min_gain - 0.01, max_gain + 0.01)
+    plt.xlim(0.0, max_length)
     plt.grid(True)
     plt.show()
 
