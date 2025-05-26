@@ -109,7 +109,9 @@ def measure_t2echo(
     cfg["detune"] = detune
     cfg["dac"]["t2e_half"] = sweep2param("length", sweep_cfg)
 
-    ts = 2 * sweep2array(sweep_cfg)  # predicted times
+    ts = (
+        2 * sweep2array(sweep_cfg) + cfg["dac"]["pi_pulse"]["length"]
+    )  # predicted times
 
     # linear hard sweep
     prog, signals = sweep_hard_template(
@@ -124,7 +126,10 @@ def measure_t2echo(
     )
 
     # get the actual times
-    _ts: np.ndarray = 2 * prog.get_time_param("t2e_half", "t", as_array=True)  # type: ignore
+    _ts: np.ndarray = (
+        2 * prog.get_time_param("t2e_half", "t", as_array=True)
+        + cfg["dac"]["pi_pulse"]["length"]
+    )  # type: ignore
     # TODO: check if this is correct
     ts = _ts + ts[0] - _ts[0]  # adjust to start from the first time
 

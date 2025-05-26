@@ -1,7 +1,9 @@
 from typing import Any, Dict, Optional
 
+from myqick.asm_v2 import AveragerProgramV2
 
-def create_waveform(prog, name: str, pulse: Dict[str, Any]):
+
+def create_waveform(prog: AveragerProgramV2, name: str, pulse: Dict[str, Any]):
     ch: int = pulse["ch"]
     style: str = pulse["style"]
 
@@ -35,7 +37,7 @@ def create_waveform(prog, name: str, pulse: Dict[str, Any]):
 
 
 def add_pulse(
-    prog,
+    prog: AveragerProgramV2,
     pulse: Dict[str, Any],
     waveform: str,
     ro_ch: Optional[int] = None,
@@ -60,5 +62,8 @@ def add_pulse(
 
         if style in ["gauss", "cosine", "drag", "arb"]:
             wav_kwargs["style"] = "arb"
+
+    if "mask" in pulse:
+        wav_kwargs["mask"] = pulse["mask"]
 
     prog.add_pulse(ch, waveform, ro_ch=ro_ch, **wav_kwargs, **kwargs)

@@ -34,7 +34,7 @@ def get_rotate_angle(
     return {"theta": theta}
 
 
-def fit_ge_by_center(signals: np.ndarray, plot: bool = True) -> tuple:
+def fit_ge_by_center(signals: np.ndarray) -> tuple:
     """
     Analyze ground and excited state signals using the center method.
 
@@ -46,8 +46,6 @@ def fit_ge_by_center(signals: np.ndarray, plot: bool = True) -> tuple:
     signals : np.ndarray
         Complex array of shape (2, N) containing measurement signals.
         First row should contain ground state signals, second row excited state signals.
-    plot : bool, default=True
-        If True, generate visualization plots of the analysis results.
 
     Returns
     -------
@@ -57,4 +55,4 @@ def fit_ge_by_center(signals: np.ndarray, plot: bool = True) -> tuple:
         - threshold: The optimal threshold value for state discrimination
         - theta_deg: The optimal rotation angle in degrees
     """
-    return fitting_ge_and_plot(signals, get_rotate_angle, plot)
+    return fitting_ge_and_plot(signals, get_rotate_angle)

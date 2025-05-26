@@ -37,7 +37,15 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
         ro_ch: Optional[int] = None,
         **kwargs,
     ):
-        self.declare_gen(pulse["ch"], nqz=pulse["nqz"])
+        self.declare_gen(
+            pulse["ch"],
+            nqz=pulse["nqz"],
+            mixer_freq=pulse.get("mixer_freq"),
+            mux_freqs=pulse.get("mux_freqs"),
+            mux_gains=pulse.get("mux_gains"),
+            mux_phases=pulse.get("mux_phases"),
+            ro_ch=pulse.get("ro_ch")
+        )
         create_waveform(self, waveform, pulse)
 
         add_pulse(self, pulse, waveform=waveform, ro_ch=ro_ch, **kwargs)

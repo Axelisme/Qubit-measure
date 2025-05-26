@@ -39,6 +39,8 @@ def format_sweep1D(
 
         # it is already in regular format
         return sweep
+    else:
+        raise ValueError(sweep)
 
 
 def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):

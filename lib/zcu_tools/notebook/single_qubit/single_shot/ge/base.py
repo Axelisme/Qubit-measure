@@ -185,7 +185,6 @@ def calculate_fidelity(
 def fitting_ge_and_plot(
     signals: np.ndarray,
     classify_func: Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], Dict],
-    plot: bool = True,
     numbins: int = 200,
 ) -> Tuple[float, float, float]:
     """
@@ -206,8 +205,6 @@ def fitting_ge_and_plot(
     classify_func : Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], Dict]
         Function that determines the optimal rotation angle from I/Q data.
         Should accept (Ig, Qg, Ie, Qe) as arguments and return a dictionary with at least a 'theta' key.
-    plot : bool, default=True
-        If True, generate visualization plots of the analysis results.
     numbins : int, default=200
         Number of bins for histograms.
 
@@ -231,55 +228,51 @@ def fitting_ge_and_plot(
     Ig, Qg = rotate(Ig, Qg, theta)
     Ie, Qe = rotate(Ie, Qe, theta)
 
-    if plot:
-        fig, axs = plt.subplots(2, 2, figsize=(8, 8))
-        fig.suptitle(f"Rotation angle: {180 * theta / np.pi:.3f} deg")
+    fig, axs = plt.subplots(2, 2, figsize=(8, 8))
+    fig.suptitle(f"Rotation angle: {180 * theta / np.pi:.3f} deg")
 
-        scatter_ge_plot((Ig, Ie), (Qg, Qe), axs[0, 0], "Rotated")
+    scatter_ge_plot((Ig, Ie), (Qg, Qe), axs[0, 0], "Rotated")
 
-        ng, ne, bins = hist(Ig, Ie, numbins, axs[1, 0])
+    ng, ne, bins = hist(Ig, Ie, numbins, axs[1, 0])
 
-        xs = bins[:-1]
-        axs[0, 1].hist(xs, bins=bins, weights=ng, color="b", alpha=0.5)
-        axs[1, 1].hist(xs, bins=bins, weights=ne, color="r", alpha=0.5)
+    xs = bins[:-1]
+    axs[0, 1].hist(xs, bins=bins, weights=ng, color="b", alpha=0.5)
+    axs[1, 1].hist(xs, bins=bins, weights=ne, color="r", alpha=0.5)
 
-        ge_params, _ = batch_fit_dual_gauss([xs, xs], [ng, ne])
-        g_params, e_params = ge_params
+    ge_params, _ = batch_fit_dual_gauss([xs, xs], [ng, ne])
+    g_params, e_params = ge_params
 
-        n_gg, n_ge = g_params[0], g_params[3]
-        n_eg, n_ee = e_params[0], e_params[3]
-        n_gg, n_ge = n_gg / (n_gg + n_ge), n_ge / (n_gg + n_ge)
-        n_eg, n_ee = n_eg / (n_eg + n_ee), n_ee / (n_eg + n_ee)
+    n_gg, n_ge = g_params[0], g_params[3]
+    n_eg, n_ee = e_params[0], e_params[3]
+    n_gg, n_ge = n_gg / (n_gg + n_ge), n_ge / (n_gg + n_ge)
+    n_eg, n_ee = n_eg / (n_eg + n_ee), n_ee / (n_eg + n_ee)
 
-        gg_fit = gauss_func(xs, *g_params[:3])
-        ge_fit = gauss_func(xs, *g_params[3:])
-        eg_fit = gauss_func(xs, *e_params[:3])
-        ee_fit = gauss_func(xs, *e_params[3:])
-        axs[0, 1].plot(xs, gg_fit + ge_fit, "k-", label="total")
-        axs[0, 1].plot(xs, gg_fit, "b-", label="g")
-        axs[0, 1].plot(xs, ge_fit, "b--", label="e")
-        axs[0, 1].set_title(f"{n_gg:.1%} / {n_ge:.1%}", fontsize=14)
-        axs[1, 1].plot(xs, eg_fit + ee_fit, "k-", label="total")
-        axs[1, 1].plot(xs, eg_fit, "r-", label="g")
-        axs[1, 1].plot(xs, ee_fit, "r--", label="e")
-        axs[1, 1].set_title(f"{n_eg:.1%} / {n_ee:.1%}", fontsize=14)
+    gg_fit = gauss_func(xs, *g_params[:3])
+    ge_fit = gauss_func(xs, *g_params[3:])
+    eg_fit = gauss_func(xs, *e_params[:3])
+    ee_fit = gauss_func(xs, *e_params[3:])
+    axs[0, 1].plot(xs, gg_fit + ge_fit, "k-", label="total")
+    axs[0, 1].plot(xs, gg_fit, "b-", label="g")
+    axs[0, 1].plot(xs, ge_fit, "b--", label="e")
+    axs[0, 1].set_title(f"{n_gg:.1%} / {n_ge:.1%}", fontsize=14)
+    axs[1, 1].plot(xs, eg_fit + ee_fit, "k-", label="total")
+    axs[1, 1].plot(xs, eg_fit, "r-", label="g")
+    axs[1, 1].plot(xs, ee_fit, "r--", label="e")
+    axs[1, 1].set_title(f"{n_eg:.1%} / {n_ee:.1%}", fontsize=14)
 
-        axs[1, 0].plot(xs, gg_fit + ge_fit, "b-", label="g")
-        axs[1, 0].plot(xs, eg_fit + ee_fit, "r-", label="e")
-    else:
-        ng, ne, bins = hist(Ig, Ie, numbins)
+    axs[1, 0].plot(xs, gg_fit + ge_fit, "b-", label="g")
+    axs[1, 0].plot(xs, eg_fit + ee_fit, "r-", label="e")
 
     fid, threshold = calculate_fidelity(ng, ne, bins)
 
-    if plot:
-        title = "${F}_{ge}$"
-        axs[1, 0].set_title(f"Histogram ({title}: {fid:.3%})", fontsize=14)
+    title = "${F}_{ge}$"
+    axs[1, 0].set_title(f"Histogram ({title}: {fid:.3%})", fontsize=14)
 
-        for ax in axs.flat:
-            ax.axvline(threshold, color="0.2", linestyle="--")
+    for ax in axs.flat:
+        ax.axvline(threshold, color="0.2", linestyle="--")
 
-        plt.subplots_adjust(hspace=0.25, wspace=0.15)
-        plt.tight_layout()
-        plt.show()
+    plt.subplots_adjust(hspace=0.25, wspace=0.15)
+    plt.tight_layout()
+    plt.show()
 
-    return fid, threshold, theta * 180 / np.pi  # fids: ge, gf, ef
+    return fid, threshold, theta * 180 / np.pi, (n_gg, n_ge, n_eg, n_ee)   # fids: ge, gf, ef

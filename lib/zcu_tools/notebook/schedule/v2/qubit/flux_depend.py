@@ -51,11 +51,6 @@ def measure_qub_flux_dep(soc, soccfg, cfg, earlystop_snr=None):
     if cfg["dev"]["flux_dev"] == "none":
         raise ValueError("Flux sweep but get flux_dev == 'none'")
 
-    if reset_rf is not None:
-        assert cfg["dac"]["reset"] == "pulse", "Need reset=pulse for conjugate reset"
-        assert "reset_pulse" in cfg["dac"], "Need reset_pulse for conjugate reset"
-        cfg["dac"]["reset_pulse"]["freq"] = reset_rf - qub_pulse["freq"]
-
     qub_pulse["freq"] = sweep2param("freq", fpt_sweep)
 
     del cfg["sweep"]["flux"]  # use for loop here

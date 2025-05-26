@@ -312,18 +312,18 @@ def effective_temperature(
     Parameters
     ----------
     population : List[Tuple[float, float]]
-        A list of tuples of (population, energy).
+        A list of tuples of (population, energy in MHz).
     plot : bool, default=True
         Whether to plot the population and energy.
 
     Returns
     -------
     Tuple[float, float]
-        The effective temperature and its error.
+        The effective temperature in mK and its error.
     """
 
-    def boltzmann_distribution(energy: float, eff_T: float) -> float:
-        exp_term = np.exp(-energy / (sc.k * eff_T))
+    def boltzmann_distribution(freq: float, eff_T: float) -> float:
+        exp_term = np.exp(-1e6 * sc.h * freq / (sc.k * 1e-3 *eff_T))
         return exp_term / np.sum(exp_term)
 
     # calculate the effective temperature
@@ -332,25 +332,24 @@ def effective_temperature(
             "At least two qubits are required to calculate effective temperature."
         )
 
-    if len(population) == 2:
-        # directly calculate from two points
-        pop1, energy1 = population[0]
-        pop2, energy2 = population[1]
-        eff_T = (energy2 - energy1) / (sc.k * np.log(pop1 / pop2))
-        err_T = 0.0
-    else:
+    pops, freqs = zip(*population)
+    pops, freqs = np.array(pops), np.array(freqs)
+
+    # directly calculate from two points
+    eff_T = 1e9 * sc.h * (freqs[1] - freqs[0]) / (sc.k * np.log(pops[0] / pops[1]))
+    err_T = 0.0
+    if len(population) > 2:
         # fit the boltzmann distribution
-        energies, pops = zip(*population)
-        pOpt, err = curve_fit(boltzmann_distribution, energies, pops)
+        pOpt, err = curve_fit(boltzmann_distribution, freqs, pops, p0=(eff_T,))
         eff_T = pOpt[0]
         err_T = np.sqrt(np.diag(err))[0]
 
     if plot:
         plt.figure(figsize=figsize)
-        plt.plot(energies, pops, label="data")
+        plt.plot(freqs, pops, label="data")
         plt.plot(
-            energies,
-            boltzmann_distribution(energies, eff_T),
+            freqs,
+            boltzmann_distribution(freqs, eff_T),
             label=f"fit, $T_e$={eff_T:.1g} +/- {err_T:.1g} K",
         )
         plt.xlabel("Energy (a.u.)")

@@ -82,7 +82,6 @@ def singleshot_visualize(
 
 def singleshot_ge_analysis(
     signals: np.ndarray,
-    plot: bool = True,
     angle: float = None,
     backend: Literal["center", "regression", "pca"] = "pca",
 ) -> Tuple[float, float, float]:
@@ -97,8 +96,6 @@ def singleshot_ge_analysis(
     signals : np.ndarray
         Complex array of shape (2, N) containing measurement signals.
         First row should contain ground state signals, second row excited state signals.
-    plot : bool, default=True
-        If True, generate visualization plots of the analysis results.
     angle : float, default=None
         if given, use this angle for rotation, ignore backend
     backend : Literal["center", "regression", "pca"], default="pca"
@@ -116,14 +113,14 @@ def singleshot_ge_analysis(
         - theta_deg: The optimal rotation angle in degrees
     """
     if angle is not None:
-        return fit_ge_manual(signals, angle, plot=plot)
+        return fit_ge_manual(signals, angle)
 
     if backend == "center":
-        return fit_ge_by_center(signals, plot=plot)
+        return fit_ge_by_center(signals)
     if backend == "regression":
-        return fit_ge_by_regression(signals, plot=plot)
+        return fit_ge_by_regression(signals)
     if backend == "pca":
-        return fit_ge_by_pca(signals, plot=plot)
+        return fit_ge_by_pca(signals)
 
     raise ValueError(f"Unknown backend: {backend}")
 

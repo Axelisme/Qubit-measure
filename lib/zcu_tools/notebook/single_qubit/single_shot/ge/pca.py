@@ -13,5 +13,5 @@ def get_rotate_angle(
     return {"theta": angle}
 
 
-def fit_ge_by_pca(signals: np.ndarray, plot: bool = True) -> tuple:
-    return fitting_ge_and_plot(signals, get_rotate_angle, plot)
+def fit_ge_by_pca(signals: np.ndarray) -> tuple:
+    return fitting_ge_and_plot(signals, get_rotate_angle)

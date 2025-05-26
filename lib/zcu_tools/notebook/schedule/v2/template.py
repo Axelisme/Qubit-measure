@@ -110,15 +110,16 @@ def sweep_hard_template(
             signals, stds = result2signals(avg_d, std_d)
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
+        except Exception as e:
+            if prog is None:
+                raise e  # the error is happen in initialize of program
             print("Error during measurement:")
             print_traceback()
-        finally:
-            viewer.update_show(
-                signal2real(signals),
-                errs=std2err(stds, cfg["soft_avgs"] * reps),
-                title=title,
-            )
+        viewer.update_show(
+            signal2real(signals),
+            errs=std2err(stds, cfg["soft_avgs"] * reps),
+            title=title,
+        )
 
     return prog, signals
 
@@ -192,8 +193,7 @@ def sweep1D_soft_template(
         except Exception:
             print("Error during measurement:")
             print_traceback()
-        finally:
-            viewer.update_show(signal2real(signals), errs=std2err(stds, N))
+        viewer.update_show(signal2real(signals), errs=std2err(stds, N))
 
     return xs, signals
 
@@ -247,6 +247,7 @@ def sweep2D_soft_hard_template(
     # set initial flux
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
+    prog = None
     title = None
     with InstantShow2D(xs, ys, xlabel, ylabel, title=title, with_1D_axis="y") as viewer:
         try:
@@ -298,14 +299,16 @@ def sweep2D_soft_hard_template(
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
-            print("Error during measurement:")
-            print_traceback()
-        finally:
             signals_real = signal2real(signals2D)
             viewer.update_show(
                 signals_real, title=title, signals_real_1D=signals_real[i]
             )
+        except Exception as e:
+            if prog is None:
+                raise e  # the error is happen in initialize of program
+            print("Error during measurement:")
+            print_traceback()
+        finally:
             xs_tqdm.close()
             avgs_tqdm.close()
 

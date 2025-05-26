@@ -11,8 +11,8 @@ class T2EchoProgram(MyProgramV2):
 
         pi2_pulse = deepcopy(self.pi2_pulse)
         self.declare_pulse(pi2_pulse, "pi2_pulse1")
-        pi2_pulse["phase"] = (
-            pi2_pulse["phase"] + 360 * cfg["detune"] * self.dac["t2e_half"]
+        pi2_pulse["phase"] = pi2_pulse["phase"] + 360 * cfg["detune"] * (
+            2 * self.dac["t2e_half"] + self.pi_pulse["length"]
         )
         self.declare_pulse(pi2_pulse, "pi2_pulse2")
         super()._initialize(cfg)
