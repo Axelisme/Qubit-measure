@@ -24,7 +24,7 @@ def calculate_energy_vs_flx(
     cutoff: int = 40,
     evals_count: int = 20,
     spectrum_data: Optional[SpectrumData] = None,
-) -> np.ndarray:
+) -> Tuple[SpectrumData, np.ndarray]:
     """
     Calculate the energy of a fluxonium qubit.
     """
@@ -50,4 +50,4 @@ def calculate_energy_vs_flx(
     energies[sort_idxs, :] = energies
     energies = energies[uni_idxs, :]
 
-    return energies
+    return spectrum_data, energies

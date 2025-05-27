@@ -23,7 +23,7 @@ def plot_matrix_elements(
 ) -> go.Figure:
     need_dim = max(max(i, j) for i, j in show_idxs) + 1
 
-    matrix_elements = calculate_n_oper_vs_flx(
+    spectrum_data, matrix_elements = calculate_n_oper_vs_flx(
         params, flxs, return_dim=need_dim, spectrum_data=spectrum_data
     )
 
@@ -45,7 +45,7 @@ def plot_matrix_elements(
         yaxis_title="Matrix elements",
     )
 
-    return fig
+    return fig, spectrum_data
 
 
 def plot_dispersive_shift(

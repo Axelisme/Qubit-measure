@@ -357,7 +357,7 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
         nonlocal flxs, allows, fpts
 
         # 計算能量並轉成線性形式
-        energies = calculate_energy_vs_flx(
+        _, energies = calculate_energy_vs_flx(
             params, flxs, cutoff=45, evals_count=evals_count
         )
         Bs, Cs = energy2linearform(energies, allows)

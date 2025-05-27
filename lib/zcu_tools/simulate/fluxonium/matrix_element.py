@@ -2,6 +2,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import scqubits as scq
+from scqubits.utils.misc import Qobj_to_scipy_csc_matrix
 
 
 def calculate_n_oper(
@@ -51,7 +52,7 @@ def calculate_n_oper_vs_flx(
         )
     matrix_elements = spectrum_data.matrixelem_table
 
-    return matrix_elements[:, :return_dim, :return_dim]
+    return spectrum_data, matrix_elements[:, :return_dim, :return_dim]
 
 
 def calculate_system_n_oper_vs_flx(
@@ -61,47 +62,72 @@ def calculate_system_n_oper_vs_flx(
     g: float,
     return_dim: int = 4,
     progress: bool = True,
-) -> np.ndarray:
+    sweep: Optional[scq.ParameterSweep] = None,
+) -> Tuple[scq.ParameterSweep, np.ndarray]:
     """
     Calculate the matrix elements of the system vs. a parameter
     """
 
-    cutoff = 40
-    evals_count = 5
-    resonator_dim = 5
+    if sweep is None:
+        cutoff = 50
+        evals_count = 20
+        resonator_dim = 10
 
-    resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
-    fluxonium = scq.Fluxonium(
-        *params, flux=0.5, cutoff=cutoff, truncated_dim=evals_count
-    )
-    hilbertspace = scq.HilbertSpace([resonator, fluxonium])
-    hilbertspace.add_interaction(
-        g=g, op1=resonator.creation_operator, op2=fluxonium.n_operator, add_hc=True
-    )
+        resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
+        fluxonium = scq.Fluxonium(
+            *params, flux=0.5, cutoff=cutoff, truncated_dim=evals_count
+        )
+        hilbertspace = scq.HilbertSpace([resonator, fluxonium])
+        hilbertspace.add_interaction(
+            g=g, op1=resonator.creation_operator, op2=fluxonium.n_operator, add_hc=True
+        )
 
-    def update_hilbertspace(flx: float) -> None:
-        fluxonium.flux = flx
+        def update_hilbertspace(flx: float) -> None:
+            fluxonium.flux = flx
+
+        old = scq.settings.PROGRESSBAR_DISABLED
+        scq.settings.PROGRESSBAR_DISABLED = not progress
+        sweep = scq.ParameterSweep(
+            hilbertspace,
+            {"params": flxs},
+            update_hilbertspace=update_hilbertspace,
+            evals_count=resonator_dim * evals_count,
+            subsys_update_info={"params": [fluxonium]},
+            labeling_scheme="LX",
+        )
+        scq.settings.PROGRESSBAR_DISABLED = old
 
     def get_n_oper(
-        paramsweep: scq.ParameterSweep,
-        paramindex_tuple: Tuple[int, int],
-        paramvals_tuple: Tuple[float, float],
-        **kwargs,
+        paramsweep: scq.ParameterSweep, paramindex_tuple: Tuple[int, int], **kwargs
     ) -> np.ndarray:
-        return paramsweep.op_in_dressed_eigenbasis(fluxonium.n_operator)
+        fluxonium: scq.Fluxonium = paramsweep.get_subsys(1)
 
-    old = scq.settings.PROGRESSBAR_DISABLED
-    scq.settings.PROGRESSBAR_DISABLED = not progress
-    sweep = scq.ParameterSweep(
-        hilbertspace,
-        {"params": flxs},
-        update_hilbertspace=update_hilbertspace,
-        evals_count=resonator_dim * evals_count,
-        subsys_update_info={"params": [fluxonium]},
-        labeling_scheme="LX",
-    )
-    scq.settings.PROGRESSBAR_DISABLED = old
+        bare_evecs = paramsweep["bare_evecs"]["subsys":1][paramindex_tuple]
+        id_wrapped_op = scq.identity_wrap(
+            fluxonium.n_operator,
+            fluxonium,
+            paramsweep.hilbertspace.subsystem_list,
+            op_in_eigenbasis=False,
+            evecs=bare_evecs,
+        )
+
+        dressed_evecs = paramsweep["evecs"][paramindex_tuple]
+        dressed_op_data = Qobj_to_scipy_csc_matrix(
+            id_wrapped_op.transform(dressed_evecs)
+        )
+
+        # get the dressed indexs
+        dressed_op = np.zeros((return_dim, return_dim), dtype=complex)
+        for i in range(return_dim):
+            for j in range(i, return_dim):
+                idx_0i = paramsweep.dressed_index((0, i), paramindex_tuple)
+                idx_1j = paramsweep.dressed_index((1, j), paramindex_tuple)
+                idx_1i = paramsweep.dressed_index((1, i), paramindex_tuple)
+                idx_0j = paramsweep.dressed_index((0, j), paramindex_tuple)
+                dressed_op[i, j] = dressed_op_data[idx_0i, idx_1j]
+                dressed_op[j, i] = dressed_op_data[idx_1i, idx_0j]
+        return dressed_op
 
     sweep.add_sweep(get_n_oper, "n_oper")
 
-    return sweep["n_oper"]
+    return sweep, sweep["n_oper"]
