@@ -2,7 +2,6 @@ from typing import Optional, Tuple
 
 import numpy as np
 import scqubits as scq
-from scqubits.utils.misc import Qobj_to_scipy_csc_matrix
 
 
 def calculate_n_oper(
@@ -112,21 +111,14 @@ def calculate_system_n_oper_vs_flx(
         )
 
         dressed_evecs = paramsweep["evecs"][paramindex_tuple]
-        dressed_op_data = Qobj_to_scipy_csc_matrix(
-            id_wrapped_op.transform(dressed_evecs)
-        )
+        dressed_op_data = id_wrapped_op.transform(dressed_evecs)
 
-        # get the dressed indexs
-        dressed_op = np.zeros((return_dim, return_dim), dtype=complex)
-        for i in range(return_dim):
-            for j in range(i, return_dim):
-                idx_0i = paramsweep.dressed_index((0, i), paramindex_tuple)
-                idx_1j = paramsweep.dressed_index((1, j), paramindex_tuple)
-                idx_1i = paramsweep.dressed_index((1, i), paramindex_tuple)
-                idx_0j = paramsweep.dressed_index((0, j), paramindex_tuple)
-                dressed_op[i, j] = dressed_op_data[idx_0i, idx_1j]
-                dressed_op[j, i] = dressed_op_data[idx_1i, idx_0j]
-        return dressed_op
+        def get_idx(i: int, j: int) -> int:
+            return paramsweep.dressed_index((i, j), paramindex_tuple)
+
+        idx_0 = [get_idx(0, i) for i in range(return_dim)]
+        idx_1 = [get_idx(1, j) for j in range(return_dim)]
+        return dressed_op_data[np.ix_(idx_0, idx_1)]
 
     sweep.add_sweep(get_n_oper, "n_oper")
 
