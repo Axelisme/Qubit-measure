@@ -1,6 +1,7 @@
 from copy import deepcopy
 from functools import wraps
 from typing import Any, Callable, Dict, Type
+import warnings
 
 import numpy as np
 from myqick.asm_v2 import QickParam
@@ -10,9 +11,11 @@ from .pulse import Pulse, pulses_to_signal, visualize_pulse
 from .waveform import format_param
 
 
-def update_t(ref_t, t):
+def max_t(ref_t, t):
     t_a = ref_t
     t_b = t
+
+    # TODO: handle edge cases for QickParam
     if isinstance(t_a, QickParam):
         t_a = 0.5 * (t_a.minval() + t_a.maxval())
     if isinstance(t_b, QickParam):
@@ -63,8 +66,8 @@ class SimulateProgramV2:
     ) -> None:
         self.sim_ref_t = 0.0
 
-        self.sim_last_gen_end_t = None
-        self.sim_last_ro_end_t = None
+        self.sim_gen_t = 0.0
+        self.sim_ro_t = 0.0
 
         self.pulse_list = []
         self.pulse_map = dict()
@@ -74,7 +77,7 @@ class SimulateProgramV2:
 
         method_hooks = {
             "declare_pulse": self.declare_pulse_hook,
-            "delay": self.delay_pulse_hook,
+            "delay": self.delay_hook,
             "delay_auto": self.delay_auto_hook,
             "pulse": self.pulse_hook,
             "declare_readout": self.declare_readout_hook,
@@ -86,51 +89,47 @@ class SimulateProgramV2:
     def declare_pulse_hook(self, pulse, name, *args, **kwargs) -> None:
         self.pulse_map[(pulse["ch"], name)] = deepcopy(pulse)
 
-    def delay_pulse_hook(self, t, *args, **kwargs) -> None:
-        self.sim_ref_t = update_t(self.sim_ref_t, t)
+    def delay_hook(self, t, *args, **kwargs) -> None:
+        self.sim_ref_t = self.sim_ref_t + t
 
     def delay_auto_hook(self, t=0, gens=True, ros=True, *args, **kwargs) -> None:
         last_end = self.sim_ref_t
-        if gens and self.sim_last_gen_end_t is not None:
-            last_end = update_t(last_end, self.sim_last_gen_end_t)
-        if ros and self.sim_last_ro_end_t is not None:
-            last_end = update_t(last_end, self.sim_last_ro_end_t)
-        self.sim_ref_t = update_t(self.sim_ref_t, last_end + t)
+        if gens:
+            last_end = max_t(last_end, self.sim_gen_t)
+        if ros:
+            last_end = max_t(last_end, self.sim_ro_t)
+        self.sim_ref_t = max_t(self.sim_ref_t, last_end + t)
 
     def pulse_hook(self, ch, name, t=0, *args, **kwargs) -> None:
-        start_t = 0.0
-        if t == "auto":
-            if self.sim_last_gen_end_t is not None:
-                start_t = self.sim_last_gen_end_t
-        else:
-            start_t = t
-        start_t = update_t(start_t, self.sim_ref_t)
+        start_t = self.sim_gen_t if t == "auto" else t
+        start_t = max_t(start_t, self.sim_ref_t)
 
         pulse_cfg = self.pulse_map[(ch, name)]
         self.pulse_list.append(Pulse(start_t, pulse_cfg))
 
-        pulse_end = start_t + pulse_cfg["length"]
-        if self.sim_last_gen_end_t is None:
-            self.sim_last_gen_end_t = pulse_end
-        else:
-            self.sim_last_gen_end_t = update_t(self.sim_last_gen_end_t, pulse_end)
+        self.sim_gen_t = max_t(self.sim_gen_t, start_t + pulse_cfg["length"])
 
     def declare_readout_hook(self, ch, length, *args, **kwargs) -> None:
-        # TODO: this only works for single readout pulse
+        if self.sim_ro_length is not None:
+            # TODO: support multiple readout
+            warnings.warn(
+                "Multiple readout declarations are not supported in simulation. "
+                f"Override readout declaration for channel {ch} with args {args} and kwargs {kwargs}."
+            )
         self.sim_ro_length = length
 
     def trigger_hook(self, ros=None, pins=None, t=0, *args, **kwargs) -> None:
         if t is None:
             t = self.sim_ref_t
-        t = update_t(t, self.sim_ref_t)
+        t = max_t(t, self.sim_ref_t)
 
         # TODO: this only works for single readout pulse
-        self.sim_last_ro_end_t = t + self.sim_ro_length
+        self.sim_ro_t = t + self.sim_ro_length
 
     def visualize(self, time_fly: float = 0.0) -> None:
-        total_length = update_t(
+        total_length = max_t(
             self.sim_ref_t,
-            0.0 if self.sim_last_gen_end_t is None else self.sim_last_gen_end_t,
+            0.0 if self.sim_gen_t is None else self.sim_gen_t,
         )
         assert total_length is not None, "total_length is None"
         if isinstance(total_length, QickParam):
@@ -156,8 +155,8 @@ class SimulateProgramV2:
 
         seq_lengths = format_param(loop_dict, self.sim_ref_t)
         if self.sim_ro_length is not None:
-            ro_start = self.sim_last_ro_end_t - self.sim_ro_length
-            ro_end = self.sim_last_ro_end_t
+            ro_start = self.sim_ro_t - self.sim_ro_length
+            ro_end = self.sim_ro_t
             ro_start = format_param(loop_dict, ro_start)
             ro_end = format_param(loop_dict, ro_end)
 
