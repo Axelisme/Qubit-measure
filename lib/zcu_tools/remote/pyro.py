@@ -3,7 +3,7 @@ from typing import Any, Literal, Optional, Tuple
 
 import Pyro4
 import Pyro4.naming
-from myqick import QickConfig, QickSoc
+from myqick import QickConfig
 
 from zcu_tools.tools import get_bitfile
 
@@ -73,7 +73,7 @@ def make_proxy(
     remote_traceback: bool = True,
     lookup_name: str = "myqick",
     proxy_prog: bool = False,
-) -> Tuple[QickSoc, QickConfig, Optional[Any]]:
+) -> Tuple[Any, QickConfig, Optional[Any]]:
     from .client import ProgramClient  # lazy import to avoid recursive import
 
     ns = Pyro4.locateNS(host=ns_host, port=ns_port)

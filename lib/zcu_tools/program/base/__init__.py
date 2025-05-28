@@ -1,7 +1,6 @@
 from collections import defaultdict
 from typing import Any, Dict
 
-from myqick import QickSoc
 from myqick.qick_asm import AcquireMixin
 from zcu_tools.auto import is_pulse_cfg
 from zcu_tools.tools import AsyncFunc
@@ -17,7 +16,7 @@ class MyProgram(ProxyProgram, AcquireMixin):
         wrap acqurie callback to be a coroutine
     """
 
-    def __init__(self, soccfg: QickSoc, cfg: Dict[str, Any], **kwargs) -> None:
+    def __init__(self, soccfg, cfg: Dict[str, Any], **kwargs) -> None:
         self._parse_cfg(cfg)  # parse config first
         super().__init__(soccfg, cfg=cfg, **kwargs)
 
@@ -48,14 +47,14 @@ class MyProgram(ProxyProgram, AcquireMixin):
             cur_nqz = nqzs.setdefault(ch, nqz)
             assert cur_nqz == nqz, "Found different nqz on the same channel"
 
-    def acquire(self, soc: QickSoc, **kwargs) -> list:
+    def acquire(self, soc, **kwargs) -> list:
         # let callback be executd as a coroutine
         with AsyncFunc(kwargs.get("callback")) as cb:
             kwargs["callback"] = cb
 
             return super().acquire(soc, **kwargs)
 
-    def acquire_decimated(self, soc: QickSoc, **kwargs) -> list:
+    def acquire_decimated(self, soc, **kwargs) -> list:
         # let callback be executd as a coroutine
         with AsyncFunc(kwargs.get("callback")) as cb:
             kwargs["callback"] = cb

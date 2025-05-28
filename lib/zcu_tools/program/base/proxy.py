@@ -1,8 +1,7 @@
 import warnings
 from abc import ABC, abstractmethod
-from typing import Optional, override
+from typing import Optional
 
-from myqick import QickSoc
 from myqick.qick_asm import AcquireMixin
 
 
@@ -55,7 +54,6 @@ class ProxyProgram(AcquireMixin):
 
         self.proxy_buf_expired = False
 
-    @override
     def set_early_stop(self) -> None:
         if self.is_use_proxy():
             # tell proxy to set early stop
@@ -69,7 +67,7 @@ class ProxyProgram(AcquireMixin):
                 self.proxy_buf_expired = False
         return self.acc_buf
 
-    def local_acquire(self, soc: QickSoc, decimated: bool, **kwargs) -> list:
+    def local_acquire(self, soc, decimated: bool, **kwargs) -> list:
         # non-override method, for ProgramServer to call
         if decimated:
             return super().acquire_decimated(soc, **kwargs)
@@ -80,12 +78,10 @@ class ProxyProgram(AcquireMixin):
         self.proxy_buf_expired = True
         return self.proxy.acquire(self, decimated=decimated, **kwargs)
 
-    @override
-    def acquire(self, soc: QickSoc, **kwargs) -> list:
+    def acquire(self, soc, **kwargs) -> list:
         return self.local_acquire(soc, decimated=False, **kwargs)
 
-    @override
-    def acquire_decimated(self, soc: QickSoc, **kwargs) -> list:
+    def acquire_decimated(self, soc, **kwargs) -> list:
         if self.is_use_proxy():
             return self.proxy_acquire(decimated=True, **kwargs)
 

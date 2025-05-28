@@ -3,7 +3,6 @@ from typing import Optional
 from unittest.mock import Mock
 
 import Pyro4
-from myqick import QickSoc
 
 from zcu_tools.program.base import MyProgram
 from zcu_tools.tools import AsyncFunc
@@ -13,7 +12,7 @@ from .wrapper import RemoteCallback, unwrap_callback
 
 
 class ProgramServer:
-    def __init__(self, soc: QickSoc, zp: ModuleType) -> None:
+    def __init__(self, soc, zp: ModuleType) -> None:
         self.soc = soc
         self.zp = zp  # zcu_tools.program.v1 or v2
 

@@ -1,6 +1,6 @@
 from typing import Any, Dict, Optional
 
-from myqick import QickConfig, QickSoc
+from myqick import QickConfig
 from myqick.asm_v2 import AveragerProgramV2
 from zcu_tools.program.base import MyProgram
 
@@ -61,8 +61,8 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
         self.resetM.init(self)
         self.readoutM.init(self)
 
-    def acquire(self, soc: QickSoc, **kwargs) -> list:
+    def acquire(self, soc, **kwargs) -> list:
         return super().acquire(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)
 
-    def acquire_decimated(self, soc: QickSoc, **kwargs) -> list:
+    def acquire_decimated(self, soc, **kwargs) -> list:
         return super().acquire_decimated(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)

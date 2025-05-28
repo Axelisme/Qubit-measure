@@ -48,7 +48,7 @@ class ProgramClient(AbsProxy):
 
     def _overwrite_kwargs_for_remote(
         self, prog: MyProgram, kwargs: Dict[str, Any]
-    ) -> Tuple[Dict[str, Any], Optional[tqdm.tqdm]]:
+    ) -> Tuple[Dict[str, Any], Optional[Any]]:
         # before send to remote server, override some kwargs
 
         soft_avgs = prog.cfg["soft_avgs"]
