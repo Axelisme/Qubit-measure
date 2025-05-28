@@ -1,6 +1,9 @@
+from types import ModuleType
+from typing import Any, Literal, Optional, Tuple
+
 import Pyro4
 import Pyro4.naming
-from myqick import QickConfig
+from myqick import QickConfig, QickSoc
 
 from zcu_tools.tools import get_bitfile
 
@@ -11,7 +14,7 @@ Pyro4.config.DILL_PROTOCOL_VERSION = 5
 Pyro4.config.REQUIRE_EXPOSE = False
 
 
-def get_program_module(version):
+def get_program_module(version: Literal["v1", "v2"]) -> ModuleType:
     import importlib
 
     if version == "v1":
@@ -22,11 +25,11 @@ def get_program_module(version):
         raise ValueError(f"Invalid version {version}")
 
 
-def start_nameserver(ns_port):
+def start_nameserver(ns_port: int) -> None:
     Pyro4.naming.startNSloop(host="0.0.0.0", port=ns_port)
 
 
-def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs):
+def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs) -> None:
     from myqick import QickSoc
 
     from zcu_tools.remote.server import ProgramServer
@@ -65,9 +68,13 @@ def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs):
 
 
 def make_proxy(
-    ns_host, ns_port, remote_traceback=True, lookup_name="myqick", proxy_prog=False
-):
-    from .client import ProgramClient
+    ns_host: str,
+    ns_port: int,
+    remote_traceback: bool = True,
+    lookup_name: str = "myqick",
+    proxy_prog: bool = False,
+) -> Tuple[QickSoc, QickConfig, Optional[Any]]:
+    from .client import ProgramClient  # lazy import to avoid recursive import
 
     ns = Pyro4.locateNS(host=ns_host, port=ns_port)
 

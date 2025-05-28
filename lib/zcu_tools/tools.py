@@ -10,7 +10,7 @@ def deepupdate(
     d: Dict[str, Any],
     u: Dict[str, Any],
     behavior: Literal["error", "force", "ignore"] = "error",
-):
+) -> None:
     """
     深度更新字典 `d`，將字典 `u` 的內容合併進去。
 
@@ -31,7 +31,7 @@ def deepupdate(
         None: 此函數直接修改輸入的字典 `d`。
     """
 
-    def conflict_handler(d: Dict[str, Any], u: Dict[str, Any], k: Any):
+    def conflict_handler(d: Dict[str, Any], u: Dict[str, Any], k: Any) -> None:
         if behavior == "error":
             raise KeyError(f"Key {k} already exists in {d}.")
         elif behavior == "force":
@@ -115,7 +115,7 @@ def make_sweep(
     return {"start": start, "stop": stop, "expts": expts, "step": step}
 
 
-def get_bitfile(version):
+def get_bitfile(version: Literal["v1", "v2"]) -> str:
     import myqick
 
     version_dict = {
@@ -127,7 +127,7 @@ def get_bitfile(version):
     return os.path.join(os.path.dirname(myqick.__file__), version_dict[version])
 
 
-def get_ip_address(iface):
+def get_ip_address(iface: str) -> str:
     """
     獲取指定網路介面的 IP 位址，支援 Linux 與 Windows 系統。
 
@@ -171,7 +171,7 @@ def get_ip_address(iface):
             raise OSError(f"Interface {iface} not found or has no IPv4 address.")
 
 
-def print_traceback():
+def print_traceback() -> None:
     """
     印出當前的異常追蹤訊息。如果異常包含 `_pyroTraceback`，則印出該追蹤訊息。
     """
@@ -194,10 +194,10 @@ class AsyncFunc:
 
     def __init__(
         self,
-        func: Optional[Callable],
+        func: Optional[Callable[..., None]],
         min_interval: float = 0.1,
         include_idx: bool = True,
-    ):
+    ) -> None:
         """
         初始化 AsyncFunc 類別。
 
@@ -216,7 +216,7 @@ class AsyncFunc:
         if min_interval <= 0:
             raise ValueError("min_interval must be greater than 0")
 
-    def __enter__(self):
+    def __enter__(self) -> Optional["AsyncFunc"]:
         """
         啟動非同步執行環境，並初始化相關資源。
 
@@ -242,7 +242,7 @@ class AsyncFunc:
 
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """
         結束非同步執行環境，釋放相關資源。
         """
@@ -255,7 +255,7 @@ class AsyncFunc:
             self.have_new_job.set()  # notify worker thread to exit
         self.worker_t.join()
 
-    def work_loop(self):
+    def work_loop(self) -> None:
         """
         工作執行緒的主迴圈，負責執行非同步任務。
         """
@@ -292,7 +292,7 @@ class AsyncFunc:
             finally:
                 prev_start = time.time()
 
-    def __call__(self, ir: int, *args, **kwargs):
+    def __call__(self, ir: int, *args, **kwargs) -> None:
         """
         將任務加入執行佇列，並確保僅保留最新的任務。
 

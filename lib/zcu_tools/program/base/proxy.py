@@ -1,7 +1,8 @@
 import warnings
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, override
 
+from myqick import QickSoc
 from myqick.qick_asm import AcquireMixin
 
 
@@ -11,7 +12,7 @@ class AbsProxy(ABC):
         pass
 
     @abstractmethod
-    def get_acc_buf(self) -> list:
+    def get_acc_buf(self) -> Optional[list]:
         pass
 
     @abstractmethod
@@ -19,7 +20,7 @@ class AbsProxy(ABC):
         pass
 
     @abstractmethod
-    def acquire(self, prog, decimated, **kwargs) -> list:
+    def acquire(self, prog: AcquireMixin, decimated: bool, **kwargs) -> list:
         pass
 
 
@@ -31,7 +32,7 @@ class ProxyProgram(AcquireMixin):
     proxy: Optional[AbsProxy] = None
 
     @classmethod
-    def init_proxy(cls, proxy: AbsProxy, test=False):
+    def init_proxy(cls, proxy: AbsProxy, test=False) -> None:
         if test:
             success = proxy.test_remote_callback()
             if not success:
@@ -42,32 +43,33 @@ class ProxyProgram(AcquireMixin):
         cls.proxy = proxy
 
     @classmethod
-    def clear_proxy(cls):
+    def clear_proxy(cls) -> None:
         cls.proxy = None
 
     @classmethod
-    def is_use_proxy(cls):
+    def is_use_proxy(cls) -> bool:
         return cls.proxy is not None
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
 
         self.proxy_buf_expired = False
 
+    @override
     def set_early_stop(self) -> None:
         if self.is_use_proxy():
             # tell proxy to set early stop
             self.proxy.set_early_stop()
         super().set_early_stop()  # set locally for safe
 
-    def get_acc_buf(self):
+    def get_acc_buf(self) -> Optional[list]:
         if self.is_use_proxy():
             if self.proxy_buf_expired:
                 self.acc_buf = self.proxy.get_acc_buf()
                 self.proxy_buf_expired = False
         return self.acc_buf
 
-    def local_acquire(self, soc, decimated: bool, **kwargs) -> list:
+    def local_acquire(self, soc: QickSoc, decimated: bool, **kwargs) -> list:
         # non-override method, for ProgramServer to call
         if decimated:
             return super().acquire_decimated(soc, **kwargs)
@@ -78,10 +80,12 @@ class ProxyProgram(AcquireMixin):
         self.proxy_buf_expired = True
         return self.proxy.acquire(self, decimated=decimated, **kwargs)
 
-    def acquire(self, soc, **kwargs) -> list:
+    @override
+    def acquire(self, soc: QickSoc, **kwargs) -> list:
         return self.local_acquire(soc, decimated=False, **kwargs)
 
-    def acquire_decimated(self, soc, **kwargs) -> list:
+    @override
+    def acquire_decimated(self, soc: QickSoc, **kwargs) -> list:
         if self.is_use_proxy():
             return self.proxy_acquire(decimated=True, **kwargs)
 

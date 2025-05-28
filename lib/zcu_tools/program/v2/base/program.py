@@ -1,11 +1,12 @@
 from typing import Any, Dict, Optional
 
+from myqick import QickConfig, QickSoc
 from myqick.asm_v2 import AveragerProgramV2
 from zcu_tools.program.base import MyProgram
 
 from .pulse import add_pulse, create_waveform
-from .readout import make_readout, AbsReadout
-from .reset import make_reset, AbsReset
+from .readout import AbsReadout, make_readout
+from .reset import AbsReset, make_reset
 
 
 class MyProgramV2(MyProgram, AveragerProgramV2):
@@ -13,7 +14,7 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
     Convert general config to qick v2 specific api calls
     """
 
-    def __init__(self, soccfg, cfg: Dict[str, Any], **kwargs) -> None:
+    def __init__(self, soccfg: QickConfig, cfg: Dict[str, Any], **kwargs) -> None:
         # v2 program need to pass reps and final_delay to init
         super().__init__(
             soccfg,
@@ -36,7 +37,7 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
         waveform: str,
         ro_ch: Optional[int] = None,
         **kwargs,
-    ):
+    ) -> None:
         self.declare_gen(
             pulse["ch"],
             nqz=pulse["nqz"],
@@ -60,8 +61,8 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
         self.resetM.init(self)
         self.readoutM.init(self)
 
-    def acquire(self, soc, **kwargs):
+    def acquire(self, soc: QickSoc, **kwargs) -> list:
         return super().acquire(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)
 
-    def acquire_decimated(self, soc, **kwargs):
+    def acquire_decimated(self, soc: QickSoc, **kwargs) -> list:
         return super().acquire_decimated(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)

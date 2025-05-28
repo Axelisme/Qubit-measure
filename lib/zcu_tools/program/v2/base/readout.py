@@ -38,7 +38,7 @@ class BaseReadout(AbsReadout):
         )
 
     def readout_qubit(self, prog: AveragerProgramV2):
-        ro_ch = prog.adc["chs"][0]
+        ro_ch: int = prog.adc["chs"][0]
 
         prog.send_readoutconfig(ro_ch, "readout_adc", t=0)
 
@@ -53,6 +53,3 @@ class BaseReadout(AbsReadout):
 
         if post_delay is not None:
             prog.delay_auto(t=post_delay, gens=True, tag="post_delay")
-
-
-

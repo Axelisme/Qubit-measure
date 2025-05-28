@@ -1,6 +1,9 @@
+from types import ModuleType
 from typing import Optional
+from unittest.mock import Mock
 
 import Pyro4
+from myqick import QickSoc
 
 from zcu_tools.program.base import MyProgram
 from zcu_tools.tools import AsyncFunc
@@ -10,7 +13,7 @@ from .wrapper import RemoteCallback, unwrap_callback
 
 
 class ProgramServer:
-    def __init__(self, soc, zp):
+    def __init__(self, soc: QickSoc, zp: ModuleType) -> None:
         self.soc = soc
         self.zp = zp  # zcu_tools.program.v1 or v2
 
@@ -20,7 +23,7 @@ class ProgramServer:
     def _make_prog(self, name: str, cfg: dict) -> MyProgram:
         return getattr(self.zp, name)(self.soc, cfg)
 
-    def _before_run_program(self, prog: MyProgram, kwargs):
+    def _before_run_program(self, prog: MyProgram, kwargs: dict) -> None:
         if self.acquiring:
             raise RuntimeError("Only one program can be run at a time")
         self.last_prog = prog
@@ -28,19 +31,19 @@ class ProgramServer:
 
         kwargs["progress"] = False  # disable progress bar
 
-    def _after_run_program(self):
+    def _after_run_program(self) -> None:
         self.acquiring = False
 
     @Pyro4.expose
     @Pyro4.oneway
-    def set_early_stop(self):
+    def set_early_stop(self) -> None:
         if self.last_prog is not None:
             self.last_prog.set_early_stop()  # set interrupt flag in program
         else:
             print("Warning: no program is running but received early stop signal")
 
     @Pyro4.expose
-    def run_program(self, name: str, cfg: dict, decimated: bool, **kwargs):
+    def run_program(self, name: str, cfg: dict, decimated: bool, **kwargs) -> list:
         prog = self._make_prog(name, cfg)
         self._before_run_program(prog, kwargs)
         callback = unwrap_callback(kwargs.get("callback"))
@@ -56,7 +59,7 @@ class ProgramServer:
             self._after_run_program()
 
     @Pyro4.expose
-    def get_acc_buf(self):
+    def get_acc_buf(self) -> Optional[list]:
         if self.acquiring:
             raise RuntimeError("Program is still running")
 
@@ -66,9 +69,9 @@ class ProgramServer:
         return self.last_prog.acc_buf
 
     @Pyro4.expose
-    def test_callback(self, cb: RemoteCallback):
+    def test_callback(self, cb: RemoteCallback) -> None:
         print("Server received callback test...")
-        self._before_run_program((), {})
+        self._before_run_program(Mock(), {})
         try:
             callback = unwrap_callback(cb)
             assert callback is not None  # of course

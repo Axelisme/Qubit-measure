@@ -6,11 +6,11 @@ CALLBACK_TIMEOUT = 2  # seconds
 
 
 class RemoteCallback:
-    def __init__(self, client, func: Optional[Callable]):
+    def __init__(self, client, func: Optional[Callable[..., None]]) -> None:
         self.client = client
         self.func = func
 
-    def __enter__(self):
+    def __enter__(self) -> Optional["RemoteCallback"]:
         if self.func is None:
             return None
 
@@ -19,7 +19,7 @@ class RemoteCallback:
 
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         if self.func is None:
             return
 
@@ -27,13 +27,13 @@ class RemoteCallback:
 
     @Pyro4.expose
     @Pyro4.oneway
-    def do_callback(self, *args, **kwargs):
+    def do_callback(self, *args, **kwargs) -> None:
         if self.func is None:
             raise RuntimeError("This method should not be called if func is None")
         self.func(*args, **kwargs)
 
 
-def unwrap_callback(cb: Optional[RemoteCallback]):
+def unwrap_callback(cb: Optional[RemoteCallback]) -> Optional[Callable[..., None]]:
     """
     Unwrap the callback function from RemoteCallback object
     The return function is guaranteed to have no exception
@@ -41,7 +41,7 @@ def unwrap_callback(cb: Optional[RemoteCallback]):
     if cb is None:
         return None  # do nothing
 
-    def unwrapped_cb(*args, **kwargs):
+    def unwrapped_cb(*args, **kwargs) -> None:
         # timeout is set to prevent connecting forever
         cb._pyroTimeout, old = CALLBACK_TIMEOUT, cb._pyroTimeout
         try:

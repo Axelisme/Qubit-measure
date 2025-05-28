@@ -1,11 +1,12 @@
 import threading
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 import Pyro4
+from Pyro4.core import Daemon
 from tqdm.auto import tqdm
 
-from zcu_tools.program.base import AbsProxy
+from zcu_tools.program.base import AbsProxy, MyProgram
 
 from ..config import config
 from .pyro import *  # noqa , initialize Pyro4.config
@@ -17,11 +18,11 @@ class ProgramClient(AbsProxy):
     callback_daemon = None  # lazy init
     daemon_thread = None  # lazy init
 
-    def __init__(self, prog_server: ProgramServer):
+    def __init__(self, prog_server: ProgramServer) -> None:
         self.prog_server = prog_server
 
     @classmethod
-    def get_daemon(cls):
+    def get_daemon(cls) -> Daemon:
         if cls.callback_daemon is None:
             print(
                 f"Client Pyro4 daemon started at {config.LOCAL_IP}:{config.LOCAL_PORT}"
@@ -37,7 +38,7 @@ class ProgramClient(AbsProxy):
         return cls.callback_daemon
 
     @classmethod
-    def clear_daemon(cls):
+    def clear_daemon(cls) -> None:
         if cls.callback_daemon is not None:
             print("Client Pyro4 daemon stopped")
             cls.callback_daemon.shutdown()
@@ -45,7 +46,9 @@ class ProgramClient(AbsProxy):
             cls.daemon_thread.join()
             cls.daemon_thread = None
 
-    def _overwrite_kwargs_for_remote(self, prog, kwargs: Dict[str, Any]):
+    def _overwrite_kwargs_for_remote(
+        self, prog: MyProgram, kwargs: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Optional[tqdm.tqdm]]:
         # before send to remote server, override some kwargs
 
         soft_avgs = prog.cfg["soft_avgs"]
@@ -64,7 +67,7 @@ class ProgramClient(AbsProxy):
             # wrap existing callback
             cb = kwargs["callback"]
 
-            def callback_with_bar(ir: int, *args, **kwargs):
+            def callback_with_bar(ir: int, *args, **kwargs) -> None:
                 bar.update(max(ir + 1 - bar.n, 0))
                 if cb is not None:
                     cb(ir, *args, **kwargs)
@@ -75,7 +78,14 @@ class ProgramClient(AbsProxy):
 
         return kwargs, bar
 
-    def _remote_call(self, func_name: str, *args, timeout=None, copy_=False, **kwargs):
+    def _remote_call(
+        self,
+        func_name: str,
+        *args,
+        timeout=None,
+        copy_=False,
+        **kwargs,
+    ) -> Any:
         # call server-side method with kwargs
         prog_s = self.prog_server
         if copy_:
@@ -107,18 +117,19 @@ class ProgramClient(AbsProxy):
     def test_remote_callback(self) -> bool:
         success_flag = False
 
-        def set_success(_):
+        def set_success(_: int) -> None:
             nonlocal success_flag
             success_flag = True
 
         print("Sending callback to server...", end="   ")
         with RemoteCallback(self, set_success) as cb:
+            assert cb is not None, "Callback should not be None in test_callback"
             self._remote_call("test_callback", cb)
             time.sleep(0.5)
         print("Callback test ", "passed" if success_flag else "failed", "!")
         return success_flag
 
-    def _remote_acquire(self, prog, decimated: bool, **kwargs):
+    def _remote_acquire(self, prog: MyProgram, decimated: bool, **kwargs) -> list:
         kwargs, bar = self._overwrite_kwargs_for_remote(prog, kwargs)
 
         with RemoteCallback(self, kwargs["callback"]) as cb:
@@ -143,5 +154,5 @@ class ProgramClient(AbsProxy):
     def set_early_stop(self) -> None:
         self._remote_call("set_early_stop", copy_=True, timeout=4)
 
-    def acquire(self, prog, decimated=False, **kwargs):
+    def acquire(self, prog: MyProgram, decimated: bool = False, **kwargs) -> list:
         return self._remote_acquire(prog, decimated=decimated, **kwargs)
