@@ -224,7 +224,7 @@ class InteractiveLines:
         "none": "<span style='color:gray'>未選擇線條</span>",
     }
 
-    def __init__(self, spectrum, mAs, fpts, mA_c=None, mA_e=None, minus_mean=True):
+    def __init__(self, spectrum, mAs, fpts, mA_c=None, mA_e=None, use_phase=True):
         plt.ioff()  # 避免立即顯示圖表
         self.fig_main, self.ax_main = plt.subplots(num=None)
         self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(5, 5), num=None)
@@ -238,7 +238,7 @@ class InteractiveLines:
 
         self.mAs = mAs
         self.fpts = fpts
-        self.amps = cast2real_and_norm(spectrum, minus_mean=minus_mean)
+        self.amps = cast2real_and_norm(spectrum, use_phase=use_phase)
 
         self.mouse_x = None
         self.mouse_y = None
@@ -768,6 +768,9 @@ class VisualizeSpet:
         self.scatter_size = 3
         self.scatter_color = "red"
         self.scatter_color_array = None  # 用於存儲顏色陣列
+
+        if len(self.s_spects) == 0:
+            raise ValueError("No spectrum data provided")
 
         first_spect = next(iter(self.s_spects.values()))
         mA_c, period = first_spect["mA_c"], first_spect["period"]

@@ -2,6 +2,7 @@ import json
 from typing import Optional, Tuple
 
 import numpy as np
+from scipy.optimize import root_scalar
 from scqubits import Fluxonium
 
 
@@ -44,6 +45,42 @@ class FluxoniumPredictor:
         energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 1)
 
         return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
+
+    def calibrate_current(
+        self, cur_A: float, cur_freq: float, transition: Tuple[int, int] = (0, 1)
+    ) -> float:
+        """
+        Calibrate the mA_c of the fluxonium qubit by a given current and frequency.
+        Args:
+            cur_A (float): Current in A.
+            cur_freq (float): Frequency in MHz.
+            transition (Tuple[int, int]): transition between which level
+        Returns:
+            float: fitting bias current in A (fit_A - cur_A).
+        """
+
+        def freq_diff_func(test_A):
+            return self.predict_freq(test_A, transition) - cur_freq
+
+        try:
+            result = root_scalar(
+                freq_diff_func,
+                x0=cur_A,
+                x1=cur_A + 1e-4,
+                method="secant",
+                bracket=[cur_A - 1e-3, cur_A + 1e-3],
+                xtol=1e-9,
+                maxiter=50,
+            )
+            if result.converged:
+                fit_A = result.root
+            else:
+                fit_A = cur_A
+        except Exception:
+            fit_A = cur_A
+
+        bias = fit_A - cur_A
+        return round(bias, 6)  # 1e-3mA precision
 
     def predict_lenrabi(self, cur_A: float, ref_A: float, ref_pilen: float) -> float:
         """

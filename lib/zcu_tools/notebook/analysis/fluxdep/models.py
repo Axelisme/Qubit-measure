@@ -95,7 +95,6 @@ def energy2transition(energies, allows):
 
     Returns:
     fs: numpy 陣列, 形狀 (N, K), 其中 N 是通量數量, K 是過渡數量
-    labels: list, 過渡標籤
     names: list, 過渡名稱
     """
     N, M = energies.shape

@@ -29,7 +29,7 @@ def calculate_energy_vs_flx(
     Calculate the energy of a fluxonium qubit.
     """
     if spectrum_data is not None:
-        return spectrum_data.energy_table  # early return
+        return spectrum_data, spectrum_data.energy_table  # early return
 
     # because energy is periodic, remove repeated values and record index
     flxs = flxs % 1.0

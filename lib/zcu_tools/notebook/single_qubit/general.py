@@ -323,7 +323,7 @@ def effective_temperature(
     """
 
     def boltzmann_distribution(freq: float, eff_T: float) -> float:
-        exp_term = np.exp(-1e6 * sc.h * freq / (sc.k * 1e-3 *eff_T))
+        exp_term = np.exp(-1e6 * sc.h * freq / (sc.k * 1e-3 * eff_T))
         return exp_term / np.sum(exp_term)
 
     # calculate the effective temperature

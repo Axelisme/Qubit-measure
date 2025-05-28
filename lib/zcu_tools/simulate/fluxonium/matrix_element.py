@@ -32,7 +32,7 @@ def calculate_n_oper_vs_flx(
     flxs: np.ndarray,
     return_dim: int = 4,
     spectrum_data: Optional[scq.SpectrumData] = None,
-) -> np.ndarray:
+) -> Tuple[scq.SpectrumData, np.ndarray]:
     """
     Calculate the matrix elements of the fluxonium vs. a parameter
     """

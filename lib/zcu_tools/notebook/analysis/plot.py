@@ -20,7 +20,7 @@ def plot_matrix_elements(
     flxs: np.ndarray,
     show_idxs: List[Tuple[int, int]],
     spectrum_data: Optional[scq.SpectrumData] = None,
-) -> go.Figure:
+) -> Tuple[go.Figure, scq.SpectrumData]:
     need_dim = max(max(i, j) for i, j in show_idxs) + 1
 
     spectrum_data, matrix_elements = calculate_n_oper_vs_flx(
