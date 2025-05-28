@@ -1,5 +1,5 @@
 import json
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 from scipy.optimize import root_scalar
@@ -11,7 +11,7 @@ class FluxoniumPredictor:
     Provide some methods to predict hyper-parameters of fluxonium measurement.
     """
 
-    def __init__(self, result_path: str, mA_c: Optional[float] = None) -> None:
+    def __init__(self, result_path: str, *, bias: float = 0.0) -> None:
         with open(result_path, "r") as f:
             data = json.load(f)
         self.params = np.array(
@@ -20,14 +20,12 @@ class FluxoniumPredictor:
         self.mA_c = data["half flux"]
         self.period = data["period"]
 
-        if mA_c is not None:
-            self.mA_c = mA_c
+        self.bias = bias
 
         self.fluxonium = Fluxonium(*self.params, flux=0.5, cutoff=40, truncated_dim=2)
 
-    @staticmethod
-    def _A_to_flx(cur_A: float, mA_c: float, period: float) -> float:
-        return (1e3 * cur_A - mA_c) / period + 0.5
+    def _A_to_flx(self, cur_A: float) -> float:
+        return (1e3 * (cur_A + self.bias) - self.mA_c) / self.period + 0.5
 
     def predict_freq(self, cur_A: float, transition: Tuple[int, int] = (0, 1)) -> float:
         """
@@ -39,14 +37,14 @@ class FluxoniumPredictor:
             float: transition frequency in MHz.
         """
 
-        flx = self._A_to_flx(cur_A, self.mA_c, self.period)
+        flx = self._A_to_flx(cur_A)
 
         self.fluxonium.flux = flx
         energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 1)
 
         return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
 
-    def calibrate_current(
+    def calculate_bias(
         self, cur_A: float, cur_freq: float, transition: Tuple[int, int] = (0, 1)
     ) -> float:
         """
@@ -82,6 +80,9 @@ class FluxoniumPredictor:
         bias = fit_A - cur_A
         return round(bias, 6)  # 1e-3mA precision
 
+    def update_bias(self, bias: float) -> None:
+        self.bias = bias
+
     def predict_lenrabi(self, cur_A: float, ref_A: float, ref_pilen: float) -> float:
         """
         Predict the length of Pi pulse for a given current.
@@ -92,8 +93,7 @@ class FluxoniumPredictor:
         Returns:
             float: Length of Pi pulse in ns.
         """
-        flx = self._A_to_flx(cur_A, self.mA_c, self.period)
-        ref_flx = self._A_to_flx(ref_A, self.mA_c, self.period)
+        flx, ref_flx = self._A_to_flx(cur_A), self._A_to_flx(ref_A)
 
         self.fluxonium.flux = flx
         n_oper = self.fluxonium.n_operator(energy_esys=True)

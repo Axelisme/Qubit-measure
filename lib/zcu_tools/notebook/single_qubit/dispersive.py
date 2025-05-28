@@ -5,7 +5,7 @@ from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from .general import figsize
 
 
-def dispersive1D_analyze(xs, snrs, xlabel=None):
+def dispersive1D_analyze(xs: np.ndarray, snrs: np.ndarray, xlabel: str = None) -> float:
     """
     Analyze 1D dispersive measurement data to find the maximum SNR position.
 
@@ -46,6 +46,33 @@ def dispersive1D_analyze(xs, snrs, xlabel=None):
     plt.show()
 
     return max_x
+
+
+def dispersive_ro_len_analyze(
+    ro_lens: np.ndarray, snrs: np.ndarray, t0: float = 1.0
+) -> float:
+    snrs = np.abs(snrs)
+
+    # fill NaNs with zeros
+    snrs[np.isnan(snrs)] = 0
+
+    snrs = gaussian_filter1d(snrs, 1)
+
+    # consider integral length cost
+    snrs /= np.sqrt(ro_lens + t0)
+
+    max_id = np.argmax(snrs)
+    max_len = ro_lens[max_id]
+
+    plt.figure(figsize=figsize)
+    plt.plot(ro_lens, snrs)
+    plt.axvline(max_len, color="r", ls="--", label=f"max SNR = {snrs[max_id]:.2f}")
+    plt.xlabel("Readout length (us)")
+    plt.ylabel("SNR (a.u.)")
+    plt.legend()
+    plt.show()
+
+    return max_len
 
 
 def dispersive2D_analyze(xs, ys, snr2D, xlabel=None, ylabel=None):
