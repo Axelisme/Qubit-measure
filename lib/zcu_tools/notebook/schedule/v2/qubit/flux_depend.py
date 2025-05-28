@@ -6,14 +6,13 @@ from zcu_tools.program.v2 import TwoToneProgram
 
 from ...tools import sweep2array, sweep2param
 from ..template import sweep2D_soft_hard_template
-from .twotone import qub_signal2snr
 
 
 def qub_signals2reals(signals):
     return np.abs(minus_background(signals, axis=1))
 
 
-def measure_qub_flux_dep(soc, soccfg, cfg, earlystop_snr=None):
+def measure_qub_flux_dep(soc, soccfg, cfg):
     """
     Measure qubit frequency as a function of flux bias.
 
@@ -55,38 +54,28 @@ def measure_qub_flux_dep(soc, soccfg, cfg, earlystop_snr=None):
 
     del cfg["sweep"]["flux"]  # use for loop here
 
-    mAs = sweep2array(flx_sweep, allow_array=True)
+    As = sweep2array(flx_sweep, allow_array=True)
     fpts = sweep2array(fpt_sweep)
 
-    cfg["dev"]["flux"] = mAs[0]  # set initial flux
+    cfg["dev"]["flux"] = As[0]  # set initial flux
 
     def updateCfg(cfg, _, mA):
         cfg["dev"]["flux"] = mA * 1e-3  # convert to A
-
-    if earlystop_snr is not None:
-
-        def checker(signals):
-            snr = qub_signal2snr(signals)
-            return snr >= earlystop_snr, f"Current SNR: {snr:.2f}"
-
-    else:
-        checker = None
 
     prog, signals2D = sweep2D_soft_hard_template(
         soc,
         soccfg,
         cfg,
         TwoToneProgram,
-        xs=1e3 * mAs,
+        xs=1e3 * As,
         ys=fpts,
         xlabel="Flux (mA)",
         ylabel="Frequency (MHz)",
         updateCfg=updateCfg,
         signal2real=qub_signals2reals,
-        early_stop_checker=checker,
     )
 
     # get the actual frequency points
     fpts: ndarray = prog.get_pulse_param("qub_pulse", "freq", as_array=True)
 
-    return mAs, fpts, signals2D
+    return As, fpts, signals2D

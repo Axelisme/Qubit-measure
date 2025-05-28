@@ -83,18 +83,26 @@ def measure_res_pdr_dep(
         cfg["dac"]["res_pulse"]["gain"] = pdr
 
         if dynamic_avg:
-            dyn_factor = gain_ref / max(pdr, 1e-6)
+            dyn_factor = (gain_ref / pdr)**2
             if dyn_factor > 1:
                 # increase reps
                 cfg["reps"] = int(reps_ref * dyn_factor)
-                if cfg["reps"] > 100 * reps_ref:
-                    cfg["reps"] = int(10 * reps_ref)
-            else:
+                max_reps = min(100*reps_ref, 1000000)
+                if cfg["reps"] > max_reps:
+                    cfg["reps"] = max_reps
+            elif cfg["soft_avgs"] > 1:
                 # decrease rounds
                 cfg["rounds"] = int(rounds_ref * dyn_factor)
-                if cfg["rounds"] < 0.1 * rounds_ref:
-                    cfg["rounds"] = int(0.1 * rounds_ref + 0.99)
-                cfg["soft_avgs"] = cfg["rounds"]
+                min_avgs = max(0.1 * rounds_ref, 1)
+                if cfg["rounds"] < min_avgs:
+                    cfg["rounds"] = min_avgs
+                cfg["soft_avgs"] = cfg["rounds"] # this two are the smae
+            else:
+                # decrease reps
+                cfg["reps"] = int(reps_ref * dyn_factor)
+                min_reps = max(int(0.1 * reps_ref), 1)
+                if cfg["reps"] < min_reps:
+                    cfg["reps"] = min_reps
 
     prog, signals2D = sweep2D_soft_hard_template(
         soc,

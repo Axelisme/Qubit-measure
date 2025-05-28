@@ -46,31 +46,23 @@ def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.n
 
     res_pulse["freq"] = sweep2param("freq", fpt_sweep)
 
-    flxs = sweep2array(flx_sweep, allow_array=True)
+    As = sweep2array(flx_sweep, allow_array=True)
     fpts = sweep2array(fpt_sweep)  # predicted frequency points
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    cfg["dev"]["flux"] = flxs[0]  # set initial flux
+    cfg["dev"]["flux"] = As[0]  # set initial flux
 
-    def updateCfg(cfg, i, flx):
-        """
-        Updates configuration with current flux value during the sweep.
-
-        Args:
-            cfg (dict): Configuration dictionary to update.
-            i (int): Current index in the sweep.
-            flx (float): Current flux value to set.
-        """
-        cfg["dev"]["flux"] = flx
+    def updateCfg(cfg, _, mA):
+        cfg["dev"]["flux"] = mA * 1e-3
 
     prog, signals2D = sweep2D_soft_hard_template(
         soc,
         soccfg,
         cfg,
         OneToneProgram,
-        xs=flxs,
+        xs=1e3 * As,
         ys=fpts,
-        xlabel="Flux (a.u.)",
+        xlabel="Flux (mA)",
         ylabel="Frequency (MHz)",
         updateCfg=updateCfg,
         signal2real=signal2real,
@@ -79,4 +71,4 @@ def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.n
     # get the actual frequency points
     fpts = prog.get_pulse_param("res_pulse", "freq", as_array=True)
 
-    return flxs, fpts, signals2D
+    return As, fpts, signals2D

@@ -8,21 +8,17 @@ from zcu_tools.notebook.single_qubit.process import rotate2real
 from ...tools import format_sweep1D, sweep2array, sweep2param
 from ..template import sweep_hard_template
 
-def qub_signal2real(signals: np.ndarray) -> np.ndarray:
-    return np.abs(rotate2real(signals - np.mean(signals)).real)
 
-def measure_reset_freq(
-    soc, soccfg, cfg, ro_freq: float
-) -> Tuple[np.ndarray, np.ndarray]:
+def qub_signal2real(signals: np.ndarray) -> np.ndarray:
+    return rotate2real(signals).real
+
+
+def measure_reset_freq(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
     reset_pulse = cfg["dac"]["reset_pulse"]
 
     if cfg["dac"]["reset"] != "pulse":
         raise ValueError("Reset pulse must be one pulse")
-    if cfg["dac"]["readout"] != "passive":
-        raise ValueError("Readout must be passive")
-    cfg["adc"]["ro_freq"] = ro_freq
-    cfg["adc"]["gen_ch"] = reset_pulse["ch"] # TODO: I don't known why need this
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
 
@@ -40,7 +36,7 @@ def measure_reset_freq(
         progress=True,
         xlabel="Frequency (MHz)",
         ylabel="Amplitude",
-        signal2real=qub_signal2real
+        signal2real=qub_signal2real,
     )
 
     # get the actual frequency points
@@ -78,7 +74,7 @@ def measure_mux_reset_freq(
         progress=True,
         xlabel="Frequency1 (MHz)",
         ylabel="Frequency2 (MHz)",
-        signal2real=qub_signal2real
+        signal2real=qub_signal2real,
     )
 
     # get the actual frequency points
