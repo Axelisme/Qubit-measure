@@ -83,7 +83,13 @@ class InstantShow1D(BaseInstantShow):
     """
 
     def __init__(
-        self, xs, x_label: str, y_label: str, title: Optional[str] = None, **kwargs
+        self,
+        xs,
+        x_label: str,
+        y_label: str,
+        title: Optional[str] = None,
+        num_line: int = 1,
+        **kwargs,
     ):
         """
         Initialize a 1D instant show plot.
@@ -100,44 +106,17 @@ class InstantShow1D(BaseInstantShow):
         self.xs = xs
         sorted_xs = xs[np.argsort(xs)]
 
-        err_kwargs = {"linestyle": "--", "color": "lightgray"}
-        self.err_up = self.ax.plot(sorted_xs, np.zeros_like(xs), **err_kwargs)[0]
-        self.err_dn = self.ax.plot(sorted_xs, np.zeros_like(xs), **err_kwargs)[0]
-
         kwargs.setdefault("linestyle", "-")
         kwargs.setdefault("marker", ".")
-        self.contain = self.ax.plot(sorted_xs, np.zeros_like(xs), **kwargs)[0]
-
-    def _smooth_errs(self, errs):
-        """
-        Smooth error values using median filtering.
-
-        Args:
-            errs: Array of error values to smooth
-
-        Returns:
-            Smoothed error array with the same shape as input
-        """
-        if np.all(np.isnan(errs)):
-            return errs
-
-        s_len = max(len(errs) // 20, 1)
-        _errs = np.full_like(errs, np.nan)
-        for i in range(len(errs)):
-            start = max(0, i - s_len)
-            end = min(len(errs), i + s_len)
-            if start == end or np.all(np.isnan(errs[start:end])):
-                _errs[i] = np.nan
-            else:
-                _errs[i] = np.nanmedian(errs[start:end])
-        _errs[np.isnan(errs)] = np.nan
-        return _errs
+        self.contains = [
+            self.ax.plot(sorted_xs, np.zeros_like(xs), **kwargs)[0]
+            for _ in range(num_line)
+        ]
 
     def update_show(
         self,
         signals_real: np.ndarray,
         *,
-        errs: Optional[np.ndarray] = None,
         ticks: Optional[np.ndarray] = None,
         title: Optional[str] = None,
     ):
@@ -146,29 +125,19 @@ class InstantShow1D(BaseInstantShow):
 
         Args:
             signals_real: Array of y-values to display
-            errs: Optional array of error values corresponding to signals_real
             ticks: Optional new x-axis values to replace the existing ones
             title: Optional new title for the plot
         """
-        if errs is None:
-            errs = np.full_like(signals_real, np.nan)
-
         if ticks is not None:
             self.xs = ticks
 
         sorted_idxs = np.argsort(self.xs)
         sorted_xs = self.xs[sorted_idxs]
         signals_real = signals_real[sorted_idxs]
-        errs = errs[sorted_idxs]
-
-        # smooth error bars
-        errs_up = signals_real + 2 * errs
-        errs_dn = signals_real - 2 * errs
 
         with self.update_lock:
-            self.contain.set_data(sorted_xs, signals_real)
-            self.err_up.set_data(sorted_xs, errs_up)
-            self.err_dn.set_data(sorted_xs, errs_dn)
+            for i, contain in enumerate(self.contains):
+                contain.set_data(sorted_xs, signals_real[i])
 
             if title:
                 self.fig.suptitle(title)
@@ -262,7 +231,6 @@ class InstantShow2D(BaseInstantShow):
         *,
         ticks: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         title: Optional[str] = None,
-        errs: Optional[np.ndarray] = None,
         signals_real_1D: Optional[np.ndarray] = None,
     ):
         """
@@ -272,7 +240,6 @@ class InstantShow2D(BaseInstantShow):
             signals_real: 2D array of values to display as a heatmap
             ticks: Optional tuple of (X, Y) arrays to update axis extents
             title: Optional new title for the plot
-            errs: Optional array of error values (not used in this class)
             signals_real_1D: Optional 1D array of values to display as a line plot
 
         Raises:

@@ -63,13 +63,9 @@ def sweep1D_hard_template(
     ] = default_result2signals,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
-    early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,
     **kwargs,
 ) -> Tuple[ndarray, ndarray]:
     signals = np.full_like(xs, np.nan, dtype=complex)
-    stds = np.full_like(xs, np.nan, dtype=float)
-
-    reps = cfg["reps"]
 
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
@@ -80,22 +76,17 @@ def sweep1D_hard_template(
             prog = prog_cls(soccfg, cfg)
 
             def callback(ir, sum_d, sum2_d):
-                nonlocal signals, stds, title
-                signals, stds = result2signals(*raw2result(ir, sum_d, sum2_d))
-                if early_stop_checker is not None:
-                    stop, title = early_stop_checker(signals)
-                    if stop:
-                        prog.set_early_stop()
+                nonlocal signals, title
+                signals, _ = result2signals(*raw2result(ir, sum_d, sum2_d))
                 viewer.update_show(
                     signal2real(signals),
-                    errs=std2err(stds, (ir + 1) * reps),
                     title=title,
                 )
 
             xs, *result = prog.acquire(
                 soc, progress=progress, callback=callback, **kwargs
             )
-            signals, stds = result2signals(*result)
+            signals, _ = result2signals(*result)
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
         except Exception:
@@ -105,7 +96,6 @@ def sweep1D_hard_template(
             viewer.update_show(
                 signal2real(signals),
                 ticks=xs,
-                errs=std2err(stds, reps * cfg["soft_avgs"]),
                 title=title,
             )
 
@@ -133,8 +123,6 @@ def sweep1D_soft_template(
     signals = np.full_like(xs, np.nan, dtype=complex)
     stds = np.full_like(xs, np.nan, dtype=float)
 
-    N = cfg["soft_avgs"] * cfg["reps"]
-
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
@@ -159,7 +147,7 @@ def sweep1D_soft_template(
                     else:
                         raise ValueError("prog_or_fn must be a type or a callable")
 
-                    async_draw(i, signal2real(signals), errs=std2err(stds, N))
+                    async_draw(i, signal2real(signals))
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
@@ -167,7 +155,7 @@ def sweep1D_soft_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signal2real(signals), errs=std2err(stds, N))
+            viewer.update_show(signal2real(signals))
             xs_tqdm.close()
 
     return xs, signals

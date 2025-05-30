@@ -7,7 +7,6 @@ from .base import fidelity_func
 from .center import fit_ge_by_center
 from .manual import fit_ge_manual
 from .pca import fit_ge_by_pca
-from .regression import fit_ge_by_regression
 
 NUM_BINS = 201
 
@@ -117,8 +116,6 @@ def singleshot_ge_analysis(
 
     if backend == "center":
         return fit_ge_by_center(signals)
-    if backend == "regression":
-        return fit_ge_by_regression(signals)
     if backend == "pca":
         return fit_ge_by_pca(signals)
 

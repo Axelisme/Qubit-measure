@@ -28,7 +28,7 @@ def qub_signal2snr(signals: np.ndarray) -> float:
 
 
 def measure_qub_freq(
-    soc, soccfg, cfg, remove_bg=False, earlystop_snr=None
+    soc, soccfg, cfg, remove_bg=False
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Perform a frequency sweep measurement of a qubit using two-tone spectroscopy.
@@ -41,8 +41,6 @@ def measure_qub_freq(
                                    conjugate reset is not used. Defaults to None.
         remove_bg (bool, optional): Whether to remove background from signals.
                                    Defaults to False.
-        earlystop_snr (float, optional): Early stop signal-to-noise ratio threshold.
-                                         Defaults to None.
 
     Returns:
         tuple:
@@ -66,14 +64,6 @@ def measure_qub_freq(
     kwargs = {"xlabel": "Frequency (MHz)", "ylabel": "Amplitude"}
     if remove_bg:
         kwargs["signal2real"] = qub_signal2real
-
-    if earlystop_snr is not None:
-
-        def checker(signals):
-            snr = qub_signal2snr(signals)
-            return snr >= earlystop_snr, f"SNR: {snr:.2f}"
-
-        kwargs["early_stop_checker"] = checker
 
     prog, signals = sweep_hard_template(
         soc,

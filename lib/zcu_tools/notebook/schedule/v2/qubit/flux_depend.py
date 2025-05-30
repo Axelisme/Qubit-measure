@@ -28,9 +28,6 @@ def measure_qub_flux_dep(soc, soccfg, cfg):
             - dev: Device configuration with flux_dev and flux settings.
             - dac: DAC configuration with qub_pulse settings.
             - sweep: Sweep parameters for freq and flux.
-        earlystop_snr (float, optional): Early stop signal-to-noise ratio threshold.
-            If provided, the measurement will stop if the SNR exceeds this value.
-            Defaults to None.
 
     Returns:
         tuple: Three-element tuple containing:

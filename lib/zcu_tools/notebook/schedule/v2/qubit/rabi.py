@@ -1,12 +1,8 @@
 from typing import Tuple
+from copy import deepcopy
 
 import numpy as np
-from zcu_tools.auto import make_cfg
-from zcu_tools.notebook.single_qubit.process import (
-    calculate_noise,
-    peak_n_avg,
-    rotate2real,
-)
+from zcu_tools.notebook.single_qubit.process import rotate2real
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.program.v2.base.simulate import SimulateProgramV2
 
@@ -14,17 +10,8 @@ from ...tools import format_sweep1D, sweep2array, sweep2param
 from ..template import sweep_hard_template
 
 
-def qub_signals2reals(signals: np.ndarray) -> np.ndarray:
+def qub_signal2real(signals: np.ndarray) -> np.ndarray:
     return rotate2real(signals).real
-
-
-def qub_signal2snr(signals: np.ndarray) -> float:
-    noise, m_signals = calculate_noise(signals)
-
-    m_real = rotate2real(m_signals).real
-    contrast = peak_n_avg(m_real, n=3, mode="max") - peak_n_avg(m_real, n=3, mode="min")
-
-    return contrast / noise
 
 
 def measure_lenrabi(
@@ -58,7 +45,7 @@ def measure_lenrabi(
         - First element: Array of actual pulse lengths used (in microseconds)
         - Second element: Array of measured amplitude responses
     """
-    cfg = make_cfg(cfg)  # prevent in-place modification
+    cfg = deepcopy(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]
 
@@ -83,7 +70,7 @@ def measure_lenrabi(
         progress=True,
         xlabel="Length (us)",
         ylabel="Amplitude",
-        signal2real=qub_signals2reals,
+        signal2real=qub_signal2real,
     )
 
     # get the actual lengths
@@ -94,7 +81,7 @@ def measure_lenrabi(
 
 
 def visualize_lenrabi(soccfg, cfg, *, force_align=True, time_fly=0.0) -> None:
-    cfg = make_cfg(cfg)  # prevent in-place modification
+    cfg = deepcopy(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]
 
@@ -113,9 +100,7 @@ def visualize_lenrabi(soccfg, cfg, *, force_align=True, time_fly=0.0) -> None:
     visualizer.visualize(time_fly=time_fly)
 
 
-def measure_amprabi(
-    soc, soccfg, cfg, earlystop_snr=None
-) -> Tuple[np.ndarray, np.ndarray]:
+def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     """Measure Rabi oscillation by sweeping pulse amplitude (gain).
 
     This function performs a Rabi measurement experiment by varying the amplitude/gain of the
@@ -133,9 +118,6 @@ def measure_amprabi(
         Must include:
         - sweep: dict with gain sweep parameters
         - dac: dict with qubit pulse settings
-    earlystop_snr : float, optional
-        Early stop signal-to-noise ratio threshold. If provided, the measurement will stop
-        when the SNR exceeds this value.
 
     Returns
     -------
@@ -144,21 +126,12 @@ def measure_amprabi(
         - First element: Array of actual pulse gains/amplitudes used
         - Second element: Array of measured amplitude responses
     """
-    cfg = make_cfg(cfg)  # prevent in-place modification
+    cfg = deepcopy(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
 
     sweep_cfg = cfg["sweep"]["gain"]
     cfg["dac"]["qub_pulse"]["gain"] = sweep2param("gain", sweep_cfg)
-
-    if earlystop_snr is not None:
-
-        def checker(signals):
-            snr = qub_signal2snr(signals)
-            return snr >= earlystop_snr, f"SNR: {snr:.2g}"
-
-    else:
-        checker = None
 
     amps = sweep2array(sweep_cfg)  # predicted amplitudes
     prog, signals = sweep_hard_template(
@@ -170,8 +143,7 @@ def measure_amprabi(
         progress=True,
         xlabel="Pulse gain",
         ylabel="Amplitude",
-        signal2real=qub_signals2reals,
-        early_stop_checker=checker,
+        signal2real=qub_signal2real,
     )
 
     # get the actual amplitudes
@@ -181,7 +153,7 @@ def measure_amprabi(
 
 
 def visualize_amprabi(soccfg, cfg, *, time_fly=0.0) -> None:
-    cfg = make_cfg(cfg)  # prevent in-place modification
+    cfg = deepcopy(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
 

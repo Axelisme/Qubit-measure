@@ -51,7 +51,6 @@ def sweep_hard_template(
     ] = default_result2signal,
     signal2real: Callable[[ndarray], ndarray] = default_signal2real,
     progress: bool = True,
-    early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,
     **kwargs,
 ) -> Tuple[MyProgramV2, ndarray]:
     """
@@ -68,7 +67,6 @@ def sweep_hard_template(
         result2signals: Function to convert raw results to signal data
         signal2real: Function to convert complex signals to real values
         progress: Whether to show progress bars
-        early_stop_checker: Optional function to check for early stopping
         **kwargs: Additional arguments passed to the acquire method
 
     Returns:
@@ -78,8 +76,6 @@ def sweep_hard_template(
     """
     signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
     stds = np.full_like(signals, np.nan, dtype=float)
-
-    reps = cfg["reps"]
 
     ViewerCls = [InstantShow1D, InstantShow2D][len(ticks) - 1]
 
@@ -93,13 +89,7 @@ def sweep_hard_template(
         def callback(ir, sum_d, sum2_d):
             nonlocal signals, stds, title
             signals, stds = result2signals(*raw2result(ir, sum_d, sum2_d))
-            if early_stop_checker is not None:
-                stop, title = early_stop_checker(signals)
-                if stop:
-                    prog.set_early_stop()
-            viewer.update_show(
-                signal2real(signals), errs=std2err(stds, (ir + 1) * reps), title=title
-            )
+            viewer.update_show(signal2real(signals), title=title)
 
         try:
             prog = prog_cls(soccfg, cfg)
@@ -115,11 +105,7 @@ def sweep_hard_template(
                 raise e  # the error is happen in initialize of program
             print("Error during measurement:")
             print_traceback()
-        viewer.update_show(
-            signal2real(signals),
-            errs=std2err(stds, cfg["soft_avgs"] * reps),
-            title=title,
-        )
+        viewer.update_show(signal2real(signals), title=title)
 
     return prog, signals
 
@@ -167,8 +153,6 @@ def sweep1D_soft_template(
     signals = np.full_like(xs, np.nan, dtype=complex)
     stds = np.full_like(xs, np.nan, dtype=float)
 
-    N = cfg["soft_avgs"] * cfg["reps"]
-
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
@@ -186,14 +170,14 @@ def sweep1D_soft_template(
                     result = prog.acquire(soc, progress=False, **kwargs)
                     signals[i], stds[i] = result2signals(*result)
 
-                    async_draw(i, signal2real(signals), errs=std2err(stds, N))
+                    async_draw(i, signal2real(signals))
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
         except Exception:
             print("Error during measurement:")
             print_traceback()
-        viewer.update_show(signal2real(signals), errs=std2err(stds, N))
+        viewer.update_show(signal2real(signals))
 
     return xs, signals
 
@@ -214,7 +198,6 @@ def sweep2D_soft_hard_template(
     ] = default_result2signal,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
-    early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,
     **kwargs,
 ) -> Tuple[MyProgramV2, ndarray]:
     """
@@ -233,7 +216,6 @@ def sweep2D_soft_hard_template(
         result2signals: Function to convert raw results to signal data
         signal2real: Function to convert complex signals to real values
         progress: Whether to show progress bars
-        early_stop_checker: Optional function to check for early stopping
         **kwargs: Additional arguments passed to the acquire method
 
     Returns:
@@ -273,10 +255,6 @@ def sweep2D_soft_hard_template(
                         _signals2D[i], _ = result2signals(
                             *raw2result(ir, sum_d, sum2_d)
                         )
-                        if early_stop_checker is not None:
-                            stop, title = early_stop_checker(_signals2D[i])
-                            if stop:
-                                prog.set_early_stop()
                         signals_real = signal2real(_signals2D)
                         viewer.update_show(
                             signals_real, title=title, signals_real_1D=signals_real[i]

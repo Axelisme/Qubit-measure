@@ -9,7 +9,7 @@ from .ge_different import (
 )
 from .power_depend import measure_qub_pdr_dep
 from .rabi import measure_amprabi, measure_lenrabi, visualize_amprabi, visualize_lenrabi
-from .reset import measure_mux_reset_freq, measure_reset_freq
+from .reset import measure_mux_reset_freq, measure_reset_freq, measure_mux_reset_amprabi
 from .singleshot import measure_singleshot
 from .time_domain import (
     measure_t1,
@@ -46,4 +46,5 @@ __all__ = [
     "measure_singleshot",
     "measure_reset_freq",
     "measure_mux_reset_freq",
+    "measure_mux_reset_amprabi",
 ]

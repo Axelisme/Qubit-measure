@@ -4,8 +4,7 @@ from .base import batch_fit_func, fit_func
 
 
 # Gaussian function
-def gauss_func(x, *p):
-    yscale, x_c, sigma = p
+def gauss_func(x, yscale, x_c, sigma):
     return yscale * np.exp(-0.5 * ((x - x_c) / sigma) ** 2)
 
 
@@ -37,8 +36,8 @@ def fit_gauss(xdata, ydata, fixedparams=None):
 
 
 # # Dual Gaussian function
-def dual_gauss_func(x, *p):
-    return gauss_func(x, *p[:3]) + gauss_func(x, *p[3:])
+def dual_gauss_func(x, yscale1, x_c1, sigma1, yscale2, x_c2, sigma2):
+    return gauss_func(x, yscale1, x_c1, sigma1) + gauss_func(x, yscale2, x_c2, sigma2)
 
 
 def guess_dual_gauss_params(xdata, ydata):

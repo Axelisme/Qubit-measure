@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 
 from myqick.asm_v2 import AveragerProgramV2
 
+from .pulse import trigger_pulse
+
 
 class AbsReset(ABC):
     @abstractmethod
@@ -37,18 +39,7 @@ class PulseReset(AbsReset):
         prog.declare_pulse(prog.reset_pulse, "reset")
 
     def reset_qubit(self, prog: AveragerProgramV2):
-        reset_pulse = prog.reset_pulse
-
-        pre_delay = reset_pulse.get("pre_delay")
-        post_delay = reset_pulse.get("post_delay")
-
-        if pre_delay is not None:
-            prog.delay_auto(pre_delay)
-
-        prog.pulse(reset_pulse["ch"], "reset")
-
-        if post_delay is not None:
-            prog.delay_auto(post_delay)
+        trigger_pulse(prog, prog.reset_pulse)
 
 
 class TwoPulseReset(AbsReset):
