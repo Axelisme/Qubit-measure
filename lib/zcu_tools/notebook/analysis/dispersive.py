@@ -133,9 +133,7 @@ def auto_fit_dispersive(
     amps = np.abs(signals)
 
     # determine whether fit the value to max or min
-    avg_amp = np.mean(amps, axis=1)
-    max_amp, min_amp = np.max(amps, axis=1), np.min(amps, axis=1)
-    fit_factor = 1 if np.sum(max_amp + min_amp) > 2 * np.sum(avg_amp) else -1
+    fit_factor = 1 if np.sum(amps[:, amps.shape[1] // 2] - amps[:, 0]) < 0 else -1
 
     # derive the initial g value if not provided
     if g_init is None:
