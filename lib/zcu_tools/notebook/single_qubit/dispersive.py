@@ -59,9 +59,7 @@ def dispersive_ro_len_analyze(
     snrs = gaussian_filter1d(snrs, 1)
 
     # consider integral length cost
-    snrs /= np.sqrt(ro_lens + t0)
-
-    max_id = np.argmax(snrs)
+    max_id = np.argmax(snrs / np.sqrt(ro_lens + t0))
     max_len = ro_lens[max_id]
 
     plt.figure(figsize=figsize)

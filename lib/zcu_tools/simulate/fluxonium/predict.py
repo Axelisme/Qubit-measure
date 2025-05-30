@@ -11,7 +11,7 @@ class FluxoniumPredictor:
     Provide some methods to predict hyper-parameters of fluxonium measurement.
     """
 
-    def __init__(self, result_path: str, *, bias: float = 0.0) -> None:
+    def __init__(self, result_path: str, bias: float = 0.0) -> None:
         with open(result_path, "r") as f:
             data = json.load(f)
         self.params = np.array(
@@ -77,7 +77,7 @@ class FluxoniumPredictor:
         except Exception:
             fit_A = cur_A
 
-        bias = fit_A - cur_A
+        bias = fit_A - cur_A + self.bias
         return round(bias, 6)  # 1e-3mA precision
 
     def update_bias(self, bias: float) -> None:

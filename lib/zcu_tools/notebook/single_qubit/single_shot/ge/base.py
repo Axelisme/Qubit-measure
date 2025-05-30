@@ -3,7 +3,7 @@ from typing import Callable, Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from zcu_tools.notebook.util.fitting import batch_fit_dual_gauss, gauss_func
+from zcu_tools.notebook.util.fitting import gauss_func, fit_dual_gauss
 
 
 def rotate(
@@ -239,8 +239,9 @@ def fitting_ge_and_plot(
     axs[0, 1].hist(xs, bins=bins, weights=ng, color="b", alpha=0.5)
     axs[1, 1].hist(xs, bins=bins, weights=ne, color="r", alpha=0.5)
 
-    ge_params, _ = batch_fit_dual_gauss([xs, xs], [ng, ne])
-    g_params, e_params = ge_params
+    ge_params, _ = fit_dual_gauss(xs, ng + ne)
+    g_params, _ = fit_dual_gauss(xs, ng, fixedparams=[None, *ge_params[1:3], None, *ge_params[4:6]])
+    e_params, _ = fit_dual_gauss(xs, ne, fixedparams=[None, *ge_params[1:3], None, *ge_params[4:6]])
 
     n_gg, n_ge = g_params[0], g_params[3]
     n_eg, n_ee = e_params[0], e_params[3]

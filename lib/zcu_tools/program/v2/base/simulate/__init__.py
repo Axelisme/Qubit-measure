@@ -121,7 +121,8 @@ class SimulateProgramV2:
     def trigger_hook(self, ros=None, pins=None, t=0, *args, **kwargs) -> None:
         if t is None:
             t = self.sim_ref_t
-        t = max_t(t, self.sim_ref_t)
+        else:
+            t = self.sim_ref_t + t
 
         # TODO: this only works for single readout pulse
         self.sim_ro_t = t + self.sim_ro_length

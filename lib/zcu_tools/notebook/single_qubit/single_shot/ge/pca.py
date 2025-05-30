@@ -10,7 +10,7 @@ def get_rotate_angle(
 ) -> dict:
     signals = np.concatenate([Ig + 1j * Qg, Ie + 1j * Qe])
     _, angle = rotate2real(signals, ret_angle=True)
-    return {"theta": angle}
+    return {"theta": -angle}
 
 
 def fit_ge_by_pca(signals: np.ndarray) -> tuple:
