@@ -131,9 +131,12 @@ class InstantShow1D(BaseInstantShow):
         if ticks is not None:
             self.xs = ticks
 
+        if len(signals_real.shape) == 1:
+            signals_real = signals_real.reshape(1, -1)
+
         sorted_idxs = np.argsort(self.xs)
         sorted_xs = self.xs[sorted_idxs]
-        signals_real = signals_real[sorted_idxs]
+        signals_real = signals_real[:, sorted_idxs]
 
         with self.update_lock:
             for i, contain in enumerate(self.contains):
