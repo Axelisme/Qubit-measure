@@ -5,7 +5,7 @@ from myqick.asm_v2 import AveragerProgramV2
 
 def trigger_pulse(prog, pulse: Dict[str, Any]) -> None:
     pre_delay = pulse.get("pre_delay")
-    post_delay = pulse.get("post_delay")
+    post_delay = pulse.get("post_delay", 0.0)
 
     if pre_delay is not None:
         prog.delay_auto(pre_delay, ros=False)

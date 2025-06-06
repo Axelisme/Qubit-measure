@@ -6,6 +6,7 @@ import scqubits as scq
 
 from zcu_tools.simulate.fluxonium import (
     calculate_dispersive_vs_flx,
+    calculate_energy_vs_flx,
     calculate_n_oper_vs_flx,
 )
 
@@ -80,5 +81,31 @@ def plot_t1s(
     fig.add_trace(go.Scatter(x=flxs, y=t1s, mode="lines", name="t1"))
     fig.update_layout(title_x=0.51, yaxis_type="log")
     fig.update_yaxes(exponentformat="power")
+
+    return fig
+
+
+def plot_transitions(
+    params: Tuple[float, float, float],
+    flxs: np.ndarray,
+    show_idxs: List[Tuple[int, int]],
+    ref_freqs: Optional[List[float]] = None,
+) -> go.Figure:
+    fig = go.Figure()
+
+    _, energies = calculate_energy_vs_flx(params, flxs)
+
+    for i, j in show_idxs:
+        fig.add_trace(
+            go.Scatter(
+                x=flxs, y=energies[:, j] - energies[:, i], mode="lines", name=f"{i}-{j}"
+            )
+        )
+    if ref_freqs is not None:
+        for ref_freq in ref_freqs:
+            fig.add_hline(
+                y=ref_freq, line_color="black", line_width=2, line_dash="dash"
+            )
+    fig.update_layout(title_x=0.51)
 
     return fig

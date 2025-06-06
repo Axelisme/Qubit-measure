@@ -6,7 +6,6 @@ from matplotlib.colors import TABLEAU_COLORS
 
 from .gauss2d import fit_gauss_2d, fit_gauss_2d_bayesian
 from .ge import fidelity_func, singleshot_ge_analysis, singleshot_visualize
-from .rabi import singleshot_rabi_analysis, visualize_singleshot_rabi
 
 
 def fit_singleshot2d(
@@ -127,6 +126,4 @@ __all__ = [
     "singleshot_ge_analysis",
     "fit_singleshot2d",
     "singleshot_visualize",
-    "singleshot_rabi_analysis",
-    "visualize_singleshot_rabi",
 ]

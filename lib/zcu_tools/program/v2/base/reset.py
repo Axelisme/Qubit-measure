@@ -66,7 +66,7 @@ class TwoPulseReset(AbsReset):
         reset_pulse2 = prog.reset_pulse2
 
         pre_delay = reset_pulse1.get("pre_delay")
-        post_delay = reset_pulse2.get("post_delay")
+        post_delay = reset_pulse2.get("post_delay", 0.0)
 
         if pre_delay is not None:
             prog.delay_auto(pre_delay)
