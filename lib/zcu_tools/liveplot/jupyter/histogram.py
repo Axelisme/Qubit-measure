@@ -1,0 +1,34 @@
+from typing import Optional, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+from ..segments import HistogramSegment
+from .base import JupyterLivePlotter
+
+
+class LivePlotterHistogram(JupyterLivePlotter):
+    def __init__(
+        self,
+        xlabel: str,
+        ylabel: str,
+        bins: int = 50,
+        title: Optional[str] = None,
+        figsize: Optional[Tuple[int, int]] = None,
+    ):
+        segment = HistogramSegment(xlabel, ylabel, title, bins)
+        super().__init__([segment], figsize=figsize)
+
+    def update(
+        self,
+        signals: np.ndarray,
+        title: Optional[str] = None,
+        refresh: bool = True,
+    ) -> None:
+        ax: plt.Axes = self.axs[0]
+        segment: HistogramSegment = self.segments[0]
+
+        with self.update_lock:
+            segment.update(ax, signals, title)
+            if refresh:
+                self._refresh_unchecked()

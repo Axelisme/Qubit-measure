@@ -1,4 +1,3 @@
-# type: ignore
 """
 Real-time data visualization tools for Jupyter notebooks.
 
