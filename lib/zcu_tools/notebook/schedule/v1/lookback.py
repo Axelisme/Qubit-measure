@@ -6,7 +6,8 @@ from zcu_tools import make_cfg
 from zcu_tools.program.v1 import OneToneProgram, TwoToneProgram
 
 from ..flux import set_flux
-from ..instant_show import InstantShow1D
+
+from zcu_tools.liveplot.jupyter import LivePlotter1D
 
 
 def measure_one(soc, soccfg, cfg, progress, qub_pulse):
@@ -49,16 +50,7 @@ def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
             disable=not progress,
         )
 
-        total_num = soccfg.us2cycles(total_len, ro_ch=cfg["adc"]["chs"][0])
-        viewer = InstantShow1D(
-            np.linspace(0, total_len, total_num, endpoint=False),
-            x_label="Time (us)",
-            y_label="Amplitude",
-            linestyle="-",
-            marker=None,
-        )
-
-        with viewer:
+        with LivePlotter1D("Time (us)", "Amplitude") as viewer:
             Ts = []
             signals = []
             while trig_offset < total_len:
@@ -71,9 +63,7 @@ def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
                 Ts.append(Ts_)
                 signals.append(signals_)
 
-                viewer.update_show(
-                    np.abs(np.concatenate(signals)), ticks=np.concatenate(Ts)
-                )
+                viewer.update(np.concatenate(Ts), np.abs(np.concatenate(signals)))
 
                 trig_offset += MAX_LEN
                 bar.update()
@@ -86,6 +76,6 @@ def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
             Ts = Ts[sort_idxs]
             signals = signals[sort_idxs]
 
-            viewer.update_show(np.abs(signals), ticks=Ts)
+            viewer.update(Ts, np.abs(signals))
 
     return Ts, signals

@@ -13,7 +13,7 @@ class JupyterLivePlotter(AbsLivePlotter):
 
     def __init__(
         self, segments: List[AbsSegment], figsize: Optional[Tuple[int, int]] = None
-    ):
+    ) -> None:
         if len(segments) == 0:
             raise ValueError("At least one segment is required.")
 
@@ -48,11 +48,11 @@ class JupyterLivePlotter(AbsLivePlotter):
         with self.update_lock:
             self._refresh_unchecked()
 
-    def __enter__(self):
+    def __enter__(self) -> "JupyterLivePlotter":
         for ax, segment in zip(self.axs, self.segments):
             segment.init_ax(ax)
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
         plt.close(self.fig)
         pass

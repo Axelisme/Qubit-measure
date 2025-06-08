@@ -4,12 +4,11 @@ from typing import Any, Callable, Dict, Optional, Tuple, Type
 import numpy as np
 from numpy import ndarray
 from tqdm.auto import tqdm
+from zcu_tools.liveplot.jupyter import JupyterLivePlotter, LivePlotter1D, LivePlotter2D
 from zcu_tools.program.v2 import MyProgramV2
 from zcu_tools.tools import AsyncFunc, print_traceback
 
 from ..flux import set_flux
-from ..instant_show import InstantShow1D, InstantShow2D
-from ..v1.template import sweep2D_maximize_template  # noqa
 
 
 def default_result2signal(
@@ -77,19 +76,20 @@ def sweep_hard_template(
     signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
     stds = np.full_like(signals, np.nan, dtype=float)
 
-    ViewerCls = [InstantShow1D, InstantShow2D][len(ticks) - 1]
+    ViewerCls: JupyterLivePlotter = [LivePlotter1D, LivePlotter2D][len(ticks) - 1]
+    assert isinstance(ViewerCls, JupyterLivePlotter)
 
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     prog = None
     title = None
-    with ViewerCls(*ticks, xlabel, ylabel, title=title) as viewer:
+    with ViewerCls(xlabel, ylabel, title=title) as viewer:
 
-        def callback(ir, sum_d, sum2_d):
+        def callback(ir, sum_d, sum2_d) -> None:
             nonlocal signals, stds, title
             signals, stds = result2signals(*raw2result(ir, sum_d, sum2_d))
-            viewer.update_show(signal2real(signals), title=title)
+            viewer.update(*ticks, signal2real(signals), title=title)
 
         try:
             prog = prog_cls(soccfg, cfg)
@@ -105,7 +105,7 @@ def sweep_hard_template(
                 raise e  # the error is happen in initialize of program
             print("Error during measurement:")
             print_traceback()
-        viewer.update_show(signal2real(signals), title=title)
+        viewer.update(*ticks, signal2real(signals), title=title)
 
     return prog, signals
 
@@ -156,10 +156,10 @@ def sweep1D_soft_template(
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
-    with InstantShow1D(xs, xlabel, ylabel) as viewer:
+    with LivePlotter1D(xlabel, ylabel) as viewer:
         try:
             xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
-            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
+            with AsyncFunc(viewer.update, include_idx=False) as async_draw:
                 for i, x in enumerate(xs_tqdm):
                     updateCfg(cfg, i, x)
 
@@ -170,14 +170,14 @@ def sweep1D_soft_template(
                     result = prog.acquire(soc, progress=False, **kwargs)
                     signals[i], stds[i] = result2signals(*result)
 
-                    async_draw(i, signal2real(signals))
+                    async_draw(i, xs, signal2real(signals))
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
         except Exception:
             print("Error during measurement:")
             print_traceback()
-        viewer.update_show(signal2real(signals))
+        viewer.update(xs, signal2real(signals))
 
     return xs, signals
 
@@ -231,11 +231,11 @@ def sweep2D_soft_hard_template(
 
     prog = None
     title = None
-    with InstantShow2D(xs, ys, xlabel, ylabel, title=title, with_1D_axis="y") as viewer:
+    with LivePlotter2D(xlabel, ylabel, title=title) as viewer:
         try:
             xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
             avgs_tqdm = tqdm(total=cfg["soft_avgs"], smoothing=0, disable=not progress)
-            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
+            with AsyncFunc(viewer.update, include_idx=False) as async_draw:
                 for i, x in enumerate(xs_tqdm):
                     updateCfg(cfg, i, x)
 
@@ -247,7 +247,7 @@ def sweep2D_soft_hard_template(
 
                     _signals2D = signals2D.copy()  # prevent overwrite
 
-                    def callback(ir, sum_d, sum2_d):
+                    def callback(ir, sum_d, sum2_d) -> None:
                         nonlocal _signals2D, title, avgs_tqdm
                         avgs_tqdm.update(max(ir + 1 - avgs_tqdm.n, 0))
                         avgs_tqdm.refresh()
@@ -256,9 +256,7 @@ def sweep2D_soft_hard_template(
                             *raw2result(ir, sum_d, sum2_d)
                         )
                         signals_real = signal2real(_signals2D)
-                        viewer.update_show(
-                            signals_real, title=title, signals_real_1D=signals_real[i]
-                        )
+                        viewer.update(xs, ys, signals_real, title=title)
 
                     prog = prog_cls(soccfg, cfg)
 
@@ -270,17 +268,11 @@ def sweep2D_soft_hard_template(
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
 
-                    signals_real = signal2real(signals2D)
-                    async_draw(
-                        i, signals_real, title=title, signals_real_1D=signals_real[i]
-                    )
+                    async_draw(i, xs, ys, signal2real(signals2D), title=title)
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
-            signals_real = signal2real(signals2D)
-            viewer.update_show(
-                signals_real, title=title, signals_real_1D=signals_real[i]
-            )
+            viewer.update(xs, ys, signal2real(signals2D), title=title)
         except Exception as e:
             if prog is None:
                 raise e  # the error is happen in initialize of program

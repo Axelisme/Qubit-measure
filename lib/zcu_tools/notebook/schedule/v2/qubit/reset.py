@@ -8,7 +8,8 @@ from zcu_tools.notebook.single_qubit.process import rotate2real
 
 from ...tools import format_sweep1D, sweep2array, sweep2param
 from ..template import sweep_hard_template
-from ...instant_show import InstantShow1D
+
+from zcu_tools.liveplot.jupyter import LivePlotter1D
 from ...flux import set_flux
 from zcu_tools.tools import print_traceback
 
@@ -116,7 +117,7 @@ def measure_mux_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]
     def signal2real(signals):
         return rotate2real(signals).real
 
-    with InstantShow1D(amps, "Pulse gain", "Amplitude", num_line=2) as viewer:
+    with LivePlotter1D("Pulse gain", "Amplitude", num_line=2) as viewer:
         for i in range(2):
             if i == 1:
                 cfg["dac"]["reset_pulse1"]["gain"] = 0.0
@@ -124,7 +125,7 @@ def measure_mux_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]
 
             def callback(ir, sum_d, sum2_d):
                 signals_all[i, :], _ = result2signals(*raw2result(ir, sum_d, sum2_d))
-                viewer.update_show(signal2real(signals_all))
+                viewer.update(amps, signal2real(signals_all))
 
             try:
                 prog = TwoToneProgram(soccfg, cfg)
@@ -137,7 +138,7 @@ def measure_mux_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]
                 print("Error during measurement:")
                 print_traceback()
 
-            viewer.update_show(signal2real(signals_all))
+            viewer.update(amps, signal2real(signals_all))
 
     # get the actual amplitudes
     amps: np.ndarray = prog.get_pulse_param("qub_pulse", "gain", as_array=True)  # type: ignore

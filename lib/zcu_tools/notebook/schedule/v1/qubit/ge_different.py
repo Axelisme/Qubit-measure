@@ -3,13 +3,8 @@ from copy import deepcopy
 import numpy as np
 from zcu_tools.program.v1 import TwoToneProgram
 
-from ...flux import set_flux
 from ...tools import check_time_sweep, map2adcfreq, sweep2array
-from ..template import (
-    sweep1D_soft_template,
-    sweep2D_maximize_template,
-    sweep2D_soft_soft_template,
-)
+from ..template import sweep1D_soft_template, sweep2D_soft_soft_template
 
 
 def measure_one(soc, soccfg, cfg):
@@ -69,34 +64,6 @@ def measure_ge_pdr_dep(soc, soccfg, cfg):
     )
 
     return pdrs, fpts, snr2D
-
-
-def measure_ge_pdr_dep_auto(soc, soccfg, cfg, method="Nelder-Mead"):
-    cfg = deepcopy(cfg)  # prevent in-place modification
-
-    res_pulse = cfg["dac"]["res_pulse"]
-
-    pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
-    fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
-    fpts = map2adcfreq(soc, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
-
-    del cfg["sweep"]  # remove sweep from cfg
-
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
-
-    def measure_signals(pdr, fpt):
-        cfg["dac"]["res_pulse"]["gain"] = int(pdr)
-        cfg["dac"]["res_pulse"]["freq"] = float(fpt)
-        return measure_one(soc, soccfg, cfg)
-
-    return sweep2D_maximize_template(
-        measure_signals,
-        xs=pdrs,
-        ys=fpts,
-        xlabel="Power (a.u)",
-        ylabel="Frequency (MHz)",
-        method=method,
-    )
 
 
 def measure_ge_ro_dep(soc, soccfg, cfg):

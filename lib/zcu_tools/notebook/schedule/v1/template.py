@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
 import numpy as np
 from numpy import ndarray
 from tqdm.auto import tqdm
+from zcu_tools.liveplot.jupyter import LivePlotter1D, LivePlotter2D
 from zcu_tools.program.v1 import (
     MyAveragerProgram,
     MyNDAveragerProgram,
@@ -12,11 +13,6 @@ from zcu_tools.program.v1 import (
 from zcu_tools.tools import AsyncFunc, print_traceback
 
 from ..flux import set_flux
-from ..instant_show import (
-    InstantShow1D,
-    InstantShow2D,
-    InstantShowScatter,
-)
 
 
 def default_result2signals(
@@ -71,17 +67,14 @@ def sweep1D_hard_template(
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     title = None
-    with InstantShow1D(xs, xlabel, ylabel, title=title) as viewer:
+    with LivePlotter1D(xlabel, ylabel, title=title) as viewer:
         try:
             prog = prog_cls(soccfg, cfg)
 
             def callback(ir, sum_d, sum2_d):
                 nonlocal signals, title
                 signals, _ = result2signals(*raw2result(ir, sum_d, sum2_d))
-                viewer.update_show(
-                    signal2real(signals),
-                    title=title,
-                )
+                viewer.update(xs, signal2real(signals), title=title)
 
             xs, *result = prog.acquire(
                 soc, progress=progress, callback=callback, **kwargs
@@ -93,11 +86,7 @@ def sweep1D_hard_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(
-                signal2real(signals),
-                ticks=xs,
-                title=title,
-            )
+            viewer.update(xs, signal2real(signals), title=title)
 
     return xs, signals
 
@@ -126,10 +115,10 @@ def sweep1D_soft_template(
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
-    with InstantShow1D(xs, xlabel, ylabel) as viewer:
+    with LivePlotter1D(xlabel, ylabel) as viewer:
         try:
             xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
-            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
+            with AsyncFunc(viewer.update, include_idx=False) as async_draw:
                 for i, x in enumerate(xs_tqdm):
                     updateCfg(cfg, i, x)
 
@@ -147,7 +136,7 @@ def sweep1D_soft_template(
                     else:
                         raise ValueError("prog_or_fn must be a type or a callable")
 
-                    async_draw(i, signal2real(signals))
+                    async_draw(i, xs, signal2real(signals))
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
@@ -155,7 +144,7 @@ def sweep1D_soft_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signal2real(signals))
+            viewer.update(xs, signal2real(signals))
             xs_tqdm.close()
 
     return xs, signals
@@ -183,12 +172,12 @@ def sweep2D_hard_template(
     # set initial flux
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
-    with InstantShow2D(xs, ys, xlabel, ylabel) as viewer:
+    with LivePlotter2D(xlabel, ylabel) as viewer:
 
         def callback(ir, sum_d, sum2_d):
             nonlocal signals2D
             signals2D, _ = result2signals(*raw2result(ir, sum_d, sum2_d))
-            viewer.update_show(signal2real(signals2D))
+            viewer.update(xs, ys, signal2real(signals2D))
 
         try:
             prog = prog_cls(soccfg, cfg)
@@ -203,7 +192,7 @@ def sweep2D_hard_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signal2real(signals2D), ticks=(xs, ys))
+            viewer.update(xs, ys, signal2real(signals2D))
 
     return xs, ys, signals2D
 
@@ -234,11 +223,11 @@ def sweep2D_soft_hard_template(
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     title = None
-    with InstantShow2D(xs, ys, xlabel, ylabel, title=title) as viewer:
+    with LivePlotter2D(xlabel, ylabel, title=title) as viewer:
         try:
             xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
             avgs_tqdm = tqdm(total=cfg["soft_avgs"], smoothing=0, disable=not progress)
-            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
+            with AsyncFunc(viewer.update, include_idx=False) as async_draw:
                 for i, x in enumerate(xs_tqdm):
                     updateCfg(cfg, i, x)
 
@@ -265,7 +254,7 @@ def sweep2D_soft_hard_template(
                             if stop:
                                 prog.set_early_stop()
 
-                        viewer.update_show(signal2real(_signals2D), title=title)
+                        viewer.update(xs, ys, signal2real(_signals2D), title=title)
 
                     xs, *result = prog.acquire(
                         soc, progress=False, callback=callback, **kwargs
@@ -275,7 +264,7 @@ def sweep2D_soft_hard_template(
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
 
-                    async_draw(i, signal2real(signals2D), ticks=(xs, ys), title=title)
+                    async_draw(i, xs, ys, signal2real(signals2D), title=title)
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
@@ -283,7 +272,7 @@ def sweep2D_soft_hard_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signal2real(signals2D), ticks=(xs, ys), title=title)
+            viewer.update(xs, ys, signal2real(signals2D), title=title)
             xs_tqdm.close()
             avgs_tqdm.close()
 
@@ -315,11 +304,12 @@ def sweep2D_soft_soft_template(
     # set initial flux
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
-    with InstantShow2D(xs, ys, xlabel, ylabel) as viewer:
+    with LivePlotter2D(xlabel, ylabel) as viewer:
         try:
             xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
             ys_tqdm = tqdm(ys, desc=ylabel, smoothing=0, disable=not progress)
-            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
+            with AsyncFunc(viewer.update, include_idx=False) as async_draw:
+                count = 0
                 for i, x in enumerate(xs):
                     x_updateCfg(cfg, i, x)
 
@@ -341,7 +331,8 @@ def sweep2D_soft_soft_template(
 
                         ys_tqdm.update()
 
-                        async_draw(i * len(ys) + j, signal2real(signals2D))
+                        async_draw(count, xs, ys, signal2real(signals2D))
+                        count += 1
                     xs_tqdm.update()
 
         except KeyboardInterrupt:
@@ -350,56 +341,8 @@ def sweep2D_soft_soft_template(
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update_show(signal2real(signals2D), ticks=(xs, ys))
+            viewer.update(xs, ys, signal2real(signals2D))
             xs_tqdm.close()
             ys_tqdm.close()
 
     return xs, ys, signals2D
-
-
-def sweep2D_maximize_template(
-    measure_fn: Callable,
-    *,
-    xs: ndarray,
-    ys: ndarray,
-    xlabel: str,
-    ylabel: str,
-    signals2score: Callable,
-    method: str = "Nelder-Mead",
-    **kwargs,
-):
-    from scipy.optimize import minimize
-
-    with InstantShowScatter(xlabel, ylabel) as viewer:
-
-        def loss_func(param):
-            x, y = param
-
-            signals, _ = measure_fn(x, y)
-            score = signals2score(signals)
-
-            viewer.append_spot(x, y, score)
-
-            return -score
-
-        options = dict(maxiter=(len(xs) * len(ys)) // 5)
-
-        if method in ["Nelder-Mead", "Powell"]:
-            options["xatol"] = min(xs[1] - xs[0], ys[1] - ys[0])
-        elif method in ["L-BFGS-B"]:
-            options["ftol"] = 1e-4  # type: ignore
-
-        options.update(kwargs)
-
-        init_point = (0.5 * (xs[0] + xs[-1]), 0.5 * (ys[0] + ys[-1]))
-        res = minimize(
-            loss_func,
-            init_point,
-            method=method,
-            bounds=[(xs[0], xs[-1]), (ys[0], ys[-1])],
-            options=options,
-        )
-
-    if isinstance(res, ndarray):
-        return res
-    return res.x

@@ -15,7 +15,6 @@ __all__ = [
     "measure_t1",
     "measure_t2ramsey",
     "measure_t2echo",
-    "measure_fid_auto",
     "measure_ge_pdr_dep",
     "measure_ge_ro_dep",
     "measure_ge_trig_dep",

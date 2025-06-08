@@ -3,10 +3,12 @@ from typing import Tuple
 import numpy as np
 from tqdm.auto import tqdm
 from zcu_tools.auto import make_cfg
+
+# from ..instant_show import InstantShow1D
+from zcu_tools.liveplot.jupyter import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 
 from ..flux import set_flux
-from ..instant_show import InstantShow1D
 
 
 def onetone_demimated(
@@ -112,44 +114,32 @@ def measure_lookback(
             disable=not progress,
         )
 
-        total_num = soccfg.us2cycles(total_len, ro_ch=cfg["adc"]["chs"][0])
-        viewer = InstantShow1D(
-            np.linspace(0, total_len, total_num, endpoint=False),
-            x_label="Time (us)",
-            y_label="Amplitude",
-            title="Readout",
-            linestyle="-",
-            marker=None,
-        )
-
         Ts = []
         signals = []
-        while trig_offset < total_len:
-            cfg["adc"]["trig_offset"] = trig_offset
+        with LivePlotter1D("Time (us)", "Amplitude", title="Readout") as viewer:
+            while trig_offset < total_len:
+                cfg["adc"]["trig_offset"] = trig_offset
 
-            Ts_, singals_ = onetone_demimated(
-                soc, soccfg, cfg, progress=False, qub_pulse=qub_pulse
-            )
+                Ts_, singals_ = onetone_demimated(
+                    soc, soccfg, cfg, progress=False, qub_pulse=qub_pulse
+                )
 
-            Ts.append(Ts_)
-            signals.append(singals_)
+                Ts.append(Ts_)
+                signals.append(singals_)
 
-            viewer.update_show(
-                np.abs(np.concatenate(signals)), ticks=np.concatenate(Ts)
-            )
+                viewer.update(np.concatenate(Ts), np.concatenate(signals))
 
-            trig_offset += MAX_LEN
-            bar.update()
+                trig_offset += MAX_LEN
+                bar.update()
 
-        bar.close()
-        Ts = np.concatenate(Ts)
-        signals = np.concatenate(signals)
+            bar.close()
+            Ts = np.concatenate(Ts)
+            signals = np.concatenate(signals)
 
-        sort_idxs = np.argsort(Ts, kind="stable")
-        Ts = Ts[sort_idxs]
-        signals = signals[sort_idxs]
+            sort_idxs = np.argsort(Ts, kind="stable")
+            Ts = Ts[sort_idxs]
+            signals = signals[sort_idxs]
 
-        viewer.update_show(np.abs(signals), ticks=Ts)
-        viewer.close_show()
+            viewer.update(Ts, np.abs(signals))
 
     return Ts, signals

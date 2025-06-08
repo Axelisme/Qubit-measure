@@ -9,7 +9,8 @@ from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.tools import AsyncFunc, print_traceback
 
 from ...flux import set_flux
-from ...instant_show import InstantShowHist
+
+from zcu_tools.liveplot.jupyter import LivePlotterHistogram
 from ...tools import format_sweep1D, sweep2array, sweep2param
 
 
@@ -112,10 +113,10 @@ def measure_amprabi_singleshot(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
-    with InstantShowHist("rototed I", "Count", title="Rabi SingleShot") as viewer:
+    with LivePlotterHistogram("rototed I", "Count", bins=100) as viewer:
         try:
             pdr_tqdm = tqdm(pdrs, desc="Power", smoothing=0)
-            with AsyncFunc(viewer.update_show, include_idx=False) as async_draw:
+            with AsyncFunc(viewer.update, include_idx=False) as async_draw:
                 for i, pdr in enumerate(pdr_tqdm):
                     cfg["dac"]["qub_pulse"]["gain"] = pdr
 

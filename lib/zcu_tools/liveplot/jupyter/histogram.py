@@ -32,3 +32,6 @@ class LivePlotterHistogram(JupyterLivePlotter):
             segment.update(ax, signals, title)
             if refresh:
                 self._refresh_unchecked()
+
+    def __enter__(self) -> "LivePlotterHistogram":
+        return super().__enter__()

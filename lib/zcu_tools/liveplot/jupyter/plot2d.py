@@ -33,3 +33,6 @@ class LivePlotter2D(JupyterLivePlotter):
             segment.update(ax, xs, ys, signals, title)
             if refresh:
                 self._refresh_unchecked()
+
+    def __enter__(self) -> "LivePlotter2D":
+        return super().__enter__()
