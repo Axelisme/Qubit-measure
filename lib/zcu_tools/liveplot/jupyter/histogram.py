@@ -3,11 +3,12 @@ from typing import Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ..base import AbsLivePlotter
 from ..segments import HistogramSegment
 from .base import JupyterLivePlotter
 
 
-class LivePlotterHistogram(JupyterLivePlotter):
+class LivePlotterHistogram(JupyterLivePlotter, AbsLivePlotter):
     def __init__(
         self,
         xlabel: str,

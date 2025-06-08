@@ -149,14 +149,17 @@ def auto_derive(exp_cfg: Dict[str, Any]):
     trig_offset = None
     for name, pulse_cfg in dac_cfg.items():
         if is_pulse_cfg(name, pulse_cfg):
-            if "trig_offset" in pulse_cfg or "ro_length" in pulse_cfg:
+            if (
+                pulse_cfg.get("ro_length") is not None
+                or pulse_cfg.get("trig_offset") is not None
+            ):
                 if ro_name is not None:
                     raise ValueError(f"Multiple ro_lengths found: {name} and {ro_name}")
                 ro_name = name
 
-            if "ro_length" in pulse_cfg:
+            if pulse_cfg.get("ro_length") is not None:
                 ro_length = pulse_cfg["ro_length"]
-            if "trig_offset" in pulse_cfg:
+            if pulse_cfg.get("trig_offset") is not None:
                 trig_offset = pulse_cfg["trig_offset"]
 
     if trig_offset is not None:

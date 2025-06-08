@@ -14,7 +14,7 @@ class YokoDevControl:
     dev_cfg = {}
 
     @classmethod
-    def connect_server(cls, dev_cfg: dict, reinit=False):
+    def connect_server(cls, dev_cfg: dict, reinit=False) -> None:
         if cls.yoko is not None:
             if not reinit:
                 return  # only register once if not reinit
@@ -50,16 +50,16 @@ class YokoDevControl:
         cls.yoko.ctrl.globalFlux.setInstrConfig(output_cfg)
 
     @classmethod
-    def disconnect_server(cls):
+    def disconnect_server(cls) -> None:
         if cls.yoko is not None:
             cls.yoko = None
             cls.SWEEP_RATE = None
             cls.dev_cfg = {}
 
     @classmethod
-    def get_current(cls):
+    def get_current(cls) -> float:
         if config.YOKO_DRY_RUN:
-            return 0.0
+            return cls.cur_val
 
         if cls.yoko is None:
             raise RuntimeError("YokoDevControl not initialized")
@@ -67,7 +67,7 @@ class YokoDevControl:
         return cls.yoko.ctrl.globalFlux.getValue("Current")
 
     @classmethod
-    def _set_current_direct(cls, value):
+    def _set_current_direct(cls, value) -> None:
         if config.YOKO_DRY_RUN:
             if cls.cur_val != value:
                 cls.cur_val = value
@@ -75,7 +75,7 @@ class YokoDevControl:
         cls.yoko.ctrl.globalFlux.setValue("Current", value, rate=cls.SWEEP_RATE)
 
     @classmethod
-    def _set_current_smart(cls, value, progress=True):
+    def _set_current_smart(cls, value, progress=True) -> None:
         # sweep to the target value step by step
         cur = cls.get_current()
         if cur == value:
@@ -123,8 +123,8 @@ class YokoDevControl:
         if cls.yoko is None:
             raise RuntimeError("YokoDevControl not initialized")
 
-        if config.YOKO_DRY_RUN:
-            print(f"DRY RUN: Set current to {value}\r")
+        if config.YOKO_DRY_RUN and value != cls.cur_val:
+            print(f"DRY RUN: Set current to {value}A\r")
 
         try:
             cls._set_current_smart(value, progress=progress)

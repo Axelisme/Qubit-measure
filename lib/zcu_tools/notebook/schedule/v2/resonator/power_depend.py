@@ -83,11 +83,11 @@ def measure_res_pdr_dep(
         cfg["dac"]["res_pulse"]["gain"] = pdr
 
         if dynamic_avg:
-            dyn_factor = (gain_ref / pdr)**2
+            dyn_factor = (gain_ref / pdr) ** 2
             if dyn_factor > 1:
                 # increase reps
                 cfg["reps"] = int(reps_ref * dyn_factor)
-                max_reps = min(100*reps_ref, 1000000)
+                max_reps = min(100 * reps_ref, 1000000)
                 if cfg["reps"] > max_reps:
                     cfg["reps"] = max_reps
             elif cfg["soft_avgs"] > 1:
@@ -96,7 +96,7 @@ def measure_res_pdr_dep(
                 min_avgs = max(0.1 * rounds_ref, 1)
                 if cfg["rounds"] < min_avgs:
                     cfg["rounds"] = min_avgs
-                cfg["soft_avgs"] = cfg["rounds"] # this two are the smae
+                cfg["soft_avgs"] = cfg["rounds"]  # this two are the smae
             else:
                 # decrease reps
                 cfg["reps"] = int(reps_ref * dyn_factor)
@@ -115,6 +115,7 @@ def measure_res_pdr_dep(
         ylabel="Frequency (MHz)",
         updateCfg=updateCfg,
         signal2real=signal2real,
+        num_lines=10,
     )
 
     # get the actual frequency points

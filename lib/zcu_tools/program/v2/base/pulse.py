@@ -3,14 +3,38 @@ from typing import Any, Dict, Optional
 from myqick.asm_v2 import AveragerProgramV2
 
 
-def trigger_pulse(prog, pulse: Dict[str, Any]) -> None:
-    pre_delay = pulse.get("pre_delay")
+def trigger_pulse(
+    prog: AveragerProgramV2, pulse: Dict[str, Any], name: str, t: float = 0.0
+) -> None:
+    pre_delay = pulse.get("pre_delay", 0.0)
     post_delay = pulse.get("post_delay", 0.0)
 
     if pre_delay is not None:
         prog.delay_auto(pre_delay, ros=False)
 
-    prog.pulse(pulse["ch"], "qub_pulse")
+    prog.pulse(pulse["ch"], name, t=t)
+
+    if post_delay is not None:
+        prog.delay_auto(post_delay, ros=False)
+
+
+def trigger_dual_pulse(
+    prog: AveragerProgramV2,
+    pulse1: Dict[str, Any],
+    pulse2: Dict[str, Any],
+    name1: str,
+    name2: str,
+    t1: float = 0.0,
+    t2: float = 0.0,
+) -> None:
+    pre_delay = pulse1.get("pre_delay", 0.0)
+    post_delay = pulse2.get("post_delay", 0.0)
+
+    if pre_delay is not None:
+        prog.delay_auto(pre_delay, ros=False)
+
+    prog.pulse(pulse1["ch"], name1, t=t1)
+    prog.pulse(pulse2["ch"], name2, t=t2)
 
     if post_delay is not None:
         prog.delay_auto(post_delay, ros=False)

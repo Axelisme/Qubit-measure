@@ -4,7 +4,11 @@ from typing import Any, Callable, Dict, Optional, Tuple, Type
 import numpy as np
 from numpy import ndarray
 from tqdm.auto import tqdm
-from zcu_tools.liveplot.jupyter import JupyterLivePlotter, LivePlotter1D, LivePlotter2D
+from zcu_tools.liveplot.jupyter import (
+    LivePlotter1D,
+    LivePlotter2D,
+    LivePlotter2DwithLine,
+)
 from zcu_tools.program.v2 import MyProgramV2
 from zcu_tools.tools import AsyncFunc, print_traceback
 
@@ -76,8 +80,7 @@ def sweep_hard_template(
     signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
     stds = np.full_like(signals, np.nan, dtype=float)
 
-    ViewerCls: JupyterLivePlotter = [LivePlotter1D, LivePlotter2D][len(ticks) - 1]
-    assert isinstance(ViewerCls, JupyterLivePlotter)
+    ViewerCls = [LivePlotter1D, LivePlotter2D][len(ticks) - 1]
 
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
@@ -198,6 +201,7 @@ def sweep2D_soft_hard_template(
     ] = default_result2signal,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
+    num_lines: int = 1,
     **kwargs,
 ) -> Tuple[MyProgramV2, ndarray]:
     """
@@ -231,7 +235,9 @@ def sweep2D_soft_hard_template(
 
     prog = None
     title = None
-    with LivePlotter2D(xlabel, ylabel, title=title) as viewer:
+    with LivePlotter2DwithLine(
+        xlabel, ylabel, line_axis=1, num_lines=num_lines, title=title
+    ) as viewer:
         try:
             xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
             avgs_tqdm = tqdm(total=cfg["soft_avgs"], smoothing=0, disable=not progress)
@@ -256,7 +262,7 @@ def sweep2D_soft_hard_template(
                             *raw2result(ir, sum_d, sum2_d)
                         )
                         signals_real = signal2real(_signals2D)
-                        viewer.update(xs, ys, signals_real, title=title)
+                        viewer.update(xs, ys, signals_real, i, title=title)
 
                     prog = prog_cls(soccfg, cfg)
 
@@ -268,11 +274,11 @@ def sweep2D_soft_hard_template(
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
 
-                    async_draw(i, xs, ys, signal2real(signals2D), title=title)
+                    async_draw(i, xs, ys, signal2real(signals2D), i, title=title)
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
-            viewer.update(xs, ys, signal2real(signals2D), title=title)
+            viewer.update(xs, ys, signal2real(signals2D), i, title=title)
         except Exception as e:
             if prog is None:
                 raise e  # the error is happen in initialize of program

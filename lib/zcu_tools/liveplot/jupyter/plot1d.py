@@ -3,11 +3,12 @@ from typing import Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ..base import AbsLivePlotter
 from ..segments import Plot1DSegment
 from .base import JupyterLivePlotter
 
 
-class LivePlotter1D(JupyterLivePlotter):
+class LivePlotter1D(JupyterLivePlotter, AbsLivePlotter):
     def __init__(
         self,
         xlabel: str,

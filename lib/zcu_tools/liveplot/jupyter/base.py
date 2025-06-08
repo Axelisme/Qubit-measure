@@ -4,11 +4,10 @@ from typing import List, Optional, Tuple
 import matplotlib.pyplot as plt
 from IPython.display import display
 
-from ..base import AbsLivePlotter
 from ..segments import AbsSegment
 
 
-class JupyterLivePlotter(AbsLivePlotter):
+class JupyterLivePlotter:
     """live plotters in Jupyter notebooks."""
 
     def __init__(
@@ -18,7 +17,7 @@ class JupyterLivePlotter(AbsLivePlotter):
             raise ValueError("At least one segment is required.")
 
         if figsize is None:
-            figsize = (5 * len(segments), 4)
+            figsize = (6 * len(segments), 5)
 
         fig, axs = plt.subplots(1, len(segments), figsize=figsize)
 
@@ -37,9 +36,6 @@ class JupyterLivePlotter(AbsLivePlotter):
             for ax, segment in zip(self.axs, self.segments):
                 segment.clear(ax)
             self._refresh_unchecked()
-
-    def update(self, *args, **kwargs) -> None:
-        raise NotImplementedError("Subclass must implement this method.")
 
     def _refresh_unchecked(self) -> None:
         self.dh.update(self.fig)

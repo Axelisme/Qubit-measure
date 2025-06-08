@@ -5,8 +5,8 @@ from scipy.ndimage import gaussian_filter
 from .general import figsize
 
 
-def mux_reset_analyze(xs, ys, signal2D, xlabel=None, ylabel=None):
-    signal2D = gaussian_filter(signal2D, 1)
+def mux_reset_analyze(xs, ys, signal2D, xlabel=None, ylabel=None, smooth=1):
+    signal2D = gaussian_filter(signal2D, smooth)
 
     amp2D = np.abs(signal2D - np.mean(signal2D))
 

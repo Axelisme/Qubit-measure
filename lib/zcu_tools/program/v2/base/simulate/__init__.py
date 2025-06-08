@@ -1,7 +1,7 @@
+import warnings
 from copy import deepcopy
 from functools import wraps
 from typing import Any, Callable, Dict, Type
-import warnings
 
 import numpy as np
 from myqick.asm_v2 import QickParam
@@ -101,7 +101,7 @@ class SimulateProgramV2:
         self.sim_ref_t = max_t(self.sim_ref_t, last_end + t)
 
     def pulse_hook(self, ch, name, t=0, *args, **kwargs) -> None:
-        start_t = self.sim_gen_t if t == "auto" else t
+        start_t = self.sim_gen_t if t == "auto" else self.sim_ref_t + t
         start_t = max_t(start_t, self.sim_ref_t)
 
         pulse_cfg = self.pulse_map[(ch, name)]
@@ -136,7 +136,7 @@ class SimulateProgramV2:
         if isinstance(total_length, QickParam):
             total_length = total_length.maxval()
 
-        NUM_SAMPLE = 1001
+        NUM_SAMPLE = 10001
 
         visualize_keywords = ["length", "sigma", "alpha", "gain"]
         loop_dict = {

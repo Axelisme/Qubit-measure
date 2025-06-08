@@ -25,11 +25,14 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             **kwargs,
         )
 
+    def _make_modules(self) -> None:
+        self.resetM = make_reset(self.cfg["dac"]["reset"])
+        self.readoutM = make_readout(self.cfg["dac"]["readout"])
+
     def _parse_cfg(self, cfg: Dict[str, Any]) -> None:
         # instaniate v2 reset and readout modules
-        self.resetM = make_reset(cfg["dac"]["reset"])
-        self.readoutM = make_readout(cfg["dac"]["readout"])
-        return super()._parse_cfg(cfg)
+        super()._parse_cfg(cfg)
+        self._make_modules()
 
     def declare_pulse(
         self,
@@ -51,15 +54,18 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
 
         add_pulse(self, pulse, waveform=waveform, ro_ch=ro_ch, **kwargs)
 
+    def _init_modules(self) -> None:
+        # initialize v2 reset and readout modules
+        self.resetM.init(self)
+        self.readoutM.init(self)
+
     def _initialize(self, cfg: Dict[str, Any]) -> None:
         # add v2 sweep loops
         if "sweep" in cfg:
             for name, sweep in cfg["sweep"].items():
                 self.add_loop(name, count=sweep["expts"])
 
-        # initialize v2 reset and readout modules
-        self.resetM.init(self)
-        self.readoutM.init(self)
+        self._init_modules()
 
     def acquire(self, soc, **kwargs) -> list:
         return super().acquire(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)

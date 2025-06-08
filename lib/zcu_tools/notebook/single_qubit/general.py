@@ -59,7 +59,11 @@ def lookback_show(
     plt.plot(Ts, y, label="mag")
     if plot_fit:
         plt.axvline(offset, color="r", linestyle="--", label="predict_offset")
-    if pulse_cfg is not None:
+    if (
+        pulse_cfg is not None
+        and "trig_offset" in pulse_cfg
+        and "ro_length" in pulse_cfg
+    ):
         trig_offset = pulse_cfg["trig_offset"]
         ro_length = pulse_cfg["ro_length"]
         plt.axvline(trig_offset, color="g", linestyle="--", label="ro start")
@@ -230,33 +234,7 @@ def freq_analyze(
     asym=False,
     plot_fit=True,
     max_contrast=False,
-) -> float:
-    """
-    Analyze resonance frequency in spectroscopy data by fitting Lorentzian functions.
-
-    This function fits either symmetric or asymmetric Lorentzian functions to amplitude or
-    phase-rotated data to extract resonance frequencies and linewidths (kappa).
-
-    Parameters
-    ----------
-    fpts : np.ndarray
-        Frequency points in MHz.
-    signals : np.ndarray
-        Complex signal values at each frequency point.
-    asym : bool, default=False
-        If True, fit an asymmetric Lorentzian function.
-        If False, fit a symmetric Lorentzian function.
-    plot_fit : bool, default=True
-        Whether to include the fit curve and resonance markers in the plot.
-    max_contrast : bool, default=False
-        If True, rotate signals to maximize the real component contrast before fitting.
-        If False, fit to the magnitude of signals.
-
-    Returns
-    -------
-    float
-        The resonance frequency in MHz.
-    """
+) -> Tuple[float, float]:
     val_mask = ~np.isnan(signals)
     fpts = fpts[val_mask]
     signals = signals[val_mask]
@@ -300,7 +278,7 @@ def freq_analyze(
     plt.legend()
     plt.show()
 
-    return freq
+    return freq, kappa
 
 
 def effective_temperature(

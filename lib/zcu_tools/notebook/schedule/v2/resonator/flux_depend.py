@@ -66,6 +66,7 @@ def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.n
         ylabel="Frequency (MHz)",
         updateCfg=updateCfg,
         signal2real=signal2real,
+        num_lines=2,
     )
 
     # get the actual frequency points

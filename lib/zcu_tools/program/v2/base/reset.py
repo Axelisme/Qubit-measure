@@ -2,16 +2,16 @@ from abc import ABC, abstractmethod
 
 from myqick.asm_v2 import AveragerProgramV2
 
-from .pulse import trigger_pulse
+from .pulse import trigger_dual_pulse, trigger_pulse
 
 
 class AbsReset(ABC):
     @abstractmethod
-    def init(self, prog: AveragerProgramV2):
+    def init(self, prog: AveragerProgramV2) -> None:
         pass
 
     @abstractmethod
-    def reset_qubit(self, prog: AveragerProgramV2):
+    def reset_qubit(self, prog: AveragerProgramV2) -> None:
         pass
 
 
@@ -20,32 +20,38 @@ def make_reset(name: str) -> AbsReset:
         return NoneReset()
     elif name == "pulse":
         return PulseReset()
-    elif name == "two_pulse":
-        return TwoPulseReset()
+    elif name == "mux_dual_pulse":
+        return MuxDualPulseReset()
     else:
         raise ValueError(f"Unknown reset type: {name}")
 
 
 class NoneReset(AbsReset):
-    def init(self, _):
+    def init(self, _) -> None:
         pass
 
-    def reset_qubit(self, _):
+    def reset_qubit(self, _) -> None:
         pass
 
 
 class PulseReset(AbsReset):
-    def init(self, prog: AveragerProgramV2):
+    def init(self, prog: AveragerProgramV2) -> None:
         prog.declare_pulse(prog.reset_pulse, "reset")
+        if hasattr(prog, "reset_pi_pulse"):
+            prog.declare_pulse(prog.reset_pi_pulse, "reset_pi")
 
-    def reset_qubit(self, prog: AveragerProgramV2):
-        trigger_pulse(prog, prog.reset_pulse)
+    def reset_qubit(self, prog: AveragerProgramV2) -> None:
+        trigger_pulse(prog, prog.reset_pulse, "reset")
+        if hasattr(prog, "reset_pi_pulse"):
+            trigger_pulse(prog, prog.reset_pi_pulse, "reset_pi")
 
 
-class TwoPulseReset(AbsReset):
-    def init(self, prog: AveragerProgramV2):
+class MuxDualPulseReset(AbsReset):
+    def init(self, prog: AveragerProgramV2) -> None:
         prog.declare_pulse(prog.reset_pulse1, "reset1")
         prog.declare_pulse(prog.reset_pulse2, "reset2")
+        if hasattr(prog, "reset_pi_pulse"):
+            prog.declare_pulse(prog.reset_pi_pulse, "reset_pi")
 
         if prog.reset_pulse1["ch"] == prog.reset_pulse2["ch"]:
             raise ValueError(
@@ -61,18 +67,9 @@ class TwoPulseReset(AbsReset):
         if prog.reset_pulse2.get("pre_delay") is not None:
             raise ValueError("reset_pulse2 cannot have a pre_delay")
 
-    def reset_qubit(self, prog: AveragerProgramV2):
-        reset_pulse1 = prog.reset_pulse1
-        reset_pulse2 = prog.reset_pulse2
-
-        pre_delay = reset_pulse1.get("pre_delay")
-        post_delay = reset_pulse2.get("post_delay", 0.0)
-
-        if pre_delay is not None:
-            prog.delay_auto(pre_delay)
-
-        prog.pulse(reset_pulse1["ch"], "reset1")
-        prog.pulse(reset_pulse2["ch"], "reset2")
-
-        if post_delay is not None:
-            prog.delay_auto(post_delay)
+    def reset_qubit(self, prog: AveragerProgramV2) -> None:
+        trigger_dual_pulse(
+            prog, prog.reset_pulse1, prog.reset_pulse2, "reset1", "reset2"
+        )
+        if hasattr(prog, "reset_pi_pulse"):
+            trigger_pulse(prog, prog.reset_pi_pulse, "reset_pi")
