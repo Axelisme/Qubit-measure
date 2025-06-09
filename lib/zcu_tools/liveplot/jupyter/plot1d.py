@@ -13,11 +13,11 @@ class LivePlotter1D(JupyterLivePlotter, AbsLivePlotter):
         self,
         xlabel: str,
         ylabel: str,
-        num_line: int = 1,
+        num_lines: int = 1,
         title: Optional[str] = None,
         figsize: Optional[Tuple[int, int]] = None,
     ):
-        segment = Plot1DSegment(xlabel, ylabel, num_line, title)
+        segment = Plot1DSegment(xlabel, ylabel, num_lines, title)
         super().__init__([segment], figsize=figsize)
 
     def update(

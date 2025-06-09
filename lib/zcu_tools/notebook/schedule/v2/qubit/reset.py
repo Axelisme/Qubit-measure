@@ -187,7 +187,7 @@ def measure_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         raise ValueError(f"Reset type {cfg['dac']['reset_test']} not supported")
 
     prog = None
-    with LivePlotter1D("Pulse gain", "Amplitude", num_line=2) as viewer:
+    with LivePlotter1D("Pulse gain", "Amplitude", num_lines=2) as viewer:
         try:
             for i in range(2):
                 if cfg["dac"]["reset_test"] == "pulse":

@@ -9,6 +9,7 @@ from .mist import (
 from .qubit import (
     measure_ac_stark,
     measure_amprabi,
+    measure_dispersive,
     measure_lenrabi,
     measure_mux_reset_freq,
     measure_qub_flux_dep,
@@ -38,6 +39,7 @@ __all__ = [
     "measure_res_freq",
     "measure_res_pdr_dep",
     "measure_res_flux_dep",
+    "measure_dispersive",
     "measure_ac_stark",
     "visualize_ac_stark",
     "measure_qub_freq",

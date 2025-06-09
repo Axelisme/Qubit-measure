@@ -1,4 +1,5 @@
 from .ac_stark import measure_ac_stark, visualize_ac_stark
+from .dispersive import measure_dispersive
 from .flux_depend import measure_qub_flux_dep
 from .ge_different import (
     measure_ge_freq_dep,
@@ -30,6 +31,7 @@ from .twotone import measure_qub_freq, visualize_qub_freq
 __all__ = [
     "measure_ac_stark",
     "visualize_ac_stark",
+    "measure_dispersive",
     "measure_qub_freq",
     "visualize_qub_freq",
     "measure_lenrabi",

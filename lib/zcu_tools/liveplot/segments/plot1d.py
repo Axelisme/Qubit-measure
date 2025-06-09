@@ -8,11 +8,11 @@ from .base import AbsSegment
 
 class Plot1DSegment(AbsSegment):
     def __init__(
-        self, xlabel: str, ylabel: str, num_line: int = 1, title: Optional[str] = None
+        self, xlabel: str, ylabel: str, num_lines: int = 1, title: Optional[str] = None
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel
-        self.num_line = num_line
+        self.num_line = num_lines
         self.title = title
 
         self.lines: Optional[List[plt.Line2D]] = None
