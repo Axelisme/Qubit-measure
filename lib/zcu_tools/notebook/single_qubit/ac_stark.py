@@ -51,11 +51,11 @@ def analyze_ac_stark_shift(
     # fitting max_freqs with ax2 + bx + c
     x_fit = np.linspace(min(pdrs), max(pdrs), 100)
     if deg == 1:
-        b, c = np.polyfit(s_pdrs, s_fpts, 1)
-        y_fit = b * x_fit + c
+        b, c = np.polyfit(s_pdrs**2, s_fpts, 1, w=1 / (0.1 + s_pdrs))
+        y_fit = b * x_fit**2 + c
     elif deg == 2:
-        a, b, c = np.polyfit(s_pdrs, s_fpts, 2)
-        y_fit = a * x_fit**2 + b * x_fit + c
+        a, b, c = np.polyfit(s_pdrs**2, s_fpts, 2, w=1 / (0.1 + s_pdrs))
+        y_fit = a * x_fit**4 + b * x_fit**2 + c
     else:
         raise ValueError(f"Degree {deg} is not supported.")
 
