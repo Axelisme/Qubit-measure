@@ -20,7 +20,9 @@ class Plot2DSegment(AbsSegment):
         if self.title is not None:
             ax.set_title(self.title)
 
-        self.im = ax.imshow([[0, 1]], aspect="auto", origin="lower")
+        self.im = ax.imshow(
+            [[0, 1]], aspect="auto", origin="lower", interpolation="nearest"
+        )
 
     def update(
         self,

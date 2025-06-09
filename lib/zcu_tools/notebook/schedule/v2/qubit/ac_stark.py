@@ -2,7 +2,7 @@ from copy import deepcopy
 from typing import Tuple
 
 import numpy as np
-from zcu_tools.notebook.single_qubit.process import rotate2real
+from zcu_tools.notebook.single_qubit.process import minus_background, rotate2real
 from zcu_tools.program.v2 import ACStarkProgram
 from zcu_tools.program.v2.base.simulate import SimulateProgramV2
 
@@ -11,7 +11,7 @@ from ..template import sweep_hard_template
 
 
 def qub_signal2real(signals: np.ndarray) -> np.ndarray:
-    return rotate2real(signals).real
+    return rotate2real(minus_background(signals, axis=1)).real
 
 
 def measure_ac_stark(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:

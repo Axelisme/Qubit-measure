@@ -23,7 +23,10 @@ class Plot1DSegment(AbsSegment):
         if self.title is not None:
             ax.set_title(self.title)
 
-        self.lines = [ax.plot([], [])[0] for _ in range(self.num_line)]
+        self.lines = [
+            ax.plot([], [], marker=".", linestyle="-", markersize=5)[0]
+            for _ in range(self.num_line)
+        ]
 
     def update(
         self,
