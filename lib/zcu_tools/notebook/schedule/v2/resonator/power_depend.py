@@ -93,7 +93,7 @@ def measure_res_pdr_dep(
             elif cfg["soft_avgs"] > 1:
                 # decrease rounds
                 cfg["rounds"] = int(rounds_ref * dyn_factor)
-                min_avgs = max(0.1 * rounds_ref, 1)
+                min_avgs = max(int(0.1 * rounds_ref), 1)
                 if cfg["rounds"] < min_avgs:
                     cfg["rounds"] = min_avgs
                 cfg["soft_avgs"] = cfg["rounds"]  # this two are the smae

@@ -10,11 +10,13 @@ def trigger_pulse(
     post_delay = pulse.get("post_delay", 0.0)
 
     if pre_delay is not None:
+        # print("pre delay", name)
         prog.delay_auto(pre_delay, ros=False)
 
     prog.pulse(pulse["ch"], name, t=t)
 
     if post_delay is not None:
+        # print("post delay", name)
         prog.delay_auto(post_delay, ros=False)
 
 

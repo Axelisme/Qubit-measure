@@ -42,14 +42,17 @@ class BaseReadout(AbsReadout):
 
         prog.send_readoutconfig(ro_ch, "readout_adc", t=0)
 
-        pre_delay = prog.res_pulse.get("pre_delay")
-        post_delay = prog.res_pulse.get("post_delay")
+        pre_delay = prog.res_pulse.get("pre_delay", 0.0)
+        post_delay = prog.res_pulse.get("post_delay", 0.0)
+        t = prog.res_pulse.get("t", 0)
 
         if pre_delay is not None:
-            prog.delay_auto(t=pre_delay, gens=True, tag="pre_delay")
+            # print("pre delay readout")
+            prog.delay_auto(t=pre_delay, ros=False, tag="pre_delay")
 
-        prog.pulse(prog.res_pulse["ch"], "res_pulse", t="auto")
-        prog.trigger([ro_ch], t=prog.adc["trig_offset"])
+        prog.pulse(prog.res_pulse["ch"], "res_pulse", t=t)
+        prog.trigger([ro_ch], t=t+prog.adc["trig_offset"])
 
         if post_delay is not None:
-            prog.delay_auto(t=post_delay, gens=True, tag="post_delay")
+            # print("post delay readout")
+            prog.delay_auto(t=post_delay, ros=False, tag="post_delay")

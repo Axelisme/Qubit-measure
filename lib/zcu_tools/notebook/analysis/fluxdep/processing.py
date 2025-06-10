@@ -20,11 +20,11 @@ def cast2real_and_norm(signals: np.ndarray, use_phase: bool = True) -> np.ndarra
         signals = signals - np.ma.mean(signals, axis=0)
         signals = gaussian_filter1d(signals, sigma=1, axis=0)
         amps = np.abs(signals)
+        amps /= np.ma.std(amps, axis=0)
     else:
         amps = np.abs(signals)
         amps = gaussian_filter1d(amps, sigma=1, axis=0)
 
-    amps /= np.ma.std(amps, axis=0)
     return amps
 
 

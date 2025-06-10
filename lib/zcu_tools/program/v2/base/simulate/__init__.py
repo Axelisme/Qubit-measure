@@ -91,6 +91,7 @@ class SimulateProgramV2:
 
     def delay_hook(self, t, *args, **kwargs) -> None:
         self.sim_ref_t = self.sim_ref_t + t
+        # print("delay", self.sim_ref_t, self.sim_gen_t, self.sim_ro_t)
 
     def delay_auto_hook(self, t=0, gens=True, ros=True, *args, **kwargs) -> None:
         last_end = self.sim_ref_t
@@ -99,6 +100,7 @@ class SimulateProgramV2:
         if ros:
             last_end = max_t(last_end, self.sim_ro_t)
         self.sim_ref_t = max_t(self.sim_ref_t, last_end + t)
+        # print("delay_auto", self.sim_ref_t, self.sim_gen_t, self.sim_ro_t)
 
     def pulse_hook(self, ch, name, t=0, *args, **kwargs) -> None:
         start_t = self.sim_gen_t if t == "auto" else self.sim_ref_t + t
