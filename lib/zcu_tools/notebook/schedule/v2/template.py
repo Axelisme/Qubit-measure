@@ -54,6 +54,7 @@ def sweep_hard_template(
     ] = default_result2signal,
     signal2real: Callable[[ndarray], ndarray] = default_signal2real,
     progress: bool = True,
+    catch_interrupt: bool = True,
     viewer_kwargs: Dict[str, Any] = {},
 ) -> Tuple[MyProgramV2, ndarray]:
     # set flux first
@@ -76,10 +77,12 @@ def sweep_hard_template(
 
             results = prog.acquire(soc, progress=progress, callback=callback)
             signals, _ = result2signals(*results)
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as e:
+            if not catch_interrupt:
+                raise e  # re-raise if not catching
             print("Received KeyboardInterrupt, early stopping the program")
         except Exception as e:
-            if prog is None:
+            if prog is None or not catch_interrupt:
                 raise e  # the error is happen in initialize of program
             print("Error during measurement:")
             print_traceback()

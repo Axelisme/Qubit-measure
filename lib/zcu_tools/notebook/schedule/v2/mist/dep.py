@@ -72,7 +72,9 @@ def mist_pdr_result2signal(avg_d: list, std_d: list):
     return avg_d, std_d
 
 
-def measure_mist_pdr_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
+def measure_mist_pdr_dep(
+    soc, soccfg, cfg, backend_mode=False
+) -> Tuple[ndarray, ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]
@@ -89,10 +91,12 @@ def measure_mist_pdr_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
         cfg,
         TwoToneProgram,
         ticks=(amps,),
-        progress=True,
+        progress=not backend_mode,
         xlabel="Pulse gain",
         ylabel="MIST",
         result2signals=mist_pdr_result2signal,
+        catch_interrupt=not backend_mode,
+        viewer_kwargs=dict(disable=backend_mode),
     )
 
     # get the actual amplitudes

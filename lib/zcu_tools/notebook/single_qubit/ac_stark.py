@@ -40,9 +40,8 @@ def analyze_ac_stark_shift(
 ) -> float:
     # apply cutoff if provided
     if cutoff is not None:
-        valid_indices = np.where(pdrs < cutoff)
+        valid_indices = np.where(pdrs < cutoff)[0]
         pdrs = pdrs[valid_indices]
-        fpts = fpts[valid_indices]
         signals = signals[valid_indices, :]
 
     amps = rotate2real(minus_background(signals, axis=1)).real
@@ -73,9 +72,11 @@ def analyze_ac_stark_shift(
         cmap="viridis",
     )
     plt.plot(s_pdrs, s_fpts, ".", c="k")
-    plt.plot(x_fit, y_fit, "-", label=f"Linear term: {b:.3g} MHz/a.u.")
-    plt.xlabel("Probe Power (a.u.)")
-    plt.ylabel("Resonator Frequency (MHz)")
+    plt.plot(
+        x_fit, y_fit, "-", label=f"Stark Shift = {stark_shift_coeff:.2f} x\u00b2 MHz"
+    )
+    plt.xlabel("Readout Gain (a.u.)")
+    plt.ylabel("Qubit Frequency (MHz)")
     plt.title("AC Stark Shift Analysis")
     plt.legend()
 
