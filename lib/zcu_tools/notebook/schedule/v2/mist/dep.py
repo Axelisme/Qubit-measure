@@ -6,10 +6,7 @@ from zcu_tools import make_cfg
 from zcu_tools.program.v2 import TwoToneProgram
 
 from ...tools import format_sweep1D, sweep2array, sweep2param
-from ..template import (
-    sweep2D_soft_hard_template,
-    sweep_hard_template,
-)
+from ..template import sweep2D_soft_hard_template, sweep_hard_template
 
 
 def mist_len_result2signal(avg_d: list, std_d: list):
@@ -37,11 +34,6 @@ def measure_mist_len_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
 
     qub_pulse["gain"] = sweep2param("w/o", cfg["sweep"]["w/o"])
     qub_pulse["length"] = sweep2param("length", len_sweep)
-
-    max_length = max(
-        len_sweep["start"], len_sweep["stop"], qub_pulse.get("pre_delay", 0.0)
-    )
-    qub_pulse["pre_delay"] = max_length - qub_pulse["length"]
 
     lens = sweep2array(len_sweep)  # predicted lengths
     prog, signals = sweep_hard_template(
@@ -103,81 +95,6 @@ def measure_mist_pdr_dep(
     amps: ndarray = prog.get_pulse_param("qub_pulse", "gain", as_array=True)  # type: ignore
 
     return amps, signals
-
-
-def measure_mist_pdr_len_dep2D(soc, soccfg, cfg) -> Tuple[ndarray, ndarray, ndarray]:
-    cfg = make_cfg(cfg)  # prevent in-place modification
-
-    qub_pulse = cfg["dac"]["qub_pulse"]
-
-    pdr_sweep = cfg["sweep"]["gain"]
-    len_sweep = cfg["sweep"]["length"]
-
-    # force gain be the first sweep
-    cfg["sweep"] = {"gain": pdr_sweep, "length": len_sweep}
-
-    qub_pulse["gain"] = sweep2param("gain", pdr_sweep)
-    qub_pulse["length"] = sweep2param("length", len_sweep)
-
-    max_length = max(
-        len_sweep["start"], len_sweep["stop"], qub_pulse.get("pre_delay", 0.0)
-    )
-    qub_pulse["pre_delay"] = max_length - qub_pulse["length"]
-
-    pdrs = sweep2array(pdr_sweep)  # predicted gains
-    lens = sweep2array(len_sweep)  # predicted lengths
-    prog, signals2D = sweep_hard_template(
-        soc,
-        soccfg,
-        cfg,
-        TwoToneProgram,
-        ticks=(pdrs, lens),
-        progress=True,
-        xlabel="Drive power (a.u.)",
-        ylabel="Length (us)",
-        result2signals=mist_pdr_result2signal,
-    )
-
-    # get the actual lengths
-    pdrs: ndarray = prog.get_pulse_param("qub_pulse", "gain", as_array=True)  # type: ignore
-    lens: ndarray = prog.get_pulse_param("qub_pulse", "length", as_array=True)  # type: ignore
-
-    return pdrs, lens, signals2D
-
-
-def measure_mist_pdr_fpt_dep2D(soc, soccfg, cfg) -> Tuple[ndarray, ndarray, ndarray]:
-    cfg = make_cfg(cfg)  # prevent in-place modification
-
-    qub_pulse = cfg["dac"]["qub_pulse"]
-
-    pdr_sweep = cfg["sweep"]["gain"]
-    fpt_sweep = cfg["sweep"]["freq"]
-
-    # force gain be the first sweep
-    cfg["sweep"] = {"gain": pdr_sweep, "freq": fpt_sweep}
-
-    qub_pulse["gain"] = sweep2param("gain", pdr_sweep)
-    qub_pulse["freq"] = sweep2param("freq", fpt_sweep)
-
-    pdrs = sweep2array(pdr_sweep)  # predicted gains
-    fpts = sweep2array(fpt_sweep)  # predicted frequencies
-    prog, signals2D = sweep_hard_template(
-        soc,
-        soccfg,
-        cfg,
-        TwoToneProgram,
-        ticks=(pdrs, fpts),
-        progress=True,
-        xlabel="Drive power (a.u.)",
-        ylabel="Frequency (MHz)",
-        result2signals=mist_pdr_result2signal,
-    )
-
-    # get the actual lengths
-    pdrs: ndarray = prog.get_pulse_param("qub_pulse", "gain", as_array=True)  # type: ignore
-    fpts: ndarray = prog.get_pulse_param("qub_pulse", "freq", as_array=True)  # type: ignore
-
-    return pdrs, fpts, signals2D
 
 
 def measure_mist_flx_pdr_dep2D(soc, soccfg, cfg) -> Tuple[ndarray, ndarray, ndarray]:

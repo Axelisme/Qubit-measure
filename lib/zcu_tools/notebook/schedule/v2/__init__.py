@@ -1,10 +1,9 @@
 from .lookback import measure_lookback
 from .mist import (
+    measure_abnormal_pdr_dep,
     measure_mist_flx_pdr_dep2D,
     measure_mist_len_dep,
     measure_mist_pdr_dep,
-    measure_mist_pdr_fpt_dep2D,
-    measure_mist_pdr_len_dep2D,
 )
 from .qubit import (
     measure_ac_stark,
@@ -63,9 +62,8 @@ __all__ = [
     "measure_t2ramsey",
     "visualize_t2ramsey",
     "measure_singleshot",
+    "measure_abnormal_pdr_dep",
+    "measure_mist_flx_pdr_dep2D",
     "measure_mist_len_dep",
     "measure_mist_pdr_dep",
-    "measure_mist_flx_pdr_dep2D",
-    "measure_mist_pdr_fpt_dep2D",
-    "measure_mist_pdr_len_dep2D",
 ]
