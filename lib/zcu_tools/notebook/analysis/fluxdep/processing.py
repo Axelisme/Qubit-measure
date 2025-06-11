@@ -98,13 +98,28 @@ def diff_mirror(xs: np.ndarray, data: np.ndarray, center: float) -> np.ndarray:
     返回:
         差值陣列，形狀與 data 相同
     """
-    # 找到最接近 center 的索引
+    # 使用向量化計算，避免 Python for-loop 以提升效能
+
+    # 以 xs 的端點為 0 與 N-1，計算 center 對應的連續索引位置 (浮點數)
     c_idx = (len(xs) - 1) * (center - xs.min()) / (xs.max() - xs.min())
 
+    # 建立正向索引 0,1,2,...,N-1
+    idxs = np.arange(data.shape[0])
+
+    # 鏡像後的索引: j = 2*c_idx - i  (四捨五入到最近整數)
+    mirror_idxs = np.round(2 * c_idx - idxs).astype(int)
+
+    # 篩掉超出邊界的索引
+    valid = (mirror_idxs >= 0) & (mirror_idxs < data.shape[0])
+
+    # 預先建立輸出陣列，以零填充無效位置
     diff_data = np.zeros_like(data)
-    for i in range(data.shape[0]):
-        j = int(2 * c_idx - i - 0.5)
-        if 0 <= j < data.shape[0]:
-            diff_data[i] = np.abs(data[i] - data[j])
+
+    # 只在有效位置計算差值
+    if data.ndim == 1:
+        diff_data[valid] = np.abs(data[valid] - data[mirror_idxs[valid]])
+    else:
+        # 利用 broadcasting，一次處理剩餘維度
+        diff_data[valid] = np.abs(data[valid] - data[mirror_idxs[valid]])
 
     return diff_data
