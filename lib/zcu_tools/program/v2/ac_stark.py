@@ -26,7 +26,7 @@ class ACStarkProgram(MyProgramV2):
         # qubit pulse with stark probe
         res_len = self.stark_res_pulse["length"]
         qub_len = self.stark_qub_pulse["length"]
-        t2 = (res_len - qub_len) / 2
+        t2 = (res_len - qub_len) * 0.99
         trigger_dual_pulse(
             self,
             self.stark_res_pulse,

@@ -27,25 +27,7 @@ def ge_result2signals(avg_d: list, std_d: list) -> Tuple[ndarray, Optional[ndarr
     return calc_snr(avg_d, std_d), None
 
 
-def measure_ge_freq_dep(soc, soccfg, cfg):
-    """
-    Measure ground/excited state discrimination as a function of frequency.
-
-    Parameters
-    ----------
-    soc : object
-        System-on-chip object for hardware control
-    soccfg : object
-        System-on-chip configuration
-    cfg : dict
-        Configuration dictionary with DAC, sweep, and other settings
-
-    Returns
-    -------
-    tuple
-        (frequency_points, snrs)
-        Returns frequency points, and the resulting SNR matrix
-    """
+def measure_ge_freq_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -84,25 +66,7 @@ def measure_ge_freq_dep(soc, soccfg, cfg):
     return fpts, snrs  # fpts
 
 
-def measure_ge_pdr_dep(soc, soccfg, cfg):
-    """
-    Measure ground/excited state discrimination as a function of pulse drive.
-
-    Parameters
-    ----------
-    soc : object
-        System-on-chip object for hardware control
-    soccfg : object
-        System-on-chip configuration
-    cfg : dict
-        Configuration dictionary with DAC, sweep, and other settings
-
-    Returns
-    -------
-    tuple
-        (pdrs, snrs)
-        Returns pulse drive, and the resulting SNR matrix
-    """
+def measure_ge_pdr_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -140,25 +104,7 @@ def measure_ge_pdr_dep(soc, soccfg, cfg):
     return pdrs, snrs  # pdrs
 
 
-def measure_ge_pdr_dep2D(soc, soccfg, cfg):
-    """
-    Measure ground/excited state discrimination as a function of pulse drive and frequency.
-
-    Parameters
-    ----------
-    soc : object
-        System-on-chip object for hardware control
-    soccfg : object
-        System-on-chip configuration
-    cfg : dict
-        Configuration dictionary with DAC, sweep, and other settings
-
-    Returns
-    -------
-    tuple
-        (pulse_drive_values, frequency_points, snr_2D_matrix)
-        Returns actual pulse drive values, frequency points, and the resulting SNR matrix
-    """
+def measure_ge_pdr_dep2D(soc, soccfg, cfg) -> Tuple[ndarray, ndarray, ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -199,25 +145,7 @@ def measure_ge_pdr_dep2D(soc, soccfg, cfg):
     return pdrs, fpts, snr2D  # (pdrs, fpts)
 
 
-def measure_ge_ro_dep(soc, soccfg, cfg):
-    """
-    Measure ground/excited state discrimination as a function of readout length.
-
-    Parameters
-    ----------
-    soc : object
-        System-on-chip object for hardware control
-    soccfg : object
-        System-on-chip configuration
-    cfg : dict
-        Configuration dictionary with DAC, sweep, and other settings
-
-    Returns
-    -------
-    tuple
-        (readout_lengths, signal_to_noise_ratios)
-        Returns the readout length values and corresponding SNR values
-    """
+def measure_ge_ro_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]

@@ -245,6 +245,9 @@ class InteractiveLines:
         self.prev_mouse_x = None
         self.prev_mouse_y = None
 
+        # Flag to確認滑鼠是否真的移動過，用於減少 update_zoom_view 次數
+        self._mouse_moved = False
+
         self.create_widgets()
         self.create_background(mAs, fpts, self.amps)
         self.create_lines(mAs)
@@ -443,6 +446,13 @@ class InteractiveLines:
         self.mouse_x = event.xdata
         self.mouse_y = event.ydata
 
+        # 標記滑鼠有移動，供 update_zoom_view 使用
+        self._mouse_moved = True
+
+        # 更新前一次位置紀錄
+        self.prev_mouse_x = self.mouse_x
+        self.prev_mouse_y = self.mouse_y
+
     def update_main_view(self, _):
         """更新動畫"""
         x, y = self.mouse_x, self.mouse_y
@@ -479,14 +489,13 @@ class InteractiveLines:
     def update_zoom_view(self, _):
         """更新放大視圖"""
         x, y = self.mouse_x, self.mouse_y
-        if x is None or y is None or self.active_line is None:
-            return []  # out of axes or not dragging, do nothing
 
-        if self.prev_mouse_x == x and self.prev_mouse_y == y:
-            return []
+        # 條件不足或滑鼠未移動時不更新，減少 CPU loading
+        if x is None or y is None or self.active_line is None or not self._mouse_moved:
+            return []  # do nothing
 
-        self.prev_mouse_x = x
-        self.prev_mouse_y = y
+        # reset flag
+        self._mouse_moved = False
 
         diff_amps = diff_mirror(self.mAs, self.amps.T, x).T
         self.zoom_im.set_data(diff_amps)

@@ -54,57 +54,35 @@ def sweep_hard_template(
     ] = default_result2signal,
     signal2real: Callable[[ndarray], ndarray] = default_signal2real,
     progress: bool = True,
-    **kwargs,
+    catch_interrupt: bool = True,
+    viewer_kwargs: Dict[str, Any] = {},
 ) -> Tuple[MyProgramV2, ndarray]:
-    """
-    Template for hardware-based parameter sweeps in measurements.
-
-    Args:
-        soc: Socket object for hardware communication
-        soccfg: Socket configuration
-        cfg: Measurement configuration dictionary
-        prog_cls: Program class for measurement execution
-        ticks: Tuple of arrays representing parameter sweep points
-        xlabel: Label for x-axis in visualization
-        ylabel: Label for y-axis in visualization
-        result2signals: Function to convert raw results to signal data
-        signal2real: Function to convert complex signals to real values
-        progress: Whether to show progress bars
-        **kwargs: Additional arguments passed to the acquire method
-
-    Returns:
-        Tuple containing:
-            - Program instance
-            - Complex signal array from measurements
-    """
-    signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
-    stds = np.full_like(signals, np.nan, dtype=float)
-
-    ViewerCls = [LivePlotter1D, LivePlotter2D][len(ticks) - 1]
-
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
+    ViewerCls = [LivePlotter1D, LivePlotter2D][len(ticks) - 1]
+
     prog = None
     title = None
-    with ViewerCls(xlabel, ylabel, title=title) as viewer:
+    signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
+    with ViewerCls(xlabel, ylabel, title=title, **viewer_kwargs) as viewer:
 
         def callback(ir, sum_d, sum2_d) -> None:
-            nonlocal signals, stds, title
-            signals, stds = result2signals(*raw2result(ir, sum_d, sum2_d))
+            nonlocal signals, title
+            signals, _ = result2signals(*raw2result(ir, sum_d, sum2_d))
             viewer.update(*ticks, signal2real(signals), title=title)
 
         try:
             prog = prog_cls(soccfg, cfg)
 
-            avg_d, std_d = prog.acquire(
-                soc, progress=progress, callback=callback, **kwargs
-            )
-            signals, stds = result2signals(avg_d, std_d)
-        except KeyboardInterrupt:
+            results = prog.acquire(soc, progress=progress, callback=callback)
+            signals, _ = result2signals(*results)
+        except KeyboardInterrupt as e:
+            if not catch_interrupt:
+                raise e  # re-raise if not catching
             print("Received KeyboardInterrupt, early stopping the program")
         except Exception as e:
-            if prog is None:
+            if prog is None or not catch_interrupt:
                 raise e  # the error is happen in initialize of program
             print("Error during measurement:")
             print_traceback()
@@ -128,30 +106,7 @@ def sweep1D_soft_template(
     ] = default_result2signal,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
-    **kwargs,
 ) -> Tuple[ndarray, ndarray]:
-    """
-    Template for 1D software-based parameter sweeps in measurements.
-
-    Args:
-        soc: Socket object for hardware communication
-        soccfg: Socket configuration
-        cfg: Measurement configuration dictionary
-        prog_cls: Program class for measurement execution
-        xs: Array of x-axis parameter values to sweep
-        updateCfg: Function to update configuration for each step
-        xlabel: Label for x-axis in visualization
-        ylabel: Label for y-axis in visualization
-        result2signals: Function to convert raw results to signal data
-        signal2real: Function to convert complex signals to real values
-        progress: Whether to show progress bars
-        **kwargs: Additional arguments passed to the acquire method
-
-    Returns:
-        Tuple containing:
-            - Array of x-axis parameters
-            - Complex signal array from measurements
-    """
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals = np.full_like(xs, np.nan, dtype=complex)
     stds = np.full_like(xs, np.nan, dtype=float)
@@ -170,7 +125,7 @@ def sweep1D_soft_template(
                     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
                     prog = prog_cls(soccfg, cfg)
-                    result = prog.acquire(soc, progress=False, **kwargs)
+                    result = prog.acquire(soc, progress=False)
                     signals[i], stds[i] = result2signals(*result)
 
                     async_draw(i, xs, signal2real(signals))
@@ -202,31 +157,7 @@ def sweep2D_soft_hard_template(
     signal2real: Callable = default_signal2real,
     progress: bool = True,
     num_lines: int = 1,
-    **kwargs,
 ) -> Tuple[MyProgramV2, ndarray]:
-    """
-    Template for 2D parameter sweeps with software and hardware components.
-
-    Args:
-        soc: Socket object for hardware communication
-        soccfg: Socket configuration
-        cfg: Measurement configuration dictionary
-        prog_cls: Program class for measurement execution
-        xs: Array of x-axis parameter values to sweep (software)
-        ys: Array of y-axis parameter values (hardware)
-        updateCfg: Function to update configuration for each x step
-        xlabel: Label for x-axis in visualization
-        ylabel: Label for y-axis in visualization
-        result2signals: Function to convert raw results to signal data
-        signal2real: Function to convert complex signals to real values
-        progress: Whether to show progress bars
-        **kwargs: Additional arguments passed to the acquire method
-
-    Returns:
-        Tuple containing:
-            - Program instance
-            - 2D complex signal array from measurements
-    """
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
 
@@ -266,9 +197,7 @@ def sweep2D_soft_hard_template(
 
                     prog = prog_cls(soccfg, cfg)
 
-                    avg_d, std_d = prog.acquire(
-                        soc, progress=False, callback=callback, **kwargs
-                    )
+                    avg_d, std_d = prog.acquire(soc, progress=False, callback=callback)
                     signals2D[i], _ = result2signals(avg_d, std_d)
 
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)

@@ -13,12 +13,13 @@ class LivePlotter1D(JupyterLivePlotter, AbsLivePlotter):
         self,
         xlabel: str,
         ylabel: str,
-        num_line: int = 1,
+        num_lines: int = 1,
         title: Optional[str] = None,
         figsize: Optional[Tuple[int, int]] = None,
+        disable: bool = False,
     ):
-        segment = Plot1DSegment(xlabel, ylabel, num_line, title)
-        super().__init__([segment], figsize=figsize)
+        segment = Plot1DSegment(xlabel, ylabel, num_lines, title)
+        super().__init__([segment], figsize=figsize, disable=disable)
 
     def update(
         self,
@@ -29,6 +30,9 @@ class LivePlotter1D(JupyterLivePlotter, AbsLivePlotter):
     ) -> None:
         ax: plt.Axes = self.axs[0]
         segment: Plot1DSegment = self.segments[0]
+
+        if self.disable:
+            return
 
         with self.update_lock:
             segment.update(ax, xs, signals, title)

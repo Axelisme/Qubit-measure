@@ -59,7 +59,6 @@ def sweep1D_hard_template(
     ] = default_result2signals,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
-    **kwargs,
 ) -> Tuple[ndarray, ndarray]:
     signals = np.full_like(xs, np.nan, dtype=complex)
 
@@ -76,9 +75,7 @@ def sweep1D_hard_template(
                 signals, _ = result2signals(*raw2result(ir, sum_d, sum2_d))
                 viewer.update(xs, signal2real(signals), title=title)
 
-            xs, *result = prog.acquire(
-                soc, progress=progress, callback=callback, **kwargs
-            )
+            xs, *result = prog.acquire(soc, progress=progress, callback=callback)
             signals, _ = result2signals(*result)
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
@@ -106,7 +103,6 @@ def sweep1D_soft_template(
     ] = default_result2signals,
     signal2real: Callable = default_signal2real,
     progress: bool = True,
-    **kwargs,
 ) -> Tuple[ndarray, ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals = np.full_like(xs, np.nan, dtype=complex)
@@ -127,9 +123,7 @@ def sweep1D_soft_template(
 
                     if isinstance(prog_or_fn, type):
                         prog = prog_or_fn(soccfg, cfg)
-                        avgi, avgq, stdi, stdq = prog.acquire(
-                            soc, progress=False, **kwargs
-                        )
+                        avgi, avgq, stdi, stdq = prog.acquire(soc, progress=False)
                         signals[i], stds[i] = result2signals(avgi, avgq, stdi, stdq)
                     elif isinstance(prog_or_fn, Callable):
                         signals[i], stds[i] = prog_or_fn(soc, soccfg, cfg)

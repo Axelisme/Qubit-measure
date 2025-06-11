@@ -22,30 +22,6 @@ def lookback_show(
     ratio: float = 0.3,
     pulse_cfg: Optional[dict] = None,
 ) -> float:
-    """
-    Visualize time domain signals with lookback feature to identify signal onset.
-
-    This function plots the real, imaginary, and magnitude components of complex signals over time.
-    It automatically identifies the time point where the signal magnitude exceeds a threshold ratio of the maximum value.
-
-    Parameters
-    ----------
-    Ts : np.ndarray
-        Time points in microseconds.
-    signals : np.ndarray
-        Complex signal values at each time point.
-    plot_fit : bool, default=True
-        Whether to plot the predicted onset offset line.
-    ratio : float, default=0.3
-        Threshold ratio of maximum amplitude for determining signal onset.
-    pulse_cfg : Optional[dict], default=None
-        If provided, should contain 'trig_offset' and 'ro_length' keys to display readout window.
-
-    Returns
-    -------
-    float
-        The time point (offset) where the signal magnitude first exceeds the threshold ratio.
-    """
     if smooth is not None:
         signals = gaussian_filter1d(signals, smooth)
     y = np.abs(signals)
@@ -83,29 +59,6 @@ def lookback_fft(
     normalize=True,
     pad_ratio=1,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Perform and visualize FFT analysis on multiple time domain signals.
-
-    This function computes the Fast Fourier Transform of multiple signals and plots their magnitude
-    spectra. It supports zero-padding and normalization of the FFT results.
-
-    Parameters
-    ----------
-    records : Dict[str, Tuple[np.ndarray, np.ndarray]]
-        Dictionary mapping signal names to tuples of (time_points, signal_values).
-    xrange : Tuple[float, float], default=(-5, 5)
-        X-axis range (frequency in MHz) to display in the plot.
-    normalize : bool, default=True
-        Whether to normalize the FFT magnitudes by their maximum values.
-    pad_ratio : float, default=1
-        Factor by which to zero-pad the signals for FFT resolution enhancement.
-
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray]
-        Frequency points and FFT values of the last processed signal.
-    """
-
     def get_fft(Ts, signals):
         N = int(len(Ts) * pad_ratio)
         signals = np.pad(signals, (0, N - len(signals)), "constant")
@@ -141,28 +94,6 @@ def lookback_fft(
 def contrast_plot(
     xs: np.ndarray, signals: np.ndarray, max_contrast=False, xlabel=None
 ) -> None:
-    """
-    Plot signal contrast across a range of x values.
-
-    This function visualizes either the magnitude or the maximally contrasted real component
-    of signals across a range of x values.
-
-    Parameters
-    ----------
-    xs : np.ndarray
-        X-axis values.
-    signals : np.ndarray
-        Complex signal values corresponding to each x point.
-    max_contrast : bool, default=False
-        If True, rotate signals to maximize the real component contrast.
-        If False, plot the magnitude of signals.
-    xlabel : Optional[str], default=None
-        Label for the x-axis. If None, no label is displayed.
-
-    Returns
-    -------
-    None
-    """
     if max_contrast:
         y = rotate2real(signals).real
     else:
@@ -184,29 +115,6 @@ def contrast_plot(
 def phase_analyze(
     fpts: np.ndarray, signals: np.ndarray, plot=True, plot_fit=True
 ) -> Tuple[float, float]:
-    """
-    Analyze the phase response of a system as a function of frequency.
-
-    This function calculates the unwrapped phase of complex signals and fits a linear model
-    to determine the phase slope and offset. The phase slope can be used to extract time delay
-    information.
-
-    Parameters
-    ----------
-    fpts : np.ndarray
-        Frequency points in MHz.
-    signals : np.ndarray
-        Complex signal values at each frequency point.
-    plot : bool, default=True
-        Whether to generate a visualization plot.
-    plot_fit : bool, default=True
-        Whether to include the linear fit line in the plot.
-
-    Returns
-    -------
-    Tuple[float, float]
-        Slope (in degrees/MHz) and offset (in degrees) of the phase response.
-    """
     phase = np.angle(signals)
     phase = np.unwrap(phase) * 180 / np.pi
 

@@ -15,9 +15,10 @@ class LivePlotter2D(JupyterLivePlotter, AbsLivePlotter):
         ylabel: str,
         title: Optional[str] = None,
         figsize: Optional[Tuple[int, int]] = None,
+        disable: bool = False,
     ):
         segment = Plot2DSegment(xlabel, ylabel, title)
-        super().__init__([segment], figsize=figsize)
+        super().__init__([segment], figsize=figsize, disable=disable)
 
     def update(
         self,
@@ -29,6 +30,9 @@ class LivePlotter2D(JupyterLivePlotter, AbsLivePlotter):
     ) -> None:
         ax: plt.Axes = self.axs[0]
         segment: Plot2DSegment = self.segments[0]
+
+        if self.disable:
+            return
 
         with self.update_lock:
             segment.update(ax, xs, ys, signals, title)
@@ -48,11 +52,12 @@ class LivePlotter2DwithLine(JupyterLivePlotter):
         num_lines: int = 1,
         title: Optional[str] = None,
         figsize: Optional[Tuple[int, int]] = None,
+        disable: bool = False,
     ):
         segment2d = Plot2DSegment(xlabel, ylabel, title)
         xlbael1d = xlabel if line_axis == 0 else ylabel
         segment1d = Plot1DSegment(xlbael1d, "", num_lines)
-        super().__init__([segment2d, segment1d], figsize=figsize)
+        super().__init__([segment2d, segment1d], figsize=figsize, disable=disable)
 
         self.num_lines = num_lines
         self.line_axis = line_axis
@@ -70,6 +75,9 @@ class LivePlotter2DwithLine(JupyterLivePlotter):
         ax1d: plt.Axes = self.axs[1]
         segment2d: Plot2DSegment = self.segments[0]
         segment1d: Plot1DSegment = self.segments[1]
+
+        if self.disable:
+            return
 
         line_start = max(0, current_line - self.num_lines + 1)
         if self.line_axis == 0:
