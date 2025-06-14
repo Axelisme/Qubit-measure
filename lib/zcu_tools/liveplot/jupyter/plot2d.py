@@ -5,10 +5,10 @@ import numpy as np
 
 from ..base import AbsLivePlotter
 from ..segments import Plot1DSegment, Plot2DSegment
-from .base import JupyterLivePlotter
+from .base import JupyterPlotMixin
 
 
-class LivePlotter2D(JupyterLivePlotter, AbsLivePlotter):
+class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
     def __init__(
         self,
         xlabel: str,
@@ -16,7 +16,7 @@ class LivePlotter2D(JupyterLivePlotter, AbsLivePlotter):
         title: Optional[str] = None,
         figsize: Optional[Tuple[int, int]] = None,
         disable: bool = False,
-    ):
+    ) -> None:
         segment = Plot2DSegment(xlabel, ylabel, title)
         super().__init__([segment], figsize=figsize, disable=disable)
 
@@ -39,11 +39,8 @@ class LivePlotter2D(JupyterLivePlotter, AbsLivePlotter):
             if refresh:
                 self._refresh_unchecked()
 
-    def __enter__(self) -> "LivePlotter2D":
-        return super().__enter__()
 
-
-class LivePlotter2DwithLine(JupyterLivePlotter):
+class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
     def __init__(
         self,
         xlabel: str,
@@ -93,6 +90,3 @@ class LivePlotter2DwithLine(JupyterLivePlotter):
             segment1d.update(ax1d, line_xs, lines_signals)
             if refresh:
                 self._refresh_unchecked()
-
-    def __enter__(self) -> "LivePlotter2DwithLine":
-        return super().__enter__()

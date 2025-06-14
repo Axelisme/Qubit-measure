@@ -15,10 +15,10 @@ pip install .
 ```
 
 這將安裝以下核心依賴：
+
 - numpy
 - tqdm
 - matplotlib
-
 
 ### ZCU伺服器擴展
 
@@ -29,6 +29,7 @@ pip install ".[server]"
 ```
 
 這將安裝基本依賴外加：
+
 - myqick
 - dill
 
@@ -43,6 +44,7 @@ pip install ".[client]"
 ```
 
 這將安裝以下依賴：
+
 - myqick
 - labber
 - numpy (<=1.19.5)
@@ -67,6 +69,7 @@ pip install ".[fit]"
 ```
 
 這將安裝以下依賴：
+
 - h5py
 - ipykernel
 - ipywidgets

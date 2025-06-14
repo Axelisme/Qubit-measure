@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 class AbsSegment(ABC):
     @abstractmethod
-    def init_ax(self, ax: plt.Axes):
+    def init_ax(self, ax: plt.Axes) -> None:
         """Initialize the segment with a matplotlib Axes object."""
         pass
 

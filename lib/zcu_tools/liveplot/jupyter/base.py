@@ -1,13 +1,17 @@
 from threading import Lock
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TypeVar
 
 import matplotlib.pyplot as plt
 from IPython.display import display
 
 from ..segments import AbsSegment
 
+# Generic type variable used to correctly type the context-manager methods so that
+# subclasses don't need to override ``__enter__`` just to narrow the return type.
+T_JupyterPlotMixin = TypeVar("T_JupyterPlotMixin", bound="JupyterPlotMixin")
 
-class JupyterLivePlotter:
+
+class JupyterPlotMixin:
     """live plotters in Jupyter notebooks."""
 
     def __init__(
@@ -59,7 +63,7 @@ class JupyterLivePlotter:
         with self.update_lock:
             self._refresh_unchecked()
 
-    def __enter__(self) -> "JupyterLivePlotter":
+    def __enter__(self: T_JupyterPlotMixin) -> T_JupyterPlotMixin:
         if self.disable:
             return self
         for ax, segment in zip(self.axs, self.segments):

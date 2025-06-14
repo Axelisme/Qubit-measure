@@ -5,10 +5,10 @@ import numpy as np
 
 from ..base import AbsLivePlotter
 from ..segments import HistogramSegment
-from .base import JupyterLivePlotter
+from .base import JupyterPlotMixin
 
 
-class LivePlotterHistogram(JupyterLivePlotter, AbsLivePlotter):
+class LivePlotterHistogram(JupyterPlotMixin, AbsLivePlotter):
     def __init__(
         self,
         xlabel: str,
@@ -17,7 +17,7 @@ class LivePlotterHistogram(JupyterLivePlotter, AbsLivePlotter):
         title: Optional[str] = None,
         figsize: Optional[Tuple[int, int]] = None,
         disable: bool = False,
-    ):
+    ) -> None:
         segment = HistogramSegment(xlabel, ylabel, title, bins)
         super().__init__([segment], figsize=figsize, disable=disable)
 
@@ -37,6 +37,3 @@ class LivePlotterHistogram(JupyterLivePlotter, AbsLivePlotter):
             segment.update(ax, signals, title)
             if refresh:
                 self._refresh_unchecked()
-
-    def __enter__(self) -> "LivePlotterHistogram":
-        return super().__enter__()

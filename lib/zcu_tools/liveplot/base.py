@@ -29,14 +29,3 @@ class AbsLivePlotter(ABC):
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         pass
-
-
-class NoneLivePlotter(AbsLivePlotter):
-    def clear(self) -> None:
-        pass
-
-    def update(self, *args, refresh: bool, **kwargs) -> None:
-        pass
-
-    def refresh(self) -> None:
-        pass

@@ -1,3 +1,3 @@
-from .base import AbsLivePlotter, NoneLivePlotter
+from .base import AbsLivePlotter
 
-__all__ = ["AbsLivePlotter", "NoneLivePlotter"]
+__all__ = ["AbsLivePlotter"]
