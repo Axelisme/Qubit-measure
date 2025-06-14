@@ -68,7 +68,9 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
         self._init_modules()
 
     def acquire(self, soc, **kwargs) -> list:
+        # v2 program need to pass soft_avgs to acquire
         return super().acquire(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)
 
     def acquire_decimated(self, soc, **kwargs) -> list:
+        # v2 program need to pass soft_avgs to acquire_decimated
         return super().acquire_decimated(soc, soft_avgs=self.cfg["soft_avgs"], **kwargs)

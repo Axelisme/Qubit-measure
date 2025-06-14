@@ -1,12 +1,13 @@
 # type: ignore
 
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from zcu_tools.auto import make_cfg
 from zcu_tools.notebook.single_qubit.process import rotate2real
 from zcu_tools.program.v2 import T1Program, T2EchoProgram, T2RamseyProgram
 from zcu_tools.program.v2.base.simulate import SimulateProgramV2
+from zcu_tools.liveplot.jupyter import LivePlotter1D
 
 from ...tools import format_sweep1D, sweep2array, sweep2param
 from ..template import sweep_hard_template
@@ -19,30 +20,6 @@ def qub_signals2reals(signals):
 def measure_t2ramsey(
     soc, soccfg, cfg, detune: float = 0
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Perform a T2* Ramsey measurement on a qubit.
-
-    This function measures the phase coherence time (T2*) of a qubit using the Ramsey
-    protocol, which involves applying two π/2 pulses separated by variable delay times.
-
-    Parameters
-    ----------
-    soc : object
-        The socket object for communication with the hardware.
-    soccfg : object
-        The socket configuration object.
-    cfg : dict
-        Configuration dictionary containing measurement settings.
-        Must include 'sweep' with 'length' parameter.
-    detune : float, optional
-        Frequency detune value for the Ramsey experiment in MHz, by default 0.
-
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray]
-        A tuple containing:
-        - ts: Array of time points in microseconds
-        - signals: Array of measured amplitude values
-    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -53,15 +30,19 @@ def measure_t2ramsey(
 
     ts = sweep2array(sweep_cfg)  # predicted times
 
+    prog: Optional[T2RamseyProgram] = None
+
+    def measure_fn(cfg, callback) -> list:
+        nonlocal prog
+        prog = T2RamseyProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
     # linear hard sweep
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+    signals = sweep_hard_template(
         cfg,
-        T2RamseyProgram,
+        measure_fn,
+        LivePlotter1D("Time (us)", "Amplitude"),
         ticks=(ts,),
-        xlabel="Time (us)",
-        ylabel="Amplitude",
         signal2real=qub_signals2reals,
     )
 
@@ -76,31 +57,6 @@ def measure_t2ramsey(
 def measure_t2echo(
     soc, soccfg, cfg, detune: float = 0.0
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Perform a T2 Echo measurement on a qubit.
-
-    This function measures the phase coherence time (T2) using the Hahn echo technique,
-    which adds a π pulse between two π/2 pulses to refocus dephasing caused by low-frequency
-    noise.
-
-    Parameters
-    ----------
-    soc : object
-        The socket object for communication with the hardware.
-    soccfg : object
-        The socket configuration object.
-    cfg : dict
-        Configuration dictionary containing measurement settings.
-        Must include 'sweep' with 'length' parameter.
-    detune : float, optional
-        Frequency detune value for the T2 echo experiment in MHz, by default 0.
-
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray]
-        A tuple containing:
-        - ts: Array of time points in microseconds
-        - signals: Array of measured amplitude values
-    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -113,15 +69,19 @@ def measure_t2echo(
         2 * sweep2array(sweep_cfg) + cfg["dac"]["pi_pulse"]["length"]
     )  # predicted times
 
+    prog: Optional[T2EchoProgram] = None
+
+    def measure_fn(cfg, callback) -> list:
+        nonlocal prog
+        prog = T2EchoProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
     # linear hard sweep
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+    signals = sweep_hard_template(
         cfg,
-        T2EchoProgram,
+        measure_fn,
+        LivePlotter1D("Time (us)", "Amplitude"),
         ticks=(ts,),
-        xlabel="Time (us)",
-        ylabel="Amplitude",
         signal2real=qub_signals2reals,
     )
 
@@ -136,29 +96,9 @@ def measure_t2echo(
     return ts, signals
 
 
-def measure_t1(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
-    """Perform a T1 measurement on a qubit.
-
-    This function measures the energy relaxation time (T1) of a qubit by applying a π pulse
-    to excite the qubit and measuring the decay after variable delay times.
-
-    Parameters
-    ----------
-    soc : object
-        The socket object for communication with the hardware.
-    soccfg : object
-        The socket configuration object.
-    cfg : dict
-        Configuration dictionary containing measurement settings.
-        Must include 'sweep' with 'length' parameter.
-
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray]
-        A tuple containing:
-        - ts: Array of time points in microseconds
-        - signals: Array of measured amplitude values
-    """
+def measure_t1(
+    soc, soccfg, cfg, backend_mode: bool = False
+) -> Tuple[np.ndarray, np.ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -168,15 +108,19 @@ def measure_t1(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
 
     ts = sweep2array(sweep_cfg)  # predicted times
 
+    prog: Optional[T1Program] = None
+
+    def measure_fn(cfg, callback) -> list:
+        nonlocal prog
+        prog = T1Program(soccfg, cfg)
+        return prog.acquire(soc, progress=not backend_mode, callback=callback)
+
     # linear hard sweep
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+    signals = sweep_hard_template(
         cfg,
-        T1Program,
+        measure_fn,
+        LivePlotter1D("Time (us)", "Amplitude", disable=backend_mode),
         ticks=(ts,),
-        xlabel="Time (us)",
-        ylabel="Amplitude",
         signal2real=qub_signals2reals,
     )
 

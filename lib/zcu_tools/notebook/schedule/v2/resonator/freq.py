@@ -1,4 +1,7 @@
+from typing import Optional, Tuple
+
 from zcu_tools import make_cfg
+from zcu_tools.liveplot.jupyter import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram
 
 from ...tools import format_sweep1D, map2adcfreq, sweep2array, sweep2param
@@ -52,15 +55,18 @@ def measure_res_freq(soc, soccfg, cfg):
     fpts = sweep2array(sweep_cfg)  # predicted frequency points
     fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[OneToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = OneToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    signals = sweep_hard_template(
         cfg,
-        OneToneProgram,
+        measure_fn,
+        LivePlotter1D("Frequency (MHz)", "Amplitude"),
         ticks=(fpts,),
-        progress=True,
-        xlabel="Frequency (MHz)",
-        ylabel="Amplitude",
     )
 
     # get the actual frequency points

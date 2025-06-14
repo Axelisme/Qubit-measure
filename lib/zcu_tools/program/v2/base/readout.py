@@ -3,6 +3,8 @@ from typing import Any, Dict, List
 
 from myqick.asm_v2 import AveragerProgramV2
 
+from .pulse import force_no_post_delay, trigger_pulse
+
 
 class AbsReadout(ABC):
     @abstractmethod
@@ -17,6 +19,8 @@ class AbsReadout(ABC):
 def make_readout(name: str) -> AbsReadout:
     if name == "base":
         return BaseReadout()
+    elif name == "two_pulse":
+        return TwoPulseReadout()
     else:
         raise ValueError(f"Unknown readout type: {name}")
 
@@ -27,10 +31,14 @@ class BaseReadout(AbsReadout):
         res_ch: int = res_pulse["ch"]
         ro_chs: List[int] = prog.adc["chs"]
 
+        # TODO: support multiple readout channels
         assert len(ro_chs) == 1, "Only one readout channel is supported"
         ro_ch = ro_chs[0]
 
-        prog.declare_pulse(res_pulse, "res_pulse", ro_chs[0])
+        # TODO: support post delay
+        force_no_post_delay(res_pulse, "res_pulse")
+
+        prog.declare_pulse(res_pulse, "res_pulse", ro_ch)
 
         prog.declare_readout(ch=ro_ch, length=prog.adc["ro_length"])
         prog.add_readoutconfig(
@@ -42,17 +50,38 @@ class BaseReadout(AbsReadout):
 
         prog.send_readoutconfig(ro_ch, "readout_adc", t=0)
 
-        pre_delay = prog.res_pulse.get("pre_delay", 0.0)
-        post_delay = prog.res_pulse.get("post_delay", 0.0)
-        t = prog.res_pulse.get("t", 0)
+        trigger_pulse(prog, prog.res_pulse, "res_pulse")
 
-        if pre_delay is not None:
-            # print("pre delay readout")
-            prog.delay_auto(t=pre_delay, ros=False, tag="pre_delay")
+        prog.trigger([ro_ch], t=prog.adc["trig_offset"])
 
-        prog.pulse(prog.res_pulse["ch"], "res_pulse", t=t)
-        prog.trigger([ro_ch], t=t+prog.adc["trig_offset"])
 
-        if post_delay is not None:
-            # print("post delay readout")
-            prog.delay_auto(t=post_delay, ros=False, tag="post_delay")
+class TwoPulseReadout(AbsReadout):
+    def init(self, prog: AveragerProgramV2):
+        res_pulse: Dict[str, Any] = prog.res_pulse
+        res_ch: int = res_pulse["ch"]
+        ro_chs: List[int] = prog.adc["chs"]
+
+        # TODO: support multiple readout channels
+        assert len(ro_chs) == 1, "Only one readout channel is supported"
+        ro_ch = ro_chs[0]
+
+        # TODO: support post delay
+        force_no_post_delay(res_pulse, "res_pulse")
+
+        prog.declare_pulse(prog.pre_res_pulse, "pre_res_pulse")
+        prog.declare_pulse(res_pulse, "res_pulse", ro_ch)
+
+        prog.declare_readout(ch=ro_ch, length=prog.adc["ro_length"])
+        prog.add_readoutconfig(
+            ch=ro_ch, name="readout_adc", freq=res_pulse["freq"], gen_ch=res_ch
+        )
+
+    def readout_qubit(self, prog: AveragerProgramV2):
+        ro_ch: int = prog.adc["chs"][0]
+
+        prog.send_readoutconfig(ro_ch, "readout_adc", t=0)
+
+        trigger_pulse(prog, prog.pre_res_pulse, "pre_res_pulse")
+        trigger_pulse(prog, prog.res_pulse, "res_pulse")
+
+        prog.trigger([ro_ch], t=prog.adc["trig_offset"])

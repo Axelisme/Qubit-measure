@@ -140,7 +140,7 @@ class SimulateProgramV2:
 
         NUM_SAMPLE = 10001
 
-        visualize_keywords = ["length", "sigma", "alpha", "gain"]
+        visualize_keywords = ["length", "sigma", "alpha", "gain", "ge", "w/o_reset"]
         loop_dict = {
             k: v
             for k, v in self.prog.loop_dict.items()

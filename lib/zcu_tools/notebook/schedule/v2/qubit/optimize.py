@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 import numpy as np
 from numpy import ndarray
 from zcu_tools import make_cfg
+from zcu_tools.liveplot.jupyter import LivePlotter1D, LivePlotter2D
 from zcu_tools.program.v2 import TwoToneProgram
 
 from ...tools import format_sweep1D, map2adcfreq, sweep2array, sweep2param
@@ -49,14 +50,18 @@ def measure_ge_freq_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
     fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
     fpts = map2adcfreq(soc, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    prog, snrs = sweep_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[TwoToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = TwoToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    snrs = sweep_hard_template(
         cfg,
-        TwoToneProgram,
+        measure_fn,
+        LivePlotter1D("Frequency (MHz)", "SNR"),
         ticks=(fpts,),
-        xlabel="Frequency (MHz)",
-        ylabel="SNR",
         result2signals=ge_result2signals,
     )
 
@@ -82,19 +87,22 @@ def measure_ge_pdr_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
 
     # set with / without pi gain for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
-
     res_pulse["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
 
     pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
 
-    prog, snrs = sweep_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[TwoToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = TwoToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    snrs = sweep_hard_template(
         cfg,
-        TwoToneProgram,
+        measure_fn,
+        LivePlotter1D("Power (a.u)", "SNR"),
         ticks=(pdrs,),
-        xlabel="Power (a.u)",
-        ylabel="SNR",
         result2signals=ge_result2signals,
     )
 
@@ -127,14 +135,18 @@ def measure_ge_pdr_dep2D(soc, soccfg, cfg) -> Tuple[ndarray, ndarray, ndarray]:
     fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
     fpts = map2adcfreq(soc, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    prog, snr2D = sweep_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[TwoToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = TwoToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    snr2D = sweep_hard_template(
         cfg,
-        TwoToneProgram,
+        measure_fn,
+        LivePlotter2D("Readout Gain", "Frequency (MHz)"),
         ticks=(pdrs, fpts),
-        xlabel="Readout Gain",
-        ylabel="Frequency (MHz)",
         result2signals=ge_result2signals,
     )
 
@@ -167,16 +179,20 @@ def measure_ge_ro_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray]:
     def updateCfg(cfg, _, ro_len):
         cfg["adc"]["ro_length"] = ro_len
 
-    lens, snrs = sweep1D_soft_template(
-        soc,
-        soccfg,
+    prog: Optional[TwoToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = TwoToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=False, callback=callback)
+
+    snrs = sweep1D_soft_template(
         cfg,
-        TwoToneProgram,
+        measure_fn,
+        LivePlotter1D("Readout Length (us)", "SNR"),
         xs=lens,
         progress=True,
         updateCfg=updateCfg,
-        xlabel="Readout Length (us)",
-        ylabel="Amplitude",
         result2signals=ge_result2signals,
     )
 

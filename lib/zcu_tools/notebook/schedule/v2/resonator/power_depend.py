@@ -1,7 +1,8 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from zcu_tools.auto import make_cfg
+from zcu_tools.liveplot.jupyter import LivePlotter2DwithLine
 from zcu_tools.notebook.single_qubit.process import minus_background, rescale
 from zcu_tools.program.v2 import OneToneProgram
 
@@ -10,49 +11,12 @@ from ..template import sweep2D_soft_hard_template
 
 
 def signal2real(signals: np.ndarray) -> np.ndarray:
-    """
-    Process measurement signals by removing background and rescaling.
-
-    Args:
-        signals (ndarray): Raw measurement signals to process.
-
-    Returns:
-        ndarray: Processed signals after taking absolute value, removing background,
-                and rescaling along axis 1.
-    """
     return rescale(minus_background(np.abs(signals), axis=1), axis=1)
 
 
 def measure_res_pdr_dep(
     soc, soccfg, cfg, dynamic_avg=False, gain_ref=0.1
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Measure the power dependency of a resonator by sweeping both power and frequency.
-
-    This function performs a 2D sweep where power (gain) is swept in the outer loop
-    and frequency in the inner loop. For each power level, a frequency sweep is performed
-    to characterize the resonator response.
-
-    Args:
-        soc: System-on-chip object for hardware control.
-        soccfg: SoC configuration object containing hardware settings.
-        cfg (dict): Configuration dictionary containing measurement parameters:
-            - dac.res_pulse: Resonator pulse settings
-            - sweep.gain: Power/gain sweep settings
-            - sweep.freq: Frequency sweep settings
-            - reps: Number of measurement repetitions
-            - adc.chs: ADC channels to use
-        dynamic_avg (bool, optional): Whether to dynamically adjust avg count
-                                     based on power level. Defaults to False.
-        gain_ref (float, optional): Reference gain value for dynamic repetition
-                                   adjustment. Defaults to 0.1.
-
-    Returns:
-        tuple: A 3-element tuple containing:
-            - pdrs (ndarray): Power/gain values used in the sweep.
-            - fpts (ndarray): Frequency points used in the sweep.
-            - signals2D (ndarray): 2D array of measured signals with shape (len(pdrs), len(fpts)).
-    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -71,17 +35,10 @@ def measure_res_pdr_dep(
 
     res_pulse["gain"] = pdrs[0]  # set initial power
 
-    def updateCfg(cfg, i, pdr):
-        """
-        Update configuration for each step in the power sweep.
-
-        Args:
-            cfg (dict): Configuration dictionary to update.
-            i (int): Current index in the power sweep.
-            pdr (float): Current power/gain value.
-        """
+    def updateCfg(cfg, _, pdr) -> None:
         cfg["dac"]["res_pulse"]["gain"] = pdr
 
+        # change reps and rounds based on power
         if dynamic_avg:
             dyn_factor = (gain_ref / pdr) ** 2
             if dyn_factor > 1:
@@ -104,18 +61,21 @@ def measure_res_pdr_dep(
                 if cfg["reps"] < min_reps:
                     cfg["reps"] = min_reps
 
-    prog, signals2D = sweep2D_soft_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[OneToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = OneToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=False, callback=callback)
+
+    signals2D = sweep2D_soft_hard_template(
         cfg,
-        OneToneProgram,
+        measure_fn,
+        LivePlotter2DwithLine("Power (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=10),
         xs=pdrs,
         ys=fpts,
-        xlabel="Power (a.u.)",
-        ylabel="Frequency (MHz)",
         updateCfg=updateCfg,
         signal2real=signal2real,
-        num_lines=10,
     )
 
     # get the actual frequency points

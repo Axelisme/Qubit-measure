@@ -1,7 +1,8 @@
 from copy import deepcopy
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
+from zcu_tools.liveplot.jupyter import LivePlotter2D
 from zcu_tools.notebook.single_qubit.process import minus_background, rotate2real
 from zcu_tools.program.v2 import ACStarkProgram
 from zcu_tools.program.v2.base.simulate import SimulateProgramV2
@@ -27,15 +28,19 @@ def measure_ac_stark(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.ndarr
 
     amps = sweep2array(gain_sweep)
     freqs = sweep2array(freq_sweep)
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+
+    prog: Optional[ACStarkProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = ACStarkProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    signals = sweep_hard_template(
         cfg,
-        ACStarkProgram,
+        measure_fn,
+        LivePlotter2D("Pulse gain", "Frequency (MHz)"),
         ticks=(amps, freqs),
-        progress=True,
-        xlabel="Pulse gain",
-        ylabel="Frequency (MHz)",
         signal2real=qub_signal2real,
     )
 

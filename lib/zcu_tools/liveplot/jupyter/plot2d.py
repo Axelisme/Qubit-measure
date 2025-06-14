@@ -53,7 +53,7 @@ class LivePlotter2DwithLine(JupyterLivePlotter):
         title: Optional[str] = None,
         figsize: Optional[Tuple[int, int]] = None,
         disable: bool = False,
-    ):
+    ) -> None:
         segment2d = Plot2DSegment(xlabel, ylabel, title)
         xlbael1d = xlabel if line_axis == 0 else ylabel
         segment1d = Plot1DSegment(xlbael1d, "", num_lines)
@@ -67,7 +67,6 @@ class LivePlotter2DwithLine(JupyterLivePlotter):
         xs: np.ndarray,
         ys: np.ndarray,
         signals: np.ndarray,
-        current_line: int,
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:
@@ -79,6 +78,8 @@ class LivePlotter2DwithLine(JupyterLivePlotter):
         if self.disable:
             return
 
+        # use the last non-nan line as current line
+        current_line = np.where(~np.isnan(signals))[1 - self.line_axis][-1]
         line_start = max(0, current_line - self.num_lines + 1)
         if self.line_axis == 0:
             lines_signals = signals[:, line_start:]

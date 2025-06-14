@@ -3,8 +3,6 @@ from typing import Tuple
 import numpy as np
 from tqdm.auto import tqdm
 from zcu_tools.auto import make_cfg
-
-# from ..instant_show import InstantShow1D
 from zcu_tools.liveplot.jupyter import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 
@@ -14,33 +12,6 @@ from ..flux import set_flux
 def onetone_demimated(
     soc, soccfg, cfg, progress=True, qub_pulse=False
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Performs a decimated one-tone or two-tone measurement.
-
-    This function acquires a single-shot measurement using either OneToneProgram or
-    TwoToneProgram depending on whether a qubit pulse is included.
-
-    Parameters
-    ----------
-    soc : object
-        Socket object for communication with the FPGA.
-    soccfg : object
-        Socket configuration object.
-    cfg : dict
-        Configuration dictionary for the measurement.
-    progress : bool, optional
-        Whether to show a progress bar during measurement, defaults to True.
-    qub_pulse : bool, optional
-        If True, uses TwoToneProgram (with qubit pulse); otherwise uses
-        OneToneProgram (without qubit pulse), defaults to False.
-
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray]
-        A tuple containing:
-        - Time axis (in microseconds)
-        - Complex signal data (I + 1j*Q)
-    """
     cfg = make_cfg(cfg, reps=1)
 
     prog = TwoToneProgram(soccfg, cfg) if qub_pulse else OneToneProgram(soccfg, cfg)

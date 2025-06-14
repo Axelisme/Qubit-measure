@@ -1,7 +1,8 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from zcu_tools.auto import make_cfg
+from zcu_tools.liveplot.jupyter import LivePlotter2DwithLine
 from zcu_tools.notebook.single_qubit.process import minus_background
 from zcu_tools.program.v2 import OneToneProgram
 
@@ -14,28 +15,6 @@ def signal2real(signals) -> np.ndarray:
 
 
 def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Measures resonator frequency dependence on flux.
-
-    This function performs a 2D sweep of resonator frequency vs flux to
-    characterize the flux dependence of a resonator.
-
-    Args:
-        soc: System-on-chip object that controls the hardware.
-        soccfg: Configuration object for the system-on-chip.
-        cfg (dict): Configuration dictionary containing:
-            - dac.res_pulse: Resonator pulse parameters.
-            - sweep.freq: Frequency sweep parameters.
-            - sweep.flux: Flux sweep parameters.
-            - adc.chs: ADC channel array.
-            - dev: Device configuration for flux control.
-
-    Returns:
-        tuple: A 3-tuple containing:
-            - flxs (numpy.ndarray): Flux values used in the measurement.
-            - fpts (numpy.ndarray): Frequency points used in the measurement.
-            - signals2D (numpy.ndarray): 2D array of measurement results.
-    """
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]
@@ -52,21 +31,24 @@ def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.n
 
     cfg["dev"]["flux"] = As[0]  # set initial flux
 
-    def updateCfg(cfg, _, mA):
+    def updateCfg(cfg, _, mA) -> None:
         cfg["dev"]["flux"] = mA * 1e-3
 
-    prog, signals2D = sweep2D_soft_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[OneToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = OneToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=False, callback=callback)
+
+    signals2D = sweep2D_soft_hard_template(
         cfg,
-        OneToneProgram,
+        measure_fn,
+        LivePlotter2DwithLine("Flux (mA)", "Frequency (MHz)", num_lines=2),
         xs=1e3 * As,
         ys=fpts,
-        xlabel="Flux (mA)",
-        ylabel="Frequency (MHz)",
         updateCfg=updateCfg,
         signal2real=signal2real,
-        num_lines=2,
     )
 
     # get the actual frequency points

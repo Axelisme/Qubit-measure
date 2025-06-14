@@ -1,25 +1,24 @@
 from copy import deepcopy
-from typing import List, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
-from zcu_tools.liveplot.jupyter import LivePlotter1D
-from zcu_tools.notebook.single_qubit.process import minus_background, rotate2real
+from zcu_tools.liveplot.jupyter import LivePlotter1D, LivePlotter2D
+from zcu_tools.notebook.single_qubit.process import rotate2real
 from zcu_tools.program.v2 import (
-    MuxResetRabiProgram,
+    MyProgramV2,
     OneToneProgram,
-    ResetRabiProgram,
+    ResetProgram,
+    TwoPulseResetProgram,
     TwoToneProgram,
 )
 from zcu_tools.program.v2.base.simulate import SimulateProgramV2
-from zcu_tools.tools import print_traceback
 
-from ...flux import set_flux
 from ...tools import format_sweep1D, sweep2array, sweep2param
 from ..template import sweep_hard_template
 
 
 def qub_signal2real(signals: np.ndarray) -> np.ndarray:
-    return np.abs(minus_background(signals))
+    return rotate2real(signals).real
 
 
 def measure_reset_freq(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
@@ -36,15 +35,18 @@ def measure_reset_freq(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
 
     fpts = sweep2array(sweep_cfg)  # predicted frequency points
 
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[OneToneProgram] = None
+
+    def measure_fn(cfg, callback) -> list:
+        nonlocal prog
+        prog = OneToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    signals = sweep_hard_template(
         cfg,
-        OneToneProgram,
+        measure_fn,
+        LivePlotter1D("Frequency (MHz)", "Amplitude"),
         ticks=(fpts,),
-        progress=True,
-        xlabel="Frequency (MHz)",
-        ylabel="Amplitude",
         signal2real=qub_signal2real,
     )
 
@@ -62,7 +64,7 @@ def measure_mux_reset_freq(
     reset_pulse1 = cfg["dac"]["reset_pulse1"]
     reset_pulse2 = cfg["dac"]["reset_pulse2"]
 
-    if cfg["dac"]["reset"] != "mux_dual_pulse":
+    if cfg["dac"]["reset"] != "two_pulse":
         raise ValueError("Reset pulse must be two pulse")
 
     # force freq1 to be the outer loop
@@ -74,15 +76,18 @@ def measure_mux_reset_freq(
     fpts1 = sweep2array(cfg["sweep"]["freq1"])  # predicted frequency points
     fpts2 = sweep2array(cfg["sweep"]["freq2"])  # predicted frequency points
 
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[OneToneProgram] = None
+
+    def measure_fn(cfg, callback) -> list:
+        nonlocal prog
+        prog = OneToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    signals = sweep_hard_template(
         cfg,
-        OneToneProgram,
+        measure_fn,
+        LivePlotter2D("Frequency1 (MHz)", "Frequency2 (MHz)"),
         ticks=(fpts1, fpts2),
-        progress=True,
-        xlabel="Frequency1 (MHz)",
-        ylabel="Frequency2 (MHz)",
         signal2real=qub_signal2real,
     )
 
@@ -91,6 +96,48 @@ def measure_mux_reset_freq(
     fpts2 = prog.get_pulse_param("reset2", "freq", as_array=True)
 
     return fpts1, fpts2, signals
+
+
+def measure_mux_reset_pdr(
+    soc, soccfg, cfg
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
+    reset_test_pulse1 = cfg["dac"]["reset_test_pulse1"]
+    reset_test_pulse2 = cfg["dac"]["reset_test_pulse2"]
+
+    # force gain1 to be the outer loop
+    cfg["sweep"] = {
+        "gain1": cfg["sweep"]["gain1"],
+        "gain2": cfg["sweep"]["gain2"],
+    }
+
+    reset_test_pulse1["gain"] = sweep2param("gain1", cfg["sweep"]["gain1"])
+    reset_test_pulse2["gain"] = sweep2param("gain2", cfg["sweep"]["gain2"])
+
+    pdrs1 = sweep2array(cfg["sweep"]["gain1"])  # predicted amplitudes
+    pdrs2 = sweep2array(cfg["sweep"]["gain2"])  # predicted amplitudes
+
+    prog: Optional[TwoPulseResetProgram] = None
+
+    def measure_fn(cfg, callback) -> list:
+        nonlocal prog
+        prog = TwoPulseResetProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    signals = sweep_hard_template(
+        cfg,
+        measure_fn,
+        LivePlotter2D("Gain1", "Gain2"),
+        ticks=(pdrs1, pdrs2),
+        signal2real=qub_signal2real,
+    )
+
+    # get the actual frequency points
+    pdrs1 = prog.get_pulse_param("reset_test1", "gain", as_array=True)
+    pdrs2 = prog.get_pulse_param("reset_test2", "gain", as_array=True)
+
+    return pdrs1, pdrs2, signals
 
 
 def measure_reset_time(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
@@ -112,7 +159,7 @@ def measure_reset_time(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     len_params = sweep2param("length", cfg["sweep"]["length"])
     if cfg["dac"]["reset"] == "pulse":
         cfg["dac"]["reset_pulse"]["length"] = len_params
-    elif cfg["dac"]["reset"] == "mux_dual_pulse":
+    elif cfg["dac"]["reset"] == "two_pulse":
         cfg["dac"]["reset_pulse1"]["length"] = len_params
         cfg["dac"]["reset_pulse2"]["length"] = len_params
     else:
@@ -128,14 +175,18 @@ def measure_reset_time(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
 
         return avg_d, std_d
 
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[TwoToneProgram] = None
+
+    def measure_fn(cfg, callback) -> list:
+        nonlocal prog
+        prog = TwoToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    signals = sweep_hard_template(
         cfg,
-        TwoToneProgram,
+        measure_fn,
+        LivePlotter1D("Length (us)", "Amplitude"),
         ticks=(lens,),
-        xlabel="Length (us)",
-        ylabel="Amplitude",
         result2signals=result2signals,
     )
 
@@ -153,79 +204,61 @@ def measure_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
     gain_sweep = cfg["sweep"]["gain"]
 
+    cfg["sweep"] = {
+        "w/o_reset": {"start": 0, "stop": 1.0, "expts": 2},
+        "gain": gain_sweep,
+    }
+
     cfg["dac"]["qub_pulse"]["gain"] = sweep2param("gain", gain_sweep)
 
-    amps = sweep2array(gain_sweep)  # predicted amplitudes
-    signals_all = np.full((2, len(amps)), np.nan, dtype=complex)
-
-    # set flux first
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
-
-    def raw2result(ir, sum_d, sum2_d) -> Tuple[List, List]:
-        avg_d = [d / (ir + 1) for d in sum_d]
-        std_d = [np.sqrt(d2 / (ir + 1) - d**2) for d, d2 in zip(avg_d, sum2_d)]
-        return avg_d, std_d
-
-    def result2signals(avg_d: list, std_d: list) -> Tuple[np.ndarray, np.ndarray]:
-        avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep)
-        std_d = np.max(std_d[0][0], axis=-1)  # (*sweep)
-
-        return avg_d, std_d
-
-    def signal2real(signals) -> np.ndarray:
-        return rotate2real(signals).real
-
+    reset_factor = sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"])
     if cfg["dac"]["reset_test"] == "pulse":
-        reset_pulse = cfg["dac"]["reset_test_pulse"]
-        reset_gain = reset_pulse["gain"]
-    elif cfg["dac"]["reset_test"] == "mux_dual_pulse":
-        reset_pulse1 = cfg["dac"]["reset_test_pulse1"]
-        reset_pulse2 = cfg["dac"]["reset_test_pulse2"]
-        reset_gain1 = reset_pulse1["gain"]
-        reset_gain2 = reset_pulse2["gain"]
+        reset_test_pulse = cfg["dac"]["reset_test_pulse"]
+        reset_test_pulse["gain"] = reset_factor * reset_test_pulse["gain"]
+        reset_test_pulse["length"] = reset_factor * reset_test_pulse["length"]
+        if reset_test_pulse["style"] == "flat_top":
+            reset_test_pulse["length"] += (
+                reset_test_pulse["raise_pulse"]["length"] + 0.005
+            )
+    elif cfg["dac"]["reset_test"] == "two_pulse":
+        reset_test_pulse1 = cfg["dac"]["reset_test_pulse1"]
+        reset_test_pulse2 = cfg["dac"]["reset_test_pulse2"]
+        reset_test_pulse1["gain"] = reset_factor * reset_test_pulse1["gain"]
+        reset_test_pulse2["gain"] = reset_factor * reset_test_pulse2["gain"]
+        reset_test_pulse1["length"] = reset_factor * reset_test_pulse1["length"] + 0.01
+        reset_test_pulse2["length"] = reset_factor * reset_test_pulse2["length"] + 0.01
+        if reset_test_pulse1["style"] == "flat_top":
+            reset_test_pulse1["length"] += reset_test_pulse1["raise_pulse"]["length"]
+            reset_test_pulse2["length"] += reset_test_pulse2["raise_pulse"]["length"]
     else:
         raise ValueError(f"Reset type {cfg['dac']['reset_test']} not supported")
 
-    prog = None
-    with LivePlotter1D("Pulse gain", "Amplitude", num_lines=2) as viewer:
-        try:
-            for i in range(2):
-                if cfg["dac"]["reset_test"] == "pulse":
-                    reset_pulse["gain"] = i * reset_gain
-                elif cfg["dac"]["reset_test"] == "mux_dual_pulse":
-                    reset_pulse1["gain"] = i * reset_gain1
-                    reset_pulse2["gain"] = i * reset_gain2
+    pdrs = sweep2array(gain_sweep)  # predicted amplitudes
 
-                def callback(ir, sum_d, sum2_d) -> None:
-                    signals_all[i, :], _ = result2signals(
-                        *raw2result(ir, sum_d, sum2_d)
-                    )
-                    viewer.update(amps, signal2real(signals_all))
+    prog: Optional[MyProgramV2] = None
 
-                if cfg["dac"]["reset_test"] == "pulse":
-                    prog = ResetRabiProgram(soccfg, cfg)
-                elif cfg["dac"]["reset_test"] == "mux_dual_pulse":
-                    prog = MuxResetRabiProgram(soccfg, cfg)
-                else:
-                    raise ValueError(
-                        f"Reset type {cfg['dac']['reset_test']} not supported"
-                    )
+    def measure_fn(cfg, callback) -> Tuple[np.ndarray, np.ndarray]:
+        nonlocal prog
+        if cfg["dac"]["reset_test"] == "pulse":
+            prog = ResetProgram(soccfg, cfg)
+        elif cfg["dac"]["reset_test"] == "two_pulse":
+            prog = TwoPulseResetProgram(soccfg, cfg)
+        else:
+            raise ValueError(f"Reset type {cfg['dac']['reset']} not supported")
 
-                avg_d, std_d = prog.acquire(soc, progress=True, callback=callback)
-                signals_all[i, :], _ = result2signals(avg_d, std_d)
-        except KeyboardInterrupt:
-            print("Received KeyboardInterrupt, early stopping the program")
-            viewer.update(amps, signal2real(signals_all))
-        except Exception as e:
-            if prog is None:
-                raise e  # the error is happen in initialize of program
-            print("Error during measurement:")
-            print_traceback()
+        return prog.acquire(soc, progress=False, callback=callback)
 
-    # get the actual amplitudes
-    amps: np.ndarray = prog.get_pulse_param("qub_pulse", "gain", as_array=True)  # type: ignore
+    signals = sweep_hard_template(
+        cfg,
+        measure_fn,
+        LivePlotter1D("Pulse gain", "Amplitude", num_lines=2),
+        ticks=(pdrs,),
+        signal2real=qub_signal2real,
+    )
 
-    return amps, signals_all
+    pdrs = prog.get_pulse_param("qub_pulse", "gain", as_array=True)
+
+    return pdrs, signals
 
 
 def visualize_reset_time(soccfg, cfg, *, time_fly=0.0) -> None:
@@ -247,7 +280,7 @@ def visualize_reset_time(soccfg, cfg, *, time_fly=0.0) -> None:
     len_params = sweep2param("length", cfg["sweep"]["length"])
     if cfg["dac"]["reset"] == "pulse":
         cfg["dac"]["reset_pulse"]["length"] = len_params
-    elif cfg["dac"]["reset"] == "mux_dual_pulse":
+    elif cfg["dac"]["reset"] == "two_pulse":
         cfg["dac"]["reset_pulse1"]["length"] = len_params
         cfg["dac"]["reset_pulse2"]["length"] = len_params
     else:
@@ -263,14 +296,31 @@ def visualize_reset_amprabi(soccfg, cfg, *, time_fly=0.0) -> None:
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
     gain_sweep = cfg["sweep"]["gain"]
 
+    cfg["sweep"] = {
+        "w/o_reset": {"start": 0, "stop": 1.0, "expts": 2},
+        "gain": gain_sweep,
+    }
+
     cfg["dac"]["qub_pulse"]["gain"] = sweep2param("gain", gain_sweep)
 
+    reset_factor = sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"])
     if cfg["dac"]["reset_test"] == "pulse":
-        progCls = ResetRabiProgram
-    elif cfg["dac"]["reset_test"] == "mux_dual_pulse":
-        progCls = MuxResetRabiProgram
+        reset_test_pulse = cfg["dac"]["reset_test_pulse"]
+        reset_test_pulse["gain"] = reset_factor * reset_test_pulse["gain"]
+    elif cfg["dac"]["reset_test"] == "two_pulse":
+        reset_test_pulse1 = cfg["dac"]["reset_test_pulse1"]
+        reset_test_pulse2 = cfg["dac"]["reset_test_pulse2"]
+        reset_test_pulse1["gain"] = reset_factor * reset_test_pulse1["gain"]
+        reset_test_pulse2["gain"] = reset_factor * reset_test_pulse2["gain"]
     else:
         raise ValueError(f"Reset type {cfg['dac']['reset_test']} not supported")
+
+    if cfg["dac"]["reset_test"] == "pulse":
+        progCls = ResetProgram
+    elif cfg["dac"]["reset_test"] == "two_pulse":
+        progCls = TwoPulseResetProgram
+    else:
+        raise ValueError(f"Reset type {cfg['dac']['reset']} not supported")
 
     visualizer = SimulateProgramV2(progCls, soccfg, cfg)
     visualizer.visualize(time_fly=time_fly)

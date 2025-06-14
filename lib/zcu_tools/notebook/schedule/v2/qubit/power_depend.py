@@ -1,5 +1,8 @@
+from typing import Optional, Tuple
+
 import numpy as np
 from zcu_tools.auto import make_cfg
+from zcu_tools.liveplot.jupyter import LivePlotter2D
 from zcu_tools.notebook.single_qubit.process import minus_background
 from zcu_tools.program.v2 import TwoToneProgram
 
@@ -11,27 +14,7 @@ def signals2reals(signals: np.ndarray) -> np.ndarray:
     return np.abs(minus_background(signals, axis=1))
 
 
-def measure_qub_pdr_dep(soc, soccfg, cfg):
-    """
-    Measure qubit power dependency by performing a 2D sweep of pulse gain and frequency.
-
-    This function prepares and executes a two-tone spectroscopy experiment that sweeps both
-    the gain (power) and frequency of the qubit pulse. The gain sweep is set as the outer loop
-    for efficient measurement.
-
-    Args:
-        soc: System-on-chip interface object for hardware control.
-        soccfg: Configuration for the system-on-chip.
-        cfg (dict): Configuration dictionary containing sweep parameters and pulse settings.
-                    Must include 'sweep' with 'gain' and 'freq' parameters, and 'dac' with
-                    'qub_pulse' settings.
-
-    Returns:
-        tuple: Three elements:
-            - pdrs (np.ndarray): Actual pulse gain values used in the measurement.
-            - fpts (np.ndarray): Actual frequency points used in the measurement.
-            - signals (np.ndarray): Measurement signal data with dimensions matching the sweep.
-    """
+def measure_qub_pdr_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     cfg = make_cfg(cfg)  # prevent in-place modification
 
     # make sure gain is the outer loop
@@ -48,15 +31,18 @@ def measure_qub_pdr_dep(soc, soccfg, cfg):
     pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
     fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[TwoToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = TwoToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    signals = sweep_hard_template(
         cfg,
-        TwoToneProgram,
+        measure_fn,
+        LivePlotter2D("Pulse Gain", "Frequency (MHz)"),
         ticks=(pdrs, fpts),
-        progress=True,
-        xlabel="Pulse Gain",
-        ylabel="Frequency (MHz)",
         signal2real=signals2reals,
     )
 

@@ -67,46 +67,49 @@ def analyze_ac_stark_shift(
     eta = kappa**2 / (kappa**2 + chi**2)
     ac_coeff = abs(b) / (2 * eta * chi)
 
+    avg_n = ac_coeff * pdrs2
+
     # plot the data and the fitted polynomial
     fig, ax1 = plt.subplots(figsize=figsize)
 
     # Use NonUniformImage for better visualization with pdr^2 as x-axis
     im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
-    im.set_data(pdrs2, fpts, amps.T)
-    im.set_extent([pdrs2[0], pdrs2[-1], fpts[0], fpts[-1]])
+    im.set_data(avg_n, fpts, amps.T)
+    im.set_extent([avg_n[0], avg_n[-1], fpts[0], fpts[-1]])
     ax1.add_image(im)
 
     # Set proper limits for the plot
-    ax1.set_xlim(pdrs2[0], pdrs2[-1])
+    ax1.set_xlim(avg_n[0], avg_n[-1])
     ax1.set_ylim(fpts[0], fpts[-1])
 
     # Plot the resonance frequencies and fitted curve
-    ax1.plot(s_pdrs2, s_fpts, ".", c="k")
+    ax1.plot(ac_coeff * s_pdrs2, s_fpts, ".", c="k")
 
     # Fit curve in terms of pdr^2
-    label = r"$\bar n$" + f" = {ac_coeff:.2g} x"
-    ax1.plot(x2_fit, y_fit, "-", label=label)
+    label = r"$\bar n$" + f" = {ac_coeff:.2g} " + r"$gain^2$"
+    n_fit = ac_coeff * x2_fit
+    ax1.plot(n_fit, y_fit, "-", label=label)
 
     # Create secondary x-axis for pdr^2 (Readout Gain²)
     ax2 = ax1.twiny()
 
-    # 主 x 軸顯示 avg_n，次 x 軸顯示 pdr^2
+    # main x-axis: avg_n, secondary x-axis: pdr^2
     # avg_n = ac_coeff * pdrs^2
-    avg_n_ticks = ac_coeff * ax1.get_xticks()
     ax1.set_xticks(ax1.get_xticks())
-    ax1.set_xticklabels([f"{avg_n:.1f}" for avg_n in avg_n_ticks])
-    ax1.set_xlabel(r"Average Photon Number ($\bar n$)")
+    # ax1.set_xticklabels([f"{avg_n:.1f}" for avg_n in ax1.get_xticks()])
+    ax1.set_xlabel(r"Average Photon Number ($\bar n$)", fontsize=14)
 
-    # 上方次 x 軸顯示 pdr^2，使用科學記號顯示小數點後一位
-    pdr2_ticks = ax1.get_xticks()
+    # 上方次 x 軸顯示 pdr
+    avgn_ticks = ax1.get_xticks()
+    pdr_ticks = np.sqrt(avgn_ticks / ac_coeff)
     ax2.set_xlim(ax1.get_xlim())
-    ax2.set_xticks(pdr2_ticks)
-    ax2.set_xticklabels([f"{pdr2:.1e}" for pdr2 in pdr2_ticks])
-    ax2.set_xlabel("Readout Gain² (a.u.²)")
+    ax2.set_xticks(avgn_ticks)
+    ax2.set_xticklabels([f"{pdr:.2f}" for pdr in pdr_ticks])
+    ax2.set_xlabel("Readout Gain (a.u.)", fontsize=14)
 
-    ax1.set_ylabel("Qubit Frequency (MHz)")
-    ax1.set_title("AC Stark Shift Analysis")
-    ax1.legend()
+    ax1.set_ylabel("Qubit Frequency (MHz)", fontsize=14)
+    ax1.legend(fontsize="x-large")
+    ax1.tick_params(axis="both", which="major", labelsize=12)
 
     fig.tight_layout()
     plt.show()

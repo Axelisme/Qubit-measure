@@ -1,7 +1,8 @@
-from typing import Tuple
 from copy import deepcopy
+from typing import Optional, Tuple
 
 import numpy as np
+from zcu_tools.liveplot.jupyter import LivePlotter1D
 from zcu_tools.notebook.single_qubit.process import rotate2real
 from zcu_tools.program.v2 import TwoToneProgram
 from zcu_tools.program.v2.base.simulate import SimulateProgramV2
@@ -14,37 +15,7 @@ def qub_signal2real(signals: np.ndarray) -> np.ndarray:
     return rotate2real(signals).real
 
 
-def measure_lenrabi(
-    soc, soccfg, cfg, *, force_align=True
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Measure Rabi oscillation by sweeping pulse length.
-
-    This function performs a Rabi measurement experiment by varying the length of the qubit pulse
-    and measuring the amplitude response. It allows for characterization of qubit control through
-    the observation of Rabi oscillations.
-
-    Parameters
-    ----------
-    soc : object
-        The system-on-chip object that controls the hardware.
-    soccfg : object
-        Configuration for the system-on-chip.
-    cfg : dict
-        Configuration dictionary containing experiment parameters.
-        Must include:
-        - sweep: dict with length sweep parameters
-        - dac: dict with qubit pulse settings
-    force_align : bool, optional
-        If True, add alignment delay time before qub_pulse to ensure the total length is
-        consistent.
-
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray]
-        A tuple containing:
-        - First element: Array of actual pulse lengths used (in microseconds)
-        - Second element: Array of measured amplitude responses
-    """
+def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]
@@ -54,22 +25,20 @@ def measure_lenrabi(
 
     qub_pulse["length"] = sweep2param("length", len_sweep)
 
-    if force_align:
-        max_length = max(
-            len_sweep["start"], len_sweep["stop"], qub_pulse.get("pre_delay", 0.0)
-        )
-        qub_pulse["pre_delay"] = max_length - qub_pulse["length"]
-
     lens = sweep2array(len_sweep)  # predicted lengths
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+
+    prog: Optional[TwoToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = TwoToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    signals = sweep_hard_template(
         cfg,
-        TwoToneProgram,
+        measure_fn,
+        LivePlotter1D("Length (us)", "Amplitude"),
         ticks=(lens,),
-        progress=True,
-        xlabel="Length (us)",
-        ylabel="Amplitude",
         signal2real=qub_signal2real,
     )
 
@@ -80,7 +49,7 @@ def measure_lenrabi(
     return real_lens, signals
 
 
-def visualize_lenrabi(soccfg, cfg, *, force_align=True, time_fly=0.0) -> None:
+def visualize_lenrabi(soccfg, cfg, *, time_fly=0.0) -> None:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     qub_pulse = cfg["dac"]["qub_pulse"]
@@ -90,42 +59,11 @@ def visualize_lenrabi(soccfg, cfg, *, force_align=True, time_fly=0.0) -> None:
 
     qub_pulse["length"] = sweep2param("length", len_sweep)
 
-    if force_align:
-        max_length = max(
-            len_sweep["start"], len_sweep["stop"], qub_pulse.get("pre_delay", 0.0)
-        )
-        qub_pulse["pre_delay"] = max_length - qub_pulse["length"]
-
     visualizer = SimulateProgramV2(TwoToneProgram, soccfg, cfg)
     visualizer.visualize(time_fly=time_fly)
 
 
 def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
-    """Measure Rabi oscillation by sweeping pulse amplitude (gain).
-
-    This function performs a Rabi measurement experiment by varying the amplitude/gain of the
-    qubit pulse and measuring the response. It allows for characterization of qubit control
-    by observing how the system responds to different pulse powers.
-
-    Parameters
-    ----------
-    soc : object
-        The system-on-chip object that controls the hardware.
-    soccfg : object
-        Configuration for the system-on-chip.
-    cfg : dict
-        Configuration dictionary containing experiment parameters.
-        Must include:
-        - sweep: dict with gain sweep parameters
-        - dac: dict with qubit pulse settings
-
-    Returns
-    -------
-    Tuple[np.ndarray, np.ndarray]
-        A tuple containing:
-        - First element: Array of actual pulse gains/amplitudes used
-        - Second element: Array of measured amplitude responses
-    """
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
@@ -134,15 +72,19 @@ def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     cfg["dac"]["qub_pulse"]["gain"] = sweep2param("gain", sweep_cfg)
 
     amps = sweep2array(sweep_cfg)  # predicted amplitudes
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+
+    prog: Optional[TwoToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = TwoToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    signals = sweep_hard_template(
         cfg,
-        TwoToneProgram,
+        measure_fn,
+        LivePlotter1D("Pulse gain", "Amplitude"),
         ticks=(amps,),
-        progress=True,
-        xlabel="Pulse gain",
-        ylabel="Amplitude",
         signal2real=qub_signal2real,
     )
 

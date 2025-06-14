@@ -40,6 +40,8 @@ class Plot1DSegment(AbsSegment):
 
         if signals.ndim == 1:
             signals = signals[None, :]
+        elif signals.ndim > 2:
+            signals = signals.reshape(-1, signals.shape[-1])
 
         for i, line in enumerate(self.lines):
             line.set_data(xs, signals[i, :])

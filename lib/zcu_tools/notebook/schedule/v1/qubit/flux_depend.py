@@ -1,19 +1,21 @@
 from copy import deepcopy
+from typing import Tuple
 
 import numpy as np
+from numpy import ndarray
+from zcu_tools.liveplot.jupyter import LivePlotter2DwithLine
 from zcu_tools.notebook.single_qubit.process import minus_background
 from zcu_tools.program.v1 import RFreqTwoToneProgram
 
 from ...tools import sweep2array
 from ..template import sweep2D_soft_hard_template
-from .twotone import qub_signal2snr
 
 
-def signal2real(signals):
+def signal2real(signals: ndarray) -> ndarray:
     return np.abs(minus_background(signals, axis=1))
 
 
-def measure_qub_flux_dep(soc, soccfg, cfg, earlystop_snr=None):
+def measure_qub_flux_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray, ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     if cfg["dev"]["flux_dev"] == "none":
@@ -26,30 +28,21 @@ def measure_qub_flux_dep(soc, soccfg, cfg, earlystop_snr=None):
 
     cfg["sweep"] = cfg["sweep"]["freq"]  # change sweep to freq
 
-    def updateCfg(cfg, _, flx):
+    def updateCfg(cfg, _, flx) -> None:
         cfg["dev"]["flux"] = flx
 
-    if earlystop_snr is not None:
-
-        def checker(signals):
-            snr = qub_signal2snr(signals)
-            return snr >= earlystop_snr, f"Current SNR: {snr:.2g}"
-
-    else:
-        checker = None
+    def measure_fn(cfg, callback) -> Tuple[ndarray, ...]:
+        prog = RFreqTwoToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=False, callback=callback)
 
     flxs, fpts, signals2D = sweep2D_soft_hard_template(
-        soc,
-        soccfg,
         cfg,
-        RFreqTwoToneProgram,
+        measure_fn,
+        LivePlotter2DwithLine("Flux (a.u.)", "Frequency (MHz)", num_lines=2),
         xs=flxs,
         ys=fpts,
         updateCfg=updateCfg,
-        xlabel="Flux (a.u.)",
-        ylabel="Frequency (MHz)",
         signal2real=signal2real,
-        early_stop_checker=checker,
     )
 
     return flxs, fpts, signals2D

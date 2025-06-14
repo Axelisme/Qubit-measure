@@ -29,7 +29,7 @@ def make_cfg(exp_cfg: Dict[str, Any], **kwargs) -> Dict[str, Any]:
 
 
 # Function to automatically derive waveform parameters based on pulse configuration
-def auto_derive_waveform(pulse_cfg: Dict[str, Any]):
+def auto_derive_waveform(pulse_cfg: Dict[str, Any]) -> None:
     """
     Automatically derive waveform parameters for a given pulse configuration.
 
@@ -103,13 +103,14 @@ def auto_derive_pulse(
 
 
 def is_pulse_cfg(name: str, pulse_cfg: Any) -> bool:
+    # TODO: use better method to check if it is a pulse configuration
     if "pulse" in name:
         return isinstance(pulse_cfg, str) or isinstance(pulse_cfg, dict)
     return False
 
 
 # Function to automatically derive experiment configuration parameters
-def auto_derive(exp_cfg: Dict[str, Any]):
+def auto_derive(exp_cfg: Dict[str, Any]) -> None:
     """
     Automatically derive missing parameters for the experiment configuration.
 
@@ -144,28 +145,13 @@ def auto_derive(exp_cfg: Dict[str, Any]):
         adc_cfg.setdefault("chs", ro_chs)
 
     ## readout length and trig_offset
-    ro_name = None
-    ro_length = None
-    trig_offset = None
-    for name, pulse_cfg in dac_cfg.items():
-        if is_pulse_cfg(name, pulse_cfg):
-            if (
-                pulse_cfg.get("ro_length") is not None
-                or pulse_cfg.get("trig_offset") is not None
-            ):
-                if ro_name is not None:
-                    raise ValueError(f"Multiple ro_lengths found: {name} and {ro_name}")
-                ro_name = name
-
-            if pulse_cfg.get("ro_length") is not None:
-                ro_length = pulse_cfg["ro_length"]
-            if pulse_cfg.get("trig_offset") is not None:
-                trig_offset = pulse_cfg["trig_offset"]
-
-    if trig_offset is not None:
-        adc_cfg.setdefault("trig_offset", trig_offset)
-    if ro_length is not None:
-        adc_cfg.setdefault("ro_length", ro_length)
+    if dac_cfg["readout"] in ["base", "two_pulse"]:
+        if "res_pulse" in dac_cfg:
+            res_pulse = dac_cfg["res_pulse"]
+            if res_pulse.get("ro_length") is not None:
+                adc_cfg.setdefault("ro_length", res_pulse["ro_length"])
+            if res_pulse.get("trig_offset") is not None:
+                adc_cfg.setdefault("trig_offset", res_pulse["trig_offset"])
 
     # dev
     ## flux dev

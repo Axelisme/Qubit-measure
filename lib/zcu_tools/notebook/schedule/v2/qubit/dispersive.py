@@ -1,7 +1,8 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from zcu_tools import make_cfg
+from zcu_tools.liveplot.jupyter import LivePlotter1D
 from zcu_tools.program.v2 import TwoToneProgram
 
 from ...tools import format_sweep1D, map2adcfreq, sweep2array, sweep2param
@@ -29,15 +30,18 @@ def measure_dispersive(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
     fpts = map2adcfreq(soc, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
 
-    prog, signals = sweep_hard_template(
-        soc,
-        soccfg,
+    prog: Optional[TwoToneProgram] = None
+
+    def measure_fn(cfg, callback) -> Tuple[list, list]:
+        nonlocal prog
+        prog = TwoToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=True, callback=callback)
+
+    signals = sweep_hard_template(
         cfg,
-        TwoToneProgram,
+        measure_fn,
+        LivePlotter1D("Frequency (MHz)", "Amplitude", num_lines=2),
         ticks=(fpts,),
-        xlabel="Frequency (MHz)",
-        ylabel="Amplitude",
-        viewer_kwargs=dict(num_lines=2),
     )
 
     # get the actual pulse gains and frequency points

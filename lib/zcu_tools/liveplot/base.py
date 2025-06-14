@@ -24,10 +24,19 @@ class AbsLivePlotter(ABC):
         """Refresh the plot to reflect the latest data."""
         pass
 
-    @abstractmethod
-    def __enter__(self):
+    def __enter__(self) -> "AbsLivePlotter":
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
         pass
 
-    @abstractmethod
-    def __exit__(self, exc_type, exc_value, traceback):
+
+class NoneLivePlotter(AbsLivePlotter):
+    def clear(self) -> None:
+        pass
+
+    def update(self, *args, refresh: bool, **kwargs) -> None:
+        pass
+
+    def refresh(self) -> None:
         pass

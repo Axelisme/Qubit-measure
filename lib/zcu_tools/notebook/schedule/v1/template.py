@@ -1,39 +1,16 @@
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 from numpy import ndarray
 from tqdm.auto import tqdm
-from zcu_tools.liveplot.jupyter import LivePlotter1D, LivePlotter2D
-from zcu_tools.program.v1 import (
-    MyAveragerProgram,
-    MyNDAveragerProgram,
-    MyRAveragerProgram,
-)
+from zcu_tools.liveplot import AbsLivePlotter
 from zcu_tools.tools import AsyncFunc, print_traceback
 
 from ..flux import set_flux
 
 
-def default_result2signals(
-    avgi: list, avgq: list, stdi: list, stdq: list
-) -> Tuple[ndarray, Optional[ndarray]]:
-    signals = avgi[0][0] + 1j * avgq[0][0]  # (*sweep)
-    stds = np.maximum(stdi[0][0], stdq[0][0])  # (*sweep)
-    return signals, stds
-
-
-def default_signal2real(signals) -> ndarray:
-    return np.abs(signals)
-
-
-def std2err(stds: Optional[ndarray], N: int) -> Optional[ndarray]:
-    if stds is None:
-        return None
-    return stds / np.sqrt(N)
-
-
-def raw2result(ir, sum_d, sum2_d):
+def raw2result(ir: int, sum_d: list, sum2_d: list) -> Tuple[list, list, list, list]:
     avg_d = [d / (ir + 1) for d in sum_d]
     avgi = [d[..., 0] for d in avg_d]
     avgq = [d[..., 1] for d in avg_d]
@@ -45,64 +22,75 @@ def raw2result(ir, sum_d, sum2_d):
     return avgi, avgq, stdi, stdq
 
 
+def default_result2signals(
+    avgi: list, avgq: list, stdi: list, stdq: list
+) -> Tuple[ndarray, Optional[ndarray]]:
+    signals = avgi[0][0] + 1j * avgq[0][0]  # (*sweep)
+    stds = np.sqrt(stdi[0][0] ** 2 + stdq[0][0] ** 2)
+    return signals, stds
+
+
+def default_signal2real(signals: ndarray) -> ndarray:
+    return np.abs(signals)
+
+
+MeasureFn = Callable[[Dict[str, Any], Optional[Callable[[int, list, list], None]]], Any]
+Result2SignalFn = Callable[[list, list], Tuple[ndarray, Optional[ndarray]]]
+Signal2RealFn = Callable[[ndarray], ndarray]
+UpdateCfgFn = Callable[[Dict[str, Any], int, Any], None]
+
+
 def sweep1D_hard_template(
-    soc,
-    soccfg,
     cfg: Dict[str, Any],
-    prog_cls: Type[MyRAveragerProgram],
+    measure_fn: MeasureFn,
+    liveplotter: AbsLivePlotter,
     *,
     xs: ndarray,
-    xlabel: str,
-    ylabel: str,
-    result2signals: Callable[
-        [list, list, list, list], Tuple[ndarray, Optional[ndarray]]
-    ] = default_result2signals,
-    signal2real: Callable = default_signal2real,
-    progress: bool = True,
+    result2signals: Result2SignalFn = default_result2signals,
+    signal2real: Signal2RealFn = default_signal2real,
+    catch_interrupt: bool = True,
 ) -> Tuple[ndarray, ndarray]:
     signals = np.full_like(xs, np.nan, dtype=complex)
 
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
-    title = None
-    with LivePlotter1D(xlabel, ylabel, title=title) as viewer:
+    with liveplotter as viewer:
         try:
-            prog = prog_cls(soccfg, cfg)
 
-            def callback(ir, sum_d, sum2_d):
-                nonlocal signals, title
+            def callback(ir: int, sum_d: list, sum2_d: list) -> None:
+                nonlocal signals, xs
                 signals, _ = result2signals(*raw2result(ir, sum_d, sum2_d))
-                viewer.update(xs, signal2real(signals), title=title)
+                viewer.update(xs, signal2real(signals))
 
-            xs, *result = prog.acquire(soc, progress=progress, callback=callback)
+            xs, *result = measure_fn(cfg, callback)
             signals, _ = result2signals(*result)
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as e:
+            if not catch_interrupt:
+                raise e
             print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
+        except Exception as e:
+            if not catch_interrupt:
+                raise e
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update(xs, signal2real(signals), title=title)
+            viewer.update(xs, signal2real(signals))
 
     return xs, signals
 
 
 def sweep1D_soft_template(
-    soc,
-    soccfg,
     cfg: Dict[str, Any],
-    prog_or_fn: Union[Type[MyAveragerProgram], Callable],
+    measure_fn: MeasureFn,
+    liveplotter: AbsLivePlotter,
     *,
     xs: ndarray,
-    updateCfg: Callable,
-    xlabel: str,
-    ylabel: str,
-    result2signals: Callable[
-        [list, list, list, list], Tuple[ndarray, Optional[ndarray]]
-    ] = default_result2signals,
-    signal2real: Callable = default_signal2real,
+    updateCfg: UpdateCfgFn,
+    result2signals: Result2SignalFn = default_result2signals,
+    signal2real: Signal2RealFn = default_signal2real,
     progress: bool = True,
+    catch_interrupt: bool = True,
 ) -> Tuple[ndarray, ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals = np.full_like(xs, np.nan, dtype=complex)
@@ -111,9 +99,9 @@ def sweep1D_soft_template(
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
-    with LivePlotter1D(xlabel, ylabel) as viewer:
+    with liveplotter as viewer:
         try:
-            xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
+            xs_tqdm = tqdm(xs, smoothing=0, disable=not progress)
             with AsyncFunc(viewer.update, include_idx=False) as async_draw:
                 for i, x in enumerate(xs_tqdm):
                     updateCfg(cfg, i, x)
@@ -121,20 +109,18 @@ def sweep1D_soft_template(
                     # set again in case of change
                     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-                    if isinstance(prog_or_fn, type):
-                        prog = prog_or_fn(soccfg, cfg)
-                        avgi, avgq, stdi, stdq = prog.acquire(soc, progress=False)
-                        signals[i], stds[i] = result2signals(avgi, avgq, stdi, stdq)
-                    elif isinstance(prog_or_fn, Callable):
-                        signals[i], stds[i] = prog_or_fn(soc, soccfg, cfg)
-                    else:
-                        raise ValueError("prog_or_fn must be a type or a callable")
+                    results = measure_fn(cfg, callback=None)
+                    signals[i], stds[i] = result2signals(*results)
 
                     async_draw(i, xs, signal2real(signals))
 
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as e:
+            if not catch_interrupt:
+                raise e
             print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
+        except Exception as e:
+            if not catch_interrupt:
+                raise e
             print("Error during measurement:")
             print_traceback()
         finally:
@@ -145,44 +131,39 @@ def sweep1D_soft_template(
 
 
 def sweep2D_hard_template(
-    soc,
-    soccfg,
     cfg: Dict[str, Any],
-    prog_cls: Type[MyNDAveragerProgram],
+    measure_fn: MeasureFn,
+    liveplotter: AbsLivePlotter,
     *,
     xs: ndarray,
     ys: ndarray,
-    xlabel: str,
-    ylabel: str,
-    result2signals: Callable[
-        [list, list, list, list], Tuple[ndarray, Optional[ndarray]]
-    ] = default_result2signals,
-    signal2real: Callable = default_signal2real,
-    progress: bool = True,
-    **kwargs,
+    result2signals: Result2SignalFn = default_result2signals,
+    signal2real: Signal2RealFn = default_signal2real,
+    catch_interrupt: bool = True,
 ) -> Tuple[ndarray, ndarray, ndarray]:
     signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
 
     # set initial flux
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
-    with LivePlotter2D(xlabel, ylabel) as viewer:
+    with liveplotter as viewer:
 
-        def callback(ir, sum_d, sum2_d):
-            nonlocal signals2D
+        def callback(ir: int, sum_d: list, sum2_d: list) -> None:
+            nonlocal signals2D, xs, ys
             signals2D, _ = result2signals(*raw2result(ir, sum_d, sum2_d))
             viewer.update(xs, ys, signal2real(signals2D))
 
         try:
-            prog = prog_cls(soccfg, cfg)
-            xs_ys, *result = prog.acquire(
-                soc, progress=progress, callback=callback, **kwargs
-            )
+            xs_ys, *result = measure_fn(cfg, callback)
             signals2D, _ = result2signals(*result)
             xs, ys = xs_ys[0], xs_ys[1]
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as e:
+            if not catch_interrupt:
+                raise e
             print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
+        except Exception as e:
+            if not catch_interrupt:
+                raise e
             print("Error during measurement:")
             print_traceback()
         finally:
@@ -192,23 +173,17 @@ def sweep2D_hard_template(
 
 
 def sweep2D_soft_hard_template(
-    soc,
-    soccfg,
     cfg: Dict[str, Any],
-    prog_cls: Type[MyRAveragerProgram],
+    measure_fn: MeasureFn,
+    liveplotter: AbsLivePlotter,
     *,
     xs: ndarray,
     ys: ndarray,
-    updateCfg: Callable,
-    xlabel: str,
-    ylabel: str,
-    result2signals: Callable[
-        [list, list, list, list], Tuple[ndarray, Optional[ndarray]]
-    ] = default_result2signals,
-    signal2real: Callable = default_signal2real,
+    updateCfg: UpdateCfgFn,
+    result2signals: Result2SignalFn = default_result2signals,
+    signal2real: Signal2RealFn = default_signal2real,
     progress: bool = True,
-    early_stop_checker: Optional[Callable[[ndarray], Tuple[bool, str]]] = None,
-    **kwargs,
+    catch_interrupt: bool = True,
 ) -> Tuple[ndarray, ndarray, ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
@@ -216,10 +191,9 @@ def sweep2D_soft_hard_template(
     # set initial flux
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
-    title = None
-    with LivePlotter2D(xlabel, ylabel, title=title) as viewer:
+    with liveplotter as viewer:
         try:
-            xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
+            xs_tqdm = tqdm(xs, smoothing=0, disable=not progress)
             avgs_tqdm = tqdm(total=cfg["soft_avgs"], smoothing=0, disable=not progress)
             with AsyncFunc(viewer.update, include_idx=False) as async_draw:
                 for i, x in enumerate(xs_tqdm):
@@ -231,42 +205,38 @@ def sweep2D_soft_hard_template(
                     avgs_tqdm.reset()
                     avgs_tqdm.refresh()
 
-                    prog = prog_cls(soccfg, cfg)
-
                     _signals2D = signals2D.copy()  # prevent overwrite
 
-                    def callback(ir, sum_d, sum2_d):
-                        nonlocal _signals2D, avgs_tqdm, title
+                    def callback(ir: int, sum_d: list, sum2_d: list) -> None:
+                        nonlocal _signals2D, avgs_tqdm
                         avgs_tqdm.update(max(ir + 1 - avgs_tqdm.n, 0))
                         avgs_tqdm.refresh()
 
                         _signals2D[i], _ = result2signals(
                             *raw2result(ir, sum_d, sum2_d)
                         )
-                        if early_stop_checker is not None:
-                            stop, title = early_stop_checker(_signals2D[i])
-                            if stop:
-                                prog.set_early_stop()
 
-                        viewer.update(xs, ys, signal2real(_signals2D), title=title)
+                        viewer.update(xs, ys, signal2real(_signals2D))
 
-                    xs, *result = prog.acquire(
-                        soc, progress=False, callback=callback, **kwargs
-                    )
-                    signals2D[i], _ = result2signals(*result)
+                    xs, *results = measure_fn(cfg, callback)
+                    signals2D[i], _ = result2signals(*results)
 
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
 
-                    async_draw(i, xs, ys, signal2real(signals2D), title=title)
+                    async_draw(i, xs, ys, signal2real(signals2D))
 
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as e:
+            if not catch_interrupt:
+                raise e
             print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
+        except Exception as e:
+            if not catch_interrupt:
+                raise e
             print("Error during measurement:")
             print_traceback()
         finally:
-            viewer.update(xs, ys, signal2real(signals2D), title=title)
+            viewer.update(xs, ys, signal2real(signals2D))
             xs_tqdm.close()
             avgs_tqdm.close()
 
@@ -274,23 +244,18 @@ def sweep2D_soft_hard_template(
 
 
 def sweep2D_soft_soft_template(
-    soc,
-    soccfg,
     cfg: Dict[str, Any],
-    prog_or_fn: Union[Type[MyAveragerProgram], Callable],
+    measure_fn: MeasureFn,
+    liveplotter: AbsLivePlotter,
     *,
     xs: ndarray,
     ys: ndarray,
-    x_updateCfg: Callable,
-    y_updateCfg: Callable,
-    xlabel: str,
-    ylabel: str,
-    result2signals: Callable[
-        [list, list, list, list], Tuple[ndarray, Optional[ndarray]]
-    ] = default_result2signals,
-    signal2real: Callable = default_signal2real,
+    x_updateCfg: UpdateCfgFn,
+    y_updateCfg: UpdateCfgFn,
+    result2signals: Result2SignalFn = default_result2signals,
+    signal2real: Signal2RealFn = default_signal2real,
     progress: bool = True,
-    **kwargs,
+    catch_interrupt: bool = True,
 ) -> Tuple[ndarray, ndarray, ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
     signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
@@ -298,10 +263,10 @@ def sweep2D_soft_soft_template(
     # set initial flux
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
-    with LivePlotter2D(xlabel, ylabel) as viewer:
+    with liveplotter as viewer:
         try:
-            xs_tqdm = tqdm(xs, desc=xlabel, smoothing=0, disable=not progress)
-            ys_tqdm = tqdm(ys, desc=ylabel, smoothing=0, disable=not progress)
+            xs_tqdm = tqdm(xs, smoothing=0, disable=not progress)
+            ys_tqdm = tqdm(ys, smoothing=0, disable=not progress)
             with AsyncFunc(viewer.update, include_idx=False) as async_draw:
                 count = 0
                 for i, x in enumerate(xs):
@@ -314,14 +279,8 @@ def sweep2D_soft_soft_template(
 
                         set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-                        if isinstance(prog_or_fn, type):
-                            prog = prog_or_fn(soccfg, cfg)
-                            result = prog.acquire(soc, progress=False, **kwargs)
-                            signals2D[i, j], _ = result2signals(*result)
-                        elif isinstance(prog_or_fn, Callable):
-                            signals2D[i, j], _ = prog_or_fn(soc, soccfg, cfg)
-                        else:
-                            raise ValueError("prog_or_fn must be a type or a callable")
+                        results = measure_fn(cfg, callback=None)
+                        signals2D[i, j], _ = result2signals(*results)
 
                         ys_tqdm.update()
 
@@ -329,9 +288,13 @@ def sweep2D_soft_soft_template(
                         count += 1
                     xs_tqdm.update()
 
-        except KeyboardInterrupt:
+        except KeyboardInterrupt as e:
+            if not catch_interrupt:
+                raise e
             print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
+        except Exception as e:
+            if not catch_interrupt:
+                raise e
             print("Error during measurement:")
             print_traceback()
         finally:

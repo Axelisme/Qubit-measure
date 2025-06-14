@@ -1,16 +1,17 @@
 from copy import deepcopy
+from typing import Tuple
 
 import numpy as np
+from numpy import ndarray
 from tqdm.auto import tqdm
 from zcu_tools import make_cfg
+from zcu_tools.liveplot.jupyter import LivePlotter1D
 from zcu_tools.program.v1 import OneToneProgram, TwoToneProgram
 
 from ..flux import set_flux
 
-from zcu_tools.liveplot.jupyter import LivePlotter1D
 
-
-def measure_one(soc, soccfg, cfg, progress, qub_pulse):
+def measure_one(soc, soccfg, cfg, progress, qub_pulse) -> Tuple[ndarray, ndarray]:
     if qub_pulse:
         prog = TwoToneProgram(soccfg, make_cfg(cfg, reps=1))
     else:
@@ -25,7 +26,9 @@ def measure_one(soc, soccfg, cfg, progress, qub_pulse):
     return Ts, signals
 
 
-def measure_lookback(soc, soccfg, cfg, progress=True, qub_pulse=False):
+def measure_lookback(
+    soc, soccfg, cfg, progress=True, qub_pulse=False
+) -> Tuple[ndarray, ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
     assert cfg.get("reps", 1) == 1, "Only one rep is allowed for lookback"
 

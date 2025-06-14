@@ -1,48 +1,27 @@
+import warnings
 from typing import Any, Dict, Optional
 
 from myqick.asm_v2 import AveragerProgramV2
 
 
-def trigger_pulse(
-    prog: AveragerProgramV2, pulse: Dict[str, Any], name: str, t: float = 0.0
-) -> None:
-    pre_delay = pulse.get("pre_delay", 0.0)
+def force_no_post_delay(pulse: Dict[str, Any], name: str) -> None:
+    if pulse.get("post_delay") is not None:
+        warnings.warn(f"{name} has a post_delay, which will be ignored")
+    pulse["post_delay"] = None
+
+
+def trigger_pulse(prog: AveragerProgramV2, pulse: Dict[str, Any], name: str) -> None:
+    ch = pulse["ch"]
     post_delay = pulse.get("post_delay", 0.0)
+    t = pulse.get("t", 0.0)
 
-    if pre_delay is not None:
-        # print("pre delay", name)
-        prog.delay_auto(pre_delay, ros=False)
-
-    prog.pulse(pulse["ch"], name, t=t)
+    prog.pulse(ch, name, t=t, tag=f"ch{ch}_{name}")
 
     if post_delay is not None:
-        # print("post delay", name)
-        prog.delay_auto(post_delay, ros=False)
+        prog.delay_auto(post_delay, ros=False, tag=f"ch{ch}_{name}_post_delay")
 
 
-def trigger_dual_pulse(
-    prog: AveragerProgramV2,
-    pulse1: Dict[str, Any],
-    pulse2: Dict[str, Any],
-    name1: str,
-    name2: str,
-    t1: float = 0.0,
-    t2: float = 0.0,
-) -> None:
-    pre_delay = pulse1.get("pre_delay", 0.0)
-    post_delay = pulse2.get("post_delay", 0.0)
-
-    if pre_delay is not None:
-        prog.delay_auto(pre_delay, ros=False)
-
-    prog.pulse(pulse1["ch"], name1, t=t1)
-    prog.pulse(pulse2["ch"], name2, t=t2)
-
-    if post_delay is not None:
-        prog.delay_auto(post_delay, ros=False)
-
-
-def create_waveform(prog: AveragerProgramV2, name: str, pulse: Dict[str, Any]):
+def create_waveform(prog: AveragerProgramV2, name: str, pulse: Dict[str, Any]) -> None:
     ch: int = pulse["ch"]
     style: str = pulse["style"]
 
@@ -81,7 +60,7 @@ def add_pulse(
     waveform: str,
     ro_ch: Optional[int] = None,
     **kwargs,
-):
+) -> None:
     ch: int = pulse["ch"]
     style: str = pulse["style"]
 

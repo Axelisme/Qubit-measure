@@ -69,8 +69,8 @@ def plot_t1_vs_flx(
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     fig.suptitle(f"Temperature = {Temp * 1e3} mK")
     ax.errorbar(s_mAs, s_T1s * 1e3, yerr=s_T1errs * 1e3, fmt=".-", label="T1")
-    ax.set_xlabel(r"Current (mA)")
-    ax.set_ylabel(r"$T_1$ (ns)")
+    ax.set_xlabel(r"Current (mA)", fontsize=14)
+    ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
     ax.grid()
     ax2 = ax.secondary_xaxis(
@@ -96,11 +96,11 @@ def plot_t1_vs_flx(
         t1_effs.append(t1_eff)
 
     ax.set_xlim(s_mAs.min() - 0.03, s_mAs.max() + 0.03)
-    ax.set_ylim(
-        min(s_T1s.min() * 0.5e3, np.array(t1_effs).max() * 0.7),
-        max(s_T1s.max() * 3.0e3, np.array(t1_effs).min() * 1.4),
-    )
-    ax.legend()
+    # ax.set_ylim(
+    #     min(s_T1s.min() * 0.5e3, np.array(t1_effs).max() * 0.7),
+    #     max(s_T1s.max() * 3.0e3, np.array(t1_effs).min() * 1.4),
+    # )
+    ax.legend(fontsize="x-large")
 
     return fig, ax
 
@@ -116,9 +116,8 @@ def plot_sample_t1(
 
     ax1.errorbar(s_mAs, s_T1s, yerr=s_T1errs, fmt=".-", label="Current")
     ax1.grid()
-    ax1.set_xlabel(r"Current (mA)")
-
-    ax1.set_ylabel(r"$T_1$ ($\mu s$)")
+    ax1.set_xlabel(r"Current (mA)", fontsize=14)
+    ax1.set_ylabel(r"$T_1$ ($\mu s$)", fontsize=14)
     ax2 = ax1.secondary_xaxis(
         "top",
         functions=(
@@ -126,6 +125,6 @@ def plot_sample_t1(
             partial(flx2mA, mA_c=mA_c, period=period),
         ),
     )
-    ax2.set_xlabel(r"$\phi_{ext}/\phi_0$")
+    ax2.set_xlabel(r"$\phi_{ext}/\phi_0$", fontsize=14)
 
     return fig, ax1

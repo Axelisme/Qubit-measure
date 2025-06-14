@@ -61,7 +61,7 @@ def visualize_pulse(
 
         max_length = max(
             max_length,
-            pulse_cfg.get("pre_delay", 0.0)
+            pulse_cfg.get("t", 0.0)
             + pulse_cfg["length"]
             + pulse_cfg.get("post_delay", 0.0),
         )
