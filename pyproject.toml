@@ -8,20 +8,7 @@ dependencies = ["numpy", "tqdm", "matplotlib"]
 
 [project.optional-dependencies]
 server = ["myqick", "dill"]
-client = [
-    "myqick",
-    "labber",
-    "numpy<=1.19.5",
-    "h5py",
-    "ipykernel",
-    "ipywidgets",
-    "ipympl",
-    "pyyaml",
-    "pandas",
-    "scikit-learn",
-    "scipy",
-    "dill",
-]
+client = ["myqick", "labber", "numpy<=1.19.5", "pyyaml", "dill"]
 fit = [
     "h5py",
     "ipykernel",
@@ -33,6 +20,7 @@ fit = [
     "kaleido",
     "scipy",
     "nbformat>=4.2.0",
+    "scikit-learn",
     "joblib",
     "numba",
     "requests",
@@ -48,7 +36,7 @@ package-dir = { "" = "lib" }
 packages = ["zcu_tools"]
 
 [tool.ruff.lint]
-ignore = ["E402"]
+ignore = ["E402", "F401"]
 
 [tool.jupytext]
 notebook_metadata_filter = "-all,+kernelspec,+language_info"

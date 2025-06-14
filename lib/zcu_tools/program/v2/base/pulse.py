@@ -74,8 +74,6 @@ def add_pulse(
     if style == "const":
         wav_kwargs["length"] = pulse["length"]
     else:
-        assert waveform is not None, f"Waveform is required for {style} pulse"
-
         wav_kwargs["envelope"] = waveform
         if style == "flat_top":
             # the length register for flat_top only contain the flat part

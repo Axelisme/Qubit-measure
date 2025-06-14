@@ -1,12 +1,8 @@
-from __future__ import annotations
+from typing import Any, Dict, Optional
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
-
-from .module import Module
+from ..base import MyProgramV2
+from .base import Module
 from .pulse import Pulse
-
-if TYPE_CHECKING:
-    from .program import MyProgramV2
 
 
 class AbsReset(Module):

@@ -1,12 +1,8 @@
-from __future__ import annotations
+from typing import Any, Dict
 
-from typing import TYPE_CHECKING, Any, Dict
-
-from .module import Module
-from .pulse import Pulse, force_no_post_delay
-
-if TYPE_CHECKING:
-    from .program import MyProgramV2
+from ..base import force_no_post_delay
+from .base import Module
+from .pulse import MyProgramV2, Pulse
 
 
 class AbsReadout(Module):
@@ -47,7 +43,7 @@ class BaseReadout(AbsReadout):
         # TODO: support post delay
         pulse_name = f"{name}_pulse"
         force_no_post_delay(pulse_cfg, pulse_name)
-        self.pulse = Pulse(name=pulse_name, cfg=pulse_cfg)
+        self.pulse = Pulse(name=pulse_name, cfg=pulse_cfg, ro_ch=ro_cfg["ro_ch"])
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse.init(prog)
@@ -86,7 +82,9 @@ class TwoPulseReadout(AbsReadout):
         force_no_post_delay(pulse2_cfg, pulse2_name)
 
         self.pulse1 = Pulse(name=f"{name}_pulse1", cfg=pulse1_cfg)
-        self.pulse2 = Pulse(name=f"{name}_pulse2", cfg=pulse2_cfg)
+        self.pulse2 = Pulse(
+            name=f"{name}_pulse2", cfg=pulse2_cfg, ro_ch=ro_cfg["ro_ch"]
+        )
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse1.init(prog)
@@ -96,8 +94,8 @@ class TwoPulseReadout(AbsReadout):
         prog.add_readoutconfig(
             ch=self.ro_cfg["ro_ch"],
             name=f"{self.name}_readout_adc",
-            freq=self.ro_cfg["freq"],
-            gen_ch=self.ro_cfg["gen_ch"],
+            freq=self.ro_cfg.get("freq", self.pulse2_cfg["freq"]),
+            gen_ch=self.ro_cfg.get("gen_ch", self.pulse2_cfg["ch"]),
         )
 
     def run(self, prog: MyProgramV2) -> None:
