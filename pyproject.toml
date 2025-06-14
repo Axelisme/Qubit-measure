@@ -7,7 +7,6 @@ requires-python = ">=3.8"
 dependencies = ["numpy", "tqdm", "matplotlib"]
 
 [project.optional-dependencies]
-data = ["h5py", "flask"]
 server = ["myqick", "dill"]
 client = [
     "myqick",
@@ -37,6 +36,7 @@ fit = [
     "joblib",
     "numba",
     "requests",
+    "flask",
 ]
 
 [build-system]

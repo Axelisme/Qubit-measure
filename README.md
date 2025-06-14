@@ -19,17 +19,6 @@ pip install .
 - tqdm
 - matplotlib
 
-### 資料伺服器擴展
-
-如果您需要資料伺服器功能，可以使用以下命令安裝相關依賴：
-
-```bash
-pip install ".[data]"
-```
-
-這將安裝基本依賴外加：
-- h5py
-- flask
 
 ### ZCU伺服器擴展
 
@@ -97,7 +86,7 @@ pip install ".[fit]"
 如果您想安裝所有功能，可以使用：
 
 ```bash
-pip install ".[data,server,client,fit]"
+pip install ".[server,client,fit]"
 ```
 
 ## 系統需求
