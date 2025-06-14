@@ -1,17 +1,21 @@
-from abc import ABC, abstractmethod
+from __future__ import annotations
 
-from myqick.asm_v2 import AveragerProgramV2
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from .pulse import trigger_pulse
+
+if TYPE_CHECKING:
+    from .program import MyProgramV2
 
 
 class AbsReset(ABC):
     @abstractmethod
-    def init(self, prog: AveragerProgramV2) -> None:
+    def init(self, prog: MyProgramV2) -> None:
         pass
 
     @abstractmethod
-    def reset_qubit(self, prog: AveragerProgramV2) -> None:
+    def reset_qubit(self, prog: MyProgramV2) -> None:
         pass
 
 
@@ -35,13 +39,13 @@ class NoneReset(AbsReset):
 
 
 class PulseReset(AbsReset):
-    def init(self, prog: AveragerProgramV2) -> None:
+    def init(self, prog: MyProgramV2) -> None:
         prog.declare_pulse(prog.reset_pulse, "reset")
 
         if hasattr(prog, "reset_pi_pulse"):
             prog.declare_pulse(prog.reset_pi_pulse, "reset_pi")
 
-    def reset_qubit(self, prog: AveragerProgramV2) -> None:
+    def reset_qubit(self, prog: MyProgramV2) -> None:
         trigger_pulse(prog, prog.reset_pulse, "reset")
 
         # if reset_pi_pulse exists, trigger it after reset
@@ -50,14 +54,14 @@ class PulseReset(AbsReset):
 
 
 class TwoPulseReset(AbsReset):
-    def init(self, prog: AveragerProgramV2) -> None:
+    def init(self, prog: MyProgramV2) -> None:
         prog.declare_pulse(prog.reset_pulse1, "reset1")
         prog.declare_pulse(prog.reset_pulse2, "reset2")
 
         if hasattr(prog, "reset_pi_pulse"):
             prog.declare_pulse(prog.reset_pi_pulse, "reset_pi")
 
-    def reset_qubit(self, prog: AveragerProgramV2) -> None:
+    def reset_qubit(self, prog: MyProgramV2) -> None:
         trigger_pulse(prog, prog.reset_pulse1, "reset1")
         trigger_pulse(prog, prog.reset_pulse2, "reset2")
 

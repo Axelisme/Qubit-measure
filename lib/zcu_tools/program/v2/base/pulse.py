@@ -1,7 +1,10 @@
-import warnings
-from typing import Any, Dict, Optional
+from __future__ import annotations
 
-from myqick.asm_v2 import AveragerProgramV2
+import warnings
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+if TYPE_CHECKING:
+    from .program import MyProgramV2
 
 
 def force_no_post_delay(pulse: Dict[str, Any], name: str) -> None:
@@ -10,7 +13,7 @@ def force_no_post_delay(pulse: Dict[str, Any], name: str) -> None:
     pulse["post_delay"] = None
 
 
-def trigger_pulse(prog: AveragerProgramV2, pulse: Dict[str, Any], name: str) -> None:
+def trigger_pulse(prog: MyProgramV2, pulse: Dict[str, Any], name: str) -> None:
     ch = pulse["ch"]
     post_delay = pulse.get("post_delay", 0.0)
     t = pulse.get("t", 0.0)
@@ -21,7 +24,7 @@ def trigger_pulse(prog: AveragerProgramV2, pulse: Dict[str, Any], name: str) -> 
         prog.delay_auto(post_delay, ros=False, tag=f"ch{ch}_{name}_post_delay")
 
 
-def create_waveform(prog: AveragerProgramV2, name: str, pulse: Dict[str, Any]) -> None:
+def create_waveform(prog: MyProgramV2, name: str, pulse: Dict[str, Any]) -> None:
     ch: int = pulse["ch"]
     style: str = pulse["style"]
 
@@ -55,7 +58,7 @@ def create_waveform(prog: AveragerProgramV2, name: str, pulse: Dict[str, Any]) -
 
 
 def add_pulse(
-    prog: AveragerProgramV2,
+    prog: MyProgramV2,
     pulse: Dict[str, Any],
     waveform: str,
     ro_ch: Optional[int] = None,

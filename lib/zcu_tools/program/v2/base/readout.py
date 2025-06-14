@@ -1,18 +1,21 @@
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from __future__ import annotations
 
-from myqick.asm_v2 import AveragerProgramV2
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from .pulse import force_no_post_delay, trigger_pulse
+
+if TYPE_CHECKING:
+    from .program import MyProgramV2
 
 
 class AbsReadout(ABC):
     @abstractmethod
-    def init(self, prog: AveragerProgramV2):
+    def init(self, prog: MyProgramV2):
         pass
 
     @abstractmethod
-    def readout_qubit(self, prog: AveragerProgramV2):
+    def readout_qubit(self, prog: MyProgramV2):
         pass
 
 
@@ -26,7 +29,7 @@ def make_readout(name: str) -> AbsReadout:
 
 
 class BaseReadout(AbsReadout):
-    def init(self, prog: AveragerProgramV2):
+    def init(self, prog: MyProgramV2):
         res_pulse: Dict[str, Any] = prog.res_pulse
         res_ch: int = res_pulse["ch"]
         ro_chs: List[int] = prog.adc["chs"]
@@ -45,7 +48,7 @@ class BaseReadout(AbsReadout):
             ch=ro_ch, name="readout_adc", freq=res_pulse["freq"], gen_ch=res_ch
         )
 
-    def readout_qubit(self, prog: AveragerProgramV2):
+    def readout_qubit(self, prog: MyProgramV2):
         ro_ch: int = prog.adc["chs"][0]
 
         prog.send_readoutconfig(ro_ch, "readout_adc", t=0)
@@ -56,7 +59,7 @@ class BaseReadout(AbsReadout):
 
 
 class TwoPulseReadout(AbsReadout):
-    def init(self, prog: AveragerProgramV2):
+    def init(self, prog: MyProgramV2):
         res_pulse: Dict[str, Any] = prog.res_pulse
         res_ch: int = res_pulse["ch"]
         ro_chs: List[int] = prog.adc["chs"]
@@ -76,7 +79,7 @@ class TwoPulseReadout(AbsReadout):
             ch=ro_ch, name="readout_adc", freq=res_pulse["freq"], gen_ch=res_ch
         )
 
-    def readout_qubit(self, prog: AveragerProgramV2):
+    def readout_qubit(self, prog: MyProgramV2):
         ro_ch: int = prog.adc["chs"][0]
 
         prog.send_readoutconfig(ro_ch, "readout_adc", t=0)

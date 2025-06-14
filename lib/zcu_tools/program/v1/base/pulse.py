@@ -1,7 +1,14 @@
-from typing import Any, Dict, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+if TYPE_CHECKING:
+    from .program import MyProgramV1
 
 
-def declare_pulse(prog, pulse: Any, waveform: str, ro_ch: Optional[int] = None):
+def declare_pulse(
+    prog: MyProgramV1, pulse: Any, waveform: str, ro_ch: Optional[int] = None
+) -> None:
     prog.declare_gen(pulse["ch"], nqz=pulse["nqz"])
     create_waveform(prog, waveform, pulse)
 
@@ -10,7 +17,7 @@ def declare_pulse(prog, pulse: Any, waveform: str, ro_ch: Optional[int] = None):
     set_pulse(prog, pulse, ro_ch=ro_ch, waveform=waveform, set_default=(times == 1))
 
 
-def create_waveform(prog, name: str, pulse_cfg: Dict[str, Any]):
+def create_waveform(prog: MyProgramV1, name: str, pulse_cfg: Dict[str, Any]) -> None:
     ch = pulse_cfg["ch"]
     style = pulse_cfg["style"]
 
@@ -43,12 +50,12 @@ def create_waveform(prog, name: str, pulse_cfg: Dict[str, Any]):
 
 
 def set_pulse(
-    prog,
+    prog: MyProgramV1,
     pulse_cfg: dict,
     ro_ch: Optional[int] = None,
     waveform: Optional[str] = None,
     set_default=False,
-):
+) -> None:
     ch = pulse_cfg["ch"]
     style = pulse_cfg["style"]
     gain = pulse_cfg["gain"]

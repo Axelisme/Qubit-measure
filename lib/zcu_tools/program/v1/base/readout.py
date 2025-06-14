@@ -1,9 +1,15 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Callable, Optional
 
 from .pulse import declare_pulse, set_pulse
 
+if TYPE_CHECKING:
+    from .program import MyProgramV1
 
-def make_readout(name: str):
+
+def make_readout(name: str) -> AbsReadout:
     if name == "base":
         return BaseReadout()
     else:
@@ -12,16 +18,16 @@ def make_readout(name: str):
 
 class AbsReadout(ABC):
     @abstractmethod
-    def init(self, prog):
+    def init(self, prog: MyProgramV1) -> None:
         pass
 
     @abstractmethod
-    def readout_qubit(self, prog):
+    def readout_qubit(self, prog: MyProgramV1) -> None:
         pass
 
 
 class BaseReadout(AbsReadout):
-    def init(self, prog):
+    def init(self, prog: MyProgramV1) -> None:
         res_ch = prog.res_pulse["ch"]
         ro_chs = prog.adc["chs"]
 
@@ -35,7 +41,9 @@ class BaseReadout(AbsReadout):
                 gen_ch=res_ch,
             )
 
-    def readout_qubit(self, prog, before_readout=None):
+    def readout_qubit(
+        self, prog: MyProgramV1, before_readout: Optional[Callable] = None
+    ) -> None:
         res_ch = prog.res_pulse["ch"]
         ro_chs = prog.adc["chs"]
         if prog.ch_count[res_ch] > 1:

@@ -1,11 +1,15 @@
-from abc import ABC, abstractmethod
+from __future__ import annotations
 
-from myqick.asm_v1 import QickProgram
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from .pulse import declare_pulse, set_pulse
 
+if TYPE_CHECKING:
+    from .program import MyProgramV1
 
-def make_reset(name: str):
+
+def make_reset(name: str) -> AbsReset:
     if name == "none":
         return NoneReset()
     elif name == "pulse":
@@ -18,27 +22,27 @@ def make_reset(name: str):
 
 class AbsReset(ABC):
     @abstractmethod
-    def init(self, prog: QickProgram):
+    def init(self, prog: MyProgramV1) -> None:
         pass
 
     @abstractmethod
-    def reset_qubit(self, prog: QickProgram):
+    def reset_qubit(self, prog: MyProgramV1) -> None:
         pass
 
 
 class NoneReset(AbsReset):
-    def init(self, prog: QickProgram):
+    def init(self, prog: MyProgramV1) -> None:
         pass
 
-    def reset_qubit(self, prog: QickProgram):
+    def reset_qubit(self, prog: MyProgramV1) -> None:
         pass
 
 
 class PulseReset(AbsReset):
-    def init(self, prog: QickProgram):
+    def init(self, prog: MyProgramV1) -> None:
         declare_pulse(prog, prog.reset_pulse, waveform="reset")
 
-    def reset_qubit(self, prog: QickProgram):
+    def reset_qubit(self, prog: MyProgramV1) -> None:
         reset_pulse = prog.reset_pulse
 
         pre_delay = reset_pulse.get("pre_delay")
@@ -56,7 +60,7 @@ class PulseReset(AbsReset):
 
 
 class TwoPulseReset(AbsReset):
-    def init(self, prog: QickProgram):
+    def init(self, prog: MyProgramV1) -> None:
         declare_pulse(prog, prog.reset_pulse1, waveform="reset1")
         declare_pulse(prog, prog.reset_pulse2, waveform="reset2")
 
@@ -74,7 +78,7 @@ class TwoPulseReset(AbsReset):
         if prog.reset_pulse2.get("pre_delay") is not None:
             raise ValueError("reset_pulse2 cannot have a pre_delay")
 
-    def reset_qubit(self, prog: QickProgram):
+    def reset_qubit(self, prog: MyProgramV1) -> None:
         reset_pulse1 = prog.reset_pulse1
         reset_pulse2 = prog.reset_pulse2
 

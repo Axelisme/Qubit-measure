@@ -10,10 +10,6 @@ from .reset import make_reset
 
 
 class MyProgramV2(MyProgram, AveragerProgramV2):
-    """
-    Convert general config to qick v2 specific api calls
-    """
-
     def __init__(self, soccfg: QickConfig, cfg: Dict[str, Any], **kwargs) -> None:
         # v2 program need to pass reps and final_delay to init
         super().__init__(
