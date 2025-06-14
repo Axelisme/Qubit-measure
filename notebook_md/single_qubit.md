@@ -1,5 +1,13 @@
 ---
 jupyter:
+  jupytext:
+    cell_metadata_filter: tags,-all
+    notebook_metadata_filter: language_info
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.17.2
   kernelspec:
     display_name: axelenv
     language: python
@@ -60,6 +68,7 @@ database_path = create_datafolder(os.path.join(os.getcwd(), ".."), prefix=chip_n
 ```
 
 # Connect to zcu216
+
 ```python
 from zcu_tools.remote import make_proxy
 from zcu_tools.program.base import MyProgram  # noqa: F401
@@ -73,7 +82,6 @@ soc, soccfg, rm_prog = make_proxy("192.168.10.113", 8887, proxy_prog=True)
 MyProgram.init_proxy(rm_prog, test=True)
 print(soccfg)
 ```
-
 
 ```python
 # from myqick import QickSoc  # noqa: E402
@@ -127,7 +135,6 @@ YokoDevControl.set_current(cur_A)
 DefaultCfg.set_dev(flux=cur_A)
 ```
 
-
 # Lookback
 
 ```python
@@ -164,7 +171,6 @@ exp_cfg = {
 }
 ```
 
-
 ```python
 cfg = make_cfg(exp_cfg, rounds=5000)
 
@@ -177,7 +183,6 @@ predict_offset = zf.lookback_show(
 )
 predict_offset
 ```
-
 
 ```python
 timeFly = float(predict_offset)
@@ -317,7 +322,6 @@ pdrs, fpts, signals2D = zs.measure_res_pdr_dep(
     soc, soccfg, cfg, dynamic_avg=True, gain_ref=0.03
 )
 ```
-
 
 ```python
 filename = f"{res_name}_pdr@{cur_A * 1e3:.3f}mA"
@@ -522,7 +526,6 @@ preditor.update_bias(bias)
 ```
 
 ## Reset
-
 
 ### One Pulse
 
@@ -1155,7 +1158,6 @@ save_data(
 
 # Rabi
 
-
 ## Length Rabi
 
 ```python
@@ -1324,7 +1326,6 @@ visualize_pulse([DefaultCfg.get_pulse("pi_amp"), DefaultCfg.get_pulse("pi2_amp")
 ```
 
 # Optimize Readout
-
 
 ## Frequency tuning
 
@@ -1519,7 +1520,6 @@ visualize_pulse(DefaultCfg.get_pulse("readout_dpm"), time_fly=timeFly)
 
 # T1 & T2
 
-
 ## T2Ramsey
 
 ```python
@@ -1636,7 +1636,6 @@ save_data(
 )
 ```
 
-
 ## T2Echo
 
 ```python
@@ -1688,7 +1687,6 @@ save_data(
 ```
 
 # Single shot
-
 
 ## Ground state & Excited state
 

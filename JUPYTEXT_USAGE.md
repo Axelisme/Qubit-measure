@@ -4,6 +4,7 @@
 
 - **主要編輯區**: `notebook/` 目錄下的 `.ipynb` 檔案。
 - **版本控制區**: `notebook_md/` 目錄下的 `.md` 檔案。
+- **同步工具**: `sync.py` Python 腳本。
 
 ## 檔案結構
 
@@ -12,10 +13,7 @@
 │   └── ...
 ├── notebook_md/           # .md 檔案，用於版本控制
 │   └── ...
-├── sync_nb2md.sh          # (Linux/macOS) 同步 ipynb -> md
-├── sync_nb2md.cmd         # (Windows)     同步 ipynb -> md
-├── sync_md2nb.sh          # (Linux/macOS) 同步 md -> ipynb
-└── sync_md2nb.cmd         # (Windows)     同步 md -> ipynb
+└── sync.py                # 跨平台的同步腳本
 ```
 
 ---
@@ -32,23 +30,17 @@
 
 **2. 執行同步腳本:**
 
-- **Linux/macOS**:
+- 在終端機中執行以下指令：
 
-     ```bash
-     ./sync_nb2md.sh
-     ```
+  ```bash
+  python sync.py nb2md
+  ```
 
-- **Windows**:
-
-     ```cmd
-     .\sync_nb2md.cmd
-     ```
-
-- 此腳本會將 `notebook/` 的內容單向同步到 `notebook_md/`。
+- 腳本會逐一檢查每個 Notebook。如果目標 Markdown 不存在，會**自動建立**。如果已存在但內容不一致，它會**停下來詢問您是否要同步該檔案**。
 
 **3. 提交到 Git:**
 
-- `git status` 檢查 `notebook_md/` 中的變更。
+- 在確認並同步完所有必要的變更後，提交 `notebook_md/` 目錄。
 - `git add notebook_md/`
 - `git commit -m "更新 notebook"`
 - `git push`
@@ -64,23 +56,17 @@
 
 **2. 執行同步腳本:**
 
-- **Linux/macOS**:
+- 在終端機中執行以下指令：
 
-     ```bash
-     ./sync_md2nb.sh
-     ```
+  ```bash
+  python sync.py md2nb
+  ```
 
-- **Windows**:
-
-     ```cmd
-     .\sync_md2nb.cmd
-     ```
-
-- 此腳本會安全地將 `notebook_md/` 的內容同步回 `notebook/`，並在偵測到衝突時提供警告與選項。
+- 腳本會逐一檢查每個 Markdown。如果目標 Notebook 不存在，會**自動建立**。如果已存在但內容不一致，它會**停下來詢問您是否要覆寫本地的 Notebook**。
 
 **3. 繼續工作:**
 
-- 現在 `notebook/` 中的檔案已是最新狀態，可以安全地繼續開發。
+- 在同步完所有遠端變更後，您 `notebook/` 中的檔案已是最新狀態，可以安全地繼續開發。
 
 ---
 
@@ -92,11 +78,4 @@
 ## 注意事項
 
 - **停用自動同步**: 請確保 `pyproject.toml` 或其他 Jupytext 設定中已停用自動配對同步，以避免與本手動流程衝突。
-- **賦予執行權限 (Linux/macOS)**: 首次使用時，需要為 `.sh` 腳本添加執行權限：
-
-  ```bash
-  chmod +x sync_nb2md.sh
-  chmod +x sync_md2nb.sh
-  ```
-
 - **環境**: 執行腳本前，請確認已啟用包含 `jupytext` 的 Python/Conda 環境。

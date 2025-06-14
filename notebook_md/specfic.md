@@ -1,5 +1,13 @@
 ---
 jupyter:
+  jupytext:
+    cell_metadata_filter: tags,-all
+    notebook_metadata_filter: language_info
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.17.2
   kernelspec:
     display_name: axelenv
     language: python
@@ -58,6 +66,7 @@ database_path = create_datafolder(os.path.join(os.getcwd(), ".."), prefix=chip_n
 ```
 
 # Connect to zcu216
+
 ```python
 from zcu_tools.remote import make_proxy
 from zcu_tools.program.base import MyProgram  # noqa: F401
@@ -71,7 +80,6 @@ soc, soccfg, rm_prog = make_proxy("192.168.10.113", 8887, proxy_prog=True)
 MyProgram.init_proxy(rm_prog, test=True)
 print(soccfg)
 ```
-
 
 ```python
 # from qick import QickSoc  # noqa: E402
@@ -121,7 +129,6 @@ cur_A
 YokoDevControl.set_current(cur_A)
 DefaultCfg.set_dev(flux=cur_A)
 ```
-
 
 # MIST
 
@@ -523,7 +530,6 @@ exp_cfg = {
 }
 ```
 
-
 ```python
 cfg = make_cfg(exp_cfg, rounds=1000)
 
@@ -540,7 +546,6 @@ _ = zf.lookback_show(
     pulse_cfg=cfg["dac"]["res_pulse"],
 )
 ```
-
 
 ```python
 cfg = make_cfg(exp_cfg, rounds=1000)

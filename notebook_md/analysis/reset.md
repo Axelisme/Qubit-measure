@@ -1,5 +1,13 @@
 ---
 jupyter:
+  jupytext:
+    cell_metadata_filter: tags,-all
+    notebook_metadata_filter: language_info
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.17.2
   kernelspec:
     display_name: Python 3
     language: python
@@ -39,7 +47,6 @@ port = 4999
 ```
 
 # Load data
-
 
 ## Parameters
 

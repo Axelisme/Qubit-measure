@@ -1,5 +1,13 @@
 ---
 jupyter:
+  jupytext:
+    cell_metadata_filter: tags,-all
+    notebook_metadata_filter: language_info
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.17.2
   kernelspec:
     display_name: Python 3
     language: python
@@ -214,7 +222,6 @@ best_params, fig = zf.search_in_database(
 )
 fig.savefig(f"../../result/{qub_name}/image/search_result.png")
 ```
-
 
 ```python
 energies = calculate_energy_vs_flx(best_params, t_flxs, cutoff=40, evals_count=15)
