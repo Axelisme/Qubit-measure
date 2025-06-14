@@ -1,6 +1,8 @@
+from collections import defaultdict
 from typing import Any, Dict
 
 from myqick import AveragerProgram, NDAveragerProgram, RAveragerProgram
+from zcu_tools.auto import is_pulse_cfg
 from zcu_tools.program.base import MyProgram
 
 from .readout import make_readout
@@ -12,6 +14,18 @@ SYNC_TIME = 200  # cycles
 class MyProgramV1(MyProgram):
     def _parse_cfg(self, cfg: Dict[str, Any]) -> None:
         super()._parse_cfg(cfg)
+
+        # dac pulse channel check
+        self.ch_count = defaultdict(int)
+        nqzs = dict()
+        for name, pulse in self.dac.items():
+            if not is_pulse_cfg(name, pulse):
+                continue
+            ch, nqz = pulse["ch"], pulse["nqz"]
+            self.ch_count[ch] += 1
+            cur_nqz = nqzs.setdefault(ch, nqz)
+            assert cur_nqz == nqz, "Found different nqz on the same channel"
+
         self._make_modules()
 
     def _make_modules(self) -> None:

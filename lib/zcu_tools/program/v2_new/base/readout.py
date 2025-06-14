@@ -1,90 +1,111 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict
 
-from .pulse import force_no_post_delay, trigger_pulse
+from .module import Module
+from .pulse import Pulse, force_no_post_delay
 
 if TYPE_CHECKING:
     from .program import MyProgramV2
 
 
-class AbsReadout(ABC):
-    @abstractmethod
-    def init(self, prog: MyProgramV2):
-        pass
-
-    @abstractmethod
-    def readout_qubit(self, prog: MyProgramV2):
-        pass
+class AbsReadout(Module):
+    pass
 
 
-def make_readout(name: str) -> AbsReadout:
+def make_readout(readout_cfg: Dict[str, Any]) -> AbsReadout:
+    name = readout_cfg["type"]
+
     if name == "base":
-        return BaseReadout()
+        return BaseReadout(
+            name,
+            pulse_cfg=readout_cfg["pulse_cfg"],
+            ro_cfg=readout_cfg["ro_cfg"],
+        )
     elif name == "two_pulse":
-        return TwoPulseReadout()
+        return TwoPulseReadout(
+            name,
+            pulse1_cfg=readout_cfg["pulse1_cfg"],
+            pulse2_cfg=readout_cfg["pulse2_cfg"],
+            ro_cfg=readout_cfg["ro_cfg"],
+        )
     else:
         raise ValueError(f"Unknown readout type: {name}")
 
 
 class BaseReadout(AbsReadout):
-    def init(self, prog: MyProgramV2):
-        res_pulse: Dict[str, Any] = prog.res_pulse
-        res_ch: int = res_pulse["ch"]
-        ro_chs: List[int] = prog.adc["chs"]
-
-        # TODO: support multiple readout channels
-        assert len(ro_chs) == 1, "Only one readout channel is supported"
-        ro_ch = ro_chs[0]
+    def __init__(
+        self,
+        name: str,
+        pulse_cfg: Dict[str, Any],
+        ro_cfg: Dict[str, Any],
+    ) -> None:
+        self.name = name
+        self.pulse_cfg = pulse_cfg
+        self.ro_cfg = ro_cfg
 
         # TODO: support post delay
-        force_no_post_delay(res_pulse, "res_pulse")
+        pulse_name = f"{name}_pulse"
+        force_no_post_delay(pulse_cfg, pulse_name)
+        self.pulse = Pulse(name=pulse_name, cfg=pulse_cfg)
 
-        prog.declare_pulse(res_pulse, "res_pulse", ro_ch)
+    def init(self, prog: MyProgramV2) -> None:
+        self.pulse.init(prog)
 
-        prog.declare_readout(ch=ro_ch, length=prog.adc["ro_length"])
+        prog.declare_readout(ch=self.ro_cfg["ro_ch"], length=self.ro_cfg["ro_length"])
         prog.add_readoutconfig(
-            ch=ro_ch, name="readout_adc", freq=res_pulse["freq"], gen_ch=res_ch
+            ch=self.ro_cfg["ro_ch"],
+            name=f"{self.name}_readout_adc",
+            freq=self.ro_cfg.get("freq", self.pulse_cfg["freq"]),
+            gen_ch=self.ro_cfg.get("gen_ch", self.pulse_cfg["ch"]),
         )
 
-    def readout_qubit(self, prog: MyProgramV2):
-        ro_ch: int = prog.adc["chs"][0]
+    def run(self, prog: MyProgramV2) -> None:
+        ro_ch: int = self.ro_cfg["ro_ch"]
 
-        prog.send_readoutconfig(ro_ch, "readout_adc", t=0)
+        prog.send_readoutconfig(ro_ch, f"{self.name}_readout_adc", t=0)
 
-        trigger_pulse(prog, prog.res_pulse, "res_pulse")
+        self.pulse.run(prog)
 
-        prog.trigger([ro_ch], t=prog.adc["trig_offset"])
+        prog.trigger([ro_ch], t=self.ro_cfg["trig_offset"])
 
 
 class TwoPulseReadout(AbsReadout):
-    def init(self, prog: MyProgramV2):
-        res_pulse: Dict[str, Any] = prog.res_pulse
-        res_ch: int = res_pulse["ch"]
-        ro_chs: List[int] = prog.adc["chs"]
-
-        # TODO: support multiple readout channels
-        assert len(ro_chs) == 1, "Only one readout channel is supported"
-        ro_ch = ro_chs[0]
+    def __init__(
+        self,
+        name: str,
+        pulse1_cfg: Dict[str, Any],
+        pulse2_cfg: Dict[str, Any],
+        ro_cfg: Dict[str, Any],
+    ) -> None:
+        self.name = name
+        self.ro_cfg = ro_cfg
 
         # TODO: support post delay
-        force_no_post_delay(res_pulse, "res_pulse")
+        pulse2_name = f"{name}_pulse2"
+        force_no_post_delay(pulse2_cfg, pulse2_name)
 
-        prog.declare_pulse(prog.pre_res_pulse, "pre_res_pulse")
-        prog.declare_pulse(res_pulse, "res_pulse", ro_ch)
+        self.pulse1 = Pulse(name=f"{name}_pulse1", cfg=pulse1_cfg)
+        self.pulse2 = Pulse(name=f"{name}_pulse2", cfg=pulse2_cfg)
 
-        prog.declare_readout(ch=ro_ch, length=prog.adc["ro_length"])
+    def init(self, prog: MyProgramV2) -> None:
+        self.pulse1.init(prog)
+        self.pulse2.init(prog)
+
+        prog.declare_readout(ch=self.ro_cfg["ro_ch"], length=self.ro_cfg["ro_length"])
         prog.add_readoutconfig(
-            ch=ro_ch, name="readout_adc", freq=res_pulse["freq"], gen_ch=res_ch
+            ch=self.ro_cfg["ro_ch"],
+            name=f"{self.name}_readout_adc",
+            freq=self.ro_cfg["freq"],
+            gen_ch=self.ro_cfg["gen_ch"],
         )
 
-    def readout_qubit(self, prog: MyProgramV2):
-        ro_ch: int = prog.adc["chs"][0]
+    def run(self, prog: MyProgramV2) -> None:
+        ro_ch: int = self.ro_cfg["ro_ch"]
 
-        prog.send_readoutconfig(ro_ch, "readout_adc", t=0)
+        prog.send_readoutconfig(ro_ch, f"{self.name}_readout_adc", t=0)
 
-        trigger_pulse(prog, prog.pre_res_pulse, "pre_res_pulse")
-        trigger_pulse(prog, prog.res_pulse, "res_pulse")
+        self.pulse1.run(prog)
+        self.pulse2.run(prog)
 
-        prog.trigger([ro_ch], t=prog.adc["trig_offset"])
+        prog.trigger([ro_ch], t=self.ro_cfg["trig_offset"])

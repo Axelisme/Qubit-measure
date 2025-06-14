@@ -1,4 +1,3 @@
-from collections import defaultdict
 from typing import Any, Dict
 
 from myqick.qick_asm import AcquireMixin
@@ -35,17 +34,6 @@ class MyProgram(ProxyProgram, AcquireMixin):
             if hasattr(self, name):
                 raise ValueError(f"Pulse name {name} already exists")
             setattr(self, name, pulse)
-
-        # dac pulse channel check
-        self.ch_count = defaultdict(int)
-        nqzs = dict()
-        for name, pulse in self.dac.items():
-            if not is_pulse_cfg(name, pulse):
-                continue
-            ch, nqz = pulse["ch"], pulse["nqz"]
-            self.ch_count[ch] += 1
-            cur_nqz = nqzs.setdefault(ch, nqz)
-            assert cur_nqz == nqz, "Found different nqz on the same channel"
 
     def acquire(self, soc, **kwargs) -> list:
         # let callback be executd as a coroutine
