@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: axelenv13
+    display_name: Python 3
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.5
+    version: 3.13.2
 ---
 
 ```python
@@ -107,7 +107,9 @@ fig.write_image(f"../../result/{qub_name}/image/matrixelem.png", format="png")
 # Flux dependence
 
 ```python
-_, energies = calculate_energy_vs_flx(params, flxs, spectrum_data=spectrum_data, cutoff=50, evals_count=40)
+_, energies = calculate_energy_vs_flx(
+    params, flxs, spectrum_data=spectrum_data, cutoff=50, evals_count=40
+)
 ```
 
 ```python
@@ -128,7 +130,9 @@ fig = go.Figure()
 freqs, names = energy2transition(energies, v_allows)
 for j in range(1, 10):
     for i in range(len(names)):
-        fig.add_trace(go.Scatter(x=mAs, y=freqs[:, i]/j, mode="lines", name=f"{j}_{names[i]}"))
+        fig.add_trace(
+            go.Scatter(x=mAs, y=freqs[:, i] / j, mode="lines", name=f"{j}_{names[i]}")
+        )
 
 fig.add_hline(y=v_allows["r_f"], line_dash="dash", line_color="black", line_width=2)
 fig.add_hline(

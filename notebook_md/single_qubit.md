@@ -770,14 +770,8 @@ exp_cfg = {
         "res_pulse": "readout_rf",
         # "res_pulse": "readout_dpm",
         "qub_pulse": "pi_amp",
-        "reset_test_pulse1": {
-            **DefaultCfg.get_pulse("mux_reset1"),
-            "length": 0.5
-        },
-        "reset_test_pulse2": {
-            **DefaultCfg.get_pulse("mux_reset2"),
-            "length": 0.5
-        },
+        "reset_test_pulse1": {**DefaultCfg.get_pulse("mux_reset1"), "length": 0.5},
+        "reset_test_pulse2": {**DefaultCfg.get_pulse("mux_reset2"), "length": 0.5},
         "reset": "two_pulse",
         "reset_pulse1": "mux_reset1",
         "reset_pulse2": "mux_reset2",
@@ -803,7 +797,9 @@ pdrs1, pdrs2, signals2D = zs.measure_mux_reset_pdr(soc, soccfg, cfg)
 %matplotlib inline
 xlabal = f"|{reset1_trans[0]}, 0> - |{reset1_trans[1]}, 0>"
 ylabal = f"|{reset2_trans[0]}, 0> - |{reset2_trans[1]}, 1>"
-gain1, gain2 = zf.mux_reset_pdr_analyze(pdrs1, pdrs2, signals2D, xlabel=xlabal, ylabel=ylabal)
+gain1, gain2 = zf.mux_reset_pdr_analyze(
+    pdrs1, pdrs2, signals2D, xlabel=xlabal, ylabel=ylabal
+)
 ```
 
 ```python
@@ -821,14 +817,8 @@ save_data(
 
 ```python
 DefaultCfg.set_pulse(
-    mux_reset1={
-        **DefaultCfg.get_pulse("mux_reset1"),
-        "gain": gain1
-    },
-    mux_reset2={
-        **DefaultCfg.get_pulse("mux_reset2"),
-        "gain": gain2
-    },
+    mux_reset1={**DefaultCfg.get_pulse("mux_reset1"), "gain": gain1},
+    mux_reset2={**DefaultCfg.get_pulse("mux_reset2"), "gain": gain2},
 )
 ```
 
@@ -991,7 +981,7 @@ exp_cfg = {
         "res_pulse": {
             **DefaultCfg.get_pulse("readout_rf"),
             # "length": 5.0,
-            'gain': 0.3,
+            "gain": 0.3,
             # "pre_delay": None,
             # "t": 0.5
         },

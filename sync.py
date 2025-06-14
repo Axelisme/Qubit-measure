@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import difflib
 import json
 import subprocess
@@ -96,20 +97,28 @@ def sync_files(
                         generated_json = json.loads(generated_dest_content)
                         on_disk_json = json.loads(on_disk_dest_content)
 
-                        # Remove cell IDs for comparison
-                        def remove_cell_ids(notebook_json):
-                            if "cells" in notebook_json:
-                                for cell in notebook_json["cells"]:
-                                    if "id" in cell:
-                                        del cell["id"]
-                            return notebook_json
+                        # Normalize notebooks by removing volatile fields such as
+                        # cell IDs and kernelspec information which can vary
+                        # between environments but do not affect notebook content.
+                        def normalize_notebook(notebook_json: dict) -> dict:
+                            nb_copy = copy.deepcopy(notebook_json)
 
-                        generated_clean = remove_cell_ids(
-                            json.loads(json.dumps(generated_json))
-                        )
-                        on_disk_clean = remove_cell_ids(
-                            json.loads(json.dumps(on_disk_json))
-                        )
+                            # Strip random cell IDs
+                            if "cells" in nb_copy:
+                                for cell in nb_copy["cells"]:
+                                    cell.pop("id", None)
+
+                            # Remove kernelspec metadata that may differ across machines
+                            if (
+                                "metadata" in nb_copy
+                                and "kernelspec" in nb_copy["metadata"]
+                            ):
+                                nb_copy["metadata"].pop("kernelspec", None)
+
+                            return nb_copy
+
+                        generated_clean = normalize_notebook(generated_json)
+                        on_disk_clean = normalize_notebook(on_disk_json)
 
                         are_synced = generated_clean == on_disk_clean
                     except (json.JSONDecodeError, KeyError):
@@ -139,12 +148,16 @@ def sync_files(
                         generated_json = json.loads(generated_dest_content)
                         on_disk_json = json.loads(on_disk_dest_content)
 
-                        # Pretty print JSON for better readability
+                        # Pretty print normalized JSON for better readability
                         generated_formatted = json.dumps(
-                            generated_json, indent=2, ensure_ascii=False
+                            normalize_notebook(generated_json),
+                            indent=2,
+                            ensure_ascii=False,
                         )
                         on_disk_formatted = json.dumps(
-                            on_disk_json, indent=2, ensure_ascii=False
+                            normalize_notebook(on_disk_json),
+                            indent=2,
+                            ensure_ascii=False,
                         )
 
                         diff = difflib.unified_diff(

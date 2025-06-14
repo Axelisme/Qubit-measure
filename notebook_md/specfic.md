@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: axelenv
+    display_name: Python 3
     language: python
     name: python3
   language_info:
@@ -166,7 +166,7 @@ exp_cfg = {
 ```
 
 ```python
-exp_cfg["sweep"] =  make_sweep(0.0, 1.0, 101)
+exp_cfg["sweep"] = make_sweep(0.0, 1.0, 101)
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
 # zs.mist.visualize_mist_pdr_dep(soccfg, cfg, time_fly=0.6)
@@ -201,7 +201,6 @@ exp_cfg = {
             # "length": 0.1,
             "post_delay": 0.5,
         },
-
         # "reset": "pulse",
         # "reset_pulse": "reset_red",
         "reset": "two_pulse",
@@ -211,7 +210,6 @@ exp_cfg = {
         },
         "reset_pulse2": "mux_reset2",
         # "reset_pi_pulse": "pi_amp",
-
         "readout": "two_pulse",
         "pre_res_pulse": "pi_amp",
     },
@@ -222,7 +220,7 @@ exp_cfg = {
 ```
 
 ```python
-exp_cfg["sweep"] =  make_sweep(0.0, 1.0, 101)
+exp_cfg["sweep"] = make_sweep(0.0, 1.0, 101)
 cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 # zs.mist.visualize_abnormal_pdr_dep(soccfg, cfg, time_fly=0.6)
@@ -238,7 +236,7 @@ filename = f"{qub_name}_abnormal_pdr@{cur_A * 1e3:.3f}mA"
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
-    y_info={"name": "GE", "unit": "None", "values": np.array([0,1])},
+    y_info={"name": "GE", "unit": "None", "values": np.array([0, 1])},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=make_comment(cfg),
     tag="MIST/pdr/abnormal",
@@ -271,7 +269,7 @@ exp_cfg = {
         "relax_delay": 0.0,  # us
     },
 }
-exp_cfg["sweep"] =  make_sweep(0.0, 1.0, 51)
+exp_cfg["sweep"] = make_sweep(0.0, 1.0, 51)
 cfg = make_cfg(exp_cfg, reps=500, rounds=10)
 
 # Create two subplots: one for current scan, one for historical scans
@@ -286,7 +284,9 @@ interval = 5 * 60  # 5 minutes in seconds
 
 overnight_signals = []
 try:
-    for i in tqdm(range(total_time // interval), desc="Overnight Scans", unit="iteration"):
+    for i in tqdm(
+        range(total_time // interval), desc="Overnight Scans", unit="iteration"
+    ):
         start_t = time.time()
 
         pdrs, signals = zs.measure_mist_pdr_dep(soc, soccfg, cfg, backend_mode=True)
@@ -300,11 +300,11 @@ try:
         ax_left.plot(pdrs, np.abs(signals - g0), linestyle="-", marker=".")
         ax_left.set_xlabel("Drive Power (a.u.)")
         ax_left.set_ylabel("Signal (a.u.)")
-        ax_left.set_title(f"Current Scan (Iteration {i+1})")
+        ax_left.set_title(f"Current Scan (Iteration {i + 1})")
 
         # Right plot: Historical scans
         ax_right.clear()
-        ax_right.plot(pdrs, np.abs(signals_array- g0).T, linestyle="--")
+        ax_right.plot(pdrs, np.abs(signals_array - g0).T, linestyle="--")
         ax_right.set_xlabel("Drive Power (a.u.)")
         ax_right.set_ylabel("Signal (a.u.)")
         ax_right.set_title("Historical Scans")
@@ -316,14 +316,13 @@ try:
     plt.close(fig)
     clear_output(wait=True)
 
-
     overnight_signals = np.array(overnight_signals)
 
     g0 = np.mean(overnight_signals[:, 0])
 
     # plot overnight_signals in one plot
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(pdrs, np.abs(overnight_signals-g0).T, linestyle="--")
+    ax.plot(pdrs, np.abs(overnight_signals - g0).T, linestyle="--")
     ax.set_xlabel(r"$\bar n$")
     ax.set_ylabel("Signal difference")
     plt.tight_layout()
@@ -338,7 +337,11 @@ filename = f"{qub_name}_mist_pdr_overnight@{cur_A * 1e3:.3f}mA"
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
-    y_info={"name": "Iteration", "unit": "None", "values": np.arange(len(overnight_signals))},
+    y_info={
+        "name": "Iteration",
+        "unit": "None",
+        "values": np.arange(len(overnight_signals)),
+    },
     z_info={"name": "Signal", "unit": "a.u.", "values": np.array(overnight_signals)},
     comment=make_comment(cfg),
     tag="MIST/pdr/overnight",
@@ -381,7 +384,7 @@ exp_cfg = {
 ```
 
 ```python
-exp_cfg["sweep"] =  make_sweep(0.0, 1.0, 101)
+exp_cfg["sweep"] = make_sweep(0.0, 1.0, 101)
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
 # zs.visualize_mist_pdr_mux_reset(soccfg, cfg, time_fly=0.6)
@@ -422,14 +425,12 @@ exp_cfg = {
             # "length": 5.0,
             # "gain": 0.0
         },
-
         # "reset": "pulse",
         # "reset_pulse": "reset_red",
         "reset": "two_pulse",
         "reset_pulse1": "mux_reset1",
         "reset_pulse2": "mux_reset2",
         # "reset_pi_pulse": "pi_amp",
-
         "readout": "two_pulse",
         "pre_res_pulse": "pi_amp",
     },
@@ -440,7 +441,7 @@ exp_cfg = {
 ```
 
 ```python
-exp_cfg["sweep"] =  make_sweep(0.0, 1.0, 61)
+exp_cfg["sweep"] = make_sweep(0.0, 1.0, 61)
 cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 zs.mist.visualize_abnormal_pdr_mux_reset(soccfg, cfg, time_fly=0.6)
@@ -456,7 +457,7 @@ filename = f"{qub_name}_abnormal_pdr_mux_reset@{cur_A * 1e3:.3f}mA"
 save_data(
     filepath=os.path.join(database_path, filename),
     x_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
-    y_info={"name": "GE", "unit": "None", "values": np.array([0,1])},
+    y_info={"name": "GE", "unit": "None", "values": np.array([0, 1])},
     z_info={"name": "Signal", "unit": "a.u.", "values": signals},
     comment=make_comment(cfg),
     tag="MIST/pdr_reset_abnormal",
