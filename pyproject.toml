@@ -49,3 +49,11 @@ packages = ["zcu_tools"]
 
 [tool.ruff.lint]
 ignore = ["E402"]
+
+[tool.jupytext]
+# 配對格式：notebook_md 目錄存放 .md 檔案，notebook 目錄存放 .ipynb 檔案
+formats = "notebook_md//md,notebook//ipynb"
+# 過濾掉不必要的 notebook 元數據
+notebook_metadata_filter = "-all,+kernelspec,+language_info"
+# 過濾掉不必要的 cell 元數據
+cell_metadata_filter = "-all,+tags"

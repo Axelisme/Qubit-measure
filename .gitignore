@@ -20,3 +20,7 @@ test.ipynb
 *.png
 *.csv
 *.log
+
+# Jupytext generated files
+notebook/
+backup_ipynb_*/
