@@ -22,5 +22,5 @@ test.ipynb
 *.log
 
 # Jupytext generated files
-notebook/
+/notebook/
 backup_ipynb_*/

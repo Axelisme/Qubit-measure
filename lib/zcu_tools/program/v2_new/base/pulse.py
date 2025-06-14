@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 import warnings
+from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
     from .program import MyProgramV2
+
+
+class AbsPulse(ABC):
+    @abstractmethod
+    def init(self, prog: MyProgramV2) -> None:
+        pass
+
+    @abstractmethod
+    def trigger(self, prog: MyProgramV2) -> None:
+        pass
 
 
 def force_no_post_delay(pulse: Dict[str, Any], name: str) -> None:
