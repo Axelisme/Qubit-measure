@@ -3,7 +3,9 @@ import sys
 import time
 import traceback
 from copy import deepcopy
-from typing import Any, Callable, Dict, Literal, Optional, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
+
+import numpy as np
 
 
 def deepupdate(
@@ -57,13 +59,13 @@ def numpy2number(obj: Any) -> Any:
     Returns:
         Any: 將 numpy 型別轉換為 Python 型別後的物件。
     """
-    if hasattr(obj, "tolist"):
+    if hasattr(obj, "tolist") and callable(obj.tolist):
         obj = obj.tolist()
     if isinstance(obj, dict):
         return {k: numpy2number(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [numpy2number(v) for v in obj]
-    if hasattr(obj, "item"):
+    if hasattr(obj, "item") and callable(obj.item):
         return obj.item()
     return obj
 
@@ -74,7 +76,7 @@ def make_sweep(
     expts: Optional[int] = None,
     step: Optional[Union[int, float]] = None,
     force_int: bool = False,
-) -> dict:
+) -> Dict[str, Union[int, float]]:
     """
     建立一個掃描參數的字典，包含起始值、結束值、步長與實驗次數。
 
@@ -96,18 +98,18 @@ def make_sweep(
     if expts is None:
         assert stop is not None, err_str
         assert step is not None, err_str
-        expts = int((stop - start) / step + 0.99)  # pyright: ignore[reportOperatorIssue]
+        expts = int((stop - start) / step + 0.99)
     elif step is None:
         assert stop is not None, err_str
         assert expts is not None, err_str
-        step = (stop - start) / expts  # pyright: ignore[reportOperatorIssue]
+        step = (stop - start) / expts
 
     if force_int:
-        start = int(start)  # pyright: ignore
-        step = int(step)  # pyright: ignore
+        start = int(start)
+        step = int(step)
         expts = int(expts)
 
-    stop = start + step * expts  # pyright: ignore[reportOperatorIssue]
+    stop = start + step * expts
 
     assert expts > 0, f"expts must be greater than 0, but got {expts}"
     assert step != 0, f"step must not be zero, but got {step}"
@@ -176,8 +178,12 @@ def print_traceback() -> None:
     印出當前的異常追蹤訊息。如果異常包含 `_pyroTraceback`，則印出該追蹤訊息。
     """
     err_msg = sys.exc_info()[1]
+    if err_msg is None:
+        return
     if hasattr(err_msg, "_pyroTraceback"):
-        print("".join(err_msg._pyroTraceback))
+        pyro_traceback = getattr(err_msg, "_pyroTraceback", None)
+        if isinstance(pyro_traceback, list):
+            print("".join(pyro_traceback))
     else:
         print(traceback.format_exc())
 

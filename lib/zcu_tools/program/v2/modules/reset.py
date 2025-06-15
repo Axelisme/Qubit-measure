@@ -9,18 +9,18 @@ class AbsReset(Module):
     pass
 
 
-def make_reset(reset_cfg: Dict[str, Any]) -> AbsReset:
-    name = reset_cfg["type"]
+def make_reset(name: str, reset_cfg: Dict[str, Any]) -> AbsReset:
+    reset_type = reset_cfg["type"]
 
-    if name == "none":
+    if reset_type == "none":
         return NoneReset()
-    elif name == "pulse":
+    elif reset_type == "pulse":
         return PulseReset(
             name,
             pulse_cfg=reset_cfg["pulse_cfg"],
             post_pulse_cfg=reset_cfg.get("post_pulse_cfg"),
         )
-    elif name == "two_pulse":
+    elif reset_type == "two_pulse":
         return TwoPulseReset(
             name,
             pulse1_cfg=reset_cfg["pulse1_cfg"],
@@ -28,14 +28,14 @@ def make_reset(reset_cfg: Dict[str, Any]) -> AbsReset:
             post_pulse_cfg=reset_cfg.get("post_pulse_cfg"),
         )
     else:
-        raise ValueError(f"Unknown reset type: {name}")
+        raise ValueError(f"Unknown reset type: {reset_type}")
 
 
 class NoneReset(AbsReset):
-    def init(self, _) -> None:
+    def init(self, prog: MyProgramV2) -> None:
         pass
 
-    def reset_qubit(self, _) -> None:
+    def run(self, prog: MyProgramV2) -> None:
         pass
 
 

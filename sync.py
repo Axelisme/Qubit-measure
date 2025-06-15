@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import jupytext
+import jupytext  # pyright: ignore
 
 
 def get_jupytext_version() -> Optional[str]:

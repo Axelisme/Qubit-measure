@@ -9,16 +9,16 @@ class AbsReadout(Module):
     pass
 
 
-def make_readout(readout_cfg: Dict[str, Any]) -> AbsReadout:
-    name = readout_cfg["type"]
+def make_readout(name: str, readout_cfg: Dict[str, Any]) -> AbsReadout:
+    ro_type = readout_cfg["type"]
 
-    if name == "base":
+    if ro_type == "base":
         return BaseReadout(
             name,
             pulse_cfg=readout_cfg["pulse_cfg"],
             ro_cfg=readout_cfg["ro_cfg"],
         )
-    elif name == "two_pulse":
+    elif ro_type == "two_pulse":
         return TwoPulseReadout(
             name,
             pulse1_cfg=readout_cfg["pulse1_cfg"],
@@ -26,7 +26,7 @@ def make_readout(readout_cfg: Dict[str, Any]) -> AbsReadout:
             ro_cfg=readout_cfg["ro_cfg"],
         )
     else:
-        raise ValueError(f"Unknown readout type: {name}")
+        raise ValueError(f"Unknown readout type: {ro_type}")
 
 
 class BaseReadout(AbsReadout):
@@ -52,8 +52,8 @@ class BaseReadout(AbsReadout):
         prog.add_readoutconfig(
             ch=self.ro_cfg["ro_ch"],
             name=f"{self.name}_readout_adc",
-            freq=self.ro_cfg.get("freq", self.pulse_cfg["freq"]),
-            gen_ch=self.ro_cfg.get("gen_ch", self.pulse_cfg["ch"]),
+            freq=self.pulse_cfg["freq"],
+            gen_ch=self.pulse_cfg["ch"],
         )
 
     def run(self, prog: MyProgramV2) -> None:
@@ -76,6 +76,8 @@ class TwoPulseReadout(AbsReadout):
     ) -> None:
         self.name = name
         self.ro_cfg = ro_cfg
+        self.pulse1_cfg = pulse1_cfg
+        self.pulse2_cfg = pulse2_cfg
 
         # TODO: support post delay
         pulse2_name = f"{name}_pulse2"
@@ -94,8 +96,8 @@ class TwoPulseReadout(AbsReadout):
         prog.add_readoutconfig(
             ch=self.ro_cfg["ro_ch"],
             name=f"{self.name}_readout_adc",
-            freq=self.ro_cfg.get("freq", self.pulse2_cfg["freq"]),
-            gen_ch=self.ro_cfg.get("gen_ch", self.pulse2_cfg["ch"]),
+            freq=self.pulse2_cfg["freq"],
+            gen_ch=self.pulse2_cfg["ch"],
         )
 
     def run(self, prog: MyProgramV2) -> None:

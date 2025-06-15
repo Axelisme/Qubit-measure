@@ -193,7 +193,9 @@ def load_local_data(
         print("DRY RUN: Load data from ", filepath)
         return np.array([]), np.array([]), None
 
-    def parser_data(data):
+    def parser_data(
+        data: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         if data.shape[2] == 1:  # 1D data,
             x_data = data[:, 0, 0][:]
             y_data = None
@@ -206,20 +208,35 @@ def load_local_data(
         return z_data, x_data, y_data
 
     with h5py.File(filepath, "r") as file:
-        data: np.ndarray = file["Data"]["Data"]
+        data = np.array(file["Data"]["Data"])  # type: ignore
         z_data, x_data, y_data = parser_data(data)
+
+        assert isinstance(x_data, np.ndarray)
+        assert isinstance(z_data, np.ndarray)
 
         if "Log_2" in file:
             z_data = [z_data]
 
-            i = 2
-            while f"Log_{i}" in file:
-                log_data = file[f"Log_{i}"]["Data"]["Data"]
-                z_data_i, x_i, y_i = parser_data(log_data)
-                if not x_data.shape == x_i.shape or not y_data.shape == y_i.shape:
-                    raise ValueError("Data shape mismatch")
+            def check_log_valid(
+                z_i: np.ndarray, x_i: np.ndarray, y_i: np.ndarray
+            ) -> None:
+                if not x_data.shape == x_i.shape:
+                    raise ValueError("x data shape mismatch")
+                if y_i is not None:
+                    if y_data is None:
+                        raise ValueError("y data is None")
+                    if not y_data.shape == y_i.shape:
+                        raise ValueError("y data shape mismatch")
+
                 if not np.allclose(x_data, x_i) or not np.allclose(y_data, y_i):
                     raise ValueError("Find different x or y data in log data")
+
+            i = 2
+            while f"Log_{i}" in file:
+                log_data = np.array(file[f"Log_{i}"]["Data"]["Data"])  # type: ignore
+                z_data_i, x_i, y_i = parser_data(log_data)
+                check_log_valid(z_data_i, x_i, y_i)
+
                 z_data.append(z_data_i)
                 i += 1
             z_data = np.array(z_data)
