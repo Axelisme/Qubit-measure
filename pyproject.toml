@@ -46,5 +46,5 @@ reportExplicitAny = "none"
 reportMissingTypeStubs = "none"
 
 [tool.jupytext]
-notebook_metadata_filter = "-all,+language_info"
-cell_metadata_filter = "-all,+tags"
+notebook_metadata_filter = "-all"
+cell_metadata_filter = "-all"
