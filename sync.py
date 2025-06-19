@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import difflib
 import json
 import subprocess
 import sys
@@ -9,6 +8,10 @@ from pathlib import Path
 from typing import Optional
 
 import jupytext
+
+# ------------------------------
+# Helper utilities
+# ------------------------------
 
 
 def get_jupytext_version() -> Optional[str]:
@@ -22,12 +25,38 @@ def get_jupytext_version() -> Optional[str]:
         return None
 
 
+def _normalize_notebook(nb: dict) -> dict:
+    """Return a deep-copied notebook dict with unstable fields removed."""
+    nb_copy = copy.deepcopy(nb)
+
+    # Remove random cell IDs
+    if "cells" in nb_copy:
+        for cell in nb_copy["cells"]:
+            cell.pop("id", None)
+
+    # Remove environment-specific metadata
+    if "metadata" in nb_copy:
+        nb_copy["metadata"].pop("kernelspec", None)
+        nb_copy["metadata"].pop("language_info", None)
+
+    return nb_copy
+
+
+# ------------------------------
+# Main function
+# ------------------------------
+
+
 def sync_files(
     source_dir: str,
     dest_dir: str,
     source_ext: str,
     dest_ext: str,
     to_format: str,
+    *,
+    always_overwrite: bool = False,
+    prompt: bool = True,
+    default_yes: bool = False,
 ) -> None:
     """Synchronize ``source_ext`` files in *source_dir* to ``dest_ext`` files in *dest_dir*.
 
@@ -59,6 +88,27 @@ def sync_files(
         # Pre-convert source to destination format for comparison/writing
         source_notebook: Optional[dict] = None
 
+        # -------------------------------------------------------------
+        # Fast-path: unconditional overwrite requested (e.g. nb2md mode)
+        # -------------------------------------------------------------
+        if always_overwrite:
+            if source_notebook is None:
+                source_notebook = jupytext.read(source_file)
+
+            if not dest_file.exists():
+                dest_file.parent.mkdir(parents=True, exist_ok=True)
+                print(f"ℹ️  正在建立新檔案: {source_file.name} -> {dest_file.name}")
+            else:
+                print(f"🔄 覆寫: {source_file.name} -> {dest_file.name}")
+
+            jupytext.write(source_notebook, dest_file)
+            synced_count += 1
+            continue  # move to next file
+
+        # -------------------------------------------------------------
+        # Regular interactive/compare workflow
+        # -------------------------------------------------------------
+
         if not dest_file.exists():
             all_in_sync = False
             print(f"ℹ️  正在建立新檔案: {source_file.name} -> {dest_file.name}")
@@ -89,46 +139,33 @@ def sync_files(
                 # Read the actual content of the destination file from disk
                 on_disk_dest_content = dest_file.read_text(encoding="utf-8")
 
-                # Perform a robust comparison
+                # 使用全域 _normalize_notebook 進行比較
                 if dest_ext == ".ipynb":
-                    # For notebooks (JSON), compare the parsed Python objects
-                    # but ignore cell IDs which are randomly generated
                     try:
                         generated_json = json.loads(generated_dest_content)
                         on_disk_json = json.loads(on_disk_dest_content)
 
-                        # Normalize notebooks by removing volatile fields such as
-                        # cell IDs and kernelspec information which can vary
-                        # between environments but do not affect notebook content.
-                        def normalize_notebook(notebook_json: dict) -> dict:
-                            nb_copy = copy.deepcopy(notebook_json)
-
-                            # Strip random cell IDs
-                            if "cells" in nb_copy:
-                                for cell in nb_copy["cells"]:
-                                    cell.pop("id", None)
-
-                            # Remove kernelspec metadata that may differ across machines
-                            if (
-                                "metadata" in nb_copy
-                                and "kernelspec" in nb_copy["metadata"]
-                            ):
-                                nb_copy["metadata"].pop("kernelspec", None)
-
-                            return nb_copy
-
-                        generated_clean = normalize_notebook(generated_json)
-                        on_disk_clean = normalize_notebook(on_disk_json)
+                        generated_clean = _normalize_notebook(generated_json)
+                        on_disk_clean = _normalize_notebook(on_disk_json)
 
                         are_synced = generated_clean == on_disk_clean
                     except (json.JSONDecodeError, KeyError):
-                        # Fallback to original comparison if JSON manipulation fails
                         are_synced = json.loads(generated_dest_content) == json.loads(
                             on_disk_dest_content
                         )
                 else:
-                    # For Markdown, a direct string comparison is sufficient
-                    are_synced = generated_dest_content == on_disk_dest_content
+                    try:
+                        generated_nb = jupytext.reads(
+                            generated_dest_content, fmt=dest_ext.strip(".")
+                        )
+                        on_disk_nb = jupytext.read(dest_file)
+
+                        generated_clean = _normalize_notebook(generated_nb)
+                        on_disk_clean = _normalize_notebook(on_disk_nb)
+
+                        are_synced = generated_clean == on_disk_clean
+                    except Exception:
+                        are_synced = generated_dest_content == on_disk_dest_content
 
             except Exception:
                 # If any error occurs during parsing or comparison, assume not synced
@@ -140,73 +177,26 @@ def sync_files(
                 all_in_sync = False
                 print(f"❌ 不同步: {source_file.name} -> {dest_file.name}")
 
-                # Show the differences
-                print("   📋 差異內容:")
-                if dest_ext == ".ipynb":
-                    # For notebooks, show formatted JSON diff
-                    try:
-                        generated_json = json.loads(generated_dest_content)
-                        on_disk_json = json.loads(on_disk_dest_content)
-
-                        # Pretty print normalized JSON for better readability
-                        generated_formatted = json.dumps(
-                            normalize_notebook(generated_json),
-                            indent=2,
-                            ensure_ascii=False,
-                        )
-                        on_disk_formatted = json.dumps(
-                            normalize_notebook(on_disk_json),
-                            indent=2,
-                            ensure_ascii=False,
-                        )
-
-                        diff = difflib.unified_diff(
-                            on_disk_formatted.splitlines(keepends=True),
-                            generated_formatted.splitlines(keepends=True),
-                            fromfile=f"{dest_file.name} (目前檔案)",
-                            tofile=f"{dest_file.name} (來源轉換後)",
-                            lineterm="",
-                        )
-                    except json.JSONDecodeError:
-                        # Fallback to text diff if JSON parsing fails
-                        diff = difflib.unified_diff(
-                            on_disk_dest_content.splitlines(keepends=True),
-                            generated_dest_content.splitlines(keepends=True),
-                            fromfile=f"{dest_file.name} (目前檔案)",
-                            tofile=f"{dest_file.name} (來源轉換後)",
-                            lineterm="",
-                        )
-                else:
-                    # For Markdown, show text diff
-                    diff = difflib.unified_diff(
-                        on_disk_dest_content.splitlines(keepends=True),
-                        generated_dest_content.splitlines(keepends=True),
-                        fromfile=f"{dest_file.name} (目前檔案)",
-                        tofile=f"{dest_file.name} (來源轉換後)",
-                        lineterm="",
-                    )
-
-                # Print the diff with proper indentation
-                diff_lines = list(diff)
-                if diff_lines:
-                    for line in diff_lines[
-                        :50
-                    ]:  # Limit to first 50 lines to avoid overwhelming output
-                        print(f"   {line.rstrip()}")
-                    if len(diff_lines) > 50:
-                        print(f"   ... (還有 {len(diff_lines) - 50} 行差異)")
-                else:
-                    print("   (無法顯示差異)")
-
                 if dest_file.stat().st_mtime > source_file.stat().st_mtime:
                     print(
                         f"   ⚠️  警告: 目標檔案 {dest_file.name} 較新，覆寫將會遺失其變更。"
                     )
 
-                choice = input(
-                    f"   您要用 {source_ext} 的內容覆寫 {dest_ext} 嗎？ (y/N): "
-                ).lower()
-                if choice == "y":
+                if prompt:
+                    default_prompt = "Y/n" if default_yes else "y/N"
+                    choice = input(
+                        f"   您要用 {source_ext} 的內容覆寫 {dest_ext} 嗎？ ({default_prompt}): "
+                    ).lower()
+
+                    overwrite = False
+                    if default_yes:
+                        overwrite = choice not in ["n", "no"]
+                    else:
+                        overwrite = choice in ["y", "yes"]
+                else:
+                    overwrite = True  # non-interactive path
+
+                if overwrite:
                     # Use jupytext library to perform the conversion
                     jupytext.write(source_notebook, dest_file)
                     print(f"   🔄 已同步: {dest_file.name}")
@@ -235,10 +225,26 @@ def main() -> None:
 
     if direction == "md2nb":
         print("=== Interactive Sync: Markdown to Notebooks (.md -> .ipynb) ===")
-        sync_files("notebook_md", "notebook", ".md", ".ipynb", "ipynb")
+        sync_files(
+            "notebook_md",
+            "notebook",
+            ".md",
+            ".ipynb",
+            "ipynb",
+            prompt=True,
+            default_yes=True,
+        )
     elif direction == "nb2md":
         print("=== Interactive Sync: Notebooks to Markdown (.ipynb -> .md) ===")
-        sync_files("notebook", "notebook_md", ".ipynb", ".md", "md")
+        sync_files(
+            "notebook",
+            "notebook_md",
+            ".ipynb",
+            ".md",
+            "md",
+            always_overwrite=True,
+            prompt=False,
+        )
 
 
 if __name__ == "__main__":
