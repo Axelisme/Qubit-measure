@@ -36,7 +36,7 @@ import zcu_tools.notebook.analysis.plot as zp
 ```
 
 ```python
-qub_name = "Design1"
+qub_name = "Design2"
 
 os.makedirs(f"../../result/{qub_name}/image", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/web", exist_ok=True)
@@ -46,12 +46,12 @@ os.makedirs(f"../../result/{qub_name}/web", exist_ok=True)
 
 ```python
 EJb = (2.0, 7.5)
-EC = 0.8
+EC = 0.74
 # EC = 1.4
-ELb = (0.35, 1.0)
+ELb = (0.35, 1.5)
 
-flx = 0.6
-r_f = 5.9
+flx = 0.5
+r_f = 5.927
 # r_f = 7.52994
 g = 0.1
 ```
@@ -68,7 +68,7 @@ noise_channels = [
     # ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
 ]
 
-avoid_freqs = [r_f, 2 * r_f]
+avoid_freqs = [r_f]
 
 
 params_table = zd.generate_params_table(EJb, EC, ELb, flx)
@@ -84,8 +84,8 @@ zd.calculate_dipersive_shift(params_table, g=g, r_f=r_f)
 
 ```python
 params_table["valid"] = True
-zd.avoid_collision(params_table, avoid_freqs, threshold=0.5)
-zd.avoid_low_f01(params_table, f01_threshold=0.1)
+zd.avoid_collision(params_table, avoid_freqs, threshold=0.4)
+zd.avoid_low_f01(params_table, f01_threshold=0.07)
 zd.avoid_low_m01(params_table, m01_threshold=0.05)
 params_table.drop(["esys"], axis=1)
 ```
@@ -101,7 +101,9 @@ fig.update_layout(
 )
 
 best_params = zd.annotate_best_point(fig, params_table)
-# zd.add_real_sample(fig, "Q12_2D/Q4", noise_channels=noise_channels, Temp=Temp, flx=flx)
+zd.add_real_sample(
+    fig, "Q12_2D[2]/Q4", noise_channels=noise_channels, Temp=Temp, flx=flx
+)
 
 fig.show()
 ```
@@ -113,7 +115,7 @@ fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```
 
 ```python
-best_params = 4.0, 0.8, 0.4
+# best_params = 4.0, 0.8, 0.4
 
 flxs = np.linspace(0.0, 1.0, 1000)
 best_params
@@ -122,7 +124,9 @@ best_params
 ```python
 show_idxs = [(i, j) for i in range(2) for j in range(10) if j > i]
 
-fig = zp.plot_transitions(best_params, flxs, show_idxs, ref_freqs=avoid_freqs)
+fig = zp.plot_transitions(
+    best_params, flxs, show_idxs, ref_freqs=avoid_freqs + [2 * r_f, 3 * r_f, 4 * r_f]
+)
 
 fig.update_yaxes(range=(0.0, 14.0))
 fig.update_layout(
@@ -140,7 +144,7 @@ fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```python
 show_idxs = [(i, j) for i in range(2) for j in range(3) if j > i]
 
-fig = zp.plot_matrix_elements(best_params, flxs, show_idxs)
+fig, _ = zp.plot_matrix_elements(best_params, flxs, show_idxs)
 fig.show()
 ```
 

@@ -44,9 +44,9 @@ def calculate_dispersive_sweep(
     g: float,
     r_f: float,
     progress: bool = True,
-    resonator_dim: int = 10,
+    resonator_dim: int = 5,
     cutoff: int = 30,
-    evals_count: int = 10,
+    evals_count: int = 20,
     return_dim: int = 2,
 ) -> Tuple[np.ndarray, ...]:
     """
@@ -119,4 +119,70 @@ def calculate_dispersive_vs_flx(
         cutoff,
         evals_count,
         return_dim,
+    )
+
+
+def calculate_chi_sweep(
+    sweep_list: List[Any],
+    update_fn: Callable[[scq.Fluxonium, Any], None],
+    g: float,
+    r_f: float,
+    progress: bool = True,
+    resonator_dim: int = 5,
+    cutoff: int = 30,
+    evals_count: int = 20,
+) -> np.ndarray:
+    """
+    Calculate the chi of ground and excited state vs. params of fluxonium
+    """
+
+    resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
+    fluxonium = scq.Fluxonium(
+        *(1.0, 1.0, 1.0), flux=0.5, cutoff=cutoff, truncated_dim=evals_count
+    )
+    hilbertspace = scq.HilbertSpace([fluxonium, resonator])
+    hilbertspace.add_interaction(
+        g=g, op1=fluxonium.n_operator, op2=resonator.creation_operator, add_hc=True
+    )
+
+    def update_hilbertspace(sweep_param: Any) -> None:
+        update_fn(fluxonium, sweep_param)
+
+    old = scq.settings.PROGRESSBAR_DISABLED
+    scq.settings.PROGRESSBAR_DISABLED = not progress
+    sweep = scq.ParameterSweep(
+        hilbertspace,
+        {"params": sweep_list},
+        update_hilbertspace=update_hilbertspace,
+        evals_count=resonator_dim * evals_count,
+        subsys_update_info={"params": [fluxonium]},
+        labeling_scheme="LX",
+    )
+    scq.settings.PROGRESSBAR_DISABLED = old
+
+    return sweep["chi"]["subsys1":0, "subsys2":1]
+
+
+def calculate_chi_vs_flx(
+    params: Tuple[float, float, float],
+    flxs: np.ndarray,
+    r_f: float,
+    g: float,
+    progress: bool = True,
+    resonator_dim: int = 5,
+    cutoff: int = 30,
+    qubit_dim: int = 20,
+) -> np.ndarray:
+    """
+    Calculate the dispersive shift of ground and excited state vs. flux
+    """
+
+    def update_hilbertspace(fluxonium: scq.Fluxonium, flux: float) -> None:
+        fluxonium.flux = flux
+        fluxonium.EJ = params[0]
+        fluxonium.EC = params[1]
+        fluxonium.EL = params[2]
+
+    return calculate_chi_sweep(
+        flxs, update_hilbertspace, g, r_f, progress, resonator_dim, cutoff, qubit_dim
     )

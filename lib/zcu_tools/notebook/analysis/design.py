@@ -10,10 +10,7 @@ import scqubits as scq
 from tqdm.auto import tqdm
 
 from zcu_tools.notebook.persistance import load_result
-from zcu_tools.simulate.fluxonium import (
-    calculate_dispersive,
-    calculate_dispersive_sweep,
-)
+from zcu_tools.simulate.fluxonium import calculate_chi_sweep, calculate_dispersive
 
 DESIGN_CUTOFF = 40
 DESIGN_EVALS_COUNT = 10
@@ -139,11 +136,8 @@ def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) 
         fluxonium.EC = row["EC"]
         fluxonium.EL = row["EL"]
 
-    rf_0, rf_1 = calculate_dispersive_sweep(
-        params_list, update_fn, g, r_f, evals_count=20, progress=True
-    )
-
-    params_table["Chi"] = np.abs(rf_0 - rf_1)
+    chis = calculate_chi_sweep(params_list, update_fn, g, r_f, progress=True)
+    params_table["Chi"] = np.abs(chis[:, 1])
 
 
 def calculate_t1(
@@ -203,9 +197,10 @@ def avoid_collision(
         e0x_collision = np.min(np.abs(e0x[:, None] - freqs), axis=0) < threshold
         e1x_collision = np.min(np.abs(e1x[:, None] - freqs), axis=0) < threshold
 
-        return ~np.any(e0x_collision | e1x_collision)
+        return np.any(e0x_collision | e1x_collision)
 
-    params_table["valid"] &= params_table.apply(calc_single_collision, axis=1)
+    params_table["collision"] = params_table.apply(calc_single_collision, axis=1)
+    params_table["valid"] &= ~params_table["collision"]
 
 
 def avoid_low_f01(params_table: pd.DataFrame, f01_threshold: float) -> None:
@@ -213,7 +208,8 @@ def avoid_low_f01(params_table: pd.DataFrame, f01_threshold: float) -> None:
     移除 f01 小於 f01_threshold 的參數組合
     """
 
-    params_table["valid"] &= params_table["f01"] > f01_threshold
+    params_table["low_f01"] = params_table["f01"] < f01_threshold
+    params_table["valid"] &= ~params_table["low_f01"]
 
 
 def avoid_low_m01(params_table: pd.DataFrame, m01_threshold: float) -> None:
@@ -221,15 +217,37 @@ def avoid_low_m01(params_table: pd.DataFrame, m01_threshold: float) -> None:
     移除 m01 小於 m01_threshold 的參數組合
     """
 
-    params_table["valid"] &= params_table["m01"] > m01_threshold
+    params_table["low_m01"] = params_table["m01"] < m01_threshold
+    params_table["valid"] &= ~params_table["low_m01"]
 
 
 def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
-    plot_table = params_table.drop("esys", axis=1)
-    plot_table["Label"] = plot_table.apply(
-        lambda row: f"EJ={row['EJ']:.2f}, EC={row['EC']:.3f}, EL={row['EL']:.3f}",
-        axis=1,
-    )
+    # Remove the heavy esys column if present; ignore errors to stay robust when it is
+    # already absent.
+    plot_table = params_table.drop(columns=["esys"], errors="ignore")
+
+    # Helper to build a descriptive label that conditionally includes additional flags
+    def _build_label(row: pd.Series) -> str:
+        """Return a label string for hover info.
+
+        It always shows EJ, EC and EL, and conditionally appends the state of
+        optional columns (collision, low_f01, low_m01) only when they exist in
+        the dataframe.
+        """
+
+        parts = [
+            f"EJ={row['EJ']:.2f}",
+            f"EC={row['EC']:.3f}",
+            f"EL={row['EL']:.3f}",
+        ]
+
+        for opt_flag in ("collision", "low_f01", "low_m01"):
+            if opt_flag in row.index:
+                parts.append(f"{opt_flag}={row[opt_flag]}")
+
+        return ", ".join(parts)
+
+    plot_table["Label"] = plot_table.apply(_build_label, axis=1)
 
     # 繪製散點圖
     fig = px.scatter(
@@ -327,15 +345,13 @@ def add_real_sample(
     r_f, g = result["dispersive"]["r_f"], result["dispersive"]["g"]
 
     # load freq data
-    freq_path = os.path.join(result_dir, chip_name, "freqs.csv")
+    freq_path = os.path.join(result_dir, chip_name, "sample.csv")
     freq_df = pd.read_csv(freq_path)
-    idx = np.argmin(np.abs(freq_df["Current (mA)"] - mA_c))
-    t1 = freq_df["T1 (μs)"].iloc[idx]
+    idx = np.argmin(np.abs(freq_df["calibrated mA"] - mA_c))
+    t1 = freq_df["T1 (us)"].iloc[idx]
 
     # calculate chi
-    rf_0, rf_1 = calculate_dispersive(
-        param, flx, r_f, g, cutoff=DESIGN_CUTOFF, evals_count=20
-    )
+    rf_0, rf_1 = calculate_dispersive(param, flx, r_f, g)
     chi = np.abs(rf_0 - rf_1)
 
     # calculate t1
@@ -367,6 +383,12 @@ def add_real_sample(
         marker=dict(symbol="x", size=5, color="black"),
         text=[chip_name],
         textposition="top center",
+        hovertemplate=f"<b>{chip_name}</b><br>"
+        + f"χ: {chi:.2f} MHz<br>"
+        + f"T1: {t1:.2f} us<br>"
+        + f"EJ: {param[0]:.3f} GHz<br>"
+        + f"EC: {param[1]:.3f} GHz<br>"
+        + f"EL: {param[2]:.3f} GHz",
         legendgroup=chip_name,
         showlegend=False,
     )
