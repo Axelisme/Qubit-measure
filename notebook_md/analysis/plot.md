@@ -33,17 +33,19 @@ import pandas as pd
 import zcu_tools.notebook.analysis.plot as zp
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate import flx2mA, mA2flx
-from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
+from zcu_tools.simulate.fluxonium import (
+    calculate_energy_vs_flx,
+    calculate_dispersive_vs_flx,
+    calculate_chi_vs_flx,
+)
 ```
 
 ```python
-qub_name = "Q12_2D[2]/Q4"
+qub_name = "SF008"
 
 server_ip = "021-zcu216"
 port = 4999
 ```
-
-# Load data
 
 ## Parameters
 
@@ -104,23 +106,43 @@ fig.write_html(f"../../result/{qub_name}/web/matrixelem.html", include_plotlyjs=
 fig.write_image(f"../../result/{qub_name}/image/matrixelem.png", format="png")
 ```
 
+# Dispersive
+
+```python
+dispersive = calculate_chi_vs_flx(params, flxs, r_f, g=0.1)
+```
+
+```python
+import plotly.graph_objects as go
+
+fig = go.Figure()
+for i in [1, 2]:
+    fig.add_trace(
+        go.Scatter(x=mAs, y=dispersive[:, i], mode="lines", name=f"state {i}")
+    )
+fig.update_yaxes(range=[-0.005, 0.005])
+fig.show()
+```
+
 # Flux dependence
 
 ```python
-_, energies = calculate_energy_vs_flx(
-    params, flxs, spectrum_data=spectrum_data, cutoff=50, evals_count=40
-)
+_, energies = calculate_energy_vs_flx(params, flxs, spectrum_data=spectrum_data)
 ```
 
 ```python
 v_allows = {
-    **allows,
-    "transitions": [(i, j) for i in (0, 1, 2, 3) for j in range(i + 1, 40)],
-    # "red side": [(i, j) for i in (0, 1, 2, 3) for j in range(i + 1, 15)],
+    # **allows,
+    "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
+    "transitions2": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
+    # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 3)],
+    "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
     # "mirror": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 15)],
     # "mirror red": [(i, j) for i in (0, 1, 2, 3) for j in range(i + 1, 15)],
-    "r_f": 5.7965,
-    "sample_f": 6.881280 / 2,
+    "r_f": 5.9274,
+    "sample_f": 9.58464 / 2,
+    # "r_f": r_f,
+    # "sample_f": sample_f,
 }
 
 import plotly.graph_objects as go
@@ -128,22 +150,24 @@ from zcu_tools.notebook.analysis.fluxdep import energy2transition
 
 fig = go.Figure()
 freqs, names = energy2transition(energies, v_allows)
-for j in range(1, 10):
-    for i in range(len(names)):
-        fig.add_trace(
-            go.Scatter(x=mAs, y=freqs[:, i] / j, mode="lines", name=f"{j}_{names[i]}")
-        )
+for i in range(len(names)):
+    fig.add_trace(go.Scatter(x=mAs, y=freqs[:, i], mode="lines", name=f"{names[i]}"))
+# for j in range(1, 10):
+#     for i in range(len(names)):
+#         fig.add_trace(
+#             go.Scatter(x=mAs, y=freqs[:, i] / j, mode="lines", name=f"{j}_{names[i]}")
+#         )
 
 fig.add_hline(y=v_allows["r_f"], line_dash="dash", line_color="black", line_width=2)
 fig.add_hline(
     y=v_allows["sample_f"], line_dash="dash", line_color="black", line_width=2
 )
-fig.add_hline(
-    y=2 * v_allows["sample_f"] - v_allows["r_f"],
-    line_dash="dash",
-    line_color="black",
-    line_width=2,
-)
+# fig.add_hline(
+#     y=2 * v_allows["sample_f"] - v_allows["r_f"],
+#     line_dash="dash",
+#     line_color="black",
+#     line_width=2,
+# )
 
 fig.update_layout(
     title=f"EJ/EC/EL = ({params[0]:.2f}, {params[1]:.2f}, {params[2]:.2f})",
