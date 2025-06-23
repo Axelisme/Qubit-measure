@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 from zcu_tools.liveplot.jupyter import LivePlotter2D
@@ -23,30 +23,25 @@ def measure_ac_stark(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.ndarr
     freq_sweep = cfg["sweep"]["freq"]
     cfg["sweep"] = {"gain": gain_sweep, "freq": freq_sweep}
 
-    cfg["dac"]["stark_res_pulse"]["gain"] = sweep2param("gain", gain_sweep)
-    cfg["dac"]["stark_qub_pulse"]["freq"] = sweep2param("freq", freq_sweep)
+    cfg["stark_pulse1"]["gain"] = sweep2param("gain", gain_sweep)
+    cfg["stark_pulse2"]["freq"] = sweep2param("freq", freq_sweep)
 
     amps = sweep2array(gain_sweep)
     freqs = sweep2array(freq_sweep)
 
-    prog: Optional[ACStarkProgram] = None
-
-    def measure_fn(cfg, callback) -> Tuple[list, list]:
-        nonlocal prog
-        prog = ACStarkProgram(soccfg, cfg)
-        return prog.acquire(soc, progress=True, callback=callback)
+    prog = ACStarkProgram(soccfg, cfg)
 
     signals = sweep_hard_template(
         cfg,
-        measure_fn,
+        lambda _, cb: prog.acquire(soc, progress=True, callback=cb),
         LivePlotter2D("Pulse gain", "Frequency (MHz)"),
         ticks=(amps, freqs),
         signal2real=qub_signal2real,
     )
 
     # get the actual amplitudes
-    amps: np.ndarray = prog.get_pulse_param("stark_res_pulse", "gain", as_array=True)
-    freqs: np.ndarray = prog.get_pulse_param("stark_qub_pulse", "freq", as_array=True)
+    amps = prog.get_pulse_param("stark_pulse1", "gain", as_array=True)
+    freqs = prog.get_pulse_param("stark_pulse2", "freq", as_array=True)
 
     return amps, freqs, signals
 
@@ -58,8 +53,8 @@ def visualize_ac_stark(soccfg, cfg, *, time_fly=0.0) -> None:
     freq_sweep = cfg["sweep"]["freq"]
     cfg["sweep"] = {"gain": gain_sweep, "freq": freq_sweep}
 
-    cfg["dac"]["stark_res_pulse"]["gain"] = sweep2param("gain", gain_sweep)
-    cfg["dac"]["stark_qub_pulse"]["freq"] = sweep2param("freq", freq_sweep)
+    cfg["stark_pulse1"]["gain"] = sweep2param("gain", gain_sweep)
+    cfg["stark_pulse2"]["freq"] = sweep2param("freq", freq_sweep)
 
     visualizer = SimulateProgramV2(ACStarkProgram, soccfg, cfg)
     visualizer.visualize(time_fly=time_fly)

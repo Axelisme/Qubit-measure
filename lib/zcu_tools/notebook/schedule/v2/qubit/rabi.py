@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 from zcu_tools.liveplot.jupyter import LivePlotter1D
@@ -18,7 +18,7 @@ def qub_signal2real(signals: np.ndarray) -> np.ndarray:
 def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    qub_pulse = cfg["dac"]["qub_pulse"]
+    qub_pulse = cfg["qub_pulse"]
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
     len_sweep = cfg["sweep"]["length"]
@@ -27,24 +27,21 @@ def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
 
     lens = sweep2array(len_sweep)  # predicted lengths
 
-    prog: Optional[TwoToneProgram] = None
-
-    def measure_fn(cfg, callback) -> Tuple[list, list]:
-        nonlocal prog
-        prog = TwoToneProgram(soccfg, cfg)
-        return prog.acquire(soc, progress=True, callback=callback)
+    prog = TwoToneProgram(soccfg, cfg)
 
     signals = sweep_hard_template(
         cfg,
-        measure_fn,
+        lambda _, cb: prog.acquire(soc, progress=True, callback=cb),
         LivePlotter1D("Length (us)", "Amplitude"),
         ticks=(lens,),
         signal2real=qub_signal2real,
     )
 
     # get the actual lengths
-    real_lens: np.ndarray = prog.get_pulse_param("qub_pulse", "length", as_array=True)  # type: ignore
-    real_lens += lens[0] - real_lens[0]  # adjust to the first length
+    real_lens = prog.get_pulse_param("qubit_pulse", "length", as_array=True)
+
+    # TODO: better way to do this?
+    real_lens += lens[0] - real_lens[0]  # add back the side length of the pulse
 
     return real_lens, signals
 
@@ -52,7 +49,7 @@ def measure_lenrabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
 def visualize_lenrabi(soccfg, cfg, *, time_fly=0.0) -> None:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    qub_pulse = cfg["dac"]["qub_pulse"]
+    qub_pulse = cfg["qub_pulse"]
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
     len_sweep = cfg["sweep"]["length"]
@@ -69,27 +66,22 @@ def measure_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
 
     sweep_cfg = cfg["sweep"]["gain"]
-    cfg["dac"]["qub_pulse"]["gain"] = sweep2param("gain", sweep_cfg)
+    cfg["qub_pulse"]["gain"] = sweep2param("gain", sweep_cfg)
 
     amps = sweep2array(sweep_cfg)  # predicted amplitudes
 
-    prog: Optional[TwoToneProgram] = None
-
-    def measure_fn(cfg, callback) -> Tuple[list, list]:
-        nonlocal prog
-        prog = TwoToneProgram(soccfg, cfg)
-        return prog.acquire(soc, progress=True, callback=callback)
+    prog = TwoToneProgram(soccfg, cfg)
 
     signals = sweep_hard_template(
         cfg,
-        measure_fn,
+        lambda _, cb: prog.acquire(soc, progress=True, callback=cb),
         LivePlotter1D("Pulse gain", "Amplitude"),
         ticks=(amps,),
         signal2real=qub_signal2real,
     )
 
     # get the actual amplitudes
-    amps: np.ndarray = prog.get_pulse_param("qub_pulse", "gain", as_array=True)  # type: ignore
+    amps = prog.get_pulse_param("qubit_pulse", "gain", as_array=True)
 
     return amps, signals
 
@@ -100,7 +92,7 @@ def visualize_amprabi(soccfg, cfg, *, time_fly=0.0) -> None:
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
 
     sweep_cfg = cfg["sweep"]["gain"]
-    cfg["dac"]["qub_pulse"]["gain"] = sweep2param("gain", sweep_cfg)
+    cfg["qub_pulse"]["gain"] = sweep2param("gain", sweep_cfg)
 
     visualizer = SimulateProgramV2(TwoToneProgram, soccfg, cfg)
     visualizer.visualize(time_fly=time_fly)

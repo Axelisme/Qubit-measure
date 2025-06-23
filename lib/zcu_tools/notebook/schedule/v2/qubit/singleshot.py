@@ -9,8 +9,13 @@ from ...flux import set_flux
 from ...tools import sweep2param
 
 
-def acquire_singleshot(prog, soc) -> np.ndarray:
+def acquire_singleshot(soccfg, soc, cfg) -> np.ndarray:
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+
+    prog = TwoToneProgram(soccfg, deepcopy(cfg))
     prog.acquire(soc, progress=False)
+
+    # TODO: better way to acquire acc_buf?
     acc_buf = prog.get_acc_buf()[0]  # use this method to support proxy program
     avgiq = acc_buf / list(prog.ro_chs.values())[0]["length"]  # (reps, *sweep, 1, 2)
     i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, *sweep)
@@ -35,7 +40,7 @@ def measure_singleshot(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     if "sweep" in cfg:
         warn("sweep will be overwritten by singleshot measurement")
 
-    qub_pulse = cfg["dac"]["qub_pulse"]
+    qub_pulse = cfg["qub_pulse"]
 
     # append ge sweep to inner loop
     cfg["sweep"] = {"ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2}}
@@ -43,7 +48,4 @@ def measure_singleshot(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     # set with / without pi gain for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
-
-    prog = TwoToneProgram(soccfg, deepcopy(cfg))
-    return acquire_singleshot(prog, soc)
+    return acquire_singleshot(soccfg, soc, cfg)

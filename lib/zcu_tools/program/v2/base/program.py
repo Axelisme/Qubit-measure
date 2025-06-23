@@ -17,11 +17,14 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             **kwargs,
         )
 
-    def _initialize(self, cfg: Dict[str, Any]) -> None:
+    def _initialize_sweep(self, cfg: Dict[str, Any]) -> None:
         # add v2 sweep loops
         if "sweep" in cfg:
             for name, sweep in cfg["sweep"].items():
                 self.add_loop(name, count=sweep["expts"])
+
+    def _initialize(self, cfg: Dict[str, Any]) -> None:
+        self._initialize_sweep(cfg)
 
     def acquire(self, soc, **kwargs) -> list:
         # v2 program need to pass soft_avgs to acquire

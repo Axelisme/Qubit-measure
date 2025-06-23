@@ -31,8 +31,6 @@ from .qubit import (
     visualize_amprabi,
     visualize_lenrabi,
     visualize_qub_freq,
-    visualize_reset_amprabi,
-    visualize_reset_time,
     visualize_t1,
     visualize_t2echo,
     visualize_t2ramsey,

@@ -1,7 +1,7 @@
-from typing import Optional, Tuple
+from copy import deepcopy
+from typing import Tuple
 
 import numpy as np
-from zcu_tools.auto import make_cfg
 from zcu_tools.liveplot.jupyter import LivePlotter2DwithLine
 from zcu_tools.notebook.single_qubit.process import minus_background
 from zcu_tools.program.v2 import OneToneProgram
@@ -15,9 +15,10 @@ def signal2real(signals) -> np.ndarray:
 
 
 def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    cfg = make_cfg(cfg)  # prevent in-place modification
+    cfg = deepcopy(cfg)  # prevent in-place modification
 
-    res_pulse = cfg["dac"]["res_pulse"]
+    res_pulse = cfg["readout"]["pulse_cfg"]
+    ro_cfg = cfg["readout"]["ro_cfg"]
     fpt_sweep = cfg["sweep"]["freq"]
     flx_sweep = cfg["sweep"]["flux"]
 
@@ -27,23 +28,18 @@ def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.n
 
     As = sweep2array(flx_sweep, allow_array=True)
     fpts = sweep2array(fpt_sweep)  # predicted frequency points
-    fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], cfg["adc"]["chs"][0])
+    fpts = map2adcfreq(soccfg, fpts, res_pulse["ch"], ro_cfg["ro_ch"])
 
     cfg["dev"]["flux"] = As[0]  # set initial flux
 
     def updateCfg(cfg, _, mA) -> None:
         cfg["dev"]["flux"] = mA * 1e-3
 
-    prog: Optional[OneToneProgram] = None
-
-    def measure_fn(cfg, callback) -> Tuple[list, list]:
-        nonlocal prog
-        prog = OneToneProgram(soccfg, cfg)
-        return prog.acquire(soc, progress=False, callback=callback)
-
     signals2D = sweep2D_soft_hard_template(
         cfg,
-        measure_fn,
+        lambda cfg, cb: OneToneProgram(soccfg, cfg).acquire(
+            soc, progress=False, callback=cb
+        ),
         LivePlotter2DwithLine("Flux (mA)", "Frequency (MHz)", num_lines=2),
         xs=1e3 * As,
         ys=fpts,
@@ -52,6 +48,7 @@ def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.n
     )
 
     # get the actual frequency points
-    fpts = prog.get_pulse_param("res_pulse", "freq", as_array=True)
+    prog = OneToneProgram(soccfg, cfg)
+    fpts = prog.get_pulse_param("readout_pulse", "freq", as_array=True)
 
     return As, fpts, signals2D
