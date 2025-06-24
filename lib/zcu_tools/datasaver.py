@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime
 from typing import Optional, Tuple
@@ -34,18 +35,13 @@ def make_comment(cfg: dict, prepend: str = "") -> str:
 
     Args:
         cfg (dict): Configuration dictionary to be converted to a string.
-        append (str, optional): Additional string to append to the comment. Defaults to "".
+        prepend (str, optional): Additional string to prepend to the comment. Defaults to "".
 
     Returns:
         str: A formatted comment string.
     """
     # pretty convert cfg to string
-    import json
-
-    comment = prepend
-    comment = comment + "\n" + json.dumps(cfg, indent=2)
-
-    return comment
+    return prepend + "\n" + json.dumps(cfg, indent=2)
 
 
 def format_ext(filepath: str) -> str:

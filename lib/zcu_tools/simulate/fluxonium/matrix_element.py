@@ -64,17 +64,17 @@ def calculate_system_n_oper_vs_flx(
     sweep: Optional[scq.ParameterSweep] = None,
 ) -> Tuple[scq.ParameterSweep, np.ndarray]:
     """
-    Calculate the matrix elements of the system vs. a parameter
+    Calculate the matrix elements of the system over a parameter sweep
     """
 
     if sweep is None:
         cutoff = 50
-        evals_count = 20
-        resonator_dim = 10
+        qub_dim = 20
+        res_dim = 10
 
-        resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
+        resonator = scq.Oscillator(r_f, truncated_dim=res_dim)
         fluxonium = scq.Fluxonium(
-            *params, flux=0.5, cutoff=cutoff, truncated_dim=evals_count
+            *params, flux=0.5, cutoff=cutoff, truncated_dim=qub_dim
         )
         hilbertspace = scq.HilbertSpace([resonator, fluxonium])
         hilbertspace.add_interaction(
@@ -90,7 +90,7 @@ def calculate_system_n_oper_vs_flx(
             hilbertspace,
             {"params": flxs},
             update_hilbertspace=update_hilbertspace,
-            evals_count=resonator_dim * evals_count,
+            evals_count=res_dim * qub_dim,
             subsys_update_info={"params": [fluxonium]},
             labeling_scheme="LX",
         )
