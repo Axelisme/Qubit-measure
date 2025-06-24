@@ -26,11 +26,11 @@ class YOKOGS200:
     # ==========================================================================#
 
     # Turn on output
-    def OutputOn(self) -> None:
+    def output_on(self) -> None:
         self.session.write("OUTPut 1")
 
     # Turn off output
-    def OutputOff(self) -> None:
+    def output_off(self) -> None:
         self.session.write("OUTPut 0")
 
     # ==========================================================================#
@@ -41,7 +41,7 @@ class YOKOGS200:
 
     def _set_voltage_smart(self, voltage: float, progress: bool = False) -> None:
         # sweep to the target value step by step
-        current_voltage = self.GetVoltage()
+        current_voltage = self.get_voltage()
         if current_voltage == voltage:
             return
 
@@ -64,9 +64,11 @@ class YOKOGS200:
 
     # Ramp up the voltage (volts) in increments of _rampstep, waiting _rampinterval
     # between each increment.
-    def SetVoltage(self, voltage: float, progress: bool = True) -> None:
-        self.OutputOn()
+    def set_voltage(self, voltage: float, progress: bool = True) -> float:
+        self.output_on()
         self._set_voltage_smart(voltage, progress=progress)
+
+        return self.get_voltage()
 
     def _set_current_direct(self, current: float) -> None:
         self.session.write(":SOURce:LEVel:AUTO %.8f" % current)
@@ -74,7 +76,7 @@ class YOKOGS200:
 
     def _set_current_smart(self, current: float, progress: bool = False) -> None:
         # sweep to the target value step by step
-        current_current = self.GetCurrent()
+        current_current = self.get_current()
         if current_current == current:
             return
 
@@ -97,38 +99,40 @@ class YOKOGS200:
 
     # Ramp up the current (amps) in increments of _rampstep, waiting _rampinterval
     # between each increment.
-    def SetCurrent(self, current: float, progress: bool = True) -> None:
-        self.OutputOn()
+    def set_current(self, current: float, progress: bool = True) -> float:
+        self.output_on()
         self._set_current_smart(current, progress=progress)
 
+        return self.get_current()
+
     # Set to either current or voltage mode.
-    def SetMode(self, mode: Literal["voltage", "current"]) -> None:
+    def set_mode(self, mode: Literal["voltage", "current"]) -> None:
         if not (mode == "voltage" or mode == "current"):
             sys.stderr.write("Unknown output mode %s." % mode)
             return
         self.session.write("SOURce:FUNCtion %s" % mode)
 
-    def SetRate(self, rate: float) -> None:
+    def set_rate(self, rate: float) -> None:
         self._rampstep = rate
 
     # ==========================================================================#
 
     # Returns the voltage in volts as a float
-    def GetVoltage(self) -> float:
+    def get_voltage(self) -> float:
         self.session.write("SOURce:FUNCtion VOLTage")
         self.session.write("SOURce:LEVel?")
         result = self.session.read()
         return float(result.rstrip("\n"))
 
     # Returns the current in amps as a float
-    def GetCurrent(self) -> float:
+    def get_current(self) -> float:
         self.session.write("SOURce:FUNCtion CURRent")
         self.session.write("SOURce:LEVel?")
         result = self.session.read()
         return float(result.rstrip("\n"))
 
     # Returns the mode (voltage or current)
-    def GetMode(self) -> Literal["voltage", "current"]:
+    def get_mode(self) -> Literal["voltage", "current"]:
         self.session.write("SOURce:FUNCtion?")
         result = self.session.read()
         result = result.rstrip("\n")

@@ -1,16 +1,19 @@
-from typing import Any
+from typing import Any, Dict
 
 
 class GlobalDeviceManager:
-    devices = {}
+    devices: Dict[str, Any] = {}
 
-    def register_device(self, name: str, device: Any) -> None:
-        self.devices[name] = device
+    @classmethod
+    def register_device(cls, name: str, device: Any) -> None:
+        cls.devices[name] = device
 
-    def get_device(self, name: str) -> Any:
-        if name not in self.devices:
+    @classmethod
+    def get_device(cls, name: str) -> Any:
+        if name not in cls.devices:
             raise ValueError(f"Device {name} not found")
-        return self.devices[name]
+        return cls.devices[name]
 
-    def get_all_devices(self) -> dict[str, Any]:
-        return self.devices
+    @classmethod
+    def get_all_devices(cls) -> Dict[str, Any]:
+        return cls.devices

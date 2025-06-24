@@ -8,7 +8,7 @@ class ResetProbeProgram(ModularProgramV2):
     def make_modules(self, cfg: Dict[str, Any]) -> List[Module]:
         return [
             make_reset("reset", cfg=cfg["reset"]),
-            Pulse(name="init_pulse", cfg=cfg["init_pulse"]),
+            Pulse(name="init_pulse", cfg=cfg.get("init_pulse")),
             make_reset("tested_reset", cfg=cfg["tested_reset"]),
             make_readout("readout", cfg=cfg["readout"]),
         ]

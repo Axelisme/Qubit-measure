@@ -44,11 +44,11 @@ def measure_t2ramsey(
     )
 
     # get the actual times
-    _ts = prog.get_time_param("pi2_pulse1_post_delay", "t", as_array=True)
-    # TODO: check if this is correct
-    ts = _ts + ts[0] - _ts[0]  # adjust to start from the first time
+    real_ts = prog.get_time_param("pi2_pulse1_post_delay", "t", as_array=True)
+    # TODO: make sure this is correct
+    real_ts += ts[0] - real_ts[0]  # adjust to start from the first time
 
-    return ts, signals
+    return real_ts, signals
 
 
 def measure_t2echo(
@@ -84,13 +84,13 @@ def measure_t2echo(
     )
 
     # get the actual times
-    _ts1 = prog.get_time_param("pi2_pulse1_post_delay", "t", as_array=True)
-    _ts2 = prog.get_time_param("pi_pulse_post_delay", "t", as_array=True)
-    _ts = _ts1 + _ts2
+    real_ts1 = prog.get_time_param("pi2_pulse1_post_delay", "t", as_array=True)
+    real_ts2 = prog.get_time_param("pi_pulse_post_delay", "t", as_array=True)
+    real_ts = real_ts1 + real_ts2
     # TODO: check if this is correct
-    ts = _ts + ts[0] - _ts[0]  # adjust to start from the first time
+    real_ts += ts[0] - real_ts[0]  # adjust to start from the first time
 
-    return ts, signals
+    return real_ts, signals
 
 
 def measure_t1(
@@ -118,11 +118,11 @@ def measure_t1(
     )
 
     # get the actual times
-    _ts = prog.get_time_param("pi_pulse_post_delay", "t", as_array=True)
-    # TODO: check if this is correct
-    ts = _ts + ts[0] - _ts[0]  # adjust to start from the first time
+    real_ts = prog.get_time_param("pi_pulse_post_delay", "t", as_array=True)
+    # TODO: make sure this is correct
+    real_ts += ts[0] - real_ts[0]  # adjust to start from the first time
 
-    return ts, signals
+    return real_ts, signals
 
 
 def visualize_t2ramsey(

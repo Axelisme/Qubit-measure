@@ -1,16 +1,21 @@
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from ..base import MyProgramV2, add_pulse, create_waveform
 from .base import Module
 
 
 class Pulse(Module):
-    def __init__(self, name: str, cfg: dict, ro_ch: Optional[int] = None) -> None:
+    def __init__(
+        self, name: str, cfg: Optional[Dict[str, Any]], ro_ch: Optional[int] = None
+    ) -> None:
         self.name = name
         self.cfg = cfg
         self.ro_ch = ro_ch
 
     def init(self, prog: MyProgramV2) -> None:
+        if self.cfg is None:
+            return
+
         prog.declare_gen(
             self.cfg["ch"],
             nqz=self.cfg["nqz"],
@@ -26,6 +31,9 @@ class Pulse(Module):
 
     def run(self, prog: MyProgramV2) -> None:
         cfg = self.cfg
+
+        if cfg is None:
+            return
 
         prog.pulse(
             cfg["ch"],

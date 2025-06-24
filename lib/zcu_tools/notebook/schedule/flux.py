@@ -28,7 +28,7 @@ def set_flux(flux_dev: str, current, progress: bool = False) -> None:
         yoko_device = GlobalDeviceManager.get_device("flux_yoko")
         assert isinstance(yoko_device, YOKOGS200)
 
-        yoko_device.SetCurrent(current, progress=progress)
+        yoko_device.set_current(current, progress=progress)
     elif flux_dev == "none":
         pass
     else:

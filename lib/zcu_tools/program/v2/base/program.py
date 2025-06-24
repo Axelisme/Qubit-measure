@@ -13,7 +13,7 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             cfg=cfg,
             reps=cfg["reps"],
             initial_delay=0.0,
-            final_delay=cfg["adc"]["relax_delay"],
+            final_delay=cfg["relax_delay"],
             **kwargs,
         )
 

@@ -4,13 +4,7 @@ from typing import Optional, Tuple
 import numpy as np
 from zcu_tools.liveplot.jupyter import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.single_qubit.process import rotate2real
-from zcu_tools.program.v2 import (
-    MyProgramV2,
-    OneToneProgram,
-    ResetProbeProgram,
-    TwoToneProgram,
-)
-from zcu_tools.program.v2.base.simulate import SimulateProgramV2
+from zcu_tools.program.v2 import ResetProbeProgram, TwoToneProgram
 
 from ...tools import format_sweep1D, sweep2array, sweep2param
 from ..template import sweep_hard_template
@@ -31,9 +25,11 @@ def reset_signal2real(signals: np.ndarray) -> np.ndarray:
 
 def measure_reset_freq(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
-    reset_pulse = cfg["tested_reset"]["pulse_cfg"]
 
-    if cfg["tested_reset"]["type"] != "pulse":
+    test_reset_cfg = cfg["tested_reset"]
+    reset_pulse = test_reset_cfg["pulse_cfg"]
+
+    if test_reset_cfg["type"] != "pulse":
         raise ValueError("Reset pulse must be pulse")
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
@@ -43,11 +39,10 @@ def measure_reset_freq(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
 
     fpts = sweep2array(sweep_cfg)  # predicted frequency points
 
-    prog = OneToneProgram(soccfg, cfg)
+    prog = ResetProbeProgram(soccfg, cfg)
 
     signals = sweep_hard_template(
         cfg,
-        # measure_fn,
         lambda _, cb: prog.acquire(soc, progress=True, callback=cb),
         LivePlotter1D("Frequency (MHz)", "Amplitude"),
         ticks=(fpts,),
@@ -63,11 +58,12 @@ def measure_reset_freq(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
 def measure_reset_time(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    qub_pulse = cfg["qub_pulse"]
-    reset_cfg = cfg["tested_reset"]
-
+    reset_cfg = cfg["reset"]
     if reset_cfg["type"] != "pulse":
         raise ValueError("Reset pulse must be pulse")
+
+    qub_pulse = cfg["qub_pulse"]
+    reset_pulse = reset_cfg["pulse_cfg"]
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
@@ -79,7 +75,7 @@ def measure_reset_time(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
 
     # set with / without pi gain for qubit pulse
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
-    reset_cfg["pulse_cfg"]["length"] = sweep2param("length", cfg["sweep"]["length"])
+    reset_pulse["length"] = sweep2param("length", cfg["sweep"]["length"])
 
     lens = sweep2array(cfg["sweep"]["length"])  # predicted pulse gains
 
@@ -94,7 +90,7 @@ def measure_reset_time(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     )
 
     # get the actual pulse length
-    real_lens = prog.get_pulse_param("tested_reset_pulse", "length", as_array=True)
+    real_lens = prog.get_pulse_param("reset_pulse", "length", as_array=True)
     # TODO: better way to do this?
     real_lens += lens[0] - real_lens[0]  # add back the side length of the pulse
 
@@ -109,7 +105,7 @@ def measure_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         raise ValueError("Reset pulse must be pulse")
 
     reset_pulse = reset_cfg["pulse_cfg"]
-    qub_pulse = cfg["qub_pulse"]
+    init_pulse = cfg["init_pulse"]
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
     gain_sweep = cfg["sweep"]["gain"]
@@ -119,7 +115,7 @@ def measure_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         "gain": gain_sweep,
     }
 
-    qub_pulse["gain"] = sweep2param("gain", gain_sweep)
+    init_pulse["gain"] = sweep2param("gain", gain_sweep)
 
     # TODO: better way to do this?
     reset_factor = sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"])
@@ -140,7 +136,7 @@ def measure_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         signal2real=reset_signal2real,
     )
 
-    pdrs = prog.get_pulse_param("qub_pulse", "gain", as_array=True)
+    pdrs = prog.get_pulse_param("init_pulse", "gain", as_array=True)
 
     return pdrs, signals
 
@@ -170,7 +166,7 @@ def measure_mux_reset_freq(
     fpts1 = sweep2array(cfg["sweep"]["freq1"])  # predicted frequency points
     fpts2 = sweep2array(cfg["sweep"]["freq2"])  # predicted frequency points
 
-    prog = OneToneProgram(soccfg, cfg)
+    prog = ResetProbeProgram(soccfg, cfg)
 
     signals = sweep_hard_template(
         cfg,
@@ -212,7 +208,7 @@ def measure_mux_reset_pdr(
     pdrs1 = sweep2array(cfg["sweep"]["gain1"])  # predicted amplitudes
     pdrs2 = sweep2array(cfg["sweep"]["gain2"])  # predicted amplitudes
 
-    prog = TwoToneProgram(soccfg, cfg)
+    prog = ResetProbeProgram(soccfg, cfg)
 
     signals = sweep_hard_template(
         cfg,
@@ -232,11 +228,13 @@ def measure_mux_reset_pdr(
 def measure_mux_reset_time(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
-    qub_pulse = cfg["qub_pulse"]
-    reset_cfg = cfg["tested_reset"]
-
+    reset_cfg = cfg["reset"]
     if reset_cfg["type"] != "two_pulse":
         raise ValueError("Reset pulse must be two pulse")
+
+    qub_pulse = cfg["qub_pulse"]
+    reset_pulse1 = reset_cfg["pulse_cfg1"]
+    reset_pulse2 = reset_cfg["pulse_cfg2"]
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
@@ -250,8 +248,8 @@ def measure_mux_reset_time(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
     len_params = sweep2param("length", cfg["sweep"]["length"])
-    reset_cfg["pulse_cfg1"]["length"] = len_params
-    reset_cfg["pulse_cfg2"]["length"] = len_params
+    reset_pulse1["length"] = len_params
+    reset_pulse2["length"] = len_params  # TODO: support not equal length pulses
 
     lens = sweep2array(cfg["sweep"]["length"])  # predicted pulse gains
 
@@ -266,7 +264,7 @@ def measure_mux_reset_time(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
     )
 
     # get the actual pulse length
-    real_lens = prog.get_pulse_param("tested_reset_pulse1", "length", as_array=True)
+    real_lens = prog.get_pulse_param("reset_pulse1", "length", as_array=True)
     # TODO: better way to do this?
     real_lens += lens[0] - real_lens[0]  # add back the side length of the pulse
 
@@ -284,7 +282,7 @@ def measure_mux_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]
     reset_pulse1 = reset_cfg["pulse_cfg1"]
     reset_pulse2 = reset_cfg["pulse_cfg2"]
 
-    qub_pulse = cfg["qub_pulse"]
+    init_pulse = cfg["init_pulse"]
 
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
     gain_sweep = cfg["sweep"]["gain"]
@@ -294,7 +292,7 @@ def measure_mux_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]
         "gain": gain_sweep,
     }
 
-    qub_pulse["gain"] = sweep2param("gain", gain_sweep)
+    init_pulse["gain"] = sweep2param("gain", gain_sweep)
 
     # TODO: better way to do this?
     reset_factor = sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"])
@@ -319,6 +317,6 @@ def measure_mux_reset_amprabi(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]
         signal2real=reset_signal2real,
     )
 
-    pdrs = prog.get_pulse_param("qub_pulse", "gain", as_array=True)
+    pdrs = prog.get_pulse_param("init_pulse", "gain", as_array=True)
 
     return pdrs, signals

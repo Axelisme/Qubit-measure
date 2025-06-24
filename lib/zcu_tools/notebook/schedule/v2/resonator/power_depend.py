@@ -24,7 +24,7 @@ def measure_res_pdr_dep(
     pdr_sweep = cfg["sweep"]["gain"]
     fpt_sweep = cfg["sweep"]["freq"]
     reps_ref = cfg["reps"]
-    rounds_ref = cfg["rounds"]
+    avgs_ref = cfg["soft_avgs"]
 
     del cfg["sweep"]["gain"]  # use soft for loop here
 
@@ -50,11 +50,10 @@ def measure_res_pdr_dep(
                     cfg["reps"] = max_reps
             elif cfg["soft_avgs"] > 1:
                 # decrease rounds
-                cfg["rounds"] = int(rounds_ref * dyn_factor)
-                min_avgs = max(int(0.1 * rounds_ref), 1)
-                if cfg["rounds"] < min_avgs:
-                    cfg["rounds"] = min_avgs
-                cfg["soft_avgs"] = cfg["rounds"]  # this two are the smae
+                cfg["soft_avgs"] = int(avgs_ref * dyn_factor)
+                min_avgs = max(int(0.1 * avgs_ref), 1)
+                if cfg["soft_avgs"] < min_avgs:
+                    cfg["soft_avgs"] = min_avgs
             else:
                 # decrease reps
                 cfg["reps"] = int(reps_ref * dyn_factor)
@@ -78,6 +77,6 @@ def measure_res_pdr_dep(
 
     # get the actual frequency points
     prog = OneToneProgram(soccfg, cfg)
-    fpts = prog.get_pulse_param("res_pulse", "freq", as_array=True)
+    fpts = prog.get_pulse_param("readout_pulse", "freq", as_array=True)
 
     return pdrs, fpts, signals2D

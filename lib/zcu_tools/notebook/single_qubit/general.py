@@ -20,7 +20,7 @@ def lookback_show(
     plot_fit=True,
     smooth=None,
     ratio: float = 0.3,
-    pulse_cfg: Optional[dict] = None,
+    ro_cfg: Optional[dict] = None,
 ) -> float:
     if smooth is not None:
         signals = gaussian_filter1d(signals, smooth)
@@ -35,13 +35,9 @@ def lookback_show(
     plt.plot(Ts, y, label="mag")
     if plot_fit:
         plt.axvline(offset, color="r", linestyle="--", label="predict_offset")
-    if (
-        pulse_cfg is not None
-        and "trig_offset" in pulse_cfg
-        and "ro_length" in pulse_cfg
-    ):
-        trig_offset = pulse_cfg["trig_offset"]
-        ro_length = pulse_cfg["ro_length"]
+    if ro_cfg is not None:
+        trig_offset = ro_cfg["trig_offset"]
+        ro_length = ro_cfg["ro_length"]
         plt.axvline(trig_offset, color="g", linestyle="--", label="ro start")
         plt.axvline(trig_offset + ro_length, color="g", linestyle="--", label="ro end")
 
@@ -59,7 +55,7 @@ def lookback_fft(
     normalize=True,
     pad_ratio=1,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    def get_fft(Ts, signals):
+    def get_fft(Ts: np.ndarray, signals: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         N = int(len(Ts) * pad_ratio)
         signals = np.pad(signals, (0, N - len(signals)), "constant")
         freqs = np.fft.fftfreq(N, (Ts[-1] - Ts[0]) / len(Ts))
