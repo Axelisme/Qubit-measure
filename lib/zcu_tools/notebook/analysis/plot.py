@@ -6,11 +6,11 @@ import scqubits as scq
 
 from zcu_tools.simulate.fluxonium import (
     calculate_dispersive_vs_flx,
+    calculate_eff_t1_vs_flx,
     calculate_energy_vs_flx,
     calculate_n_oper_vs_flx,
 )
-
-from .t1_curve import get_t1_vs_flx
+from zcu_tools.simulate.fluxonium.dispersive import calculate_chi_vs_flx
 
 PLOT_CUTOFF = 40
 PLOT_EVALS_COUNT = 10
@@ -50,15 +50,22 @@ def plot_matrix_elements(
 
 
 def plot_dispersive_shift(
-    params: Tuple[float, float, float], flxs: np.ndarray, r_f: float, g: float
+    params: Tuple[float, float, float],
+    flxs: np.ndarray,
+    r_f: float,
+    g: float,
+    upto: int = 2,
 ) -> go.Figure:
     fig = go.Figure()
 
-    rf_0, rf_1 = calculate_dispersive_vs_flx(params, flxs, r_f, g)
-
-    fig.add_hline(y=r_f, line_color="black", line_width=2, line_dash="dash")
-    fig.add_trace(go.Scatter(x=flxs, y=rf_0, mode="lines", name="rf_0"))
-    fig.add_trace(go.Scatter(x=flxs, y=rf_1, mode="lines", name="rf_1"))
+    chi = calculate_chi_vs_flx(params, flxs, r_f, g, resonator_dim=upto + 2)
+    fig.add_hline(y=0.0, line_color="black", line_width=2, line_dash="dash")
+    for i in range(upto):
+        fig.add_trace(
+            go.Scatter(
+                x=flxs, y=chi[:, i + 1] - chi[:, i], mode="lines", name=f"chi_n{i}"
+            )
+        )
 
     fig.update_layout(
         title=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
@@ -73,10 +80,14 @@ def plot_t1s(
 ) -> go.Figure:
     fig = go.Figure()
 
-    fluxonium = scq.Fluxonium(
-        *params, flux=0.5, cutoff=PLOT_CUTOFF, truncated_dim=PLOT_EVALS_COUNT
+    t1s = calculate_eff_t1_vs_flx(
+        flxs,
+        noise_channels=noise_channels,
+        Temp=Temp,
+        params=params,
+        cutoff=PLOT_CUTOFF,
+        evals_count=PLOT_EVALS_COUNT,
     )
-    t1s = get_t1_vs_flx(flxs, fluxonium, noise_channels=noise_channels, Temp=Temp)
 
     fig.add_trace(go.Scatter(x=flxs, y=t1s, mode="lines", name="t1"))
     fig.update_layout(title_x=0.51, yaxis_type="log")

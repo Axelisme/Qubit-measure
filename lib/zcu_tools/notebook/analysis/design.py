@@ -137,7 +137,7 @@ def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) 
         fluxonium.EL = row["EL"]
 
     chis = calculate_chi_sweep(params_list, update_fn, g, r_f, progress=True)
-    params_table["Chi"] = np.abs(chis[:, 1])
+    params_table["Chi"] = np.abs(chis[:, 1] - chis[:, 0])
 
 
 def calculate_t1(
