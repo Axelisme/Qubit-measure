@@ -87,9 +87,13 @@ def sweep1D_soft_template(
     signal2real: Signal2RealFn = default_signal2real,
     progress: bool = True,
     catch_interrupt: bool = True,
+    data_shape: Optional[tuple] = None,
 ) -> ndarray:
     cfg = deepcopy(cfg)  # prevent in-place modification
-    signals = np.full_like(xs, np.nan, dtype=complex)
+    if data_shape is not None:
+        signals = np.full((len(xs), *data_shape), np.nan, dtype=complex)
+    else:
+        signals = np.full_like(xs, np.nan, dtype=complex)
 
     # set flux first
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
@@ -135,9 +139,13 @@ def sweep2D_soft_hard_template(
     signal2real: Signal2RealFn = default_signal2real,
     progress: bool = True,
     catch_interrupt: bool = True,
+    data_shape: Optional[tuple] = None,
 ) -> ndarray:
     cfg = deepcopy(cfg)  # prevent in-place modification
-    signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
+    if data_shape is not None:
+        signals2D = np.full((len(xs), len(ys), *data_shape), np.nan, dtype=complex)
+    else:
+        signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
 
     # set initial flux
     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
