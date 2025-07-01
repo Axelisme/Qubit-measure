@@ -1,6 +1,6 @@
 from typing import Any, Dict, List
 
-from myqick import QickConfig
+from qick import QickConfig
 
 from .base import MyProgramV2
 from .modules import Module

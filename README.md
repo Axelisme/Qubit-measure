@@ -30,10 +30,10 @@ pip install ".[server]"
 
 這將安裝基本依賴外加：
 
-- myqick
+- qick
 - dill
 
-其中依賴`myqick`需要自行手動安裝，請參考[myqick](https://github.com/Axelisme/myqick)。
+其中依賴`qick`需要自行手動安裝，請參考[qick](https://github.com/openquantumhardware/qick.git)。
 
 ### 客戶端工具擴展
 
@@ -45,7 +45,7 @@ pip install ".[client]"
 
 這將安裝以下依賴：
 
-- myqick
+- qick
 - labber
 - numpy (<=1.19.5)
 - h5py
@@ -58,7 +58,7 @@ pip install ".[client]"
 - scipy
 - dill
 
-其中依賴`labber`和`myqick`需要自行手動安裝，請參考[labber](https://github.com/Axelisme/labber_api)和[myqick](https://github.com/Axelisme/myqick)。
+其中依賴`labber`和`qick`需要自行手動安裝，請參考[labber](https://github.com/Axelisme/labber_api)和[qick](https://github.com/openquantumhardware/qick.git)。
 
 ### 數據擬合擴展
 

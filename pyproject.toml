@@ -7,8 +7,8 @@ requires-python = ">=3.8"
 dependencies = ["numpy", "tqdm", "matplotlib"]
 
 [project.optional-dependencies]
-server = ["myqick", "dill"]
-client = ["myqick", "labber", "numpy<=1.19.5", "pyyaml", "dill"]
+server = ["qick", "dill"]
+client = ["qick", "labber", "numpy<=1.19.5", "pyyaml", "dill"]
 fit = [
   "h5py",
   "ipykernel",

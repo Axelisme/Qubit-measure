@@ -83,7 +83,7 @@ print(soccfg)
 ```
 
 ```python
-# from myqick import QickSoc  # noqa: E402
+# from qick import QickSoc  # noqa: E402
 # from zcu_tools.tools import get_bitfile
 
 # soc = QickSoc(bitfile=get_bitfile("v2"))
@@ -1326,7 +1326,6 @@ ModuleLibrary.register_module(
 ```
 
 # T1 & T2
-
 
 ## T2Ramsey
 

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Tuple
 
 import numpy as np
-from myqick.asm_v2 import QickParam
+from qick.asm_v2 import QickParam
 
 
 def format_param(loop_dict: Dict[str, int], param: Any) -> np.ndarray:

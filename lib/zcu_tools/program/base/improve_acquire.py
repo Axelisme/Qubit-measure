@@ -3,10 +3,8 @@ import operator
 from typing import Callable, List, Optional
 
 import numpy as np
+from qick.qick_asm import AcquireMixin, logger, obtain
 from tqdm.auto import tqdm
-
-from myqick.qick_asm import AcquireMixin, logger
-from myqick import obtain
 
 AcquireCallbackType = Callable[
     [int, List[np.ndarray], List[np.ndarray]], None

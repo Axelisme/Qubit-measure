@@ -9,7 +9,7 @@ import numpy as np
 import scqubits as scq
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
-from zcu_tools.simulate import calculate_energy
+from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 
 # parameters
 data_path = "Database/simulation/fluxonium_all.h5"
@@ -188,7 +188,7 @@ if DRY_RUN:
     energies = [np.random.randn(evals_count) for _ in range(num_sample)]
 else:
     energies = [
-        calculate_energy(flxs, EJ, EC, EL, cutoff, evals_count)
+        calculate_energy_vs_flx((EJ, EC, EL), flxs, cutoff, evals_count)[1]
         for EJ, EC, EL in tqdm(params, desc="Calculating")
     ]
 

@@ -1,7 +1,7 @@
 from typing import Any, Dict
 
-from myqick import QickConfig
-from myqick.asm_v2 import AveragerProgramV2
+from qick import QickConfig
+from qick.asm_v2 import AveragerProgramV2
 from zcu_tools.program.base import MyProgram
 
 

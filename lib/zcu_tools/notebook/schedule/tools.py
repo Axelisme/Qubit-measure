@@ -3,7 +3,7 @@ from typing import Any, Dict, Union
 
 import numpy as np
 from numpy import ndarray
-from myqick.asm_v2 import QickParam, QickSweep1D
+from qick.asm_v2 import QickParam, QickSweep1D
 
 
 def format_sweep1D(

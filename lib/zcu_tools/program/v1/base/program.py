@@ -2,8 +2,7 @@ from collections import defaultdict
 from typing import Any, Dict, List
 
 import numpy as np
-
-from myqick import AveragerProgram, NDAveragerProgram, RAveragerProgram
+from qick import AveragerProgram, NDAveragerProgram, RAveragerProgram
 from zcu_tools.auto import is_pulse_cfg
 from zcu_tools.program.base import MyProgram
 

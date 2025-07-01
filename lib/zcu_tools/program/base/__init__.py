@@ -1,11 +1,10 @@
 from typing import Any, Dict
 
-from myqick.qick_asm import AcquireMixin
 from zcu_tools.auto import is_pulse_cfg
 from zcu_tools.tools import AsyncFunc
 
-from .proxy import AbsProxy, ProxyAcquireMixin
 from .improve_acquire import ImproveAcquireMixin
+from .proxy import AbsProxy, ProxyAcquireMixin
 
 
 class MyProgram(ProxyAcquireMixin, ImproveAcquireMixin):

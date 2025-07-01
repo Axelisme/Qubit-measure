@@ -2,7 +2,7 @@ import warnings
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from myqick.qick_asm import AcquireMixin
+from qick.qick_asm import AcquireMixin
 
 
 class AbsProxy(ABC):
