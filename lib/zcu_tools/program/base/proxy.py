@@ -19,6 +19,10 @@ class AbsProxy(ABC):
         pass
 
     @abstractmethod
+    def get_stderr(self) -> Optional[list]:
+        pass
+
+    @abstractmethod
     def set_early_stop(self) -> None:
         pass
 
@@ -62,12 +66,18 @@ class ProxyAcquireMixin(AcquireMixin):
 
         self.proxy_buf_expired = False
         self.proxy_shots_expired = False
+        self.proxy_std_expired = False
 
     def set_early_stop(self) -> None:
         if self.is_use_proxy():
             # tell proxy to set early stop
             self.proxy.set_early_stop()
         super().set_early_stop()  # set locally for safe
+
+    def _set_expired(self) -> None:
+        self.proxy_buf_expired = True
+        self.proxy_shots_expired = True
+        self.proxy_std_expired = True
 
     def get_raw(self) -> Optional[list]:
         if self.is_use_proxy():
@@ -83,6 +93,14 @@ class ProxyAcquireMixin(AcquireMixin):
                 self.proxy_shots_expired = False
         return super().get_shots()
 
+    def get_stderr(self) -> Optional[list]:
+        if self.is_use_proxy():
+            if self.proxy_std_expired:
+                self.stderr_buf = self.proxy.get_stderr()
+                self.proxy_std_expired = False
+
+        return super().get_stderr()
+
     def local_acquire(self, soc, **kwargs) -> list:
         # non-override method, for ProgramServer to call
         return super().acquire(soc, **kwargs)
@@ -92,13 +110,15 @@ class ProxyAcquireMixin(AcquireMixin):
         return super().acquire_decimated(soc, **kwargs)
 
     def acquire(self, soc, **kwargs) -> list:
+        if self.is_use_proxy():
+            self._set_expired()
+            return self.proxy.acquire(self, **kwargs)
+
         return self.local_acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs) -> list:
         if self.is_use_proxy():
-            # return self.proxy_acquire_decimated(**kwargs)
-            self.proxy_buf_expired = True
-            self.proxy_shots_expired = True
+            self._set_expired()
             return self.proxy.acquire_decimated(self, **kwargs)
 
         return self.local_acquire_decimated(soc, **kwargs)

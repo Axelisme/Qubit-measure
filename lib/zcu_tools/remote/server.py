@@ -81,6 +81,16 @@ class ProgramServer:
         return self.last_prog.get_shots()
 
     @Pyro4.expose
+    def get_stderr(self) -> Optional[list]:
+        if self.acquiring:
+            raise RuntimeError("Program is still running")
+
+        if self.last_prog is None:
+            raise RuntimeError("No program has been run")
+
+        return self.last_prog.get_stderr()
+
+    @Pyro4.expose
     def test_callback(self, cb: RemoteCallback) -> None:
         print("Server received callback test...")
         self._before_run_program(Mock(), {})
