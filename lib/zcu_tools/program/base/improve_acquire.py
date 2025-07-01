@@ -74,17 +74,19 @@ class StdErrorMixin(AcquireMixin):
         not_finish = super().finish_round()
 
         # save the standard error information for the accumulated data
-        assert self.stderr_buf is not None
         assert self.acquire_params is not None
-        if self.acquire_params["record_stderr"]:
-            if self.acquire_params["type"] == "accumulated":
+
+        if self.acquire_params["type"] == "accumulated":
+            if self.acquire_params["record_stderr"]:
+                assert self.stderr_buf is not None
                 self.stderr_buf.append(
                     self._process_accumulated_for_stderr(self.acc_buf)
                 )
-            else:
-                raise NotImplementedError(
-                    "Standard error is not implemented for type other than accumulated"
-                )
+        elif self.acquire_params.get("record_stderr", False):
+            # currently not supported for type other than accumulated
+            raise NotImplementedError(
+                "Standard error is not implemented for type other than accumulated"
+            )
 
         return not_finish
 

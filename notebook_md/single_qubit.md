@@ -161,14 +161,14 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, soft_avgs=5000)
+cfg = make_cfg(exp_cfg, rounds=5000)
 
 Ts, signals = zs.measure_lookback(soc, soccfg, cfg, progress=True)
 ```
 
 ```python
 predict_offset = zf.lookback_show(
-    Ts, signals, ratio=0.2, smooth=1.0, ro_cfg=cfg["readout"]["ro_cfg"]
+    Ts, signals, ratio=0.15, smooth=1.0, ro_cfg=cfg["readout"]["ro_cfg"]
 )
 predict_offset
 ```
@@ -190,10 +190,6 @@ save_data(
 )
 ```
 
-```python
-timeFly = 0.654
-```
-
 # OneTone
 
 ```python
@@ -201,12 +197,12 @@ res_name = "3D_7.5G"
 ```
 
 ```python
-ro_pulse_len = 5.1  # us
+res_probe_len = 5.1  # us
 ModuleLibrary.register_waveform(
     ro_waveform={
         "style": "flat_top",
         "raise_pulse": {"style": "cosine", "length": 0.1},
-        "length": ro_pulse_len,  # us
+        "length": res_probe_len,  # us
     }
 )
 ```
@@ -225,7 +221,7 @@ exp_cfg = {
         },
         "ro_cfg": {
             "ro_ch": ro_ch,
-            "ro_length": ro_pulse_len - 0.1,  # us
+            "ro_length": res_probe_len - 0.1,  # us
             "trig_offset": timeFly + 0.05,  # us
         },
     },
@@ -233,11 +229,11 @@ exp_cfg = {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    # "sweep": make_sweep(7510, 7530, 201),
-    "sweep": make_sweep(r_f-4, r_f+4, 101),
+    "sweep": make_sweep(7510, 7530, 201),
+    # "sweep": make_sweep(r_f-4, r_f+4, 101),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 fpts, signals = zs.measure_res_freq(soc, soccfg, cfg)
 ```
@@ -294,7 +290,7 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=30)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=30)
 
 pdrs, fpts, signals2D = zs.measure_res_pdr_dep(
     soc, soccfg, cfg, dynamic_avg=True, gain_ref=0.03
@@ -317,7 +313,7 @@ save_data(
 ## Flux dependence
 
 ```python
-cur_A = -2.0e-3
+cur_A = 0.0e-3
 1e3 * flux_dev.set_current(cur_A)
 ```
 
@@ -333,7 +329,7 @@ exp_cfg = {
         },
         "ro_cfg": {
             "ro_ch": ro_ch,
-            "ro_length": ro_pulse_len - 0.1,  # us
+            "ro_length": res_probe_len - 0.1,  # us
             "trig_offset": timeFly + 0.05,  # us
         },
     },
@@ -341,12 +337,12 @@ exp_cfg = {
         "flux_dev": "yoko"
     },
     "sweep": {
-        "flux": make_sweep(-2.0e-3, 2.0e-3, 201),
+        "flux": make_sweep(0.0e-3, 0.1e-3, 21),
         "freq": make_sweep(r_f - 3, r_f + 3, 61),
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 As, fpts, signals2D = zs.measure_res_flux_dep(soc, soccfg, cfg)
 ```
@@ -372,7 +368,7 @@ cur_A = 0.0e-3
 ## Set readout pulse
 
 ```python
-# ro_pulse_len = 3.1  # us
+ro_pulse_len = 3.1  # us
 ModuleLibrary.register_module(
     readout_rf={
         "type": "base",
@@ -401,8 +397,7 @@ qub_name = "Q"
 ```
 
 ```python
-# preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
-preditor = FluxoniumPredictor(f"../result/Test049/params.json")
+preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
 ```
 
 ```python
@@ -429,14 +424,14 @@ q_f
 
 ```python
 exp_cfg = {
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
     "qub_pulse": {
         **ModuleLibrary.get_waveform("qub_waveform"),
         "ch": qub_ch,
         "nqz": 2,
-        "gain": 0.5,
+        "gain": 0.2,
         "length": 5.0,  # us
-        # "mixer_freq": 6500,
+        # "mixer_freq": 4950,
         "mixer_freq": q_f,
         # "post_delay": None,
     },
@@ -445,10 +440,10 @@ exp_cfg = {
         "flux": cur_A,  # A
     },
     "sweep": make_sweep(q_f - 3, q_f + 3, 101),
-    # "sweep": make_sweep(6000, 7000, 1001),
+    # "sweep": make_sweep(4800, 5100, 301),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 fpts, signals = zs.measure_qub_freq(soc, soccfg, cfg)
 ```
@@ -522,7 +517,7 @@ exp_cfg = {
     "sweep": make_sweep(reset_f - 150, reset_f + 150, 101),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
 fpts, signals = zs.measure_reset_freq(soc, soccfg, cfg, remove_bg=True)
 ```
@@ -573,7 +568,7 @@ exp_cfg = {
     "sweep": make_sweep(0.03, 5.0, 51),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 Ts, signals = zs.measure_reset_time(soc, soccfg, cfg)
 ```
@@ -658,7 +653,7 @@ exp_cfg = {
     },
     "relax_delay": 10.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=100, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 fpts1, fpts2, signals = zs.measure_mux_reset_freq(soc, soccfg, cfg)
 ```
@@ -736,7 +731,7 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=100, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 pdrs1, pdrs2, signals2D = zs.measure_mux_reset_pdr(soc, soccfg, cfg)
 ```
@@ -787,7 +782,7 @@ exp_cfg = {
     "sweep": make_sweep(0.05, 1.0, 31),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 Ts, signals = zs.measure_mux_reset_time(soc, soccfg, cfg)
 ```
@@ -830,7 +825,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
 # zs.visualize_reset_amprabi(soccfg, cfg, time_fly=timeFly)
 pdrs, signals = zs.measure_reset_amprabi(soc, soccfg, cfg)
@@ -870,7 +865,7 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=50, soft_avgs=50)
+cfg = make_cfg(exp_cfg, reps=50, rounds=50)
 
 fpts, pdrs, signals2D = zs.measure_qub_pdr_dep(soc, soccfg, cfg)
 ```
@@ -917,7 +912,7 @@ exp_cfg = {
     "relax_delay": 0.0,  # us
 
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
 As, fpts, signals2D = zs.measure_qub_flux_dep(soc, soccfg, cfg)
 ```
@@ -954,7 +949,7 @@ exp_cfg = {
     "sweep": make_sweep(r_f - 20, r_f + 20, 101),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=10000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=10000, rounds=10)
 
 pdrs, signals = zs.measure_reset_amprabi(soc, soccfg, cfg)
 ```
@@ -1006,7 +1001,7 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=100, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
 # zs.visualize_ac_stark(soccfg, cfg, time_fly=timeFly)
 pdrs, fpts, signals2D = zs.measure_ac_stark(soc, soccfg, cfg)
@@ -1055,9 +1050,8 @@ exp_cfg = {
     "relax_delay": 50.0,  # us
     "sweep": make_sweep(0.1, 4.0, 101),
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=20)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=20)
 
-# zs.visualize_lenrabi(soccfg, cfg, time_fly=timeFly)
 Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg)
 ```
 
@@ -1130,7 +1124,7 @@ exp_cfg = {
     "relax_delay": 50.0,  # us
     "sweep": make_sweep(0.0, max_gain, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
 # zs.visualize_amprabi(soccfg, cfg, time_fly=timeFly)
 pdrs, signals = zs.measure_amprabi(soc, soccfg, cfg)
@@ -1198,7 +1192,7 @@ exp_cfg = {
     "relax_delay": 10.0,  # us
     "sweep": make_sweep(r_f - 3, r_f + 3, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
 fpts, snrs = zs.qubit.measure_ge_freq_dep(soc, soccfg, cfg)
 ```
@@ -1240,7 +1234,7 @@ exp_cfg = {
     "relax_delay": 10.0,  # us
     "sweep": make_sweep(0.01, 0.5, 31),
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
 pdrs, snrs = zs.qubit.measure_ge_pdr_dep(soc, soccfg, cfg)
 ```
@@ -1283,7 +1277,7 @@ exp_cfg = {
     "relax_delay": 0.0,  # us
     "sweep": make_sweep(0.1, 15.0, 31),
 }
-cfg = make_cfg(exp_cfg, reps=10000, soft_avgs=1)
+cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
 
 ro_lens, snrs = zs.qubit.measure_ge_ro_dep(soc, soccfg, cfg)
 ```
@@ -1327,6 +1321,7 @@ ModuleLibrary.register_module(
 
 # T1 & T2
 
+
 ## T2Ramsey
 
 ```python
@@ -1346,7 +1341,7 @@ exp_cfg = {
     "relax_delay": 50.0,  # us
     "sweep": make_sweep(0, 10.0, 101),  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 activate_detune = 10.0 / (cfg["sweep"]["stop"] - cfg["sweep"]["start"])
 print(f"activate_detune: {activate_detune:.2f}")
@@ -1392,7 +1387,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 50, 51),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 Ts, signals = zs.measure_t1(soc, soccfg, cfg)
 ```
@@ -1435,7 +1430,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.5 * t2e, 101),
     # "sweep": make_sweep(0.01, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 activate_detune = 10.0 / (cfg["sweep"]["stop"] - cfg["sweep"]["start"])
 print(f"activate_detune: {activate_detune:.2f}")
@@ -1466,16 +1461,16 @@ save_data(
 
 ```python
 exp_cfg = {
-    "reset": "reset_120",
+    # "reset": "reset_120",
     "qub_pulse": "pi_amp",
     "readout": ModuleLibrary.get_module(
         "readout_rf",
         {
             "pulse_cfg": {
-                "length": 0.2 * t1 + timeFly + 0.1,
+                # "length": 0.2 * t1 + timeFly + 0.1,
             },
             "ro_cfg": {
-                "ro_length": 0.2 * t1,
+                # "ro_length": 0.2 * t1,
             },
         },
     ),
@@ -1483,9 +1478,9 @@ exp_cfg = {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    "relax_delay": 0.0,  # us
+    "relax_delay": 50.0,  # us
 }
-cfg = make_cfg(exp_cfg, shots=1000000)
+cfg = make_cfg(exp_cfg, shots=100000)
 print("readout length: ", cfg["readout"]["ro_cfg"]["ro_length"])
 
 signals = zs.measure_singleshot(soc, soccfg, cfg)

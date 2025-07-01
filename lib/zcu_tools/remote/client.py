@@ -51,7 +51,7 @@ class ProgramClient(AbsProxy):
     ) -> Tuple[Dict[str, Any], Optional[Any]]:
         # before send to remote server, override some kwargs
 
-        soft_avgs = prog.cfg["soft_avgs"]
+        rounds = prog.cfg["rounds"]
 
         kwargs.setdefault("progress", False)
         kwargs.setdefault("callback", None)
@@ -62,7 +62,7 @@ class ProgramClient(AbsProxy):
             # to make remote progress bar work
             kwargs["progress"] = False
 
-            bar = tqdm(total=soft_avgs, desc="Soft_avgs", leave=True)
+            bar = tqdm(total=rounds, desc="Rounds", leave=True)
 
             # wrap existing callback
             cb = kwargs["callback"]

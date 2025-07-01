@@ -4,7 +4,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 from numpy import ndarray
 from zcu_tools.liveplot.jupyter import LivePlotter1D, LivePlotter2D
-from zcu_tools.notebook.schedule.v1.template import raw2result
 from zcu_tools.program.v2 import TwoToneProgram
 
 from ...tools import format_sweep1D, map2adcfreq, sweep2array, sweep2param
