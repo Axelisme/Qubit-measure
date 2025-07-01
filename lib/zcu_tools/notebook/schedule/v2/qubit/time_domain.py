@@ -65,7 +65,6 @@ def measure_t2echo(
     t2e_half_spans = 0.5 * sweep2param("length", sweep_cfg)
     cfg["pi2_pulse1"]["post_delay"] = t2e_half_spans
     cfg["pi_pulse"]["post_delay"] = t2e_half_spans
-    cfg["pi_pulse"]["phase"] = cfg["pi_pulse"]["phase"] + 360 * detune * t2e_half_spans
     cfg["pi2_pulse2"]["phase"] = (
         cfg["pi2_pulse2"]["phase"] + 2 * 360 * detune * t2e_half_spans
     )

@@ -14,8 +14,8 @@ class T2RamseyProgram(ModularProgramV2):
             )
 
         return [
-            make_reset("reset", cfg=cfg["reset"]),
+            make_reset("reset", reset_cfg=cfg["reset"]),
             Pulse(name="pi2_pulse1", cfg=cfg["pi2_pulse1"]),
             Pulse(name="pi2_pulse2", cfg=cfg["pi2_pulse2"]),
-            make_readout("readout", cfg=cfg["readout"]),
+            make_readout("readout", readout_cfg=cfg["readout"]),
         ]

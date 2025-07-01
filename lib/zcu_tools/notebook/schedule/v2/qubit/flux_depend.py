@@ -42,7 +42,7 @@ def measure_qub_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.n
         lambda cfg, cb: TwoToneProgram(soccfg, cfg).acquire(
             soc, progress=False, callback=cb
         ),
-        LivePlotter2DwithLine("Flux (mA)", "Frequency (MHz)", num_lines=2),
+        LivePlotter2DwithLine("Flux (mA)", "Frequency (MHz)", line_axis=1, num_lines=2),
         xs=1e3 * As,
         ys=fpts,
         updateCfg=updateCfg,

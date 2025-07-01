@@ -7,6 +7,6 @@ from .modules import Module, make_readout, make_reset
 class OneToneProgram(ModularProgramV2):
     def make_modules(self, cfg: Dict[str, Any]) -> List[Module]:
         return [
-            make_reset("reset", cfg=cfg["reset"]),
-            make_readout("readout", cfg=cfg["readout"]),
+            make_reset("reset", reset_cfg=cfg["reset"]),
+            make_readout("readout", readout_cfg=cfg["readout"]),
         ]

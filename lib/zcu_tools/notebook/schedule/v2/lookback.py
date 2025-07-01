@@ -17,7 +17,7 @@ def onetone_demimated(
     IQlist = prog.acquire_decimated(soc, progress=progress)
 
     Ts = prog.get_time_axis(ro_index=0)
-    Ts += cfg["adc"]["trig_offset"]
+    Ts += cfg["readout"]["ro_cfg"]["trig_offset"]
 
     return Ts, IQlist[0].dot([1, 1j])
 
@@ -27,6 +27,7 @@ def measure_lookback(
 ) -> Tuple[np.ndarray, np.ndarray]:
     cfg = deepcopy(cfg)
 
+    cfg.setdefault("reps", 1)
     if cfg["reps"] != 1:
         warnings.warn("reps is not 1 in config, this will be ignored.")
         cfg["reps"] = 1

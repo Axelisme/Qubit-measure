@@ -108,7 +108,7 @@ def sweep1D_soft_template(
                     # set again in case of change
                     set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
 
-                    result = measure_fn(cfg, callback=None)
+                    result = measure_fn(cfg, None)
                     signals[i], _ = result2signals(*result)
 
                     async_draw(i, xs, signal2real(signals))
@@ -177,7 +177,7 @@ def sweep2D_soft_hard_template(
                         signals_real = signal2real(_signals2D)
                         viewer.update(xs, ys, signals_real)
 
-                    results = measure_fn(cfg, callback=callback)
+                    results = measure_fn(cfg, callback)
                     signals2D[i], _ = result2signals(*results)
 
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)

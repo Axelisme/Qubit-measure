@@ -76,7 +76,7 @@ def auto_derive_pulse(
     # load pulse configuration if it is a string
     if isinstance(pulse_cfg, str):
         name = pulse_cfg
-        pulse_cfg = deepcopy(ModuleLibrary.get_pulse(name))
+        pulse_cfg = deepcopy(ModuleLibrary.get_module(name))
         pulse_cfg["name"] = name
 
     # phase

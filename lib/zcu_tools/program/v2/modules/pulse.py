@@ -16,6 +16,8 @@ class Pulse(Module):
         if self.cfg is None:
             return
 
+        ro_ch = self.ro_ch if self.cfg.get("mixer_freq") is not None else None
+
         prog.declare_gen(
             self.cfg["ch"],
             nqz=self.cfg["nqz"],
@@ -23,7 +25,7 @@ class Pulse(Module):
             mux_freqs=self.cfg.get("mux_freqs"),
             mux_gains=self.cfg.get("mux_gains"),
             mux_phases=self.cfg.get("mux_phases"),
-            ro_ch=self.ro_ch,
+            ro_ch=ro_ch,
         )
 
         create_waveform(prog, self.name, self.cfg)

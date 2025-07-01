@@ -16,8 +16,8 @@ class ACStarkProgram(ModularProgramV2):
             )
 
         return [
-            make_reset("reset", cfg=cfg["reset"]),
+            make_reset("reset", reset_cfg=cfg["reset"]),
             Pulse(name="stark_pulse1", cfg=cfg["stark_pulse1"]),
             Pulse(name="stark_pulse2", cfg=cfg["stark_pulse2"]),
-            make_readout("readout", cfg=cfg["readout"]),
+            make_readout("readout", readout_cfg=cfg["readout"]),
         ]

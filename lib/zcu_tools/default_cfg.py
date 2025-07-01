@@ -33,7 +33,7 @@ class ModuleLibrary:
     ) -> Dict[str, Any]:
         module = deepcopy(cls.modules[name])
         if override_cfg is not None:
-            deepupdate(module, override_cfg)
+            deepupdate(module, override_cfg, behavior="force")
         return module
 
     @classmethod

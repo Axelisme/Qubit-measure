@@ -4,7 +4,7 @@ from typing import Literal
 
 import numpy as np
 import pyvisa as visa
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 DEFAULT_RAMPSTEP = 1e-6  # increment step when setting voltage/current
 DEFAULT_RAMPINTERVAL = 0.01  # dwell time for each voltage step # Default MATLAB is 0.01, CANNOT be lower than 0.001 otherwise fridge heats up

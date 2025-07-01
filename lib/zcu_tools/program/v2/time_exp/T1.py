@@ -14,7 +14,7 @@ class T1Program(ModularProgramV2):
             )
 
         return [
-            make_reset("reset", cfg=cfg["reset"]),
+            make_reset("reset", reset_cfg=cfg["reset"]),
             Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-            make_readout("readout", cfg=cfg["readout"]),
+            make_readout("readout", readout_cfg=cfg["readout"]),
         ]

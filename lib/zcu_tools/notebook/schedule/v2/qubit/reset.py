@@ -151,8 +151,8 @@ def measure_mux_reset_freq(
     if reset_cfg["type"] != "two_pulse":
         raise ValueError("Reset pulse must be two pulse")
 
-    reset_pulse1 = reset_cfg["pulse_cfg1"]
-    reset_pulse2 = reset_cfg["pulse_cfg2"]
+    reset_pulse1 = reset_cfg["pulse1_cfg"]
+    reset_pulse2 = reset_cfg["pulse2_cfg"]
 
     if reset_cfg["type"] != "two_pulse":
         raise ValueError("Reset pulse must be two pulse")
