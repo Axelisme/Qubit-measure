@@ -272,7 +272,7 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
 
     fig.update_layout(
         title_x=0.501,
-        xaxis_title="Chi",
+        xaxis_title="Chi (GHz)",
         yaxis_title="T1 (ns)",
         template="plotly_white",
         showlegend=True,
@@ -313,6 +313,19 @@ def annotate_best_point(fig, data: pd.DataFrame) -> Tuple[float, float, float]:
         ax=0,
         ay=-20,
     )
+
+    # draw a line of same snr across best_param
+    # xs = np.linspace(valid_data["Chi"].min(), valid_data["Chi"].max(), 100)
+    # ys = (best_param["Chi"] * np.sqrt(best_param["t1"]) / xs) ** 2
+    # fig.add_trace(
+    #     go.Scatter(
+    #         x=xs,
+    #         y=ys,
+    #         mode="lines",
+    #         name="Same SNR",
+    #         line=dict(color="black", width=1, dash="dot"),
+    #     )
+    # )
 
     return EJ, EC, EL
 

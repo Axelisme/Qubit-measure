@@ -90,7 +90,11 @@ def plot_t1s(
     )
 
     fig.add_trace(go.Scatter(x=flxs, y=t1s, mode="lines", name="t1"))
-    fig.update_layout(title_x=0.51, yaxis_type="log")
+    fig.update_layout(
+        title=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
+        title_x=0.51,
+        yaxis_type="log",
+    )
     fig.update_yaxes(exponentformat="power")
 
     return fig
@@ -117,6 +121,9 @@ def plot_transitions(
             fig.add_hline(
                 y=ref_freq, line_color="black", line_width=2, line_dash="dash"
             )
-    fig.update_layout(title_x=0.51)
+    fig.update_layout(
+        title=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
+        title_x=0.51,
+    )
 
     return fig
