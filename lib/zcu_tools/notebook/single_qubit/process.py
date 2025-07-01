@@ -1,12 +1,14 @@
 import warnings
-from typing import Literal, Tuple
+from typing import Literal, Tuple, Union
 
 import numpy as np
 from numpy import ndarray
 from scipy.ndimage import gaussian_filter1d
 
 
-def rotate2real(signals: ndarray, ret_angle=False):
+def rotate2real(
+    signals: ndarray, ret_angle: bool = False
+) -> Union[ndarray, Tuple[ndarray, float]]:
     """
     Rotate the signals to maximize the contrast on real axis by performing
     principal component analysis (PCA) on complex data
@@ -270,7 +272,7 @@ def calculate_noise(signals: ndarray) -> Tuple[float, ndarray]:
     return np.abs(signals - m_signals).mean(), m_signals
 
 
-def peak_n_avg(data: ndarray, n: int, mode: Literal["max", "min"] = "max"):
+def peak_n_avg(data: ndarray, n: int, mode: Literal["max", "min"] = "max") -> float:
     """
     Find the first n max/min points in the data, and return their average
     Parameters
@@ -294,7 +296,7 @@ def peak_n_avg(data: ndarray, n: int, mode: Literal["max", "min"] = "max"):
         raise ValueError(f"n should be positive, but get {n}")
 
     if np.sum(~np.isnan(data)) <= n:
-        return np.nanmean(data)
+        return np.nanmean(data)  # type: ignore
 
     peak_fn = np.nanargmax if mode == "max" else np.nanargmin
 
@@ -304,10 +306,10 @@ def peak_n_avg(data: ndarray, n: int, mode: Literal["max", "min"] = "max"):
         peak_idx = peak_fn(_data)
         peaks[i], _data[peak_idx] = _data[peak_idx], np.nan
 
-    return np.mean(peaks)
+    return np.mean(peaks)  # type: ignore
 
 
-def rotate_phase(fpts, signals, phase_slope):
+def rotate_phase(fpts: ndarray, signals: ndarray, phase_slope: float) -> ndarray:
     """
     Rotate the phase of complex signals based on frequency points
 

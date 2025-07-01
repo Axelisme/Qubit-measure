@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 from zcu_tools.liveplot.jupyter import LivePlotter2DwithLine
@@ -24,7 +24,7 @@ def measure_res_pdr_dep(
     pdr_sweep = cfg["sweep"]["gain"]
     fpt_sweep = cfg["sweep"]["freq"]
     reps_ref = cfg["reps"]
-    avgs_ref = cfg["soft_avgs"]
+    avgs_ref = cfg["rounds"]
 
     del cfg["sweep"]["gain"]  # use soft for loop here
 
@@ -48,12 +48,12 @@ def measure_res_pdr_dep(
                 max_reps = min(100 * reps_ref, 1000000)
                 if cfg["reps"] > max_reps:
                     cfg["reps"] = max_reps
-            elif cfg["soft_avgs"] > 1:
+            elif cfg["rounds"] > 1:
                 # decrease rounds
-                cfg["soft_avgs"] = int(avgs_ref * dyn_factor)
+                cfg["rounds"] = int(avgs_ref * dyn_factor)
                 min_avgs = max(int(0.1 * avgs_ref), 1)
-                if cfg["soft_avgs"] < min_avgs:
-                    cfg["soft_avgs"] = min_avgs
+                if cfg["rounds"] < min_avgs:
+                    cfg["rounds"] = min_avgs
             else:
                 # decrease reps
                 cfg["reps"] = int(reps_ref * dyn_factor)
@@ -61,11 +61,15 @@ def measure_res_pdr_dep(
                 if cfg["reps"] < min_reps:
                     cfg["reps"] = min_reps
 
+    def measure_fn(
+        cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+    ) -> np.ndarray:
+        prog = OneToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
     signals2D = sweep2D_soft_hard_template(
         cfg,
-        lambda cfg, cb: OneToneProgram(soccfg, cfg).acquire(
-            soc, progress=False, callback=cb
-        ),
+        measure_fn,
         LivePlotter2DwithLine(
             "Power (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=10
         ),
@@ -78,5 +82,6 @@ def measure_res_pdr_dep(
     # get the actual frequency points
     prog = OneToneProgram(soccfg, cfg)
     fpts = prog.get_pulse_param("readout_pulse", "freq", as_array=True)
+    assert isinstance(fpts, np.ndarray), "fpts should be an array"
 
     return pdrs, fpts, signals2D

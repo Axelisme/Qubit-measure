@@ -32,7 +32,7 @@ def measure_lookback(
         warnings.warn("reps is not 1 in config, this will be ignored.")
         cfg["reps"] = 1
 
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
 
     MAX_LEN = 3.32  # us
     ro_cfg = cfg["readout"]["ro_cfg"]

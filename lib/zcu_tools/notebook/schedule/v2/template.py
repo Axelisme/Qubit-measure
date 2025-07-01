@@ -17,13 +17,13 @@ Signal2RealFn = Callable[[ndarray], ndarray]
 UpdateCfgFn = Callable[[Dict[str, Any], int, Any], None]
 
 
-def default_raw2signal(
+def avg_as_signal(
     ir: int, avg_d: List[ndarray], std_d: Optional[List[ndarray]]
 ) -> ndarray:
     return avg_d[0][0].dot([1, 1j])  # (*sweep)
 
 
-def default_signal2real(signals: ndarray) -> ndarray:
+def take_signal_abs(signals: ndarray) -> ndarray:
     return np.abs(signals)
 
 
@@ -33,8 +33,8 @@ def sweep_hard_template(
     liveplotter: AbsLivePlotter,
     *,
     ticks: Tuple[ndarray, ...],
-    raw2signal: Raw2SignalFn = default_raw2signal,
-    signal2real: Signal2RealFn = default_signal2real,
+    raw2signal: Raw2SignalFn = avg_as_signal,
+    signal2real: Signal2RealFn = take_signal_abs,
     catch_interrupt: bool = True,
 ) -> ndarray:
     # set flux first
@@ -73,7 +73,7 @@ def sweep1D_soft_template(
     *,
     xs: ndarray,
     updateCfg: UpdateCfgFn,
-    signal2real: Signal2RealFn = default_signal2real,
+    signal2real: Signal2RealFn = take_signal_abs,
     progress: bool = True,
     catch_interrupt: bool = True,
     data_shape: Optional[tuple] = None,
@@ -125,8 +125,8 @@ def sweep2D_soft_hard_template(
     xs: ndarray,
     ys: ndarray,
     updateCfg: UpdateCfgFn,
-    raw2signal: Raw2SignalFn = default_raw2signal,
-    signal2real: Signal2RealFn = default_signal2real,
+    raw2signal: Raw2SignalFn = avg_as_signal,
+    signal2real: Signal2RealFn = take_signal_abs,
     progress: bool = True,
     catch_interrupt: bool = True,
     data_shape: Optional[tuple] = None,

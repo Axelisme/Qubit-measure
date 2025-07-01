@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 from zcu_tools.liveplot.jupyter import LivePlotter2DwithLine
@@ -10,7 +10,7 @@ from ...tools import map2adcfreq, sweep2array, sweep2param
 from ..template import sweep2D_soft_hard_template
 
 
-def signal2real(signals) -> np.ndarray:
+def signal2real(signals: np.ndarray) -> np.ndarray:
     return minus_background(np.abs(signals), axis=1)
 
 
@@ -35,11 +35,15 @@ def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.n
     def updateCfg(cfg, _, mA) -> None:
         cfg["dev"]["flux"] = mA * 1e-3
 
+    def measure_fn(
+        cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+    ) -> np.ndarray:
+        prog = OneToneProgram(soccfg, cfg)
+        return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
     signals2D = sweep2D_soft_hard_template(
         cfg,
-        lambda cfg, cb: OneToneProgram(soccfg, cfg).acquire(
-            soc, progress=False, callback=cb
-        ),
+        measure_fn,
         LivePlotter2DwithLine("Flux (mA)", "Frequency (MHz)", line_axis=1, num_lines=2),
         xs=1e3 * As,
         ys=fpts,
@@ -50,5 +54,6 @@ def measure_res_flux_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.n
     # get the actual frequency points
     prog = OneToneProgram(soccfg, cfg)
     fpts = prog.get_pulse_param("readout_pulse", "freq", as_array=True)
+    assert isinstance(fpts, np.ndarray), "fpts should be an array"
 
     return As, fpts, signals2D

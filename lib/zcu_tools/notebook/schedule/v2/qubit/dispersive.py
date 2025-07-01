@@ -35,12 +35,13 @@ def measure_dispersive(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
 
     signals = sweep_hard_template(
         cfg,
-        lambda _, cb: prog.acquire(soc, progress=True, callback=cb),
+        lambda _, cb: prog.acquire(soc, progress=True, callback=cb)[0][0].dot([1, 1j]),
         LivePlotter1D("Frequency (MHz)", "Amplitude", num_lines=2),
         ticks=(fpts,),
     )
 
     # get the actual pulse gains and frequency points
     fpts = prog.get_pulse_param("readout_pulse", "freq", as_array=True)
+    assert isinstance(fpts, np.ndarray), "fpts should be an array"
 
     return fpts, signals  # fpts

@@ -35,7 +35,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.nd
 
     signals = sweep_hard_template(
         cfg,
-        lambda _, cb: prog.acquire(soc, progress=True, callback=cb),
+        lambda _, cb: prog.acquire(soc, progress=True, callback=cb)[0][0].dot([1, 1j]),
         LivePlotter2D("Pulse Gain", "Frequency (MHz)"),
         ticks=(pdrs, fpts),
         signal2real=signals2reals,
@@ -44,5 +44,7 @@ def measure_qub_pdr_dep(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.nd
     # get the actual pulse gains and frequency points
     pdrs = prog.get_pulse_param("qubit_pulse", "gain", as_array=True)
     fpts = prog.get_pulse_param("qubit_pulse", "freq", as_array=True)
+    assert isinstance(pdrs, np.ndarray), "pdrs should be an array"
+    assert isinstance(fpts, np.ndarray), "fpts should be an array"
 
     return pdrs, fpts, signals  # (pdrs, fpts)

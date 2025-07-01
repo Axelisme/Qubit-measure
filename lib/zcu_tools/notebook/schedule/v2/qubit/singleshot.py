@@ -1,5 +1,4 @@
 from copy import deepcopy
-from typing import Tuple
 from warnings import warn
 
 import numpy as np
@@ -15,8 +14,11 @@ def acquire_singleshot(soccfg, soc, cfg) -> np.ndarray:
     prog = TwoToneProgram(soccfg, deepcopy(cfg))
     prog.acquire(soc, progress=False)
 
-    acc_buf = prog.get_raw()[0]  # use this method to support proxy program
-    avgiq = acc_buf / list(prog.ro_chs.values())[0]["length"]  # (reps, *sweep, 1, 2)
+    # use this method to support proxy program
+    acc_buf = prog.get_raw()
+    assert acc_buf is not None, "acc_buf should not be None"
+
+    avgiq = acc_buf[0] / list(prog.ro_chs.values())[0]["length"]  # (reps, *sweep, 1, 2)
     i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, *sweep)
     signals = np.array(i0 + 1j * q0)  # (reps, *sweep)
 
@@ -26,11 +28,11 @@ def acquire_singleshot(soccfg, soc, cfg) -> np.ndarray:
     return signals  # (reps, *sweep)
 
 
-def measure_singleshot(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
+def measure_singleshot(soc, soccfg, cfg) -> np.ndarray:
     cfg = deepcopy(cfg)  # avoid in-place modification
 
-    if cfg.setdefault("soft_avgs", 1) != 1:
-        warn("soft_avgs will be overwritten to 1 for singleshot measurement")
+    if cfg.setdefault("rounds", 1) != 1:
+        warn("rounds will be overwritten to 1 for singleshot measurement")
 
     if "reps" in cfg:
         warn("reps will be overwritten by singleshot measurement shots")
