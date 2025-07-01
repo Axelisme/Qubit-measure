@@ -78,12 +78,12 @@ zc.config.LOCAL_IP = "192.168.10.232"
 zc.config.LOCAL_PORT = 8887
 
 soc, soccfg, rm_prog = make_proxy("192.168.10.113", 8887, proxy_prog=True)
-# MyProgram.init_proxy(rm_prog, test=True)
+MyProgram.init_proxy(rm_prog, test=True)
 print(soccfg)
 ```
 
 ```python
-# from qick import QickSoc  # noqa: E402
+# from myqick import QickSoc  # noqa: E402
 # from zcu_tools.tools import get_bitfile
 
 # soc = QickSoc(bitfile=get_bitfile("v2"))
@@ -393,14 +393,11 @@ ModuleLibrary.register_module(
 # TwoTone
 
 ```python
-qub_name = "Q"
-```
-
-```python
 preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
 ```
 
 ```python
+qub_name = "Q"
 ModuleLibrary.register_waveform(
     qub_waveform={
         "style": "flat_top",
@@ -1126,7 +1123,6 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
-# zs.visualize_amprabi(soccfg, cfg, time_fly=timeFly)
 pdrs, signals = zs.measure_amprabi(soc, soccfg, cfg)
 ```
 
