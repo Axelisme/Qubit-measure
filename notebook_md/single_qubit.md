@@ -36,7 +36,6 @@ import numpy as np
 import zcu_tools.notebook.single_qubit as zf  # noqa: E402
 import zcu_tools.notebook.schedule.v2 as zs  # noqa: E402
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.program.v2 import visualize_pulse
 
 # ruff: noqa: I001
 from zcu_tools import (  # noqa: E402
@@ -59,7 +58,7 @@ import zcu_tools.config as zc
 # Create data folder
 
 ```python
-chip_name = r"Test"
+chip_name = r"Test049[2]"
 
 data_host = None
 # data_host = "021-zcu216"
@@ -79,7 +78,7 @@ zc.config.LOCAL_IP = "192.168.10.232"
 zc.config.LOCAL_PORT = 8887
 
 soc, soccfg, rm_prog = make_proxy("192.168.10.113", 8887, proxy_prog=True)
-MyProgram.init_proxy(rm_prog, test=True)
+# MyProgram.init_proxy(rm_prog, test=True)
 print(soccfg)
 ```
 
@@ -97,9 +96,9 @@ print(soccfg)
 ```python
 timeFly = 0.45
 res_ch = 0
-qub_ch = 2
-reset_ch = 14
-reset_ch2 = 2
+qub_ch = 5
+reset_ch = 2
+reset_ch2 = 5
 
 ro_ch = 0
 ```
@@ -118,7 +117,7 @@ from zcu_tools.device.yoko import YOKOGS200
 import pyvisa
 
 flux_dev = YOKOGS200(
-    VISAaddress="USB0::0x0B21::0x0039::91T810992::INSTR", rm=pyvisa.ResourceManager()
+    VISAaddress="USB0::0x0B21::0x0039::90ZB35282::INSTR", rm=pyvisa.ResourceManager()
 )
 GlobalDeviceManager.register_device("flux_yoko", flux_dev)
 cur_A = flux_dev.get_current()
@@ -147,13 +146,18 @@ exp_cfg = {
             "length": 0.65,  # us
             "raise_pulse": {"style": "cosine", "length": 0.1},
             "gain": 1.0,
-            "freq": 5795.62,
+            "freq": 7520.62,
             # "freq": r_f,
         },
         "ro_cfg": {
+            "ro_ch": ro_ch,
             "ro_length": 1.5,  # us
             "trig_offset": 0.4,  # us
         },
+    },
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
     },
     "relax_delay": 0.0,  # us
 }
@@ -164,7 +168,7 @@ Ts, signals = zs.measure_lookback(soc, soccfg, cfg, progress=True)
 
 ```python
 predict_offset = zf.lookback_show(
-    Ts, signals, ratio=0.3, smooth=1.0, ro_cfg=cfg["readout"]["ro_cfg"]
+    Ts, signals, ratio=0.2, smooth=1.0, ro_cfg=cfg["readout"]["ro_cfg"]
 )
 predict_offset
 ```
@@ -186,18 +190,23 @@ save_data(
 )
 ```
 
+```python
+timeFly = 0.654
+```
+
 # OneTone
 
 ```python
-res_name = "3D_cavity"
+res_name = "3D_7.5G"
 ```
 
 ```python
+ro_pulse_len = 5.1  # us
 ModuleLibrary.register_waveform(
     ro_waveform={
         "style": "flat_top",
         "raise_pulse": {"style": "cosine", "length": 0.1},
-        "length": 5.1,  # us
+        "length": ro_pulse_len,  # us
     }
 )
 ```
@@ -212,18 +221,23 @@ exp_cfg = {
             **ModuleLibrary.get_waveform("ro_waveform"),
             "ch": res_ch,
             "nqz": 2,
-            "gain": 1.0,
+            "gain": 0.15,
         },
         "ro_cfg": {
-            "ro_length": 4.5,  # us
+            "ro_ch": ro_ch,
+            "ro_length": ro_pulse_len - 0.1,  # us
             "trig_offset": timeFly + 0.05,  # us
         },
     },
-    "sweep": make_sweep(5750, 5850, 201),
-    # "sweep": make_sweep(r_f-10, r_f+10, 101),
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
+    # "sweep": make_sweep(7510, 7530, 201),
+    "sweep": make_sweep(r_f-4, r_f+4, 101),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
 
 fpts, signals = zs.measure_res_freq(soc, soccfg, cfg)
 ```
@@ -252,11 +266,6 @@ save_data(
 )
 ```
 
-```python
-# r_f =  6026.1
-r_f
-```
-
 ## Power Dependence
 
 ```python
@@ -267,20 +276,25 @@ exp_cfg = {
             **ModuleLibrary.get_waveform("ro_waveform"),
             "ch": res_ch,
             "nqz": 2,
-            "gain": 1.0,
+            "freq": r_f,  # MHz
         },
         "ro_cfg": {
-            "ro_length": 4.5,  # us
+            "ro_ch": ro_ch,
+            "ro_length": ro_pulse_len - 0.1,  # us
             "trig_offset": timeFly + 0.05,  # us
         },
     },
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": {
-        "gain": make_sweep(0.01, 1.0, 51),
-        "freq": make_sweep(r_f - 7, r_f + 7, 51),
+        "gain": make_sweep(0.01, 0.4, 41),
+        "freq": make_sweep(r_f - 2, r_f + 2, 51),
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
+cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=30)
 
 pdrs, fpts, signals2D = zs.measure_res_pdr_dep(
     soc, soccfg, cfg, dynamic_avg=True, gain_ref=0.03
@@ -303,7 +317,7 @@ save_data(
 ## Flux dependence
 
 ```python
-cur_A = -1.5e-3
+cur_A = -2.0e-3
 1e3 * flux_dev.set_current(cur_A)
 ```
 
@@ -315,16 +329,20 @@ exp_cfg = {
             **ModuleLibrary.get_waveform("ro_waveform"),
             "ch": res_ch,
             "nqz": 2,
-            "gain": 1.0,
+            "gain": 0.2,
         },
         "ro_cfg": {
-            "ro_length": 4.5,  # us
+            "ro_ch": ro_ch,
+            "ro_length": ro_pulse_len - 0.1,  # us
             "trig_offset": timeFly + 0.05,  # us
         },
     },
+    "dev": {
+        "flux_dev": "yoko"
+    },
     "sweep": {
-        "gain": make_sweep(0.01, 1.0, 51),
-        "freq": make_sweep(r_f - 7, r_f + 7, 51),
+        "flux": make_sweep(-2.0e-3, 2.0e-3, 201),
+        "freq": make_sweep(r_f - 3, r_f + 3, 61),
     },
     "relax_delay": 0.0,  # us
 }
@@ -347,13 +365,14 @@ save_data(
 ```
 
 ```python
-cur_A = 4e-3
+cur_A = 0.0e-3
 1e3 * flux_dev.set_current(cur_A)
 ```
 
 ## Set readout pulse
 
 ```python
+# ro_pulse_len = 3.1  # us
 ModuleLibrary.register_module(
     readout_rf={
         "type": "base",
@@ -362,11 +381,12 @@ ModuleLibrary.register_module(
             "ch": res_ch,
             "nqz": 2,
             "freq": r_f,
-            "gain": 1.0,
-            "length": 5.1,
+            "gain": 0.2,
+            "length": ro_pulse_len,  # us
         },
         "ro_cfg": {
-            "ro_length": 4.5,  # us
+            "ro_ch": ro_ch,
+            "ro_length": ro_pulse_len - 0.1,  # us
             "trig_offset": timeFly + 0.05,  # us
         },
         "desc": "lower power readout with exact resonator frequency",
@@ -377,22 +397,15 @@ ModuleLibrary.register_module(
 # TwoTone
 
 ```python
-qub_name = "Q4"
+qub_name = "Q"
 ```
 
 ```python
-preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
+# preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
+preditor = FluxoniumPredictor(f"../result/Test049/params.json")
 ```
 
 ```python
-# ModuleLibrary.set_pulse(
-#     probe_qf={
-#         "style": "flat_top",
-#         "length": 2.0,
-#         # "raise_pulse": {"style": "gauss", "length": 0.02, "sigma": 0.003},
-#         "raise_pulse": {"style": "cosine", "length": 0.02},
-#     },
-# )
 ModuleLibrary.register_waveform(
     qub_waveform={
         "style": "flat_top",
@@ -416,19 +429,26 @@ q_f
 
 ```python
 exp_cfg = {
-    "readout": "readout_rf",
+    "readout": "readout_dpm",
     "qub_pulse": {
         **ModuleLibrary.get_waveform("qub_waveform"),
         "ch": qub_ch,
         "nqz": 2,
-        "gain": 0.01,
+        "gain": 0.5,
+        "length": 5.0,  # us
+        # "mixer_freq": 6500,
         "mixer_freq": q_f,
         # "post_delay": None,
     },
-    "sweep": make_sweep(q_f - 50, q_f + 50, 101),
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
+    "sweep": make_sweep(q_f - 3, q_f + 3, 101),
+    # "sweep": make_sweep(6000, 7000, 1001),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=1000)
+cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
 
 fpts, signals = zs.measure_qub_freq(soc, soccfg, cfg)
 ```
@@ -495,6 +515,10 @@ exp_cfg = {
         },
     },
     "readout": "readout_rf",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": make_sweep(reset_f - 150, reset_f + 150, 101),
     "relax_delay": 0.0,  # us
 }
@@ -542,6 +566,10 @@ exp_cfg = {
     },
     "qub_pulse": "pi_amp",
     "readout": "readout_rf",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": make_sweep(0.03, 5.0, 51),
     "relax_delay": 0.0,  # us
 }
@@ -590,40 +618,45 @@ reset_f2
 
 ```python
 exp_cfg = {
-    "init_pulse": {
-        **ModuleLibrary.get_waveform("qub_waveform"),
-        "ch": qub_ch,
-        "nqz": 2,
-        "gain": 0.01,
-        "mixer_freq": q_f,
-    },
+    # "init_pulse": {
+    #     **ModuleLibrary.get_waveform("qub_waveform"),
+    #     "ch": qub_ch,
+    #     "nqz": 2,
+    #     "gain": 0.01,
+    #     "mixer_freq": q_f,
+    # },
+    "init_pulse": "pi_amp",
     "tested_reset": {
         "type": "two_pulse",
-        "pulse_cfg1": {
-            **ModuleLibrary.get_waveform("qub_waveform"),
-            "ch": reset_ch,
-            "nqz": 2,
-            "gain": 0.5,
-            # "mixer_freq": reset_f1,
-            "post_delay": None,
-        },
-        "pulse_cfg2": {
+        "pulse1_cfg": {
             **ModuleLibrary.get_waveform("qub_waveform"),
             "ch": reset_ch2,
+            "nqz": 2,
+            "gain": 0.5,
+            "mixer_freq": reset_f1,
+            "post_delay": None,
+        },
+        "pulse2_cfg": {
+            **ModuleLibrary.get_waveform("qub_waveform"),
+            "ch": reset_ch,
             "nqz": 1,
             "gain": 0.5,
             # "mixer_freq": reset_f2,
             "post_delay": 5.0 / rf_w,  # 5 times the resonator linewidth
         },
     },
-    "readout": "readout_rf",
+    "readout": "readout_dpm",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": {
         "freq1": make_sweep(reset_f1 - 100, reset_f1 + 100, 51),
         "freq2": make_sweep(reset_f2 - 100, reset_f2 + 100, 51),
         # "freq1": make_sweep(3170, 3250, 51),
         # "freq2": make_sweep(1920, 2000, 51),
     },
-    "relax_delay": 0.0,  # us
+    "relax_delay": 10.0,  # us
 }
 cfg = make_cfg(exp_cfg, reps=100, soft_avgs=100)
 
@@ -693,6 +726,10 @@ exp_cfg = {
     },
     "tested_reset": "reset_120",
     "readout": "readout_rf",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": {
         "gain1": make_sweep(0.0, 1.0, 51),
         "gain2": make_sweep(0.0, 1.0, 51),
@@ -743,6 +780,10 @@ exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": "pi_amp",
     "readout": "readout_rf",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": make_sweep(0.05, 1.0, 31),
     "relax_delay": 0.0,  # us
 }
@@ -782,6 +823,10 @@ exp_cfg = {
     "init_pulse": "pi_amp",
     "tested_reset": "reset_120",
     "readout": "readout_rf",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 0.0,  # us
 }
@@ -815,6 +860,10 @@ exp_cfg = {
         "length": 5,  # us
     },
     "readout": "readout_rf",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": {
         "gain": make_sweep(0.05, 1.0, 30),
         "freq": make_sweep(1700, 2000, 30),
@@ -842,7 +891,7 @@ save_data(
 ## Flux Dependence
 
 ```python
-cur_A = 3.5e-3
+cur_A = -1.0e-3
 1e3 * flux_dev.set_current(cur_A)
 ```
 
@@ -852,16 +901,23 @@ exp_cfg = {
         **ModuleLibrary.get_waveform("qub_waveform"),
         "ch": qub_ch,
         "nqz": 2,
-        "length": 5,  # us
+        "gain": 1.0,
+        "length": 2,  # us
+        "mixer_freq": 4500,
     },
-    "readout": "readout_rf",
-    "relax_delay": 0.0,  # us
+    "readout": "readout_dpm",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": {
-        "flux": make_sweep(3.5e-3, -0.5e-3, 301),
-        "freq": make_sweep(3000, 5000, 501),
+        "flux": make_sweep(-1.0e-3, 5.0e-3, 301),
+        "freq": make_sweep(4000, 5100, 2201),
     },
+    "relax_delay": 0.0,  # us
+
 }
-cfg = make_cfg(exp_cfg, reps=10000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
 
 As, fpts, signals2D = zs.measure_qub_flux_dep(soc, soccfg, cfg)
 ```
@@ -891,6 +947,10 @@ exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": "pi_amp",
     "readout": "readout_rf",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": make_sweep(r_f - 20, r_f + 20, 101),
     "relax_delay": 0.0,  # us
 }
@@ -936,6 +996,10 @@ exp_cfg = {
         "post_delay": 5.0 / rf_w,
     },
     "readout": "readout_rf",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "sweep": {
         "gain": make_sweep(0.00, 0.35, 101),
         "freq": make_sweep(q_f - 100, q_f + 10, 101),
@@ -979,25 +1043,28 @@ exp_cfg = {
         "ch": qub_ch,
         "nqz": 2,
         "freq": q_f,
-        "gain": 0.3,
+        "gain": 0.5,
         # "gain": pi_gain,
-        "length": 5,  # us
-        # "mixer_freq": q_f,
+        "mixer_freq": q_f,
     },
     "readout": "readout_rf",
-    "relax_delay": 0.0,  # us
-    "sweep": make_sweep(0.03, 0.3, 101),
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
+    "relax_delay": 50.0,  # us
+    "sweep": make_sweep(0.1, 4.0, 101),
 }
 cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=20)
 
 # zs.visualize_lenrabi(soccfg, cfg, time_fly=timeFly)
-pdrs, fpts, signals2D = zs.measure_lenrabi(soc, soccfg, cfg)
+Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg)
 ```
 
 ```python
 %matplotlib inline
 pi_len, pi2_len = zf.rabi_analyze(
-    Ts, signals, decay=False, max_contrast=True, xlabel="Time (us)"
+    Ts, signals, decay=True, max_contrast=True, xlabel="Time (us)"
 )
 pi_len, pi2_len
 ```
@@ -1042,24 +1109,31 @@ ModuleLibrary.register_module(
 pi_gain = ModuleLibrary.get_module("pi_len")["gain"]
 max_gain = min(5 * pi_gain, 1.0)
 exp_cfg = {
-    "reset": "reset_120",
+    # "reset": "reset_120",
     "qub_pulse": {
-        **ModuleLibrary.get_waveform("qub_waveform"),
+        # **ModuleLibrary.get_waveform("qub_waveform"),
+        "style": "gauss",
+        "sigma": 0.08,
+        "length": 0.4,
         "ch": qub_ch,
         "nqz": 2,
         "freq": q_f,
-        "length": 5,  # us
-        # "length": pi_len,
-        # "mixer_freq": q_f,
+        # "length": 0.3,  # us
+        # "length": 1.5*pi_len,
+        "mixer_freq": q_f,
     },
     "readout": "readout_rf",
-    "relax_delay": 0.0,  # us
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
+    "relax_delay": 50.0,  # us
     "sweep": make_sweep(0.0, max_gain, 51),
 }
 cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
 
 # zs.visualize_amprabi(soccfg, cfg, time_fly=timeFly)
-pdrs, fpts, signals2D = zs.measure_amprabi(soc, soccfg, cfg)
+pdrs, signals = zs.measure_amprabi(soc, soccfg, cfg)
 ```
 
 ```python
@@ -1112,11 +1186,17 @@ ModuleLibrary.register_module(
 
 ```python
 exp_cfg = {
-    "reset": "reset_120",
+    # "reset": "reset_120",
     "qub_pulse": "pi_amp",
-    "readout": "readout_rf",
-    "relax_delay": 0.0,  # us
-    "sweep": make_sweep(r_f - 10, r_f + 10, 51),
+    "readout": ModuleLibrary.get_module(
+        "readout_rf",
+    ),
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
+    "relax_delay": 10.0,  # us
+    "sweep": make_sweep(r_f - 3, r_f + 3, 51),
 }
 cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
 
@@ -1143,7 +1223,7 @@ save_data(
 
 ```python
 exp_cfg = {
-    "reset": "reset_120",
+    # "reset": "reset_120",
     "qub_pulse": "pi_amp",
     "readout": ModuleLibrary.get_module(
         "readout_rf",
@@ -1153,8 +1233,12 @@ exp_cfg = {
             }
         },
     ),
-    "relax_delay": 0.0,  # us
-    "sweep": make_sweep(0.01, 1.0, 31),
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
+    "relax_delay": 10.0,  # us
+    "sweep": make_sweep(0.01, 0.5, 31),
 }
 cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
 
@@ -1181,7 +1265,7 @@ save_data(
 
 ```python
 exp_cfg = {
-    "reset": "reset_120",
+    # "reset": "reset_120",
     "qub_pulse": "pi_amp",
     "readout": ModuleLibrary.get_module(
         "readout_rf",
@@ -1192,6 +1276,10 @@ exp_cfg = {
             }
         },
     ),
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "relax_delay": 0.0,  # us
     "sweep": make_sweep(0.1, 15.0, 31),
 }
@@ -1201,7 +1289,7 @@ ro_lens, snrs = zs.qubit.measure_ge_ro_dep(soc, soccfg, cfg)
 ```
 
 ```python
-ro_max = zf.optimize_ro_len(ro_lens, snrs, t0=30.0)
+ro_max = zf.optimize_ro_len(ro_lens, snrs, t0=5.0)
 ro_max
 ```
 
@@ -1239,6 +1327,7 @@ ModuleLibrary.register_module(
 
 # T1 & T2
 
+
 ## T2Ramsey
 
 ```python
@@ -1248,13 +1337,17 @@ orig_qf
 
 ```python
 exp_cfg = {
-    "reset": "reset_120",
+    # "reset": "reset_120",
     "pi2_pulse": "pi2_amp",
     "readout": "readout_dpm",
-    "relax_delay": 0.0,  # us
-    "sweep": make_sweep(0, 20.0, 101),  # us
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
+    "relax_delay": 50.0,  # us
+    "sweep": make_sweep(0, 10.0, 101),  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
 
 activate_detune = 10.0 / (cfg["sweep"]["stop"] - cfg["sweep"]["start"])
 print(f"activate_detune: {activate_detune:.2f}")
@@ -1288,21 +1381,27 @@ q_f
 
 ```python
 exp_cfg = {
-    "reset": "reset_120",
+    # "reset": "reset_120",
     "pi_pulse": "pi_amp",
     "readout": "readout_dpm",
-    "relax_delay": 0.0,  # us
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
+    "relax_delay": 50.0,  # us
+    # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.0, 50, 51),
-    # "sweep": make_sweep(0.01, 5 * t1, 51),
+    # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
 
 Ts, signals = zs.measure_t1(soc, soccfg, cfg)
 ```
 
 ```python
+%matplotlib widget
 %matplotlib inline
-start = 1
+start = 0
 t1, _ = zf.T1_analyze(Ts[start:], signals[start:], max_contrast=True, dual_exp=False)
 t1
 ```
@@ -1323,37 +1422,23 @@ save_data(
 
 ```python
 exp_cfg = {
-    "dac": {
-        "res_pulse": "readout_dpm",
-        "pi_pulse": "pi_amp",
-        "pi2_pulse": "pi2_amp",
-        # "reset": "pulse",
-        # "reset_pulse": "reset_red",
-        "reset": "mux_dual_pulse",
-        "reset_pulse1": "mux_reset1",
-        "reset_pulse2": "mux_reset2",
-    },
-    "adc": {
-        "relax_delay": 0.5,  # us
-        # "relax_delay": 3*t1,  # us
-    },
-}
-```
-
-```python
-exp_cfg = {
-    "reset": "reset_120",
+    # "reset": "reset_120",
     "pi_pulse": "pi_amp",
     "pi2_pulse": "pi2_amp",
     "readout": "readout_dpm",
-    "relax_delay": 0.0,  # us
-    "sweep": make_sweep(0.0, 1.5 * t2r, 101),
-    # "sweep": make_sweep(0.0, 1.5 * t2e, 101),
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
+    # "relax_delay": 0.0,  # us
+    "relax_delay": 5 * t1,  # us
+    # "sweep": make_sweep(0.0, 1.5 * t2r, 101),
+    "sweep": make_sweep(0.0, 1.5 * t2e, 101),
     # "sweep": make_sweep(0.01, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=10)
+cfg = make_cfg(exp_cfg, reps=1000, soft_avgs=100)
 
-activate_detune = 5.0 / (cfg["sweep"]["stop"] - cfg["sweep"]["start"])
+activate_detune = 10.0 / (cfg["sweep"]["stop"] - cfg["sweep"]["start"])
 print(f"activate_detune: {activate_detune:.2f}")
 Ts, signals = zs.measure_t2echo(soc, soccfg, cfg, detune=activate_detune)
 ```
@@ -1382,35 +1467,6 @@ save_data(
 
 ```python
 exp_cfg = {
-    "dac": {
-        # "res_pulse": "readout_rf",
-        "res_pulse": {
-            **ModuleLibrary.get_pulse("readout_dpm"),
-            # "length": 0.2 * t1 + timeFly + 0.1,
-            # "ro_length": 0.2 * t1,
-        },
-        "qub_pulse": "pi_amp",
-        # "qub_pulse": "reset_red",
-        # "qub_pulse": {
-        #     **DefaultCfg.get_pulse("pi_amp"),
-        #     # "gain": 0.0,
-        # },
-        # "reset": "pulse",
-        # "reset_pulse": "reset_red",
-        "reset": "two_pulse",
-        "reset_pulse1": "mux_reset1",
-        "reset_pulse2": "mux_reset2",
-    },
-    "adc": {
-        # "relax_delay": 5 * t1,  # us
-        "relax_delay": 0.0,  # us
-    },
-}
-exp_cfg["dac"]["res_pulse"]["ro_length"]
-```
-
-```python
-exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": "pi_amp",
     "readout": ModuleLibrary.get_module(
@@ -1424,6 +1480,10 @@ exp_cfg = {
             },
         },
     ),
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
     "relax_delay": 0.0,  # us
 }
 cfg = make_cfg(exp_cfg, shots=1000000)
