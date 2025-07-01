@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 from numpy import ndarray
@@ -9,33 +9,22 @@ from zcu_tools.tools import AsyncFunc, print_traceback
 
 from ..flux import set_flux
 
+# TODO: support user controlled callback function
 
-def raw2result(ir, sum_d, sum2_d) -> Tuple[ndarray, ndarray]:
-    avg_d = [d / (ir + 1) for d in sum_d]
-    std_d = [np.sqrt(d2 / (ir + 1) - d**2) for d, d2 in zip(avg_d, sum2_d)]
-    return avg_d, std_d
+MeasureFn = Callable[[Dict[str, Any], Optional[Callable[..., None]]], ndarray]
+Raw2SignalFn = Callable[[int, List[ndarray], Optional[List[ndarray]]], ndarray]
+Signal2RealFn = Callable[[ndarray], ndarray]
+UpdateCfgFn = Callable[[Dict[str, Any], int, Any], None]
 
 
-def default_result2signal(
-    avg_d: list, std_d: list
-) -> Tuple[ndarray, Optional[ndarray]]:
-    avg_d = avg_d[0][0].dot([1, 1j])  # (*sweep)
-    std_d = np.max(std_d[0][0], axis=-1)  # (*sweep)
-
-    return avg_d, std_d
+def default_raw2signal(
+    ir: int, avg_d: List[ndarray], std_d: Optional[List[ndarray]]
+) -> ndarray:
+    return avg_d[0][0].dot([1, 1j])  # (*sweep)
 
 
 def default_signal2real(signals: ndarray) -> ndarray:
     return np.abs(signals)
-
-
-MeasureFn = Callable[
-    [Dict[str, Any], Optional[Callable[[int, list, list], None]]],
-    Tuple[list, list],
-]
-Result2SignalFn = Callable[[list, list], Tuple[ndarray, Optional[ndarray]]]
-Signal2RealFn = Callable[[ndarray], ndarray]
-UpdateCfgFn = Callable[[Dict[str, Any], int, Any], None]
 
 
 def sweep_hard_template(
@@ -44,7 +33,7 @@ def sweep_hard_template(
     liveplotter: AbsLivePlotter,
     *,
     ticks: Tuple[ndarray, ...],
-    result2signals: Result2SignalFn = default_result2signal,
+    raw2signal: Raw2SignalFn = default_raw2signal,
     signal2real: Signal2RealFn = default_signal2real,
     catch_interrupt: bool = True,
 ) -> ndarray:
@@ -54,14 +43,15 @@ def sweep_hard_template(
     signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
     with liveplotter as viewer:
 
-        def callback(ir, sum_d, sum2_d) -> None:
+        def callback(
+            ir: int, avg_d: List[ndarray], std_d: Optional[List[ndarray]]
+        ) -> None:
             nonlocal signals
-            signals, _ = result2signals(*raw2result(ir, sum_d, sum2_d))
+            signals = raw2signal(ir, avg_d, std_d)
             viewer.update(*ticks, signal2real(signals))
 
         try:
-            results = measure_fn(cfg, callback)
-            signals, _ = result2signals(*results)
+            signals = measure_fn(cfg, callback)
         except KeyboardInterrupt as e:
             if not catch_interrupt:
                 raise e  # re-raise if not catching
@@ -83,33 +73,33 @@ def sweep1D_soft_template(
     *,
     xs: ndarray,
     updateCfg: UpdateCfgFn,
-    result2signals: Result2SignalFn = default_result2signal,
     signal2real: Signal2RealFn = default_signal2real,
     progress: bool = True,
     catch_interrupt: bool = True,
     data_shape: Optional[tuple] = None,
 ) -> ndarray:
     cfg = deepcopy(cfg)  # prevent in-place modification
+
+    # set flux first
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
+
     if data_shape is not None:
         signals = np.full((len(xs), *data_shape), np.nan, dtype=complex)
     else:
         signals = np.full_like(xs, np.nan, dtype=complex)
 
-    # set flux first
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
-
     with liveplotter as viewer:
         try:
             xs_tqdm = tqdm(xs, smoothing=0, disable=not progress)
             with AsyncFunc(viewer.update, include_idx=False) as async_draw:
+                assert async_draw is not None
                 for i, x in enumerate(xs_tqdm):
                     updateCfg(cfg, i, x)
 
                     # set again in case of change
-                    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+                    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=False)
 
-                    result = measure_fn(cfg, None)
-                    signals[i], _ = result2signals(*result)
+                    signals[i] = measure_fn(cfg, None)
 
                     async_draw(i, xs, signal2real(signals))
 
@@ -135,50 +125,50 @@ def sweep2D_soft_hard_template(
     xs: ndarray,
     ys: ndarray,
     updateCfg: UpdateCfgFn,
-    result2signals: Result2SignalFn = default_result2signal,
+    raw2signal: Raw2SignalFn = default_raw2signal,
     signal2real: Signal2RealFn = default_signal2real,
     progress: bool = True,
     catch_interrupt: bool = True,
     data_shape: Optional[tuple] = None,
 ) -> ndarray:
     cfg = deepcopy(cfg)  # prevent in-place modification
+
+    # set initial flux
+    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
+
     if data_shape is not None:
         signals2D = np.full((len(xs), len(ys), *data_shape), np.nan, dtype=complex)
     else:
         signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
 
-    # set initial flux
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
-
     with liveplotter as viewer:
         try:
             xs_tqdm = tqdm(xs, smoothing=0, disable=not progress)
-            avgs_tqdm = tqdm(total=cfg["soft_avgs"], smoothing=0, disable=not progress)
+            avgs_tqdm = tqdm(total=cfg["rounds"], smoothing=0, disable=not progress)
             with AsyncFunc(viewer.update, include_idx=False) as async_draw:
+                assert async_draw is not None
                 for i, x in enumerate(xs_tqdm):
                     updateCfg(cfg, i, x)
 
-                    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+                    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=False)
 
-                    avgs_tqdm.total = cfg["soft_avgs"]
+                    avgs_tqdm.total = cfg["rounds"]
                     avgs_tqdm.reset()
                     avgs_tqdm.refresh()
 
                     _signals2D = signals2D.copy()  # prevent overwrite
 
-                    def callback(ir, sum_d, sum2_d) -> None:
+                    def callback(
+                        ir: int, avg_d: List[ndarray], std_d: Optional[List[ndarray]]
+                    ) -> None:
                         nonlocal _signals2D, avgs_tqdm
-                        avgs_tqdm.update(max(ir + 1 - avgs_tqdm.n, 0))
+                        avgs_tqdm.update(max(ir - avgs_tqdm.n, 0))
                         avgs_tqdm.refresh()
 
-                        _signals2D[i], _ = result2signals(
-                            *raw2result(ir, sum_d, sum2_d)
-                        )
-                        signals_real = signal2real(_signals2D)
-                        viewer.update(xs, ys, signals_real)
+                        _signals2D[i] = raw2signal(ir, avg_d, std_d)
+                        viewer.update(xs, ys, signal2real(_signals2D))
 
-                    results = measure_fn(cfg, callback)
-                    signals2D[i], _ = result2signals(*results)
+                    signals2D[i] = measure_fn(cfg, callback)
 
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
