@@ -6,7 +6,7 @@ config = Namespace(
     # The port number of local host
     LOCAL_PORT=0,
     # proxy setting
-    ONLY_PROXY_DECIMATED=False,
+    ONLY_PROXY_DECIMATED=True,
     # Whether to run data server in dry run mode
     DATA_DRY_RUN=False,
     # Whether to run Yoko device in dry run mode

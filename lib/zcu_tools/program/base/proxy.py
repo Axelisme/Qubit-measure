@@ -2,9 +2,8 @@ import warnings
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple
 
-from zcu_tools.config import config
-
 from qick.qick_asm import AcquireMixin
+from zcu_tools.config import config
 
 
 class AbsProxy(ABC):
@@ -87,6 +86,7 @@ class ProxyAcquireMixin(AcquireMixin):
             if self.proxy_buf_expired:  # check cache expiration
                 self.acc_buf = self.proxy.get_raw()
                 self.proxy_buf_expired = False
+
         return super().get_raw()
 
     def get_shots(self) -> Optional[list]:
@@ -94,15 +94,23 @@ class ProxyAcquireMixin(AcquireMixin):
             if self.proxy_shots_expired:  # check cache expiration
                 self.shots = self.proxy.get_shots()
                 self.proxy_shots_expired = False
+
         return super().get_shots()
 
-    def get_stderr(self) -> Optional[list]:
+    def get_rounds(self) -> Optional[list]:
         if self.is_use_proxy() and not config.ONLY_PROXY_DECIMATED:
             if self.proxy_round_expired:  # check cache expiration
                 self.rounds_buf, self.stderr_buf = self.proxy.get_round_data()
                 self.proxy_round_expired = False
 
-        return super().get_stderr()
+        return super().get_rounds()
+
+    def get_stderr_raw(self) -> Optional[list]:
+        if self.is_use_proxy() and not config.ONLY_PROXY_DECIMATED:
+            if self.proxy_round_expired:  # check cache expiration
+                self.rounds_buf, self.stderr_buf = self.proxy.get_round_data()
+                self.proxy_round_expired = False
+        return super().get_stderr_raw()
 
     def local_acquire(self, soc, **kwargs) -> list:
         # non-override method, for ProgramServer to call

@@ -17,11 +17,13 @@ class StdErrorMixin(AcquireMixin):
         return self.stderr_buf
 
     def get_stderr(self) -> Optional[List[np.ndarray]]:
-        if self.stderr_buf is None:
+        rounds_buf = self.get_rounds()
+        stderr_buf = self.get_stderr_raw()
+        if stderr_buf is None:
             return None
 
-        assert self.rounds_buf is not None
-        return self._summarize_accumulated_std(self.rounds_buf, self.stderr_buf)
+        assert rounds_buf is not None
+        return self._summarize_accumulated_std(rounds_buf, stderr_buf)
 
     def _summarize_accumulated_std(
         self, rounds_buf: List[List[np.ndarray]], std_buf: List[List[np.ndarray]]
