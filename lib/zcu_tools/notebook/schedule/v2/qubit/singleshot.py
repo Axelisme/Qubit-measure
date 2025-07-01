@@ -15,8 +15,7 @@ def acquire_singleshot(soccfg, soc, cfg) -> np.ndarray:
     prog = TwoToneProgram(soccfg, deepcopy(cfg))
     prog.acquire(soc, progress=False)
 
-    # TODO: better way to acquire acc_buf?
-    acc_buf = prog.get_acc_buf()[0]  # use this method to support proxy program
+    acc_buf = prog.get_raw()[0]  # use this method to support proxy program
     avgiq = acc_buf / list(prog.ro_chs.values())[0]["length"]  # (reps, *sweep, 1, 2)
     i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, *sweep)
     signals = np.array(i0 + 1j * q0)  # (reps, *sweep)

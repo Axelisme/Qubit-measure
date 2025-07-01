@@ -11,7 +11,11 @@ class AbsProxy(ABC):
         pass
 
     @abstractmethod
-    def get_acc_buf(self) -> Optional[list]:
+    def get_raw(self) -> Optional[list]:
+        pass
+
+    @abstractmethod
+    def get_shots(self) -> Optional[list]:
         pass
 
     @abstractmethod
@@ -19,11 +23,15 @@ class AbsProxy(ABC):
         pass
 
     @abstractmethod
-    def acquire(self, prog: AcquireMixin, decimated: bool, **kwargs) -> list:
+    def acquire(self, prog: AcquireMixin, **kwargs) -> list:
+        pass
+
+    @abstractmethod
+    def acquire_decimated(self, prog: AcquireMixin, **kwargs) -> list:
         pass
 
 
-class ProxyProgram(AcquireMixin):
+class ProxyAcquireMixin(AcquireMixin):
     """
     Provide proxy support for acquire and acquire_decimated.
     """
@@ -53,6 +61,7 @@ class ProxyProgram(AcquireMixin):
         super().__init__(*args, **kwargs)
 
         self.proxy_buf_expired = False
+        self.proxy_shots_expired = False
 
     def set_early_stop(self) -> None:
         if self.is_use_proxy():
@@ -60,29 +69,36 @@ class ProxyProgram(AcquireMixin):
             self.proxy.set_early_stop()
         super().set_early_stop()  # set locally for safe
 
-    def get_acc_buf(self) -> Optional[list]:
+    def get_raw(self) -> Optional[list]:
         if self.is_use_proxy():
-            if self.proxy_buf_expired:
-                self.acc_buf = self.proxy.get_acc_buf()
+            if self.proxy_buf_expired:  # check cache expiration
+                self.acc_buf = self.proxy.get_raw()
                 self.proxy_buf_expired = False
-        return self.acc_buf
+        return super().get_raw()
 
-    def local_acquire(self, soc, decimated: bool, **kwargs) -> list:
+    def get_shots(self) -> Optional[list]:
+        if self.is_use_proxy():
+            if self.proxy_shots_expired:  # check cache expiration
+                self.shots = self.proxy.get_shots()
+                self.proxy_shots_expired = False
+        return super().get_shots()
+
+    def local_acquire(self, soc, **kwargs) -> list:
         # non-override method, for ProgramServer to call
-        if decimated:
-            return super().acquire_decimated(soc, **kwargs)
         return super().acquire(soc, **kwargs)
 
-    def proxy_acquire(self, decimated: bool, **kwargs) -> list:
-        # acquire from proxy, also reset local acc_buf
-        self.proxy_buf_expired = True
-        return self.proxy.acquire(self, decimated=decimated, **kwargs)
+    def local_acquire_decimated(self, soc, **kwargs) -> list:
+        # non-override method, for ProgramServer to call
+        return super().acquire_decimated(soc, **kwargs)
 
     def acquire(self, soc, **kwargs) -> list:
-        return self.local_acquire(soc, decimated=False, **kwargs)
+        return self.local_acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs) -> list:
         if self.is_use_proxy():
-            return self.proxy_acquire(decimated=True, **kwargs)
+            # return self.proxy_acquire_decimated(**kwargs)
+            self.proxy_buf_expired = True
+            self.proxy_shots_expired = True
+            return self.proxy.acquire_decimated(self, **kwargs)
 
-        return self.local_acquire(soc, decimated=True, **kwargs)
+        return self.local_acquire_decimated(soc, **kwargs)

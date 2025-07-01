@@ -4,10 +4,11 @@ from myqick.qick_asm import AcquireMixin
 from zcu_tools.auto import is_pulse_cfg
 from zcu_tools.tools import AsyncFunc
 
-from .proxy import AbsProxy, ProxyProgram
+from .proxy import AbsProxy, ProxyAcquireMixin
+from .improve_acquire import ImproveAcquireMixin
 
 
-class MyProgram(ProxyProgram, AcquireMixin):
+class MyProgram(ProxyAcquireMixin, ImproveAcquireMixin):
     """
     Add some functionality to the base program class
     including:
@@ -50,4 +51,4 @@ class MyProgram(ProxyProgram, AcquireMixin):
             return super().acquire_decimated(soc, **kwargs)
 
 
-__all__ = ["MyProgram", "AbsProxy", "ProxyProgram"]
+__all__ = ["MyProgram", "AbsProxy", "ProxyAcquireMixin"]
