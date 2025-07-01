@@ -13,6 +13,9 @@ class StdErrorMixin(AcquireMixin):
         super().__init__(*args, **kwargs)
         self.stderr_buf: Optional[List[List[np.ndarray]]] = None
 
+    def get_stderr_raw(self) -> Optional[List[List[np.ndarray]]]:
+        return self.stderr_buf
+
     def get_stderr(self) -> Optional[List[np.ndarray]]:
         if self.stderr_buf is None:
             return None

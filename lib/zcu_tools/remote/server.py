@@ -1,5 +1,5 @@
 from types import ModuleType
-from typing import Optional
+from typing import Optional, Tuple
 from unittest.mock import Mock
 
 import Pyro4
@@ -81,14 +81,14 @@ class ProgramServer:
         return self.last_prog.get_shots()
 
     @Pyro4.expose
-    def get_stderr(self) -> Optional[list]:
+    def get_round_data(self) -> Tuple[Optional[list], Optional[list]]:
         if self.acquiring:
             raise RuntimeError("Program is still running")
 
         if self.last_prog is None:
             raise RuntimeError("No program has been run")
 
-        return self.last_prog.get_stderr()
+        return self.last_prog.get_rounds(), self.last_prog.get_stderr_raw()
 
     @Pyro4.expose
     def test_callback(self, cb: RemoteCallback) -> None:

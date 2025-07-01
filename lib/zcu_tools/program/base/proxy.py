@@ -1,6 +1,8 @@
 import warnings
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, Tuple
+
+from zcu_tools.config import config
 
 from qick.qick_asm import AcquireMixin
 
@@ -19,7 +21,8 @@ class AbsProxy(ABC):
         pass
 
     @abstractmethod
-    def get_stderr(self) -> Optional[list]:
+    def get_round_data(self) -> Tuple[Optional[list], Optional[list]]:
+        """Return rounds_buf and stderr_buf"""
         pass
 
     @abstractmethod
@@ -66,7 +69,7 @@ class ProxyAcquireMixin(AcquireMixin):
 
         self.proxy_buf_expired = False
         self.proxy_shots_expired = False
-        self.proxy_std_expired = False
+        self.proxy_round_expired = False
 
     def set_early_stop(self) -> None:
         if self.is_use_proxy():
@@ -77,7 +80,7 @@ class ProxyAcquireMixin(AcquireMixin):
     def _set_expired(self) -> None:
         self.proxy_buf_expired = True
         self.proxy_shots_expired = True
-        self.proxy_std_expired = True
+        self.proxy_round_expired = True
 
     def get_raw(self) -> Optional[list]:
         if self.is_use_proxy():
@@ -87,17 +90,17 @@ class ProxyAcquireMixin(AcquireMixin):
         return super().get_raw()
 
     def get_shots(self) -> Optional[list]:
-        if self.is_use_proxy():
+        if self.is_use_proxy() and not config.ONLY_PROXY_DECIMATED:
             if self.proxy_shots_expired:  # check cache expiration
                 self.shots = self.proxy.get_shots()
                 self.proxy_shots_expired = False
         return super().get_shots()
 
     def get_stderr(self) -> Optional[list]:
-        if self.is_use_proxy():
-            if self.proxy_std_expired:
-                self.stderr_buf = self.proxy.get_stderr()
-                self.proxy_std_expired = False
+        if self.is_use_proxy() and not config.ONLY_PROXY_DECIMATED:
+            if self.proxy_round_expired:  # check cache expiration
+                self.rounds_buf, self.stderr_buf = self.proxy.get_round_data()
+                self.proxy_round_expired = False
 
         return super().get_stderr()
 
@@ -110,7 +113,7 @@ class ProxyAcquireMixin(AcquireMixin):
         return super().acquire_decimated(soc, **kwargs)
 
     def acquire(self, soc, **kwargs) -> list:
-        if self.is_use_proxy():
+        if self.is_use_proxy() and not config.ONLY_PROXY_DECIMATED:
             self._set_expired()
             return self.proxy.acquire(self, **kwargs)
 

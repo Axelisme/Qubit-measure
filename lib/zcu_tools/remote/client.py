@@ -154,8 +154,8 @@ class ProgramClient(AbsProxy):
     def get_shots(self) -> list:
         return self._remote_call("get_shots", timeout=5)
 
-    def get_stderr(self) -> Optional[list]:
-        return self._remote_call("get_stderr", timeout=5)
+    def get_round_data(self) -> Tuple[Optional[list], Optional[list]]:
+        return self._remote_call("get_round_data", timeout=5)
 
     def set_early_stop(self) -> None:
         self._remote_call("set_early_stop", copy_=True, timeout=4)
