@@ -52,7 +52,7 @@ class BaseReadout(AbsReadout):
         prog.add_readoutconfig(
             ch=self.ro_cfg["ro_ch"],
             name=f"{self.name}_readout_adc",
-            freq=self.pulse_cfg["freq"],
+            freq=self.ro_cfg.get("ro_freq", self.pulse_cfg["freq"]),
             gen_ch=self.pulse_cfg["ch"],
         )
 
@@ -96,7 +96,7 @@ class TwoPulseReadout(AbsReadout):
         prog.add_readoutconfig(
             ch=self.ro_cfg["ro_ch"],
             name=f"{self.name}_readout_adc",
-            freq=self.pulse2_cfg["freq"],
+            freq=self.ro_cfg.get("ro_freq", self.pulse2_cfg["freq"]),
             gen_ch=self.pulse2_cfg["ch"],
         )
 
