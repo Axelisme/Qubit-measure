@@ -52,13 +52,13 @@ def sweep_hard_template(
 
         try:
             signals = measure_fn(cfg, callback)
-        except KeyboardInterrupt as e:
+        except KeyboardInterrupt:
             if not catch_interrupt:
-                raise e  # re-raise if not catching
+                raise
             print("Received KeyboardInterrupt, early stopping the program")
-        except Exception as e:
+        except Exception:
             if not catch_interrupt:
-                raise e  #
+                raise
             print("Error during measurement:")
             print_traceback()
         viewer.update(*ticks, signal2real(signals))
@@ -103,13 +103,13 @@ def sweep1D_soft_template(
 
                     async_draw(xs, signal2real(signals))
 
-        except KeyboardInterrupt as e:
+        except KeyboardInterrupt:
             if not catch_interrupt:
-                raise e  #
+                raise
             print("Received KeyboardInterrupt, early stopping the program")
-        except Exception as e:
+        except Exception:
             if not catch_interrupt:
-                raise e  #
+                raise
             print("Error during measurement:")
             print_traceback()
         viewer.update(xs, signal2real(signals))
@@ -175,14 +175,14 @@ def sweep2D_soft_hard_template(
 
                     async_draw(xs, ys, signal2real(signals2D))
 
-        except KeyboardInterrupt as e:
+        except KeyboardInterrupt:
             if not catch_interrupt:
-                raise e  #
+                raise
             print("Received KeyboardInterrupt, early stopping the program")
             viewer.update(xs, ys, signal2real(signals2D))
-        except Exception as e:
+        except Exception:
             if not catch_interrupt:
-                raise e  #
+                raise
             print("Error during measurement:")
             print_traceback()
         finally:
