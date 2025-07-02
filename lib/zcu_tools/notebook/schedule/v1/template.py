@@ -102,7 +102,8 @@ def sweep1D_soft_template(
     with liveplotter as viewer:
         try:
             xs_tqdm = tqdm(xs, smoothing=0, disable=not progress)
-            with AsyncFunc(viewer.update, include_idx=False) as async_draw:
+            with AsyncFunc(viewer.update) as async_draw:
+                assert async_draw is not None
                 for i, x in enumerate(xs_tqdm):
                     updateCfg(cfg, i, x)
 
@@ -112,7 +113,7 @@ def sweep1D_soft_template(
                     results = measure_fn(cfg, callback=None)
                     signals[i], stds[i] = result2signals(*results)
 
-                    async_draw(i, xs, signal2real(signals))
+                    async_draw(xs, signal2real(signals))
 
         except KeyboardInterrupt as e:
             if not catch_interrupt:
@@ -195,7 +196,8 @@ def sweep2D_soft_hard_template(
         try:
             xs_tqdm = tqdm(xs, smoothing=0, disable=not progress)
             avgs_tqdm = tqdm(total=cfg["soft_avgs"], smoothing=0, disable=not progress)
-            with AsyncFunc(viewer.update, include_idx=False) as async_draw:
+            with AsyncFunc(viewer.update) as async_draw:
+                assert async_draw is not None
                 for i, x in enumerate(xs_tqdm):
                     updateCfg(cfg, i, x)
 
@@ -224,7 +226,7 @@ def sweep2D_soft_hard_template(
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
 
-                    async_draw(i, xs, ys, signal2real(signals2D))
+                    async_draw(xs, ys, signal2real(signals2D))
 
         except KeyboardInterrupt as e:
             if not catch_interrupt:
@@ -267,8 +269,8 @@ def sweep2D_soft_soft_template(
         try:
             xs_tqdm = tqdm(xs, smoothing=0, disable=not progress)
             ys_tqdm = tqdm(ys, smoothing=0, disable=not progress)
-            with AsyncFunc(viewer.update, include_idx=False) as async_draw:
-                count = 0
+            with AsyncFunc(viewer.update) as async_draw:
+                assert async_draw is not None
                 for i, x in enumerate(xs):
                     x_updateCfg(cfg, i, x)
 
@@ -284,8 +286,7 @@ def sweep2D_soft_soft_template(
 
                         ys_tqdm.update()
 
-                        async_draw(count, xs, ys, signal2real(signals2D))
-                        count += 1
+                        async_draw(xs, ys, signal2real(signals2D))
                     xs_tqdm.update()
 
         except KeyboardInterrupt as e:

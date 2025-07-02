@@ -1,8 +1,12 @@
 import sys
+import threading
 import time
 import traceback
 from copy import deepcopy
-from typing import Any, Callable, Dict, Literal, Optional, Union
+from functools import wraps
+from typing import Any, Callable, Dict, Generic, Literal, Optional, TypeVar, Union
+
+from typing_extensions import ParamSpec
 
 
 def deepupdate(
@@ -173,21 +177,16 @@ def print_traceback() -> None:
         print(traceback.format_exc())
 
 
-class AsyncFunc:
-    """
-    一個用於執行非同步函數的工具類別，支援最小間隔時間與索引參數。
+P = ParamSpec("P")
 
-    Attributes:
-        func (Optional[Callable]): 要執行的函數。
-        min_interval (float): 兩次執行之間的最小間隔時間。
-        include_idx (bool): 是否在執行函數時包含索引參數。
+
+class AsyncFunc(Generic[P]):
+    """
+    讓函數在非同步線程中執行，並確保最小間隔時間。
     """
 
     def __init__(
-        self,
-        func: Optional[Callable[..., None]],
-        min_interval: float = 0.1,
-        include_idx: bool = True,
+        self, func: Optional[Callable[P, None]], min_interval: float = 0.1
     ) -> None:
         """
         初始化 AsyncFunc 類別。
@@ -195,43 +194,50 @@ class AsyncFunc:
         Args:
             func (Optional[Callable]): 要執行的函數。
             min_interval (float, optional): 兩次執行之間的最小間隔時間。預設為 0.1 秒。
-            include_idx (bool, optional): 是否在執行函數時包含索引參數。預設為 True。
-
-        Raises:
-            ValueError: 當 `min_interval` 小於等於 0 時拋出。
         """
         self.func = func
         self.min_interval = min_interval
-        self.include_idx = include_idx
 
         if min_interval <= 0:
             raise ValueError("min_interval must be greater than 0")
 
-    def __enter__(self) -> Optional["AsyncFunc"]:
-        """
-        啟動非同步執行環境，並初始化相關資源。
+        if func is not None and not callable(func):
+            raise TypeError("func must be a callable")
 
-        Returns:
-            AsyncFunc: 返回自身以供使用。
-        """
-        if self.func is None:
-            return None  # do nothing
-
-        import threading
-
+    def _init_worker_thread(self) -> None:
         self.lock = threading.Lock()
 
         # these variables are protected by lock
         self.acquiring = True
         self.have_new_job = threading.Event()
-        self.last_ir = -1  # initial to -1 to accept the first job
         self.last_job = None
 
         # start worker thread
         self.worker_t = threading.Thread(target=self.work_loop, daemon=True)
         self.worker_t.start()  # start worker thread
 
-        return self
+    def __enter__(self) -> Optional[Callable[P, None]]:
+        """
+        啟動非同步執行環境，並初始化相關資源。
+        """
+        if self.func is None:
+            return None  # do nothing
+
+        self._init_worker_thread()
+
+        @wraps(self.func)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
+            # this method may be called concurrently, so we need to protect it
+            # also, make it executed in worker thread, to avoid blocking main thread
+            with self.lock:
+                # only keep the latest job
+                if self.acquiring:
+                    self.last_job = deepcopy((args, kwargs))
+                    self.have_new_job.set()  # notify worker thread
+
+            return None
+
+        return wrapper
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """
@@ -272,31 +278,10 @@ class AsyncFunc:
             # do not raise exception in this thread
             try:
                 assert job is not None, "Job should not be None"
-                ir, args, kwargs = job
-                if self.include_idx:
-                    self.func(ir, *args, **kwargs)
-                else:
-                    self.func(*args, **kwargs)
+                args, kwargs = job
+                self.func(*args, **kwargs)
             except Exception:
                 print("Error in callback:")
                 print_traceback()
             finally:
                 prev_start = time.time()
-
-    def __call__(self, ir: int, *args, **kwargs) -> None:
-        """
-        將任務加入執行佇列，並確保僅保留最新的任務。
-
-        Args:
-            ir (int): 任務的索引。
-            *args: 傳遞給函數的參數。
-            **kwargs: 傳遞給函數的關鍵字參數。
-        """
-        # this method may be called concurrently, so we need to protect it
-        # also, make it executed in worker thread, to avoid blocking main thread
-        with self.lock:
-            # only keep the latest job
-            if ir > self.last_ir and self.acquiring:
-                self.last_ir = ir
-                self.last_job = deepcopy((ir, args, kwargs))
-                self.have_new_job.set()  # notify worker thread

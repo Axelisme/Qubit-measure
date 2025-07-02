@@ -26,7 +26,7 @@ from .models import count_max_evals, energy2linearform
     "float64(float64[:], float64, float64[:,:], float64[:,:])",
     nogil=True,
 )
-def eval_dist(A: np.ndarray, a: float, B: np.ndarray, C: np.ndarray):
+def eval_dist(A: np.ndarray, a: float, B: np.ndarray, C: np.ndarray) -> float:
     """
     計算: mean_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
     """
@@ -262,7 +262,7 @@ def search_in_database(
 
     prev_draw_idx = -1
 
-    def update_plot(_):
+    def update_plot() -> None:
         nonlocal best_dist, best_params, results, prev_draw_idx, best_idx
 
         # Update best result
@@ -305,6 +305,7 @@ def search_in_database(
     idx_bar = trange(f_params.shape[0], desc="Searching...")
     try:
         with AsyncFunc(update_plot) as async_plot:
+            assert async_plot is not None
             for i, dist, factor in Parallel(
                 return_as="generator_unordered", n_jobs=n_jobs, require="sharedmem"
             )(delayed(process_energy)(i, fuzzy) for i in idx_bar):
@@ -318,14 +319,14 @@ def search_in_database(
                     best_dist = dist
 
                 # Update plot
-                async_plot(i)
+                async_plot()
             else:
                 idx_bar.set_description_str("Done! ")
         if fuzzy:
             # recalculate factor
             best_idx, best_dist, best_factor = process_energy(best_idx, fuzzy=False)
             best_params = f_params[best_idx] * best_factor
-        update_plot(best_idx)
+        update_plot()
 
     except KeyboardInterrupt:
         pass
@@ -345,7 +346,7 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
 
     pbar = tqdm(desc="Distance: nan", total=maxfun)
 
-    def update_pbar(params, dist):
+    def update_pbar(params, dist) -> None:
         nonlocal pbar
 
         pbar.set_postfix_str(f"({params[0]:.3f}, {params[1]:.3f}, {params[2]:.2f})")
@@ -353,7 +354,7 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
         pbar.update()
 
     # 使用 least_squares 進行參數最佳化
-    def residuals(params):
+    def residuals(params) -> np.ndarray:
         nonlocal flxs, allows, fpts
 
         # 計算能量並轉成線性形式
