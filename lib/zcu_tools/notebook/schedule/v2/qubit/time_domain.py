@@ -4,7 +4,7 @@ from typing import Tuple
 import numpy as np
 from zcu_tools.liveplot.jupyter import LivePlotter1D
 from zcu_tools.notebook.single_qubit.process import rotate2real
-from zcu_tools.program.v2 import T1Program, T2EchoProgram, T2RamseyProgram
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, make_readout, make_reset
 
 from ...tools import format_sweep1D, sweep2array, sweep2param
 from ..template import sweep_hard_template
@@ -22,18 +22,33 @@ def measure_t2ramsey(
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
     sweep_cfg = cfg["sweep"]["length"]
 
-    cfg["pi2_pulse1"] = deepcopy(cfg["pi2_pulse"])
-    cfg["pi2_pulse2"] = deepcopy(cfg["pi2_pulse"])
-
     t2r_spans = sweep2param("length", sweep_cfg)
-    cfg["pi2_pulse1"]["post_delay"] = t2r_spans
-    cfg["pi2_pulse2"]["phase"] = cfg["pi2_pulse2"]["phase"] + 360 * detune * t2r_spans
 
-    ts = sweep2array(sweep_cfg)  # predicted times
-
-    prog = T2RamseyProgram(soccfg, cfg)
+    prog = ModularProgramV2(
+        soccfg,
+        cfg,
+        modules=[
+            make_reset("reset", reset_cfg=cfg["reset"]),
+            Pulse(
+                name="pi2_pulse1",
+                cfg={
+                    **cfg["pi2_pulse"],
+                    "post_delay": t2r_spans,
+                },
+            ),
+            Pulse(
+                name="pi2_pulse2",
+                cfg={
+                    **cfg["pi2_pulse"],
+                    "phase": cfg["pi2_pulse"]["phase"] + 360 * detune * t2r_spans,
+                },
+            ),
+            make_readout("readout", readout_cfg=cfg["readout"]),
+        ],
+    )
 
     # linear hard sweep
+    ts = sweep2array(sweep_cfg)  # predicted times
     signals = sweep_hard_template(
         cfg,
         lambda _, cb: prog.acquire(soc, progress=True, callback=cb)[0][0].dot([1, 1j]),
@@ -59,21 +74,40 @@ def measure_t2echo(
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
     sweep_cfg = cfg["sweep"]["length"]
 
-    cfg["pi2_pulse1"] = deepcopy(cfg["pi2_pulse"])
-    cfg["pi2_pulse2"] = deepcopy(cfg["pi2_pulse"])
+    t2e_spans = sweep2param("length", sweep_cfg)
 
-    t2e_half_spans = 0.5 * sweep2param("length", sweep_cfg)
-    cfg["pi2_pulse1"]["post_delay"] = t2e_half_spans
-    cfg["pi_pulse"]["post_delay"] = t2e_half_spans
-    cfg["pi2_pulse2"]["phase"] = (
-        cfg["pi2_pulse2"]["phase"] + 2 * 360 * detune * t2e_half_spans
+    prog = ModularProgramV2(
+        soccfg,
+        cfg,
+        modules=[
+            make_reset("reset", reset_cfg=cfg["reset"]),
+            Pulse(
+                name="pi2_pulse1",
+                cfg={
+                    **cfg["pi2_pulse"],
+                    "post_delay": 0.5 * t2e_spans,
+                },
+            ),
+            Pulse(
+                name="pi_pulse",
+                cfg={
+                    **cfg["pi_pulse"],
+                    "post_delay": 0.5 * t2e_spans,
+                },
+            ),
+            Pulse(
+                name="pi2_pulse2",
+                cfg={
+                    **cfg["pi2_pulse"],
+                    "phase": cfg["pi2_pulse"]["phase"] + 360 * detune * t2e_spans,
+                },
+            ),
+            make_readout("readout", readout_cfg=cfg["readout"]),
+        ],
     )
 
-    ts = 2 * sweep2array(sweep_cfg) + cfg["pi_pulse"]["length"]  # predicted times
-
-    prog = T2EchoProgram(soccfg, cfg)
-
     # linear hard sweep
+    ts = sweep2array(sweep_cfg)  # predicted times
     signals = sweep_hard_template(
         cfg,
         lambda _, cb: prog.acquire(soc, progress=True, callback=cb)[0][0].dot([1, 1j]),
@@ -103,13 +137,24 @@ def measure_t1(
     cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
     sweep_cfg = cfg["sweep"]["length"]
 
-    cfg["pi_pulse"]["post_delay"] = sweep2param("length", sweep_cfg)
-
-    ts = sweep2array(sweep_cfg)  # predicted times
-
-    prog = T1Program(soccfg, cfg)
+    prog = ModularProgramV2(
+        soccfg,
+        cfg,
+        modules=[
+            make_reset("reset", reset_cfg=cfg["reset"]),
+            Pulse(
+                name="pi_pulse",
+                cfg={
+                    **cfg["pi_pulse"],
+                    "post_delay": sweep2param("length", sweep_cfg),
+                },
+            ),
+            make_readout("readout", readout_cfg=cfg["readout"]),
+        ],
+    )
 
     # linear hard sweep
+    ts = sweep2array(sweep_cfg)  # predicted times
     signals = sweep_hard_template(
         cfg,
         lambda _, cb: prog.acquire(soc, progress=liveplot, callback=cb)[0][0].dot(

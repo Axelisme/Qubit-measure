@@ -4,7 +4,13 @@ from typing import Tuple
 import numpy as np
 from zcu_tools.liveplot.jupyter import LivePlotter2D
 from zcu_tools.notebook.single_qubit.process import minus_background, rotate2real
-from zcu_tools.program.v2 import ACStarkProgram
+from zcu_tools.program.v2 import (
+    ModularProgramV2,
+    Pulse,
+    check_no_post_delay,
+    make_readout,
+    make_reset,
+)
 
 from ...tools import sweep2array, sweep2param
 from ..template import sweep_hard_template
@@ -17,19 +23,38 @@ def qub_signal2real(signals: np.ndarray) -> np.ndarray:
 def measure_ac_stark(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
+    check_no_post_delay(cfg["stark_pulse1"], "stark_pulse1")
+
     # force the order of sweep
     gain_sweep = cfg["sweep"]["gain"]
     freq_sweep = cfg["sweep"]["freq"]
     cfg["sweep"] = {"gain": gain_sweep, "freq": freq_sweep}
 
-    cfg["stark_pulse1"]["gain"] = sweep2param("gain", gain_sweep)
-    cfg["stark_pulse2"]["freq"] = sweep2param("freq", freq_sweep)
+    prog = ModularProgramV2(
+        soccfg,
+        cfg,
+        modules=[
+            make_reset("reset", reset_cfg=cfg["reset"]),
+            Pulse(
+                name="stark_pulse1",
+                cfg={
+                    **cfg["stark_pulse1"],
+                    "gain": sweep2param("gain", gain_sweep),
+                },
+            ),
+            Pulse(
+                name="stark_pulse2",
+                cfg={
+                    **cfg["stark_pulse2"],
+                    "freq": sweep2param("freq", freq_sweep),
+                },
+            ),
+            make_readout("readout", readout_cfg=cfg["readout"]),
+        ],
+    )
 
     amps = sweep2array(gain_sweep)
     freqs = sweep2array(freq_sweep)
-
-    prog = ACStarkProgram(soccfg, cfg)
-
     signals = sweep_hard_template(
         cfg,
         lambda _, cb: prog.acquire(soc, progress=True, callback=cb)[0][0].dot([1, 1j]),

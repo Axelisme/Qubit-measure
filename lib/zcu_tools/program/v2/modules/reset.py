@@ -1,9 +1,8 @@
-import warnings
 from typing import Any, Dict, Optional
 
 from ..base import MyProgramV2
 from .base import Module
-from .pulse import Pulse
+from .pulse import Pulse, check_no_post_delay
 
 
 class AbsReset(Module):
@@ -77,15 +76,11 @@ class TwoPulseReset(AbsReset):
         post_pulse_cfg: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.name = name
+
+        check_no_post_delay(pulse1_cfg, f"{name}_pulse1")
+
         self.reset_pulse1 = Pulse(name=f"{name}_pulse1", cfg=pulse1_cfg)
         self.reset_pulse2 = Pulse(name=f"{name}_pulse2", cfg=pulse2_cfg)
-
-        interval_delay = pulse1_cfg.get("post_delay")
-        if interval_delay is not None:
-            warnings.warn(
-                "Not-None interval delay in two pulse reset, this will make the two reset pulse not overlap"
-                "make sure this is what you want"
-            )
 
         if post_pulse_cfg is not None:
             self.post_reset_pulse = Pulse(name=f"{name}_post_pulse", cfg=post_pulse_cfg)

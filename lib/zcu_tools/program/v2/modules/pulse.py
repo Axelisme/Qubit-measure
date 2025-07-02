@@ -1,7 +1,16 @@
+import warnings
 from typing import Any, Dict, Optional
 
 from ..base import MyProgramV2, add_pulse, create_waveform
 from .base import Module
+
+
+def check_no_post_delay(cfg: Dict[str, Any], name: str) -> None:
+    if cfg.get("post_delay") is not None:
+        warnings.warn(
+            f"{name} has post_delay, this may potentially make two pulses not overlap. "
+            "Make sure this is what you want."
+        )
 
 
 class Pulse(Module):
