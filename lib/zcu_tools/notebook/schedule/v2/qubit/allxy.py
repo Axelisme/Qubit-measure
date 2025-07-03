@@ -72,13 +72,7 @@ def measure_allxy(soc, soccfg, cfg) -> Tuple[np.ndarray, np.ndarray]:
         xlabel="Gate",
         ylabel="Signal",
         title="All XY",
-        line_kwargs=[
-            {
-                "marker": ".",
-                "linestyle": "",
-                "markersize": 5,
-            }
-        ],
+        line_kwargs=[dict(marker="o", linestyle="None", markersize=5)],
     )
 
     ax = liveplotter.axs[0]
