@@ -1,4 +1,5 @@
 from typing import Any, Dict
+from copy import deepcopy
 
 from ..base import force_no_post_delay
 from .base import Module
@@ -37,13 +38,15 @@ class BaseReadout(AbsReadout):
         ro_cfg: Dict[str, Any],
     ) -> None:
         self.name = name
-        self.pulse_cfg = pulse_cfg
-        self.ro_cfg = ro_cfg
+        self.pulse_cfg = deepcopy(pulse_cfg)
+        self.ro_cfg = deepcopy(ro_cfg)
 
         # TODO: support post delay
         pulse_name = f"{name}_pulse"
-        force_no_post_delay(pulse_cfg, pulse_name)
-        self.pulse = Pulse(name=pulse_name, cfg=pulse_cfg, ro_ch=ro_cfg["ro_ch"])
+        force_no_post_delay(self.pulse_cfg, pulse_name)
+        self.pulse = Pulse(
+            name=pulse_name, cfg=self.pulse_cfg, ro_ch=self.ro_cfg["ro_ch"]
+        )
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse.init(prog)
@@ -76,16 +79,16 @@ class TwoPulseReadout(AbsReadout):
     ) -> None:
         self.name = name
         self.ro_cfg = ro_cfg
-        self.pulse1_cfg = pulse1_cfg
-        self.pulse2_cfg = pulse2_cfg
+        self.pulse1_cfg = deepcopy(pulse1_cfg)
+        self.pulse2_cfg = deepcopy(pulse2_cfg)
 
         # TODO: support post delay
         pulse2_name = f"{name}_pulse2"
-        force_no_post_delay(pulse2_cfg, pulse2_name)
+        force_no_post_delay(self.pulse2_cfg, pulse2_name)
 
-        self.pulse1 = Pulse(name=f"{name}_pulse1", cfg=pulse1_cfg)
+        self.pulse1 = Pulse(name=f"{name}_pulse1", cfg=self.pulse1_cfg)
         self.pulse2 = Pulse(
-            name=f"{name}_pulse2", cfg=pulse2_cfg, ro_ch=ro_cfg["ro_ch"]
+            name=f"{name}_pulse2", cfg=self.pulse2_cfg, ro_ch=self.ro_cfg["ro_ch"]
         )
 
     def init(self, prog: MyProgramV2) -> None:

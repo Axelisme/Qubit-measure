@@ -1,5 +1,6 @@
 import warnings
 from typing import Any, Dict, Optional
+from copy import deepcopy
 
 from ..base import MyProgramV2, add_pulse, create_waveform
 from .base import Module
@@ -18,7 +19,7 @@ class Pulse(Module):
         self, name: str, cfg: Optional[Dict[str, Any]], ro_ch: Optional[int] = None
     ) -> None:
         self.name = name
-        self.cfg = cfg
+        self.cfg = deepcopy(cfg)
         self.ro_ch = ro_ch
 
     def init(self, prog: MyProgramV2) -> None:
