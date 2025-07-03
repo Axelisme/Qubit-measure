@@ -25,5 +25,6 @@ from .qubit import (
     measure_t1,
     measure_t2echo,
     measure_t2ramsey,
+    measure_allxy,
 )
 from .resonator import measure_res_flux_dep, measure_res_freq, measure_res_pdr_dep
