@@ -36,35 +36,9 @@ def auto_derive_waveform(pulse_cfg: Dict[str, Any]) -> None:
     Args:
         pulse_cfg (Dict[str, Any]): The pulse configuration dictionary.
 
-    Notes:
-        - If the pulse style is "flat_top", a raise pulse is added with default parameters.
-        - For "gauss" and "drag" styles, the sigma value is derived based on the pulse length.
-        - For "drag" style, the alpha parameter is set to a default value if not provided.
     """
-    # style and length are required to derive waveform
-    if "style" not in pulse_cfg:
-        return  # do nothing
-
-    style: str = pulse_cfg["style"]
-    length: Optional[float] = pulse_cfg.get("length")
-    if style == "flat_top":
-        raise_cfg: Dict[str, Any] = pulse_cfg.setdefault("raise_pulse", {})
-        raise_cfg.setdefault("style", "cosine")  # default use cosine
-        if length is not None:
-            # default raise pulse is 10% of the total length
-            # the minimum length is 15 ns
-            raise_cfg.setdefault("length", 0.1 * max(length, 0.15))
-
-        # derive raise pulse parameters
-        auto_derive_waveform(raise_cfg)
-    else:
-        if style in ["gauss", "drag"]:
-            if length is not None:
-                # default sigma is 1/4 of the total length
-                pulse_cfg.setdefault("sigma", length / 4)
-
-        if style == "drag":
-            pulse_cfg.setdefault("alpha", 0.5)
+    # currently, do nothing
+    pass
 
 
 # Function to automatically derive pulse parameters based on pulse name and configuration
@@ -77,7 +51,7 @@ def auto_derive_pulse(
     if isinstance(pulse_cfg, str):
         name = pulse_cfg
         pulse_cfg = deepcopy(ModuleLibrary.get_module(name))
-        pulse_cfg["name"] = name
+    pulse_cfg["name"] = name
 
     # phase
     pulse_cfg.setdefault("phase", 0.0)  # deg
@@ -97,7 +71,7 @@ def auto_derive_module(
     if isinstance(module_cfg, str):
         name = module_cfg
         module_cfg = deepcopy(ModuleLibrary.get_module(name))
-        module_cfg["name"] = name
+    module_cfg["name"] = name
 
     # derive pulse in module
     for key, value in module_cfg.items():

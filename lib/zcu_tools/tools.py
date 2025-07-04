@@ -281,7 +281,7 @@ class AsyncFunc(Generic[P]):
                 args, kwargs = job
                 self.func(*args, **kwargs)
             except Exception:
-                print("Error in callback:")
+                print("Error in async func:")
                 print_traceback()
             finally:
                 prev_start = time.time()

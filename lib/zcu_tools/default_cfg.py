@@ -13,10 +13,13 @@ class ModuleLibrary:
     @classmethod
     def register_waveform(cls, **kwargs) -> None:
         kwargs = deepcopy(kwargs)
+
+        # filter out non-waveform attributes
         for name, wav_cfg in kwargs.items():
             waveform = dict(style=wav_cfg["style"], length=wav_cfg["length"])
             if waveform["style"] == "flat_top":
                 waveform["raise_pulse"] = wav_cfg["raise_pulse"]
+
         cls.waveforms[name] = waveform
 
     @classmethod
