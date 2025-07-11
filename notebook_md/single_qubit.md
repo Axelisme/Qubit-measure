@@ -1317,6 +1317,9 @@ ModuleLibrary.register_module(
 
 # T1 & T2
 
+```python
+# t1 = 5.0
+```
 
 ## T2Ramsey
 
