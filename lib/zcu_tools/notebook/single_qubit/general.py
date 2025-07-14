@@ -8,9 +8,8 @@ from scipy.optimize import curve_fit
 
 import zcu_tools.notebook.util.fitting as ft
 
+from .config import figsize
 from .process import rotate2real
-
-figsize = (8, 6)
 
 
 def lookback_show(
