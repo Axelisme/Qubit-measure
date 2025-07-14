@@ -75,13 +75,13 @@ spectrum_data = None
 
 ```python
 # loading points
-loadpath = f"../../result/{qub_name}/freqs.csv"
+loadpath = f"../../result/{qub_name}/sample.csv"
 
 freqs_df = pd.read_csv(loadpath)
-s_mAs = freqs_df["Current (mA)"].values  # mA
+s_mAs = freqs_df["calibrated mA"].values  # mA
 s_fpts = freqs_df["Freq (MHz)"].values * 1e-3  # GHz
-s_T1s = freqs_df["T1 (μs)"].values
-s_T1errs = freqs_df["T1err (μs)"].values
+s_T1s = freqs_df["T1 (us)"].values
+s_T1errs = freqs_df["T1err (us)"].values
 
 # sort by flux
 s_mAs, s_fpts, s_T1s, s_T1errs = tuple(
@@ -134,12 +134,12 @@ _, energies = calculate_energy_vs_flx(params, flxs, spectrum_data=spectrum_data)
 v_allows = {
     # **allows,
     "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
-    "transitions2": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
+    # "transitions2": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
     # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 3)],
-    "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
+    # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
     # "mirror": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 15)],
     # "mirror red": [(i, j) for i in (0, 1, 2, 3) for j in range(i + 1, 15)],
-    "r_f": 5.9274,
+    "r_f": 7.520,
     "sample_f": 9.58464 / 2,
     # "r_f": r_f,
     # "sample_f": sample_f,

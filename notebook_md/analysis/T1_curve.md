@@ -184,12 +184,12 @@ fit_noise, fit_temp = fit_noise_and_temp(
     init_guess_noise=[
         ("t1_capacitive", dict(Q_cap=Q_cap)),
         ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
-        # ("t1_inductive", dict(Q_ind=Q_ind)),
+        ("t1_inductive", dict(Q_ind=Q_ind)),
     ],
     bounds_noise=[
         ("t1_capacitive", dict(Q_cap=(0.5 * Q_cap, 10 * Q_cap))),
         ("t1_quasiparticle_tunneling", dict(x_qp=(0.1 * x_qp, 2 * x_qp))),
-        # ("t1_inductive", dict(Q_ind=(0.5 * Q_ind, 10 * Q_ind))),
+        ("t1_inductive", dict(Q_ind=(0.5 * Q_ind, 10 * Q_ind))),
     ],
     init_guess_temp=Temp,
     bounds_temp=(10e-3, 500e-3),
@@ -215,7 +215,7 @@ plt.show()
 ```python
 Q_cap = fit_noise[0][1]["Q_cap"]
 x_qp = fit_noise[1][1]["x_qp"]
-# Q_ind = fit_noise[2][1]["Q_ind"]
+Q_ind = fit_noise[2][1]["Q_ind"]
 Temp = fit_temp
 ```
 
@@ -227,7 +227,7 @@ fig, ax = plot_eff_t1_with_sample(
     noise_channels=[
         ("t1_capacitive", dict(Q_cap=Q_cap)),
         ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
-        # ("t1_inductive", dict(Q_ind=Q_ind)),
+        ("t1_inductive", dict(Q_ind=Q_ind)),
     ],
     Temp=Temp,
     # Temp=20e-3,
@@ -241,8 +241,8 @@ plt.show()
 t1 = calculate_eff_t1_with(
     flx=0.5,
     noise_channels=[("t1_capacitive", dict(Q_cap=Q_cap))],
-    # Temp=Temp,
-    Temp=20e-3,
+    Temp=Temp,
+    # Temp=20e-3,
     fluxonium=fluxonium,
 )
 

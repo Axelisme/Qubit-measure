@@ -200,6 +200,18 @@ fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```
 
+# EC to C
+
+```python
+EC = 0.74
+
+import scipy.constants as sc
+
+Cap = sc.e**2 / (2 * EC * 1e9)
+
+print(f"Capacitance: {1e12 * Cap:.4g} pF")
+```
+
 ```python
 
 ```
