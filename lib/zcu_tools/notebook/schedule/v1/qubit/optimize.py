@@ -42,7 +42,7 @@ def result2snr(
     return contrast / noise, np.zeros_like(dist)
 
 
-def measure_ge_pdr_dep(soc, soccfg, cfg) -> Tuple[ndarray, ndarray, ndarray]:
+def measure_ge_pdr_dep2D(soc, soccfg, cfg) -> Tuple[ndarray, ndarray, ndarray]:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     res_pulse = cfg["dac"]["res_pulse"]

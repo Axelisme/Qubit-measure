@@ -1,6 +1,6 @@
 from .flux_depend import measure_qub_flux_dep
 from .freq import measure_qub_freq
-from .optimize import measure_ge_pdr_dep, measure_ge_ro_dep
+from .optimize import measure_ge_pdr_dep2D, measure_ge_ro_dep
 from .power_depend import measure_qub_pdr_dep
 from .rabi import measure_amprabi, measure_lenrabi
 from .singleshot import measure_singleshot
@@ -15,7 +15,7 @@ __all__ = [
     "measure_t1",
     "measure_t2ramsey",
     "measure_t2echo",
-    "measure_ge_pdr_dep",
+    "measure_ge_pdr_dep2D",
     "measure_ge_ro_dep",
     "measure_singleshot",
 ]
