@@ -2,8 +2,6 @@ import warnings
 from typing import Any, Dict, Union
 
 import numpy as np
-from numpy import ndarray
-from qick.asm_v2 import QickParam, QickSweep1D
 
 
 def format_sweep1D(
@@ -67,31 +65,7 @@ def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):
         )
 
 
-def map2adcfreq(soccfg, fpts, gen_ch, ro_ch):
-    """
-    Map frequencies to ADC frequencies.
-
-    This function converts the input frequencies to ADC frequencies using the
-    system configuration and checks for any duplicated frequencies after conversion.
-
-    Args:
-        soccfg: SocCfg object containing the system configuration
-        fpts: Array of frequencies in MHz
-        gen_ch: Generator channel number
-        ro_ch: Readout channel number or array of readout channels
-
-    Returns:
-        Array of mapped ADC frequencies in Hz
-    """
-    fpts = soccfg.adcfreq(fpts, gen_ch=gen_ch, ro_ch=ro_ch)
-    if len(set(fpts)) != len(fpts):
-        warnings.warn(
-            "Some frequencies are duplicated, you sweep step may be too small"
-        )
-    return fpts
-
-
-def sweep2array(sweep, allow_array=False) -> ndarray:
+def sweep2array(sweep, allow_array=False) -> np.ndarray:
     """
     Convert sweep parameter to a numpy array.
 
@@ -114,21 +88,3 @@ def sweep2array(sweep, allow_array=False) -> ndarray:
         return np.array(sweep)
     else:
         raise ValueError("Invalid sweep format")
-
-
-def sweep2param(name: str, sweep: Dict[str, Any]) -> QickParam:
-    """
-    Convert formatted sweep dictionary to a QickSweep1D parameter.
-
-    This function creates a QickSweep1D parameter from a formatted sweep dictionary,
-    which is used in Qick v2 assembly programming.
-
-    Args:
-        name: Name of the sweep parameter
-        sweep: Dictionary containing 'start' and 'stop' values for the sweep
-
-    Returns:
-        QickSweep1D: Qick v2 sweep parameter object
-    """
-    # convert formatted sweep to qick v2 sweep param
-    return QickSweep1D(name, sweep["start"], sweep["stop"])

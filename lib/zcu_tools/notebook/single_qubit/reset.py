@@ -1,3 +1,5 @@
+from typing import Optional, Tuple
+
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import gaussian_filter
@@ -7,7 +9,14 @@ from zcu_tools.notebook.single_qubit.process import rotate2real
 from .general import figsize
 
 
-def mux_reset_fpt_analyze(fpts1, fpts2, signals, xname=None, yname=None, smooth=1):
+def mux_reset_fpt_analyze(
+    fpts1: np.ndarray,
+    fpts2: np.ndarray,
+    signals: np.ndarray,
+    xname: Optional[str] = None,
+    yname: Optional[str] = None,
+    smooth: float = 1,
+) -> Tuple[float, float]:
     signals = gaussian_filter(signals, smooth)
 
     amps = np.abs(signals - np.mean(signals))
@@ -36,7 +45,14 @@ def mux_reset_fpt_analyze(fpts1, fpts2, signals, xname=None, yname=None, smooth=
     return x_peak, y_peak
 
 
-def mux_reset_pdr_analyze(pdrs1, pdrs2, signal2D, xname=None, yname=None, smooth=1):
+def mux_reset_pdr_analyze(
+    pdrs1: np.ndarray,
+    pdrs2: np.ndarray,
+    signal2D: np.ndarray,
+    xname: Optional[str] = None,
+    yname: Optional[str] = None,
+    smooth: float = 1,
+) -> Tuple[float, float]:
     signal2D = gaussian_filter(signal2D, smooth)
 
     amp2D = rotate2real(signal2D).real
@@ -79,7 +95,10 @@ def mux_reset_pdr_analyze(pdrs1, pdrs2, signal2D, xname=None, yname=None, smooth
     return x_peak, y_peak
 
 
-def mux_reset_time_analyze(Ts, signals) -> None:
+def mux_reset_time_analyze(
+    Ts: np.ndarray,
+    signals: np.ndarray,
+) -> None:
     signals = rotate2real(signals).real
 
     fig, ax = plt.subplots(figsize=figsize)

@@ -9,23 +9,17 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from tqdm.auto import tqdm
 
-from zcu_tools.datasaver import save_data
-from zcu_tools.liveplot import AbsLivePlotter
-from zcu_tools.liveplot.jupyter import LivePlotter1D
+from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.liveplot import AbsLivePlotter, LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
+from zcu_tools.utils.datasaver import save_data
 
-from ..base import AbsExperiment
-from ..config import figsize
 from ..flux import set_flux
 
 LookbackResultType = Tuple[np.ndarray, np.ndarray]
 
 
 class LookbackExperiment(AbsExperiment[LookbackResultType]):
-    def __init__(self) -> None:
-        self.last_cfg = None
-        self.last_result = None
-
     def run(
         self,
         soc,
@@ -111,23 +105,24 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
 
                 viewer.update(Ts, np.abs(signals))
 
-        # record last result and cfg
-        self.last_cfg = deepcopy(cfg)
+        # record last cfg and result
+        self.last_cfg = cfg
         self.last_result = (Ts, signals)
 
-        return self.last_result
+        return Ts, signals
 
     def analyze(
         self,
         result: Optional[LookbackResultType] = None,
         *,
-        plot_fit=True,
-        smooth=None,
         ratio: float = 0.3,
+        smooth: Optional[float] = None,
         ro_cfg: Optional[dict] = None,
+        plot_fit: bool = True,
     ) -> float:
         if result is None:
             result = self.last_result
+        assert result is not None, "no result found"
 
         Ts, signals = result
 
@@ -138,7 +133,7 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
         # find first idx where y is larger than ratio * max_y
         offset = Ts[np.argmax(y > ratio * np.max(y))]
 
-        plt.figure(figsize=figsize)
+        plt.figure(figsize=config.figsize)
         plt.plot(Ts, signals.real, label="I value")
         plt.plot(Ts, signals.imag, label="Q value")
         plt.plot(Ts, y, label="mag")
@@ -162,12 +157,14 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
     def save(
         self,
         filepath: str,
-        result: Optional[LookbackResultType],
+        result: Optional[LookbackResultType] = None,
         comment: Optional[str] = None,
+        tag: str = "lookback",
         **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
+        assert result is not None, "no result found"
 
         Ts, signals = result
 
@@ -176,6 +173,6 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
             x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
-            tag="Lookback",
+            tag=tag,
             **kwargs,
         )

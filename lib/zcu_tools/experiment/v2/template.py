@@ -6,7 +6,8 @@ from numpy import ndarray
 from tqdm.auto import tqdm
 
 from zcu_tools.liveplot import AbsLivePlotter
-from zcu_tools.tools import AsyncFunc, print_traceback
+from zcu_tools.utils.async_func import AsyncFunc
+from zcu_tools.utils.debug import print_traceback
 
 from ..flux import set_flux
 

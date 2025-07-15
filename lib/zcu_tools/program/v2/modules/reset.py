@@ -9,7 +9,10 @@ class AbsReset(Module):
     pass
 
 
-def make_reset(name: str, reset_cfg: Dict[str, Any]) -> AbsReset:
+def make_reset(name: str, reset_cfg: Optional[Dict[str, Any]]) -> AbsReset:
+    if reset_cfg is None:
+        return NoneReset()
+
     reset_type = reset_cfg["type"]
 
     if reset_type == "none":

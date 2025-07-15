@@ -1,5 +1,5 @@
-from typing import Any, Dict
 from copy import deepcopy
+from typing import Any, Dict
 
 from ..base import force_no_post_delay
 from .base import Module

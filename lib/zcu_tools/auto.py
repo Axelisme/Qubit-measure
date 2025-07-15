@@ -101,9 +101,6 @@ def is_pulse_cfg(name: str, pulse_cfg: Any) -> bool:
 
 # Function to automatically derive experiment configuration parameters
 def auto_derive(exp_cfg: Dict[str, Any]) -> None:
-    exp_cfg.setdefault("dev", dict(flux_dev="none", flux=0.0))
-    exp_cfg.setdefault("reset", dict(type="none"))
-
     # derive pulse
     # TODO: better way to derive module and pulse
     for name, sub_cfg in exp_cfg.items():

@@ -83,7 +83,7 @@ def singleshot_ge_analysis(
     signals: np.ndarray,
     angle: float = None,
     backend: Literal["center", "regression", "pca"] = "pca",
-) -> Tuple[float, float, float]:
+) -> Tuple[float, float, float, np.ndarray]:
     """
     Analyze ground and excited state signals to determine classification parameters.
 
@@ -105,11 +105,12 @@ def singleshot_ge_analysis(
 
     Returns
     -------
-    Tuple[float, float, float]
+    Tuple[float, float, float, np.ndarray]
         A tuple containing:
         - fidelity: The assignment fidelity between ground and excited states (0.5-1.0)
         - threshold: The optimal threshold value for state discrimination
         - theta_deg: The optimal rotation angle in degrees
+        - populations: The populations of ground and excited states
     """
     if angle is not None:
         return fit_ge_manual(signals, angle)

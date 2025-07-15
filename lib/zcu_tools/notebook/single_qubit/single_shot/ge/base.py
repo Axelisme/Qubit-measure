@@ -3,8 +3,7 @@ from typing import Callable, Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-
-from zcu_tools.notebook.util.fitting import gauss_func, fit_dual_gauss
+from zcu_tools.notebook.util.fitting import fit_dual_gauss, gauss_func
 
 
 def rotate(
@@ -89,7 +88,7 @@ def fitting_ge_and_plot(
     signals: np.ndarray,
     classify_func: Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], Dict],
     numbins: int = 200,
-) -> Tuple[float, float, float]:
+) -> Tuple[float, float, float, np.ndarray]:
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
 
@@ -158,5 +157,10 @@ def fitting_ge_and_plot(
         fid,
         threshold,
         theta * 180 / np.pi,
-        (n_gg, n_ge, n_eg, n_ee),
-    )  # fids: ge, gf, ef
+        np.array(
+            [
+                [n_gg, n_ge],
+                [n_eg, n_ee],
+            ]
+        ),
+    )

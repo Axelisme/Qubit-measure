@@ -130,6 +130,31 @@ def phase_analyze(
     return slope, offset
 
 
+def fit_resonence_freq(
+    fpts: np.ndarray,
+    real_signals: np.ndarray,
+    type: Literal["lor", "sinc"] = "lor",
+    asym=False,
+) -> Tuple[float, float, float, Tuple[Tuple[float, ...], np.ndarray]]:
+    if type == "lor":
+        if asym:
+            pOpt, pCov = ft.fit_asym_lor(fpts, real_signals)
+        else:
+            pOpt, pCov = ft.fitlor(fpts, real_signals)
+        freq: float = pOpt[3]
+        kappa: float = 2 * pOpt[4]
+        freq_err = np.sqrt(np.diag(pCov))[3]
+    elif type == "sinc":
+        if asym:
+            raise ValueError("Asymmetric sinc fit is not supported.")
+        pOpt, pCov = ft.fitsinc(fpts, real_signals)
+        freq: float = pOpt[3]
+        kappa: float = 1.2067 * pOpt[4]  # sinc function hwm is 1.2067 * gamma
+        freq_err = np.sqrt(np.diag(pCov))[3]
+
+    return freq, kappa, freq_err, (pOpt, pCov)
+
+
 def freq_analyze(
     fpts: np.ndarray,
     signals: np.ndarray,
@@ -147,24 +172,11 @@ def freq_analyze(
     else:
         y = np.abs(signals)
 
+    freq, kappa, freq_err, (pOpt, pCov) = fit_resonence_freq(fpts, y, type, asym)
     if type == "lor":
-        if asym:
-            pOpt, err = ft.fit_asym_lor(fpts, y)
-            curve = ft.asym_lorfunc(fpts, *pOpt)
-        else:
-            pOpt, err = ft.fitlor(fpts, y)
-            curve = ft.lorfunc(fpts, *pOpt)
-        freq: float = pOpt[3]
-        kappa: float = 2 * pOpt[4]
-        freq_err = np.sqrt(np.diag(err))[3]
+        curve = ft.lorfunc(fpts, *pOpt)
     elif type == "sinc":
-        if asym:
-            raise ValueError("Asymmetric sinc fit is not supported.")
-        pOpt, err = ft.fitsinc(fpts, y)
         curve = ft.sincfunc(fpts, *pOpt)
-        freq: float = pOpt[3]
-        kappa: float = 1.2067 * pOpt[4]  # sinc function hwm is 1.2067 * gamma
-        freq_err = np.sqrt(np.diag(err))[3]
 
     plt.figure(figsize=figsize)
     plt.tight_layout()
