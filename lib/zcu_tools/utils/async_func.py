@@ -2,7 +2,9 @@ import threading
 import time
 from copy import deepcopy
 from functools import wraps
-from typing import Callable, Generic, Optional, ParamSpec
+from typing import Callable, Generic, Optional
+
+from typing_extensions import ParamSpec
 
 from zcu_tools.utils.debug import print_traceback
 

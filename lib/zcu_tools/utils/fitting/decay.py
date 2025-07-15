@@ -21,7 +21,9 @@ def fit_dual_decay(
     xs: np.ndarray, real_signals: np.ndarray
 ) -> Tuple[
     float,
-    ...,
+    float,
+    float,
+    float,
     np.ndarray,
     Tuple[Tuple[float, ...], np.ndarray],
 ]:
@@ -49,7 +51,9 @@ def fit_dual_decay(
 
 def fit_decay_fringe(
     xs: np.ndarray, real_signals: np.ndarray
-) -> Tuple[float, ..., np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
+) -> Tuple[
+    float, float, float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]
+]:
     pOpt, pCov = fitdecaycos(xs, real_signals)
 
     fit_signals = decaycos(xs, *pOpt)

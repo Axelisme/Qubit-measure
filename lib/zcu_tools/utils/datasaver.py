@@ -78,7 +78,7 @@ def remove_ext(filepath: str) -> str:
     return filepath
 
 
-def safe_labber_filepath(filepath: str):
+def safe_labber_filepath(filepath: str) -> str:
     """
     Ensure a unique file path by appending a numeric suffix if the file already exists.
 
@@ -92,7 +92,7 @@ def safe_labber_filepath(filepath: str):
 
     filepath = format_ext(filepath)
 
-    def parse_filepath(filepath):
+    def parse_filepath(filepath) -> Tuple[str, int, str]:
         filename, ext = os.path.splitext(filepath)
         count = filename.split("_")[-1]
         if count.isdigit():
@@ -118,7 +118,7 @@ def save_local_data(
     y_info: Optional[dict] = None,
     comment: Optional[str] = None,
     tag: Optional[str] = None,
-):
+) -> None:
     """
     Save data locally in a Labber-compatible format.
 
@@ -271,7 +271,7 @@ def upload_to_server(filepath: str, server_ip: str, port: int) -> bool:
         return False
 
 
-def download_from_server(filepath: str, server_ip: str, port: int):
+def download_from_server(filepath: str, server_ip: str, port: int) -> None:
     """
     Download a file from a remote server.
 
@@ -306,7 +306,7 @@ def save_data(
     tag: Optional[str] = None,
     server_ip: Optional[str] = None,
     port: int = 4999,
-):
+) -> None:
     """
     Save data either locally or to a remote server.
 
@@ -339,7 +339,7 @@ def load_data(
     filepath: str,
     server_ip: Optional[str] = None,
     port: int = 4999,
-):
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """
     Load data either locally or from a remote server.
 
