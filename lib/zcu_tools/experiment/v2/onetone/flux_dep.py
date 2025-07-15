@@ -88,8 +88,27 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
     def analyze(
         self,
         result: Optional[FluxDepResultType] = None,
+        mA_c: Optional[float] = None,
+        mA_e: Optional[float] = None,
     ) -> None:
-        raise NotImplementedError("Not implemented")
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        As, fpts, signals2D = result
+
+        from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
+
+        actline = InteractiveLines(
+            signals2D,
+            mAs=1e3 * As,
+            fpts=fpts,
+            mA_c=mA_c,
+            mA_e=mA_e,
+            use_phase=False,
+        )
+
+        return actline
 
     def save(
         self,

@@ -11,10 +11,8 @@ from .optimize import (
 from .power_depend import measure_qub_pdr_dep
 from .rabi import measure_amprabi, measure_lenrabi
 from .reset import (
-    measure_mux_reset_amprabi,
     measure_mux_reset_freq,
     measure_mux_reset_pdr,
-    measure_mux_reset_time,
     measure_reset_amprabi,
     measure_reset_freq,
     measure_reset_time,

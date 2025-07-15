@@ -56,9 +56,7 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
             return Ts, IQlist[0].dot([1, 1j])
 
         if ro_cfg["ro_length"] <= MAX_LEN:
-            Ts, signals = run_once(
-                soc, soccfg, cfg, progress=progress, qub_pulse=qub_pulse
-            )
+            Ts, signals = run_once(cfg, progress=progress)
         else:
             # measure multiple times
             trig_offset = ro_cfg["trig_offset"]
@@ -83,9 +81,7 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
                 while trig_offset < total_len:
                     ro_cfg["trig_offset"] = trig_offset
 
-                    Ts_, singals_ = run_once(
-                        soc, soccfg, cfg, progress=False, qub_pulse=qub_pulse
-                    )
+                    Ts_, singals_ = run_once(cfg, progress=False)
 
                     Ts.append(Ts_)
                     signals.append(singals_)

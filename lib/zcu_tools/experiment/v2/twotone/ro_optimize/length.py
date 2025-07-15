@@ -75,7 +75,11 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         return lengths, snrs
 
     def analyze(
-        self, result: Optional[LengthResultType] = None, *, plot: bool = True
+        self,
+        result: Optional[LengthResultType] = None,
+        *,
+        plot: bool = True,
+        t0: Optional[float] = None,
     ) -> float:
         if result is None:
             result = self.last_result
@@ -89,7 +93,11 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
 
         snrs = gaussian_filter1d(snrs, 1)
 
-        max_id = np.argmax(snrs)
+        if t0 is None:
+            max_id = np.argmax(snrs)
+        else:
+            max_id = np.argmax(snrs / np.sqrt(lengths + t0))
+
         max_length = float(lengths[max_id])
         max_snr = float(snrs[max_id])
 

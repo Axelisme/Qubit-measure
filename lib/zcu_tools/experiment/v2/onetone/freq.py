@@ -12,7 +12,6 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_resonence_freq
-from zcu_tools.utils.process import rotate2real
 
 from ..template import sweep_hard_template
 
@@ -69,7 +68,6 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         type: Literal["lor", "sinc"] = "lor",
         asym: bool = False,
         plot_fit: bool = True,
-        max_contrast: bool = False,
     ) -> Tuple[float, float]:
         if result is None:
             result = self.last_result
@@ -81,19 +79,19 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         fpts = fpts[val_mask]
         signals = signals[val_mask]
 
-        y = rotate2real(signals).real if max_contrast else np.abs(signals)
+        amps = np.abs(signals)
 
-        freq, freq_err, kappa, _, y_fit, _ = fit_resonence_freq(fpts, y, type, asym)
+        freq, freq_err, kappa, _, y_fit, _ = fit_resonence_freq(fpts, amps, type, asym)
 
         plt.figure(figsize=config.figsize)
         plt.tight_layout()
-        plt.plot(fpts, y, label="signal", marker="o", markersize=3)
+        plt.plot(fpts, amps, label="signal", marker="o", markersize=3)
         if plot_fit:
             plt.plot(fpts, y_fit, label=f"fit, $kappa$={kappa:.1g} MHz")
             label = f"$f_res$ = {freq:.5g} +/- {freq_err:.1g} MHz"
             plt.axvline(freq, color="r", ls="--", label=label)
         plt.xlabel("Frequency (MHz)")
-        plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        plt.ylabel("Magnitude (a.u.)")
         plt.legend()
         plt.show()
 

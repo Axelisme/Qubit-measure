@@ -51,18 +51,12 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         signals = sweep_hard_template(
             cfg,
-            lambda _, cb: prog.acquire(soc, progress=True, callback=cb)[0][0].dot(
+            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
                 [1, 1j]
             ),
-            LivePlotter1D(
-                "Frequency (MHz)",
-                "Amplitude",
-                title="Qubit spectroscopy",
-                disable=not progress,
-            ),
+            LivePlotter1D("Frequency (MHz)", "Amplitude", disable=not progress),
             ticks=(fpts,),
             signal2real=qubfreq_signal2real,
-            progress=progress,
         )
 
         # actual frequencies used by the FPGA

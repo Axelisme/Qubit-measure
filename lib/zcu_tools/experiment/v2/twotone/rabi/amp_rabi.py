@@ -85,12 +85,10 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
         pi_amp, pi2_amp, y_fit, _ = fit_rabi(pdrs, real_signals, decay=decay)
 
         if plot:
-            xs_fit = np.linspace(pdrs[0], pdrs[-1], 1001)
-
             plt.figure(figsize=config.figsize)
             plt.tight_layout()
             plt.plot(pdrs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-            plt.plot(xs_fit, y_fit, label="fit")
+            plt.plot(pdrs, y_fit, label="fit")
             plt.axvline(pi_amp, ls="--", c="red", label=f"pi = {pi_amp:.3g}")
             plt.axvline(pi2_amp, ls="--", c="red", label=f"pi/2 = {pi2_amp:.3g}")
             plt.xlabel("Pulse gain (a.u.)")

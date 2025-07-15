@@ -9,6 +9,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.utils.datasaver import save_data
 
 from ...template import sweep_hard_template
 from .base import calc_snr, snr_as_signal
@@ -99,3 +100,26 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
             plt.show()
 
         return max_power
+
+    def save(
+        self,
+        filepath: str,
+        result: Optional[PowerResultType] = None,
+        comment: Optional[str] = None,
+        tag: str = "twotone/ge/ro_optimize/gain",
+        **kwargs,
+    ) -> None:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        pdrs, snrs = result
+
+        save_data(
+            filepath=filepath,
+            x_info={"name": "Probe Power (a.u)", "unit": "s", "values": pdrs},
+            z_info={"name": "SNR", "unit": "a.u.", "values": snrs},
+            comment=comment,
+            tag=tag,
+            **kwargs,
+        )

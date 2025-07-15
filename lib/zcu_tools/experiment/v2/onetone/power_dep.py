@@ -102,6 +102,10 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
         fpts = prog.get_pulse_param("readout_pulse", "freq", as_array=True)
         assert isinstance(fpts, np.ndarray), "fpts should be an array"
 
+        # rescale signals2D
+        self.last_cfg = cfg
+        self.last_result = (pdrs, fpts, signals2D)
+
         return pdrs, fpts, signals2D
 
     def analyze(

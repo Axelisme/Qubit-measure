@@ -90,12 +90,10 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         pi_len, pi2_len, y_fit, _ = fit_rabi(lens, real_signals, decay=decay)
 
         if plot:
-            xs_fit = np.linspace(lens[0], lens[-1], 1001)
-
             plt.figure(figsize=config.figsize)
             plt.tight_layout()
             plt.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)
-            plt.plot(xs_fit, y_fit, label="fit")
+            plt.plot(lens, y_fit, label="fit")
             plt.axvline(pi_len, ls="--", c="red", label=f"pi = {pi_len:.3g}")
             plt.axvline(pi2_len, ls="--", c="red", label=f"pi/2 = {pi2_len:.3g}")
             plt.xlabel("Pulse length (us)")

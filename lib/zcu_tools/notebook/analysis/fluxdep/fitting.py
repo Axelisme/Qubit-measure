@@ -35,7 +35,8 @@ def eval_dist(A: np.ndarray, a: float, B: np.ndarray, C: np.ndarray) -> float:
 
     dist = 0.0
     for i in range(N):
-        min_diff = float("inf")
+        # min_diff = float("inf") # this will cause error in python 3.8 numba
+        min_diff = np.inf
         for j in range(K):
             diff = np.abs(A[i] - np.abs(a * B[i, j] + C[i, j]))
             if diff < min_diff:
@@ -72,7 +73,8 @@ def candidate_breakpoint_search(
     K = B.shape[1]
 
     # 評估篩選後的 a 值
-    best_distance = float("inf")
+    # best_distance = float("inf")
+    best_distance = np.inf
     best_a = (a_min + a_max) / 2.0
 
     for i in range(N):
@@ -181,7 +183,8 @@ def smart_fuzzy_search(
         cand_as = sample_as
 
     # 5. 評估所有選出的點，找到最佳的
-    best_dist = float("inf")
+    # best_dist = float("inf")
+    best_dist = np.inf
     best_a = (a_min + a_max) / 2.0
 
     for a in cand_as:

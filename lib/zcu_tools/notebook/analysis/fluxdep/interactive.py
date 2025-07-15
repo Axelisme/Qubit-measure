@@ -7,7 +7,7 @@ including tools for finding points, selecting lines, and selecting points.
 """
 
 from threading import Timer
-from typing import Any, Self, Tuple
+from typing import Tuple
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
@@ -230,8 +230,8 @@ class InteractiveLines:
         self, spectrum, mAs, fpts, mA_c=None, mA_e=None, use_phase=True
     ) -> None:
         plt.ioff()  # 避免立即顯示圖表
-        self.fig_main, self.ax_main = plt.subplots(num=None)
-        self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(5, 5), num=None)
+        self.fig_main, self.ax_main = plt.subplots()
+        self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(5, 5))
         self.fig_main.tight_layout()
         self.fig_zoom.tight_layout()
         plt.ion()

@@ -141,7 +141,7 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
         plot: bool = True,
         chi: float,
         kappa: float,
-        deg: int = 2,
+        deg: int = 1,
         cutoff: Optional[float] = None,
     ) -> float:
         if result is None:
