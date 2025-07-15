@@ -492,7 +492,7 @@ class InteractiveLines:
     def _find_best_position(self, current_pos: float, search_width: float) -> float:
         """在給定範圍內找到mirror loss最小的位置"""
         # 計算半格精度
-        precision = 0.5 * (self.mAs[-1] - self.mAs[0]) / len(self.mAs)
+        precision = 0.25 * (self.mAs[-1] - self.mAs[0]) / len(self.mAs)
 
         # 定義搜索範圍
         left_bound = max(self.mAs[0], current_pos - search_width / 2)
