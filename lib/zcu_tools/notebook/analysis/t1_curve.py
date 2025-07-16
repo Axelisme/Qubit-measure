@@ -201,31 +201,21 @@ def plot_eff_t1_with_sample(
     s_mAs: np.ndarray,
     s_T1s: np.ndarray,
     s_T1errs: np.ndarray,
+    t1_effs: np.ndarray,
     mA_c: float,
     period: float,
-    fluxonium: scq.Fluxonium,
-    spectrum_data: scq.SpectrumData,
     t_flxs: np.ndarray,
     *,
-    noise_channels: List[Tuple[str, Dict[str, float]]],
-    Temp: float,
+    label: str = "t1_eff",
+    title: Optional[str] = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
-    fig.suptitle(f"Temperature = {Temp * 1e3:.2f} mK")
+    if title is not None:
+        fig.suptitle(title)
     ax.errorbar(s_mAs, s_T1s * 1e3, yerr=s_T1errs * 1e3, fmt=".-", label="T1")
 
     t_mAs = flx2mA(t_flxs, mA_c=mA_c, period=period)
-    t1_effs = calculate_eff_t1_vs_flx_with(
-        t_flxs, noise_channels, Temp, fluxonium=fluxonium, spectrum_data=spectrum_data
-    )
 
-    label = "\n".join(
-        [
-            f"{name:<5} = {value:.1e}"
-            for ch in noise_channels
-            for name, value in ch[1].items()
-        ]
-    )
     ax.plot(t_mAs, t1_effs, label=label, linestyle="--")
 
     ax.set_xlim(s_mAs.min() - 0.03, s_mAs.max() + 0.03)
