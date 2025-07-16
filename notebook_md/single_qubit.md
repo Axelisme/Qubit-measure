@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: Python 3
+    display_name: axelenv
     language: python
     name: python3
   language_info:
@@ -33,8 +33,7 @@ import os
 import numpy as np
 
 %autoreload 2
-import zcu_tools.notebook.single_qubit as zf  # noqa: E402
-import zcu_tools.notebook.schedule.v2 as zs  # noqa: E402
+import zcu_tools.experiment.v2 as ze
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 # ruff: noqa: I001
@@ -43,7 +42,6 @@ from zcu_tools import (  # noqa: E402
     create_datafolder,
     make_cfg,
     make_sweep,
-    save_data,
     make_comment,
 )
 ```
@@ -58,7 +56,7 @@ import zcu_tools.config as zc
 # Create data folder
 
 ```python
-chip_name = r"Test049[2]"
+chip_name = r"Q12_2D[3]/Q1"
 
 data_host = None
 # data_host = "021-zcu216"
@@ -77,7 +75,7 @@ from zcu_tools.tools import get_ip_address  # noqa: F401
 zc.config.LOCAL_IP = "192.168.10.232"
 zc.config.LOCAL_PORT = 8887
 
-soc, soccfg, rm_prog = make_proxy("192.168.10.113", 8887, proxy_prog=True)
+soc, soccfg, rm_prog = make_proxy("192.168.10.7", 8887, proxy_prog=True)
 MyProgram.init_proxy(rm_prog, test=True)
 print(soccfg)
 ```
@@ -94,9 +92,8 @@ print(soccfg)
 # Predefine parameters
 
 ```python
-timeFly = 0.45
 res_ch = 0
-qub_ch = 5
+qub_ch = 14
 reset_ch = 2
 reset_ch2 = 5
 
@@ -117,7 +114,7 @@ from zcu_tools.device.yoko import YOKOGS200
 import pyvisa
 
 flux_dev = YOKOGS200(
-    VISAaddress="USB0::0x0B21::0x0039::90ZB35282::INSTR", rm=pyvisa.ResourceManager()
+    VISAaddress="USB0::0x0B21::0x0039::91WB18859::INSTR", rm=pyvisa.ResourceManager()
 )
 GlobalDeviceManager.register_device("flux_yoko", flux_dev)
 cur_A = flux_dev.get_current()
@@ -146,7 +143,7 @@ exp_cfg = {
             "length": 0.65,  # us
             "raise_pulse": {"style": "cosine", "length": 0.1},
             "gain": 1.0,
-            "freq": 7520.62,
+            "freq": 5352.79,
             # "freq": r_f,
         },
         "ro_cfg": {
@@ -163,13 +160,12 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, rounds=5000)
 
-Ts, signals = zs.measure_lookback(soc, soccfg, cfg, progress=True)
+lookback_exp = ze.LookbackExperiment()
+Ts, signals = lookback_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-predict_offset = zf.lookback_show(
-    Ts, signals, ratio=0.15, smooth=1.0, ro_cfg=cfg["readout"]["ro_cfg"]
-)
+predict_offset = lookback_exp.analyze(ratio=0.15, smooth=1.0, ro_cfg=cfg["readout"]["ro_cfg"])
 predict_offset
 ```
 
@@ -179,13 +175,9 @@ timeFly
 ```
 
 ```python
-filename = "lookback"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+lookback_exp.save(
+    filepath=os.path.join(database_path, "lookback"),
     comment=make_comment(cfg, f"timeFly = {timeFly}us"),
-    tag="Lookback",
     server_ip=data_host,
 )
 ```
@@ -193,7 +185,7 @@ save_data(
 # OneTone
 
 ```python
-res_name = "3D_7.5G"
+res_name = "R1"
 ```
 
 ```python
@@ -229,18 +221,19 @@ exp_cfg = {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    "sweep": make_sweep(7510, 7530, 201),
+    "sweep": make_sweep(5330, 5370, 201),
     # "sweep": make_sweep(r_f-4, r_f+4, 101),
     "relax_delay": 0.0,  # us
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
-fpts, signals = zs.measure_res_freq(soc, soccfg, cfg)
+res_freq_exp = ze.onetone.FreqExperiment()
+fpts, signals = res_freq_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
 %matplotlib inline
-f, kappa = zf.freq_analyze(fpts, signals, asym=True)
+f, kappa = res_freq_exp.analyze(asym=True)
 f
 ```
 
@@ -250,14 +243,9 @@ rf_w = kappa
 ```
 
 ```python
-filename = f"{res_name}_freq@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+res_freq_exp.save(
+    filepath=os.path.join(database_path, f"{res_name}_freq@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg, f"resonator frequency = {r_f}MHz"),
-    # comment=make_comment(cfg),
-    tag="OneTone/single",
     server_ip=data_host,
 )
 ```
@@ -276,7 +264,7 @@ exp_cfg = {
         },
         "ro_cfg": {
             "ro_ch": ro_ch,
-            "ro_length": ro_pulse_len - 0.1,  # us
+            "ro_length": res_probe_len - 0.1,  # us
             "trig_offset": timeFly + 0.05,  # us
         },
     },
@@ -285,27 +273,23 @@ exp_cfg = {
         "flux": cur_A,  # A
     },
     "sweep": {
-        "gain": make_sweep(0.01, 0.4, 41),
-        "freq": make_sweep(r_f - 2, r_f + 2, 51),
+        "gain": make_sweep(0.01, 0.2, 41),
+        "freq": make_sweep(r_f - 4, r_f + 4, 51),
     },
     "relax_delay": 0.0,  # us
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=30)
 
-pdrs, fpts, signals2D = zs.measure_res_pdr_dep(
+res_pdr_exp = ze.onetone.PowerDepExperiment()
+pdrs, fpts, signals2D = res_pdr_exp.run(
     soc, soccfg, cfg, dynamic_avg=True, gain_ref=0.03
 )
 ```
 
 ```python
-filename = f"{res_name}_pdr@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    y_info={"name": "Power", "unit": "a.u.", "values": pdrs},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+res_pdr_exp.save(
+    filepath=os.path.join(database_path, f"{res_name}_pdr@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg),
-    tag="OneTone/pdr",
     server_ip=data_host,
 )
 ```
@@ -313,7 +297,7 @@ save_data(
 ## Flux dependence
 
 ```python
-cur_A = 0.0e-3
+cur_A = -4.0e-3
 1e3 * flux_dev.set_current(cur_A)
 ```
 
@@ -325,7 +309,7 @@ exp_cfg = {
             **ModuleLibrary.get_waveform("ro_waveform"),
             "ch": res_ch,
             "nqz": 2,
-            "gain": 0.2,
+            "gain": 0.1,
         },
         "ro_cfg": {
             "ro_ch": ro_ch,
@@ -337,31 +321,32 @@ exp_cfg = {
         "flux_dev": "yoko"
     },
     "sweep": {
-        "flux": make_sweep(0.0e-3, 0.1e-3, 21),
+        "flux": make_sweep(-4.0e-3, 8e-3, 201),
         "freq": make_sweep(r_f - 3, r_f + 3, 61),
     },
     "relax_delay": 0.0,  # us
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
-As, fpts, signals2D = zs.measure_res_flux_dep(soc, soccfg, cfg)
+res_flux_exp = ze.onetone.FluxDepExperiment()
+As, fpts, signals2D = res_flux_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-filename = f"{res_name}_flux"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    y_info={"name": "Current", "unit": "A", "values": As},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+res_flux_exp.save(
+    filepath=os.path.join(database_path, f"{res_name}_flux"),
     comment=make_comment(cfg),
-    tag="OneTone/flux",
     server_ip=data_host,
 )
 ```
 
 ```python
-cur_A = 0.0e-3
+%matplotlib widget
+res_flux_exp.analyze(mA_c=None, mA_e=None)
+```
+
+```python
+cur_A = 8.0e-3
 1e3 * flux_dev.set_current(cur_A)
 ```
 
@@ -377,7 +362,7 @@ ModuleLibrary.register_module(
             "ch": res_ch,
             "nqz": 2,
             "freq": r_f,
-            "gain": 0.2,
+            "gain": 0.1,
             "length": ro_pulse_len,  # us
         },
         "ro_cfg": {
@@ -410,7 +395,7 @@ ModuleLibrary.register_waveform(
 ## Twotone Frequency
 
 ```python
-cur_A = 0.0e-3
+# cur_A = 0.0e-3
 1e3 * flux_dev.set_current(cur_A)
 ```
 
@@ -426,28 +411,29 @@ exp_cfg = {
         **ModuleLibrary.get_waveform("qub_waveform"),
         "ch": qub_ch,
         "nqz": 2,
-        "gain": 0.2,
+        "gain": 0.5,
         "length": 5.0,  # us
-        # "mixer_freq": 4950,
-        "mixer_freq": q_f,
+        "mixer_freq": 4660,
+        # "mixer_freq": q_f,
         # "post_delay": None,
     },
     "dev": {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    "sweep": make_sweep(q_f - 3, q_f + 3, 101),
-    # "sweep": make_sweep(4800, 5100, 301),
+    # "sweep": make_sweep(q_f - 3, q_f + 3, 101),
+    "sweep": make_sweep(4655, 4665, 301),
     "relax_delay": 0.0,  # us
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
-fpts, signals = zs.measure_qub_freq(soc, soccfg, cfg)
+qub_freq_exp = ze.twotone.FreqExperiment()
+fpts, signals = qub_freq_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
 %matplotlib inline
-f, kappa = zf.freq_analyze(fpts, signals, max_contrast=True)
+f, kappa = qub_freq_exp.analyze(max_contrast=True)
 f
 ```
 
@@ -457,13 +443,9 @@ qf_w = kappa
 ```
 
 ```python
-filename = f"{qub_name}_freq@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+qub_freq_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_freq@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg, f"frequency = {f}MHz"),
-    tag="TwoTone/single",
     server_ip=data_host,
 )
 ```
@@ -850,32 +832,33 @@ exp_cfg = {
         "ch": qub_ch,
         "nqz": 2,
         "length": 5,  # us
+        "mixer_freq": 4700,
+        # "mixer_freq": q_f,
+        # "post_delay": None,
     },
-    "readout": "readout_rf",
+    # "readout": "readout_rf",
+    "readout": "readout_dpm",
     "dev": {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
     "sweep": {
         "gain": make_sweep(0.05, 1.0, 30),
-        "freq": make_sweep(1700, 2000, 30),
+        # "freq": make_sweep(1700, 2000, 30),
+        "freq": make_sweep(q_f - 3, q_f + 3, 101),
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=50, rounds=50)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
-fpts, pdrs, signals2D = zs.measure_qub_pdr_dep(soc, soccfg, cfg)
+qub_pdr_exp = ze.twotone.PowerDepExperiment()
+fpts, pdrs, signals2D = qub_pdr_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-filename = f"{qub_name}_pdr@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    y_info={"name": "Power", "unit": "a.u.", "values": pdrs},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+qub_pdr_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_pdr@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg),
-    tag="TwoTone/pdr",
     server_ip=data_host,
 )
 ```
@@ -883,7 +866,7 @@ save_data(
 ## Flux Dependence
 
 ```python
-cur_A = -1.0e-3
+cur_A = 8.0e-3
 1e3 * flux_dev.set_current(cur_A)
 ```
 
@@ -893,36 +876,32 @@ exp_cfg = {
         **ModuleLibrary.get_waveform("qub_waveform"),
         "ch": qub_ch,
         "nqz": 2,
-        "gain": 1.0,
-        "length": 2,  # us
-        "mixer_freq": 4500,
+        "gain": 0.5,
+        "length": 5,  # us
+        "mixer_freq": 4000,
     },
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
     "dev": {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
     "sweep": {
-        "flux": make_sweep(-1.0e-3, 5.0e-3, 301),
-        "freq": make_sweep(4000, 5100, 2201),
+        "flux": make_sweep(8.0e-3, -4.0e-3, 301),
+        "freq": make_sweep(3000, 5100, 2101),
     },
     "relax_delay": 0.0,  # us
 
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
-As, fpts, signals2D = zs.measure_qub_flux_dep(soc, soccfg, cfg)
+qub_flux_exp = ze.twotone.FluxDepExperiment()
+As, fpts, signals2D = qub_flux_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-filename = f"{qub_name}_flux_dep"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    y_info={"name": "Current", "unit": "A", "values": As},
-    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+qub_flux_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_flux"),
     comment=make_comment(cfg),
-    tag="TwoTone/flux",
     server_ip=data_host,
 )
 ```
@@ -936,36 +915,34 @@ cur_A = 0.0e-3
 
 ```python
 exp_cfg = {
-    "reset": "reset_120",
+    # "reset": "reset_120",
     "qub_pulse": "pi_amp",
-    "readout": "readout_rf",
+    # "readout": "readout_rf",
+    "readout": "readout_dpm",
     "dev": {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    "sweep": make_sweep(r_f - 20, r_f + 20, 101),
-    "relax_delay": 0.0,  # us
+    "sweep": make_sweep(r_f - 5, r_f + 5, 101),
+    # "relax_delay": 0.0,  # us
+    "relax_delay": 2 * t1, # us
 }
-cfg = make_cfg(exp_cfg, reps=10000, rounds=10)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
-pdrs, signals = zs.measure_reset_amprabi(soc, soccfg, cfg)
+dispersive_shift_exp = ze.twotone.DispersiveExperiment()
+fpts, signals = dispersive_shift_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
 %matplotlib inline
-chi, rf_w = zf.analyze_dispersive(fpts, signals, asym=True)
+chi, rf_w = dispersive_shift_exp.analyze(asym=True)
 chi
 ```
 
 ```python
-filename = f"{res_name}_dispersive@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    y_info={"name": "Amplitude", "unit": "None", "values": np.array([0, 1])},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+dispersive_shift_exp.save(
+    filepath=os.path.join(database_path, f"{res_name}_dispersive@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg, f"chi = {chi:.3g} MHz, kappa = {rf_w:.3g} MHz"),
-    tag="TwoTone/dispersive",
     server_ip=data_host,
 )
 ```
@@ -975,7 +952,7 @@ save_data(
 ```python
 ac_qub_len = ModuleLibrary.get_module("pi_amp")["length"]  # us
 exp_cfg = {
-    "reset": "reset_120",
+    # "reset": "reset_120",
     "stark_pulse1": {
         **ModuleLibrary.get_module("readout_rf")["pulse_cfg"],
         "length": 6.0 / rf_w + ac_qub_len,  # us
@@ -987,39 +964,33 @@ exp_cfg = {
         "t": 5.0 / rf_w,
         "post_delay": 5.0 / rf_w,
     },
-    "readout": "readout_rf",
+    # "readout": "readout_rf",
+    "readout": "readout_dpm",
     "dev": {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
     "sweep": {
-        "gain": make_sweep(0.00, 0.35, 101),
-        "freq": make_sweep(q_f - 100, q_f + 10, 101),
+        "gain": make_sweep(0.00, 0.15, 101),
+        "freq": make_sweep(q_f - 50, q_f + 50, 101),
     },
     "relax_delay": 0.0,  # us
 }
 cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
-# zs.visualize_ac_stark(soccfg, cfg, time_fly=timeFly)
-pdrs, fpts, signals2D = zs.measure_ac_stark(soc, soccfg, cfg)
+ac_stark_exp = ze.twotone.AcStarkExperiment()
+pdrs, fpts, signals2D = ac_stark_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-ac_stark_coeff = zf.analyze_ac_stark_shift(
-    pdrs, fpts, signals2D, chi, kappa, deg=1, cutoff=None
-)
+ac_stark_coeff = ac_stark_exp.analyze(chi=chi, kappa=rf_w, deg=1, cutoff=0.15)
 ac_stark_coeff
 ```
 
 ```python
-filename = f"{qub_name}_ac_stark@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Power", "unit": "a.u.", "values": pdrs},
-    y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+ac_stark_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_ac_stark@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg, f"ac_stark_coeff = {ac_stark_coeff:.3g} MHz"),
-    tag="TwoTone/ac_stark",
     server_ip=data_host,
 )
 ```
@@ -1035,7 +1006,7 @@ exp_cfg = {
         "ch": qub_ch,
         "nqz": 2,
         "freq": q_f,
-        "gain": 0.5,
+        "gain": 1.0,
         # "gain": pi_gain,
         "mixer_freq": q_f,
     },
@@ -1044,30 +1015,25 @@ exp_cfg = {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    "relax_delay": 50.0,  # us
+    "relax_delay": 0.0,  # us
     "sweep": make_sweep(0.1, 4.0, 101),
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=20)
 
-Ts, signals = zs.measure_lenrabi(soc, soccfg, cfg)
+qub_lenrabi_exp = ze.twotone.LenRabiExperiment()
+Ts, signals = qub_lenrabi_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
 %matplotlib inline
-pi_len, pi2_len = zf.rabi_analyze(
-    Ts, signals, decay=True, max_contrast=True, xlabel="Time (us)"
-)
+pi_len, pi2_len = qub_lenrabi_exp.analyze(decay=True, max_contrast=True)
 pi_len, pi2_len
 ```
 
 ```python
-filename = f"{qub_name}_len_rabi@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Pulse Length", "unit": "s", "values": Ts * 1e-6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+qub_lenrabi_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_len_rabi@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg, f"pi len = {pi_len}us\npi/2 len = {pi2_len}us"),
-    tag="TimeDomain/len_rabi",
     server_ip=data_host,
 )
 ```
@@ -1102,48 +1068,41 @@ max_gain = min(5 * pi_gain, 1.0)
 exp_cfg = {
     # "reset": "reset_120",
     "qub_pulse": {
-        # **ModuleLibrary.get_waveform("qub_waveform"),
-        "style": "gauss",
-        "sigma": 0.08,
-        "length": 0.4,
+        **ModuleLibrary.get_waveform("qub_waveform"),
         "ch": qub_ch,
         "nqz": 2,
         "freq": q_f,
         # "length": 0.3,  # us
-        # "length": 1.5*pi_len,
+        "length": 1.5*pi_len,
         "mixer_freq": q_f,
     },
-    "readout": "readout_rf",
+    # "readout": "readout_rf",
+    "readout": "readout_dpm",
     "dev": {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    "relax_delay": 50.0,  # us
+    "relax_delay": 10.0,  # us
     "sweep": make_sweep(0.0, max_gain, 51),
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
-pdrs, signals = zs.measure_amprabi(soc, soccfg, cfg)
+qub_amprabi_exp = ze.twotone.AmpRabiExperiment()
+pdrs, signals = qub_amprabi_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
 %matplotlib inline
-pi_gain, pi2_gain = zf.rabi_analyze(
-    pdrs, signals, decay=False, max_contrast=True, xlabel="Power (a.u.)"
-)
+pi_gain, pi2_gain = qub_amprabi_exp.analyze(decay=False, max_contrast=True)
 pi_gain = int(pi_gain + 0.5) if pi_gain > 1.0 else pi_gain
 pi2_gain = int(pi2_gain + 0.5) if pi2_gain > 1.0 else pi2_gain
 pi_gain, pi2_gain
 ```
 
 ```python
-filename = f"{qub_name}_amp_rabi@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Amplitude", "unit": "a.u.", "values": pdrs},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+qub_amprabi_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_amp_rabi@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg, f"pi gain = {pi_gain}\npi/2 gain = {pi2_gain}"),
-    tag="TimeDomain/amp_rabi",
     server_ip=data_host,
 )
 ```
@@ -1190,21 +1149,18 @@ exp_cfg = {
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
-fpts, snrs = zs.qubit.measure_ge_freq_dep(soc, soccfg, cfg)
+opt_ro_freq_exp = ze.twotone.ro_optimize.OptimizeFreqExperiment()
+fpts, snrs = opt_ro_freq_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-fpt_max = zf.optimize_1d(fpts, snrs, xlabel="Frequency (MHz)")
+fpt_max = opt_ro_freq_exp.analyze()
 ```
 
 ```python
-filename = f"{qub_name}_ge_fpt@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-    z_info={"name": "SNR", "unit": "a.u.", "values": snrs},
-    comment=make_comment(cfg),
-    tag="TwoTone/dispersive/fpt",
+opt_ro_freq_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_ro_opt_freq@{cur_A * 1e3:.3f}mA"),
+    comment=make_comment(cfg, f"optimal frequency = {fpt_max:.1f}MHz"),
     server_ip=data_host,
 )
 ```
@@ -1228,25 +1184,22 @@ exp_cfg = {
         "flux": cur_A,  # A
     },
     "relax_delay": 10.0,  # us
-    "sweep": make_sweep(0.01, 0.5, 31),
+    "sweep": make_sweep(0.01, 1.0, 51),
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
-pdrs, snrs = zs.qubit.measure_ge_pdr_dep(soc, soccfg, cfg)
+opt_ro_pdr_exp = ze.twotone.ro_optimize.OptimizePowerExperiment()
+pdrs, snrs = opt_ro_pdr_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-pdr_max = zf.optimize_1d(pdrs, snrs, xlabel="Probe Power (a.u)")
+pdr_max = opt_ro_pdr_exp.analyze()
 ```
 
 ```python
-filename = f"{qub_name}_ge_pdr@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Probe Power (a.u)", "unit": "s", "values": pdrs},
-    z_info={"name": "SNR", "unit": "a.u.", "values": snrs},
-    comment=make_comment(cfg),
-    tag="TwoTone/dispersive/pdr",
+opt_ro_pdr_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_ro_opt_pdr@{cur_A * 1e3:.3f}mA"),
+    comment=make_comment(cfg, f"optimal power = {pdr_max:.2f}"),
     server_ip=data_host,
 )
 ```
@@ -1270,27 +1223,24 @@ exp_cfg = {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    "relax_delay": 0.0,  # us
-    "sweep": make_sweep(0.1, 15.0, 31),
+    "relax_delay": 10.0,  # us
+    "sweep": make_sweep(0.1, 7.0, 31),
 }
 cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
 
-ro_lens, snrs = zs.qubit.measure_ge_ro_dep(soc, soccfg, cfg)
+opt_ro_len_exp = ze.twotone.ro_optimize.OptimizeLengthExperiment()
+ro_lens, snrs = opt_ro_len_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-ro_max = zf.optimize_ro_len(ro_lens, snrs, t0=5.0)
+ro_max = opt_ro_len_exp.analyze(t0=5.0)
 ro_max
 ```
 
 ```python
-filename = f"{qub_name}_ge_len@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Readout length", "unit": "s", "values": ro_lens * 1e-6},
-    z_info={"name": "SNR", "unit": "a.u.", "values": snrs},
-    comment=make_comment(cfg),
-    tag="TwoTone/dispersive/ro_len",
+opt_ro_len_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_ro_opt_len@{cur_A * 1e3:.3f}mA"),
+    comment=make_comment(cfg, f"optimal readout length = {ro_max:.2f}us"),
     server_ip=data_host,
 )
 ```
@@ -1337,30 +1287,28 @@ exp_cfg = {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    "relax_delay": 50.0,  # us
+    "relax_delay": 10.0,  # us
     "sweep": make_sweep(0, 10.0, 101),  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
 activate_detune = 10.0 / (cfg["sweep"]["stop"] - cfg["sweep"]["start"])
 print(f"activate_detune: {activate_detune:.2f}")
-Ts, signals = zs.measure_t2ramsey(soc, soccfg, cfg, detune=activate_detune)
+
+t2ramsey_exp = ze.twotone.T2RamseyExperiment()
+Ts, signals = t2ramsey_exp.run(soc, soccfg, cfg, detune=activate_detune)
 ```
 
 ```python
 %matplotlib inline
-t2r, detune, _, _ = zf.T2fringe_analyze(Ts, signals, max_contrast=True)
+t2r, _, detune, _ = t2ramsey_exp.analyze(max_contrast=True)
 print(f"real detune: {(detune - activate_detune) * 1e3:.1f}kHz")
 ```
 
 ```python
-filename = f"{qub_name}_t2ramsey@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=make_comment(cfg, f"detune = {detune}MHz\nt2r = {t2r}us"),
-    tag="TimeDomain/t2ramsey",
+t2ramsey_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_t2ramsey@{cur_A * 1e3:.3f}mA"),
+    comment=make_comment(cfg, f"detune = {detune:.3f}MHz\nt2r = {t2r:.3f}us"),
     server_ip=data_host,
 )
 ```
@@ -1381,32 +1329,27 @@ exp_cfg = {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    "relax_delay": 50.0,  # us
+    "relax_delay": 10.0,  # us
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.0, 50, 51),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
-Ts, signals = zs.measure_t1(soc, soccfg, cfg)
+t1_exp = ze.twotone.T1Experiment()
+Ts, signals = t1_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-%matplotlib widget
 %matplotlib inline
-start = 0
-t1, _ = zf.T1_analyze(Ts[start:], signals[start:], max_contrast=True, dual_exp=False)
+t1, _ = t1_exp.analyze(max_contrast=True, dual_exp=False)
 t1
 ```
 
 ```python
-filename = f"{qub_name}_t1@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=make_comment(cfg, f"t1 = {t1}us"),
-    tag="TimeDomain/t1",
+t1_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_t1@{cur_A * 1e3:.3f}mA"),
+    comment=make_comment(cfg, f"t1 = {t1:.3f}us"),
     server_ip=data_host,
 )
 ```
@@ -1425,31 +1368,28 @@ exp_cfg = {
     },
     # "relax_delay": 0.0,  # us
     "relax_delay": 5 * t1,  # us
-    # "sweep": make_sweep(0.0, 1.5 * t2r, 101),
-    "sweep": make_sweep(0.0, 1.5 * t2e, 101),
+    "sweep": make_sweep(0.0, 1.5 * t2r, 101),
+    # "sweep": make_sweep(0.0, 1.5 * t2e, 101),
     # "sweep": make_sweep(0.01, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 
 activate_detune = 10.0 / (cfg["sweep"]["stop"] - cfg["sweep"]["start"])
 print(f"activate_detune: {activate_detune:.2f}")
-Ts, signals = zs.measure_t2echo(soc, soccfg, cfg, detune=activate_detune)
+
+t2echo_exp = ze.twotone.T2EchoExperiment()
+Ts, signals = t2echo_exp.run(soc, soccfg, cfg, detune=activate_detune)
 ```
 
 ```python
 %matplotlib inline
-t2e, detune, _, _ = zf.T2fringe_analyze(Ts, signals, max_contrast=True)
-# t2e, _ = zf.T2decay_analyze(Ts, signals, max_contrast=True)
+t2e, _, detune, _ = t2echo_exp.analyze(max_contrast=True)
 ```
 
 ```python
-filename = f"{qub_name}_t2echo@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    comment=make_comment(cfg, f"t2echo = {t2e}us"),
-    tag="TimeDomain/t2echo",
+t2echo_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_t2echo@{cur_A * 1e3:.3f}mA"),
+    comment=make_comment(cfg, f"detune = {detune:.3f}MHz\nt2echo = {t2e:.3f}us"),
     server_ip=data_host,
 )
 ```
@@ -1463,7 +1403,7 @@ exp_cfg = {
     # "reset": "reset_120",
     "qub_pulse": "pi_amp",
     "readout": ModuleLibrary.get_module(
-        "readout_rf",
+        "readout_dpm",
         {
             "pulse_cfg": {
                 # "length": 0.2 * t1 + timeFly + 0.1,
@@ -1477,45 +1417,37 @@ exp_cfg = {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    "relax_delay": 50.0,  # us
+    "relax_delay": 10.0,  # us
 }
 cfg = make_cfg(exp_cfg, shots=100000)
 print("readout length: ", cfg["readout"]["ro_cfg"]["ro_length"])
 
-signals = zs.measure_singleshot(soc, soccfg, cfg)
+singleshot_exp = ze.twotone.SingleShotExperiment()
+signals = singleshot_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
 %matplotlib inline
-fid, _, _, pops = zf.singleshot_ge_analysis(signals, backend="pca")
+fid, _, _, pops = singleshot_exp.analyze(backend="pca")
 print(f"Optimal fidelity after rotation = {fid:.1%}")
 ```
 
 ```python
-n_gg, n_ge, n_eg, n_ee = pops
-n_g = n_gg
-n_e = n_ge
-if n_e > n_g:
-    n_g, n_e = n_e, n_g
-n_g, n_e
-```
+from zcu_tools.simulate.temp import effective_temperature
 
-```python
-eff_T, err_T = zf.effective_temperature(population=[(n_g, 0.0), (n_e, q_f)], plot=False)
+n_g = pops[0][0] # n_gg
+n_e = pops[0][1] # n_ge
+
+eff_T, err_T = effective_temperature(population=[(n_g, 0.0), (n_e, q_f)])
 eff_T, err_T
 ```
 
 ```python
-filename = f"{qub_name}_singleshot_ge@{cur_A * 1e3:.3f}mA"
-save_data(
-    filepath=os.path.join(database_path, filename),
-    x_info={"name": "shot", "unit": "point", "values": np.arange(cfg["shots"])},
-    z_info={"name": "Signal", "unit": "a.u.", "values": signals},
-    y_info={"name": "ge", "unit": "", "values": np.array([0, 1])},
+singleshot_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_singleshot_ge@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(
         cfg, f"fide: {fid:.1%}, (n_g, n_e): ({n_g:.1%}, {n_e:.1%}), eff_T: {eff_T:.1f}"
     ),
-    tag="SingleShot/ge",
     server_ip=data_host,
 )
 ```
