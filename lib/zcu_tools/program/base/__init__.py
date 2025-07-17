@@ -1,7 +1,7 @@
 from typing import Any, Dict
 
 from zcu_tools.auto import is_pulse_cfg
-from zcu_tools.tools import AsyncFunc
+from zcu_tools.utils.async_func import AsyncFunc
 
 from .improve_acquire import ImproveAcquireMixin
 from .proxy import AbsProxy, ProxyAcquireMixin

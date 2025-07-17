@@ -1,12 +1,14 @@
 import json
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import h5py as h5
 import numpy as np
 
 
-def format_rawdata(mAs, fpts, spectrum):
+def format_rawdata(
+    mAs: np.ndarray, fpts: np.ndarray, spectrum: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     fpts = fpts / 1e9  # convert to GHz
     mAs = mAs * 1e3  # convert to mA
 
@@ -20,7 +22,14 @@ def format_rawdata(mAs, fpts, spectrum):
     return mAs, fpts, spectrum
 
 
-def dump_result(path, name, params, cflx, period, allows):
+def dump_result(
+    path: str,
+    name: str,
+    params: np.ndarray,
+    cflx: float,
+    period: float,
+    allows: Dict[str, Any],
+) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, "w") as f:
@@ -41,7 +50,9 @@ def dump_result(path, name, params, cflx, period, allows):
         )
 
 
-def load_result(path):
+def load_result(
+    path: str,
+) -> Tuple[str, np.ndarray, float, float, Dict[str, Any], Dict[str, Any]]:
     """
     Load the result from a json file
 
@@ -67,7 +78,7 @@ def load_result(path):
     )
 
 
-def update_result(path, update_dict: Dict[str, Any]):
+def update_result(path: str, update_dict: Dict[str, Any]) -> None:
     with open(path, "r") as f:
         data = json.load(f)
 
@@ -77,7 +88,7 @@ def update_result(path, update_dict: Dict[str, Any]):
         json.dump(data, f, indent=4)
 
 
-def dump_spects(save_path, s_spects, mode="x"):
+def dump_spects(save_path: str, s_spects: Dict[str, Any], mode: str = "x") -> None:
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with h5.File(save_path, mode) as f:
         for path, val in s_spects.items():
@@ -93,7 +104,7 @@ def dump_spects(save_path, s_spects, mode="x"):
             points_grp.create_dataset("fpts", data=val["points"]["fpts"])
 
 
-def load_spects(load_path):
+def load_spects(load_path: str) -> Dict[str, Any]:
     s_spects = {}
     with h5.File(load_path, "r") as f:
         for key in f.keys():

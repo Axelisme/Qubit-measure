@@ -5,15 +5,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.optimize import least_squares
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.notebook.single_qubit.allxy import analyze_allxy
 from zcu_tools.program.v2 import ModularProgramV2, Pulse, make_readout, make_reset
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ...flux import set_flux
 from ..template import sweep1D_soft_template
 
 # (sequence, signals)
@@ -23,6 +22,65 @@ AllXYResultType = Tuple[List[Tuple[str, str]], np.ndarray]
 def allxy_signal2real(signals: np.ndarray) -> np.ndarray:
     """Convert complex signals to real values for AllXY analysis."""
     return rotate2real(signals).real  # type: ignore
+
+
+def calc_predicted_state(gate1: str, gate2: str) -> np.ndarray:
+    """Calculate the expected ⟨σ_z⟩ after gate pair (gate1, gate2).
+
+    The calculation is performed by treating the qubit as a Bloch vector that
+    starts at (0, 0, 1) (ground state). Each gate is mapped to a classical
+    rotation on the Bloch sphere and applied in the order they appear in the
+    gate pair.
+
+    Parameters
+    ----------
+    gate1 : str
+        First gate in the pair.
+    gate2 : str
+        Second gate in the pair.
+
+    Returns
+    -------
+    np.ndarray
+        Array of predicted ⟨σ_z⟩ values, taking values in {+1, 0, –1} for ideal gates.
+    """
+
+    def _rotation_x(theta: float) -> np.ndarray:
+        """Rotation matrix around x-axis for Bloch vector representation."""
+
+        return np.array(
+            [
+                [1, 0, 0],
+                [0, np.cos(theta), -np.sin(theta)],
+                [0, np.sin(theta), np.cos(theta)],
+            ]
+        )
+
+    def _rotation_y(theta: float) -> np.ndarray:
+        """Rotation matrix around y-axis for Bloch vector representation."""
+
+        return np.array(
+            [
+                [np.cos(theta), 0, np.sin(theta)],
+                [0, 1, 0],
+                [-np.sin(theta), 0, np.cos(theta)],
+            ]
+        )
+
+    # Map each gate to its corresponding rotation matrix
+    gate2rot = {
+        "I": np.identity(3),
+        "X180": _rotation_x(np.pi),
+        "Y180": _rotation_y(np.pi),
+        "X90": _rotation_x(np.pi / 2),
+        "Y90": _rotation_y(np.pi / 2),
+    }
+
+    vec = np.array([0.0, 0.0, 1.0])
+    vec = gate2rot[gate1] @ vec
+    vec = gate2rot[gate2] @ vec
+
+    return vec[2]
 
 
 class AllXYExperiment(AbsExperiment[AllXYResultType]):
@@ -95,21 +153,17 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             """Measure function for each gate pair."""
             gate1, gate2 = cfg["current_gates"]
 
-            # Build list of modules for the pulse sequence
-            modules = [make_reset("reset", reset_cfg=cfg.get("reset"))]
-
-            # Add first gate (if not identity)
-            if gate1 != "I":
-                modules.append(Pulse(name="first_pulse", cfg=gate2pulse_map[gate1]))
-
-            # Add second gate (if not identity)
-            if gate2 != "I":
-                modules.append(Pulse(name="second_pulse", cfg=gate2pulse_map[gate2]))
-
-            # Add readout
-            modules.append(make_readout("readout", readout_cfg=cfg["readout"]))
-
-            prog = ModularProgramV2(soccfg, cfg, modules=modules)
+            prog = ModularProgramV2(
+                soccfg,
+                soc,
+                cfg,
+                modules=[
+                    make_reset("reset", reset_cfg=cfg.get("reset")),
+                    Pulse(name="first_pulse", cfg=gate2pulse_map[gate1]),
+                    Pulse(name="second_pulse", cfg=gate2pulse_map[gate2]),
+                    make_readout("readout", readout_cfg=cfg["readout"]),
+                ],
+            )
 
             result = prog.acquire(soc, progress=False, callback=callback)
             return result[0][0].dot([1, 1j])
@@ -118,7 +172,6 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
         liveplotter = LivePlotter1D(
             xlabel="Gate",
             ylabel="Signal",
-            title="AllXY Gate Characterization",
             line_kwargs=[dict(marker="o", linestyle="None", markersize=5)],
             disable=not progress,
         )
@@ -151,107 +204,73 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
 
         return sequence, signals
 
-    def analyze(
-        self,
-        result: Optional[AllXYResultType] = None,
-        plot: bool = True,
-    ) -> Tuple[float, float]:
-        """Analyze AllXY measurement data to extract gate fidelity information.
-
-        Parameters
-        ----------
-        result : Optional[AllXYResultType]
-            AllXY measurement data. If None, uses the last measurement result.
-        plot : bool, default=True
-            Whether to generate analysis plots.
-
-        Returns
-        -------
-        Tuple[float, float]
-            - avg_signal: Average signal level
-            - contrast: Signal contrast from the fit
-        """
+    def analyze(self, result: Optional[AllXYResultType] = None) -> Tuple[float, float]:
         if result is None:
-            if self.last_result is None:
-                raise ValueError("No measurement data available. Run experiment first.")
             result = self.last_result
+        assert result is not None, (
+            "No measurement data available. Run experiment first."
+        )
 
         sequence, signals = result
 
-        if plot:
-            # Use the analysis function from single_qubit module
-            analyze_allxy(sequence, signals)
+        # Rotate IQ data so that the contrast lies on the real axis and take only
+        # the real part for further analysis.
+        signals = rotate2real(signals).real
 
-        # Extract fitted parameters using the same approach as analyze_allxy
-        from scipy.optimize import least_squares
+        # ------------------------------------------------------------------
+        # 1. Calculate the ideal expectation values (+1, 0, –1)
+        # ------------------------------------------------------------------
+        predicted_state = np.array([calc_predicted_state(*gates) for gates in sequence])
 
-        def _calc_predicted_state(sequence: List[Tuple[str, str]]) -> np.ndarray:
-            """Calculate expected <σ_z> values for each gate pair."""
-
-            def _rotation_x(theta: float) -> np.ndarray:
-                return np.array(
-                    [
-                        [1, 0, 0],
-                        [0, np.cos(theta), -np.sin(theta)],
-                        [0, np.sin(theta), np.cos(theta)],
-                    ]
-                )
-
-            def _rotation_y(theta: float) -> np.ndarray:
-                return np.array(
-                    [
-                        [np.cos(theta), 0, np.sin(theta)],
-                        [0, 1, 0],
-                        [-np.sin(theta), 0, np.cos(theta)],
-                    ]
-                )
-
-            gate2rot = {
-                "I": np.identity(3),
-                "X180": _rotation_x(np.pi),
-                "Y180": _rotation_y(np.pi),
-                "X90": _rotation_x(np.pi / 2),
-                "Y90": _rotation_y(np.pi / 2),
-            }
-
-            predicted = []
-            for gate1, gate2 in sequence:
-                vec = np.array([0.0, 0.0, 1.0])  # Start from ground state
-                vec = gate2rot[gate1] @ vec
-                vec = gate2rot[gate2] @ vec
-                predicted.append(vec[2])  # z-component
-
-            return np.array(predicted)
-
-        # Convert signals to real values
-        real_signals = rotate2real(signals).real
-        predicted_state = _calc_predicted_state(sequence)
+        # ------------------------------------------------------------------
+        # 2. Use non-linear least squares to fit average signal and contrast
+        #    such that:  s_pred = avg + 0.5 * contrast * predicted_state
+        # ------------------------------------------------------------------
 
         def calc_predicted(params: np.ndarray) -> np.ndarray:
             avg, contrast = params
             return avg + 0.5 * contrast * predicted_state
 
-        # Fit the data
-        avg_guess = float(np.mean(real_signals))
-        contrast_guess = float(np.ptp(real_signals))
+        # Initial guess: use simple statistics of the measured signals
+        avg_guess = float(np.mean(signals))
+        contrast_guess = float(np.ptp(signals))
 
         res = least_squares(
-            lambda p: calc_predicted(p) - real_signals, x0=[avg_guess, contrast_guess]
+            lambda p: calc_predicted(p) - signals, x0=[avg_guess, contrast_guess]
         )
 
-        avg_signal, contrast = res.x
+        avg_signal, contrast = res.x  # fitted parameters
 
-        print(f"Average signal: {avg_signal:.3f}")
-        print(f"Contrast: {contrast:.3f}")
+        # ------------------------------------------------------------------
+        # 3. Plotting
+        # ------------------------------------------------------------------
 
-        return avg_signal, contrast
+        _, ax = plt.subplots(figsize=config.figsize)
+        ax.plot(signals, marker="o", linestyle="None", label="Measured Signals")
+        ax.plot(
+            calc_predicted([avg_signal, contrast]),
+            marker="x",
+            linestyle="-",
+            color="red",
+            label="Predicted Signals",
+        )
+
+        ax.set_xlabel("Gate")
+        ax.set_xticks(np.arange(len(sequence)))
+        ax.set_xticklabels([f"{g1}-{g2}" for g1, g2 in sequence], rotation=45)
+
+        ax.set_ylabel("Signal")
+        ax.legend()
+
+        plt.tight_layout()
+        plt.show()
 
     def save(
         self,
         filepath: str,
         result: Optional[AllXYResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/allxy",
+        tag: str = "twotone/ge/allxy",
         **kwargs,
     ) -> None:
         if result is None:

@@ -1,4 +1,4 @@
-from . import reset, ro_optimize
+from . import mist, reset, ro_optimize
 from .ac_stark import AcStarkExperiment
 from .allxy import AllXYExperiment
 from .dispersive import DispersiveExperiment
@@ -11,6 +11,7 @@ from .time_domain import T1Experiment, T2EchoExperiment, T2RamseyExperiment
 
 __all__ = [
     "reset",
+    "mist",
     "ro_optimize",
     "AcStarkExperiment",
     "AllXYExperiment",

@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional
 
 import yaml
 
-from .tools import deepupdate, numpy2number
+from zcu_tools.utils import deepupdate, numpy2number
 
 
 class ModuleLibrary:

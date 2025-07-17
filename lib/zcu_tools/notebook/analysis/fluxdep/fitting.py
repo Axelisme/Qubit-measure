@@ -17,7 +17,7 @@ from scipy.optimize import least_squares
 from tqdm.auto import tqdm, trange
 
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
-from zcu_tools.tools import AsyncFunc
+from zcu_tools.utils.async_func import AsyncFunc
 
 from .models import count_max_evals, energy2linearform
 
