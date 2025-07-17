@@ -13,6 +13,9 @@ result
 test.py
 test.ipynb
 
+qick/
+labber_api/
+
 *.bak
 *.yaml
 *.hdf5
