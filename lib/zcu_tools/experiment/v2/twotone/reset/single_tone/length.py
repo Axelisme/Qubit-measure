@@ -25,7 +25,7 @@ from ....template import sweep_hard_template
 SingleToneResetLengthResultType = Tuple[np.ndarray, np.ndarray]
 
 
-class ResetLengthExperiment(AbsExperiment[SingleToneResetLengthResultType]):
+class LengthExperiment(AbsExperiment[SingleToneResetLengthResultType]):
     """Single-tone reset length measurement experiment.
 
     Measures the optimal length for a single reset pulse by sweeping the reset
@@ -57,7 +57,7 @@ class ResetLengthExperiment(AbsExperiment[SingleToneResetLengthResultType]):
 
         prog = ModularProgramV2(
             soccfg,
-            soc,
+            cfg,
             modules=[
                 make_reset("reset", reset_cfg=cfg.get("reset")),
                 Pulse("init_pulse", cfg=cfg.get("init_pulse")),
@@ -82,7 +82,7 @@ class ResetLengthExperiment(AbsExperiment[SingleToneResetLengthResultType]):
         )
 
         # Get the actual pulse length used by FPGA
-        real_lens = prog.get_pulse_param("reset_pulse", "length", as_array=True)
+        real_lens = prog.get_pulse_param("tested_reset_pulse", "length", as_array=True)
         assert isinstance(real_lens, np.ndarray), "real_lens should be an array"
 
         # Add back the side length of the pulse (compensation for hardware timing)

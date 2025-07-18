@@ -1,11 +1,11 @@
-from .freq import ResetFreqExperiment
-from .length import ResetLengthExperiment
-from .power import ResetPowerExperiment
-from .rabi_check import ResetRabiCheckExperiment
+from .freq import FreqExperiment
+from .length import LengthExperiment
+from .power import PowerExperiment
+from .rabi_check import RabiCheckExperiment
 
 __all__ = [
-    "ResetFreqExperiment",
-    "ResetPowerExperiment",
-    "ResetLengthExperiment",
-    "ResetRabiCheckExperiment",
+    "FreqExperiment",
+    "PowerExperiment",
+    "LengthExperiment",
+    "RabiCheckExperiment",
 ]

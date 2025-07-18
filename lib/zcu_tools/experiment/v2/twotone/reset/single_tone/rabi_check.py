@@ -28,7 +28,7 @@ def reset_rabi_signal2real(signals: np.ndarray) -> np.ndarray:
     return rotate2real(signals).real
 
 
-class ResetRabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
+class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
     """Reset rabi check experiment for single-tone reset.
 
     Measures the effectiveness of reset by sweeping the initialization pulse amplitude
@@ -82,7 +82,7 @@ class ResetRabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
 
         prog = ModularProgramV2(
             soccfg,
-            soc,
+            cfg,
             modules=[
                 make_reset("reset", reset_cfg=cfg.get("reset")),
                 Pulse("init_pulse", cfg=cfg.get("init_pulse")),

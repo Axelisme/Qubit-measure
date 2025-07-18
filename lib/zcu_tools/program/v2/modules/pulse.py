@@ -47,12 +47,8 @@ class Pulse(Module):
         if cfg is None:
             return
 
-        prog.pulse(
-            cfg["ch"],
-            self.name,
-            t=cfg.get("t", 0.0),
-            tag=self.name,
-        )
+        prog.delay(t=cfg.get("t", 0.0))
+        prog.pulse(cfg["ch"], self.name, tag=self.name)
 
         post_delay = cfg.get("post_delay", 0.0)
         if post_delay is not None:

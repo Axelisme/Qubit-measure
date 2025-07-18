@@ -26,7 +26,7 @@ from ....template import sweep_hard_template
 DualToneResetPowerResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
-class ResetPowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
+class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
     """Dual-tone reset power measurement experiment.
 
     Measures the optimal power levels for a dual-tone reset sequence by sweeping both
@@ -61,7 +61,7 @@ class ResetPowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
 
         prog = ModularProgramV2(
             soccfg,
-            soc,
+            cfg,
             modules=[
                 make_reset("reset", reset_cfg=cfg.get("reset")),
                 Pulse("init_pulse", cfg=cfg.get("init_pulse")),

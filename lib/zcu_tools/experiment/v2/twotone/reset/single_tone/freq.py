@@ -26,7 +26,7 @@ from ....template import sweep_hard_template
 SingleToneResetFreqResultType = Tuple[np.ndarray, np.ndarray]
 
 
-class ResetFreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
+class FreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
     """Single-tone reset frequency measurement experiment.
 
     Measures the optimal frequency for a single reset pulse by sweeping the reset
@@ -61,7 +61,7 @@ class ResetFreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
 
         prog = ModularProgramV2(
             soccfg,
-            soc,
+            cfg,
             modules=[
                 make_reset("reset", reset_cfg=cfg.get("reset")),
                 Pulse("init_pulse", cfg=cfg.get("init_pulse")),
@@ -109,7 +109,6 @@ class ResetFreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
         result: Optional[SingleToneResetFreqResultType] = None,
         *,
         type: Literal["lor", "sinc"] = "lor",
-        asym: bool = False,
         plot: bool = True,
         max_contrast: bool = True,
     ) -> Tuple[float, float]:
@@ -121,8 +120,6 @@ class ResetFreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
             Measurement result. If None, uses last result.
         type : str, default="lor"
             Fitting function type ("lor" or "sinc").
-        asym : bool, default=False
-            Whether to use asymmetric fitting.
         plot : bool, default=True
             Whether to show analysis plot.
         max_contrast : bool, default=True
@@ -146,9 +143,7 @@ class ResetFreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
 
         y = rotate2real(signals).real if max_contrast else np.abs(signals)
 
-        freq, freq_err, kappa, _, y_fit, _ = fit_resonence_freq(
-            fpts, y, type=type, asym=asym
-        )
+        freq, freq_err, kappa, _, y_fit, _ = fit_resonence_freq(fpts, y, type=type)
 
         if plot:
             plt.figure(figsize=config.figsize)

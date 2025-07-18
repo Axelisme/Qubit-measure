@@ -1,5 +1,5 @@
-from .freq import ResetFreqExperiment
-from .length import ResetLengthExperiment
-from .rabi_check import ResetRabiCheckExperiment
+from .freq import FreqExperiment
+from .length import LengthExperiment
+from .rabi_check import RabiCheckExperiment
 
-__all__ = ["ResetFreqExperiment", "ResetLengthExperiment", "ResetRabiCheckExperiment"]
+__all__ = ["FreqExperiment", "LengthExperiment", "RabiCheckExperiment"]

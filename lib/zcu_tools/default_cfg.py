@@ -41,7 +41,7 @@ class ModuleLibrary:
 
     @classmethod
     def update_module(cls, name: str, override_cfg: Dict[str, Any]) -> None:
-        deepupdate(cls.modules[name], deepcopy(override_cfg))
+        deepupdate(cls.modules[name], deepcopy(override_cfg), behavior="force")
 
     @classmethod
     def dump(cls, cfg_path: str) -> None:

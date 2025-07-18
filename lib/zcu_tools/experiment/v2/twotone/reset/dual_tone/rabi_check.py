@@ -28,7 +28,7 @@ def reset_rabi_signal2real(signals: np.ndarray) -> np.ndarray:
     return rotate2real(signals).real
 
 
-class ResetRabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
+class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
     """Reset rabi check experiment for dual-tone reset.
 
     Measures the effectiveness of dual-tone reset by sweeping the initialization pulse
@@ -76,8 +76,8 @@ class ResetRabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
         # Scale both reset pulses by factor (0=off, 1=on)
         reset_pulse1["gain"] = reset_factor * reset_pulse1["gain"]
         reset_pulse2["gain"] = reset_factor * reset_pulse2["gain"]
-        reset_pulse1["length"] = reset_factor * reset_pulse1["length"] + 0.005
-        reset_pulse2["length"] = reset_factor * reset_pulse2["length"] + 0.005
+        reset_pulse1["length"] = reset_factor * reset_pulse1["length"] + 0.01
+        reset_pulse2["length"] = reset_factor * reset_pulse2["length"] + 0.01
 
         # Handle flat_top pulse style to prevent negative length
         if reset_pulse1.get("style") == "flat_top" and "raise_pulse" in reset_pulse1:
@@ -87,7 +87,7 @@ class ResetRabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
 
         prog = ModularProgramV2(
             soccfg,
-            soc,
+            cfg,
             modules=[
                 make_reset("reset", reset_cfg=cfg.get("reset")),
                 Pulse("init_pulse", cfg=cfg.get("init_pulse")),

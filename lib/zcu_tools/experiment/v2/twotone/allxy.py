@@ -129,6 +129,11 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
     ) -> AllXYResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert cfg.get("sweep", dict()) == {}, (
+            "AllXY experiment does not support sweep configurations. "
+            "Please remove 'sweep' key from the configuration."
+        )
+
         # Create gate-to-pulse mapping from configuration
         gate2pulse_map = {
             "I": cfg.get("I_pulse"),
@@ -155,7 +160,6 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
 
             prog = ModularProgramV2(
                 soccfg,
-                soc,
                 cfg,
                 modules=[
                     make_reset("reset", reset_cfg=cfg.get("reset")),
@@ -172,8 +176,8 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
         liveplotter = LivePlotter1D(
             xlabel="Gate",
             ylabel="Signal",
-            line_kwargs=[dict(marker="o", linestyle="None", markersize=5)],
             disable=not progress,
+            line_kwargs=[dict(marker="o", linestyle="None", markersize=5)],
         )
 
         # Configure x-axis labels if plotter is available
@@ -186,9 +190,10 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
                     rotation=45,
                     ha="right",
                 )
+                ax.grid(True)
 
         # Execute soft sweep over all gate pairs
-        _, signals = sweep1D_soft_template(
+        signals = sweep1D_soft_template(
             cfg,
             measure_fn,
             liveplotter,
@@ -204,7 +209,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
 
         return sequence, signals
 
-    def analyze(self, result: Optional[AllXYResultType] = None) -> Tuple[float, float]:
+    def analyze(self, result: Optional[AllXYResultType] = None) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, (
@@ -261,6 +266,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
 
         ax.set_ylabel("Signal")
         ax.legend()
+        ax.grid(True)
 
         plt.tight_layout()
         plt.show()

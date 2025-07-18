@@ -32,7 +32,7 @@ def dual_reset_signal2real(signals: np.ndarray) -> np.ndarray:
 DualToneResetFreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
-class ResetFreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
+class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
     """Dual-tone reset frequency measurement experiment.
 
     Measures the optimal frequencies for a dual-tone reset sequence by sweeping both
@@ -67,7 +67,7 @@ class ResetFreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
 
         prog = ModularProgramV2(
             soccfg,
-            soc,
+            cfg,
             modules=[
                 make_reset("reset", reset_cfg=cfg.get("reset")),
                 Pulse("init_pulse", cfg=cfg.get("init_pulse")),
