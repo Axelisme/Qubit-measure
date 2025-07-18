@@ -1,4 +1,3 @@
-import json
 import os
 from datetime import datetime
 from typing import Optional, Tuple
@@ -27,21 +26,6 @@ def create_datafolder(root_dir: str, prefix: str = "") -> str:
     if not config.DATA_DRY_RUN:
         os.makedirs(save_dir, exist_ok=True)
     return save_dir
-
-
-def make_comment(cfg: dict, prepend: str = "") -> str:
-    """
-    Generate a formatted comment string from a configuration dictionary.
-
-    Args:
-        cfg (dict): Configuration dictionary to be converted to a string.
-        prepend (str, optional): Additional string to prepend to the comment. Defaults to "".
-
-    Returns:
-        str: A formatted comment string.
-    """
-    # pretty convert cfg to string
-    return prepend + "\n" + json.dumps(cfg, indent=2)
 
 
 def format_ext(filepath: str) -> str:

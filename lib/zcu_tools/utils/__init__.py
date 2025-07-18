@@ -1,6 +1,7 @@
 from typing import Any, Dict, Literal
 
-from . import async_func, datasaver, fitting, process
+from . import datasaver, fitting, process
+from .async_func import AsyncFunc
 
 
 def deepupdate(
@@ -67,7 +68,7 @@ def numpy2number(obj: Any) -> Any:
 __all__ = [
     "deepupdate",
     "numpy2number",
-    "async_func",
+    "AsyncFunc",
     "datasaver",
     "fitting",
     "process",

@@ -1,4 +1,5 @@
 from typing import Dict, Optional, Union
+import json
 
 
 def make_sweep(
@@ -90,3 +91,18 @@ def get_ip_address(iface: str) -> str:
             )
         except OSError:
             raise OSError(f"Interface {iface} not found or has no IPv4 address.")
+
+
+def make_comment(cfg: dict, prepend: str = "") -> str:
+    """
+    Generate a formatted comment string from a configuration dictionary.
+
+    Args:
+        cfg (dict): Configuration dictionary to be converted to a string.
+        prepend (str, optional): Additional string to prepend to the comment. Defaults to "".
+
+    Returns:
+        str: A formatted comment string.
+    """
+    # pretty convert cfg to string
+    return prepend + "\n" + json.dumps(cfg, indent=2)
