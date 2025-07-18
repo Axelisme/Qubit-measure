@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +9,7 @@ from matplotlib.image import NonUniformImage
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -22,7 +22,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ..template import sweep_hard_template
+from ..template import sweep2D_soft_hard_template, sweep_hard_template
 
 # (amps, freqs, signals2D)
 AcStarkResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -61,13 +61,8 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
     and another with variable frequency (stark_pulse2).
     """
 
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
+    def _run_linear(
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> AcStarkResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -133,6 +128,103 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
         self.last_result = (amps_real, freqs_real, signals2D)
 
         return amps_real, freqs_real, signals2D
+
+    def _run_log_uniform(
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+    ) -> AcStarkResultType:
+        cfg = deepcopy(cfg)  # prevent in-place modification
+
+        # Ensure stark_pulse1 has no post_delay to avoid timing conflicts
+        check_no_post_delay(cfg["stark_pulse1"], "stark_pulse1")
+
+        # Force the order of sweep (gain outer, freq inner for better visualization)
+        gain_sweep = cfg["sweep"]["gain"]
+        freq_sweep = cfg["sweep"]["freq"]
+
+        # use soft sweep for gain
+        cfg["sweep"] = dict(freq=freq_sweep)
+
+        pdrs = np.logspace(
+            np.log10(gain_sweep["start"]),
+            np.log10(gain_sweep["stop"]),
+            gain_sweep["expts"],
+        )
+        freqs = sweep2array(freq_sweep)  # predicted frequencies
+
+        cfg["stark_pulse1"]["gain"] = pdrs[0]
+        cfg["stark_pulse2"]["freq"] = sweep2param("freq", freq_sweep)
+
+        def updateCfg(cfg, _, pdr) -> None:
+            cfg["stark_pulse1"]["gain"] = pdr
+
+        def measure_fn(
+            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+        ) -> np.ndarray:
+            # Create modular program with Stark pulses
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    make_reset("reset", reset_cfg=cfg.get("reset")),
+                    Pulse(name="stark_pulse1", cfg=cfg["stark_pulse1"]),
+                    Pulse(name="stark_pulse2", cfg=cfg["stark_pulse2"]),
+                    make_readout("readout", readout_cfg=cfg["readout"]),
+                ],
+            )
+
+            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
+        # Run 2D soft-hard sweep
+        signals2D = sweep2D_soft_hard_template(
+            cfg,
+            measure_fn,
+            LivePlotter2DwithLine(
+                "Stark Pulse Gain (a.u.)",
+                "Frequency (MHz)",
+                line_axis=1,
+                num_lines=2,
+                disable=not progress,
+            ),
+            xs=pdrs,
+            ys=freqs,
+            updateCfg=updateCfg,
+            signal2real=acstark_signal2real,
+            progress=progress,
+        )
+
+        # Get actual parameters used by the FPGA
+        prog = ModularProgramV2(
+            soccfg,
+            cfg,
+            modules=[
+                make_reset("reset", reset_cfg=cfg.get("reset")),
+                Pulse(name="stark_pulse1", cfg=cfg["stark_pulse1"]),
+                Pulse(name="stark_pulse2", cfg=cfg["stark_pulse2"]),
+                make_readout("readout", readout_cfg=cfg["readout"]),
+            ],
+        )
+        fpts = prog.get_pulse_param("stark_pulse2", "freq", as_array=True)
+        assert isinstance(fpts, np.ndarray), "freqs should be an array"
+
+        # Cache results
+        self.last_cfg = cfg
+        self.last_result = (pdrs, fpts, signals2D)
+
+        return pdrs, fpts, signals2D
+
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        progress: bool = True,
+        log_uniform: bool = False,
+    ) -> AcStarkResultType:
+        if log_uniform:
+            return self._run_log_uniform(soc, soccfg, cfg, progress=progress)
+        else:
+            return self._run_linear(soc, soccfg, cfg, progress=progress)
 
     def analyze(
         self,
