@@ -113,7 +113,7 @@ def diff_mirror(xs: np.ndarray, data: np.ndarray, center: float) -> np.ndarray:
     valid = (mirror_idxs >= 0) & (mirror_idxs < data.shape[0])
 
     # 預先建立輸出陣列，以零填充無效位置
-    diff_data = np.zeros_like(data)
+    diff_data = np.zeros_like(data, dtype=np.float64)
 
     # 只在有效位置計算差值
     if data.ndim == 1:

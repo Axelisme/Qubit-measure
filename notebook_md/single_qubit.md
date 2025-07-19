@@ -336,6 +336,16 @@ res_flux_exp.save(
 ```
 
 ```python
+%matplotlib widget
+actline = res_flux_exp.analyze()
+```
+
+```python
+mA_c, mA_e = actline.get_positions()
+mA_c, mA_e
+```
+
+```python
 cur_A = 8.0e-3
 1e3 * flux_dev.set_current(cur_A)
 ```
@@ -915,6 +925,16 @@ qub_flux_exp.save(
 ```
 
 ```python
+%matplotlib widget
+actline = qub_flux_exp.analyze()
+```
+
+```python
+mA_c, mA_e = actline.get_positions()
+mA_c, mA_e
+```
+
+```python
 cur_A = 0.0e-3
 1e3 * flux_dev.set_current(cur_A)
 ```
@@ -1197,14 +1217,14 @@ exp_cfg = {
     "qub_pulse": "pi_amp",
     "readout": ModuleLibrary.get_module(
         "readout_rf",
-        override_cfg={"gain": pdr_max},
+        # override_cfg={"gain": pdr_max},
     ),
     "dev": {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    # "relax_delay": 10.0,  # us
-    "relax_delay": 3 * t1,  # us
+    "relax_delay": 10.0,  # us
+    # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(r_f - 3, r_f + 3, 51),
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
@@ -1243,8 +1263,8 @@ exp_cfg = {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    # "relax_delay": 10.0,  # us
-    "relax_delay": 3 * t1,  # us
+    "relax_delay": 10.0,  # us
+    # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(0.01, 1.0, 51),
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
@@ -1284,8 +1304,8 @@ exp_cfg = {
         "flux_dev": "yoko",
         "flux": cur_A,  # A
     },
-    # "relax_delay": 10.0,  # us
-    "relax_delay": 3 * t1,  # us
+    "relax_delay": 10.0,  # us
+    # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(0.1, 15.0, 31),
 }
 cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
@@ -1432,8 +1452,8 @@ exp_cfg = {
     "relax_delay": 0.0,  # us
     # "relax_delay": 5 * t1,  # us
     # "sweep": make_sweep(0.0, 1.5 * t2r, 101),
-    "sweep": make_sweep(0.0, 1.5 * t2e, 101),
-    # "sweep": make_sweep(0.01, 5 * t1, 51),
+    # "sweep": make_sweep(0.0, 1.5 * t2e, 101),
+    "sweep": make_sweep(0.01, 2 * t1, 51),
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
 

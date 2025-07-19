@@ -11,6 +11,7 @@ from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import OneToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
+from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 
 from ..template import sweep2D_soft_hard_template
 
@@ -90,14 +91,12 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
         result: Optional[FluxDepResultType] = None,
         mA_c: Optional[float] = None,
         mA_e: Optional[float] = None,
-    ) -> None:
+    ) -> InteractiveLines:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         As, fpts, signals2D = result
-
-        from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 
         actline = InteractiveLines(
             signals2D,

@@ -13,7 +13,7 @@ import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
-from IPython.display import display
+from IPython.display import display, clear_output
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Ellipse
 from numpy import ndarray
@@ -231,7 +231,7 @@ class InteractiveLines:
     ) -> None:
         plt.ioff()  # 避免立即顯示圖表
         self.fig_main, self.ax_main = plt.subplots()
-        self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(5, 5))
+        self.fig_zoom, self.ax_zoom = plt.subplots()
         self.fig_main.tight_layout()
         self.fig_zoom.tight_layout()
         plt.ion()
@@ -242,6 +242,7 @@ class InteractiveLines:
 
         self.mAs = mAs
         self.fpts = fpts
+        self.spectrum = spectrum
         self.amps = cast2real_and_norm(spectrum, use_phase=use_phase)
 
         self.mouse_x = None
@@ -394,7 +395,7 @@ class InteractiveLines:
         self.anim_zoom = FuncAnimation(
             self.fig_zoom,
             self.update_zoom_view,
-            interval=33,
+            interval=100,
             blit=True,
             cache_frame_data=False,
         )
@@ -521,7 +522,8 @@ class InteractiveLines:
         # 對每個候選位置計算mirror loss
         for candidate in candidates:
             # 計算該位置的mirror loss
-            diff_amps = diff_mirror(self.mAs, self.amps.T, candidate).T
+            # 總是使用spectrum來計算(包含phase資訊)
+            diff_amps = diff_mirror(self.mAs, self.spectrum.T, candidate).T
             valid_amps = diff_amps[diff_amps != 0.0]
 
             # 確保有有效的數據點
@@ -618,7 +620,8 @@ class InteractiveLines:
         # reset flag
         self._mouse_moved = False
 
-        diff_amps = diff_mirror(self.mAs, self.amps.T, x).T
+        # 總是使用spectrum來計算(包含phase資訊)
+        diff_amps = diff_mirror(self.mAs, self.spectrum.T, x).T
         self.zoom_im.set_data(diff_amps)
 
         mirror_loss = np.mean(diff_amps[diff_amps != 0.0])
@@ -638,6 +641,12 @@ class InteractiveLines:
 
     def on_finish(self, _) -> None:
         """完成按鈕的回調函數"""
+        self.finish_interactive()
+
+        # also clear the output
+        clear_output(wait=False)
+
+    def finish_interactive(self) -> None:
         self.is_finished = True
         self.picked = None
         self.active_line = None
@@ -647,10 +656,10 @@ class InteractiveLines:
         # plt.close(self.fig_main)
         # plt.close(self.fig_zoom)
 
-    def get_positions(self) -> Tuple[float, float]:
+    def get_positions(self, finish: bool = True) -> Tuple[float, float]:
         """運行交互式選擇器並返回兩條線的位置"""
-        if not self.is_finished:
-            self.on_finish(None)
+        if not self.is_finished and finish:
+            self.finish_interactive()
         precision = 0.5 * (self.mAs[-1] - self.mAs[0]) / len(self.mAs)
         mA_c = precision * round((self.mA_c - self.mAs[0]) / precision) + self.mAs[0]
         mA_e = precision * round((self.mA_e - self.mAs[0]) / precision) + self.mAs[0]
