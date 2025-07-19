@@ -129,7 +129,7 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
 
         return amps_real, freqs_real, signals2D
 
-    def _run_log_uniform(
+    def _run_sqrt_uniform(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> AcStarkResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
@@ -144,10 +144,13 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
         # use soft sweep for gain
         cfg["sweep"] = dict(freq=freq_sweep)
 
-        pdrs = np.logspace(
-            np.log10(gain_sweep["start"]),
-            np.log10(gain_sweep["stop"]),
-            gain_sweep["expts"],
+        # uniform in square space
+        pdrs = np.sqrt(
+            np.linspace(
+                gain_sweep["start"] ** 2,
+                gain_sweep["stop"] ** 2,
+                gain_sweep["expts"],
+            )
         )
         freqs = sweep2array(freq_sweep)  # predicted frequencies
 
@@ -219,10 +222,10 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
         cfg: Dict[str, Any],
         *,
         progress: bool = True,
-        log_uniform: bool = False,
+        sqrt_uniform: bool = False,
     ) -> AcStarkResultType:
-        if log_uniform:
-            return self._run_log_uniform(soc, soccfg, cfg, progress=progress)
+        if sqrt_uniform:
+            return self._run_sqrt_uniform(soc, soccfg, cfg, progress=progress)
         else:
             return self._run_linear(soc, soccfg, cfg, progress=progress)
 
@@ -333,13 +336,13 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
             result = self.last_result
         assert result is not None, "No result found"
 
-        amps, freqs, signals2D = result
+        pdrs, fpts, signals2D = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Stark Pulse Gain", "unit": "a.u.", "values": amps},
-            y_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+            x_info={"name": "Stark Pulse Gain", "unit": "a.u.", "values": pdrs},
+            y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
             tag=tag,
             **kwargs,
