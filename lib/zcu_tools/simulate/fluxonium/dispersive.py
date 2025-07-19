@@ -1,7 +1,10 @@
-from typing import Any, Callable, List, Tuple
+from typing import TYPE_CHECKING, Any, Callable, List, Tuple
 
 import numpy as np
-import scqubits as scq
+
+if TYPE_CHECKING:
+    # otherwise, lazy import
+    import scqubits as scq
 
 
 def calculate_dispersive(
@@ -15,11 +18,11 @@ def calculate_dispersive(
     cutoff = 30
     evals_count = 10
 
-    resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
-    fluxonium = scq.Fluxonium(
-        *params, flux=flx, cutoff=cutoff, truncated_dim=evals_count
-    )
-    hilbertspace = scq.HilbertSpace([resonator, fluxonium])
+    from scqubits import Fluxonium, HilbertSpace, Oscillator  # lazy import
+
+    resonator = Oscillator(r_f, truncated_dim=resonator_dim)
+    fluxonium = Fluxonium(*params, flux=flx, cutoff=cutoff, truncated_dim=evals_count)
+    hilbertspace = HilbertSpace([resonator, fluxonium])
     hilbertspace.add_interaction(
         g=g, op1=resonator.creation_operator, op2=fluxonium.n_operator, add_hc=True
     )
@@ -40,7 +43,7 @@ def calculate_dispersive(
 
 def calculate_dispersive_sweep(
     sweep_list: List[Any],
-    update_fn: Callable[[scq.Fluxonium, Any], None],
+    update_fn: Callable[["scq.Fluxonium", Any], None],
     g: float,
     r_f: float,
     progress: bool = True,
@@ -52,6 +55,8 @@ def calculate_dispersive_sweep(
     """
     Calculate the dispersive shift of ground and excited state vs. params of fluxonium
     """
+
+    import scqubits as scq  # lazy import
 
     resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
     fluxonium = scq.Fluxonium(
@@ -103,7 +108,7 @@ def calculate_dispersive_vs_flx(
     Calculate the dispersive shift of ground and excited state vs. flux
     """
 
-    def update_hilbertspace(fluxonium: scq.Fluxonium, flux: float) -> None:
+    def update_hilbertspace(fluxonium: "scq.Fluxonium", flux: float) -> None:
         fluxonium.flux = flux
         fluxonium.EJ = params[0]
         fluxonium.EC = params[1]
@@ -124,7 +129,7 @@ def calculate_dispersive_vs_flx(
 
 def calculate_chi_sweep(
     sweep_list: List[Any],
-    update_fn: Callable[[scq.Fluxonium, Any], None],
+    update_fn: Callable[["scq.Fluxonium", Any], None],
     g: float,
     r_f: float,
     progress: bool = True,
@@ -135,6 +140,8 @@ def calculate_chi_sweep(
     """
     Calculate the chi of ground and excited state vs. params of fluxonium
     """
+
+    import scqubits as scq  # lazy import
 
     resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
     fluxonium = scq.Fluxonium(
@@ -177,7 +184,7 @@ def calculate_chi_vs_flx(
     Calculate the dispersive shift of ground and excited state vs. flux
     """
 
-    def update_hilbertspace(fluxonium: scq.Fluxonium, flux: float) -> None:
+    def update_hilbertspace(fluxonium: "scq.Fluxonium", flux: float) -> None:
         fluxonium.flux = flux
         fluxonium.EJ = params[0]
         fluxonium.EC = params[1]

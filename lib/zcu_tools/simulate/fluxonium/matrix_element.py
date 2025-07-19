@@ -1,7 +1,10 @@
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 import numpy as np
-import scqubits as scq
+
+if TYPE_CHECKING:
+    # otherwise, lazy import
+    import scqubits as scq
 
 
 def calculate_n_oper(
@@ -16,9 +19,9 @@ def calculate_n_oper(
 
     cutoff = 30
 
-    fluxonium = scq.Fluxonium(
-        *params, flux=flx, cutoff=cutoff, truncated_dim=return_dim
-    )
+    from scqubits import Fluxonium  # lazy import
+
+    fluxonium = Fluxonium(*params, flux=flx, cutoff=cutoff, truncated_dim=return_dim)
     if esys is None:
         esys = fluxonium.eigensys(evals_count=return_dim)
 
@@ -31,8 +34,8 @@ def calculate_n_oper_vs_flx(
     params: Tuple[float, float, float],
     flxs: np.ndarray,
     return_dim: int = 4,
-    spectrum_data: Optional[scq.SpectrumData] = None,
-) -> Tuple[scq.SpectrumData, np.ndarray]:
+    spectrum_data: Optional["scq.SpectrumData"] = None,
+) -> Tuple["scq.SpectrumData", np.ndarray]:
     """
     Calculate the matrix elements of the fluxonium vs. a parameter
     """
@@ -40,7 +43,9 @@ def calculate_n_oper_vs_flx(
     if spectrum_data is None:
         cutoff = 40
 
-        fluxonium = scq.Fluxonium(
+        from scqubits import Fluxonium  # lazy import
+
+        fluxonium = Fluxonium(
             *params, flux=0.5, cutoff=cutoff, truncated_dim=return_dim
         )
         spectrum_data = fluxonium.get_matelements_vs_paramvals(
@@ -61,8 +66,8 @@ def calculate_system_n_oper_vs_flx(
     g: float,
     return_dim: int = 4,
     progress: bool = True,
-    sweep: Optional[scq.ParameterSweep] = None,
-) -> Tuple[scq.ParameterSweep, np.ndarray]:
+    sweep: Optional["scq.ParameterSweep"] = None,
+) -> Tuple["scq.ParameterSweep", np.ndarray]:
     """
     Calculate the matrix elements of the system over a parameter sweep
     """
@@ -71,6 +76,8 @@ def calculate_system_n_oper_vs_flx(
         cutoff = 50
         qub_dim = 20
         res_dim = 10
+
+        import scqubits as scq  # lazy import
 
         resonator = scq.Oscillator(r_f, truncated_dim=res_dim)
         fluxonium = scq.Fluxonium(

@@ -3,7 +3,6 @@ from typing import Tuple
 
 import numpy as np
 from scipy.optimize import root_scalar
-from scqubits import Fluxonium
 
 
 class FluxoniumPredictor:
@@ -21,6 +20,8 @@ class FluxoniumPredictor:
         self.period = data["period"]
 
         self.bias = bias
+
+        from scqubits import Fluxonium  # lazy import
 
         self.fluxonium = Fluxonium(*self.params, flux=0.5, cutoff=40, truncated_dim=2)
 

@@ -1,6 +1,7 @@
-# Interactive tools
 # Fitting algorithms
 from .fitting import fit_spectrum, search_in_database
+
+# Interactive tools
 from .interactive import (
     InteractiveFindPoints,
     InteractiveLines,

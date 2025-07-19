@@ -8,10 +8,10 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
-from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 
 from ..template import sweep2D_soft_hard_template
 

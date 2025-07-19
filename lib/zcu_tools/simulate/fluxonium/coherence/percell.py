@@ -1,8 +1,11 @@
-from typing import Tuple
+from typing import TYPE_CHECKING, Tuple
 
 import numpy as np
 import scipy.constants as sc
-import scqubits as scq
+
+if TYPE_CHECKING:
+    # otherwise, lazy import
+    import scqubits as scq
 
 # -----------------------------
 # The equations:
@@ -25,8 +28,8 @@ def percell(
     kappa: float,
     Temp: float,
     ns: np.ndarray,
-    fluxonium: scq.Fluxonium,
-    resonator: scq.Oscillator,
+    fluxonium: "scq.Fluxonium",
+    resonator: "scq.Oscillator",
 ) -> np.ndarray:
     """
     Calculate the transition rate of 0-1 caused by percell effect.
@@ -98,6 +101,8 @@ def calculate_percell_t1_vs_flx(
     Nf = 10
     Nr = 10
     ns = np.arange(0, Nr)
+
+    import scqubits as scq  # lazy import
 
     fluxonium = scq.Fluxonium(*params, flux=0.0, cutoff=40, truncated_dim=Nf)
     resonator = scq.Oscillator(E_osc=r_f, truncated_dim=Nr)

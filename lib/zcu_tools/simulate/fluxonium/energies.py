@@ -1,7 +1,10 @@
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 import numpy as np
-from scqubits import Fluxonium, SpectrumData
+
+if TYPE_CHECKING:
+    # otherwise, lazy import
+    from scqubits import Fluxonium, SpectrumData
 
 
 def calculate_energy(
@@ -14,6 +17,8 @@ def calculate_energy(
     Calculate the energy of a fluxonium qubit.
     """
 
+    from scqubits import Fluxonium  # lazy import
+
     fluxonium = Fluxonium(*params, flux=flx, cutoff=cutoff, truncated_dim=evals_count)
     return fluxonium.eigenvals(evals_count=evals_count)
 
@@ -23,11 +28,14 @@ def calculate_energy_vs_flx(
     flxs: np.ndarray,
     cutoff: int = 40,
     evals_count: int = 20,
-    spectrum_data: Optional[SpectrumData] = None,
-) -> Tuple[SpectrumData, np.ndarray]:
+    spectrum_data: Optional["SpectrumData"] = None,
+) -> Tuple["SpectrumData", np.ndarray]:
     """
     Calculate the energy of a fluxonium qubit.
     """
+
+    from scqubits import Fluxonium  # lazy import
+
     if spectrum_data is not None:
         return spectrum_data, spectrum_data.energy_table  # early return
 

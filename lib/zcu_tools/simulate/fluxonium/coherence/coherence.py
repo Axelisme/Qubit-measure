@@ -1,16 +1,21 @@
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 import numpy as np
-import scqubits as scq
+
+if TYPE_CHECKING:
+    # otherwise, lazy import
+    import scqubits as scq
 
 
 def calculate_eff_t1_with(
     flx: float,
     noise_channels: list,
     Temp: float,
-    fluxonium: scq.Fluxonium,
+    fluxonium: "scq.Fluxonium",
     esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
 ) -> float:
+    import scqubits as scq  # lazy import
+
     scq.settings.T1_DEFAULT_WARNING = False
     fluxonium.flux = flx
     return fluxonium.t1_effective(
@@ -28,6 +33,8 @@ def calculate_eff_t1(
     cutoff: int = 40,
     evals_count: int = 20,
 ) -> float:
+    import scqubits as scq  # lazy import
+
     scq.settings.T1_DEFAULT_WARNING = False
     fluxonium = scq.Fluxonium(
         *params, flux=flx, cutoff=cutoff, truncated_dim=evals_count
@@ -41,9 +48,11 @@ def calculate_eff_t1_vs_flx_with(
     flxs: np.ndarray,
     noise_channels: list,
     Temp: float,
-    fluxonium: scq.Fluxonium,
-    spectrum_data: Optional[scq.SpectrumData] = None,
+    fluxonium: "scq.Fluxonium",
+    spectrum_data: Optional["scq.SpectrumData"] = None,
 ) -> np.ndarray:
+    import scqubits as scq  # lazy import
+
     scq.settings.T1_DEFAULT_WARNING = False
     return np.asarray(
         [
@@ -65,9 +74,9 @@ def calculate_eff_t1_vs_flx(
     cutoff: int = 40,
     evals_count: int = 20,
 ) -> np.ndarray:
-    fluxonium = scq.Fluxonium(
-        *params, flux=0.0, cutoff=cutoff, truncated_dim=evals_count
-    )
+    from scqubits import Fluxonium  # lazy import
+
+    fluxonium = Fluxonium(*params, flux=0.0, cutoff=cutoff, truncated_dim=evals_count)
     spectrum_data = fluxonium.get_spectrum_vs_paramvals(
         "flux",
         flxs,

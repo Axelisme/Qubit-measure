@@ -8,7 +8,8 @@ from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-import scqubits as scq
+
+# import scqubits as scq # use lazy import
 from h5py import File
 from IPython.display import display
 from joblib import Parallel, delayed
@@ -22,183 +23,9 @@ from zcu_tools.utils.async_func import AsyncFunc
 from .models import count_max_evals, energy2linearform
 
 
-@njit(
-    "float64(float64[:], float64, float64[:,:], float64[:,:])",
-    nogil=True,
-)
-def eval_dist(A: np.ndarray, a: float, B: np.ndarray, C: np.ndarray) -> float:
-    """
-    計算: mean_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
-    """
-    N = A.shape[0]
-    K = B.shape[1]
-
-    dist = 0.0
-    for i in range(N):
-        # min_diff = float("inf") # this will cause error in python 3.8 numba
-        min_diff = np.inf
-        for j in range(K):
-            diff = np.abs(A[i] - np.abs(a * B[i, j] + C[i, j]))
-            if diff < min_diff:
-                min_diff = diff
-        dist += min_diff
-
-    return dist / N
-
-
-@njit(
-    "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:], float64, float64)",
-    nogil=True,
-)
-def candidate_breakpoint_search(
-    A: np.ndarray, B: np.ndarray, C: np.ndarray, a_min: float, a_max: float
-) -> Tuple[float, float]:
-    """
-    使用候選斷點法尋找最佳的 a 值, 使得目標函數最小化
-    目標函數: F(a) = mean_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
-    假設: A 中所有值都是正的
-
-    Parameters:
-    A: 目標向量, numpy 陣列, 形狀 (N,), 所有元素均為正數
-    B: 候選向量矩陣, numpy 陣列, 形狀 (N, K)
-    C: 偏移矩陣, numpy 陣列, 形狀 (N, K)
-    a_min: 最小的 a 值
-    a_max: 最大的 a 值
-
-    Returns:
-    best_distance: 最小的目標函數值, 如果沒有找到則返回 inf
-    best_a: 使得目標函數最小的 a 值, 如果沒有找到則返回 1.0
-    """
-    N = A.shape[0]
-    K = B.shape[1]
-
-    # 評估篩選後的 a 值
-    # best_distance = float("inf")
-    best_distance = np.inf
-    best_a = (a_min + a_max) / 2.0
-
-    for i in range(N):
-        for j in range(K):
-            if B[i, j] == 0:
-                continue
-
-            a1 = (A[i] - C[i, j]) / B[i, j]
-            a2 = (-A[i] - C[i, j]) / B[i, j]
-
-            for a in (a1, a2):
-                if a_min <= a <= a_max:
-                    dist = eval_dist(A, a, B, C)
-
-                    if dist < best_distance:
-                        best_distance = dist
-                        best_a = a
-
-    return best_distance, best_a
-
-
-@njit(
-    "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:], float64, float64)",
-    nogil=True,
-)
-def smart_fuzzy_search(
-    A: np.ndarray, B: np.ndarray, C: np.ndarray, a_min: float, a_max: float
-) -> Tuple[float, float]:
-    """
-    結合密度估計和有限評估的方法尋找最佳的 a 值
-    先通過密度估計找到可能的高密度區域，然後在這些區域中進行有限的評估
-
-    Parameters:
-    A: 目標向量, numpy 陣列, 形狀 (N,)
-    B: 候選向量矩陣, numpy 陣列, 形狀 (N, K)
-    C: 偏移矩陣, numpy 陣列, 形狀 (N, K)
-    a_min: 最小的 a 值
-    a_max: 最大的 a 值
-
-    Returns:
-    best_distance: 最小的目標函數值
-    best_a: 使得目標函數最小的 a 值
-    """
-    N = A.shape[0]
-    K = B.shape[1]
-
-    DOWNSAMPLE_THRESHOLD = 1000
-    MAX_BIN_USED = 3
-    SAMPLE_RATE_IN_BIN = 0.05
-
-    # 收集所有可能的 a 值
-    cand_as = []
-
-    for i in range(N):
-        for j in range(K):
-            if B[i, j] == 0:
-                continue
-
-            a1 = (A[i] - C[i, j]) / B[i, j]
-            a2 = (-A[i] - C[i, j]) / B[i, j]
-
-            if a_min <= a1 <= a_max:
-                cand_as.append(a1)
-            if a_min <= a2 <= a_max:
-                cand_as.append(a2)
-
-    # 如果候選值太多，降採樣
-    if len(cand_as) >= DOWNSAMPLE_THRESHOLD:
-        cand_as.sort()
-
-        # 找到高密度區域
-        # 1. 先用直方圖方法分析密度
-        num_bins = min(100, max(10, len(cand_as) // 10))
-        bin_width = (a_max - a_min) / num_bins
-
-        bin_counts = np.zeros(num_bins, dtype=np.int32)
-        for i in range(len(cand_as)):
-            bin_idx = min(int((cand_as[i] - a_min) / bin_width), num_bins - 1)
-            bin_counts[bin_idx] += 1
-
-        # 找到前5多的bin，選取每個bin降採樣100分之1的數量，與中位數，加入test_as
-        sample_as = []
-        for bin_idx in np.argsort(-bin_counts)[:MAX_BIN_USED]:
-            # 如果bin數量為0，跳過
-            if bin_counts[bin_idx] == 0:
-                break
-
-            # 計算該bin的起始和結束範圍
-            bin_start = a_min + bin_idx * bin_width
-            bin_end = bin_start + bin_width
-
-            # 收集該bin內的所有a值
-            bin_as = []
-            for a in cand_as:
-                if bin_start <= a < bin_end:
-                    bin_as.append(a)
-
-            # 如果bin內有值
-            if len(bin_as) > 0:
-                # 添加bin的中位數
-                sample_as.append(np.median(np.array(bin_as)))
-
-                # 降採樣該bin內的值 (取100分之1)
-                step = max(1, int(len(bin_as) * SAMPLE_RATE_IN_BIN))
-                sample_as.extend(bin_as[:step:])
-        cand_as = sample_as
-
-    # 5. 評估所有選出的點，找到最佳的
-    # best_dist = float("inf")
-    best_dist = np.inf
-    best_a = (a_min + a_max) / 2.0
-
-    for a in cand_as:
-        dist = eval_dist(A, a, B, C)
-        if dist < best_dist:
-            best_dist = dist
-            best_a = a
-
-    return best_dist, best_a
-
-
 def search_in_database(
     flxs, fpts, datapath, allows, EJb, ECb, ELb, n_jobs=-1, fuzzy=True
-):
+) -> Tuple[np.ndarray, plt.Figure]:
     # Load data from database
     with File(datapath, "r") as file:
         f_flxs = file["flxs"][:]  # (f_flxs, )
@@ -256,7 +83,7 @@ def search_in_database(
 
     dh = display(fig, display_id=True)
 
-    def find_close_points(fpts, energies, factor, allows):
+    def find_close_points(fpts, energies, factor, allows) -> np.ndarray:
         Bs, Cs = energy2linearform(energies, allows)
         fs = np.abs(factor * Bs + Cs)
         dists = np.abs(fs - fpts[:, None])
@@ -292,7 +119,186 @@ def search_in_database(
 
         dh.update(fig)
 
-    def process_energy(i, fuzzy):
+    # ------------------------------------------------------------
+    # define the search functions
+    # ------------------------------------------------------------
+
+    @njit(
+        "float64(float64[:], float64, float64[:,:], float64[:,:])",
+        nogil=True,
+    )
+    def eval_dist(A: np.ndarray, a: float, B: np.ndarray, C: np.ndarray) -> float:
+        """
+        計算: mean_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
+        """
+        N = A.shape[0]
+        K = B.shape[1]
+
+        dist = 0.0
+        for i in range(N):
+            # min_diff = float("inf") # this will cause error in python 3.8 numba
+            min_diff = np.inf
+            for j in range(K):
+                diff = np.abs(A[i] - np.abs(a * B[i, j] + C[i, j]))
+                if diff < min_diff:
+                    min_diff = diff
+            dist += min_diff
+
+        return dist / N
+
+    @njit(
+        "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:], float64, float64)",
+        nogil=True,
+    )
+    def candidate_breakpoint_search(
+        A: np.ndarray, B: np.ndarray, C: np.ndarray, a_min: float, a_max: float
+    ) -> Tuple[float, float]:
+        """
+        使用候選斷點法尋找最佳的 a 值, 使得目標函數最小化
+        目標函數: F(a) = mean_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
+        假設: A 中所有值都是正的
+
+        Parameters:
+        A: 目標向量, numpy 陣列, 形狀 (N,), 所有元素均為正數
+        B: 候選向量矩陣, numpy 陣列, 形狀 (N, K)
+        C: 偏移矩陣, numpy 陣列, 形狀 (N, K)
+        a_min: 最小的 a 值
+        a_max: 最大的 a 值
+
+        Returns:
+        best_distance: 最小的目標函數值, 如果沒有找到則返回 inf
+        best_a: 使得目標函數最小的 a 值, 如果沒有找到則返回 1.0
+        """
+        N = A.shape[0]
+        K = B.shape[1]
+
+        # 評估篩選後的 a 值
+        # best_distance = float("inf")
+        best_distance = np.inf
+        best_a = (a_min + a_max) / 2.0
+
+        for i in range(N):
+            for j in range(K):
+                if B[i, j] == 0:
+                    continue
+
+                a1 = (A[i] - C[i, j]) / B[i, j]
+                a2 = (-A[i] - C[i, j]) / B[i, j]
+
+                for a in (a1, a2):
+                    if a_min <= a <= a_max:
+                        dist = eval_dist(A, a, B, C)
+
+                        if dist < best_distance:
+                            best_distance = dist
+                            best_a = a
+
+        return best_distance, best_a
+
+    @njit(
+        "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:], float64, float64)",
+        nogil=True,
+    )
+    def smart_fuzzy_search(
+        A: np.ndarray, B: np.ndarray, C: np.ndarray, a_min: float, a_max: float
+    ) -> Tuple[float, float]:
+        """
+        結合密度估計和有限評估的方法尋找最佳的 a 值
+        先通過密度估計找到可能的高密度區域，然後在這些區域中進行有限的評估
+
+        Parameters:
+        A: 目標向量, numpy 陣列, 形狀 (N,)
+        B: 候選向量矩陣, numpy 陣列, 形狀 (N, K)
+        C: 偏移矩陣, numpy 陣列, 形狀 (N, K)
+        a_min: 最小的 a 值
+        a_max: 最大的 a 值
+
+        Returns:
+        best_distance: 最小的目標函數值
+        best_a: 使得目標函數最小的 a 值
+        """
+        N = A.shape[0]
+        K = B.shape[1]
+
+        DOWNSAMPLE_THRESHOLD = 1000
+        MAX_BIN_USED = 3
+        SAMPLE_RATE_IN_BIN = 0.05
+
+        # 收集所有可能的 a 值
+        cand_as = []
+
+        for i in range(N):
+            for j in range(K):
+                if B[i, j] == 0:
+                    continue
+
+                a1 = (A[i] - C[i, j]) / B[i, j]
+                a2 = (-A[i] - C[i, j]) / B[i, j]
+
+                if a_min <= a1 <= a_max:
+                    cand_as.append(a1)
+                if a_min <= a2 <= a_max:
+                    cand_as.append(a2)
+
+        # 如果候選值太多，降採樣
+        if len(cand_as) >= DOWNSAMPLE_THRESHOLD:
+            cand_as.sort()
+
+            # 找到高密度區域
+            # 1. 先用直方圖方法分析密度
+            num_bins = min(100, max(10, len(cand_as) // 10))
+            bin_width = (a_max - a_min) / num_bins
+
+            bin_counts = np.zeros(num_bins, dtype=np.int32)
+            for i in range(len(cand_as)):
+                bin_idx = min(int((cand_as[i] - a_min) / bin_width), num_bins - 1)
+                bin_counts[bin_idx] += 1
+
+            # 找到前5多的bin，選取每個bin降採樣100分之1的數量，與中位數，加入test_as
+            sample_as = []
+            for bin_idx in np.argsort(-bin_counts)[:MAX_BIN_USED]:
+                # 如果bin數量為0，跳過
+                if bin_counts[bin_idx] == 0:
+                    break
+
+                # 計算該bin的起始和結束範圍
+                bin_start = a_min + bin_idx * bin_width
+                bin_end = bin_start + bin_width
+
+                # 收集該bin內的所有a值
+                bin_as = []
+                for a in cand_as:
+                    if bin_start <= a < bin_end:
+                        bin_as.append(a)
+
+                # 如果bin內有值
+                if len(bin_as) > 0:
+                    # 添加bin的中位數
+                    sample_as.append(np.median(np.array(bin_as)))
+
+                    # 降採樣該bin內的值 (取100分之1)
+                    step = max(1, int(len(bin_as) * SAMPLE_RATE_IN_BIN))
+                    sample_as.extend(bin_as[:step:])
+            cand_as = sample_as
+
+        # 5. 評估所有選出的點，找到最佳的
+        # best_dist = float("inf")
+        best_dist = np.inf
+        best_a = (a_min + a_max) / 2.0
+
+        for a in cand_as:
+            dist = eval_dist(A, a, B, C)
+            if dist < best_dist:
+                best_dist = dist
+                best_a = a
+
+        return best_dist, best_a
+
+    # ------------------------------------------------------------
+    # search function define done
+    # ------------------------------------------------------------
+
+    def process_energy(i, fuzzy) -> Tuple[int, float, float]:
         nonlocal f_params, sf_energies, fpts, allows
         param = f_params[i]
         a_min = max(EJb[0] / param[0], ECb[0] / param[1], ELb[0] / param[2])
@@ -342,9 +348,7 @@ def search_in_database(
     return best_params, fig
 
 
-def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
-    scq.settings.PROGRESSBAR_DISABLED, old = True, scq.settings.PROGRESSBAR_DISABLED
-
+def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000) -> np.ndarray:
     evals_count = count_max_evals(allows)
 
     pbar = tqdm(desc="Distance: nan", total=maxfun)
@@ -371,6 +375,10 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000):
         update_pbar(params, np.mean(dists))
 
         return dists
+
+    import scqubits as scq  # lazy import to speed up import time
+
+    scq.settings.PROGRESSBAR_DISABLED, old = True, scq.settings.PROGRESSBAR_DISABLED
 
     EJb, ECb, ELb = param_b
     res = least_squares(

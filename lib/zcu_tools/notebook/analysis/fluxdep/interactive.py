@@ -13,7 +13,7 @@ import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
-from IPython.display import display, clear_output
+from IPython.display import clear_output, display
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Ellipse
 from numpy import ndarray
@@ -210,12 +210,19 @@ class InteractiveFindPoints:
         self.fig.canvas.draw_idle()
 
     def on_finish(self, _) -> None:
-        plt.close(self.fig)
-        self.is_finished = True
+        self.finish_interactive()
 
-    def get_positions(self) -> Tuple[ndarray, ndarray]:
-        if not self.is_finished:
-            self.on_finish(None)
+        # also clear the output
+        clear_output(wait=False)
+
+    def finish_interactive(self) -> None:
+        self.is_finished = True
+        plt.close(self.fig)
+
+    def get_positions(self, finish: bool = True) -> Tuple[ndarray, ndarray]:
+        if not self.is_finished and finish:
+            self.finish_interactive()
+
         return self.s_mAs, self.s_fpts
 
 
@@ -827,12 +834,18 @@ class InteractiveSelector:
         self.selected[toggle_mask] = self.operation_tb.value == "Select"
 
     def on_finish(self, _) -> None:
-        plt.close(self.fig)
-        self.is_finished = True
+        self.finish_interactive()
 
-    def get_positions(self) -> Tuple[ndarray, ndarray, np.ndarray]:
-        if not self.is_finished:
-            self.on_finish(None)
+        # also clear the output
+        clear_output(wait=False)
+
+    def finish_interactive(self) -> None:
+        self.is_finished = True
+        plt.close(self.fig)
+
+    def get_positions(self, finish: bool = True) -> Tuple[ndarray, ndarray, np.ndarray]:
+        if not self.is_finished and finish:
+            self.finish_interactive()
 
         cur_selected = self.get_cur_selected()
         return (self.s_mAs[cur_selected], self.s_fpts[cur_selected], cur_selected)
