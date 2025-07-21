@@ -1069,6 +1069,48 @@ allxy_exp.save(
 )
 ```
 
+## ZigZag
+
+```python
+exp_cfg = {
+    "reset": "reset_120",
+    "X180_pulse": {
+        **ModuleLibrary.get_module("pi_amp"),
+    },
+    "Y180_pulse": {
+        **ModuleLibrary.get_module("pi_amp"),
+        "phase": 90,  # degrees
+    },
+    "X90_pulse": {
+        **ModuleLibrary.get_module("pi2_amp"),
+    },
+    "Y90_pulse": {
+        **ModuleLibrary.get_module("pi2_amp"),
+        "phase": 90,  # degrees
+    },
+    # "readout": "readout_rf",
+    "readout": "readout_dpm",
+    "dev": {
+        "flux_dev": "yoko",
+        "flux": cur_A,  # A
+    },
+    "sweep": np.arange(10),
+    "relax_delay": 0.0,  # us
+}
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+
+zigzag_exp = ze.twotone.ZigZagExperiment()
+times, signals = zigzag_exp.run(soc, soccfg, cfg)
+```
+
+```python
+zigzag_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_zigzag@{cur_A * 1e3:.3f}mA"),
+    comment=make_comment(cfg),
+    server_ip=data_host,
+)
+```
+
 # Rabi
 
 ## Length Rabi
