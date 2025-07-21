@@ -99,6 +99,7 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
             xs=lens,
             updateCfg=updateCfg,
             signal2real=rabi_signal2real,
+            progress=progress,
         )
 
         prog = TwoToneProgram(soccfg, cfg)
