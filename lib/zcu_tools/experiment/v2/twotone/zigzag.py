@@ -40,10 +40,11 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "times")
         times = sweep2array(cfg["sweep"]["times"])  # predicted
+        del cfg["sweep"]
 
         cfg["zigzag_pi_time"] = times[0]  # initial value
 
-        def updateCfg(cfg: Dict[str, Any], i: int, time: Any) -> None:
+        def updateCfg(cfg: Dict[str, Any], _: int, time: Any) -> None:
             cfg["zigzag_pi_time"] = time
 
         def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:

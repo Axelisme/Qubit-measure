@@ -77,12 +77,13 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         len_sweep = cfg["sweep"]["length"]
+        del cfg["sweep"]
 
         lens = sweep2array(len_sweep)  # predicted
 
         qub_pulse["length"] = lens[0]  # initial value
 
-        def updateCfg(cfg: Dict[str, Any], i: int, length: Any) -> None:
+        def updateCfg(cfg: Dict[str, Any], _: int, length: Any) -> None:
             cfg["qub_pulse"]["length"] = length
 
         def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
