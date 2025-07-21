@@ -14,6 +14,9 @@ labber_api/
 test.py
 test.ipynb
 
+qick/
+labber_api/
+
 *.bak
 *.yaml
 *.hdf5
@@ -23,5 +26,5 @@ test.ipynb
 *.log
 
 # Jupytext generated files
-notebook/
+/notebook/
 backup_ipynb_*/

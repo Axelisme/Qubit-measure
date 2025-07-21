@@ -1,17 +1,13 @@
-from .base import MyProgramV2, trigger_pulse
+from typing import Any, Dict, List
+
+from .modular import BaseCustomProgramV2
+from .modules import Module, Pulse, make_readout, make_reset
 
 
-class TwoToneProgram(MyProgramV2):
-    def _initialize(self, cfg) -> None:
-        self.declare_pulse(self.qub_pulse, "qub_pulse")
-        super()._initialize(cfg)
-
-    def _body(self, _) -> None:
-        # reset
-        self.resetM.reset_qubit(self)
-
-        # qubit pulse
-        trigger_pulse(self, self.qub_pulse, "qub_pulse")
-
-        # measure
-        self.readoutM.readout_qubit(self)
+class TwoToneProgram(BaseCustomProgramV2):
+    def make_modules(self, cfg: Dict[str, Any]) -> List[Module]:
+        return [
+            make_reset("reset", reset_cfg=cfg.get("reset")),
+            Pulse(name="qubit_pulse", cfg=cfg["qub_pulse"]),
+            make_readout("readout", readout_cfg=cfg["readout"]),
+        ]

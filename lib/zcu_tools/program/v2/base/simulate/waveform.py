@@ -2,19 +2,19 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Tuple
 
 import numpy as np
-from myqick.asm_v2 import QickParam
+from qick.asm_v2 import QickParam
 
 
-def format_param(loop_dict, param: Any) -> np.ndarray:
+def format_param(loop_dict: Dict[str, int], param: Any) -> np.ndarray:
     if isinstance(param, QickParam):
         values = param.start
         for name, count in loop_dict.items():
             if name in param.spans:
                 span = param.spans[name]
                 steps = np.linspace(0, span, count)
-                values = np.add.outer(values, steps)
+                values = np.add.outer(values, steps)  # pyright: ignore[reportAttributeAccessIssue]
             else:
-                values = np.add.outer(values, np.zeros(count))
+                values = np.add.outer(values, np.zeros(count))  # pyright: ignore[reportAttributeAccessIssue]
         return values
 
     return np.full(tuple(loop_dict.values()), fill_value=param)
@@ -29,7 +29,7 @@ class WaveForm(ABC):
 
     def get_phase(self, loop_dict) -> np.ndarray:
         phase = format_param(loop_dict, self.phase)
-        return np.exp(1j * phase[..., None] / 180 * np.pi)
+        return np.exp(1j * phase[..., None] / 180 * np.pi)  # type: ignore
 
     @abstractmethod
     def numpy(self, loop_dict, num_sample: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -61,7 +61,7 @@ class GaussWaveForm(WaveForm):
         # 生成高斯波形，振幅為1
         times = np.linspace(0.0, length, num_sample, axis=-1)
         x = times - length[..., None] / 2
-        signals = np.exp(-0.5 * (x / sigma[..., None]) ** 2)
+        signals = np.exp(-0.5 * (x / sigma[..., None]) ** 2)  # type: ignore
 
         return times, signals * self.get_phase(loop_dict)
 
@@ -72,7 +72,7 @@ class CosineWaveForm(WaveForm):
 
         # 生成餘弦波形，從0到2pi，振幅為1
         times = np.linspace(0.0, length, num_sample, axis=-1)
-        signals = 0.5 * (1 - np.cos(2 * np.pi * times / length[..., None]))
+        signals = 0.5 * (1 - np.cos(2 * np.pi * times / length[..., None]))  # type: ignore
 
         return times, signals * self.get_phase(loop_dict)
 
@@ -95,7 +95,7 @@ class DragWaveForm(WaveForm):
         times = np.linspace(0.0, length, num_sample, axis=-1)
 
         x = times - length[..., None] / 2
-        gauss = np.exp(-0.5 * (x / sigma[..., None]) ** 2)
+        gauss = np.exp(-0.5 * (x / sigma[..., None]) ** 2)  # type: ignore
         deriv = -x / (sigma[..., None] ** 2) * gauss
         signals = gauss - 1j * alpha[..., None] * deriv / delta[..., None]
 

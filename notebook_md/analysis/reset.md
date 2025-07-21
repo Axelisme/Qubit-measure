@@ -40,7 +40,7 @@ from zcu_tools.simulate.fluxonium import (
 ```
 
 ```python
-qub_name = "Q12_2D[2]/Q4"
+qub_name = "SF008"
 
 server_ip = "021-zcu216"
 port = 4999
@@ -110,7 +110,7 @@ for f, t in [(0, 1), (1, 0)]:
         fig.add_trace(go.Scatter(x=mAs, y=m, mode="lines", name=label))
 
 fig.update_layout(
-    yaxis_range=[0, 0.2],
+    yaxis_range=[0, 0.05],
     xaxis_title="mA",
     yaxis_title="Matrix Elements",
     showlegend=True,

@@ -4,39 +4,27 @@ version = "0.1.0"
 description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
 requires-python = ">=3.8"
-dependencies = ["numpy", "tqdm", "matplotlib"]
+dependencies = ["numpy", "tqdm", "matplotlib", "typing-extensions"]
 
 [project.optional-dependencies]
-server = ["myqick", "dill"]
-client = [
-    "myqick",
-    "labber",
-    "numpy<=1.19.5",
-    "h5py",
-    "ipykernel",
-    "ipywidgets",
-    "ipympl",
-    "pyyaml",
-    "pandas",
-    "scikit-learn",
-    "scipy",
-    "dill",
-]
+server = ["qick", "dill"]
+client = ["qick", "labber", "numpy<=1.19.5", "pyyaml", "dill"]
 fit = [
-    "h5py",
-    "ipykernel",
-    "ipywidgets",
-    "ipympl",
-    "pandas",
-    "scqubits",
-    "plotly",
-    "kaleido",
-    "scipy",
-    "nbformat>=4.2.0",
-    "joblib",
-    "numba",
-    "requests",
-    "flask",
+  "h5py",
+  "ipykernel",
+  "ipywidgets",
+  "ipympl",
+  "pandas",
+  "scqubits",
+  "plotly",
+  "kaleido",
+  "scipy",
+  "nbformat>=4.2.0",
+  "scikit-learn",
+  "joblib",
+  "numba",
+  "requests",
+  "flask",
 ]
 
 [build-system]
@@ -48,7 +36,14 @@ package-dir = { "" = "lib" }
 packages = ["zcu_tools"]
 
 [tool.ruff.lint]
-ignore = ["E402"]
+ignore = ["E402", "F401"]
+
+[tool.pyright]
+include = ["lib"]
+typeCheckingMode = "off"
+reportUnusedImport = "none"
+reportExplicitAny = "none"
+reportMissingTypeStubs = "none"
 
 [tool.jupytext]
 notebook_metadata_filter = "-all"

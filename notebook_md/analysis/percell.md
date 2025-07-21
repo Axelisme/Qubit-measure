@@ -34,7 +34,7 @@ from zcu_tools.notebook.persistance import load_result
 ```
 
 ```python
-qub_name = "Test049"
+qub_name = "Q12_2D[3]/Q1"
 
 server_ip = "005-writeboard"
 port = 4999
@@ -52,7 +52,7 @@ g = results["dispersive"]["g"]
 Nf = 20
 Nr = 20
 
-flxs = np.linspace(0.0, 0.51, 101)
+flxs = np.linspace(0.0, 0.51, 1001)
 
 fluxonium = scq.Fluxonium(*params, flux=0.0, cutoff=40, truncated_dim=Nf)
 resonator = scq.Oscillator(E_osc=r_f, truncated_dim=Nr)
@@ -83,8 +83,8 @@ n_{th}(\omega_j) = \frac{1}{exp(\beta \hbar \omega_j) - 1} \\
 $$
 
 ```python
-T = 113e-3  # K
-kappa = 2e-3  # GHz
+T = 200e-3  # K
+kappa = 7e-3  # GHz
 
 beta_hbar = sc.hbar / (sc.k * T) * 1e9
 
@@ -111,11 +111,24 @@ def percell(paramsweep: scq.ParameterSweep, paramindex_tuple: tuple, **kwargs):
     evecs = paramsweep["evecs"][paramindex_tuple]
     bare_evecs = paramsweep["bare_evecs"]["subsys":1][paramindex_tuple]
 
+    def get_esys(state: int):
+        idxs = [paramsweep.dressed_index((state, n), paramindex_tuple) for n in ns]
+        mask = np.array([idx is None for idx in idxs])
+
+        # mask the None index
+        idxs = np.array([idx if idx is not None else 0 for idx in idxs])
+
+        En = evals[idxs]
+        Vec_n = evecs[idxs]
+
+        # fill the None index with nan
+        En[mask] = np.nan
+
+        return En, Vec_n
+
     # calculate the transition rate of 0-1 caused by percell effect
-    g_idxs = [paramsweep.dressed_index((0, n), paramindex_tuple) for n in ns]
-    e_idxs = [paramsweep.dressed_index((1, n), paramindex_tuple) for n in ns]
-    Egs, Ees = evals[g_idxs], evals[e_idxs]  # (ns,)
-    Vgs, Ves = evecs[g_idxs], evecs[e_idxs]  # (ns, N)
+    Egs, Vgs = get_esys(0)
+    Ees, Ves = get_esys(1)
 
     E_1n0n = Egs[:, None] - Ees[None, :]  # (ns, ns), from |1, n> to |0, n>
 
@@ -168,8 +181,13 @@ plt.plot(flxs, sweep["percell"])
 plt.yscale("log")
 plt.ylim(1e3, 1e7)
 plt.xlabel("flux")
-plt.ylabel("T1 (us)")
+plt.ylabel("T1 (ns)")
+plt.grid()
 plt.show()
+```
+
+```python
+np.savez("../../result/Q12_2D[3]/Q1/percell", flxs=flxs, percell=sweep["percell"])
 ```
 
 ```python

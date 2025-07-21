@@ -1,5 +1,6 @@
-from myqick.averager_program import QickSweep, merge_sweeps
+from qick.averager_program import QickSweep, merge_sweeps
 
+from ..base import MyProgram
 from .base import (
     SYNC_TIME,
     MyAveragerProgram,
@@ -10,7 +11,7 @@ from .base import (
 )
 
 
-class BaseTwoToneProgram:
+class BaseTwoToneProgram(MyProgram):
     @classmethod
     def twotone_body(cls, prog, before_pulse=None):
         # reset

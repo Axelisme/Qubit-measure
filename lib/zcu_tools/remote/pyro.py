@@ -3,14 +3,16 @@ from typing import Any, Literal, Optional, Tuple
 
 import Pyro4
 import Pyro4.naming
-from myqick import QickConfig
+from qick import QickConfig
 
-from zcu_tools.tools import get_bitfile
+from zcu_tools.program.bitfiles import get_bitfile
 
 # use dill instead of pickle
+# Pyro4.config.SERIALIZER = "pickle"
 Pyro4.config.SERIALIZER = "dill"
-Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill"])
+Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill", "pickle"])
 Pyro4.config.DILL_PROTOCOL_VERSION = 5
+Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
 Pyro4.config.REQUIRE_EXPOSE = False
 
 
@@ -30,7 +32,7 @@ def start_nameserver(ns_port: int) -> None:
 
 
 def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs) -> None:
-    from myqick import QickSoc
+    from qick import QickSoc
 
     from zcu_tools.remote.server import ProgramServer
 
@@ -74,13 +76,13 @@ def make_proxy(
     lookup_name: str = "myqick",
     proxy_prog: bool = False,
 ) -> Tuple[Any, QickConfig, Optional[Any]]:
-    from .client import ProgramClient  # lazy import to avoid recursive import
-
     ns = Pyro4.locateNS(host=ns_host, port=ns_port)
 
     soc = Pyro4.Proxy(ns.lookup(lookup_name))
     soccfg = QickConfig(soc.get_cfg())
     if proxy_prog:
+        from .client import ProgramClient  # lazy import to avoid recursive import
+
         prog_server = Pyro4.Proxy(ns.lookup("prog_server"))
         prog_client = ProgramClient(prog_server)
     else:

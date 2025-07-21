@@ -3,7 +3,6 @@ from typing import Tuple
 
 import numpy as np
 from scipy.optimize import root_scalar
-from scqubits import Fluxonium
 
 
 class FluxoniumPredictor:
@@ -22,27 +21,12 @@ class FluxoniumPredictor:
 
         self.bias = bias
 
+        from scqubits import Fluxonium  # lazy import
+
         self.fluxonium = Fluxonium(*self.params, flux=0.5, cutoff=40, truncated_dim=2)
 
     def _A_to_flx(self, cur_A: float) -> float:
         return (1e3 * (cur_A + self.bias) - self.mA_c) / self.period + 0.5
-
-    def predict_freq(self, cur_A: float, transition: Tuple[int, int] = (0, 1)) -> float:
-        """
-        Predict the transition frequency of a fluxonium qubit.
-        Args:
-            cur_A (float): Current in A.
-            transition (Tuple[from, to]): transition between which level
-        Returns:
-            float: transition frequency in MHz.
-        """
-
-        flx = self._A_to_flx(cur_A)
-
-        self.fluxonium.flux = flx
-        energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 1)
-
-        return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
 
     def calculate_bias(
         self, cur_A: float, cur_freq: float, transition: Tuple[int, int] = (0, 1)
@@ -82,6 +66,23 @@ class FluxoniumPredictor:
 
     def update_bias(self, bias: float) -> None:
         self.bias = bias
+
+    def predict_freq(self, cur_A: float, transition: Tuple[int, int] = (0, 1)) -> float:
+        """
+        Predict the transition frequency of a fluxonium qubit.
+        Args:
+            cur_A (float): Current in A.
+            transition (Tuple[from, to]): transition between which level
+        Returns:
+            float: transition frequency in MHz.
+        """
+
+        flx = self._A_to_flx(cur_A)
+
+        self.fluxonium.flux = flx
+        energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 1)
+
+        return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
 
     def predict_lenrabi(self, cur_A: float, ref_A: float, ref_pilen: float) -> float:
         """

@@ -1,14 +1,13 @@
-from collections import defaultdict
 from typing import Any, Dict
 
-from myqick.qick_asm import AcquireMixin
 from zcu_tools.auto import is_pulse_cfg
-from zcu_tools.tools import AsyncFunc
+from zcu_tools.utils.async_func import AsyncFunc
 
-from .proxy import AbsProxy, ProxyProgram
+from .improve_acquire import ImproveAcquireMixin
+from .proxy import AbsProxy, ProxyAcquireMixin
 
 
-class MyProgram(ProxyProgram, AcquireMixin):
+class MyProgram(ProxyAcquireMixin, ImproveAcquireMixin):
     """
     Add some functionality to the base program class
     including:
@@ -36,17 +35,6 @@ class MyProgram(ProxyProgram, AcquireMixin):
                 raise ValueError(f"Pulse name {name} already exists")
             setattr(self, name, pulse)
 
-        # dac pulse channel check
-        self.ch_count = defaultdict(int)
-        nqzs = dict()
-        for name, pulse in self.dac.items():
-            if not is_pulse_cfg(name, pulse):
-                continue
-            ch, nqz = pulse["ch"], pulse["nqz"]
-            self.ch_count[ch] += 1
-            cur_nqz = nqzs.setdefault(ch, nqz)
-            assert cur_nqz == nqz, "Found different nqz on the same channel"
-
     def acquire(self, soc, **kwargs) -> list:
         # let callback be executd as a coroutine
         with AsyncFunc(kwargs.get("callback")) as cb:
@@ -62,4 +50,4 @@ class MyProgram(ProxyProgram, AcquireMixin):
             return super().acquire_decimated(soc, **kwargs)
 
 
-__all__ = ["MyProgram", "AbsProxy", "ProxyProgram"]
+__all__ = ["MyProgram", "AbsProxy", "ProxyAcquireMixin"]

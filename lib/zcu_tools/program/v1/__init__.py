@@ -1,6 +1,7 @@
 import warnings
 
 warnings.warn("v1 is deprecated, use v2 instead")
+# raise DeprecationWarning("v1 is deprecated, use v2 instead")
 
 from .base import MyAveragerProgram, MyNDAveragerProgram, MyRAveragerProgram
 from .onetone import OneToneProgram, RGainOneToneProgram
@@ -12,20 +13,3 @@ from .twotone import (
     RGainTwoToneProgram,
     TwoToneProgram,
 )
-
-__all__ = [
-    "MyAveragerProgram",
-    "MyNDAveragerProgram",
-    "MyRAveragerProgram",
-    "OneToneProgram",
-    "RGainOneToneProgram",
-    "TwoToneProgram",
-    "RGainTwoToneProgram",
-    "RFreqTwoToneProgram",
-    "RFreqTwoToneProgramWithRedReset",
-    "PowerDepProgram",
-    "T1Program",
-    "T2RamseyProgram",
-    "T2EchoProgram",
-    "SingleShotProgram",
-]

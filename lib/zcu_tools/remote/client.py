@@ -51,7 +51,7 @@ class ProgramClient(AbsProxy):
     ) -> Tuple[Dict[str, Any], Optional[Any]]:
         # before send to remote server, override some kwargs
 
-        soft_avgs = prog.cfg["soft_avgs"]
+        rounds = prog.cfg["rounds"]
 
         kwargs.setdefault("progress", False)
         kwargs.setdefault("callback", None)
@@ -62,7 +62,7 @@ class ProgramClient(AbsProxy):
             # to make remote progress bar work
             kwargs["progress"] = False
 
-            bar = tqdm(total=soft_avgs, desc="Soft_avgs", leave=True)
+            bar = tqdm(total=rounds, desc="Rounds", leave=True)
 
             # wrap existing callback
             cb = kwargs["callback"]
@@ -148,11 +148,20 @@ class ProgramClient(AbsProxy):
 
         return ret
 
-    def get_acc_buf(self) -> list:
-        return self._remote_call("get_acc_buf", timeout=5)
+    def get_raw(self) -> list:
+        return self._remote_call("get_raw", timeout=5)
+
+    def get_shots(self) -> list:
+        return self._remote_call("get_shots", timeout=5)
+
+    def get_round_data(self) -> Tuple[Optional[list], Optional[list]]:
+        return self._remote_call("get_round_data", timeout=5)
 
     def set_early_stop(self) -> None:
         self._remote_call("set_early_stop", copy_=True, timeout=4)
 
-    def acquire(self, prog: MyProgram, decimated: bool = False, **kwargs) -> list:
-        return self._remote_acquire(prog, decimated=decimated, **kwargs)
+    def acquire(self, prog: MyProgram, **kwargs) -> list:
+        return self._remote_acquire(prog, decimated=False, **kwargs)
+
+    def acquire_decimated(self, prog: MyProgram, **kwargs) -> list:
+        return self._remote_acquire(prog, decimated=True, **kwargs)

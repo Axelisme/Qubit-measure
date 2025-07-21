@@ -7,7 +7,11 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-import jupytext
+import jupytext  # pyright: ignore
+
+# ------------------------------
+# Helper utilities
+# ------------------------------
 
 # ------------------------------
 # Helper utilities

@@ -13,12 +13,11 @@ class LivePlotter1D(JupyterPlotMixin, AbsLivePlotter):
         self,
         xlabel: str,
         ylabel: str,
-        num_lines: int = 1,
-        title: Optional[str] = None,
         figsize: Optional[Tuple[int, int]] = None,
         disable: bool = False,
+        **kwargs,
     ) -> None:
-        segment = Plot1DSegment(xlabel, ylabel, num_lines, title)
+        segment = Plot1DSegment(xlabel, ylabel, **kwargs)
         super().__init__([segment], figsize=figsize, disable=disable)
 
     def update(
@@ -29,7 +28,8 @@ class LivePlotter1D(JupyterPlotMixin, AbsLivePlotter):
         refresh: bool = True,
     ) -> None:
         ax: plt.Axes = self.axs[0]
-        segment: Plot1DSegment = self.segments[0]
+        segment = self.segments[0]
+        assert isinstance(segment, Plot1DSegment)
 
         if self.disable:
             return

@@ -6,10 +6,12 @@ This module provides functions for calculating physical models related to
 flux-dependent spectroscopy, including energy calculations and transition models.
 """
 
+from typing import Any, Dict, Tuple
+
 import numpy as np
 
 
-def count_max_evals(allows):
+def count_max_evals(allows: Dict[str, Any]) -> int:
     evals_count = 0
     for name, lvl in allows.items():
         if not isinstance(lvl, list) or len(lvl) == 0 or name == "r_f":
@@ -20,7 +22,9 @@ def count_max_evals(allows):
     return evals_count
 
 
-def energy2linearform(energies, allows):
+def energy2linearform(
+    energies: np.ndarray, allows: Dict[str, Any]
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     將能量E轉換為線性形式B,C的躍遷頻率,使得aE的能量對應到|aB+C|的躍遷頻率,其中a可以是任意實數
 
@@ -79,13 +83,18 @@ def energy2linearform(energies, allows):
 
     for i, j in allows.get("mirror2", []):  # E = sample_f - 0.5 * E_ji
         Bs[:, idx] = -0.5 * (energies[:, j] - energies[:, i])
-        Cs[:, idx] = allows["sample_f"]
+        Cs[:, idx] = allows[
+            "sample_f"
+        ]  # from zcu_tools.notebook.single_qubit.process import rotate2real
+        # from zcu_tools.notebook.util.fitting import batch_fit_dual_gauss, fit_gauss, gauss_func
         idx += 1
 
     return Bs, Cs
 
 
-def energy2transition(energies, allows):
+def energy2transition(
+    energies: np.ndarray, allows: Dict[str, Any]
+) -> Tuple[np.ndarray, list]:
     """
     將能量E轉換為躍遷頻率。
 

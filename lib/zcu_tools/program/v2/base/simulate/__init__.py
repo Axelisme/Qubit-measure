@@ -4,7 +4,7 @@ from functools import wraps
 from typing import Any, Callable, Dict, Type
 
 import numpy as np
-from myqick.asm_v2 import QickParam
+from qick.asm_v2 import QickParam
 
 from ..program import MyProgramV2
 from .pulse import Pulse, pulses_to_signal, visualize_pulse

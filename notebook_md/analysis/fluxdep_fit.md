@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: Python 3
+    display_name: axelenv13
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.2
+    version: 3.13.5
 ---
 
 ```python
@@ -31,7 +31,7 @@ from pprint import pprint
 import numpy as np
 
 %autoreload 2
-from zcu_tools import load_data
+from zcu_tools.utils.datasaver import load_data
 
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 
@@ -41,7 +41,7 @@ from zcu_tools.simulate import mA2flx
 ```
 
 ```python
-qub_name = "Q12_2D/Q4"
+qub_name = "Q12_2D[3]/Q4"
 
 server_ip = "021-zcu216"
 port = 4999
@@ -67,14 +67,14 @@ pprint(allows)
 
 ```python
 # spect_path = "../../Database/Test049/2025/05/Data_0524/Test049_flux_dep_1.hdf5"
-spect_path = "../../Database/Q12_2D/Q4/2025/05/Data_0528/R4_flux_2.hdf5"
+spect_path = r"..\..\Database\Q12_2D[3]\Q4\2025\07\Data_0716\Q_flux_1.hdf5"
 spectrum, _fpts, _mAs = load_data(spect_path, server_ip=server_ip, port=port)
 mAs, fpts, spectrum = zp.format_rawdata(_mAs, _fpts, spectrum)
 ```
 
 ```python
 %matplotlib widget
-actLine = zf.InteractiveLines(spectrum, mAs, fpts, mA_c, mA_e, use_phase=False)
+actLine = zf.InteractiveLines(spectrum, mAs, fpts, mA_c, mA_e, use_phase=True)
 ```
 
 ```python
@@ -198,10 +198,12 @@ ELb = (0.5, 2.0)
 
 ```python
 allows = {
-    "mirror": [(0, 1), (0, 2), (0, 3), (1, 3), (1, 4)],
-    "transitions": [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3)],
-    "r_f": 7.52062,
-    "sample_f": 9.584640 / 2,
+    "transitions": [(0, 1), (0, 2), (1, 2), (0, 3)],
+    "red side": [(0, 1), (0, 2), (1, 2), (0, 3)],
+    "mirror": [(0, 1), (0, 2), (1, 2), (0, 3)],
+    "r_f": 5.794,
+    # "sample_f": 9.584640 / 2,
+    "sample_f": 6.881280 / 2,
 }
 allows = {
     **allows,
@@ -224,12 +226,15 @@ fig.savefig(f"../../result/{qub_name}/image/search_result.png")
 ```
 
 ```python
-energies = calculate_energy_vs_flx(best_params, t_flxs, cutoff=40, evals_count=15)
+_, energies = calculate_energy_vs_flx(best_params, t_flxs, cutoff=40, evals_count=15)
 ```
 
 ```python
 v_allows = {
     **allows,
+    # "transitions": [(0, 1), (0, 2), (1, 2), (0, 3)],
+    # "red side": [(0, 1), (0, 2), (1, 2), (0, 3)],
+    # "mirror": [(0, 1), (0, 2), (1, 2), (0, 3)],
     # "transitions": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 15)],
     # "red side": [(i, j) for i in [0, 1, 2] for j in range(i + 1, 15)],
     # "mirror": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
@@ -260,14 +265,14 @@ print("Fitted params:", *sp_params)
 ```
 
 ```python
-energies = calculate_energy_vs_flx(sp_params, t_flxs, cutoff=40, evals_count=15)
+_, energies = calculate_energy_vs_flx(sp_params, t_flxs, cutoff=40, evals_count=15)
 ```
 
 ```python
 v_allows = {
     **allows,
-    "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 10)],
-    "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
+    # "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 10)],
+    # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
 }
 
 vs = zf.VisualizeSpet(

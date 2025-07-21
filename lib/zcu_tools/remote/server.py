@@ -1,11 +1,11 @@
 from types import ModuleType
-from typing import Optional
+from typing import Optional, Tuple
 from unittest.mock import Mock
 
 import Pyro4
 
 from zcu_tools.program.base import MyProgram
-from zcu_tools.tools import AsyncFunc
+from zcu_tools.utils import AsyncFunc
 
 from . import pyro  # noqa , 初始化Pyro4.config
 from .wrapper import RemoteCallback, unwrap_callback
@@ -53,19 +53,42 @@ class ProgramServer:
 
                 # call original method from MyProgram instead of subclass method
                 # in case of multiple execution of overridden method
-                return prog.local_acquire(self.soc, decimated=decimated, **kwargs)
+                if decimated:
+                    return prog.local_acquire_decimated(self.soc, **kwargs)
+                else:
+                    return prog.local_acquire(self.soc, **kwargs)
         finally:
             self._after_run_program()
 
     @Pyro4.expose
-    def get_acc_buf(self) -> Optional[list]:
+    def get_raw(self) -> Optional[list]:
         if self.acquiring:
             raise RuntimeError("Program is still running")
 
         if self.last_prog is None:
             raise RuntimeError("No program has been run")
 
-        return self.last_prog.acc_buf
+        return self.last_prog.get_raw()
+
+    @Pyro4.expose
+    def get_shots(self) -> Optional[list]:
+        if self.acquiring:
+            raise RuntimeError("Program is still running")
+
+        if self.last_prog is None:
+            raise RuntimeError("No program has been run")
+
+        return self.last_prog.get_shots()
+
+    @Pyro4.expose
+    def get_round_data(self) -> Tuple[Optional[list], Optional[list]]:
+        if self.acquiring:
+            raise RuntimeError("Program is still running")
+
+        if self.last_prog is None:
+            raise RuntimeError("No program has been run")
+
+        return self.last_prog.get_rounds(), self.last_prog.get_stderr_raw()
 
     @Pyro4.expose
     def test_callback(self, cb: RemoteCallback) -> None:
