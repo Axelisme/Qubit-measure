@@ -217,8 +217,15 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
         )
 
         params, _ = curve_fit(
-            lambda i, contrast, ep, ed: g_signal
-            + 0.5 * contrast * (1 + predict_state_with_error(sequence[i], ep, ed)),
+            lambda idxs, contrast, ep, ed: g_signal
+            + 0.5
+            * contrast
+            * (
+                1
+                - np.array(
+                    [predict_state_with_error(sequence[int(i)], ep, ed) for i in idxs]
+                )
+            ),
             np.arange(len(sequence)),
             signals,
             p0=(init_contrast, 0.0, 0.0),
@@ -227,7 +234,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
         contrast, ep, ed = params
 
         predict_signals = [
-            g_signal + 0.5 * contrast * (1 + predict_state_with_error(seq, ep, ed))
+            g_signal + 0.5 * contrast * (1 - predict_state_with_error(seq, ep, ed))
             for seq in sequence
         ]
 
