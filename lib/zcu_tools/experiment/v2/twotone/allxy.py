@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import least_squares
+from scipy.optimize import curve_fit
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
@@ -18,69 +18,79 @@ from ..template import sweep1D_soft_template
 # (sequence, signals)
 AllXYResultType = Tuple[List[Tuple[str, str]], np.ndarray]
 
+# Standard AllXY sequence of 21 gate pairs
+ALLXY_SEQUENCE = [
+    ("I", "I"),
+    ("X180", "X180"),
+    ("Y180", "Y180"),
+    ("X180", "Y180"),
+    ("Y180", "X180"),
+    ("X90", "I"),
+    ("Y90", "I"),
+    ("X90", "Y90"),
+    ("Y90", "X90"),
+    ("X90", "Y180"),
+    ("Y90", "X180"),
+    ("X180", "Y90"),
+    ("Y180", "X90"),
+    ("X90", "X180"),
+    ("X180", "X90"),
+    ("Y90", "Y180"),
+    ("Y180", "Y90"),
+    ("X180", "I"),
+    ("Y180", "I"),
+    ("X90", "X90"),
+    ("Y90", "Y90"),
+]
+
+# ------------------------------------------------------------------------------
+# Helper functions
+# ------------------------------------------------------------------------------
+
+
+def predict_state_with_error(
+    gates: Tuple[str, str], power_err: float, detune_err: float
+) -> float:
+    ep = power_err
+    ed = detune_err
+
+    # reference: https://rsl.yale.edu/sites/default/files/2024-08/2013-RSL-Thesis-Matthew-Reed.pdf
+    # page 154
+
+    if gates == ("I", "I"):
+        return 1
+    elif gates in [("X180", "X180"), ("Y180", "Y180")]:
+        return 1 - 8 * ep**2 - (np.pi**2 / 32) * ed**4
+    elif gates in [("X180", "Y180"), ("Y180", "X180")]:
+        return 1 - 4 * ep**2 - ed**2
+    elif gates in [("X90", "I"), ("Y90", "I"), ("I", "X90"), ("I", "Y90")]:
+        return -ep + (1 - np.pi / 2) * ed**2
+    elif gates == ("X90", "Y90"):
+        return ep**2 - 2 * ed
+    elif gates == ("Y90", "X90"):
+        return ep**2 + 2 * ed
+    elif gates in [("X90", "Y180"), ("X180", "Y90")]:
+        return ep - ed
+    elif gates in [("Y90", "X180"), ("Y180", "X90")]:
+        return ep + ed
+    elif gates in [("X90", "X180"), ("X180", "X90"), ("Y90", "Y180"), ("Y180", "Y90")]:
+        return 3 * ep + (3 * np.pi / 8) * ed**2
+    elif gates in [("X180", "I"), ("Y180", "I"), ("I", "X180"), ("I", "Y180")]:
+        return -1 + 2 * ep**2 + 0.5 * ed**2
+    elif gates in [("X90", "X90"), ("Y90", "Y90")]:
+        return -1 + 2 * ep**2 + 2 * ed**2
+    else:
+        raise ValueError(f"Invalid gate pair: {gates}")
+
 
 def allxy_signal2real(signals: np.ndarray) -> np.ndarray:
     """Convert complex signals to real values for AllXY analysis."""
     return rotate2real(signals).real  # type: ignore
 
 
-def calc_predicted_state(gate1: str, gate2: str) -> np.ndarray:
-    """Calculate the expected ⟨σ_z⟩ after gate pair (gate1, gate2).
-
-    The calculation is performed by treating the qubit as a Bloch vector that
-    starts at (0, 0, 1) (ground state). Each gate is mapped to a classical
-    rotation on the Bloch sphere and applied in the order they appear in the
-    gate pair.
-
-    Parameters
-    ----------
-    gate1 : str
-        First gate in the pair.
-    gate2 : str
-        Second gate in the pair.
-
-    Returns
-    -------
-    np.ndarray
-        Array of predicted ⟨σ_z⟩ values, taking values in {+1, 0, –1} for ideal gates.
-    """
-
-    def _rotation_x(theta: float) -> np.ndarray:
-        """Rotation matrix around x-axis for Bloch vector representation."""
-
-        return np.array(
-            [
-                [1, 0, 0],
-                [0, np.cos(theta), -np.sin(theta)],
-                [0, np.sin(theta), np.cos(theta)],
-            ]
-        )
-
-    def _rotation_y(theta: float) -> np.ndarray:
-        """Rotation matrix around y-axis for Bloch vector representation."""
-
-        return np.array(
-            [
-                [np.cos(theta), 0, np.sin(theta)],
-                [0, 1, 0],
-                [-np.sin(theta), 0, np.cos(theta)],
-            ]
-        )
-
-    # Map each gate to its corresponding rotation matrix
-    gate2rot = {
-        "I": np.identity(3),
-        "X180": _rotation_x(np.pi),
-        "Y180": _rotation_y(np.pi),
-        "X90": _rotation_x(np.pi / 2),
-        "Y90": _rotation_y(np.pi / 2),
-    }
-
-    vec = np.array([0.0, 0.0, 1.0])
-    vec = gate2rot[gate1] @ vec
-    vec = gate2rot[gate2] @ vec
-
-    return vec[2]
+# ------------------------------------------------------------------------------
+# AllXYExperiment
+# ------------------------------------------------------------------------------
 
 
 class AllXYExperiment(AbsExperiment[AllXYResultType]):
@@ -98,31 +108,6 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
 
     Each gate pair is executed in sequence using a soft sweep approach.
     """
-
-    # Standard AllXY sequence of 21 gate pairs
-    ALLXY_SEQUENCE = [
-        ("I", "I"),
-        ("X180", "X180"),
-        ("Y180", "Y180"),
-        ("X180", "Y180"),
-        ("Y180", "X180"),
-        ("X90", "I"),
-        ("Y90", "I"),
-        ("X90", "Y90"),
-        ("Y90", "X90"),
-        ("X90", "Y180"),
-        ("Y90", "X180"),
-        ("X180", "Y90"),
-        ("Y180", "X90"),
-        ("X90", "X180"),
-        ("X180", "X90"),
-        ("Y90", "Y180"),
-        ("Y180", "Y90"),
-        ("X180", "I"),
-        ("Y180", "I"),
-        ("X90", "X90"),
-        ("Y90", "Y90"),
-    ]
 
     def run(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
@@ -148,7 +133,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             if gate_name != "I" and pulse_cfg is None:
                 raise ValueError(f"Gate '{gate_name}' pulse configuration is missing")
 
-        sequence = self.ALLXY_SEQUENCE
+        sequence = ALLXY_SEQUENCE
 
         def updateCfg(cfg: Dict[str, Any], i: int, _: Any) -> None:
             """Update configuration for each gate pair in the sequence."""
@@ -220,31 +205,48 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
 
         # Rotate IQ data so that the contrast lies on the real axis and take only
         # the real part for further analysis.
-        signals = rotate2real(signals).real
+        signals = allxy_signal2real(signals)
 
         # ------------------------------------------------------------------
-        # 1. Calculate the ideal expectation values (+1, 0, –1)
-        # ------------------------------------------------------------------
-        predicted_state = np.array([calc_predicted_state(*gates) for gates in sequence])
-
-        # ------------------------------------------------------------------
-        # 2. Use non-linear least squares to fit average signal and contrast
-        #    such that:  s_pred = avg + 0.5 * contrast * predicted_state
+        # fitting the signal with error
         # ------------------------------------------------------------------
 
-        def calc_predicted(params: np.ndarray) -> np.ndarray:
-            avg, contrast = params
-            return avg + 0.5 * contrast * predicted_state
-
-        # Initial guess: use simple statistics of the measured signals
-        avg_guess = float(np.mean(signals))
-        contrast_guess = float(np.ptp(signals))
-
-        res = least_squares(
-            lambda p: calc_predicted(p) - signals, x0=[avg_guess, contrast_guess]
+        g_signal = signals[sequence.index(("I", "I"))]
+        init_contrast = (
+            np.ptp(signals) if g_signal < np.mean(signals) else -np.ptp(signals)
         )
 
-        avg_signal, contrast = res.x  # fitted parameters
+        params, _ = curve_fit(
+            lambda i, contrast, ep, ed: g_signal
+            + 0.5 * contrast * (1 + predict_state_with_error(sequence[i], ep, ed)),
+            np.arange(len(sequence)),
+            signals,
+            p0=(init_contrast, 0.0, 0.0),
+        )
+
+        contrast, ep, ed = params
+
+        predict_signals = [
+            g_signal + 0.5 * contrast * (1 + predict_state_with_error(seq, ep, ed))
+            for seq in sequence
+        ]
+
+        # ------------------------------------------------------------------
+        # calculate the error
+        # ------------------------------------------------------------------
+        perfect_states = [predict_state_with_error(seq, 0.0, 0.0) for seq in sequence]
+        power_err = np.mean(
+            [
+                np.abs(predict_state_with_error(seq, ep, 0.0) - perf_state)
+                for seq, perf_state in zip(sequence, perfect_states)
+            ]
+        )
+        detune_err = np.mean(
+            [
+                np.abs(predict_state_with_error(seq, 0.0, ed) - perf_state)
+                for seq, perf_state in zip(sequence, perfect_states)
+            ]
+        )
 
         # ------------------------------------------------------------------
         # 3. Plotting
@@ -253,7 +255,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
         _, ax = plt.subplots(figsize=config.figsize)
         ax.plot(signals, marker="o", linestyle="None", label="Measured Signals")
         ax.plot(
-            calc_predicted([avg_signal, contrast]),
+            predict_signals,
             marker="x",
             linestyle="-",
             color="red",
@@ -267,6 +269,8 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
         ax.set_ylabel("Signal")
         ax.legend()
         ax.grid(True)
+
+        ax.set_title(f"power dep: {power_err:.1%}, detune dep: {detune_err:.1%}")
 
         plt.tight_layout()
         plt.show()
