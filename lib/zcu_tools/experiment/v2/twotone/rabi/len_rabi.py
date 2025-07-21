@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from operator import call
 from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -14,7 +15,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
-from ...template import sweep_hard_template
+from ...template import sweep1D_soft_template, sweep_hard_template
 
 
 def rabi_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -27,17 +28,16 @@ LenRabiResultType = Tuple[np.ndarray, np.ndarray]  # (lens, signals)
 class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
     """Rabi oscillation by varying pulse *length*."""
 
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
+    def _run_for_flat(
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> LenRabiResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         qub_pulse = cfg["qub_pulse"]
+
+        assert qub_pulse["style"] in ["const", "flat_top"], (
+            "This method only supports const and flat_top pulse style"
+        )
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         len_sweep = cfg["sweep"]["length"]
@@ -67,6 +67,67 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         self.last_result = (real_lens, signals)
 
         return real_lens, signals
+
+    def _run_for_arb(
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+    ) -> LenRabiResultType:
+        cfg = deepcopy(cfg)  # avoid in-place modification
+
+        qub_pulse = cfg["qub_pulse"]
+
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        len_sweep = cfg["sweep"]["length"]
+
+        lens = sweep2array(len_sweep)  # predicted
+
+        qub_pulse["length"] = lens[0]  # initial value
+
+        def updateCfg(cfg: Dict[str, Any], i: int, length: Any) -> None:
+            cfg["qub_pulse"]["length"] = length
+
+        def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
+            return (
+                TwoToneProgram(soccfg, cfg)
+                .acquire(soc, progress=False, callback=callback)[0][0]
+                .dot([1, 1j])
+            )
+
+        signals = sweep1D_soft_template(
+            cfg,
+            measure_fn,
+            LivePlotter1D("Length (us)", "Signal", disable=not progress),
+            xs=lens,
+            updateCfg=updateCfg,
+            signal2real=rabi_signal2real,
+        )
+
+        prog = TwoToneProgram(soccfg, cfg)
+        real_lens = prog.get_pulse_param("qubit_pulse", "length", as_array=True)
+        assert isinstance(real_lens, np.ndarray)
+        real_lens += lens[0] - real_lens[0]  # correct absolute offset
+
+        # record last cfg and result
+        self.last_cfg = cfg
+        self.last_result = (real_lens, signals)
+
+        return real_lens, signals
+
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        progress: bool = True,
+    ) -> LenRabiResultType:
+        qub_pulse = cfg["qub_pulse"]
+
+        if qub_pulse["style"] in ["const", "flat_top"]:
+            # use hard sweep for flat top pulse
+            return self._run_for_flat(soc, soccfg, cfg, progress=progress)
+        else:
+            # use soft sweep for arb pulse
+            return self._run_for_arb(soc, soccfg, cfg, progress=progress)
 
     def analyze(
         self,
