@@ -21,6 +21,7 @@ def generate_params_table(
     EC: Union[float, np.ndarray, Tuple[float, float]],
     EL: Union[float, np.ndarray, Tuple[float, float]],
     flx: float = 0.5,
+    precision: float = 0.1,
 ) -> pd.DataFrame:
     """
     Create a table with columns: flx, EJ, EC, EL
@@ -38,17 +39,17 @@ def generate_params_table(
     if isinstance(EJ, float):
         EJ = np.array([EJ])
     elif isinstance(EJ, tuple):
-        EJ = np.arange(EJ[0], EJ[1], 0.05)
+        EJ = np.arange(EJ[0], EJ[1], precision)
 
     if isinstance(EC, float):
         EC = np.array([EC])
     elif isinstance(EC, tuple):
-        EC = np.arange(EC[0], EC[1], 0.05)
+        EC = np.arange(EC[0], EC[1], precision)
 
     if isinstance(EL, float):
         EL = np.array([EL])
     elif isinstance(EL, tuple):
-        EL = np.arange(EL[0], EL[1], 0.05)
+        EL = np.arange(EL[0], EL[1], precision)
 
     return pd.DataFrame(
         [
