@@ -29,34 +29,34 @@ jupyter:
 import os
 
 import numpy as np
+import pandas as pd
 
 %autoreload 2
 import zcu_tools.notebook.analysis.design as zd
 import zcu_tools.notebook.analysis.plot as zp
+import zcu_tools.simulate.equation as zeq
 ```
 
 ```python
-qub_name = "Design2"
+qub_name = "Design1"
 
 os.makedirs(f"../../result/{qub_name}/image", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/web", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/params", exist_ok=True)
 ```
 
 # Scan params
 
 ```python
-EJb = (2.0, 7.5)
-EC = 0.74
-# EC = 1.4
-ELb = (0.35, 1.5)
+EJb = (4.0, 7.5)
+ECb = (1.0, 1.5)
+ELb = (0.4, 1.5)
 
 flx = 0.5
 r_f = 5.927
 # r_f = 7.52994
 g = 0.1
-```
 
-```python
 Temp = 113e-3
 Q_cap = 4.0e5
 Q_ind = 1.7e7
@@ -69,12 +69,11 @@ noise_channels = [
 ]
 
 avoid_freqs = [r_f]
-
-
-params_table = zd.generate_params_table(EJb, EC, ELb, flx)
 ```
 
 ```python
+params_table = zd.generate_params_table(EJb, ECb, ELb, flx)
+
 zd.calculate_esys(params_table)
 zd.calculate_f01(params_table)
 zd.calculate_m01(params_table)
@@ -85,12 +84,14 @@ zd.calculate_dipersive_shift(params_table, g=g, r_f=r_f)
 ```python
 params_table["valid"] = True
 zd.avoid_collision(params_table, avoid_freqs, threshold=0.4)
-zd.avoid_low_f01(params_table, f01_threshold=0.07)
-zd.avoid_low_m01(params_table, m01_threshold=0.05)
+zd.avoid_low_f01(params_table, f01_threshold=0.08)
+zd.avoid_low_m01(params_table, m01_threshold=0.07)
 params_table.drop(["esys"], axis=1)
 ```
 
 ```python
+# params_table = pd.read_parquet("../../result/Design2/params/t1vsChi_rf5.93.parquet")
+
 fig = zd.plot_scan_results(params_table)
 fig.update_layout(
     title=", ".join(
@@ -109,13 +110,16 @@ fig.show()
 ```
 
 ```python
-save_name = f"t1vsChi_EC{EC:.2f}_rf{r_f:.2f}"
+save_name = f"t1vsChi_rf{r_f:.2f}"
+params_table.drop(["esys"], axis=1).to_parquet(
+    f"../../result/{qub_name}/params/{save_name}.parquet"
+)
 fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```
 
 ```python
-# best_params = 4.0, 0.8, 0.4
+# best_params = 6.1, 1.3, 1.15
 
 flxs = np.linspace(0.0, 1.0, 1000)
 best_params
@@ -123,9 +127,12 @@ best_params
 
 ```python
 show_idxs = [(i, j) for i in range(2) for j in range(10) if j > i]
-
+"operands could not be broadcast together with shapes (42,) (4,) "
 fig = zp.plot_transitions(
-    best_params, flxs, show_idxs, ref_freqs=avoid_freqs + [2 * r_f, 3 * r_f, 4 * r_f]
+    best_params,
+    flxs,
+    show_idxs,
+    ref_freqs=avoid_freqs + [2 * r_f, 3 * r_f, 4 * r_f, 5 * r_f, 6 * r_f],
 )
 
 fig.update_yaxes(range=(0.0, 14.0))
@@ -136,7 +143,7 @@ fig.show()
 ```
 
 ```python
-save_name = f"f01_EC{EC:.2f}_rf{r_f:.2f}"
+save_name = f"f01_rf{r_f:.2f}"
 fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```
@@ -149,19 +156,18 @@ fig.show()
 ```
 
 ```python
-save_name = f"Matrix_EC{EC:.2f}_rf{r_f:.2f}"
+save_name = f"Matrix_rf{r_f:.2f}"
 fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```
 
 ```python
-fig = zp.plot_dispersive_shift(best_params, flxs, r_f=r_f, g=g)
-fig.update_yaxes(range=(r_f - 0.01, r_f + 0.01))
+fig = zp.plot_dispersive_shift(best_params, flxs, r_f=r_f, g=g, upto=5)
 fig.show()
 ```
 
 ```python
-save_name = f"Chi_EC{EC:.2f}_rf{r_f:.2f}"
+save_name = f"Chi_rf{r_f:.2f}"
 fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```
@@ -195,7 +201,7 @@ fig.show()
 ```
 
 ```python
-save_name = f"T1_EC{EC:.2f}_rf{r_f:.2f}"
+save_name = f"T1_rf{r_f:.2f}"
 fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```
@@ -203,13 +209,41 @@ fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 # EC to C
 
 ```python
-EC = 0.74
+EC = 1.1
+# EC = best_params[1]
 
-import scipy.constants as sc
 
-Cap = sc.e**2 / (2 * EC * 1e9)
+Cap = zeq.EC2C(EC)
+Lj = zeq.Cfreq2L(Cap, 6.4)
 
-print(f"Capacitance: {1e12 * Cap:.4g} pF")
+print(f"Capacitance: {Cap:.4g} fF")
+print(f"Inductance: {Lj:.4g} nH")
+```
+
+```python
+result_path = f"../../result/{qub_name}/Eigen Modes Plot 3.csv"
+fig, ax, c_Lj, c_freq, width = zd.fit_hfss_anticross(result_path)
+fig.savefig(f"../../result/{qub_name}/image/hfss_anticross.png")
+```
+
+```python
+hfss_C = zeq.Lfreq2C(c_Lj, c_freq)
+hfss_EC = zeq.C2EC(hfss_C)
+c_EL = zeq.L2EL(c_Lj)
+
+g = width / zeq.n_coeff(hfss_EC, c_EL)
+print(f"hfss_C = {hfss_C:.4g} fF")
+print(f"hfss_EC = {hfss_EC:.4g} GHz")
+print(f"g = {1e3 * g:.4g} MHz")
+
+```
+
+```python
+cur_pad_y = 0.05
+cur_q3d_C = 16.691
+new_q3d_C = float(Cap / (hfss_C / cur_q3d_C))
+print(f"new_pad_y = {cur_pad_y * (new_q3d_C / cur_q3d_C):.4g}")
+print(f"new_q3d_C = {new_q3d_C:.4g} fF")
 ```
 
 ```python
