@@ -1,3 +1,4 @@
+from .anticross import fit_anticross
 from .base import (
     asym_lorfunc,
     batch_fit_dual_gauss,

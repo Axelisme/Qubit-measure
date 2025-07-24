@@ -13,7 +13,7 @@ from zcu_tools.simulate.fluxonium import (
 from zcu_tools.simulate.fluxonium.dispersive import calculate_chi_vs_flx
 
 PLOT_CUTOFF = 40
-PLOT_EVALS_COUNT = 10
+PLOT_EVALS_COUNT = 15
 
 
 def plot_matrix_elements(
