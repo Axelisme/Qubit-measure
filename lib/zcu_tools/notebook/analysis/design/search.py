@@ -2,7 +2,6 @@ import os
 from itertools import product
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -12,7 +11,6 @@ from tqdm.auto import tqdm
 
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate.fluxonium import calculate_chi_sweep, calculate_dispersive
-from zcu_tools.utils.fitting import fit_anticross
 
 DESIGN_CUTOFF = 40
 DESIGN_EVALS_COUNT = 15
@@ -428,45 +426,3 @@ def add_real_sample(
         legendgroup=chip_name,
         showlegend=False,
     )
-
-
-def fit_hfss_anticross(
-    result_path: str,
-) -> Tuple[plt.Figure, plt.Axes, float, float, float]:
-    """
-    Fit the anticrossing of the HFSS simulation
-    """
-
-    data = pd.read_csv(result_path)
-
-    Ljs = data["Lj [nH]"].values
-    fpts1 = 1e-9 * data["re(Mode(1)) []"].values
-    fpts2 = 1e-9 * data["re(Mode(2)) []"].values
-
-    aqf = 1 / np.sqrt(Ljs)
-    cx, cy, width, m1, m2, fit_fpts1, fit_fpts2, _ = fit_anticross(
-        aqf, fpts1, fpts2, horizontal_line=True
-    )
-    c_freq = cy
-    c_Lj = 1 / cx**2
-
-    fig, ax = plt.subplots()
-    ax.plot(Ljs, fpts1, marker=".")
-    ax.plot(Ljs, fpts2, marker=".")
-    ax.plot(Ljs, fit_fpts1, label="fitting")
-    ax.plot(Ljs, fit_fpts2)
-    ax.plot(Ljs, cy + m1 * (aqf - cx), "r--")
-    ax.plot(Ljs, cy + m2 * (aqf - cx), "b--")
-    ax.plot(
-        [c_Lj, c_Lj],
-        [cy - width, cy + width],
-        "g-",
-        label=f"width = {1e3 * width:.0f} MHz",
-    )
-    ax.plot(c_Lj, cy, "o", color="black", label=f"({c_Lj:.1f} nH, {cy:.1f} GHz)")
-    ax.set_xlabel("Lj [nH]")
-    ax.set_ylabel("Frequency [GHz]")
-    ax.legend()
-    ax.grid()
-
-    return fig, ax, c_Lj, c_freq, width

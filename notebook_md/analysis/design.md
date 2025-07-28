@@ -38,11 +38,10 @@ import zcu_tools.simulate.equation as zeq
 ```
 
 ```python
-qub_name = "Design1"
+qub_name = "Design400"
 
 os.makedirs(f"../../result/{qub_name}/image", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/web", exist_ok=True)
-os.makedirs(f"../../result/{qub_name}/params", exist_ok=True)
 ```
 
 # Scan params
@@ -86,13 +85,15 @@ params_table["valid"] = True
 zd.avoid_collision(params_table, avoid_freqs, threshold=0.4)
 zd.avoid_low_f01(params_table, f01_threshold=0.08)
 zd.avoid_low_m01(params_table, m01_threshold=0.07)
-params_table.drop(["esys"], axis=1)
+result_table = params_table.drop(["esys"], axis=1)
+result_table.to_parquet(f"../../result/{qub_name}/result_table.parquet")
+result_table
 ```
 
 ```python
-# params_table = pd.read_parquet("../../result/Design2/params/t1vsChi_rf5.93.parquet")
+result_table = pd.read_parquet(f"../../result/{qub_name}/result_table.parquet")
 
-fig = zd.plot_scan_results(params_table)
+fig = zd.plot_scan_results(result_table)
 fig.update_layout(
     title=", ".join(
         ", ".join(f"{name} = {value:.1e}" for name, value in p_dict.items())
@@ -101,7 +102,7 @@ fig.update_layout(
     title_x=0.51,
 )
 
-best_params = zd.annotate_best_point(fig, params_table)
+best_params = zd.annotate_best_point(fig, result_table)
 zd.add_real_sample(
     fig, "Q12_2D[2]/Q4", noise_channels=noise_channels, Temp=Temp, flx=flx
 )
@@ -111,9 +112,6 @@ fig.show()
 
 ```python
 save_name = f"t1vsChi_rf{r_f:.2f}"
-params_table.drop(["esys"], axis=1).to_parquet(
-    f"../../result/{qub_name}/params/{save_name}.parquet"
-)
 fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```
@@ -127,7 +125,7 @@ best_params
 
 ```python
 show_idxs = [(i, j) for i in range(2) for j in range(10) if j > i]
-"operands could not be broadcast together with shapes (42,) (4,) "
+
 fig = zp.plot_transitions(
     best_params,
     flxs,
@@ -212,18 +210,19 @@ fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 EC = 1.1
 # EC = best_params[1]
 
-
 Cap = zeq.EC2C(EC)
-Lj = zeq.Cfreq2L(Cap, 6.4)
+Lj = zeq.Cfreq2L(Cap, 6.4324)
+# Lj = zeq.Cfreq2L(Cap, c_freq)
 
 print(f"Capacitance: {Cap:.4g} fF")
 print(f"Inductance: {Lj:.4g} nH")
 ```
 
 ```python
-result_path = f"../../result/{qub_name}/Eigen Modes Plot 3.csv"
+result_path = f"../../result/{qub_name}/E_X380_Y6.csv"
 fig, ax, c_Lj, c_freq, width = zd.fit_hfss_anticross(result_path)
-fig.savefig(f"../../result/{qub_name}/image/hfss_anticross.png")
+fig.savefig(result_path.replace(qub_name, f"{qub_name}/image").replace(".csv", ".png"))
+print(f"Frequency: {c_freq:.5g} GHz")
 ```
 
 ```python
@@ -239,11 +238,15 @@ print(f"g = {1e3 * g:.4g} MHz")
 ```
 
 ```python
-cur_pad_y = 0.05
-cur_q3d_C = 16.691
-new_q3d_C = float(Cap / (hfss_C / cur_q3d_C))
-print(f"new_pad_y = {cur_pad_y * (new_q3d_C / cur_q3d_C):.4g}")
-print(f"new_q3d_C = {new_q3d_C:.4g} fF")
+sweep_path = f"../../result/{qub_name}/Y_sweep.csv"
+fig, ax, max_y = zd.analyze_1d_sweep(sweep_path, c_freq, "Pad_Y [um]")
+fig.savefig(f"../../result/{qub_name}/image/g_over_y_sweep.png")
+```
+
+```python
+sweep_path = f"../../result/{qub_name}/XY_sweep.csv"
+fig, ax, max_x, max_y = zd.analyze_xy_sweep(sweep_path, c_freq)
+fig.savefig(f"../../result/{qub_name}/image/g_over_xy_sweep.png")
 ```
 
 ```python
