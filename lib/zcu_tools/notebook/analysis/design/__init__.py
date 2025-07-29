@@ -1,4 +1,4 @@
-from .hfss import analyze_xy_sweep, fit_hfss_anticross
+from .hfss import analyze_1d_sweep, analyze_xy_sweep, fit_hfss_anticross
 from .search import (
     add_real_sample,
     annotate_best_point,
