@@ -37,6 +37,7 @@ def analyze_1d_sweep(
     ax.set_ylabel("Distance to reference [MHz]")
     ax.grid()
     ax.legend()
+    ax.set_title(f"Reference frequency: {ref_freq:.5g} GHz")
 
     return fig, ax, max_param
 
