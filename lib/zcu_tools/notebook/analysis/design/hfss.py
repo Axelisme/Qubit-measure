@@ -24,17 +24,17 @@ def analyze_1d_sweep(
     max_param = params[max_idx]
 
     fig, ax = plt.subplots()
-    ax.plot(params, dist, marker=".")
+    ax.plot(params, 1e3 * dist, marker=".")
     ax.scatter(
         max_param,
-        dist[max_idx],
+        1e3 * dist[max_idx],
         c="k",
         marker="x",
         zorder=10,
         label=f"({max_param:.4g}, {1e3 * dist[max_idx]:.2f} MHz)",
     )
     ax.set_xlabel(param_name)
-    ax.set_ylabel("Distance to reference [GHz]")
+    ax.set_ylabel("Distance to reference [MHz]")
     ax.grid()
     ax.legend()
 
