@@ -35,6 +35,8 @@ def percell(
     Calculate the transition rate of 0-1 caused by percell effect.
     """
 
+    import scqubits as scq  # lazy import
+
     beta_hbar = sc.hbar / (sc.k * Temp) * 1e9
 
     def P_res(n: np.ndarray) -> np.ndarray:

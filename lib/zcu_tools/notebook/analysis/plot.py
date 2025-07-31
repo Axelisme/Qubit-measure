@@ -104,7 +104,7 @@ def plot_t1s(
     )
     fig.update_yaxes(exponentformat="power")
 
-    return fig
+    return fig, t1s
 
 
 def plot_transitions(
