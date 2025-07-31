@@ -233,9 +233,13 @@ def avoid_low_m01(params_table: pd.DataFrame, m01_threshold: float) -> None:
 
 
 def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
-    # Remove the heavy esys column if present; ignore errors to stay robust when it is
-    # already absent.
+    params_table = params_table.copy()
     plot_table = params_table.drop(columns=["esys"], errors="ignore")
+
+    # convert Chi from GHz to MHz
+    plot_table["Chi"] *= 1e3
+    # convert t1 from ns to us
+    plot_table["t1"] *= 1e-3
 
     # Helper to build a descriptive label that conditionally includes additional flags
     def _build_label(row: pd.Series) -> str:
@@ -283,8 +287,8 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
 
     fig.update_layout(
         title_x=0.501,
-        xaxis_title="Chi (GHz)",
-        yaxis_title="T1 (ns)",
+        xaxis_title="Chi (MHz)",
+        yaxis_title="T1 (us)",
         template="plotly_white",
         showlegend=True,
         width=1100,
@@ -315,8 +319,8 @@ def annotate_best_point(fig, data: pd.DataFrame) -> Tuple[float, float, float]:
     )
 
     fig.add_annotation(
-        x=np.log10(best_param["Chi"]),
-        y=np.log10(best_param["t1"]),
+        x=np.log10(best_param["Chi"] * 1e3),
+        y=np.log10(best_param["t1"] * 1e-3),
         text=f"{EJ:.2f}/{EC:.2f}/{EL:.2f}",
         showarrow=True,
         arrowhead=1,
@@ -376,7 +380,7 @@ def add_real_sample(
 
     # calculate chi
     rf_0, rf_1 = calculate_dispersive(param, flx, r_f, g)
-    chi = np.abs(rf_0 - rf_1)
+    chi = np.abs(rf_0 - rf_1) * 1e3
 
     # calculate t1
     fluxonium = scq.Fluxonium(*param, flux=flx, cutoff=DESIGN_CUTOFF, truncated_dim=2)
@@ -390,9 +394,9 @@ def add_real_sample(
     fig.add_shape(
         type="line",
         x0=chi,
-        y0=1e3 * t1,
+        y0=t1,
         x1=chi,
-        y1=1e3 * predict_t1,
+        y1=predict_t1,
         line=dict(color="red", width=1, dash="dot"),
         name=chip_name,
         legendgroup=chip_name,
@@ -402,7 +406,7 @@ def add_real_sample(
     # 添加實際t1的點
     fig.add_scatter(
         x=[chi],
-        y=[1e3 * t1],
+        y=[t1],
         mode="markers+text",
         marker=dict(symbol="x", size=5, color="black"),
         text=[chip_name],
@@ -420,7 +424,7 @@ def add_real_sample(
     # 添加預測t1的點
     fig.add_scatter(
         x=[chi],
-        y=[1e3 * predict_t1],
+        y=[predict_t1],
         mode="markers",
         marker=dict(symbol="x", size=5, color="red"),
         legendgroup=chip_name,

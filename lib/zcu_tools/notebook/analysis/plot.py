@@ -63,13 +63,18 @@ def plot_dispersive_shift(
     for i in range(upto):
         fig.add_trace(
             go.Scatter(
-                x=flxs, y=chi[:, i + 1] - chi[:, i], mode="lines", name=f"chi_n{i}"
+                x=flxs,
+                y=(chi[:, i + 1] - chi[:, i]) * 1e3,
+                mode="lines",
+                name=f"chi_n{i}",
             )
         )
 
     fig.update_layout(
         title=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
         title_x=0.5,
+        xaxis_title=r"$\phi_{ext}/\phi_0$",
+        yaxis_title="Chi (MHz)",
     )
 
     return fig
@@ -93,6 +98,8 @@ def plot_t1s(
     fig.update_layout(
         title=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
         title_x=0.51,
+        xaxis_title=r"$\phi_{ext}/\phi_0$",
+        yaxis_title="T1 (ns)",
         yaxis_type="log",
     )
     fig.update_yaxes(exponentformat="power")
