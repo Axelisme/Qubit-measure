@@ -10,5 +10,10 @@ from .gauss import (
     gauss_func,
 )
 from .lor import asym_lorfunc, fit_asym_lor, fitlor, lorfunc
-from .quadratic import get_asymptotes, quadratic_fit, quadratic_fit_wo_a
+from .quadratic import (
+    encode_params,
+    quadratic_fit,
+    quadratic_fit_wo_a,
+    retrieve_params,
+)
 from .sinc import fitsinc, sincfunc

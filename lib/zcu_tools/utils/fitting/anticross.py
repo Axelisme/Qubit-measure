@@ -1,9 +1,15 @@
 from typing import Tuple
 
 import numpy as np
-from scipy.optimize import least_squares
+from scipy.optimize import least_squares, minimize
+from tqdm.auto import tqdm
 
-from .base import get_asymptotes, quadratic_fit, quadratic_fit_wo_a
+from .base import (
+    encode_params,
+    quadratic_fit,
+    quadratic_fit_wo_a,
+    retrieve_params,
+)
 
 
 def get_predict_ys(
@@ -105,6 +111,8 @@ def fit_anticross(
     float,
     float,
     float,
+    float,
+    float,
     np.ndarray,
     np.ndarray,
     Tuple[float, float, float, float, float, float],
@@ -123,30 +131,65 @@ def fit_anticross(
     """
 
     # ax^2 + bx + cy^2 + dy + exy + f = 0
-    a, b, c, d, e, f = fit_hyperbolic(xs, fpts1, fpts2, horizontal_line=horizontal_line)
+    params = fit_hyperbolic(xs, fpts1, fpts2, horizontal_line=horizontal_line)
 
-    # 求中心點 (vertex of the conic)
-    D = e**2 - 4 * a * c
-    if D == 0:
-        # parallel
-        cx = np.mean(xs)
-        cy = 0.5 * (np.mean(fpts1) + np.mean(fpts2))
-    else:
-        cx = (2 * b * c - e * d) / D
-        cy = (2 * a * d - e * b) / D
+    fit_fpts1, fit_fpts2 = get_predict_ys(xs, *params)
 
-    # 計算 g: 在 center_x 處，兩根的距離
-    A = c
-    B = d + e * cx
-    C = a * cx**2 + b * cx + f
-    discrim = B**2 - 4 * A * C
-    if discrim >= 0:
-        g01 = 0.5 * np.sqrt(discrim) / np.abs(A)
-    else:
-        g01 = 0.5 * np.abs(np.mean(fpts2) - np.mean(fpts1))
+    return *encode_params(*params), fit_fpts1, fit_fpts2, params
 
-    m1, m2 = get_asymptotes(a, b, c, d, e, f)
 
-    fit_fpts1, fit_fpts2 = get_predict_ys(xs, a, b, c, d, e, f)
+def fit_anticross2d(
+    xs: np.ndarray, fpts: np.ndarray, signals: np.ndarray
+) -> Tuple[float, float, float, float, float]:
+    MAX_ITER = 1000
 
-    return cx, cy, g01, m1, m2, fit_fpts1, fit_fpts2, (a, b, c, d, e, f)
+    pbar = tqdm(total=MAX_ITER, desc="Auto fitting", leave=False)
+
+    def update_pbar(cx, cy, width) -> None:
+        pbar.update(1)
+        pbar.set_postfix_str(f"({cx:.3f}, {cy:.3f}, {width:.3f})")
+
+    amps = np.abs(signals)
+
+    # determine whether fit the value to max or min
+    if np.sum(amps[:, amps.shape[1] // 2] - amps[:, 0]) > 0:
+        amps = np.max(amps) - amps  # make peak always is the maximum
+
+    # guess the initial parameters
+    cx = np.sum(xs[:, None] * amps) / np.sum(amps)
+    cy = fpts[np.argmin(np.max(amps, axis=1))]
+    width = (fpts.max() - fpts.min()) / 100
+    m1 = 0.0
+    m2 = 1.0
+
+    # derive the fitting tolerance
+    ftol = np.max(amps) * 1e-4
+
+    def loss_fn(cx, cy, width, m1, m2) -> float:
+        update_pbar(cx, cy, width)
+
+        fit_fpts1, fit_fpts2 = get_predict_ys(
+            xs, *retrieve_params(cx, cy, width, m1, m2)
+        )
+
+        # 用線性插值取得每個 rf_0 對應的 signal
+        vals1 = [np.interp(f, fpts, amps[i]) for i, f in enumerate(fit_fpts1)]
+        vals2 = [np.interp(f, fpts, amps[i]) for i, f in enumerate(fit_fpts2)]
+        return -np.nanmean(vals1) - np.nanmean(vals2)
+
+    fit_kwargs = dict(
+        method="L-BFGS-B",
+        options={"disp": False, "maxiter": MAX_ITER, "ftol": ftol},
+    )
+
+    res = minimize(
+        lambda p: loss_fn(*p),
+        x0=[cx, cy, width, m1, m2],
+        **fit_kwargs,
+    )
+    if not isinstance(res, np.ndarray):
+        res = res.x  # compatibility with scipy < 1.7
+
+    cx, cy, width, m1, m2 = res
+
+    return cx, cy, width, m1, m2
