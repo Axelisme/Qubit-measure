@@ -38,7 +38,7 @@ import zcu_tools.simulate.equation as zeq
 ```
 
 ```python
-qub_name = "Design400"
+qub_name = "DesignR59"
 
 os.makedirs(f"../../result/{qub_name}/image", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/web", exist_ok=True)
@@ -53,8 +53,8 @@ ELb = (0.4, 1.5)
 
 flx = 0.5
 r_f = 5.927
-# r_f = 7.52994
-g = 0.1
+# r_f = 7.52062
+g = 0.11
 
 Temp = 113e-3
 Q_cap = 4.0e5
@@ -68,6 +68,8 @@ noise_channels = [
 ]
 
 avoid_freqs = [r_f]
+
+flxs = np.linspace(0.0, 0.55, 1000)
 ```
 
 ```python
@@ -118,8 +120,6 @@ fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 
 ```python
 # best_params = 6.1, 1.3, 1.15
-
-flxs = np.linspace(0.0, 1.0, 1000)
 best_params
 ```
 
@@ -176,7 +176,7 @@ fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 # Q_ind = 1.0e7
 # x_qp = 1.0e-8
 
-fig = zp.plot_t1s(
+fig, t1s = zp.plot_t1s(
     best_params,
     flxs,
     noise_channels=[
@@ -194,6 +194,7 @@ title2 = ", ".join(
 fig.update_layout(
     title=title1 + "<br>" + title2,
     title_x=0.515,
+    yaxis_range=[np.log10(0.5 * t1s.min()), np.log10(1.5 * t1s.max())],
 )
 fig.show()
 ```
@@ -204,49 +205,84 @@ fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```
 
+```python
+import plotly.graph_objects as go
+from zcu_tools.simulate.fluxonium import calculate_percell_t1_vs_flx
+
+rf_w = 7e-3  # GHz
+
+percell_t1s = calculate_percell_t1_vs_flx(
+    flxs, r_f=r_f, kappa=rf_w, g=g, Temp=Temp, params=best_params
+)
+```
+
+```python
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=flxs, y=1 / (1 / percell_t1s + 1 / t1s), mode="lines"))
+fig.update_layout(
+    xaxis_title="flux",
+    yaxis_title="T1 (ns)",
+    yaxis_type="log",
+    yaxis_range=[np.log10(0.5 * t1s.min()), np.log10(1.5 * t1s.max())],
+)
+fig.update_yaxes(exponentformat="power")
+fig.show()
+```
+
+```python
+save_name = f"T1_percell_rf{r_f:.2f}"
+fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
+fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
+```
+
 # EC to C
+
+```python
+project_name = "FluxoniumX400"
+```
 
 ```python
 EC = 1.1
 # EC = best_params[1]
 
 Cap = zeq.EC2C(EC)
-Lj = zeq.Cfreq2L(Cap, 6.4324)
+Lj = zeq.Cfreq2L(Cap, 6.3652)
 # Lj = zeq.Cfreq2L(Cap, c_freq)
 
 print(f"Capacitance: {Cap:.4g} fF")
-print(f"Inductance: {Lj:.4g} nH")
+print(f"Inductance: {Lj:.5g} nH")
 ```
 
 ```python
-result_path = f"../../result/{qub_name}/E_X380_Y6.csv"
+# result_path = f"../../result/{qub_name}/{project_name}/X325_Y51,5.csv"
+result_path = f"../../result/{qub_name}/{project_name}/X325_Y29.csv"
 fig, ax, c_Lj, c_freq, width = zd.fit_hfss_anticross(result_path)
-fig.savefig(result_path.replace(qub_name, f"{qub_name}/image").replace(".csv", ".png"))
+
+hfss_C = zeq.Lfreq2C(c_Lj, c_freq)
+hfss_EC = zeq.C2EC(hfss_C)
+c_EL = zeq.L2EL(c_Lj)
+g = width / zeq.n_coeff(hfss_EC, c_EL)
+
+ax.set_title(f"EC={hfss_EC:.4g} GHz, g={1e3 * g:.4g} MHz")
+
+fig.savefig(result_path.replace(".csv", ".png"))
+
+print(f"hfss_C = {hfss_C:.4g} fF")
+print(f"hfss_EC = {hfss_EC:.4g} GHz")
+print(f"g = {1e3 * g:.4g} MHz")
 print(f"Frequency: {c_freq:.5g} GHz")
 ```
 
 ```python
-hfss_C = zeq.Lfreq2C(c_Lj, c_freq)
-hfss_EC = zeq.C2EC(hfss_C)
-c_EL = zeq.L2EL(c_Lj)
-
-g = width / zeq.n_coeff(hfss_EC, c_EL)
-print(f"hfss_C = {hfss_C:.4g} fF")
-print(f"hfss_EC = {hfss_EC:.4g} GHz")
-print(f"g = {1e3 * g:.4g} MHz")
-
-```
-
-```python
-sweep_path = f"../../result/{qub_name}/Y_sweep.csv"
+sweep_path = f"../../result/{qub_name}/{project_name}/X325_Y_sweep.csv"
 fig, ax, max_y = zd.analyze_1d_sweep(sweep_path, c_freq, "Pad_Y [um]")
-fig.savefig(f"../../result/{qub_name}/image/g_over_y_sweep.png")
+fig.savefig(sweep_path.replace(".csv", ".png"))
 ```
 
 ```python
-sweep_path = f"../../result/{qub_name}/XY_sweep.csv"
+sweep_path = f"../../result/{qub_name}/{project_name}/XY_sweep.csv"
 fig, ax, max_x, max_y = zd.analyze_xy_sweep(sweep_path, c_freq)
-fig.savefig(f"../../result/{qub_name}/image/g_over_xy_sweep.png")
+fig.savefig(sweep_path.replace(".csv", ".png"))
 ```
 
 ```python

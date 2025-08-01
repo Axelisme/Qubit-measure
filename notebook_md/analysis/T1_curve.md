@@ -41,7 +41,10 @@ from zcu_tools.notebook.analysis.t1_curve import (
     calculate_eff_t1_vs_flx_with,
 )
 from zcu_tools.simulate import flx2mA, mA2flx
-from zcu_tools.simulate.fluxonium import calculate_eff_t1_with
+from zcu_tools.simulate.fluxonium import (
+    calculate_eff_t1_with,
+    calculate_percell_t1_vs_flx,
+)
 ```
 
 ```python
@@ -259,9 +262,6 @@ t1_effs = calculate_eff_t1_vs_flx_with(
 # Percell Effect
 
 ```python
-%autoreload 2
-from zcu_tools.simulate.fluxonium.coherence import calculate_percell_t1_vs_flx
-
 rf_w = 7e-3  # GHz
 g = results["dispersive"]["g"]
 r_f = results["dispersive"]["r_f"]
