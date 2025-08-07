@@ -3,13 +3,19 @@
 import os
 
 import numpy as np
-
 import matplotlib.pyplot as plt
-from scqubits import Fluxonium, HilbertSpace, Oscillator
-from joblib import Parallel, delayed
+
+from zcu_tools.notebook.analysis.branch import (
+    branch_population,
+    branch_population_over_flux,
+    make_hilbertspace,
+    plot_branch_population,
+)
 ```
 
 ```python
+qub_name = "DesignR59"
+
 r_f = 5.9
 g = 0.1
 params = (7.0, 1.1, 1.4)
@@ -17,33 +23,8 @@ flx = 0.0
 ```
 
 ```python
-res_dim = 210
-qub_cutoff = 40
-qub_dim = 15
-
-
-resonator = Oscillator(r_f, truncated_dim=res_dim)
-fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
-hilbertspace = HilbertSpace([fluxonium, resonator])
-hilbertspace.add_interaction(
-    g=g, op1=fluxonium.n_operator, op2=resonator.creation_operator, add_hc=True
-)
-hilbertspace.generate_lookup(ordering="LX")
-```
-
-```python
-bare_esys_dag_array = np.array(
-    [
-        np.sqrt(j) * hilbertspace.bare_productstate((j, m)).dag().full()
-        for j in range(qub_dim)
-        for m in range(res_dim)
-    ]
-)
-```
-
-```python
-os.makedirs("../../result/DesignR59/", exist_ok=True)
-os.makedirs("../../result/DesignR59/image", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/image", exist_ok=True)
 ```
 
 ```python
@@ -51,27 +32,24 @@ params = (7.0, 1.1, 1.4)
 r_f = 5.9
 g = 0.1
 
+
+qub_dim = 15
+qub_cutoff = 40
+res_dim = 210
+
+branchs = list(range(15))
 ```
 
 ```python
-branchs = list(range(15))
+hilbertspace = make_hilbertspace(qub_dim, res_dim, qub_cutoff)
 populations = branch_population(hilbertspace, branchs, upto=100)
 ```
 
 ```python
-for b in branchs:
-    pop_b = populations[b]
-    if np.ptp(pop_b) > 1.0:
-        color = None
-        label = f"Branch {b}"
-    else:
-        color = "lightgrey"
-        label = None
-    plt.plot(populations[b], label=label, color=color)
-plt.legend()
-plt.grid()
-plt.savefig("../../result/DesignR59/image/int_branch_analysis.png")
-plt.show()
+fig, ax = plot_branch_population(branchs, populations)
+fig.savefig(
+    f"../../result/DesignR59/{qub_name}/image/branch_analysis_at_phi{flx:.1f}.png"
+)
 ```
 
 ```python
@@ -115,7 +93,7 @@ ax1.imshow(
     interpolation="none",
     aspect="auto",
     origin="lower",
-    extent=[flxs[0]-0.5*df, flxs[-1] + 0.5*df, 0, populations.shape[2]],
+    extent=[flxs[0] - 0.5 * df, flxs[-1] + 0.5 * df, 0, populations.shape[2]],
 )
 ax1.plot(flxs, ground_cn, label="ground", marker=".", color="r")
 ax1.set_title("Ground state")
@@ -124,18 +102,23 @@ ax2.imshow(
     interpolation="none",
     aspect="auto",
     origin="lower",
-    extent=[flxs[0]-0.5*df, flxs[-1] + 0.5*df, 0, populations.shape[2]],
+    extent=[flxs[0] - 0.5 * df, flxs[-1] + 0.5 * df, 0, populations.shape[2]],
 )
 ax2.plot(flxs, excited_cn, label="excited", marker=".", color="r")
 ax2.set_title("Excited state")
 
 ax1.legend()
 ax2.legend()
-fig.savefig("../../result/DesignR59/image/branch_analysis.png")
+fig.savefig(f"../../result/DesignR59/{qub_name}/image/branch_analysis.png")
 ```
 
 ```python
-np.savez_compressed("../../result/DesignR59/branch_analysis.npz", flxs=flxs, branchs=branchs, populations=populations)
+np.savez_compressed(
+    f"../../result/DesignR59/{qub_name}/branch_analysis.npz",
+    flxs=flxs,
+    branchs=branchs,
+    populations=populations,
+)
 ```
 
 ```python
