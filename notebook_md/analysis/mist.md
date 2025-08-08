@@ -28,9 +28,8 @@ jupyter:
 %load_ext autoreload
 
 %autoreload 2
-from zcu_tools.datasaver import load_data
-
-import zcu_tools.notebook.single_qubit as zf
+from zcu_tools.utils.datasaver import load_data
+import zcu_tools.experiment.v2 as ze
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate import mA2flx
 ```
@@ -67,7 +66,9 @@ fpts2 /= 1e6
 ```
 
 ```python
-zf.mux_reset_fpt_analyze(fpts1, fpts2, signals, xname=xname, yname=yname)
+ze.twotone.reset.dual_tone.FreqExperiment().analyze(
+    result=(fpts1, fpts2, signals), xname=xname, yname=yname
+)
 ```
 
 ## reset gain
@@ -80,7 +81,9 @@ signals, pdrs1, pdrs2 = load_data(filepath)
 ```
 
 ```python
-zf.mux_reset_pdr_analyze(pdrs1, pdrs2, signals, xname=xname, yname=yname)
+ze.twotone.reset.dual_tone.PowerExperiment().analyze(
+    result=(pdrs1, pdrs2, signals), xname=xname, yname=yname
+)
 ```
 
 ## reset time
@@ -95,7 +98,7 @@ Ts *= 1e6
 ```
 
 ```python
-zf.mux_reset_time_analyze(Ts, signals)
+ze.twotone.reset.dual_tone.LengthExperiment().analyze(result=(Ts, signals))
 ```
 
 # Dispersive shift
@@ -109,7 +112,9 @@ fpts /= 1e6
 ```
 
 ```python
-chi, kappa = zf.analyze_dispersive(fpts, signals, asym=True)
+chi, kappa = ze.twotone.dispersive.DispersiveExperiment().analyze(
+    result=(fpts, signals), asym=True
+)
 ```
 
 # AC stark shift
@@ -135,7 +140,9 @@ plt.show()
 ```
 
 ```python
-ac_coeff = zf.analyze_ac_stark_shift(pdrs, fpts, signals, chi=chi, kappa=kappa)
+ac_coeff = ze.twotone.ac_stark.AcStarkExperiment().analyze(
+    result=(pdrs, fpts, signals), chi=chi, kappa=kappa
+)
 ```
 
 # Power dep
@@ -150,9 +157,9 @@ signals = signals.T
 ```
 
 ```python
-zf.analyze_mist_pdr_dep(
-    pdrs,
-    signals[0, :],
+%matplotlib inline
+ze.twotone.mist.MISTPowerDep().analyze(
+    result=(pdrs, signals),
     # g0=e0,
     # e0=g0,
     ac_coeff=ac_coeff,
@@ -168,10 +175,10 @@ g_signals = g_signals.T
 ```
 
 ```python
-g0 = zf.analyze_mist_pdr_overnight(
-    pdrs,
-    g_signals,
-    # pi_signal=e0,
+ze.twotone.mist.MISTPowerDepOvernight().analyze(
+    result=(iters, pdrs, g_signals),
+    # g0=g0,
+    # e0=e0,
     ac_coeff=ac_coeff,
 )
 ```
@@ -183,28 +190,10 @@ e_signals = e_signals.T
 ```
 
 ```python
-e0 = zf.analyze_mist_pdr_overnight(pdrs, e_signals, pi_signal=g0, ac_coeff=ac_coeff)
-```
-
-# Abnormal
-
-```python
-filepath = (
-    # "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_abnormal_pdr@-0.417mA_1.hdf5"
-    # "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_abnormal_pdr@-0.417mA_2.hdf5"
-    "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_abnormal_pdr_mux_reset@-0.417mA_1.hdf5"
-    # "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_abnormal_pdr_mux_reset@-0.417mA_2.hdf5"
-)
-signals, pdrs, _ = load_data(filepath)
-signals = signals.T
-```
-
-```python
-zf.analyze_abnormal_pdr_dep(
-    pdrs,
-    signals,
-    g0=g0,
-    e0=e0,
+ze.twotone.mist.MISTPowerDepOvernight().analyze(
+    result=(iters, pdrs, e_signals),
+    # g0=g0,
+    # e0=e0,
     ac_coeff=ac_coeff,
 )
 ```
@@ -215,21 +204,54 @@ zf.analyze_abnormal_pdr_dep(
 filepath = (
     "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_mist_flx_pdr@-0.417mA_2.hdf5"
 )
-signals, mAs, pdrs = load_data(filepath)
-
-mAs *= 1e3
-flxs = mA2flx(mAs, mA_c, period)
+signals, As, pdrs = load_data(filepath)
 ```
 
 ```python
-fig, ax = zf.analyze_mist_flx_pdr(
-    flxs,
-    pdrs,
-    signals,
-    # ac_coeff=ac_coeff,
+mA_c = 1.92
+```
+
+```python
+data = np.load(r"../../result/Q12_2D[3]/Q4/branch_analysis_n0,0.npz")
+sim_flxs, branchs, populations = data["flxs"], data["branchs"], data["populations"]
+sim_flxs = np.concatenate([sim_flxs, 1 - sim_flxs[::-1]])
+populations = np.concatenate([populations, populations[::-1, ...]], axis=0)
+
+
+flxs = mA2flx(1e3 * As, mA_c, period)
+ground_populations = np.array(
+    [
+        np.interp(np.mod(flxs, 1.0), sim_flxs, populations[:, 0, i])
+        for i in range(populations.shape[2])
+    ]
+).T
+excited_populations = np.array(
+    [
+        np.interp(np.mod(flxs, 1.0), sim_flxs, populations[:, 1, i])
+        for i in range(populations.shape[2])
+    ]
+).T
+
+# calculate the critical photon number
+ground_cn = np.argmax(ground_populations >= 1.1, axis=1)
+ground_cn[ground_cn == 0] = ground_populations.shape[1] - 1
+excited_cn = np.argmax(excited_populations >= 2.0, axis=1)
+excited_cn[excited_cn == 0] = excited_populations.shape[1] - 1
+```
+
+```python
+fig, ax = ze.twotone.mist.MISTFluxPowerDep().analyze(
+    result=(As, pdrs, signals),
+    mA_c=mA_c,
+    period=period,
+    ac_coeff=ac_coeff,
 )
+
+
+ax.plot(flxs, ground_cn, label="ground", marker=".", color="r")
+ax.plot(flxs, excited_cn, label="excited", marker=".", color="b")
 # ax.set_xlim(0.4, 0.6)
-plt.show()
+fig.savefig("../../result/Q12_2D[3]/Q4/image/qubit_mist_over_flux_with_simulation.png")
 ```
 
 ```python
