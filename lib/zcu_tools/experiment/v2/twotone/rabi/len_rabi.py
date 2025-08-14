@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from operator import call
 from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
