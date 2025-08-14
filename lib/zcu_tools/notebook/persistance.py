@@ -7,10 +7,10 @@ import numpy as np
 
 
 def format_rawdata(
-    mAs: np.ndarray, fpts: np.ndarray, spectrum: np.ndarray
+    As: np.ndarray, fpts: np.ndarray, spectrum: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     fpts = fpts / 1e9  # convert to GHz
-    mAs = mAs * 1e3  # convert to mA
+    mAs = As * 1e3  # convert to mA
 
     if mAs[0] > mAs[-1]:  # Ensure that the fluxes are in increasing
         mAs = mAs[::-1]
