@@ -31,15 +31,13 @@ def cast2real_and_norm(signals: np.ndarray, use_phase: bool = True) -> np.ndarra
 def spectrum2d_findpoint(
     mAs: np.ndarray,
     fpts: np.ndarray,
-    signals: np.ndarray,
+    amps: np.ndarray,
     threshold: float,
     weight: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Find points in a 2D spectrum.
     """
-
-    amps = cast2real_and_norm(signals)
 
     if weight is not None:
         amps *= weight

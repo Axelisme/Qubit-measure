@@ -69,6 +69,7 @@ class InteractiveFindPoints:
                             widgets.HBox(
                                 [
                                     self.show_mask_box,
+                                    self.show_origin_box,
                                     widgets.VBox(
                                         [self.perform_all_bt, self.finish_button]
                                     ),
@@ -88,6 +89,7 @@ class InteractiveFindPoints:
             value=brush_width, min=0.01, max=0.1, step=1e-4, description="Brush Width:"
         )
         self.show_mask_box = widgets.Checkbox(value=False, description="Show Mask")
+        self.show_origin_box = widgets.Checkbox(value=True, description="Show Origin")
         self.operation_tb = widgets.Dropdown(
             options=["Select", "Erase"], value="Select", description="Operation:"
         )
@@ -100,18 +102,26 @@ class InteractiveFindPoints:
 
         self.threshold_slider.observe(self.on_ratio_change, names="value")
         self.show_mask_box.observe(self.on_select_show, names="value")
+        self.show_origin_box.observe(self.on_show_origin_change, names="value")
         self.perform_all_bt.on_click(self.on_perform_all)
         self.finish_button.on_click(self.on_finish)
 
     def init_background(self, spectrum, mAs, fpts) -> None:
         amps = cast2real_and_norm(spectrum)
 
+        dx = (mAs[-1] - mAs[0]) / (len(mAs) - 1)
+        dy = (fpts[-1] - fpts[0]) / (len(fpts) - 1)
         self.spectrum_img = self.ax.imshow(
             amps,
             aspect="auto",
             origin="lower",
             interpolation="none",
-            extent=(mAs[0], mAs[-1], fpts[0], fpts[-1]),
+            extent=(
+                mAs[0] - dx / 2,
+                mAs[-1] + dx / 2,
+                fpts[0] - dy / 2,
+                fpts[-1] + dy / 2,
+            ),
         )
 
     def init_mask(self, fpts, mAs) -> None:
@@ -131,8 +141,10 @@ class InteractiveFindPoints:
 
     def init_points(self, mAs, fpts, spectrum) -> None:
         threshold = self.threshold_slider.value
+
+        amps = cast2real_and_norm(spectrum)
         self.s_mAs, self.s_fpts = spectrum2d_findpoint(
-            mAs, fpts, spectrum, threshold, weight=self.mask
+            mAs, fpts, amps, threshold, weight=self.mask
         )
         self.scatter = self.ax.scatter(self.s_mAs, self.s_fpts, color="r", s=2)
 
@@ -142,10 +154,19 @@ class InteractiveFindPoints:
 
     def update_points(self) -> None:
         threshold = self.threshold_slider.value
+
+        amps = cast2real_and_norm(self.spectrum)
         self.s_mAs, self.s_fpts = spectrum2d_findpoint(
-            self.mAs, self.fpts, self.spectrum, threshold, weight=self.mask
+            self.mAs, self.fpts, amps, threshold, weight=self.mask
         )
         self.scatter.set_offsets(np.column_stack((self.s_mAs, self.s_fpts)))
+
+        # Set spectrum image data based on show_origin checkbox
+        if self.show_origin_box.value:
+            self.spectrum_img.set_data(amps)
+        else:
+            self.spectrum_img.set_data(self.mask * amps)
+        self.spectrum_img.autoscale()
 
     def toggle_near_mask(self, x, y, width, mask, mode) -> None:
         x_d = np.abs(self.mAs - x) / (self.mAs[-1] - self.mAs[0])
@@ -174,6 +195,13 @@ class InteractiveFindPoints:
             self.select_mask.set_alpha(0.2)
         else:
             self.select_mask.set_alpha(0)
+        self.fig.canvas.draw_idle()
+
+    def on_show_origin_change(self, _) -> None:
+        if self.is_finished:
+            return
+
+        self.update_points()
         self.fig.canvas.draw_idle()
 
     def on_press(self, event) -> None:
@@ -233,9 +261,7 @@ class InteractiveLines:
         "none": "<span style='color:gray'>未選擇線條</span>",
     }
 
-    def __init__(
-        self, spectrum, mAs, fpts, mA_c=None, mA_e=None, use_phase=True
-    ) -> None:
+    def __init__(self, spectrum, mAs, fpts, mA_c=None, mA_e=None) -> None:
         plt.ioff()  # 避免立即顯示圖表
         self.fig_main, self.ax_main = plt.subplots()
         self.fig_zoom, self.ax_zoom = plt.subplots()
@@ -250,7 +276,14 @@ class InteractiveLines:
         self.mAs = mAs
         self.fpts = fpts
         self.spectrum = spectrum
-        self.amps = cast2real_and_norm(spectrum, use_phase=use_phase)
+
+        # 新增屬性: 僅使用振幅 (magnitude) 模式，預設為 False (表示同時使用相位資訊)
+        self.only_use_magnitude: bool = False
+
+        # 根據 only_use_magnitude 計算顯示用資料
+        self.real_signals = cast2real_and_norm(
+            spectrum, use_phase=not self.only_use_magnitude
+        )
 
         self.mouse_x = None
         self.mouse_y = None
@@ -261,9 +294,9 @@ class InteractiveLines:
         self._mouse_moved = False
 
         self.create_widgets()
-        self.create_background(mAs, fpts, self.amps)
+        self.create_background(mAs, fpts, self.real_signals)
         self.create_lines(mAs)
-        self.create_zoom(mAs, fpts, self.amps)
+        self.create_zoom(mAs, fpts, self.real_signals)
 
         # 顯示 widget
         display(
@@ -281,9 +314,10 @@ class InteractiveLines:
                             self.position_text,
                             widgets.HBox(
                                 [
-                                    self.conjugate_checkbox,
-                                    self.swap_button,
                                     self.auto_align_button,
+                                    self.swap_button,
+                                    self.conjugate_checkbox,
+                                    self.only_use_magnitude_checkbox,
                                 ]
                             ),
                             widgets.HBox(
@@ -319,6 +353,13 @@ class InteractiveLines:
         self.conjugate_checkbox = widgets.Checkbox(
             value=False, description="Conjugate Line", indent=False
         )
+
+        # 新增: 僅使用振幅顯示的切換開關
+        self.only_use_magnitude_checkbox = widgets.Checkbox(
+            value=self.only_use_magnitude,
+            description="Magnitude Only",
+            indent=False,
+        )
         self.swap_button = widgets.Button(
             description="交換線條",
             button_style="warning",
@@ -341,18 +382,29 @@ class InteractiveLines:
         self.swap_button.on_click(self.swap_lines)
         self.auto_align_button.on_click(self.auto_align_lines)
 
+        # 綁定 magnitude 顯示模式切換
+        self.only_use_magnitude_checkbox.observe(
+            self.on_toggle_magnitude, names="value"
+        )
+
     def create_background(self, mAs, fpts, amps) -> None:
         """創建背景圖片"""
-        # 顯示光譜圖
-        self.ax_main.imshow(
+        # 儲存圖像控制柄以便之後更新資料
+        dx = (mAs[-1] - mAs[0]) / (len(mAs) - 1)
+        dy = (fpts[-1] - fpts[0]) / (len(fpts) - 1)
+        self.main_im = self.ax_main.imshow(
             amps,
             aspect="auto",
             origin="lower",
             interpolation="none",
-            extent=(mAs[0], mAs[-1], fpts[0], fpts[-1]),
+            extent=(
+                mAs[0] - dx / 2,
+                mAs[-1] + dx / 2,
+                fpts[0] - dy / 2,
+                fpts[-1] + dy / 2,
+            ),
         )
 
-        # xlim, ylim
         self.ax_main.set_xlim(mAs[0], mAs[-1])
         self.ax_main.set_ylim(fpts[0], fpts[-1])
 
@@ -384,12 +436,20 @@ class InteractiveLines:
     def create_zoom(self, mAs, fpts, amps) -> None:
         """創建放大視圖"""
         self.ax_zoom.set_title(f"mirror loss: {None}")
+
+        dx = (mAs[-1] - mAs[0]) / (len(mAs) - 1)
+        dy = (fpts[-1] - fpts[0]) / (len(fpts) - 1)
         self.zoom_im = self.ax_zoom.imshow(
             amps,
             aspect="auto",
             origin="lower",
             interpolation="none",
-            extent=(mAs[0], mAs[-1], fpts[0], fpts[-1]),
+            extent=(
+                mAs[0] - dx / 2,
+                mAs[-1] + dx / 2,
+                fpts[0] - dy / 2,
+                fpts[-1] + dy / 2,
+            ),
         )
         self.ax_zoom.set_xticks([])
         self.ax_zoom.set_yticks([])
@@ -671,6 +731,32 @@ class InteractiveLines:
         mA_c = precision * round((self.mA_c - self.mAs[0]) / precision) + self.mAs[0]
         mA_e = precision * round((self.mA_e - self.mAs[0]) / precision) + self.mAs[0]
         return float(mA_c), float(mA_e)
+
+    # ----------------------------------
+    #  Event handlers
+    # ----------------------------------
+
+    def on_toggle_magnitude(self, change) -> None:
+        """切換是否僅使用振幅資料的顯示模式"""
+        if self.is_finished:
+            return
+
+        # 停止當前的追蹤
+        self.stop_tracking()
+
+        # 更新屬性
+        self.only_use_magnitude = bool(change["new"])
+
+        # 重新計算要顯示的資料
+        self.real_signals = cast2real_and_norm(
+            self.spectrum, use_phase=not self.only_use_magnitude
+        )
+
+        self.main_im.set_data(self.real_signals)
+        self.main_im.autoscale()
+
+        # 更新背景影像
+        self.fig_main.canvas.draw_idle()
 
 
 class InteractiveSelector:

@@ -20,9 +20,10 @@ def search_proper_g(
     signals: np.ndarray,
     g_bound: Tuple[float, float],
     g_init: Optional[float] = None,
-) -> float:
+) -> callable:
     """
-    Search the proper coupling strength g by plotting the dispersive shift of ground and excited state vs. flux
+    Search the proper coupling strength g and resonator frequency r_f by plotting the dispersive shift
+    of ground and excited state vs. flux. Returns a function that when called, returns (g, r_f) values.
     """
 
     # Pre-calculate signal amplitude for plotting
@@ -34,15 +35,15 @@ def search_proper_g(
         g_init = round(0.5 * (g_bound[0] + g_bound[1]), 3)
 
     @lru_cache(maxsize=None)
-    def get_dispersive(g: float) -> Tuple[np.ndarray, ...]:
+    def get_dispersive(g: float, r_f: float) -> Tuple[np.ndarray, ...]:
         # only use 4 states to calculate the ground state dispersive shift for speed
         return calculate_dispersive_vs_flx(
             params, sp_flxs, r_f, g, progress=False, resonator_dim=4
         )
 
-    rf_0, rf_1 = get_dispersive(g_init)
+    rf_0, rf_1 = get_dispersive(g_init, r_f)
 
-    # Create slider widget
+    # Create slider widgets
     g_slider = widgets.FloatSlider(
         value=g_init,
         min=g_bound[0],
@@ -52,6 +53,20 @@ def search_proper_g(
         continuous_update=False,
         style={"description_width": "initial"},
         readout_format=".3f",
+    )
+
+    # Calculate r_f slider parameters
+    rf_step = 0.5 * (sp_fpts.max() - sp_fpts.min()) / len(sp_fpts)
+
+    rf_slider = widgets.FloatSlider(
+        value=r_f,
+        min=sp_fpts.min(),
+        max=sp_fpts.max(),
+        step=rf_step,
+        description="r_f (GHz):",
+        continuous_update=False,
+        style={"description_width": "initial"},
+        readout_format=".6f",
     )
 
     # Create figure and axes
@@ -70,42 +85,46 @@ def search_proper_g(
 
     (line_g,) = ax.plot(sp_flxs, rf_0, "b-", label="Ground state")
     (line_e,) = ax.plot(sp_flxs, rf_1, "r-", label="Excited state")
-    ax.axhline(y=r_f, color="k", linestyle="--", label="Bare resonator")
+    line_bare = ax.axhline(y=r_f, color="k", linestyle="--", label="Bare resonator")
 
     ax.set_ylim(sp_fpts.min(), sp_fpts.max())
     ax.set_xlabel(r"Flux $\Phi_{ext}/\Phi_0$")
     ax.set_ylabel("Frequency (GHz)")
-    ax.set_title(f"g = {g_init:.3f} GHz")
+    ax.set_title(f"g = {g_init:.3f} GHz, r_f = {r_f:.6f} GHz")
     ax.legend(loc="upper right")
 
     # Register callback for slider changes
-    def on_g_change(change):
-        g = change["new"]
+    def update_plot() -> None:
+        g = g_slider.value
+        current_rf = rf_slider.value
 
-        rf_0, rf_1 = get_dispersive(g)
-        # rf_list = get_dispersive(g)
+        rf_0, rf_1 = get_dispersive(g, current_rf)
 
         # Update the lines
         line_g.set_data(sp_flxs, rf_0)
         line_e.set_data(sp_flxs, rf_1)
-        # for i, line in enumerate(line_list):
-        #     line.set_data(sp_flxs, rf_list[i])
+        line_bare.set_ydata([current_rf])
 
-        # Update the title with current g value
-        ax.set_title(f"g = {g:.3f} GHz")
+        # Update the title with current values
+        ax.set_title(f"g = {g:.3f} GHz, r_f = {current_rf:.6f} GHz")
+
+    def on_g_change(change):
+        update_plot()
+
+    def on_rf_change(change):
+        update_plot()
 
     g_slider.observe(on_g_change, names="value")
+    rf_slider.observe(on_rf_change, names="value")
 
     # Layout everything together
-    display(g_slider)
+    display(widgets.VBox([g_slider, rf_slider]))
 
-    def close_and_get_g():
-        plt.draw()
-        plt.pause(0.5)
+    def close_and_get_values():
         plt.close(fig)
-        return g_slider.value
+        return g_slider.value, rf_slider.value
 
-    return close_and_get_g
+    return close_and_get_values
 
 
 def auto_fit_dispersive(
@@ -126,14 +145,17 @@ def auto_fit_dispersive(
 
     pbar = tqdm(total=MAX_ITER, desc="Auto fitting g", leave=False)
 
-    def update_pbar(g):
+    def update_pbar(g, r_f):
         pbar.update(1)
-        pbar.set_postfix_str(f"g = {g:.3f} GHz")
+        postfix = f"g = {g:.3f} GHz"
+        if fit_rf:
+            postfix += f", r_f = {r_f:.3f} GHz"
+        pbar.set_postfix_str(postfix)
 
     amps = np.abs(signals)
 
     # determine whether fit the value to max or min
-    fit_factor = 1 if np.sum(amps[:, amps.shape[1] // 2] - amps[:, 0]) < 0 else -1
+    fit_factor = 1 if np.sum(amps[:, amps.shape[1] // 2] - amps[:, 0]) > 0 else -1
 
     # derive the initial g value if not provided
     if g_init is None:
@@ -143,7 +165,7 @@ def auto_fit_dispersive(
     ftol = np.max(amps) * 1e-4
 
     def loss_fn(g, r_f):
-        update_pbar(g)
+        update_pbar(g, r_f)
 
         # only use 4 states to calculate the ground state dispersive shift for speed
         rf_0, *_ = calculate_dispersive_vs_flx(
