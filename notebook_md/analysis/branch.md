@@ -5,6 +5,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+%autoreload 2
+from zcu_tools.notebook.persistance import load_result
 from zcu_tools.notebook.analysis.branch import (
     branch_population,
     branch_population_over_flux,
@@ -14,23 +16,30 @@ from zcu_tools.notebook.analysis.branch import (
 ```
 
 ```python
-qub_name = "DesignR59"
+qub_name = "SF010"
 
-r_f = 5.9
-g = 0.1
-params = (7.0, 1.1, 1.4)
-flx = 0.0
-```
-
-```python
 os.makedirs(f"../../result/{qub_name}/", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/image", exist_ok=True)
 ```
 
 ```python
-params = (7.0, 1.1, 1.4)
-r_f = 5.9
-g = 0.1
+loadpath = f"../../result/{qub_name}/params.json"
+_, params, mA_c, period, allows, data_dict = load_result(loadpath)
+EJ, EC, EL = params
+
+print(params)
+
+if dispersive_cfg := data_dict.get("dispersive"):
+    g = dispersive_cfg["g"]
+    r_f = dispersive_cfg["r_f"]
+elif "r_f" in allows:
+    r_f = allows["r_f"]
+```
+
+```python
+# params = (7.0, 1.1, 1.4)
+# r_f = 5.9
+# g = 0.1
 
 
 qub_dim = 15
@@ -41,15 +50,14 @@ branchs = list(range(15))
 ```
 
 ```python
-hilbertspace = make_hilbertspace(qub_dim, res_dim, qub_cutoff)
+flx = 0.5
+hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g, flx=flx)
 populations = branch_population(hilbertspace, branchs, upto=100)
 ```
 
 ```python
 fig, ax = plot_branch_population(branchs, populations)
-fig.savefig(
-    f"../../result/DesignR59/{qub_name}/image/branch_analysis_at_phi{flx:.1f}.png"
-)
+fig.savefig(f"../../result/{qub_name}/image/branch_analysis_at_phi{flx:.1f}.png")
 ```
 
 ```python

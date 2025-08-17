@@ -41,7 +41,7 @@ from zcu_tools.simulate.fluxonium import (
 ```
 
 ```python
-qub_name = "SF008"
+qub_name = "SF010"
 
 server_ip = "021-zcu216"
 port = 4999
@@ -51,12 +51,15 @@ port = 4999
 
 ```python
 loadpath = f"../../result/{qub_name}/params.json"
-_, params, mA_c, period, allows, _ = load_result(loadpath)
+_, params, mA_c, period, allows, data_dict = load_result(loadpath)
 EJ, EC, EL = params
 
 print(allows)
 
-if "r_f" in allows:
+if dispersive_cfg := data_dict.get("dispersive"):
+    g = dispersive_cfg["g"]
+    r_f = dispersive_cfg["r_f"]
+elif "r_f" in allows:
     r_f = allows["r_f"]
 
 if "sample_f" in allows:
@@ -109,18 +112,7 @@ fig.write_image(f"../../result/{qub_name}/image/matrixelem.png", format="png")
 # Dispersive
 
 ```python
-dispersive = calculate_chi_vs_flx(params, flxs, r_f, g=0.1)
-```
-
-```python
-import plotly.graph_objects as go
-
-fig = go.Figure()
-for i in [1, 2]:
-    fig.add_trace(
-        go.Scatter(x=mAs, y=dispersive[:, i], mode="lines", name=f"state {i}")
-    )
-fig.update_yaxes(range=[-0.005, 0.005])
+fig = zp.plot_dispersive_shift(params, flxs, r_f=r_f, g=g, upto=30)
 fig.show()
 ```
 

@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: axelenv13
+    display_name: Python 3
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.5
+    version: 3.13.2
 ---
 
 ```python
@@ -41,7 +41,7 @@ from zcu_tools.simulate import mA2flx
 ```
 
 ```python
-qub_name = "Q12_2D[3]/Q4"
+qub_name = "SF010"
 
 server_ip = "021-zcu216"
 port = 4999
@@ -66,15 +66,15 @@ pprint(allows)
 # Load Spectrum
 
 ```python
-# spect_path = "../../Database/Test049/2025/05/Data_0524/Test049_flux_dep_1.hdf5"
-spect_path = r"..\..\Database\Q12_2D[3]\Q4\2025\07\Data_0716\Q_flux_1.hdf5"
-spectrum, _fpts, _mAs = load_data(spect_path, server_ip=server_ip, port=port)
-mAs, fpts, spectrum = zp.format_rawdata(_mAs, _fpts, spectrum)
+spect_path = r"../../Database/SF010/SF010_flux_6.hdf5"
+# spect_path = r"../../Database/SF010/3D5,9G_flux_2.hdf5"
+spectrum, _fpts, _As = load_data(spect_path, server_ip=server_ip, port=port)
+mAs, fpts, spectrum = zp.format_rawdata(_As, _fpts, spectrum)
 ```
 
 ```python
 %matplotlib widget
-actLine = zf.InteractiveLines(spectrum, mAs, fpts, mA_c, mA_e, use_phase=True)
+actLine = zf.InteractiveLines(spectrum, mAs, fpts, mA_c, mA_e)
 ```
 
 ```python
@@ -129,6 +129,10 @@ s_spects = zp.load_spects(processed_spect_path)
 s_spects.keys()
 ```
 
+```python
+# del s_spects["s002_onetone_flux_Q2_4.hdf5"]
+```
+
 # Align half flux
 
 ```python
@@ -179,7 +183,7 @@ s_flxs = mA2flx(s_mAs, mA_c, period)
 # general
 EJb = (3.0, 15.0)
 ECb = (0.2, 2.0)
-ELb = (0.5, 2.0)
+ELb = (0.1, 2.0)
 # interger
 # EJb = (3.0, 6.0)
 # ECb = (0.8, 2.0)
@@ -198,12 +202,13 @@ ELb = (0.5, 2.0)
 
 ```python
 allows = {
-    "transitions": [(0, 1), (0, 2), (1, 2), (0, 3)],
-    "red side": [(0, 1), (0, 2), (1, 2), (0, 3)],
-    "mirror": [(0, 1), (0, 2), (1, 2), (0, 3)],
-    "r_f": 5.794,
+    "transitions": [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3)],
+    # "transitions": [(0, 1), (0, 2)],
+    # "red side": [(0, 1), (0, 2), (1, 2), (0, 3)],
+    # "mirror": [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (1, 3)],
+    # "r_f": 7.527,
     # "sample_f": 9.584640 / 2,
-    "sample_f": 6.881280 / 2,
+    # "sample_f": 6.881280 / 2,
 }
 allows = {
     **allows,
@@ -250,7 +255,7 @@ _ = fig.update_layout(
     title_x=0.501,
 )
 # fig.update_yaxes(range=[allows["r_f"] - 0.01, allows["r_f"] + 0.01])
-# fig.update_layout(height=1000)
+fig.update_layout(height=1000)
 fig.show()
 ```
 

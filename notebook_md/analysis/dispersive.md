@@ -29,7 +29,7 @@ jupyter:
 import numpy as np
 
 %autoreload 2
-from zcu_tools.datasaver import load_data
+from zcu_tools.utils.datasaver import load_data
 import zcu_tools.notebook.persistance as zp
 import zcu_tools.notebook.analysis.dispersive as zd
 from zcu_tools.simulate import mA2flx, flx2mA
@@ -37,7 +37,7 @@ from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flx
 ```
 
 ```python
-qub_name = "Q12_2D[2]/Q4"
+qub_name = "SF010"
 ```
 
 ```python
@@ -59,20 +59,18 @@ mA_c, period
 # Plot with Onetone
 
 ```python
-onetone_path = "../../Database/Q12_2D/Q4/2025/05/Data_0528/R4_flux_2.hdf5"
+onetone_path = r"../../Database/SF010/3D5,9G_flux_2.hdf5"
 
-signals, sp_fpts, sp_mAs = load_data(
-    onetone_path, server_ip="005-writeboard", port=4999
-)
-sp_mAs, sp_fpts, signals = zp.format_rawdata(sp_mAs, sp_fpts, signals)
+signals, sp_fpts, sp_As = load_data(onetone_path, server_ip="005-writeboard", port=4999)
+sp_mAs, sp_fpts, signals = zp.format_rawdata(sp_As, sp_fpts, signals)
 signals = signals.T  # (sp_mAs, sp_fpts)
 
 sp_flxs = mA2flx(sp_mAs, mA_c, period)
 ```
 
 ```python
-r_f = 5.7945
-best_g = 0.04
+r_f = 5.930
+best_g = 0.05
 ```
 
 ```python
@@ -99,8 +97,8 @@ finish_fn = zd.search_proper_g(
 ```
 
 ```python
-best_g = finish_fn()
-best_g
+best_g, r_f = finish_fn()
+best_g, r_f
 ```
 
 ```python
