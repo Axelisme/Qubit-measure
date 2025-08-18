@@ -34,10 +34,12 @@ import zcu_tools.notebook.persistance as zp
 import zcu_tools.notebook.analysis.dispersive as zd
 from zcu_tools.simulate import mA2flx, flx2mA
 from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flx
+from zcu_tools.notebook.analysis.plot import plot_dispersive_shift
+from zcu_tools.notebook.analysis.fluxdep import InteractiveLines
 ```
 
 ```python
-qub_name = "SF010"
+qub_name = "Q3_2D/Q2"
 ```
 
 ```python
@@ -59,18 +61,47 @@ mA_c, period
 # Plot with Onetone
 
 ```python
-onetone_path = r"../../Database/SF010/3D5,9G_flux_2.hdf5"
+period = 27.85
+mA_c = 1.15
+```
+
+```python
+onetone_path = r"../../Database/Q3_2D/Q2/s002_onetone_flux_Q2_2.hdf5"
 
 signals, sp_fpts, sp_As = load_data(onetone_path, server_ip="005-writeboard", port=4999)
-sp_mAs, sp_fpts, signals = zp.format_rawdata(sp_As, sp_fpts, signals)
+sp_mAs, sp_fpts, signals = zp.format_rawdata(1e-3 * sp_As, sp_fpts, signals)
 signals = signals.T  # (sp_mAs, sp_fpts)
 
 sp_flxs = mA2flx(sp_mAs, mA_c, period)
 ```
 
 ```python
-r_f = 5.930
+%matplotlib widget
+actLine = InteractiveLines(signals.T, sp_mAs, sp_fpts)
+```
+
+```python
+mA_c, mA_e = actLine.get_positions()
+period = 2 * abs(mA_e - mA_c)
+
+mA_c, mA_e, period
+```
+
+```python
+r_f = 7.4471
 best_g = 0.05
+```
+
+```python
+%matplotlib widget
+finish_fn = zd.search_proper_g(
+    params, r_f, sp_flxs, sp_fpts, signals, g_bound=(0.0, 0.2), g_init=best_g
+)
+```
+
+```python
+best_g, r_f = finish_fn()
+best_g, r_f
 ```
 
 ```python
@@ -86,18 +117,6 @@ best_g, best_rf = zd.auto_fit_dispersive(
 )
 if best_rf is not None:
     r_f = best_rf
-best_g, r_f
-```
-
-```python
-%matplotlib widget
-finish_fn = zd.search_proper_g(
-    params, r_f, sp_flxs, sp_fpts, signals, g_bound=(0.0, 0.2), g_init=best_g
-)
-```
-
-```python
-best_g, r_f = finish_fn()
 best_g, r_f
 ```
 
@@ -118,6 +137,23 @@ fig.show()
 fig.write_html(f"../../result/{qub_name}/web/dispersive.html", include_plotlyjs="cdn")
 fig.write_image(
     f"../../result/{qub_name}/image/dispersive.png", format="png", width=800, height=400
+)
+```
+
+```python
+fig = plot_dispersive_shift(params, flxs, r_f=r_f, g=best_g, upto=5)
+fig.show()
+```
+
+```python
+fig.write_html(
+    f"../../result/{qub_name}/web/dispersive_pdr_dep.html", include_plotlyjs="cdn"
+)
+fig.write_image(
+    f"../../result/{qub_name}/image/dispersive_pdr_dep.png",
+    format="png",
+    width=800,
+    height=400,
 )
 ```
 
