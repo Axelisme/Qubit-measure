@@ -28,7 +28,13 @@ def set_flux(flux_dev: str, current, progress: bool = False) -> None:
         yoko_device = GlobalDeviceManager.get_device("flux_yoko")
         assert isinstance(yoko_device, YOKOGS200)
 
-        yoko_device.set_current(current, progress=progress)
+        mode = yoko_device.get_mode()
+        if mode == "current":
+            yoko_device.set_current(current, progress=progress)
+        elif mode == "voltage":
+            yoko_device.set_voltage(current, progress=progress)
+        else:
+            raise ValueError(f"Unsupported mode {mode} for flux device {flux_dev}.")
     elif flux_dev == "none":
         pass
     else:

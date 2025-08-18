@@ -31,6 +31,7 @@ jupyter:
 import os
 
 import numpy as np
+from pprint import pprint
 
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
@@ -51,7 +52,7 @@ import zcu_tools.config as zc
 # Create data folder
 
 ```python
-chip_name = r"Q12_2D[3]/Q1"
+chip_name = r"Q3_2D/Q2"
 
 data_host = None
 # data_host = "021-zcu216"
@@ -88,9 +89,10 @@ print(soccfg)
 
 ```python
 res_ch = 0
-qub_all_ch = 14
-qub_1_4_ch = 2
+qub_0_1_ch = 11
+qub_1_4_ch = 7
 qub_4_5_ch = 5
+lo_flux_ch = 2
 
 ro_ch = 0
 ```
@@ -112,19 +114,26 @@ flux_dev = YOKOGS200(
     VISAaddress="USB0::0x0B21::0x0039::91WB18859::INSTR", rm=pyvisa.ResourceManager()
 )
 GlobalDeviceManager.register_device("flux_yoko", flux_dev)
-cur_A = flux_dev.get_current()
-cur_A
+
+# flux_dev.set_mode('current', rampstep=1e-6)
+# cur_A = flux_dev.get_current()
+# cur_A
+flux_dev.set_mode('voltage', rampstep=1e-3)
+cur_V = flux_dev.get_voltage()
+cur_V
 ```
 
 ```python
-# cur_A = 0.0e-3
-flux_dev.set_current(current=cur_A)
+# # cur_A = 0.0e-3
+# flux_dev.set_current(current=cur_A)
+# cur_V = 0.0
+flux_dev.set_voltage(voltage=cur_V)
 ```
 
 # Lookback
 
 ```python
-timeFly = 0.4
+timeFly = 0.5
 ```
 
 ```python
@@ -138,18 +147,19 @@ exp_cfg = {
             "length": 0.65,  # us
             "raise_pulse": {"style": "cosine", "length": 0.1},
             "gain": 1.0,
-            "freq": 5351.0,
+            "freq": 7448.9,
             # "freq": r_f,
         },
         "ro_cfg": {
             "ro_ch": ro_ch,
             "ro_length": 1.5,  # us
-            "trig_offset": 0.4,  # us
+            "trig_offset": timeFly,  # us
         },
     },
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
     "relax_delay": 0.0,  # us
 }
@@ -180,11 +190,11 @@ lookback_exp.save(
 # OneTone
 
 ```python
-res_name = "R1"
+res_name = "R2"
 ```
 
 ```python
-res_probe_len = 5.1  # us
+res_probe_len = 2.1  # us
 ModuleLibrary.register_waveform(
     ro_waveform={
         "style": "flat_top",
@@ -214,9 +224,10 @@ exp_cfg = {
     },
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
-    "sweep": make_sweep(5330, 5370, 101),
+    "sweep": make_sweep(7440, 7460, 101),
     # "sweep": make_sweep(r_f-4, r_f+4, 101),
     "relax_delay": 0.0,  # us
 }
@@ -228,8 +239,9 @@ fpts, signals = res_freq_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-f, kappa = res_freq_exp.analyze(asym=True)
-f
+# f, kappa, params = res_freq_exp.analyze(use_abcd=False, asym=True)
+f, kappa, params = res_freq_exp.analyze(use_abcd=True)
+pprint(params)
 ```
 
 ```python
@@ -239,8 +251,9 @@ rf_w = kappa
 
 ```python
 res_freq_exp.save(
-    filepath=os.path.join(database_path, f"{res_name}_freq@{cur_A * 1e3:.3f}mA"),
-    comment=make_comment(cfg, f"resonator frequency = {r_f}MHz"),
+    # filepath=os.path.join(database_path, f"{res_name}_freq@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{res_name}_freq@{cur_V:.3f}V"),
+    comment=make_comment(cfg, str(params)),
     server_ip=data_host,
 )
 ```
@@ -265,10 +278,11 @@ exp_cfg = {
     },
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
     "sweep": {
-        "gain": make_sweep(0.01, 0.5, 51),
+        "gain": make_sweep(0.1, 1.0, 101),
         "freq": make_sweep(r_f - 10, r_f + 10, 101),
     },
     "relax_delay": 0.0,  # us
@@ -277,13 +291,14 @@ cfg = make_cfg(exp_cfg, reps=1000, rounds=30)
 
 res_pdr_exp = ze.onetone.PowerDepExperiment()
 pdrs, fpts, signals2D = res_pdr_exp.run(
-    soc, soccfg, cfg, dynamic_avg=True, gain_ref=0.03
+    soc, soccfg, cfg, dynamic_avg=True, gain_ref=0.1
 )
 ```
 
 ```python
 res_pdr_exp.save(
-    filepath=os.path.join(database_path, f"{res_name}_pdr@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{res_name}_pdr@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{res_name}_pdr@{cur_V:.3f}V"),
     comment=make_comment(cfg),
     server_ip=data_host,
 )
@@ -362,7 +377,7 @@ ModuleLibrary.register_module(
             "ch": res_ch,
             "nqz": 2,
             "freq": r_f,
-            "gain": 0.1,
+            "gain": 0.3,
             "length": ro_pulse_len,  # us
         },
         "ro_cfg": {
@@ -378,12 +393,12 @@ ModuleLibrary.register_module(
 # TwoTone
 
 ```python
-# preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
-preditor = FluxoniumPredictor("../result/Q12_2D[3]/Q1/params.json")
+preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
+# preditor = FluxoniumPredictor("../result/Q12_2D[3]/Q1/params.json")
 ```
 
 ```python
-qub_name = "Q1"
+qub_name = "Q2"
 ModuleLibrary.register_waveform(
     qub_waveform={
         "style": "flat_top",
@@ -397,36 +412,40 @@ ModuleLibrary.register_waveform(
 
 ```python
 # cur_A = 0.0e-3
-1e3 * flux_dev.set_current(cur_A)
+# 1e3 * flux_dev.set_current(cur_A)
+# cur_V = -12.61
+flux_dev.set_voltage(cur_V)
 ```
 
 ```python
-q_f = preditor.predict_freq(cur_A, transition=(0, 1))
+# q_f = preditor.predict_freq(cur_A, transition=(0, 1))
+q_f = preditor.predict_freq(cur_V, transition=(0, 1))
 q_f
 ```
 
 ```python
 exp_cfg = {
     "reset": "reset_120",
-    # "qub_pulse": {
-    #     **ModuleLibrary.get_waveform("qub_waveform"),
-    #     "ch": qub_all_ch,
-    #     "nqz": 1,
-    #     "gain": 0.25,
-    #     "length": 5.0,  # us
-    #     "mixer_freq": 310,
-    #     # "mixer_freq": q_f,
-    #     # "post_delay": None,
-    # },
-    "qub_pulse": "pi_amp",
-    # "readout": "readout_rf",
-    "readout": "readout_dpm",
+    "qub_pulse": {
+        **ModuleLibrary.get_waveform("qub_waveform"),
+        "ch": qub_0_1_ch,
+        "nqz": 1,
+        "gain": 0.03,
+        "length": 5.0,  # us
+        # "mixer_freq": 100,
+        "mixer_freq": q_f,
+        # "post_delay": None,
+    },
+    # "qub_pulse": "pi_amp",
+    "readout": "readout_rf",
+    # "readout": "readout_dpm",
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
-    "sweep": make_sweep(q_f - 3, q_f + 3, step=0.05),
-    # "sweep": make_sweep(305, 312, step=0.05),
+    # "sweep": make_sweep(q_f - 3, q_f + 3, step=0.05),
+    "sweep": make_sweep(100, 200, step=1.0),
     "relax_delay": 0.0,  # us
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
@@ -448,15 +467,18 @@ qf_w = kappa
 
 ```python
 qub_freq_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_freq@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_freq@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_freq@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"frequency = {f}MHz"),
     server_ip=data_host,
 )
 ```
 
 ```python
-bias = preditor.calculate_bias(cur_A, q_f)
-bias * 1e3
+# bias = preditor.calculate_bias(cur_A, q_f)
+# bias * 1e3
+bias = preditor.calculate_bias(cur_V, q_f)
+bias
 ```
 
 ```python
@@ -607,19 +629,21 @@ single_reset_check_exp.save(
 
 ```python
 reset1_trans = (1, 2)
-reset_f1 = preditor.predict_freq(cur_A, transition=reset1_trans)
+# reset_f1 = preditor.predict_freq(cur_A, transition=reset1_trans)
+reset_f1 = preditor.predict_freq(cur_V, transition=reset1_trans)
 reset_f1
 ```
 
 ```python
 reset2_trans = (2, 0)
-reset_f2 = abs(r_f + preditor.predict_freq(cur_A, transition=reset2_trans))
+# reset_f2 = abs(r_f + preditor.predict_freq(cur_A, transition=reset2_trans))
+reset_f2 = abs(r_f + preditor.predict_freq(cur_V, transition=reset2_trans))
 reset_f2
 ```
 
 ```python
 exp_cfg = {
-    # "reset": "reset_120",
+    "reset": "reset_120",
     # "init_pulse": {
     #     **ModuleLibrary.get_waveform("qub_waveform"),
     #     "ch": qub_all_ch,
@@ -634,7 +658,7 @@ exp_cfg = {
             **ModuleLibrary.get_waveform("qub_waveform"),
             "ch": qub_4_5_ch,
             "nqz": 2,
-            "gain": 0.5,
+            "gain": 1.0,
             "length": 10.0,  # us
             "mixer_freq": reset_f1,
             "post_delay": None,
@@ -645,22 +669,23 @@ exp_cfg = {
             "nqz": 1,
             "gain": 1.0,
             "length": 10.0,  # us
-            # "mixer_freq": reset_f2,
+            "mixer_freq": reset_f2,
             "post_delay": 5.0 / rf_w,  # 5 times the resonator linewidth
         },
     },
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
     "sweep": {
-        # "freq1": make_sweep(reset_f1 - 100, reset_f1 + 100, 51),
-        # "freq2": make_sweep(reset_f2 - 100, reset_f2 + 100, 51),
-        "freq1": make_sweep(3332.5, 3334.5, 51),
-        "freq2": make_sweep(1697, 1708, 51),
+        "freq1": make_sweep(reset_f1 - 10, reset_f1 + 10, 51),
+        "freq2": make_sweep(reset_f2 - 10, reset_f2 + 10, 51),
+        # "freq1": make_sweep(3332.5, 3334.5, 51),
+        # "freq2": make_sweep(1697, 1708, 51),
     },
-    "relax_delay": 1.0,  # us
+    "relax_delay": 5 / rf_w,  # us
 }
 cfg = make_cfg(exp_cfg, reps=100, rounds=100)
 
@@ -685,7 +710,8 @@ reset_f2 = f2
 
 ```python
 dual_reset_freq_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_freq@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_freq@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_freq@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"frequency = ({reset_f1:.1f}, {reset_f2:.1f})MHz"),
     server_ip=data_host,
 )
@@ -727,10 +753,11 @@ exp_cfg = {
     # },
     "init_pulse": "pi_amp",
     "tested_reset": "reset_120",
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
     "sweep": {
         "gain1": make_sweep(0.0, 1.0, 51),
@@ -754,7 +781,8 @@ gain1, gain2 = dual_reset_pdr_exp.analyze(xname=xlabal, yname=ylabal)
 
 ```python
 dual_reset_pdr_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_gain@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_gain@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_gain@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"best gain = ({gain1:.1f}, {gain2:.1f})"),
     server_ip=data_host,
 )
@@ -777,12 +805,13 @@ exp_cfg = {
     "reset": "reset_120",
     "init_pulse": "pi_amp",
     "tested_reset": "reset_120",
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
-    "sweep": make_sweep(0.05, 35.0, 51),
+    "sweep": make_sweep(0.05, 50.0, 51),
     "relax_delay": 0.0,  # us
 }
 cfg = make_cfg(exp_cfg, reps=100, rounds=100)
@@ -793,14 +822,15 @@ Ts, signals = dual_reset_len_exp.run(soc, soccfg, cfg)
 
 ```python
 dual_reset_len_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_time@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_time@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_time@{cur_V:.3f}V"),
     comment=make_comment(cfg),
     server_ip=data_host,
 )
 ```
 
 ```python
-mux_reset_len = 20.0  # us
+mux_reset_len = 30.0  # us
 ModuleLibrary.update_module(
     "reset_120",
     override_cfg={
@@ -817,12 +847,13 @@ exp_cfg = {
     "reset": "reset_120",
     "init_pulse": "pi_amp",
     "tested_reset": "reset_120",
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
-    "sweep": make_sweep(0.0, 0.6, 51),
+    "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 0.0,  # us
 }
 cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
@@ -833,7 +864,8 @@ pdrs, signals = dual_reset_check_exp.run(soc, soccfg, cfg)
 
 ```python
 dual_reset_check_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_check@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_check@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_check@{cur_V:.3f}V"),
     comment=make_comment(cfg),
     server_ip=data_host,
 )
@@ -1078,19 +1110,20 @@ exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": {
         **ModuleLibrary.get_waveform("qub_waveform"),
-        "ch": qub_all_ch,
+        "ch": qub_1_4_ch,
         "nqz": 1,
         "freq": q_f,
-        "gain": 0.3,
+        "gain": 0.03,
         # "gain": pi_gain,
         "mixer_freq": q_f,
     },
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
-    "relax_delay": 0.0,  # us
+    "relax_delay": 30.0,  # us
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.1, 5.0, 101),
 }
@@ -1139,31 +1172,32 @@ ModuleLibrary.register_module(
 ## Amplitude Rabi
 
 ```python
-pi_gain = ModuleLibrary.get_module("pi_len")["gain"]
-max_gain = min(5 * pi_gain, 1.0)
+# pi_gain = ModuleLibrary.get_module("pi_len")["gain"]
+# max_gain = min(5 * pi_gain, 1.0)
 exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": {
         **ModuleLibrary.get_waveform("qub_waveform"),
-        "ch": qub_all_ch,
+        "ch": qub_0_1_ch,
         "nqz": 1,
         "freq": q_f,
-        # "length": 0.3,  # us
-        "length": 1.5*pi_len,
+        "length": 0.05,  # us
+        # "length": 1.5*pi_len,
         "mixer_freq": q_f,
     },
-    # "readout": "readout_rf",
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
+    # "readout": "readout_dpm",
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
     "relax_delay": 0.0,  # us
     # "relax_delay": 5 * t1,
-    "sweep": make_sweep(0.0, 0.4, 51),
+    "sweep": make_sweep(0.0, 1.0, 51),
     # "sweep": make_sweep(0.0, max_gain, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 qub_amprabi_exp = ze.twotone.AmpRabiExperiment()
 pdrs, signals = qub_amprabi_exp.run(soc, soccfg, cfg)
@@ -1179,7 +1213,8 @@ pi_gain, pi2_gain
 
 ```python
 qub_amprabi_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_amp_rabi@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_amp_rabi@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_amp_rabi@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"pi gain = {pi_gain}\npi/2 gain = {pi2_gain}"),
     server_ip=data_host,
 )
@@ -1213,7 +1248,7 @@ ModuleLibrary.register_module(
 
 ```python
 exp_cfg = {
-    # "reset": "reset_120",
+    "reset": "reset_120",
     "qub_pulse": "pi_amp",
     "readout": ModuleLibrary.get_module(
         "readout_rf",
@@ -1221,9 +1256,10 @@ exp_cfg = {
     ),
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
-    "relax_delay": 10.0,  # us
+    "relax_delay": 0.0,  # us
     # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(r_f - 3, r_f + 3, 51),
 }
@@ -1239,7 +1275,8 @@ fpt_max = opt_ro_freq_exp.analyze()
 
 ```python
 opt_ro_freq_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_ro_opt_freq@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_ro_opt_freq@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_ro_opt_freq@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"optimal frequency = {fpt_max:.1f}MHz"),
     server_ip=data_host,
 )
@@ -1249,7 +1286,7 @@ opt_ro_freq_exp.save(
 
 ```python
 exp_cfg = {
-    # "reset": "reset_120",
+    "reset": "reset_120",
     "qub_pulse": "pi_amp",
     "readout": ModuleLibrary.get_module(
         "readout_rf",
@@ -1261,9 +1298,10 @@ exp_cfg = {
     ),
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
-    "relax_delay": 10.0,  # us
+    "relax_delay": 0.0,  # us
     # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(0.01, 1.0, 51),
 }
@@ -1279,7 +1317,8 @@ pdr_max = opt_ro_pdr_exp.analyze()
 
 ```python
 opt_ro_pdr_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_ro_opt_pdr@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_ro_opt_pdr@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_ro_opt_pdr@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"optimal power = {pdr_max:.2f}"),
     server_ip=data_host,
 )
@@ -1289,7 +1328,7 @@ opt_ro_pdr_exp.save(
 
 ```python
 exp_cfg = {
-    # "reset": "reset_120",
+    "reset": "reset_120",
     "qub_pulse": "pi_amp",
     "readout": ModuleLibrary.get_module(
         "readout_rf",
@@ -1302,9 +1341,10 @@ exp_cfg = {
     ),
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
-    "relax_delay": 10.0,  # us
+    "relax_delay": 0.0,  # us
     # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(0.1, 15.0, 31),
 }
@@ -1321,7 +1361,8 @@ ro_max
 
 ```python
 opt_ro_len_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_ro_opt_len@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_ro_opt_len@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_ro_opt_len@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"optimal readout length = {ro_max:.2f}us"),
     server_ip=data_host,
 )
@@ -1364,16 +1405,17 @@ orig_qf
 exp_cfg = {
     "reset": "reset_120",
     "pi2_pulse": "pi2_amp",
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
-    "relax_delay": 0.0,  # us
+    "relax_delay": 50.0,  # us
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0, 10.0, 101),  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
 
 activate_detune = 0.1 / cfg["sweep"]["step"]
 print(f"activate_detune: {activate_detune:.2f}")
@@ -1390,7 +1432,8 @@ print(f"real detune: {(detune - activate_detune) * 1e3:.1f}kHz")
 
 ```python
 t2ramsey_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_t2ramsey@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_t2ramsey@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_t2ramsey@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"detune = {detune:.3f}MHz\nt2r = {t2r:.3f}us"),
     server_ip=data_host,
 )
@@ -1407,10 +1450,11 @@ q_f
 exp_cfg = {
     "reset": "reset_120",
     "pi_pulse": "pi_amp",
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
     "relax_delay": 0.0,  # us
     # "relax_delay": 5 * t1,  # us
@@ -1431,7 +1475,8 @@ t1
 
 ```python
 t1_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_t1@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_t1@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_t1@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"t1 = {t1:.3f}us"),
     server_ip=data_host,
 )
@@ -1444,10 +1489,11 @@ exp_cfg = {
     "reset": "reset_120",
     "pi_pulse": "pi_amp",
     "pi2_pulse": "pi2_amp",
-    "readout": "readout_dpm",
+    "readout": "readout_rf",
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
     "relax_delay": 0.0,  # us
     # "relax_delay": 5 * t1,  # us
@@ -1471,7 +1517,8 @@ t2e, _, detune, _ = t2echo_exp.analyze(max_contrast=True)
 
 ```python
 t2echo_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_t2echo@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_t2echo@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_t2echo@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"detune = {detune:.3f}MHz\nt2echo = {t2e:.3f}us"),
     server_ip=data_host,
 )
@@ -1498,7 +1545,8 @@ exp_cfg = {
     ),
     "dev": {
         "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        # "flux": cur_A,  # A
+        "flux": cur_V,  # V
     },
     "relax_delay": 0.0,  # us
 }
@@ -1510,7 +1558,6 @@ signals = singleshot_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-%matplotlib widget
 %matplotlib inline
 fid, _, _, pops = singleshot_exp.analyze(backend="pca")
 print(f"Optimal fidelity after rotation = {fid:.1%}")
@@ -1530,7 +1577,8 @@ eff_T, err_T
 
 ```python
 singleshot_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_singleshot_ge@{cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{qub_name}_singleshot_ge@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_singleshot_ge@{cur_V:.3f}V"),
     comment=make_comment(
         cfg, f"fide: {fid:.1%}, (n_g, n_e): ({n_g:.1%}, {n_e:.1%}), eff_T: {eff_T:.1f}"
     ),
