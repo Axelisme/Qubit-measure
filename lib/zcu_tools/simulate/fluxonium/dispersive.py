@@ -47,9 +47,9 @@ def calculate_dispersive_sweep(
     g: float,
     r_f: float,
     progress: bool = True,
-    resonator_dim: int = 5,
-    cutoff: int = 30,
-    evals_count: int = 20,
+    res_dim: int = 5,
+    qub_cutoff: int = 30,
+    qub_dim: int = 20,
     return_dim: int = 2,
 ) -> Tuple[np.ndarray, ...]:
     """
@@ -58,9 +58,9 @@ def calculate_dispersive_sweep(
 
     import scqubits as scq  # lazy import
 
-    resonator = scq.Oscillator(r_f, truncated_dim=resonator_dim)
+    resonator = scq.Oscillator(r_f, truncated_dim=res_dim)
     fluxonium = scq.Fluxonium(
-        *(1.0, 1.0, 1.0), flux=0.5, cutoff=cutoff, truncated_dim=evals_count
+        *(1.0, 1.0, 1.0), flux=0.5, cutoff=qub_cutoff, truncated_dim=qub_dim
     )
     hilbertspace = scq.HilbertSpace([resonator, fluxonium])
     hilbertspace.add_interaction(
@@ -76,7 +76,7 @@ def calculate_dispersive_sweep(
         hilbertspace,
         {"params": sweep_list},
         update_hilbertspace=update_hilbertspace,
-        evals_count=resonator_dim * evals_count,
+        evals_count=res_dim * qub_dim,
         subsys_update_info={"params": [fluxonium]},
         labeling_scheme="LX",
     )
@@ -99,9 +99,9 @@ def calculate_dispersive_vs_flx(
     r_f: float,
     g: float,
     progress: bool = True,
-    resonator_dim: int = 10,
-    cutoff: int = 30,
-    evals_count: int = 10,
+    res_dim: int = 10,
+    qub_cutoff: int = 30,
+    qub_dim: int = 10,
     return_dim: int = 2,
 ) -> Tuple[np.ndarray, ...]:
     """
@@ -120,9 +120,9 @@ def calculate_dispersive_vs_flx(
         g,
         r_f,
         progress,
-        resonator_dim,
-        cutoff,
-        evals_count,
+        res_dim,
+        qub_cutoff,
+        qub_dim,
         return_dim,
     )
 
@@ -176,9 +176,9 @@ def calculate_chi_vs_flx(
     r_f: float,
     g: float,
     progress: bool = True,
-    resonator_dim: int = 5,
-    cutoff: int = 30,
-    qubit_dim: int = 20,
+    res_dim: int = 5,
+    qub_cutoff: int = 30,
+    qub_dim: int = 20,
 ) -> np.ndarray:
     """
     Calculate the dispersive shift of ground and excited state vs. flux
@@ -191,5 +191,12 @@ def calculate_chi_vs_flx(
         fluxonium.EL = params[2]
 
     return calculate_chi_sweep(
-        flxs, update_hilbertspace, g, r_f, progress, resonator_dim, cutoff, qubit_dim
+        flxs,
+        update_hilbertspace,
+        g,
+        r_f,
+        progress,
+        res_dim,
+        qub_cutoff,
+        qub_dim,
     )

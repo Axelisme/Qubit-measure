@@ -58,7 +58,7 @@ def plot_dispersive_shift(
 ) -> go.Figure:
     fig = go.Figure()
 
-    chi = calculate_chi_vs_flx(params, flxs, r_f, g, resonator_dim=upto + 2)
+    chi = calculate_chi_vs_flx(params, flxs, r_f, g, res_dim=upto + 2)
     fig.add_hline(y=0.0, line_color="black", line_width=2, line_dash="dash")
     for i in range(upto):
         fig.add_trace(

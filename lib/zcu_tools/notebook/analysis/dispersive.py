@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
@@ -29,26 +29,46 @@ def search_proper_g(
     # Pre-calculate signal amplitude for plotting
     signal_amp = np.abs(signals)
 
-    STEP = 0.001
+    # Default parameter values
+    default_qub_dim = 15
+    default_qub_cutoff = 30
+    default_res_dim = 4
+    default_step = 5
 
     if g_init is None:
         g_init = round(0.5 * (g_bound[0] + g_bound[1]), 3)
 
-    @lru_cache(maxsize=None)
-    def get_dispersive(g: float, r_f: float) -> Tuple[np.ndarray, ...]:
-        # only use 4 states to calculate the ground state dispersive shift for speed
-        return calculate_dispersive_vs_flx(
-            params, sp_flxs, r_f, g, progress=False, resonator_dim=4
-        )
+    # Create parameter input widgets
+    qub_dim_input = widgets.IntText(
+        value=default_qub_dim,
+        description="qub_dim:",
+        style={"description_width": "initial"},
+    )
 
-    rf_0, rf_1 = get_dispersive(g_init, r_f)
+    qub_cutoff_input = widgets.IntText(
+        value=default_qub_cutoff,
+        description="qub_cutoff:",
+        style={"description_width": "initial"},
+    )
+
+    res_dim_input = widgets.IntText(
+        value=default_res_dim,
+        description="res_dim:",
+        style={"description_width": "initial"},
+    )
+
+    step_input = widgets.IntText(
+        value=default_step,
+        description="step:",
+        style={"description_width": "initial"},
+    )
 
     # Create slider widgets
     g_slider = widgets.FloatSlider(
         value=g_init,
         min=g_bound[0],
         max=g_bound[1],
-        step=STEP,
+        step=0.001,
         description="g (GHz):",
         continuous_update=False,
         style={"description_width": "initial"},
@@ -69,6 +89,30 @@ def search_proper_g(
         readout_format=".6f",
     )
 
+    @lru_cache(maxsize=None)
+    def get_dispersive(
+        g: float,
+        r_f: float,
+        qub_dim: int = default_qub_dim,
+        qub_cutoff: int = default_qub_cutoff,
+        res_dim: int = default_res_dim,
+        step: int = default_step,
+    ) -> Tuple[np.ndarray, ...]:
+        # Calculate the dispersive shift using provided parameters
+        return calculate_dispersive_vs_flx(
+            params,
+            sp_flxs[::step],
+            r_f,
+            g,
+            progress=False,
+            res_dim=res_dim,
+            qub_cutoff=qub_cutoff,
+            qub_dim=qub_dim,
+        )
+
+    flx_step = step_input.value
+    rf_0, rf_1 = get_dispersive(g_init, r_f)
+
     # Create figure and axes
     fig, ax = plt.subplots(figsize=(10, 6))
     fig.tight_layout(pad=4.0)
@@ -83,8 +127,8 @@ def search_proper_g(
         cmap="viridis",
     )
 
-    (line_g,) = ax.plot(sp_flxs, rf_0, "b-", label="Ground state")
-    (line_e,) = ax.plot(sp_flxs, rf_1, "r-", label="Excited state")
+    (line_g,) = ax.plot(sp_flxs[::flx_step], rf_0, "b-", label="Ground state")
+    (line_e,) = ax.plot(sp_flxs[::flx_step], rf_1, "r-", label="Excited state")
     line_bare = ax.axhline(y=r_f, color="k", linestyle="--", label="Bare resonator")
 
     ax.set_ylim(sp_fpts.min(), sp_fpts.max())
@@ -95,32 +139,42 @@ def search_proper_g(
 
     # Register callback for slider changes
     def update_plot() -> None:
-        g = g_slider.value
-        current_rf = rf_slider.value
+        cur_g = g_slider.value
+        cur_rf = rf_slider.value
 
-        rf_0, rf_1 = get_dispersive(g, current_rf)
+        flx_step = step_input.value
+        rf_0, rf_1 = get_dispersive(
+            cur_g,
+            cur_rf,
+            qub_dim_input.value,
+            qub_cutoff_input.value,
+            res_dim_input.value,
+            flx_step,
+        )
 
         # Update the lines
-        line_g.set_data(sp_flxs, rf_0)
-        line_e.set_data(sp_flxs, rf_1)
-        line_bare.set_ydata([current_rf])
+        line_g.set_data(sp_flxs[::flx_step], rf_0)
+        line_e.set_data(sp_flxs[::flx_step], rf_1)
+        line_bare.set_ydata([cur_rf])
 
         # Update the title with current values
-        ax.set_title(f"g = {g:.3f} GHz, r_f = {current_rf:.6f} GHz")
+        ax.set_title(f"g = {cur_g:.3f} GHz, r_f = {cur_rf:.6f} GHz")
 
-    def on_g_change(change):
-        update_plot()
-
-    def on_rf_change(change):
-        update_plot()
-
-    g_slider.observe(on_g_change, names="value")
-    rf_slider.observe(on_rf_change, names="value")
+    # Add observers for all widgets
+    g_slider.observe(lambda _: update_plot(), names="value")
+    rf_slider.observe(lambda _: update_plot(), names="value")
+    qub_dim_input.observe(lambda _: update_plot(), names="value")
+    qub_cutoff_input.observe(lambda _: update_plot(), names="value")
+    res_dim_input.observe(lambda _: update_plot(), names="value")
+    step_input.observe(lambda _: update_plot(), names="value")
 
     # Layout everything together
-    display(widgets.VBox([g_slider, rf_slider]))
+    parameter_box = widgets.HBox(
+        [qub_dim_input, qub_cutoff_input, res_dim_input, step_input]
+    )
+    display(widgets.VBox([parameter_box, g_slider, rf_slider]))
 
-    def close_and_get_values():
+    def close_and_get_values() -> tuple[float, float]:
         plt.close(fig)
         return g_slider.value, rf_slider.value
 
@@ -169,7 +223,7 @@ def auto_fit_dispersive(
 
         # only use 4 states to calculate the ground state dispersive shift for speed
         rf_0, *_ = calculate_dispersive_vs_flx(
-            params, sp_flxs, r_f, g, progress=False, resonator_dim=4
+            params, sp_flxs, r_f, g, progress=False, res_dim=4
         )
 
         # 用線性插值取得每個 rf_0 對應的 signal

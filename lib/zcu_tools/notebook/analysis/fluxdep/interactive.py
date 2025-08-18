@@ -17,6 +17,7 @@ from IPython.display import clear_output, display
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Ellipse
 from numpy import ndarray
+from tqdm.auto import tqdm
 
 from zcu_tools.simulate import mA2flx
 
@@ -540,8 +541,12 @@ class InteractiveLines:
         search_width = total_width / 20
 
         # 為紅線和藍線分別找到最佳位置
-        best_red_pos = self._find_best_position(self.mA_c, search_width)
-        best_blue_pos = self._find_best_position(self.mA_e, search_width)
+        best_red_pos = self._find_best_position(
+            self.mA_c, search_width, pbar_desc="Finding best red position..."
+        )
+        best_blue_pos = self._find_best_position(
+            self.mA_e, search_width, pbar_desc="Finding best blue position..."
+        )
 
         # 更新線條位置
         self.mA_c = best_red_pos
@@ -557,7 +562,9 @@ class InteractiveLines:
         # 重新繪製
         self.fig_main.canvas.draw_idle()
 
-    def _find_best_position(self, current_pos: float, search_width: float) -> float:
+    def _find_best_position(
+        self, current_pos: float, search_width: float, pbar_desc: str = ""
+    ) -> float:
         """在給定範圍內找到mirror loss最小的位置"""
         # 計算半格精度
         precision = 0.25 * (self.mAs[-1] - self.mAs[0]) / len(self.mAs)
@@ -587,7 +594,7 @@ class InteractiveLines:
         min_loss = float("inf")
 
         # 對每個候選位置計算mirror loss
-        for candidate in candidates:
+        for candidate in tqdm(candidates, desc=pbar_desc):
             # 計算該位置的mirror loss
             # 總是使用spectrum來計算(包含phase資訊)
             diff_amps = diff_mirror(self.mAs, self.spectrum.T, candidate).T
@@ -731,10 +738,6 @@ class InteractiveLines:
         mA_c = precision * round((self.mA_c - self.mAs[0]) / precision) + self.mAs[0]
         mA_e = precision * round((self.mA_e - self.mAs[0]) / precision) + self.mAs[0]
         return float(mA_c), float(mA_e)
-
-    # ----------------------------------
-    #  Event handlers
-    # ----------------------------------
 
     def on_toggle_magnitude(self, change) -> None:
         """切換是否僅使用振幅資料的顯示模式"""
