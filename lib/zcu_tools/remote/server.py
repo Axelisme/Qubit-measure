@@ -7,7 +7,6 @@ import Pyro4
 from zcu_tools.program.base import MyProgram
 from zcu_tools.utils import AsyncFunc
 
-from . import pyro  # noqa , 初始化Pyro4.config
 from .wrapper import RemoteCallback, unwrap_callback
 
 

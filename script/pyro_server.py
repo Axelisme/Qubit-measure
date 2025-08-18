@@ -8,12 +8,12 @@ import time
 ############
 # parse command line arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("--host", "-H", default="localhost", help="Host ip")
 parser.add_argument("--port", "-p", type=int, default=0, help="Daemon port")
 parser.add_argument("--ns-port", "-np", type=int, default=8080, help="Nameserver port")
 parser.add_argument(
     "--soc", "-s", default="v2", choices=["v1", "v2"], help="bitfile version"
 )
+parser.add_argument("--iface", "-i", default="eth0", help="Interface to use")
 
 args = parser.parse_args()
 
@@ -23,10 +23,12 @@ args = parser.parse_args()
 
 from zcu_tools.remote.pyro import start_nameserver, start_server  # noqa
 
-ns_t = threading.Thread(target=start_nameserver, args=(args.ns_port,), daemon=True)
+ns_t = threading.Thread(
+    target=start_nameserver, kwargs=dict(ns_port=args.ns_port), daemon=True
+)
 ns_t.start()
 time.sleep(2)  # wait for the nameserver to start up
 
 ############
 # start the qick proxy server
-start_server(args.host, args.port, args.ns_port, version=args.soc)
+start_server(port=args.port, ns_port=args.ns_port, version=args.soc, iface=args.iface)

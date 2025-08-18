@@ -9,9 +9,11 @@ from tqdm.auto import tqdm
 from zcu_tools.program.base import AbsProxy, MyProgram
 
 from ..config import config
-from .pyro import *  # noqa , initialize Pyro4.config
+from .pyro import setup_pyro4
 from .server import ProgramServer
 from .wrapper import RemoteCallback
+
+setup_pyro4()
 
 
 class ProgramClient(AbsProxy):
@@ -27,7 +29,6 @@ class ProgramClient(AbsProxy):
             print(
                 f"Client Pyro4 daemon started at {config.LOCAL_IP}:{config.LOCAL_PORT}"
             )
-            Pyro4.config.ONEWAY_THREADED = True
             cls.callback_daemon = Pyro4.Daemon(config.LOCAL_IP, config.LOCAL_PORT)
             # 將 daemon.requestLoop 放在背景執行緒執行
             cls.daemon_thread = threading.Thread(

@@ -1,19 +1,27 @@
+import socket
 from types import ModuleType
 from typing import Any, Literal, Optional, Tuple
 
+import psutil
 import Pyro4
 import Pyro4.naming
 from qick import QickConfig
 
 from zcu_tools.program.bitfiles import get_bitfile
 
-# use dill instead of pickle
-# Pyro4.config.SERIALIZER = "pickle"
-Pyro4.config.SERIALIZER = "dill"
-Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill", "pickle"])
-Pyro4.config.DILL_PROTOCOL_VERSION = 5
-Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
-Pyro4.config.REQUIRE_EXPOSE = False
+
+def setup_pyro4():
+    # use dill instead of pickle
+    # Pyro4.config.SERIALIZER = "pickle"
+    Pyro4.config.SERIALIZER = "dill"
+    Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill", "pickle"])
+    Pyro4.config.DILL_PROTOCOL_VERSION = 5
+    Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
+    Pyro4.config.REQUIRE_EXPOSE = False
+    Pyro4.config.ONEWAY_THREADED = True
+
+
+setup_pyro4()
 
 
 def get_program_module(version: Literal["v1", "v2"]) -> ModuleType:
@@ -27,11 +35,34 @@ def get_program_module(version: Literal["v1", "v2"]) -> ModuleType:
         raise ValueError(f"Invalid version {version}")
 
 
+def get_localhost_ip(ns: Pyro4.naming.NameServer, iface: str) -> str:
+    # if we have multiple network interfaces, we want to register the daemon using the IP address that faces the nameserver
+    host = Pyro4.socketutil.getInterfaceAddress(ns._pyroUri.host)
+    # if the nameserver is running on the QICK, the above will usually return the loopback address - not useful
+    if host == "127.0.0.1":
+        # if the eth0 interface has an IPv4 address, use that
+        # otherwise use the address of any interface starting with "eth0" (e.g. eth0:1, which is typically a static IP)
+        # unless you have an unusual network config (e.g. VPN), this is the interface clients will want to connect to
+        for name, addrs in psutil.net_if_addrs().items():
+            addrs_v4 = [
+                addr.address
+                for addr in addrs
+                if addr.family == socket.AddressFamily.AF_INET
+            ]
+            if len(addrs_v4) == 1:
+                if name.startswith(iface):
+                    host = addrs_v4[0]
+                if name == iface:
+                    break
+
+    return host
+
+
 def start_nameserver(ns_port: int) -> None:
     Pyro4.naming.startNSloop(host="0.0.0.0", port=ns_port)
 
 
-def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs) -> None:
+def start_server(port: int, ns_port: int, version="v1", iface="eth0", **kwargs) -> None:
     from qick import QickSoc
 
     from zcu_tools.remote.server import ProgramServer
@@ -40,15 +71,12 @@ def start_server(host: str, port: int, ns_port: int, version="v1", **kwargs) -> 
     ns = Pyro4.locateNS(host="0.0.0.0", port=ns_port)
     print("found nameserver")
 
-    if host in ["localhost", "0.0.0.0", "127.0.0.1"]:
-        print(
-            "WARNING: using localhost as host, this will only work on the local machine"
-        )
+    host = get_localhost_ip(ns, iface)
+
     print(f"starting daemon on {host}:{port}")
     daemon = Pyro4.Daemon(host=host, port=port)
 
     # create and register the QickSoc
-
     soc = QickSoc(bitfile=get_bitfile(version), **kwargs)
     uri = daemon.register(soc)
     ns.register("myqick", uri)
