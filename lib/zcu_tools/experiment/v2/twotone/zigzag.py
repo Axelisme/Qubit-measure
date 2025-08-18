@@ -39,7 +39,7 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "times")
-        times = sweep2array(cfg["sweep"]["times"])  # predicted
+        times = sweep2array(cfg["sweep"]["times"], allow_array=True)  # predicted
         del cfg["sweep"]
 
         cfg["zigzag_pi_time"] = times[0]  # initial value
