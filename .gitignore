@@ -11,13 +11,13 @@ wheels/
 
 Database/
 result
-labber_api/
 test.py
 test.ipynb
 CLAUDE.md
 
 qick/
 labber_api/
+abcd_rf_fit/
 
 *.bak
 *.yaml
