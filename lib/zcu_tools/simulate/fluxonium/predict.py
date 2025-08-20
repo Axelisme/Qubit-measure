@@ -16,7 +16,7 @@ class FluxoniumPredictor:
         self.params = np.array(
             [data["params"]["EJ"], data["params"]["EC"], data["params"]["EL"]]
         )
-        self.mA_c = data["half flux"]
+        self.A_c = data["half flux"]
         self.period = data["period"]
 
         self.bias = bias
@@ -25,8 +25,11 @@ class FluxoniumPredictor:
 
         self.fluxonium = Fluxonium(*self.params, flux=0.5, cutoff=40, truncated_dim=2)
 
-    def _A_to_flx(self, cur_A: float) -> float:
-        return (1e3 * (cur_A + self.bias) - self.mA_c) / self.period + 0.5
+    def A_to_flx(self, cur_A: float) -> float:
+        return (cur_A + self.bias - self.A_c) / self.period + 0.5
+
+    def flx_to_A(self, cur_flx: float) -> float:
+        return (cur_flx - 0.5) * self.period + self.A_c - self.bias
 
     def calculate_bias(
         self, cur_A: float, cur_freq: float, transition: Tuple[int, int] = (0, 1)
@@ -62,7 +65,7 @@ class FluxoniumPredictor:
             fit_A = cur_A
 
         bias = fit_A - cur_A + self.bias
-        return round(bias, 6)  # 1e-3mA precision
+        return round(bias, 6)  # 1e-3mA/mV precision
 
     def update_bias(self, bias: float) -> None:
         self.bias = bias
@@ -77,7 +80,7 @@ class FluxoniumPredictor:
             float: transition frequency in MHz.
         """
 
-        flx = self._A_to_flx(cur_A)
+        flx = self.A_to_flx(cur_A)
 
         self.fluxonium.flux = flx
         energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 1)
@@ -94,7 +97,7 @@ class FluxoniumPredictor:
         Returns:
             float: Length of Pi pulse in ns.
         """
-        flx, ref_flx = self._A_to_flx(cur_A), self._A_to_flx(ref_A)
+        flx, ref_flx = self.A_to_flx(cur_A), self.A_to_flx(ref_A)
 
         self.fluxonium.flux = flx
         n_oper = self.fluxonium.n_operator(energy_esys=True)

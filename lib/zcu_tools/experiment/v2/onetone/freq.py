@@ -61,20 +61,40 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         return fpts_real, signals
 
-    def analyze(
+    def analyze_by_abcd(
         self,
-        result: Optional[FreqResultType] = None,
+        fpts: np.ndarray,
+        signals: np.ndarray,
+        solve_type: str = "hm",
+        fit_edelay: bool = True,
+    ) -> Dict[str, float]:
+        try:
+            from abcd_rf_fit import analyze
+        except ImportError:
+            print(
+                "cannot import abcd_rf_fit, do you have it installed? please check: <https://github.com/UlysseREGLADE/abcd_rf_fit.git>"
+            )
+            raise
+
+        fit = analyze(1e6 * fpts, signals, solve_type, fit_edelay=fit_edelay)
+        fit.plot()
+        param = fit.tolist()
+        return {
+            "freq": round(param[0] * 1e-6, 7),  # MHz
+            "kappa": round(param[1] * 1e-6, 4),  # MHz
+            "Qi": round((param[0] / (param[1] - param[2]))),
+            "absQc": round(param[0] / param[2]),
+            "Ql": round(param[0] / param[1]),
+        }
+
+    def analyze_wo_abcd(
+        self,
+        fpts: np.ndarray,
+        signals: np.ndarray,
         *,
         type: Literal["lor", "sinc"] = "lor",
         asym: bool = False,
-        plot_fit: bool = True,
-    ) -> Tuple[float, float]:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        fpts, signals = result
-
+    ) -> Dict[str, float]:
         val_mask = ~np.isnan(signals)
         fpts = fpts[val_mask]
         signals = signals[val_mask]
@@ -86,16 +106,35 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         plt.figure(figsize=config.figsize)
         plt.tight_layout()
         plt.plot(fpts, amps, label="signal", marker="o", markersize=3)
-        if plot_fit:
-            plt.plot(fpts, y_fit, label=f"fit, $kappa$={kappa:.1g} MHz")
-            label = f"$f_res$ = {freq:.5g} +/- {freq_err:.1g} MHz"
-            plt.axvline(freq, color="r", ls="--", label=label)
+        plt.plot(fpts, y_fit, label=f"fit, $kappa$={kappa:.1g} MHz")
+        label = f"$f_res$ = {freq:.5g} +/- {freq_err:.1g} MHz"
+        plt.axvline(freq, color="r", ls="--", label=label)
         plt.xlabel("Frequency (MHz)")
         plt.ylabel("Magnitude (a.u.)")
         plt.legend()
         plt.show()
 
-        return freq, kappa
+        return dict(freq=freq, kappa=kappa, freq_err=freq_err)
+
+    def analyze(
+        self,
+        result: Optional[FreqResultType] = None,
+        *,
+        use_abcd: bool = True,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        fpts, signals = result
+
+        if use_abcd:
+            params = self.analyze_by_abcd(fpts=fpts, signals=signals, **kwargs)
+        else:
+            params = self.analyze_wo_abcd(fpts=fpts, signals=signals, **kwargs)
+
+        return params["freq"], params["kappa"], params
 
     def save(
         self,
