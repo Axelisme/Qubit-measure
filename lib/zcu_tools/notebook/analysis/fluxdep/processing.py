@@ -40,7 +40,7 @@ def spectrum2d_findpoint(
     """
 
     if weight is not None:
-        amps *= weight
+        amps = amps * weight
 
     s_mAs = []
     s_fpts = []

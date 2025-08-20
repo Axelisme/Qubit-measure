@@ -8,32 +8,36 @@ import matplotlib.pyplot as plt
 %autoreload 2
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.notebook.analysis.branch import (
-    branch_population,
-    branch_population_over_flux,
+    plot_cn_over_flx,
+    plot_populations_over_photon,
+)
+from zcu_tools.notebook.analysis.branch.full_quantum import (
+    calc_branch_population,
+    calc_branch_population_over_flux,
     make_hilbertspace,
-    plot_branch_population,
 )
 ```
 
 ```python
 qub_name = "SF010"
 
-os.makedirs(f"../../result/{qub_name}/", exist_ok=True)
-os.makedirs(f"../../result/{qub_name}/image", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/image/branch", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/web/branch", exist_ok=True)
 ```
 
 ```python
 loadpath = f"../../result/{qub_name}/params.json"
 _, params, mA_c, period, allows, data_dict = load_result(loadpath)
-EJ, EC, EL = params
 
-print(params)
+print(f"EJ: {params[0]:.3f} GHz, EC: {params[1]:.3f} GHz, EL: {params[2]:.3f} GHz")
 
 if dispersive_cfg := data_dict.get("dispersive"):
     g = dispersive_cfg["g"]
     r_f = dispersive_cfg["r_f"]
+    print(f"g: {g} GHz, r_f: {r_f} GHz")
 elif "r_f" in allows:
     r_f = allows["r_f"]
+    print(f"r_f: {r_f} GHz")
 ```
 
 ```python
@@ -46,27 +50,32 @@ qub_dim = 15
 qub_cutoff = 40
 res_dim = 210
 
-branchs = list(range(15))
+photons = np.arange(0, res_dim - 10)
 ```
 
 ```python
 flx = 0.5
+branchs = list(range(15))
+
 hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g, flx=flx)
-populations = branch_population(hilbertspace, branchs, upto=100)
+populations_over_flx = calc_branch_population(hilbertspace, branchs, upto=photons[-1])
 ```
 
 ```python
-fig, ax = plot_branch_population(branchs, populations)
-fig.savefig(f"../../result/{qub_name}/image/branch_analysis_at_phi{flx:.1f}.png")
+fig = plot_populations_over_photon(branchs, photons, populations_over_flx)
+
+fig.write_html(f"../../result/{qub_name}/web/branch/populations_at_phi{flx:.1f}.html")
+fig.write_image(f"../../result/{qub_name}/image/branch/populations_at_phi{flx:.1f}.png")
+fig.show()
 ```
 
 ```python
-flxs = np.linspace(0, 0.5, 1001)
+flxs = np.linspace(0, 0.5, 5)
 branchs = [0, 1]
 ```
 
 ```python
-populations = branch_population_over_flux(
+populations_over_flx = calc_branch_population_over_flux(
     flxs,
     params,
     r_f,
@@ -74,59 +83,37 @@ populations = branch_population_over_flux(
     qub_cutoff,
     res_dim,
     g,
-    upto=res_dim - 10,
+    upto=photons[-1],
     branchs=branchs,
     batch_size=30,
 )
 ```
 
 ```python
-ground_populations = populations[:, 0, :]
-excited_populations = populations[:, 1, :]
-
-# calculate the critical photon number
-ground_cn = np.argmax(ground_populations >= 2, axis=1)
-ground_cn[ground_cn == 0] = ground_populations.shape[1] - 1
-excited_cn = np.argmax(excited_populations >= 3, axis=1)
-excited_cn[excited_cn == 0] = excited_populations.shape[1] - 1
-```
-
-```python
-# plot the critical photon number as a function of flux
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 5))
-
-df = flxs[1] - flxs[0]
-ax1.imshow(
-    ground_populations.T,
-    interpolation="none",
-    aspect="auto",
-    origin="lower",
-    extent=[flxs[0] - 0.5 * df, flxs[-1] + 0.5 * df, 0, populations.shape[2]],
-)
-ax1.plot(flxs, ground_cn, label="ground", marker=".", color="r")
-ax1.set_title("Ground state")
-ax2.imshow(
-    excited_populations.T,
-    interpolation="none",
-    aspect="auto",
-    origin="lower",
-    extent=[flxs[0] - 0.5 * df, flxs[-1] + 0.5 * df, 0, populations.shape[2]],
-)
-ax2.plot(flxs, excited_cn, label="excited", marker=".", color="r")
-ax2.set_title("Excited state")
-
-ax1.legend()
-ax2.legend()
-fig.savefig(f"../../result/DesignR59/{qub_name}/image/branch_analysis.png")
-```
-
-```python
 np.savez_compressed(
-    f"../../result/DesignR59/{qub_name}/branch_analysis.npz",
+    f"../../result/{qub_name}/branch_populations.npz",
     flxs=flxs,
     branchs=branchs,
-    populations=populations,
+    photons=photons,
+    populations_over_flx=populations_over_flx,
 )
+```
+
+```python
+data = np.load(f"../../result/{qub_name}/branch_populations.npz")
+flxs = data["flxs"]
+photons = data["photons"]
+populations_over_flx = data["populations_over_flx"]
+```
+
+```python
+fig = plot_cn_over_flx(
+    flxs, photons, populations_over_flx, critical_levels={0: 2, 1: 3}
+)
+
+fig.write_html(f"../../result/{qub_name}/web/branch/cn_over_flx.html")
+fig.write_image(f"../../result/{qub_name}/image/branch/cn_over_flx.png")
+fig.show()
 ```
 
 ```python

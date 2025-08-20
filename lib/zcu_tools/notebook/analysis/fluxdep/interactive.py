@@ -271,14 +271,25 @@ class InteractiveLines:
         plt.ion()
 
         # 初始化線的位置
-        self.mA_c = (mAs[0] + mAs[-1]) / 2 if mA_c is None else mA_c
+        spect_center = (mAs[0] + mAs[-1]) / 2
+        self.mA_c = spect_center if mA_c is None else mA_c
         self.mA_e = mAs[-5] if mA_e is None else mA_e
+        if mA_c is not None and mA_e is not None:
+            period = 2 * abs(self.mA_e - self.mA_c)
+
+            # fold the mA_c and mA_e to the closest point to the spect_center
+            self.mA_c = (
+                self.mA_c - round((self.mA_c - spect_center) / period, 0) * period
+            )
+            self.mA_e = (
+                self.mA_e - round((self.mA_e - spect_center) / period, 0) * period
+            )
 
         self.mAs = mAs
         self.fpts = fpts
         self.spectrum = spectrum
 
-        # 新增屬性: 僅使用振幅 (magnitude) 模式，預設為 False (表示同時使用相位資訊)
+        # 僅使用振幅 (magnitude) 模式，預設為 False
         self.only_use_magnitude: bool = False
 
         # 根據 only_use_magnitude 計算顯示用資料

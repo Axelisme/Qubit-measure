@@ -1,9 +1,8 @@
 from typing import TYPE_CHECKING, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 from joblib import Parallel, delayed
-from tqdm.auto import trange
+from tqdm.auto import tqdm, trange
 
 if TYPE_CHECKING:
     from scqubits import Fluxonium, HilbertSpace, Oscillator, ParameterSweep
@@ -51,7 +50,7 @@ def calc_population(bra_array: np.ndarray, evec: np.ndarray) -> float:
     return np.sum(np.abs(np.dot(bra_array, evec)) ** 2)
 
 
-def branch_population(
+def calc_branch_population(
     hilbertspace: "HilbertSpace", branchs: np.ndarray, upto: int = -1
 ) -> np.ndarray:
     """
@@ -76,35 +75,15 @@ def branch_population(
 
     populations = np.array(
         Parallel(n_jobs=-1, prefer="threads")(
-            delayed(_calc_population)(dressed_idx) for dressed_idx in dressed_indices
+            delayed(_calc_population)(dressed_idx)
+            for dressed_idx in tqdm(dressed_indices, desc="Calculating population")
         )
     ).reshape(len(branchs), upto)
 
     return populations
 
 
-def plot_branch_population(
-    branchs: list[int],
-    populations: np.ndarray,
-) -> Tuple[plt.Figure, plt.Axes]:
-    fig, ax = plt.subplots()
-
-    for b in branchs:
-        pop_b = populations[b]
-        if np.ptp(pop_b) > 1.0:
-            color = None
-            label = f"Branch {b}"
-        else:
-            color = "lightgrey"
-            label = None
-        ax.plot(populations[b], label=label, color=color)
-    ax.legend(loc="upper left")
-    ax.grid()
-
-    return fig, ax
-
-
-def branch_population_over_flux(
+def calc_branch_population_over_flux(
     flxs: np.ndarray,
     params: Tuple[float, float, float],
     r_f: float,
