@@ -28,7 +28,7 @@ from zcu_tools.notebook.analysis.branch import (
     plot_cn_over_flx,
     plot_populations_over_photon,
 )
-from zcu_tools.notebook.analysis.branch.floquet import (
+from zcu_tools.simulate.fluxonium.branch.floquet import (
     encode_floquet_hamiltonian,
     calc_branch_infos,
     calc_branch_populations,

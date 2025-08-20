@@ -26,6 +26,9 @@ jupyter:
 
 ```python
 %load_ext autoreload
+import os
+
+import matplotlib.pyplot as plt
 
 %autoreload 2
 from zcu_tools.utils.datasaver import load_data
@@ -35,7 +38,11 @@ from zcu_tools.simulate import mA2flx
 ```
 
 ```python
-loadpath = "../../result/Q12_2D[2]/Q4/params.json"
+qub_name = "Q12_2D[2]/Q4"
+```
+
+```python
+loadpath = f"../../result/{qub_name}/params.json"
 _, params, mA_c, period, allows, _ = load_result(loadpath)
 EJ, EC, EL = params
 
@@ -208,50 +215,49 @@ signals, As, pdrs = load_data(filepath)
 ```
 
 ```python
-mA_c = 1.92
+mA_c = 4.787
 ```
 
 ```python
-data = np.load(r"../../result/Q12_2D[3]/Q4/branch_analysis_n0,0.npz")
-sim_flxs, branchs, populations = data["flxs"], data["branchs"], data["populations"]
-sim_flxs = np.concatenate([sim_flxs, 1 - sim_flxs[::-1]])
-populations = np.concatenate([populations, populations[::-1, ...]], axis=0)
+sim_filepath = r"../../result/Q12_2D[3]/Q4/branch_floquet_populations.npz"
+# sim_filepath = r"../../result/Q12_2D[3]/Q4/branch_populations.npz"
 
-
-flxs = mA2flx(1e3 * As, mA_c, period)
-ground_populations = np.array(
-    [
-        np.interp(np.mod(flxs, 1.0), sim_flxs, populations[:, 0, i])
-        for i in range(populations.shape[2])
-    ]
-).T
-excited_populations = np.array(
-    [
-        np.interp(np.mod(flxs, 1.0), sim_flxs, populations[:, 1, i])
-        for i in range(populations.shape[2])
-    ]
-).T
-
-# calculate the critical photon number
-ground_cn = np.argmax(ground_populations >= 1.1, axis=1)
-ground_cn[ground_cn == 0] = ground_populations.shape[1] - 1
-excited_cn = np.argmax(excited_populations >= 2.0, axis=1)
-excited_cn[excited_cn == 0] = excited_populations.shape[1] - 1
+with np.load(sim_filepath) as data:
+    sim_flxs = data["flxs"]
+    sim_photons = data["photons"]
+    branchs = data["branchs"]
+    sim_populations = data["populations_over_flx"]
 ```
 
 ```python
-fig, ax = ze.twotone.mist.MISTFluxPowerDep().analyze(
+fig = ze.twotone.mist.MISTFluxPowerDep().analyze(
     result=(As, pdrs, signals),
     mA_c=mA_c,
     period=period,
     ac_coeff=ac_coeff,
+    with_simulation=True,
+    sim_kwargs=dict(
+        flxs=sim_flxs,
+        photons=sim_photons,
+        populations_over_flx=sim_populations,
+        critical_levels={0: 1.0, 1: 2.0},
+    ),
 )
 
 
-ax.plot(flxs, ground_cn, label="ground", marker=".", color="r")
-ax.plot(flxs, excited_cn, label="excited", marker=".", color="b")
-# ax.set_xlim(0.4, 0.6)
-fig.savefig("../../result/Q12_2D[3]/Q4/image/qubit_mist_over_flux_with_simulation.png")
+if isinstance(fig, plt.Figure):
+    fig.savefig(f"../../result/{qub_name}/image/mist_over_flux.png")
+else:
+    prefix = f"../../result/{qub_name}/"
+    # postfix = "branch/mist_over_flux_with_simulation.png"
+    postfix = "branch_floquet/mist_over_flux_with_simulation.png"
+
+    os.makedirs(os.path.dirname(os.path.join(prefix, "image", postfix)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.join(prefix, "web", postfix)), exist_ok=True)
+
+    fig.write_image(os.path.join(prefix, "image", postfix))
+    fig.write_html(os.path.join(prefix, "web", postfix.replace(".png", ".html")))
+    fig.show()
 ```
 
 ```python

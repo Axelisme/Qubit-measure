@@ -5,8 +5,6 @@ import plotly.graph_objects as go
 from plotly.graph_objs._figure import Figure
 from plotly.subplots import make_subplots
 
-from . import floquet, full_quantum
-
 
 def plot_populations_over_photon(
     branchs: List[int], photons: np.ndarray, branch_populations: Dict[int, List[float]]
@@ -46,6 +44,16 @@ def plot_populations_over_photon(
     return fig
 
 
+def calc_critical_photons(
+    photons: np.ndarray,
+    populations_over_flx: np.ndarray,
+    critical_level: float,
+) -> np.ndarray:
+    critical_idx = np.argmax(populations_over_flx >= critical_level, axis=1)
+    critical_idx[critical_idx == 0] = photons.shape[0] - 1
+    return photons[critical_idx]
+
+
 def plot_cn_over_flx(
     flxs: np.ndarray,
     photons: np.ndarray,
@@ -60,13 +68,9 @@ def plot_cn_over_flx(
         vertical_spacing=0.1,
     )
 
-    # g_populations = populations_over_flx[:, 0, :]
-    # e_populations = populations_over_flx[:, 1, :]
-    for i, (b, critical_level) in enumerate(critical_levels.items()):
+    for i, critical_level in enumerate(critical_levels.values()):
         pop = populations_over_flx[:, i, :]
-        cn = np.argmax(pop >= critical_level, axis=1)
-        cn[cn == 0] = pop.shape[1] - 1
-        cn = photons[cn]
+        cn = calc_critical_photons(photons, pop, critical_level)
 
         fig.add_trace(
             go.Heatmap(
@@ -97,5 +101,67 @@ def plot_cn_over_flx(
     fig.update_xaxes(title_text="Flux", row=2, col=1)
     fig.update_yaxes(title_text="Photon Number", row=1, col=1)
     fig.update_yaxes(title_text="Photon Number", row=2, col=1)
+
+    return fig
+
+
+def plot_cn_with_mist(
+    flxs: np.ndarray,
+    photons: np.ndarray,
+    populations_over_flx: np.ndarray,
+    critical_levels: Dict[int, float],
+    mist_flxs: np.ndarray,
+    mist_photons: np.ndarray,
+    mist_amps: np.ndarray,
+) -> Figure:
+    # plot the critical photon number as a function of flux
+    fig = go.Figure()
+
+    # plot the mist spectrum
+    fig.add_trace(
+        go.Heatmap(
+            z=mist_amps.T,
+            x=mist_flxs,
+            y=mist_photons,
+            colorscale="Viridis",
+            showscale=False,
+        )
+    )
+
+    flxs = np.concatenate([flxs, 1 - flxs[::-1]])
+    populations_over_flx = np.concatenate(
+        [populations_over_flx, populations_over_flx[::-1, ...]], axis=0
+    )
+
+    colors = ["blue", "red", "green", "yellow", "purple", "orange", "brown", "pink"]
+    for b, critical_level in critical_levels.items():
+        b_populations = populations_over_flx[:, b, :]
+
+        b_populations = np.array(
+            [
+                np.interp(np.mod(mist_flxs, 1.0), flxs, b_population)
+                for b_population in b_populations.T
+            ]
+        ).T
+
+        cn = calc_critical_photons(photons, b_populations, critical_level)
+
+        fig.add_trace(
+            go.Scatter(
+                x=mist_flxs,
+                y=cn,
+                mode="markers+lines",
+                marker=dict(color=colors[b], size=6),
+                line=dict(color=colors[b]),
+                name=f"Branch {b}",
+                # showlegend=False,
+            )
+        )
+    fig.update_xaxes(title_text="Flux", range=[mist_flxs.min(), mist_flxs.max()])
+    fig.update_yaxes(
+        title_text="Photon Number",
+        range=[0.0, np.log10(mist_photons.max())],
+        type="log",
+    )
 
     return fig

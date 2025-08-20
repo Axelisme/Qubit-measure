@@ -1,9 +1,10 @@
 from copy import deepcopy
 from re import A
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
 from numpy import ndarray
 
 from zcu_tools.experiment import AbsExperiment, config
@@ -76,26 +77,23 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
 
         return As, pdrs, signals2D
 
-    def analyze(
+    def analyze_only_mist(
         self,
-        result: Optional[MISTFluxPowerDepResultType] = None,
+        As: np.ndarray,
+        pdrs: np.ndarray,
+        signals: np.ndarray,
         *,
         mA_c: Optional[float] = None,
         period: Optional[float] = None,
         ac_coeff: Optional[float] = None,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-
-        As, pdrs, signals = result
-
+        **kwargs,
+    ) -> plt.Figure:
         if mA_c is not None and period is not None:
             xs = mA2flx(1e3 * As, mA_c, period)
         else:
             xs = 1e3 * As
 
-        amp_diff = np.abs(signals - signals[:, 0][:, None])
-        amp_diff = -np.clip(amp_diff, 0.01, 0.2)
+        amp_diff = -np.abs(signals - signals[:, 0][:, None])
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
@@ -130,7 +128,71 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
         ax.set_yscale("log")
         ax.tick_params(axis="both", which="major", labelsize=12)
 
-        return fig, ax
+        return fig
+
+    def analyze_with_simulation(
+        self,
+        As: np.ndarray,
+        pdrs: np.ndarray,
+        signals: np.ndarray,
+        *,
+        mA_c: Optional[float],
+        period: Optional[float],
+        ac_coeff: Optional[float],
+        sim_kwargs: Dict[str, Any],
+        **kwargs,
+    ) -> go.Figure:
+        flxs = mA2flx(1e3 * As, mA_c, period)
+
+        amp_diff = np.abs(signals - signals[:, 0][:, None])
+        photons = ac_coeff * pdrs**2
+
+        from zcu_tools.notebook.branch import plot_cn_with_mist
+
+        fig = plot_cn_with_mist(
+            **sim_kwargs,
+            mist_flxs=flxs,
+            mist_photons=photons,
+            mist_amps=amp_diff,
+        )
+
+        return fig
+
+    def analyze(
+        self,
+        result: Optional[MISTFluxPowerDepResultType] = None,
+        *,
+        mA_c: Optional[float] = None,
+        period: Optional[float] = None,
+        ac_coeff: Optional[float] = None,
+        with_simulation: bool = False,
+        **kwargs,
+    ) -> Union[plt.Figure, go.Figure]:
+        if result is None:
+            result = self.last_result
+
+        As, pdrs, signals = result
+
+        if with_simulation:
+            return self.analyze_with_simulation(
+                As,
+                pdrs,
+                signals,
+                mA_c=mA_c,
+                period=period,
+                ac_coeff=ac_coeff,
+                **kwargs,
+            )
+        else:
+            return self.analyze_only_mist(
+                As,
+                pdrs,
+                signals,
+                mA_c=mA_c,
+                period=period,
+                ac_coeff=ac_coeff,
+                **kwargs,
+            )
 
     def save(
         self,
