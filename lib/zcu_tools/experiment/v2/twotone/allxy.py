@@ -195,7 +195,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
         return sequence, signals
 
     def analyze(
-        self, result: Optional[AllXYResultType] = None, fit_contrast: bool = False
+        self, result: Optional[AllXYResultType] = None, fit_ge: bool = False
     ) -> None:
         if result is None:
             result = self.last_result
@@ -207,53 +207,52 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
 
         # Rotate IQ data so that the contrast lies on the real axis and take only
         # the real part for further analysis.
-        signals = allxy_signal2real(signals)
+        real_signals = allxy_signal2real(signals)
 
         # ------------------------------------------------------------------
         # fitting the signal with error
         # ------------------------------------------------------------------
 
-        g_signal = signals[sequence.index(("I", "I"))]
-        init_contrast = (
-            np.ptp(signals) if g_signal < np.mean(signals) else -np.ptp(signals)
-        )
+        g_signal = real_signals[sequence.index(("I", "I"))]
+        init_center = 0.5 * (np.max(real_signals) + np.min(real_signals))
+        init_contrast = np.ptp(real_signals)
+        if g_signal < init_center:
+            init_contrast = -init_contrast
 
-        if fit_contrast:
+        def calc_sim_signal(seq, center, contrast, ep, ed) -> float:
+            return center + 0.5 * contrast * predict_state_with_error(seq, ep, ed)
+
+        if fit_ge:
             params, _ = curve_fit(
-                lambda idxs, contrast, ep, ed: [
-                    g_signal
-                    + 0.5
-                    * contrast
-                    * (1 - predict_state_with_error(sequence[int(i)], ep, ed))
-                    for i in idxs
-                ],
+                lambda _, *args: [calc_sim_signal(seq, *args) for seq in sequence],
                 np.arange(len(sequence)),
-                signals,
-                p0=(init_contrast, 0.0, 0.0),
+                real_signals,
+                p0=(init_center, init_contrast, 0.0, 0.0),
+                bounds=(
+                    (np.min(real_signals), -np.abs(init_contrast), -0.2, -0.2),
+                    (np.max(real_signals), np.abs(init_contrast), 0.2, 0.2),
+                ),
             )
 
-            contrast, ep, ed = params
+            center, contrast, ep, ed = params
         else:
+            center = init_center
             contrast = init_contrast
 
             params, _ = curve_fit(
-                lambda idxs, ep, ed: [
-                    g_signal
-                    + 0.5
-                    * contrast
-                    * (1 - predict_state_with_error(sequence[int(i)], ep, ed))
-                    for i in idxs
+                lambda _, *args: [
+                    calc_sim_signal(seq, center, contrast, *args) for seq in sequence
                 ],
                 np.arange(len(sequence)),
-                signals,
+                real_signals,
                 p0=(0.0, 0.0),
+                bounds=((-0.2, -0.2), (0.2, 0.2)),
             )
 
             ep, ed = params
 
         predict_signals = [
-            g_signal + 0.5 * contrast * (1 - predict_state_with_error(seq, ep, ed))
-            for seq in sequence
+            calc_sim_signal(seq, center, contrast, ep, ed) for seq in sequence
         ]
 
         # ------------------------------------------------------------------
@@ -278,7 +277,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
         # ------------------------------------------------------------------
 
         _, ax = plt.subplots(figsize=config.figsize)
-        ax.plot(signals, marker="o", linestyle="None", label="Measured Signals")
+        ax.plot(real_signals, marker="o", linestyle="None", label="Measured Signals")
         ax.plot(
             predict_signals,
             marker="x",
@@ -286,6 +285,9 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             color="red",
             label="Predicted Signals",
         )
+        ax.axhline(y=center, color="green", linestyle="--", alpha=0.2)
+        ax.axhline(y=center + 0.5 * contrast, color="blue", linestyle="--", alpha=0.2)
+        ax.axhline(y=center - 0.5 * contrast, color="blue", linestyle="--", alpha=0.2)
 
         ax.set_xlabel("Gate")
         ax.set_xticks(np.arange(len(sequence)))

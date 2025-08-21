@@ -72,20 +72,22 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
     ) -> LenRabiResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
-        qub_pulse = cfg["qub_pulse"]
-
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         len_sweep = cfg["sweep"]["length"]
         del cfg["sweep"]
 
         lens = sweep2array(len_sweep)  # predicted
 
-        qub_pulse["length"] = lens[0]  # initial value
-
         def updateCfg(cfg: Dict[str, Any], _: int, length: Any) -> None:
-            cfg["qub_pulse"]["length"] = length
-            if cfg["qub_pulse"]["style"] == "gauss":
-                cfg["qub_pulse"]["sigma"] = length / 5
+            qub_pulse = cfg["qub_pulse"]
+
+            qub_pulse["length"] = length
+            if qub_pulse["style"] == "gauss":
+                # TODO: better way to derive sigma?
+                qub_pulse["sigma"] = length / 5.0
+
+        # initialize pulse length
+        updateCfg(cfg, 0, lens[0])
 
         def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
             return (
