@@ -19,6 +19,8 @@ class ModuleLibrary:
             waveform = dict(style=wav_cfg["style"], length=wav_cfg["length"])
             if waveform["style"] == "flat_top":
                 waveform["raise_pulse"] = wav_cfg["raise_pulse"]
+            elif waveform["style"] == "gauss":
+                waveform["sigma"] = wav_cfg["sigma"]
 
         cls.waveforms[name] = waveform
 

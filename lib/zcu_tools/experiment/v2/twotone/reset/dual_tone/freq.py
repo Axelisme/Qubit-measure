@@ -122,6 +122,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
         smooth: float = 1.0,
         xname: Optional[str] = None,
         yname: Optional[str] = None,
+        corner_as_background: bool = False,
     ) -> Tuple[float, float]:
         if result is None:
             result = self.last_result
@@ -133,7 +134,10 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
         signals_smooth = gaussian_filter(signals, smooth)
 
         # Find peak in amplitude
-        amps = np.abs(minus_background(signals_smooth))
+        if corner_as_background:
+            amps = np.abs(signals_smooth - signals_smooth[0, 0])
+        else:
+            amps = np.abs(minus_background(signals_smooth))
 
         freq1_opt = fpts1[np.argmax(np.max(amps, axis=1))]
         freq2_opt = fpts2[np.argmax(np.max(amps, axis=0))]

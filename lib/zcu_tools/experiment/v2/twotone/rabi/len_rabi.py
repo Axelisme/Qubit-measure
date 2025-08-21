@@ -84,6 +84,8 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
 
         def updateCfg(cfg: Dict[str, Any], _: int, length: Any) -> None:
             cfg["qub_pulse"]["length"] = length
+            if cfg["qub_pulse"]["style"] == "gauss":
+                cfg["qub_pulse"]["sigma"] = length / 5
 
         def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
             return (
@@ -102,16 +104,11 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
             progress=progress,
         )
 
-        prog = TwoToneProgram(soccfg, cfg)
-        real_lens = prog.get_pulse_param("qubit_pulse", "length", as_array=True)
-        assert isinstance(real_lens, np.ndarray)
-        real_lens += lens[0] - real_lens[0]  # correct absolute offset
-
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (real_lens, signals)
+        self.last_result = (lens, signals)
 
-        return real_lens, signals
+        return lens, signals
 
     def run(
         self,

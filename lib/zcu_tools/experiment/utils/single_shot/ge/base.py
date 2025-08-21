@@ -24,6 +24,14 @@ def scatter_ge_plot(
     Qg, Qe = Qge
     xg, yg = np.median(Ig), np.median(Qg)
     xe, ye = np.median(Ie), np.median(Qe)
+
+    rand_gen = np.random.default_rng(42)
+    downsample_idx = rand_gen.choice(
+        np.arange(len(Ig)), size=min(1000, len(Ig)), replace=False
+    )
+    Ig, Qg = Ig[downsample_idx], Qg[downsample_idx]
+    Ie, Qe = Ie[downsample_idx], Qe[downsample_idx]
+
     ax.scatter(Ig, Qg, label="g", color="b", marker=".", edgecolor="None", alpha=0.2)
     ax.scatter(Ie, Qe, label="e", color="r", marker=".", edgecolor="None", alpha=0.2)
     plt_params = dict(color="k", linestyle=":", marker="o", markersize=5)

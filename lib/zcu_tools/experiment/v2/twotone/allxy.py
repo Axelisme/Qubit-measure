@@ -194,7 +194,9 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
 
         return sequence, signals
 
-    def analyze(self, result: Optional[AllXYResultType] = None) -> None:
+    def analyze(
+        self, result: Optional[AllXYResultType] = None, fit_contrast: bool = False
+    ) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, (
@@ -216,18 +218,41 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             np.ptp(signals) if g_signal < np.mean(signals) else -np.ptp(signals)
         )
 
-        params, _ = curve_fit(
-            lambda i, contrast, ep, ed: g_signal
-            + 0.5 * contrast * (1 + predict_state_with_error(sequence[i], ep, ed)),
-            np.arange(len(sequence)),
-            signals,
-            p0=(init_contrast, 0.0, 0.0),
-        )
+        if fit_contrast:
+            params, _ = curve_fit(
+                lambda idxs, contrast, ep, ed: [
+                    g_signal
+                    + 0.5
+                    * contrast
+                    * (1 - predict_state_with_error(sequence[int(i)], ep, ed))
+                    for i in idxs
+                ],
+                np.arange(len(sequence)),
+                signals,
+                p0=(init_contrast, 0.0, 0.0),
+            )
 
-        contrast, ep, ed = params
+            contrast, ep, ed = params
+        else:
+            contrast = init_contrast
+
+            params, _ = curve_fit(
+                lambda idxs, ep, ed: [
+                    g_signal
+                    + 0.5
+                    * contrast
+                    * (1 - predict_state_with_error(sequence[int(i)], ep, ed))
+                    for i in idxs
+                ],
+                np.arange(len(sequence)),
+                signals,
+                p0=(0.0, 0.0),
+            )
+
+            ep, ed = params
 
         predict_signals = [
-            g_signal + 0.5 * contrast * (1 + predict_state_with_error(seq, ep, ed))
+            g_signal + 0.5 * contrast * (1 - predict_state_with_error(seq, ep, ed))
             for seq in sequence
         ]
 
