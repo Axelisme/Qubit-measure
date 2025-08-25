@@ -35,6 +35,7 @@ import pandas as pd
 import zcu_tools.notebook.analysis.design as zd
 import zcu_tools.notebook.analysis.plot as zp
 import zcu_tools.simulate.equation as zeq
+from zcu_tools.notebook.persistance import dump_result
 ```
 
 ```python
@@ -116,6 +117,15 @@ fig.show()
 save_name = f"t1vsChi_rf{r_f:.2f}"
 fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
+
+dump_result(
+    f"../../result/{qub_name}/params.json",
+    name=qub_name,
+    params=best_params,
+    cflx=0.5,
+    period=1.0,
+    allows=dict(),
+)
 ```
 
 ```python
@@ -147,7 +157,7 @@ fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 ```
 
 ```python
-show_idxs = [(i, j) for i in range(2) for j in range(3) if j > i]
+show_idxs = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3)]
 
 fig, _ = zp.plot_matrix_elements(best_params, flxs, show_idxs)
 fig.show()
@@ -242,20 +252,21 @@ project_name = "FluxoniumX400"
 ```
 
 ```python
-EC = 1.1
+EC = 1.1 * 1.1 / 0.9
 # EC = best_params[1]
 
 Cap = zeq.EC2C(EC)
-Lj = zeq.Cfreq2L(Cap, 6.3652)
-# Lj = zeq.Cfreq2L(Cap, c_freq)
+# Lj = zeq.Cfreq2L(Cap, 6.3652)
+Lj = zeq.Cfreq2L(Cap, c_freq)
 
+print(f"EC: {EC:.4g} GHz")
 print(f"Capacitance: {Cap:.4g} fF")
 print(f"Inductance: {Lj:.5g} nH")
 ```
 
 ```python
 # result_path = f"../../result/{qub_name}/{project_name}/X325_Y51,5.csv"
-result_path = f"../../result/{qub_name}/{project_name}/X325_Y29.csv"
+result_path = f"../../result/{qub_name}/{project_name}/X325_Y29_2.csv"
 fig, ax, c_Lj, c_freq, width = zd.fit_hfss_anticross(result_path)
 
 hfss_C = zeq.Lfreq2C(c_Lj, c_freq)

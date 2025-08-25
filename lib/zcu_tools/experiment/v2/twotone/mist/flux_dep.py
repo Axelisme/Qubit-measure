@@ -147,7 +147,7 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
         amp_diff = np.abs(signals - signals[:, 0][:, None])
         photons = ac_coeff * pdrs**2
 
-        from zcu_tools.notebook.branch import plot_cn_with_mist
+        from zcu_tools.notebook.analysis.branch import plot_cn_with_mist
 
         fig = plot_cn_with_mist(
             **sim_kwargs,

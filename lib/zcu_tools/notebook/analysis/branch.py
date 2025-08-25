@@ -46,11 +46,14 @@ def plot_populations_over_photon(
 
 def calc_critical_photons(
     photons: np.ndarray,
-    populations_over_flx: np.ndarray,
+    populations: np.ndarray,
     critical_level: float,
 ) -> np.ndarray:
-    critical_idx = np.argmax(populations_over_flx >= critical_level, axis=1)
-    critical_idx[critical_idx == 0] = photons.shape[0] - 1
+    critical_idx = np.argmax(populations >= critical_level, axis=-1)
+    if len(critical_idx.shape) > 0:
+        critical_idx[critical_idx == 0] = photons.shape[0] - 1
+    else:
+        critical_idx = photons.shape[0] - 1
     return photons[critical_idx]
 
 
