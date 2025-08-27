@@ -8,7 +8,7 @@ dependencies = ["numpy", "tqdm", "matplotlib", "typing-extensions"]
 
 [project.optional-dependencies]
 server = ["qick", "dill"]
-client = ["qick", "labber", "numpy<=1.19.5", "pyyaml", "dill"]
+client = ["qick", "numpy<=1.19.5", "pyyaml", "dill", "pyvisa", "jupytext"]
 fit = [
   "h5py",
   "ipykernel",
@@ -25,6 +25,7 @@ fit = [
   "numba",
   "requests",
   "flask",
+  "jupytext",
 ]
 
 [build-system]
@@ -41,7 +42,6 @@ ignore = ["E402", "F401"]
 [tool.pyright]
 include = ["lib"]
 typeCheckingMode = "off"
-reportUnusedImport = "none"
 reportExplicitAny = "none"
 reportMissingTypeStubs = "none"
 
