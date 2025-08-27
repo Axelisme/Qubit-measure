@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from ast import mod
 from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from zcu_tools.experiment import AbsExperiment, config
@@ -12,7 +10,6 @@ from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import ModularProgramV2, Pulse, make_readout, make_reset
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
 from ..template import sweep1D_soft_template

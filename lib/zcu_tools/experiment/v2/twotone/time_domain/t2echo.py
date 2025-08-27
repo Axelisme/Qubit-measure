@@ -6,7 +6,6 @@ from typing import Any, Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
@@ -18,7 +17,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe, fit_dual_decay
+from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
 from ...template import sweep_hard_template
@@ -116,6 +115,7 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
         *,
         plot: bool = True,
         max_contrast: bool = True,
+        fit_fringe: bool = True,
     ) -> Tuple[float, float, float, float]:
         if result is None:
             result = self.last_result
@@ -128,16 +128,27 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
         else:
             real_signals = np.abs(signals)
 
-        t2e, t2eerr, detune, detune_err, y_fit, _ = fit_decay_fringe(xs, real_signals)
+        if fit_fringe:
+            t2e, t2eerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
+                xs, real_signals
+            )
+        else:
+            t2e, t2eerr, y_fit, _ = fit_decay(xs, real_signals)
+            detune = 0.0
+            detune_err = 0.0
 
         if plot:
-            t2e_str = f"{t2e:.2f}us ± {t2eerr:.2f}us"
-            detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
-
             plt.figure(figsize=config.figsize)
             plt.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
             plt.plot(xs, y_fit, label="fit")
-            plt.title(f"T2 fringe = {t2e_str}, detune = {detune_str}", fontsize=15)
+
+            t2e_str = f"{t2e:.2f}us ± {t2eerr:.2f}us"
+            if fit_fringe:
+                detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
+                plt.title(f"T2 fringe = {t2e_str}, detune = {detune_str}", fontsize=15)
+            else:
+                plt.title(f"T2 decay = {t2e_str}", fontsize=15)
+
             plt.xlabel("Time (us)")
             plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
             plt.legend()

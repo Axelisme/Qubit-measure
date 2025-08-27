@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, Literal, Optional, TypeVar, Union
 import yaml
 from typing_extensions import ParamSpec
 
+from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.utils import deepupdate, numpy2number
 
 
@@ -93,6 +94,11 @@ class ModuleLibrary:
 
         exp_cfg = deepcopy(exp_cfg)
         deepupdate(exp_cfg, kwargs, behavior="force")
+
+        # derive device configuration from global device manager
+        dev_cfg = GlobalDeviceManager.get_all_info()
+        deepupdate(dev_cfg, exp_cfg.get("dev", {}), behavior="force")
+        exp_cfg["dev"] = dev_cfg
 
         for name, sub_cfg in exp_cfg.items():
             if is_module_cfg(name, sub_cfg):

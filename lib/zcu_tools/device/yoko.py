@@ -1,30 +1,26 @@
-import sys
 import time
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional
+
+if TYPE_CHECKING:
+    import pyvisa as visa
 
 import numpy as np
-import pyvisa as visa
 from tqdm.auto import tqdm
+
+from .base import BaseDevice
 
 DEFAULT_RAMPSTEP = 1e-6  # increment step when setting voltage/current
 DEFAULT_RAMPINTERVAL = 0.01  # dwell time for each voltage step # Default MATLAB is 0.01, CANNOT be lower than 0.001 otherwise fridge heats up
 
 
-class YOKOGS200:
+class YOKOGS200(BaseDevice):
     # Initializes session for device.
     # VISAaddress: address of device, rm: VISA resource manager
     def __init__(self, VISAaddress: str, rm: visa.ResourceManager) -> None:
-        self.VISAaddress = VISAaddress
+        super().__init__(VISAaddress, rm)
+
         self._rampstep = DEFAULT_RAMPSTEP
         self._rampinterval = DEFAULT_RAMPINTERVAL
-
-        try:
-            self.session = rm.open_resource(VISAaddress)
-        except visa.Error:
-            sys.stderr.write("Couldn't connect to '%s', exiting now..." % VISAaddress)
-            sys.exit()
-
-        self.mode = self.get_mode()
 
     # ==========================================================================#
 
@@ -122,13 +118,27 @@ class YOKOGS200:
 
     # Set to either current or voltage mode.
     def set_mode(
-        self, mode: Literal["voltage", "current"], rampstep: Optional[float] = None
+        self,
+        mode: Literal["voltage", "current"],
+        force: bool = False,
+        rampstep: Optional[float] = None,
     ) -> None:
-        if not (mode == "voltage" or mode == "current"):
-            sys.stderr.write("Unknown output mode %s." % mode)
-            return
+        cur_mode = self.get_mode()
+
+        if cur_mode != mode:
+            if cur_mode == "voltage":
+                value = self.get_voltage()
+            else:
+                value = self.get_current()
+            if value != 0.0 and not force:
+                raise RuntimeError(
+                    "Try to change mode while value is not zero. Please set value to zero before changing mode"
+                    "Or set force=True to override, make sure you know what you are doing"
+                )
+
         self.session.write(":SOURce:FUNCtion %s" % mode)
 
+        # update rampstep
         if rampstep is not None:
             self._rampstep = rampstep
 
@@ -171,3 +181,61 @@ class YOKOGS200:
             return "current"
 
     # ==========================================================================#
+
+    def setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
+        """
+        Setup the device with the given configuration.
+        """
+
+        cur_mode = self.get_mode()
+
+        if cfg["mode"] != cur_mode:
+            raise RuntimeError(
+                f"Current mode {cur_mode} in device {self.VISAaddress}, but cfg requires {cfg['mode']}"
+                "YOKOGS200 does not support implicit setup mode to prevent sudden current/voltage change"
+                "Please change the device mode manually before calling setup"
+                "Remember to turn value to zero before changing mode"
+            )
+
+        self.output_on()
+
+        CURRENT_LIMIT = 20e-3
+        VOLTAGE_LIMIT = 20
+
+        value = cfg["value"]
+        if cur_mode == "current":
+            # protect large current
+            if abs(value) > CURRENT_LIMIT:
+                if cfg.get("enable_large_value", False):
+                    raise RuntimeError(
+                        f"Try to set current to over {CURRENT_LIMIT}A, are you sure you want to do this?"
+                        "If you are sure, set enable_large_value=True to override"
+                    )
+
+            self.set_current(value, progress=progress)
+        elif cur_mode == "voltage":
+            # protect large voltage
+            if abs(value) > VOLTAGE_LIMIT:
+                if cfg.get("enable_large_value", False):
+                    raise RuntimeError(
+                        f"Try to set voltage to over {VOLTAGE_LIMIT}V, are you sure you want to do this?"
+                        "If you are sure, set enable_large_value=True to override"
+                    )
+
+            self.set_voltage(value, progress=progress)
+        else:
+            raise RuntimeError(f"Unknown mode {cur_mode} in device {self.VISAaddress}")
+
+    def get_info(self) -> Dict[str, Any]:
+        mode = self.get_mode()
+        if mode == "voltage":
+            value = self.get_voltage()
+        else:
+            value = self.get_current()
+
+        return {
+            "type": self.__class__.__name__,
+            "address": self.VISAaddress,
+            "mode": mode,
+            "value": value,
+        }

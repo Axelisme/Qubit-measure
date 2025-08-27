@@ -6,12 +6,11 @@ from typing import Any, Dict, Literal, Optional, Tuple
 
 import numpy as np
 
+from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
 from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
-
-from ...flux import set_flux
 
 # (signals)
 SingleShotResultType = np.ndarray
@@ -58,7 +57,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
         # Set flux device
-        set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"])
+        GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
         # Create program and acquire data
         prog = TwoToneProgram(soccfg, deepcopy(cfg))

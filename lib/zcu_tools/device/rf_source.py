@@ -1,20 +1,10 @@
-import sys
-from typing import Literal
+from typing import Any, Dict, Literal
 
-import pyvisa as visa
+from .base import BaseDevice
 
 
 # Rohde&Schwarz RF Source
-class RFSource:
-    def __init__(self, VISAaddress: str, rm: visa.ResourceManager) -> None:
-        self.VISAaddress = VISAaddress
-
-        try:
-            self.session = rm.open_resource(VISAaddress)
-        except visa.Error:
-            sys.stderr.write("Couldn't connect to '%s', exiting now..." % VISAaddress)
-            sys.exit()
-
+class RFSource(BaseDevice):
     # ==========================================================================#
 
     # Turn on output
@@ -60,3 +50,19 @@ class RFSource:
         self.session.write("SOUR:POW:ALC?")
         result = self.session.read()
         return result.rstrip("\n")
+
+    def setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
+        self.output_on()
+
+        self.set_frequency(cfg["freq"])
+        self.set_power(cfg["power"])
+        self.set_alc(cfg["alc"])
+
+    def get_info(self) -> Dict[str, Any]:
+        return {
+            "type": self.__class__.__name__,
+            "address": self.VISAaddress,
+            "freq": self.get_frequency(),
+            "power": self.get_power(),
+            "alc": self.get_alc(),
+        }

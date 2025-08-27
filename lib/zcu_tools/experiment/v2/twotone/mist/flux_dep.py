@@ -31,19 +31,24 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
     ) -> MISTFluxPowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        flux_cfg = cfg["dev"]["flux_dev"]
+
         pdr_sweep = cfg["sweep"]["gain"]
         flx_sweep = cfg["sweep"]["flux"]
 
         del cfg["sweep"]["flux"]  # use soft loop
         cfg["qub_pulse"]["gain"] = sweep2param("gain", pdr_sweep)
 
-        As = sweep2array(flx_sweep, allow_array=True)  # predicted currents
+        dev_values = sweep2array(flx_sweep, allow_array=True)  # predicted currents
         pdrs = sweep2array(pdr_sweep)  # predicted gains
 
-        cfg["dev"]["flux"] = As[0]  # set initial flux
+        flux_cfg["value"] = dev_values[0]
 
-        def updateCfg(cfg, _, mA):
-            cfg["dev"]["flux"] = mA * 1e-3  # convert to A
+        def updateCfg(cfg, _, value):
+            if flux_cfg["mode"] == "current":
+                value *= 1e-3  # convert mA to A
+
+            cfg["dev"]["flux_dev"]["value"] = value
 
         def signal2real(signal: ndarray) -> ndarray:
             return np.abs(signal - signal[:, 0][:, None])
@@ -58,9 +63,12 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
             cfg,
             measure_fn,
             LivePlotter2DwithLine(
-                "Flux (mA)", "Drive power (a.u.)", line_axis=1, num_lines=2
+                f"Flux ({'mA' if flux_cfg['mode'] == 'current' else 'V'})",
+                "Drive power (a.u.)",
+                line_axis=1,
+                num_lines=2,
             ),
-            xs=1e3 * As,
+            xs=dev_values * (1e3 if flux_cfg["mode"] == "current" else 1),  # mA / V
             ys=pdrs,
             updateCfg=updateCfg,
             signal2real=signal2real,
@@ -73,13 +81,13 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result = (As, pdrs, signals2D)
+        self.last_result = (dev_values, pdrs, signals2D)
 
-        return As, pdrs, signals2D
+        return dev_values, pdrs, signals2D
 
     def analyze_only_mist(
         self,
-        As: np.ndarray,
+        dev_values: np.ndarray,
         pdrs: np.ndarray,
         signals: np.ndarray,
         *,
@@ -89,9 +97,9 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
         **kwargs,
     ) -> plt.Figure:
         if mA_c is not None and period is not None:
-            xs = mA2flx(1e3 * As, mA_c, period)
+            xs = mA2flx(dev_values, mA_c, period)
         else:
-            xs = 1e3 * As
+            xs = dev_values
 
         amp_diff = -np.abs(signals - signals[:, 0][:, None])
 
@@ -132,7 +140,7 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
 
     def analyze_with_simulation(
         self,
-        As: np.ndarray,
+        dev_values: np.ndarray,
         pdrs: np.ndarray,
         signals: np.ndarray,
         *,
@@ -142,7 +150,7 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
         sim_kwargs: Dict[str, Any],
         **kwargs,
     ) -> go.Figure:
-        flxs = mA2flx(1e3 * As, mA_c, period)
+        flxs = mA2flx(dev_values, mA_c, period)
 
         amp_diff = np.abs(signals - signals[:, 0][:, None])
         photons = ac_coeff * pdrs**2
@@ -171,11 +179,11 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
         if result is None:
             result = self.last_result
 
-        As, pdrs, signals = result
+        values, pdrs, signals = result
 
         if with_simulation:
             return self.analyze_with_simulation(
-                As,
+                values,
                 pdrs,
                 signals,
                 mA_c=mA_c,
@@ -185,7 +193,7 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
             )
         else:
             return self.analyze_only_mist(
-                As,
+                values,
                 pdrs,
                 signals,
                 mA_c=mA_c,
@@ -206,12 +214,12 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        As, pdrs, signals = result
+        values, pdrs, signals = result
 
         save_data(
             filepath=filepath,
             x_info={"name": "Probe gain (a.u.)", "unit": "a.u.", "values": pdrs},
-            y_info={"name": "Current", "unit": "A", "values": As},
+            y_info={"name": "Flux device value", "unit": "a.u.", "values": values},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,

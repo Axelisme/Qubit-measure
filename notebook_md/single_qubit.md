@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.2
+    version: 3.8.20
 ---
 
 # Import Module
@@ -62,8 +62,8 @@ from zcu_tools.remote import make_proxy
 from zcu_tools.program.base import MyProgram  # noqa: F401
 from zcu_tools.notebook.utils import get_ip_address  # noqa: F401
 
-# zc.config.LOCAL_IP = get_ip_address("Tailscale")
-zc.config.LOCAL_IP = "192.168.10.232"
+zc.config.LOCAL_IP = get_ip_address("eth0")
+# zc.config.LOCAL_IP = "192.168.10.232"
 zc.config.LOCAL_PORT = 8887
 
 soc, soccfg, rm_prog = make_proxy("192.168.10.7", 8887, proxy_prog=True)
@@ -92,29 +92,31 @@ lo_flux_ch = 2
 ro_ch = 0
 ```
 
+# Initialize devices
+
 ```python
-# DefaultCfg.dump("Q12_2D[2]-Q4_default_cfg_-0.42mA_0613.yaml")
-# DefaultCfg.load("Q12_2D[2]-Q4_default_cfg_-0.42mA_0612.yaml")
+import pyvisa
+from zcu_tools.device import GlobalDeviceManager
+
+resource_manager = pyvisa.ResourceManager()
 ```
 
-# Initialize the flux
+## YOKOGS200
 
 ```python
-from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.yoko import YOKOGS200
 
-import pyvisa
 
-flux_dev = YOKOGS200(
-    VISAaddress="USB0::0x0B21::0x0039::91WB18859::INSTR", rm=pyvisa.ResourceManager()
+flux_yoko = YOKOGS200(
+    VISAaddress="USB0::0x0B21::0x0039::91WB18859::INSTR", rm=resource_manager
 )
-GlobalDeviceManager.register_device("flux_yoko", flux_dev)
+GlobalDeviceManager.register_device("flux_yoko", flux_yoko)
 
 # flux_dev.set_mode('current', rampstep=1e-6)
 # cur_A = flux_dev.get_current()
 # cur_A
-flux_dev.set_mode("voltage", rampstep=1e-3)
-cur_V = flux_dev.get_voltage()
+flux_yoko.set_mode("voltage", rampstep=1e-3)
+cur_V = flux_yoko.get_voltage()
 cur_V
 ```
 
@@ -122,7 +124,18 @@ cur_V
 # # cur_A = 0.0e-3
 # flux_dev.set_current(current=cur_A)
 # cur_V = 0.0
-flux_dev.set_voltage(voltage=cur_V)
+flux_yoko.set_voltage(voltage=cur_V)
+```
+
+## RF Source
+
+```python
+from zcu_tools.device.rf_source import RFSource
+
+rf_source = RFSource(
+    VISAaddress="USB0::0x0B21::0x0039::91WB18859::INSTR", rm=resource_manager
+)
+GlobalDeviceManager.register_device("rf_source", rf_source)
 ```
 
 # Lookback
@@ -136,11 +149,11 @@ exp_cfg = {
     "readout": {
         "type": "base",
         "pulse_cfg": {
-            "ch": res_ch,
-            "nqz": 2,
             "style": "flat_top",
             "length": 0.65,  # us
             "raise_pulse": {"style": "cosine", "length": 0.1},
+            "ch": res_ch,
+            "nqz": 2,
             "gain": 1.0,
             "freq": 7448.9,
             # "freq": r_f,
@@ -150,11 +163,6 @@ exp_cfg = {
             "ro_length": 1.5,  # us
             "trig_offset": timeFly,  # us
         },
-    },
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
     },
     "relax_delay": 0.0,  # us
 }
@@ -218,11 +226,6 @@ exp_cfg = {
             "trig_offset": timeFly + 0.05,  # us
         },
     },
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "sweep": make_sweep(7440, 7460, 101),
     # "sweep": make_sweep(r_f-4, r_f+4, 101),
     "relax_delay": 0.0,  # us
@@ -271,11 +274,6 @@ exp_cfg = {
             "trig_offset": timeFly + 0.05,  # us
         },
     },
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "sweep": {
         "gain": make_sweep(0.1, 1.0, 101),
         "freq": make_sweep(r_f - 10, r_f + 10, 101),
@@ -302,7 +300,7 @@ res_pdr_exp.save(
 
 ```python
 cur_A = -6.0e-3
-1e3 * flux_dev.set_current(cur_A)
+1e3 * flux_yoko.set_current(cur_A)
 ```
 
 ```python
@@ -321,7 +319,12 @@ exp_cfg = {
             "trig_offset": timeFly + 0.05,  # us
         },
     },
-    "dev": {"flux_dev": "yoko"},
+    "dev": {
+        "flux_dev": {
+            "name": "flux_yoko",
+            "mode": "current",
+        }
+    },
     "sweep": {
         "flux": make_sweep(6.0e-3, 8e-3, 201),
         "freq": make_sweep(r_f - 5, r_f + 5, 61),
@@ -353,7 +356,7 @@ mA_c, mA_e
 
 ```python
 cur_A = 8.0e-3
-1e3 * flux_dev.set_current(cur_A)
+1e3 * flux_yoko.set_current(cur_A)
 ```
 
 ## Set readout pulse
@@ -405,7 +408,7 @@ ModuleLibrary.register_waveform(
 # cur_A = 0.0e-3
 # 1e3 * flux_dev.set_current(cur_A)
 # cur_V = -12.61
-flux_dev.set_voltage(cur_V)
+flux_yoko.set_voltage(cur_V)
 ```
 
 ```python
@@ -430,11 +433,6 @@ exp_cfg = {
     # "qub_pulse": "pi_amp",
     "readout": "readout_rf",
     # "readout": "readout_dpm",
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     # "sweep": make_sweep(q_f - 3, q_f + 3, step=0.05),
     "sweep": make_sweep(100, 200, step=1.0),
     "relax_delay": 0.0,  # us
@@ -505,10 +503,6 @@ exp_cfg = {
         },
     },
     "readout": "readout_rf",
-    "dev": {
-        "flux_dev": "yoko",
-        "flux": cur_A,  # A
-    },
     "sweep": make_sweep(reset_f - 150, reset_f + 150, 101),
     "relax_delay": 0.0,  # us
 }
@@ -554,10 +548,6 @@ exp_cfg = {
     },
     "qub_pulse": "pi_amp",
     "readout": "readout_rf",
-    "dev": {
-        "flux_dev": "yoko",
-        "flux": cur_A,  # A
-    },
     "sweep": make_sweep(0.03, 5.0, 51),
     "relax_delay": 0.0,  # us
 }
@@ -596,10 +586,6 @@ exp_cfg = {
     "init_pulse": "pi_amp",
     "tested_reset": "reset_10",
     "readout": "readout_dpm",
-    "dev": {
-        "flux_dev": "yoko",
-        "flux": cur_A,  # A
-    },
     "sweep": make_sweep(0.0, 0.6, 51),
     "relax_delay": 0.0,  # us
 }
@@ -665,11 +651,6 @@ exp_cfg = {
         },
     },
     "readout": "readout_rf",
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "sweep": {
         "freq1": make_sweep(reset_f1 - 10, reset_f1 + 10, 51),
         "freq2": make_sweep(reset_f2 - 10, reset_f2 + 10, 51),
@@ -742,11 +723,6 @@ exp_cfg = {
     "init_pulse": "pi_amp",
     "tested_reset": "reset_120",
     "readout": "readout_rf",
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "sweep": {
         "gain1": make_sweep(0.0, 1.0, 51),
         "gain2": make_sweep(0.0, 1.0, 51),
@@ -793,11 +769,6 @@ exp_cfg = {
     "init_pulse": "pi_amp",
     "tested_reset": "reset_120",
     "readout": "readout_rf",
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "sweep": make_sweep(0.05, 50.0, 51),
     "relax_delay": 0.0,  # us
 }
@@ -834,11 +805,6 @@ exp_cfg = {
     "init_pulse": "pi_amp",
     "tested_reset": "reset_120",
     "readout": "readout_rf",
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 0.0,  # us
 }
@@ -873,10 +839,6 @@ exp_cfg = {
     "qub_pulse": "pi_amp",
     # "readout": "readout_rf",
     "readout": "readout_dpm",
-    "dev": {
-        "flux_dev": "yoko",
-        "flux": cur_A,  # A
-    },
     "sweep": {
         "gain": make_sweep(0.05, 1.0, 30),
         # "freq": make_sweep(1700, 2000, 30),
@@ -901,7 +863,7 @@ qub_pdr_exp.save(
 
 ```python
 cur_A = 8.0e-3
-1e3 * flux_dev.set_current(cur_A)
+1e3 * flux_yoko.set_current(cur_A)
 ```
 
 ```python
@@ -916,8 +878,10 @@ exp_cfg = {
     },
     "readout": "readout_rf",
     "dev": {
-        "flux_dev": "yoko",
-        "flux": cur_A,  # A
+        "flux_dev": {
+            "name": "flux_yoko",
+            "mode": "current",
+        },
     },
     "sweep": {
         "flux": make_sweep(8.0e-3, -4.0e-3, 251),
@@ -950,7 +914,7 @@ mA_c, mA_e
 
 ```python
 cur_A = 0.0e-3
-1e3 * flux_dev.set_current(cur_A)
+1e3 * flux_yoko.set_current(cur_A)
 ```
 
 ## Dispersive Shift
@@ -961,10 +925,6 @@ exp_cfg = {
     "qub_pulse": "pi_amp",
     # "readout": "readout_rf",
     "readout": "readout_dpm",
-    "dev": {
-        "flux_dev": "yoko",
-        "flux": cur_A,  # A
-    },
     "sweep": make_sweep(r_f - 5, r_f + 5, 101),
     "relax_delay": 0.0,  # us
     # "relax_delay": 2 * t1, # us
@@ -1007,10 +967,6 @@ exp_cfg = {
     },
     # "readout": "readout_rf",
     "readout": "readout_dpm",
-    "dev": {
-        "flux_dev": "yoko",
-        "flux": cur_A,  # A
-    },
     "sweep": {
         "gain": make_sweep(0.01, 0.2, 201),
         "freq": make_sweep(q_f - 5, q_f + 100, step=0.5),
@@ -1056,10 +1012,6 @@ exp_cfg = {
     },
     # "readout": "readout_rf",
     "readout": "readout_dpm",
-    "dev": {
-        "flux_dev": "yoko",
-        "flux": cur_A,  # A
-    },
     "relax_delay": 0.0,  # us
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
@@ -1097,11 +1049,6 @@ exp_cfg = {
         "mixer_freq": q_f,
     },
     "readout": "readout_rf",
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "relax_delay": 30.0,  # us
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.1, 5.0, 101),
@@ -1165,11 +1112,6 @@ exp_cfg = {
     },
     "readout": "readout_rf",
     # "readout": "readout_dpm",
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "relax_delay": 0.0,  # us
     # "relax_delay": 5 * t1,
     "sweep": make_sweep(0.0, 1.0, 51),
@@ -1231,11 +1173,6 @@ exp_cfg = {
         "readout_rf",
         # override_cfg={"gain": pdr_max},
     ),
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "relax_delay": 0.0,  # us
     # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(r_f - 3, r_f + 3, 51),
@@ -1272,11 +1209,6 @@ exp_cfg = {
             }
         },
     ),
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "relax_delay": 0.0,  # us
     # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(0.01, 1.0, 51),
@@ -1314,11 +1246,6 @@ exp_cfg = {
             }
         },
     ),
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "relax_delay": 0.0,  # us
     # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(0.1, 15.0, 31),
@@ -1380,11 +1307,6 @@ exp_cfg = {
     "reset": "reset_120",
     "pi2_pulse": "pi2_amp",
     "readout": "readout_rf",
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "relax_delay": 50.0,  # us
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0, 10.0, 101),  # us
@@ -1424,11 +1346,6 @@ exp_cfg = {
     "reset": "reset_120",
     "pi_pulse": "pi_amp",
     "readout": "readout_rf",
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "relax_delay": 0.0,  # us
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.0, 150, 51),
@@ -1462,11 +1379,6 @@ exp_cfg = {
     "pi_pulse": "pi_amp",
     "pi2_pulse": "pi2_amp",
     "readout": "readout_rf",
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "relax_delay": 0.0,  # us
     # "relax_delay": 5 * t1,  # us
     # "sweep": make_sweep(0.0, 1.5 * t2r, 101),
@@ -1514,11 +1426,6 @@ exp_cfg = {
             },
         },
     ),
-    "dev": {
-        "flux_dev": "yoko",
-        # "flux": cur_A,  # A
-        "flux": cur_V,  # V
-    },
     "relax_delay": 0.0,  # us
 }
 cfg = ml.make_cfg(exp_cfg, shots=100000)

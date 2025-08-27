@@ -58,7 +58,7 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
                 if dyn_factor > 1:
                     # increase reps
                     cfg["reps"] = int(reps_ref * dyn_factor)
-                    max_reps = min(100 * reps_ref, 1000000)
+                    max_reps = min(100 * reps_ref, 100000)
                     if cfg["reps"] > max_reps:
                         cfg["reps"] = max_reps
                 elif cfg["rounds"] > 1:

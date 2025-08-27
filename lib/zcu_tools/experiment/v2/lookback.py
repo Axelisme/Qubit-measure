@@ -9,12 +9,11 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from tqdm.auto import tqdm
 
+from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import AbsLivePlotter, LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 from zcu_tools.utils.datasaver import save_data
-
-from ..flux import set_flux
 
 LookbackResultType = Tuple[np.ndarray, np.ndarray]
 
@@ -37,7 +36,7 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
             warnings.warn("reps is not 1 in config, this will be ignored.")
             cfg["reps"] = 1
 
-        set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
+        GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
         MAX_LEN = 3.32  # us
         ro_cfg = cfg["readout"]["ro_cfg"]

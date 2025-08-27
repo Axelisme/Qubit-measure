@@ -43,7 +43,6 @@ def asym_lorfunc(x, *p):
     y0, slope, yscale, x0, gamma, alpha = p
     return (
         y0
-        # - yscale / (1 + 1 / (gamma * alpha) ** 2)
         + slope * (x - x0)
         + yscale / (1 + ((x - x0) / (gamma * (1 + alpha * (x - x0)))) ** 2)
     )

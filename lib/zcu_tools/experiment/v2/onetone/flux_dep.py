@@ -33,24 +33,26 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
     ) -> FluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        flux_cfg = cfg["dev"]["flux_dev"]
+
         res_pulse = cfg["readout"]["pulse_cfg"]
         fpt_sweep = cfg["sweep"]["freq"]
         flx_sweep = cfg["sweep"]["flux"]
 
         # remove flux from sweep dict, will be handled by soft loop
-        cfg["sweep"] = {
-            "freq": fpt_sweep,
-        }
+        cfg["sweep"] = {"freq": fpt_sweep}
 
-        As = sweep2array(flx_sweep, allow_array=True)
+        dev_values = sweep2array(flx_sweep, allow_array=True)
         fpts = sweep2array(fpt_sweep)  # predicted frequency points
 
         res_pulse["freq"] = sweep2param("freq", fpt_sweep)
+        flux_cfg["value"] = dev_values[0]
 
-        cfg["dev"]["flux"] = As[0]  # set initial flux
+        def updateCfg(cfg, _, value) -> None:
+            if flux_cfg["mode"] == "current":
+                value *= 1e-3  # convert mA to A
 
-        def updateCfg(cfg, _, mA) -> None:
-            cfg["dev"]["flux"] = mA * 1e-3
+            cfg["dev"]["flux_dev"]["value"] = value
 
         def measure_fn(
             cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
@@ -62,13 +64,13 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
             cfg,
             measure_fn,
             LivePlotter2DwithLine(
-                "Flux (mA)",
+                f"Flux ({'mA' if flux_cfg['mode'] == 'current' else 'V'})",
                 "Frequency (MHz)",
                 line_axis=1,
                 num_lines=2,
                 disable=not progress,
             ),
-            xs=1e3 * As,
+            xs=dev_values * (1e3 if flux_cfg["mode"] == "current" else 1),  # mA / V
             ys=fpts,
             updateCfg=updateCfg,
             signal2real=fluxdep_signal2real,
@@ -82,9 +84,9 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (As, fpts, signals2D)
+        self.last_result = (dev_values, fpts, signals2D)
 
-        return As, fpts, signals2D
+        return dev_values, fpts, signals2D
 
     def analyze(
         self,
@@ -96,11 +98,11 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        As, fpts, signals2D = result
+        values, fpts, signals2D = result
 
         actline = InteractiveLines(
             signals2D,
-            mAs=1e3 * As,
+            mAs=values,
             fpts=fpts,
             mA_c=mA_c,
             mA_e=mA_e,
@@ -121,12 +123,12 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        As, fpts, signals2D = result
+        values, fpts, signals2D = result
 
         save_data(
             filepath=filepath,
             x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-            y_info={"name": "Current", "unit": "A", "values": As},
+            y_info={"name": "Flux device value", "unit": "a.u.", "values": values},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
             comment=comment,
             tag=tag,

@@ -5,11 +5,10 @@ import numpy as np
 from numpy import ndarray
 from tqdm.auto import tqdm
 
+from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.liveplot import AbsLivePlotter
 from zcu_tools.utils.async_func import AsyncFunc
 from zcu_tools.utils.debug import print_traceback
-
-from ..flux import set_flux
 
 # TODO: support user controlled callback function
 
@@ -40,7 +39,7 @@ def sweep_hard_template(
     catch_interrupt: bool = True,
 ) -> ndarray:
     # set flux first
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
+    GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
     signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
     with liveplotter as viewer:
@@ -83,7 +82,7 @@ def sweep1D_soft_template(
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     # set flux first
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
+    GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
     if data_shape is not None:
         signals = np.full((len(xs), *data_shape), np.nan, dtype=complex)
@@ -99,7 +98,7 @@ def sweep1D_soft_template(
                     updateCfg(cfg, i, x)
 
                     # set again in case of change
-                    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=False)
+                    GlobalDeviceManager.setup_devices(cfg["dev"], progress=False)
 
                     signals[i] = measure_fn(cfg, None)
 
@@ -136,7 +135,7 @@ def sweep2D_soft_hard_template(
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     # set initial flux
-    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=True)
+    GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
     if data_shape is not None:
         signals2D = np.full((len(xs), len(ys), *data_shape), np.nan, dtype=complex)
@@ -152,7 +151,7 @@ def sweep2D_soft_hard_template(
                 for i, x in enumerate(xs_tqdm):
                     updateCfg(cfg, i, x)
 
-                    set_flux(cfg["dev"]["flux_dev"], cfg["dev"]["flux"], progress=False)
+                    GlobalDeviceManager.setup_devices(cfg["dev"], progress=False)
 
                     avgs_tqdm.total = cfg["rounds"]
                     avgs_tqdm.reset()
@@ -190,5 +189,70 @@ def sweep2D_soft_hard_template(
         finally:
             xs_tqdm.close()
             avgs_tqdm.close()
+
+    return signals2D
+
+
+def sweep2D_soft_template(
+    cfg: Dict[str, Any],
+    measure_fn: MeasureFn,
+    liveplotter: AbsLivePlotter,
+    *,
+    xs: ndarray,
+    ys: ndarray,
+    updateCfg_x: UpdateCfgFn,
+    updateCfg_y: UpdateCfgFn,
+    signal2real: Signal2RealFn = take_signal_abs,
+    progress: bool = True,
+    catch_interrupt: bool = True,
+    data_shape: Optional[tuple] = None,
+) -> ndarray:
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
+    # set initial flux
+    GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+
+    if data_shape is not None:
+        signals2D = np.full((len(xs), len(ys), *data_shape), np.nan, dtype=complex)
+    else:
+        signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
+
+    with liveplotter as viewer:
+        try:
+            xs_tqdm = tqdm(xs, smoothing=0, disable=not progress)
+            ys_tqdm = tqdm(ys, smoothing=0, disable=not progress)
+            with AsyncFunc(viewer.update) as async_draw:
+                assert async_draw is not None
+                for i, x in enumerate(xs_tqdm):
+                    updateCfg_x(cfg, i, x)
+
+                    ys_tqdm.reset()
+                    ys_tqdm.refresh()
+
+                    for j, y in enumerate(ys_tqdm):
+                        updateCfg_y(cfg, j, y)
+
+                        GlobalDeviceManager.setup_devices(cfg["dev"], progress=False)
+
+                        signals2D[i, j] = measure_fn(cfg, None)
+
+                        ys_tqdm.update()
+                        ys_tqdm.refresh()
+
+                        async_draw(xs, ys, signal2real(signals2D))
+
+        except KeyboardInterrupt:
+            if not catch_interrupt:
+                raise
+            print("Received KeyboardInterrupt, early stopping the program")
+            viewer.update(xs, ys, signal2real(signals2D))
+        except Exception:
+            if not catch_interrupt:
+                raise
+            print("Error during measurement:")
+            print_traceback()
+        finally:
+            xs_tqdm.close()
+            ys_tqdm.close()
 
     return signals2D

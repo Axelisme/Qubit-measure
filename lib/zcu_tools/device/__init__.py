@@ -1,19 +1,40 @@
 from typing import Any, Dict
 
+from .base import BaseDevice
+
 
 class GlobalDeviceManager:
-    devices: Dict[str, Any] = {}
+    devices: Dict[str, BaseDevice] = {}
 
     @classmethod
     def register_device(cls, name: str, device: Any) -> None:
         cls.devices[name] = device
 
     @classmethod
-    def get_device(cls, name: str) -> Any:
+    def drop_device(cls, name: str, ignore_error: bool = False) -> None:
+        if name not in cls.get_all_devices() and not ignore_error:
+            raise ValueError(f"Device {name} not found")
+        del cls.devices[name]
+
+    @classmethod
+    def get_device(cls, name: str) -> BaseDevice:
         if name not in cls.devices:
             raise ValueError(f"Device {name} not found")
         return cls.devices[name]
 
     @classmethod
-    def get_all_devices(cls) -> Dict[str, Any]:
+    def get_all_devices(cls) -> Dict[str, BaseDevice]:
         return cls.devices
+
+    @classmethod
+    def setup_devices(
+        cls, dev_cfg: Dict[str, Dict[str, Any]], *, progress: bool = True
+    ) -> None:
+        for cfg in dev_cfg.values():
+            cls.get_device(cfg["name"]).setup(cfg, progress=progress)
+
+    @classmethod
+    def get_all_info(cls) -> Dict[str, Dict[str, Any]]:
+        return {
+            name: device.get_info() for name, device in cls.get_all_devices().items()
+        }
