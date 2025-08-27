@@ -30,11 +30,11 @@ class YOKOGS200:
 
     # Turn on output
     def output_on(self) -> None:
-        self.session.write("OUTPut 1")
+        self.session.write(":OUTPut 1")
 
     # Turn off output
     def output_off(self) -> None:
-        self.session.write("OUTPut 0")
+        self.session.write(":OUTPut 0")
 
     # ==========================================================================#
 
@@ -127,7 +127,7 @@ class YOKOGS200:
         if not (mode == "voltage" or mode == "current"):
             sys.stderr.write("Unknown output mode %s." % mode)
             return
-        self.session.write("SOURce:FUNCtion %s" % mode)
+        self.session.write(":SOURce:FUNCtion %s" % mode)
 
         if rampstep is not None:
             self._rampstep = rampstep
@@ -142,8 +142,8 @@ class YOKOGS200:
                 f"One can only get voltage when the device is in voltage mode. but it is in {mode} mode."
             )
 
-        self.session.write("SOURce:FUNCtion VOLTage")
-        self.session.write("SOURce:LEVel?")
+        self.session.write(":SOURce:FUNCtion VOLTage")
+        self.session.write(":SOURce:LEVel?")
         result = self.session.read()
         return float(result.rstrip("\n"))
 
@@ -155,14 +155,14 @@ class YOKOGS200:
                 f"One can only get current when the device is in current mode. but it is in {mode} mode."
             )
 
-        self.session.write("SOURce:FUNCtion CURRent")
-        self.session.write("SOURce:LEVel?")
+        self.session.write(":SOURce:FUNCtion CURRent")
+        self.session.write(":SOURce:LEVel?")
         result = self.session.read()
         return float(result.rstrip("\n"))
 
     # Returns the mode (voltage or current)
     def get_mode(self) -> Literal["voltage", "current"]:
-        self.session.write("SOURce:FUNCtion?")
+        self.session.write(":SOURce:FUNCtion?")
         result = self.session.read()
         result = result.rstrip("\n")
         if result == "VOLT":
