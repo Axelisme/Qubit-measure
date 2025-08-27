@@ -2,7 +2,6 @@ from collections import defaultdict
 from typing import Any, Dict
 
 from qick import AveragerProgram, NDAveragerProgram, RAveragerProgram
-from zcu_tools.auto import is_pulse_cfg
 from zcu_tools.program.base import MyProgram
 
 from .readout import make_readout
@@ -19,7 +18,7 @@ class MyProgramV1(MyProgram):
         self.ch_count = defaultdict(int)
         nqzs = dict()
         for name, pulse in self.dac.items():
-            if not is_pulse_cfg(name, pulse):
+            if "ch" not in pulse or "nqz" not in pulse:
                 continue
             ch, nqz = pulse["ch"], pulse["nqz"]
             self.ch_count[ch] += 1
@@ -29,8 +28,8 @@ class MyProgramV1(MyProgram):
         self._make_modules()
 
     def _make_modules(self) -> None:
-        self.resetM = make_reset(self.cfg["dac"]["reset"])
-        self.readoutM = make_readout(self.cfg["dac"]["readout"])
+        self.resetM = make_reset(self.cfg.get("reset"))
+        self.readoutM = make_readout(self.cfg["readout"])
 
     def initialize(self) -> None:
         self.resetM.init(self)

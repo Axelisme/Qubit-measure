@@ -1,6 +1,5 @@
 from typing import Any, Dict
 
-from zcu_tools.auto import is_pulse_cfg
 from zcu_tools.utils.async_func import AsyncFunc
 
 from .improve_acquire import ImproveAcquireMixin
@@ -20,20 +19,7 @@ class MyProgram(ProxyAcquireMixin, ImproveAcquireMixin):
         super().__init__(soccfg, cfg=cfg, **kwargs)
 
     def _parse_cfg(self, cfg: Dict[str, Any]) -> None:
-        # set dac and adc config as attributes
         self.cfg = cfg
-        self.dac: Dict[str, Any] = cfg.get("dac", {})
-        self.adc: Dict[str, Any] = cfg.get("adc", {})
-        if "sweep" in cfg:
-            self.sweep_cfg = cfg["sweep"]
-
-        # set dac pulse as attributes
-        for name, pulse in self.dac.items():
-            if not is_pulse_cfg(name, pulse):
-                continue
-            if hasattr(self, name):
-                raise ValueError(f"Pulse name {name} already exists")
-            setattr(self, name, pulse)
 
     def acquire(self, soc, **kwargs) -> list:
         # let callback be executd as a coroutine

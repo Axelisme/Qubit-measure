@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from .pulse import declare_pulse, set_pulse
 
@@ -9,8 +9,8 @@ if TYPE_CHECKING:
     from .program import MyProgramV1
 
 
-def make_reset(name: str) -> AbsReset:
-    if name == "none":
+def make_reset(name: Optional[str]) -> AbsReset:
+    if name in ["none", None]:
         return NoneReset()
     elif name == "pulse":
         return PulseReset()

@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: axelenv
+    display_name: Python 3
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.8.20
+    version: 3.13.2
 ---
 
 # Import Module
@@ -29,16 +29,13 @@ jupyter:
 ```python
 %load_ext autoreload
 import os
-
-import numpy as np
 from pprint import pprint
 
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.default_cfg import ModuleLibrary
+from zcu_tools.library import ModuleLibrary
 from zcu_tools.notebook.utils import make_sweep, make_comment
-from zcu_tools.auto import make_cfg
 from zcu_tools.utils.datasaver import create_datafolder
 ```
 
@@ -49,15 +46,13 @@ import zcu_tools.config as zc
 # zc.config.YOKO_DRY_RUN = True  # don't run yoko
 ```
 
-# Create data folder
+# Create data folder and cfg
 
 ```python
 chip_name = r"Q3_2D/Q2"
 
-data_host = None
-# data_host = "021-zcu216"
-
 database_path = create_datafolder(os.path.join(os.getcwd(), ".."), prefix=chip_name)
+ml = ModuleLibrary(cfg_path=os.path.join(database_path, "module_cfg.yaml"))
 ```
 
 # Connect to zcu216
@@ -118,7 +113,7 @@ GlobalDeviceManager.register_device("flux_yoko", flux_dev)
 # flux_dev.set_mode('current', rampstep=1e-6)
 # cur_A = flux_dev.get_current()
 # cur_A
-flux_dev.set_mode('voltage', rampstep=1e-3)
+flux_dev.set_mode("voltage", rampstep=1e-3)
 cur_V = flux_dev.get_voltage()
 cur_V
 ```
@@ -163,14 +158,16 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, rounds=5000)
+cfg = ml.make_cfg(exp_cfg, rounds=5000)
 
 lookback_exp = ze.LookbackExperiment()
 Ts, signals = lookback_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-predict_offset = lookback_exp.analyze(ratio=0.1, smooth=1.0, ro_cfg=cfg["readout"]["ro_cfg"])
+predict_offset = lookback_exp.analyze(
+    ratio=0.1, smooth=1.0, ro_cfg=cfg["readout"]["ro_cfg"]
+)
 predict_offset
 ```
 
@@ -183,7 +180,6 @@ timeFly
 lookback_exp.save(
     filepath=os.path.join(database_path, "lookback"),
     comment=make_comment(cfg, f"timeFly = {timeFly}us"),
-    server_ip=data_host,
 )
 ```
 
@@ -231,7 +227,7 @@ exp_cfg = {
     # "sweep": make_sweep(r_f-4, r_f+4, 101),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
 res_freq_exp = ze.onetone.FreqExperiment()
 fpts, signals = res_freq_exp.run(soc, soccfg, cfg)
@@ -254,7 +250,6 @@ res_freq_exp.save(
     # filepath=os.path.join(database_path, f"{res_name}_freq@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{res_name}_freq@{cur_V:.3f}V"),
     comment=make_comment(cfg, str(params)),
-    server_ip=data_host,
 )
 ```
 
@@ -287,7 +282,7 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=30)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=30)
 
 res_pdr_exp = ze.onetone.PowerDepExperiment()
 pdrs, fpts, signals2D = res_pdr_exp.run(
@@ -300,7 +295,6 @@ res_pdr_exp.save(
     # filepath=os.path.join(database_path, f"{res_name}_pdr@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{res_name}_pdr@{cur_V:.3f}V"),
     comment=make_comment(cfg),
-    server_ip=data_host,
 )
 ```
 
@@ -327,16 +321,14 @@ exp_cfg = {
             "trig_offset": timeFly + 0.05,  # us
         },
     },
-    "dev": {
-        "flux_dev": "yoko"
-    },
+    "dev": {"flux_dev": "yoko"},
     "sweep": {
         "flux": make_sweep(6.0e-3, 8e-3, 201),
         "freq": make_sweep(r_f - 5, r_f + 5, 61),
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
 res_flux_exp = ze.onetone.FluxDepExperiment()
 As, fpts, signals2D = res_flux_exp.run(soc, soccfg, cfg)
@@ -346,7 +338,6 @@ As, fpts, signals2D = res_flux_exp.run(soc, soccfg, cfg)
 res_flux_exp.save(
     filepath=os.path.join(database_path, f"{res_name}_flux"),
     comment=make_comment(cfg),
-    server_ip=data_host,
 )
 ```
 
@@ -448,7 +439,7 @@ exp_cfg = {
     "sweep": make_sweep(100, 200, step=1.0),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
 qub_freq_exp = ze.twotone.FreqExperiment()
 fpts, signals = qub_freq_exp.run(soc, soccfg, cfg)
@@ -470,7 +461,6 @@ qub_freq_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_freq@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_freq@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"frequency = {f}MHz"),
-    server_ip=data_host,
 )
 ```
 
@@ -522,7 +512,7 @@ exp_cfg = {
     "sweep": make_sweep(reset_f - 150, reset_f + 150, 101),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
 single_reset_freq_exp = ze.twotone.reset.single_tone.FreqExperiment()
 fpts, signals = single_reset_freq_exp.run(soc, soccfg, cfg, remove_bg=True)
@@ -539,9 +529,10 @@ reset_f = f
 
 ```python
 single_reset_freq_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_single_reset_freq@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(
+        database_path, f"{qub_name}_single_reset_freq@{cur_A * 1e3:.3f}mA"
+    ),
     comment=make_comment(cfg, f"frequency = {f}MHz"),
-    server_ip=data_host,
 )
 ```
 
@@ -570,7 +561,7 @@ exp_cfg = {
     "sweep": make_sweep(0.03, 5.0, 51),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
 single_reset_length_exp = ze.twotone.reset.single_tone.LengthExperiment()
 Ts, signals = single_reset_length_exp.run(soc, soccfg, cfg)
@@ -578,9 +569,10 @@ Ts, signals = single_reset_length_exp.run(soc, soccfg, cfg)
 
 ```python
 single_reset_length_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_single_reset_time@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(
+        database_path, f"{qub_name}_single_reset_time@{cur_A * 1e3:.3f}mA"
+    ),
     comment=make_comment(cfg),
-    server_ip=data_host,
 )
 ```
 
@@ -611,7 +603,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 0.6, 51),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
 single_reset_check_exp = ze.twotone.reset.single_tone.RabiCheckExperiment()
 pdrs, signals = single_reset_check_exp.run(soc, soccfg, cfg)
@@ -621,7 +613,6 @@ pdrs, signals = single_reset_check_exp.run(soc, soccfg, cfg)
 single_reset_check_exp.save(
     filepath=os.path.join(database_path, f"{qub_name}_reset_check@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg),
-    server_ip=data_host,
 )
 ```
 
@@ -687,7 +678,7 @@ exp_cfg = {
     },
     "relax_delay": 5 / rf_w,  # us
 }
-cfg = make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
 
 dual_reset_freq_exp = ze.twotone.reset.dual_tone.FreqExperiment()
 fpts1, fpts2, signals = dual_reset_freq_exp.run(soc, soccfg, cfg)
@@ -697,9 +688,7 @@ fpts1, fpts2, signals = dual_reset_freq_exp.run(soc, soccfg, cfg)
 %matplotlib inline
 xlabal = f"|{reset1_trans[0]}, 0> - |{reset1_trans[1]}, 0>"
 ylabal = f"|{reset2_trans[0]}, 0> - |{reset2_trans[1]}, 1>"
-f1, f2 = dual_reset_freq_exp.analyze(
-    smooth=0.5, xname=xlabal, yname=ylabal
-)
+f1, f2 = dual_reset_freq_exp.analyze(smooth=0.5, xname=xlabal, yname=ylabal)
 f1, f2
 ```
 
@@ -713,7 +702,6 @@ dual_reset_freq_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_freq@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_mux_reset_freq@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"frequency = ({reset_f1:.1f}, {reset_f2:.1f})MHz"),
-    server_ip=data_host,
 )
 ```
 
@@ -766,7 +754,7 @@ exp_cfg = {
     "relax_delay": 0.0,  # us
     # "relax_delay": 3 * t1,
 }
-cfg = make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
 
 dual_reset_pdr_exp = ze.twotone.reset.dual_tone.PowerExperiment()
 pdrs1, pdrs2, signals2D = dual_reset_pdr_exp.run(soc, soccfg, cfg)
@@ -784,7 +772,6 @@ dual_reset_pdr_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_gain@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_mux_reset_gain@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"best gain = ({gain1:.1f}, {gain2:.1f})"),
-    server_ip=data_host,
 )
 ```
 
@@ -814,7 +801,7 @@ exp_cfg = {
     "sweep": make_sweep(0.05, 50.0, 51),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
 
 dual_reset_len_exp = ze.twotone.reset.dual_tone.LengthExperiment()
 Ts, signals = dual_reset_len_exp.run(soc, soccfg, cfg)
@@ -825,7 +812,6 @@ dual_reset_len_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_time@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_mux_reset_time@{cur_V:.3f}V"),
     comment=make_comment(cfg),
-    server_ip=data_host,
 )
 ```
 
@@ -856,7 +842,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.0, 51),
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
 dual_reset_check_exp = ze.twotone.reset.dual_tone.RabiCheckExperiment()
 pdrs, signals = dual_reset_check_exp.run(soc, soccfg, cfg)
@@ -867,7 +853,6 @@ dual_reset_check_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_check@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_mux_reset_check@{cur_V:.3f}V"),
     comment=make_comment(cfg),
-    server_ip=data_host,
 )
 ```
 
@@ -899,7 +884,7 @@ exp_cfg = {
     },
     "relax_delay": 10.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=100, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
 
 qub_pdr_exp = ze.twotone.PowerDepExperiment()
 fpts, pdrs, signals2D = qub_pdr_exp.run(soc, soccfg, cfg)
@@ -909,7 +894,6 @@ fpts, pdrs, signals2D = qub_pdr_exp.run(soc, soccfg, cfg)
 qub_pdr_exp.save(
     filepath=os.path.join(database_path, f"{qub_name}_pdr@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg),
-    server_ip=data_host,
 )
 ```
 
@@ -940,9 +924,8 @@ exp_cfg = {
         "freq": make_sweep(3000, 4800, 801),
     },
     "relax_delay": 0.0,  # us
-
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=20)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=20)
 
 qub_flux_exp = ze.twotone.FluxDepExperiment()
 As, fpts, signals2D = qub_flux_exp.run(soc, soccfg, cfg)
@@ -952,7 +935,6 @@ As, fpts, signals2D = qub_flux_exp.run(soc, soccfg, cfg)
 qub_flux_exp.save(
     filepath=os.path.join(database_path, f"{qub_name}_flux"),
     comment=make_comment(cfg),
-    server_ip=data_host,
 )
 ```
 
@@ -987,7 +969,7 @@ exp_cfg = {
     "relax_delay": 0.0,  # us
     # "relax_delay": 2 * t1, # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
 dispersive_shift_exp = ze.twotone.DispersiveExperiment()
 fpts, signals = dispersive_shift_exp.run(soc, soccfg, cfg)
@@ -1003,7 +985,6 @@ chi
 dispersive_shift_exp.save(
     filepath=os.path.join(database_path, f"{res_name}_dispersive@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg, f"chi = {chi:.3g} MHz, kappa = {rf_w:.3g} MHz"),
-    server_ip=data_host,
 )
 ```
 
@@ -1036,7 +1017,7 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
 ac_stark_exp = ze.twotone.AcStarkExperiment()
 pdrs, fpts, signals2D = ac_stark_exp.run(soc, soccfg, cfg, sqrt_uniform=True)
@@ -1051,7 +1032,6 @@ ac_stark_coeff
 ac_stark_exp.save(
     filepath=os.path.join(database_path, f"{qub_name}_ac_stark@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg, f"ac_stark_coeff = {ac_stark_coeff:.3g} MHz"),
-    server_ip=data_host,
 )
 ```
 
@@ -1082,7 +1062,7 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
 allxy_exp = ze.twotone.AllXYExperiment()
 sequence, signals = allxy_exp.run(soc, soccfg, cfg)
@@ -1097,7 +1077,6 @@ allxy_exp.analyze()
 allxy_exp.save(
     filepath=os.path.join(database_path, f"{qub_name}_allxy@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg),
-    server_ip=data_host,
 )
 ```
 
@@ -1127,7 +1106,7 @@ exp_cfg = {
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0.1, 5.0, 101),
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=20)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=20)
 
 qub_lenrabi_exp = ze.twotone.LenRabiExperiment()
 Ts, signals = qub_lenrabi_exp.run(soc, soccfg, cfg)
@@ -1143,7 +1122,6 @@ pi_len, pi2_len
 qub_lenrabi_exp.save(
     filepath=os.path.join(database_path, f"{qub_name}_len_rabi@{cur_A * 1e3:.3f}mA"),
     comment=make_comment(cfg, f"pi len = {pi_len}us\npi/2 len = {pi2_len}us"),
-    server_ip=data_host,
 )
 ```
 
@@ -1197,7 +1175,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 1.0, 51),
     # "sweep": make_sweep(0.0, max_gain, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
 qub_amprabi_exp = ze.twotone.AmpRabiExperiment()
 pdrs, signals = qub_amprabi_exp.run(soc, soccfg, cfg)
@@ -1216,7 +1194,6 @@ qub_amprabi_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_amp_rabi@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_amp_rabi@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"pi gain = {pi_gain}\npi/2 gain = {pi2_gain}"),
-    server_ip=data_host,
 )
 ```
 
@@ -1263,7 +1240,7 @@ exp_cfg = {
     # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(r_f - 3, r_f + 3, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
 opt_ro_freq_exp = ze.twotone.ro_optimize.OptimizeFreqExperiment()
 fpts, snrs = opt_ro_freq_exp.run(soc, soccfg, cfg)
@@ -1278,7 +1255,6 @@ opt_ro_freq_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_ro_opt_freq@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_ro_opt_freq@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"optimal frequency = {fpt_max:.1f}MHz"),
-    server_ip=data_host,
 )
 ```
 
@@ -1305,7 +1281,7 @@ exp_cfg = {
     # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(0.01, 1.0, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
 opt_ro_pdr_exp = ze.twotone.ro_optimize.OptimizePowerExperiment()
 pdrs, snrs = opt_ro_pdr_exp.run(soc, soccfg, cfg)
@@ -1320,7 +1296,6 @@ opt_ro_pdr_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_ro_opt_pdr@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_ro_opt_pdr@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"optimal power = {pdr_max:.2f}"),
-    server_ip=data_host,
 )
 ```
 
@@ -1348,7 +1323,7 @@ exp_cfg = {
     # "relax_delay": 3 * t1,  # us
     "sweep": make_sweep(0.1, 15.0, 31),
 }
-cfg = make_cfg(exp_cfg, reps=10000, rounds=1)
+cfg = ml.make_cfg(exp_cfg, reps=10000, rounds=1)
 
 opt_ro_len_exp = ze.twotone.ro_optimize.OptimizeLengthExperiment()
 ro_lens, snrs = opt_ro_len_exp.run(soc, soccfg, cfg)
@@ -1364,7 +1339,6 @@ opt_ro_len_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_ro_opt_len@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_ro_opt_len@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"optimal readout length = {ro_max:.2f}us"),
-    server_ip=data_host,
 )
 ```
 
@@ -1415,7 +1389,7 @@ exp_cfg = {
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0, 10.0, 101),  # us
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
 activate_detune = 0.1 / cfg["sweep"]["step"]
 print(f"activate_detune: {activate_detune:.2f}")
@@ -1435,7 +1409,6 @@ t2ramsey_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_t2ramsey@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_t2ramsey@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"detune = {detune:.3f}MHz\nt2r = {t2r:.3f}us"),
-    server_ip=data_host,
 )
 ```
 
@@ -1461,7 +1434,7 @@ exp_cfg = {
     "sweep": make_sweep(0.0, 150, 51),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
 t1_exp = ze.twotone.T1Experiment()
 Ts, signals = t1_exp.run(soc, soccfg, cfg)
@@ -1478,7 +1451,6 @@ t1_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_t1@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_t1@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"t1 = {t1:.3f}us"),
-    server_ip=data_host,
 )
 ```
 
@@ -1501,7 +1473,7 @@ exp_cfg = {
     # "sweep": make_sweep(0.0, 1.5 * t2e, 101),
     "sweep": make_sweep(0.01, 2 * t1, 51),
 }
-cfg = make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
 activate_detune = 0.1 / cfg["sweep"]["step"]
 print(f"activate_detune: {activate_detune:.2f}")
@@ -1520,7 +1492,6 @@ t2echo_exp.save(
     # filepath=os.path.join(database_path, f"{qub_name}_t2echo@{cur_A * 1e3:.3f}mA"),
     filepath=os.path.join(database_path, f"{qub_name}_t2echo@{cur_V:.3f}V"),
     comment=make_comment(cfg, f"detune = {detune:.3f}MHz\nt2echo = {t2e:.3f}us"),
-    server_ip=data_host,
 )
 ```
 
@@ -1550,7 +1521,7 @@ exp_cfg = {
     },
     "relax_delay": 0.0,  # us
 }
-cfg = make_cfg(exp_cfg, shots=100000)
+cfg = ml.make_cfg(exp_cfg, shots=100000)
 print("readout length: ", cfg["readout"]["ro_cfg"]["ro_length"])
 
 singleshot_exp = ze.twotone.SingleShotExperiment()
@@ -1566,8 +1537,8 @@ print(f"Optimal fidelity after rotation = {fid:.1%}")
 ```python
 from zcu_tools.simulate.temp import effective_temperature
 
-n_g = pops[0][0] # n_gg
-n_e = pops[0][1] # n_ge
+n_g = pops[0][0]  # n_gg
+n_e = pops[0][1]  # n_ge
 
 n_g, n_e = (n_g, n_e) if n_g > n_e else (n_e, n_g)  # ensure n_g >= n_e
 
@@ -1582,7 +1553,6 @@ singleshot_exp.save(
     comment=make_comment(
         cfg, f"fide: {fid:.1%}, (n_g, n_e): ({n_g:.1%}, {n_e:.1%}), eff_T: {eff_T:.1f}"
     ),
-    server_ip=data_host,
 )
 ```
 
