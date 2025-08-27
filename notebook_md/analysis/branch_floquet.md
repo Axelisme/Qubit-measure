@@ -21,6 +21,8 @@ import numpy as np
 import plotly.graph_objects as go
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
+import matplotlib.pyplot as plt
+from IPython.display import display
 
 %autoreload 2
 from zcu_tools.notebook.persistance import load_result
@@ -37,7 +39,7 @@ from zcu_tools.simulate.fluxonium.branch.floquet import (
 # Load Parameters
 
 ```python
-qub_name = "Q12_2D[3]/Q4"
+qub_name = "SimQubit"
 
 os.makedirs(f"../../result/{qub_name}/image/branch_floquet", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/web/branch_floquet", exist_ok=True)
@@ -58,6 +60,148 @@ elif "r_f" in allows:
     print(f"r_f: {r_f} GHz")
 ```
 
+# Single
+
+```python
+r_f = 5.25
+rf_w = 0.006
+g = 0.11
+flx = 0.5
+
+qub_dim = 40
+qub_cutoff = 80
+max_photon = 150
+
+amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
+photons = (amps / (2 * g)) ** 2
+
+
+def calc_populations(
+    branchs: List[int], progress: bool = True
+) -> Tuple[np.ndarray, Dict[int, List[float]]]:
+    avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
+
+    fb_analysis = FloquetBranchAnalysis(
+        params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
+    )
+
+    fbasis_n = Parallel(n_jobs=-1)(
+        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
+        for photon in tqdm(
+            photons, desc="Computing Floquet basis", disable=not progress
+        )
+    )
+
+    branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
+    branch_populations = fb_analysis.calc_branch_populations(
+        fbasis_n, branch_infos, avg_times, progress=progress
+    )
+
+    return photons, branch_populations
+```
+
+```python
+branchs = list(range(15))
+
+photons, branch_populations = calc_populations(branchs)
+```
+
+```python
+fig = plot_populations_over_photon(branchs, photons, branch_populations)
+
+fig.write_html(
+    f"../../result/{qub_name}/web/branch_floquet/populations_phi{flx:0.2f}.html"
+)
+fig.write_image(
+    f"../../result/{qub_name}/image/branch_floquet/populations_phi{flx:0.2f}.png"
+)
+fig.show()
+```
+
+# Sweep TLS freq
+
+```python
+r_f = 5.7945
+rf_w = 0.006
+g = 0.11
+flx = 0.395
+
+qub_dim = 40
+qub_cutoff = 80
+max_photon = 150
+
+amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
+photons = (amps / (2 * g)) ** 2
+
+
+def calc_populations_with_tls(
+    branchs: List[int], E_tls: float, g_tls: float, progress: bool = True
+) -> Tuple[np.ndarray, Dict[int, List[float]]]:
+    avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
+
+    fb_analysis = FloquetWithTLSBranchAnalysis(
+        params, r_f, g, E_tls, g_tls, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
+    )
+
+    fbasis_n = Parallel(n_jobs=-1)(
+        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
+        for photon in tqdm(
+            photons, desc="Computing Floquet basis", disable=not progress
+        )
+    )
+
+    branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
+    branch_populations = fb_analysis.calc_branch_populations(
+        fbasis_n, branch_infos, avg_times, progress=progress
+    )
+
+    return photons, branch_populations
+```
+
+```python
+%matplotlib inline
+
+E_tls_list = np.linspace(0.1, 4.0, 10)
+g_tls = 0.001
+
+branchs = [0]
+
+pop_over_tls = np.full((len(E_tls_list), len(amps)), np.nan)
+
+fig, ax = plt.subplots()
+im = ax.imshow(
+    pop_over_tls,
+    aspect="auto",
+    origin="lower",
+    interpolation="none",
+    vmin=0.0,
+    vmax=2.0,
+)
+dh = display(fig, display_id=True)
+for i, E_tls in enumerate(tqdm(E_tls_list, desc="Sweeping E_tls")):
+    photons, branch_populations = calc_populations_with_tls(
+        branchs, E_tls, g_tls, progress=False
+    )
+    pop_over_tls[i] = branch_populations[0]
+
+    im.set_data(pop_over_tls)
+    im.autoscale()
+    dh.update(fig)
+plt.close(fig)
+```
+
+```python
+np.savez_compressed(
+    f"../../result/{qub_name}/branch_floquet_populations_over_tls.npz",
+    pop_over_tls=pop_over_tls,
+    tls_freqs=E_tls_list,
+    photons=photons,
+    branchs=branchs,
+)
+```
+
+# Sweep flux
+
 ```python
 r_f = 5.7945
 rf_w = 0.006
@@ -68,8 +212,11 @@ qub_dim = 40
 qub_cutoff = 80
 max_photon = 150
 
+amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
+photons = (amps / (2 * g)) ** 2
 
-def calc_populations_at_flx(
+
+def calc_populations_with_flx(
     branchs: List[int], flx: float, progress: bool = True
 ) -> Tuple[np.ndarray, Dict[int, List[float]]]:
     amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
@@ -96,51 +243,70 @@ def calc_populations_at_flx(
     return photons, branch_populations
 ```
 
-# Single Point
-
 ```python
-branchs = list(range(15))
+flxs = np.linspace(0.0, 0.5, 5)
+branchs = [0, 1]
 
-photons, branch_populations = calc_populations_at_flx(branchs, flx)
+pop_over_flx = []
+for flx in tqdm(flxs, desc="Computing branch populations"):
+    photons, branch_populations = calc_populations_with_flx(
+        branchs, flx=flx, progress=False
+    )
+
+    pop_over_flx.append(list(branch_populations.values()))
+pop_over_flx = np.array(pop_over_flx)
 ```
 
 ```python
-fig = plot_populations_over_photon(branchs, photons, branch_populations)
+np.savez_compressed(
+    f"../../result/{qub_name}/branch_floquet_populations_over_flx.npz",
+    flxs=flxs,
+    branchs=branchs,
+    photons=photons,
+    populations_over_flx=pop_over_flx,
+)
+```
 
-fig.write_html(
-    f"../../result/{qub_name}/web/branch_floquet/populations_phi{flx:0.2f}.html"
-)
-fig.write_image(
-    f"../../result/{qub_name}/image/branch_floquet/populations_phi{flx:0.2f}.png"
-)
+```python
+data = np.load(f"../../result/{qub_name}/branch_floquet_populations.npz")
+flxs = data["flxs"]
+photons = data["photons"]
+pop_over_flx = data["populations_over_flx"]
+```
+
+```python
+fig = plot_cn_over_flx(flxs, photons, pop_over_flx, {0: 2, 1: 3})
+# fig.update_layout(height=600, width=800)
+
+# Save the figure
+fig.write_html(f"../../result/{qub_name}/image/branch_floquet/cn_over_flx.html")
+fig.write_image(f"../../result/{qub_name}/image/branch_floquet/cn_over_flx.png")
+
 fig.show()
 ```
 
-## With TLS
+# Sweep r_f
 
 ```python
-r_f = 5.7945
 rf_w = 0.006
 g = 0.11
-flx = 0.395
+flx = 0.5
 
 qub_dim = 40
 qub_cutoff = 80
 max_photon = 150
 
 amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
+photons = (amps / (2 * g)) ** 2
 
 
-def calc_populations_at_flx_with_tls(
-    branchs: List[int], flx: float, E_tls: float, g_tls: float, progress: bool = True
+def calc_populations_with_rf(
+    branchs: List[int], r_f: float, progress: bool = True
 ) -> Tuple[np.ndarray, Dict[int, List[float]]]:
-    amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
-    photons = (amps / (2 * g)) ** 2
-
     avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
 
-    fb_analysis = FloquetWithTLSBranchAnalysis(
-        params, r_f, g, E_tls, g_tls, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
+    fb_analysis = FloquetBranchAnalysis(
+        params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
     )
 
     fbasis_n = Parallel(n_jobs=-1)(
@@ -160,97 +326,64 @@ def calc_populations_at_flx_with_tls(
 
 ```python
 %matplotlib inline
+rfs = np.linspace(4.0, 7.0, 100)
 
-sweep_E_tls = np.linspace(0.1, 4.0, 10)
-g_tls = 0.001
+branchs = [0, 1]
 
-branchs = [0]
 
 import matplotlib.pyplot as plt
 from IPython.display import display
-from zcu_tools.notebook.analysis.branch import calc_critical_photons
 
-# cn_over_freq = np.full_like(sweep_E_tls, np.nan)
-pop_over_freq = np.full((len(sweep_E_tls), len(amps)), np.nan)
+pop_over_rf = np.full((len(rfs), len(photons), 2), np.nan)
 
-fig, ax = plt.subplots()
-# line = ax.plot(sweep_E_tls, np.full_like(sweep_E_tls, np.nan))[0]
-im = ax.imshow(pop_over_freq, aspect="auto", origin="lower", interpolation="none")
+fig, (ax_g, ax_e) = plt.subplots(2, 1, sharex=True)
+im_g = ax_g.imshow(
+    pop_over_rf[..., 0].T,
+    aspect="auto",
+    origin="lower",
+    interpolation="none",
+    extent=[rfs[0], rfs[-1], photons[0], photons[-1]],
+    vmin=0.0,
+    vmax=2.0,
+)
+im_e = ax_e.imshow(
+    pop_over_rf[..., 1].T,
+    aspect="auto",
+    origin="lower",
+    interpolation="none",
+    extent=[rfs[0], rfs[-1], photons[0], photons[-1]],
+    vmin=0.0,
+    vmax=3.0,
+)
 dh = display(fig, display_id=True)
-for i, E_tls in enumerate(tqdm(sweep_E_tls, desc="Sweeping E_tls")):
-    photons, branch_populations = calc_populations_at_flx_with_tls(
-        branchs, flx, E_tls, g_tls, progress=False
-    )
-    # cn = calc_critical_photons(photons, np.array(branch_populations[0]), 1.0)
-    # cn_over_freq[i] = cn
-    pop_over_freq[i] = branch_populations[0]
+for i, r_f in enumerate(tqdm(rfs, desc="Sweeping r_f")):
+    if not np.any(np.isnan(pop_over_rf[i])):
+        continue
 
-    # line.set_ydata(cn_over_freq)
-    im.set_data(pop_over_freq)
-    ax.relim(visible_only=True)
-    ax.autoscale_view()
+    photons, branch_populations = calc_populations_with_rf(branchs, r_f, progress=False)
+    pop_over_rf[i, :, 0] = branch_populations[0]
+    pop_over_rf[i, :, 1] = branch_populations[1]
+
+    im_g.set_data(pop_over_rf[..., 0].T)
+    im_e.set_data(pop_over_rf[..., 1].T)
+    im_g.autoscale()
+    im_e.autoscale()
+
     dh.update(fig)
+fig.savefig(
+    f"../../result/{qub_name}/image/branch_floquet/populations_phi{flx:0.2f}_over_rf.png"
+)
 plt.close(fig)
 ```
 
 ```python
-E_tls = 3.10
-g_tls = 0.001
-
-branchs = list(range(15))
-
-photons, branch_populations = calc_populations_at_flx_with_tls(
-    branchs, flx, E_tls, g_tls
-)
-```
-
-```python
-fig = plot_populations_over_photon(branchs, photons, branch_populations)
-fig.show()
-```
-
-# Over flux
-
-```python
-flxs = np.linspace(0.0, 0.5, 5)
-branchs = [0, 1]
-
-populations_over_flx = []
-for flx in tqdm(flxs, desc="Computing branch populations"):
-    photons, branch_populations = calc_populations_at_flx(
-        branchs, flx=flx, progress=False
-    )
-
-    populations_over_flx.append(list(branch_populations.values()))
-populations_over_flx = np.array(populations_over_flx)
-```
-
-```python
 np.savez_compressed(
-    f"../../result/{qub_name}/branch_floquet_populations.npz",
-    flxs=flxs,
-    branchs=branchs,
+    f"../../result/{qub_name}/branch_floquet_populations_over_rf.npz",
+    pop_over_rf=pop_over_rf,
+    rfs=rfs,
     photons=photons,
-    populations_over_flx=populations_over_flx,
+    branchs=branchs,
 )
-```
-
-```python
-data = np.load(f"../../result/{qub_name}/branch_floquet_populations.npz")
-flxs = data["flxs"]
-photons = data["photons"]
-populations_over_flx = data["populations_over_flx"]
-```
-
-```python
-fig = plot_cn_over_flx(flxs, photons, populations_over_flx, {0: 2, 1: 3})
-# fig.update_layout(height=600, width=800)
-
-# Save the figure
-fig.write_html(f"../../result/{qub_name}/image/branch_floquet/cn_over_flx.html")
-fig.write_image(f"../../result/{qub_name}/image/branch_floquet/cn_over_flx.png")
-
-fig.show()
 ```
 
 ```python

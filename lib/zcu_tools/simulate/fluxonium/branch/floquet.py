@@ -16,12 +16,8 @@ class FloquetBranchAnalysis:
         qub_dim: int = 40,
         qub_cutoff: int = 60,
     ) -> None:
-        self.params = params
         self.r_f = r_f
         self.g = g
-        self.flx = flx
-        self.qub_dim = qub_dim
-        self.qub_cutoff = qub_cutoff
 
         import scqubits as scq  # lazy import
 
@@ -119,13 +115,8 @@ class FloquetWithTLSBranchAnalysis:
         qub_dim: int = 40,
         qub_cutoff: int = 60,
     ) -> None:
-        self.params = params
         self.r_f = r_f
         self.g = g
-        self.E_tls = E_tls
-        self.flx = flx
-        self.qub_dim = qub_dim
-        self.qub_cutoff = qub_cutoff
 
         import scqubits as scq  # lazy import
 
