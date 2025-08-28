@@ -32,6 +32,10 @@ def auto_derive_module(
         module_cfg = deepcopy(ml.get_module(name))
     module_cfg["name"] = name
 
+    # if it also a pulse cfg
+    if "style" in module_cfg:
+        module_cfg.setdefault("phase", 0.0)
+
     # derive pulse in module
     for key, value in module_cfg.items():
         if is_module_cfg(key, value):
