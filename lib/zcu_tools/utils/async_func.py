@@ -95,17 +95,15 @@ class AsyncFunc(Generic[P]):
         if self.func is None:
             return None
 
+        loop = _get_loop()
+
         # Reset state in case this instance was used before.
         # `_closed` marks that the *previous* context was exited; clear it so
         # the new context becomes active again.
         self._closed = False
         self._last_job = None
-        # A fresh event so the new worker can coordinate with this context.
-        self._have_new_job = asyncio.Event()
-        # Threading.Event used to wait for *this* worker to finish on exit.
+        self._have_new_job = asyncio.Event(loop=loop)
         self._worker_done = threading.Event()
-
-        loop = _get_loop()
 
         # Register a dedicated worker coroutine for *this* context instance.
         loop.call_soon_threadsafe(
