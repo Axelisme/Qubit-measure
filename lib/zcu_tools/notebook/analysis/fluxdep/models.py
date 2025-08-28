@@ -72,21 +72,10 @@ def energy2linearform(
         Bs[:, idx] = 0.5 * (energies[:, j] - energies[:, i])
         Cs[:, idx] = 0.0
         idx += 1
-    for i, j in allows.get("blue side2", []):  # E = 0.5 * E_ji + r_f
-        Bs[:, idx] = 0.5 * (energies[:, j] - energies[:, i])
-        Cs[:, idx] = allows["r_f"]
-        idx += 1
-    for i, j in allows.get("red side2", []):  # E = 0.5 * abs(E_ji - r_f)
-        Bs[:, idx] = -0.5 * (energies[:, j] - energies[:, i])
-        Cs[:, idx] = 0.5 * allows["r_f"]
-        idx += 1
 
-    for i, j in allows.get("mirror2", []):  # E = sample_f - 0.5 * E_ji
+    for i, j in allows.get("mirror2", []):  # E = 2 * sample_f - 0.5 * E_ji
         Bs[:, idx] = -0.5 * (energies[:, j] - energies[:, i])
-        Cs[:, idx] = allows[
-            "sample_f"
-        ]  # from zcu_tools.notebook.single_qubit.process import rotate2real
-        # from zcu_tools.notebook.util.fitting import batch_fit_dual_gauss, fit_gauss, gauss_func
+        Cs[:, idx] = 2 * allows["sample_f"]
         idx += 1
 
     return Bs, Cs
@@ -125,10 +114,6 @@ def energy2transition(
         names.append(f"{i} -> {j} mirror red")
     for i, j in allows.get("transitions2", []):  # E = 0.5 * E_ji
         names.append(f"2 {i} -> {j}")
-    for i, j in allows.get("blue side2", []):  # E = 0.5 * E_ji + r_f
-        names.append(f"2 {i} -> {j} blue side")
-    for i, j in allows.get("red side2", []):  # E = 0.5 * abs(E_ji - r_f)
-        names.append(f"2 {i} -> {j} red side")
     for i, j in allows.get("mirror2", []):  # E = sample_f - 0.5 * E_ji
         names.append(f"2 {i} -> {j} mirror")
 
