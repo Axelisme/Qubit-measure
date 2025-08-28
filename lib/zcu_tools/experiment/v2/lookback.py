@@ -14,6 +14,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import AbsLivePlotter, LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.debug import print_traceback
 
 LookbackResultType = Tuple[np.ndarray, np.ndarray]
 
@@ -42,14 +43,21 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
         ro_cfg = cfg["readout"]["ro_cfg"]
 
         def run_once(cfg, progress: bool = True) -> LookbackResultType:
-            prog = (
-                TwoToneProgram(soccfg, cfg)
-                if qub_pulse
-                else OneToneProgram(soccfg, cfg)
-            )
-            IQlist = prog.acquire_decimated(soc, progress=progress)
+            try:
+                prog = (
+                    TwoToneProgram(soccfg, cfg)
+                    if qub_pulse
+                    else OneToneProgram(soccfg, cfg)
+                )
 
-            Ts = prog.get_time_axis(ro_index=0)
+                Ts = prog.get_time_axis(ro_index=0)
+                IQlist = prog.acquire_decimated(soc, progress=progress)
+
+            except Exception:
+                print("Error during measurement:")
+                print_traceback()
+                raise
+
             Ts += cfg["readout"]["ro_cfg"]["trig_offset"]
 
             return Ts, IQlist[0].dot([1, 1j])
