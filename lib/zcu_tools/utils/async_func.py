@@ -1,118 +1,173 @@
+import asyncio
+import contextvars
 import threading
-import time
 from copy import deepcopy
 from functools import wraps
-from typing import Callable, Generic, Optional
+from typing import Callable, Dict, Generic, Optional, Tuple
 
 from typing_extensions import ParamSpec
 
 from zcu_tools.utils.debug import print_traceback
 
+"""
+AsyncFunc
+=========
+Wrap a **synchronous** function that returns ``None`` so that:
+
+1. Calls from the main-thread **return immediately** – execution is
+   delegated to a background thread that runs a single, global
+   ``asyncio`` event-loop shared by **all** ``AsyncFunc`` instances.
+2. For each ``AsyncFunc`` instance, *only the most-recent call* is ever
+   executed (subsequent calls overwrite the pending one).
+3. Leaving the ``with`` block:
+   • clears any pending, not-yet-executed job from *this* instance;
+   • waits for a running job of *this* instance to finish, then returns.
+4. The background thread is created lazily on the *first* instance and
+   marked as *daemon* – it won’t block interpreter shutdown.  Remaining
+   jobs are silently ignored at process exit.
+
+Typical usage
+-------------
+
+>>> def task(x):
+>>>     print("working", x)
+>>>     time.sleep(0.2)
+>>>
+>>> with AsyncFunc(task) as atask:
+>>>     for i in range(5):
+>>>         atask(i)   # returns instantly
+>>>         time.sleep(0.05)
+>>> # on exiting the context the last task is allowed to complete
+"""
+
+# -------------------------------------------------------------
+# Global background event-loop (singleton)
+# -------------------------------------------------------------
+_LOOP_READY = threading.Event()
+_BG_LOOP: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _run_loop() -> None:
+    """Target for the background daemon thread: create & run loop."""
+    global _BG_LOOP
+    _BG_LOOP = asyncio.new_event_loop()
+    asyncio.set_event_loop(_BG_LOOP)
+    _LOOP_READY.set()
+    _BG_LOOP.run_forever()
+
+
+def _get_loop() -> asyncio.AbstractEventLoop:
+    """Return the shared background loop; create it on first use."""
+    if _BG_LOOP is None:
+        t = threading.Thread(target=_run_loop, daemon=True, name="AsyncFuncLoop")
+        t.start()
+        _LOOP_READY.wait()
+    return _BG_LOOP  # type: ignore[return-value]
+
+
+# -------------------------------------------------------------
+# AsyncFunc implementation
+# -------------------------------------------------------------
 P = ParamSpec("P")
 
 
 class AsyncFunc(Generic[P]):
-    """
-    讓函數在非同步線程中執行，並確保最小間隔時間。
-    """
+    """See module-level docstring for behaviour details."""
 
-    def __init__(
-        self, func: Optional[Callable[P, None]], min_interval: float = 0.1
-    ) -> None:
-        """
-        初始化 AsyncFunc 類別。
-
-        Args:
-            func (Optional[Callable]): 要執行的函數。
-            min_interval (float, optional): 兩次執行之間的最小間隔時間。預設為 0.1 秒。
-        """
-        self.func = func
-        self.min_interval = min_interval
-
-        if min_interval <= 0:
-            raise ValueError("min_interval must be greater than 0")
-
+    def __init__(self, func: Optional[Callable[P, None]]) -> None:
         if func is not None and not callable(func):
-            raise TypeError("func must be a callable")
+            raise TypeError("func must be callable or None")
+        self.func = func
 
-    def _init_worker_thread(self) -> None:
-        self.lock = threading.Lock()
+        # Runtime state
+        self._last_job: Optional[Tuple[contextvars.Context, Tuple, Dict]] = None
+        self._have_new_job: Optional[asyncio.Event] = None
+        self._closed: bool = False
+        self._worker_done = threading.Event()
 
-        # these variables are protected by lock
-        self.acquiring = True
-        self.have_new_job = threading.Event()
-        self.last_job = None
-
-        # start worker thread
-        self.worker_t = threading.Thread(target=self.work_loop, daemon=True)
-        self.worker_t.start()  # start worker thread
-
+    # -----------------------------------------------------
+    # Context-manager protocol
+    # -----------------------------------------------------
     def __enter__(self) -> Optional[Callable[P, None]]:
-        """
-        啟動非同步執行環境，並初始化相關資源。
-        """
+        # Allow the same instance to be entered multiple times (non-nested).
+        # If the wrapped function is `None`, we simply behave as a no-op
+        # wrapper and return early.
         if self.func is None:
-            return None  # do nothing
+            return None
 
-        self._init_worker_thread()
+        # Reset state in case this instance was used before.
+        # `_closed` marks that the *previous* context was exited; clear it so
+        # the new context becomes active again.
+        self._closed = False
+        self._last_job = None
+        # A fresh event so the new worker can coordinate with this context.
+        self._have_new_job = asyncio.Event()
+        # Threading.Event used to wait for *this* worker to finish on exit.
+        self._worker_done = threading.Event()
+
+        loop = _get_loop()
+
+        # Register a dedicated worker coroutine for *this* context instance.
+        loop.call_soon_threadsafe(
+            lambda: asyncio.create_task(
+                self._worker(), name=f"AsyncFuncWorker-{id(self)}"
+            )
+        )
 
         @wraps(self.func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:
-            # this method may be called concurrently, so we need to protect it
-            # also, make it executed in worker thread, to avoid blocking main thread
-            with self.lock:
-                # only keep the latest job
-                if self.acquiring:
-                    self.last_job = deepcopy((args, kwargs))
-                    self.have_new_job.set()  # notify worker thread
-
-            return None
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> None:  # type: ignore[override]
+            """Main-thread call: save latest args & wake worker; return immediately."""
+            if self._closed:
+                return
+            ctx = contextvars.copy_context()
+            self._last_job = (ctx, deepcopy(args), deepcopy(kwargs))
+            # Must set the asyncio.Event from the correct thread
+            loop.call_soon_threadsafe(self._have_new_job.set)  # type: ignore[arg-type]
 
         return wrapper
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """
-        結束非同步執行環境，釋放相關資源。
-        """
-        if self.func is None:
-            return  # do nothing
+        # If wrapper is a no-op or the context has already been closed, do
+        # nothing. The extra guard ensures that nested exit calls do not break
+        # repeated usage.
+        if self.func is None or self._closed:
+            return
+        self._closed = True
+        # Discard pending job and wake the worker so it can terminate
+        self._last_job = None
+        _get_loop().call_soon_threadsafe(self._have_new_job.set)  # type: ignore[arg-type]
+        # Wait until the worker signals completion (incl. running job)
+        self._worker_done.wait()
 
-        self.last_job = None
-        with self.lock:
-            self.acquiring = False
-            self.have_new_job.set()  # notify worker thread to exit
-        self.worker_t.join()
+    # -----------------------------------------------------
+    # Worker coroutine (runs inside the shared loop)
+    # -----------------------------------------------------
+    async def _worker(self) -> None:
+        assert self.func is not None
+        assert self._have_new_job is not None
 
-    def work_loop(self) -> None:
-        """
-        工作執行緒的主迴圈，負責執行非同步任務。
-        """
-        assert self.func is not None, "This method should not be called if func is None"
-        prev_start = time.time() - 2 * self.min_interval
-        while True:
-            self.have_new_job.wait()  # wait for new job
+        try:
+            while True:
+                await self._have_new_job.wait()
+                self._have_new_job.clear()
 
-            # this don't need to be protected by lock
-            # because it is only be set before event is set
-            if not self.acquiring:
-                break  # if not acquiring, exit
+                # If context exited and nothing left to do => quit
+                if self._closed and self._last_job is None:
+                    break
 
-            # check if min_interval is satisfied
-            if time.time() - prev_start < self.min_interval:
-                time.sleep(self.min_interval / 10)
-                continue
+                job = self._last_job
+                self._last_job = None  # keep only one job
+                if job is None:
+                    continue  # may be overwritten by newer call
 
-            with self.lock:  # get job
-                job, self.last_job = self.last_job, None
-                self.have_new_job.clear()  # clear flag
-
-            # do not raise exception in this thread
-            try:
-                assert job is not None, "Job should not be None"
-                args, kwargs = job
-                self.func(*args, **kwargs)
-            except Exception:
-                print("Error in async func:")
-                print_traceback()
-            finally:
-                prev_start = time.time()
+                ctx, args, kwargs = job
+                try:
+                    # run synchronous func in executor to avoid blocking loop
+                    await asyncio.get_running_loop().run_in_executor(
+                        None, lambda: ctx.run(self.func, *args, **kwargs)
+                    )
+                except Exception:
+                    print("Error in async func:")
+                    print_traceback()
+        finally:
+            self._worker_done.set()
