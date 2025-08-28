@@ -69,7 +69,7 @@ class ProgramClient(AbsProxy):
             cb = kwargs["callback"]
 
             def callback_with_bar(ir: int, *args, **kwargs) -> None:
-                bar.update(max(ir + 1 - bar.n, 0))
+                bar.update(max(ir - bar.n, 0))
                 if cb is not None:
                     cb(ir, *args, **kwargs)
 
