@@ -49,7 +49,7 @@ import zcu_tools.config as zc
 # Create data folder and cfg
 
 ```python
-chip_name = r"Q3_2D/Q2"
+chip_name = r"Test"
 
 database_path = create_datafolder(os.path.join(os.getcwd(), ".."), prefix=chip_name)
 ml = ModuleLibrary(cfg_path=os.path.join(database_path, "module_cfg.yaml"))
@@ -62,11 +62,11 @@ from zcu_tools.remote import make_proxy
 from zcu_tools.program.base import MyProgram  # noqa: F401
 from zcu_tools.notebook.utils import get_ip_address  # noqa: F401
 
-zc.config.LOCAL_IP = get_ip_address("eth0")
-# zc.config.LOCAL_IP = "192.168.10.232"
+# zc.config.LOCAL_IP = get_ip_address("eth0")
+zc.config.LOCAL_IP = "100.121.201.53"
 zc.config.LOCAL_PORT = 8887
 
-soc, soccfg, rm_prog = make_proxy("192.168.10.7", 8887, proxy_prog=True)
+soc, soccfg, rm_prog = make_proxy("100.123.84.125", 8887, proxy_prog=True)
 MyProgram.init_proxy(rm_prog, test=True)
 print(soccfg)
 ```
@@ -199,7 +199,7 @@ res_name = "R2"
 
 ```python
 res_probe_len = 2.1  # us
-ModuleLibrary.register_waveform(
+ml.register_waveform(
     ro_waveform={
         "style": "flat_top",
         "raise_pulse": {"style": "cosine", "length": 0.1},
@@ -215,7 +215,7 @@ exp_cfg = {
     "readout": {
         "type": "base",
         "pulse_cfg": {
-            **ModuleLibrary.get_waveform("ro_waveform"),
+            **ml.get_waveform("ro_waveform"),
             "ch": res_ch,
             "nqz": 2,
             "gain": 0.15,
@@ -230,7 +230,7 @@ exp_cfg = {
     # "sweep": make_sweep(r_f-4, r_f+4, 101),
     "relax_delay": 0.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
 res_freq_exp = ze.onetone.FreqExperiment()
 fpts, signals = res_freq_exp.run(soc, soccfg, cfg)
@@ -238,8 +238,8 @@ fpts, signals = res_freq_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-# f, kappa, params = res_freq_exp.analyze(use_abcd=False, asym=True)
-f, kappa, params = res_freq_exp.analyze(use_abcd=True)
+f, kappa, params = res_freq_exp.analyze(use_abcd=False, asym=True)
+# f, kappa, params = res_freq_exp.analyze(use_abcd=True)
 pprint(params)
 ```
 
@@ -263,7 +263,7 @@ exp_cfg = {
     "readout": {
         "type": "base",
         "pulse_cfg": {
-            **ModuleLibrary.get_waveform("ro_waveform"),
+            **ml.get_waveform("ro_waveform"),
             "ch": res_ch,
             "nqz": 2,
             "freq": r_f,  # MHz
@@ -308,7 +308,7 @@ exp_cfg = {
     "readout": {
         "type": "base",
         "pulse_cfg": {
-            **ModuleLibrary.get_waveform("ro_waveform"),
+            **ml.get_waveform("ro_waveform"),
             "ch": res_ch,
             "nqz": 2,
             "gain": 0.1,
@@ -363,11 +363,11 @@ cur_A = 8.0e-3
 
 ```python
 ro_pulse_len = 3.1  # us
-ModuleLibrary.register_module(
+ml.register_module(
     readout_rf={
         "type": "base",
         "pulse_cfg": {
-            **ModuleLibrary.get_waveform("ro_waveform"),
+            **ml.get_waveform("ro_waveform"),
             "ch": res_ch,
             "nqz": 2,
             "freq": r_f,
@@ -393,7 +393,7 @@ preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
 
 ```python
 qub_name = "Q2"
-ModuleLibrary.register_waveform(
+ml.register_waveform(
     qub_waveform={
         "style": "flat_top",
         "raise_pulse": {"style": "cosine", "length": 0.02},
@@ -421,7 +421,7 @@ q_f
 exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": {
-        **ModuleLibrary.get_waveform("qub_waveform"),
+        **ml.get_waveform("qub_waveform"),
         "ch": qub_0_1_ch,
         "nqz": 1,
         "gain": 0.03,
@@ -485,7 +485,7 @@ reset_f
 ```python
 exp_cfg = {
     # "init_pulse": {
-    #     **ModuleLibrary.get_waveform("qub_waveform"),
+    #     **ml.get_waveform("qub_waveform"),
     #     "ch": qub_ch,
     #     "nqz": 2,
     #     "gain": 0.01,
@@ -494,7 +494,7 @@ exp_cfg = {
     "tested_reset": {
         "type": "pulse",
         "pulse_cfg": {
-            **ModuleLibrary.get_waveform("qub_waveform"),
+            **ml.get_waveform("qub_waveform"),
             "ch": qub_1_4_ch,
             "nqz": 2,
             "gain": 0.5,
@@ -537,7 +537,7 @@ exp_cfg = {
     "reset": {
         "type": "pulse",
         "pulse_cfg": {
-            **ModuleLibrary.get_waveform("qub_waveform"),
+            **ml.get_waveform("qub_waveform"),
             "ch": qub_1_4_ch,
             "nqz": 2,
             "gain": 0.5,
@@ -569,7 +569,7 @@ single_reset_length_exp.save(
 #### Set Reset Pulse
 
 ```python
-ModuleLibrary.register_module(
+ml.register_module(
     reset_10={
         **cfg["tested_reset"],
         "length": 5.0,  # us
@@ -622,7 +622,7 @@ reset_f2
 exp_cfg = {
     "reset": "reset_120",
     # "init_pulse": {
-    #     **ModuleLibrary.get_waveform("qub_waveform"),
+    #     **ml.get_waveform("qub_waveform"),
     #     "ch": qub_all_ch,
     #     "nqz": 2,
     #     "gain": 0.01,
@@ -632,7 +632,7 @@ exp_cfg = {
     "tested_reset": {
         "type": "two_pulse",
         "pulse1_cfg": {
-            **ModuleLibrary.get_waveform("qub_waveform"),
+            **ml.get_waveform("qub_waveform"),
             "ch": qub_4_5_ch,
             "nqz": 2,
             "gain": 1.0,
@@ -641,7 +641,7 @@ exp_cfg = {
             "post_delay": None,
         },
         "pulse2_cfg": {
-            **ModuleLibrary.get_waveform("qub_waveform"),
+            **ml.get_waveform("qub_waveform"),
             "ch": qub_1_4_ch,
             "nqz": 1,
             "gain": 1.0,
@@ -690,7 +690,7 @@ dual_reset_freq_exp.save(
 
 ```python
 mux_reset_len = 10.0
-ModuleLibrary.register_module(
+ml.register_module(
     reset_120={
         "type": "two_pulse",
         "pulse1_cfg": {
@@ -714,7 +714,7 @@ ModuleLibrary.register_module(
 exp_cfg = {
     "reset": "reset_120",
     # "init_pulse": {
-    #     **ModuleLibrary.get_waveform("qub_waveform"),
+    #     **ml.get_waveform("qub_waveform"),
     #     "ch": qub_all_ch,
     #     "nqz": 2,
     #     "gain": 0.01,
@@ -752,7 +752,7 @@ dual_reset_pdr_exp.save(
 ```
 
 ```python
-ModuleLibrary.update_module(
+ml.update_module(
     "reset_120",
     override_cfg={
         "pulse1_cfg": {"gain": gain1},
@@ -788,7 +788,7 @@ dual_reset_len_exp.save(
 
 ```python
 mux_reset_len = 30.0  # us
-ModuleLibrary.update_module(
+ml.update_module(
     "reset_120",
     override_cfg={
         "pulse1_cfg": {"length": mux_reset_len},
@@ -828,7 +828,7 @@ dual_reset_check_exp.save(
 exp_cfg = {
     # "reset": "reset_120",
     # "qub_pulse": {
-    #     **ModuleLibrary.get_waveform("qub_waveform"),
+    #     **ml.get_waveform("qub_waveform"),
     #     "ch": qub_all_ch,
     #     "nqz": 2,
     #     "length": 5,  # us
@@ -869,7 +869,7 @@ cur_A = 8.0e-3
 ```python
 exp_cfg = {
     "qub_pulse": {
-        **ModuleLibrary.get_waveform("qub_waveform"),
+        **ml.get_waveform("qub_waveform"),
         "ch": qub_all_ch,
         "nqz": 2,
         "gain": 0.2,
@@ -951,16 +951,16 @@ dispersive_shift_exp.save(
 ## AC Stark Shift
 
 ```python
-ac_qub_len = ModuleLibrary.get_module("pi_amp")["length"]  # us
+ac_qub_len = ml.get_module("pi_amp")["length"]  # us
 exp_cfg = {
     # "reset": "reset_120",
     "stark_pulse1": {
-        **ModuleLibrary.get_module("readout_rf")["pulse_cfg"],
+        **ml.get_module("readout_rf")["pulse_cfg"],
         "length": 6.0 / rf_w + ac_qub_len,  # us
         "post_delay": None,
     },
     "stark_pulse2": {
-        **ModuleLibrary.get_module("pi_amp"),
+        **ml.get_module("pi_amp"),
         "length": ac_qub_len,  # us
         "t": 5.0 / rf_w,
         "post_delay": 5.0 / rf_w,
@@ -997,17 +997,17 @@ ac_stark_exp.save(
 exp_cfg = {
     "reset": "reset_120",
     "X180_pulse": {
-        **ModuleLibrary.get_module("pi_amp"),
+        **ml.get_module("pi_amp"),
     },
     "Y180_pulse": {
-        **ModuleLibrary.get_module("pi_amp"),
+        **ml.get_module("pi_amp"),
         "phase": 90,  # degrees
     },
     "X90_pulse": {
-        **ModuleLibrary.get_module("pi2_amp"),
+        **ml.get_module("pi2_amp"),
     },
     "Y90_pulse": {
-        **ModuleLibrary.get_module("pi2_amp"),
+        **ml.get_module("pi2_amp"),
         "phase": 90,  # degrees
     },
     # "readout": "readout_rf",
@@ -1040,7 +1040,7 @@ allxy_exp.save(
 exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": {
-        **ModuleLibrary.get_waveform("qub_waveform"),
+        **ml.get_waveform("qub_waveform"),
         "ch": qub_1_4_ch,
         "nqz": 1,
         "freq": q_f,
@@ -1080,7 +1080,7 @@ qub_lenrabi_exp.save(
 ```
 
 ```python
-ModuleLibrary.register_module(
+ml.register_module(
     pi_len={
         **exp_cfg["qub_pulse"],
         "length": pi_len,
@@ -1097,12 +1097,12 @@ ModuleLibrary.register_module(
 ## Amplitude Rabi
 
 ```python
-# pi_gain = ModuleLibrary.get_module("pi_len")["gain"]
+# pi_gain = ml.get_module("pi_len")["gain"]
 # max_gain = min(5 * pi_gain, 1.0)
 exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": {
-        **ModuleLibrary.get_waveform("qub_waveform"),
+        **ml.get_waveform("qub_waveform"),
         "ch": qub_0_1_ch,
         "nqz": 1,
         "freq": q_f,
@@ -1147,7 +1147,7 @@ qub_amprabi_exp.save(
 ```
 
 ```python
-ModuleLibrary.register_module(
+ml.register_module(
     pi_amp={
         **cfg["qub_pulse"],
         "gain": pi_gain,
@@ -1169,7 +1169,7 @@ ModuleLibrary.register_module(
 exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": "pi_amp",
-    "readout": ModuleLibrary.get_module(
+    "readout": ml.get_module(
         "readout_rf",
         # override_cfg={"gain": pdr_max},
     ),
@@ -1201,7 +1201,7 @@ opt_ro_freq_exp.save(
 exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": "pi_amp",
-    "readout": ModuleLibrary.get_module(
+    "readout": ml.get_module(
         "readout_rf",
         {
             "pulse_cfg": {
@@ -1237,7 +1237,7 @@ opt_ro_pdr_exp.save(
 exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": "pi_amp",
-    "readout": ModuleLibrary.get_module(
+    "readout": ml.get_module(
         "readout_rf",
         {
             "pulse_cfg": {
@@ -1271,8 +1271,8 @@ opt_ro_len_exp.save(
 
 ```python
 # ro_max = 3.0
-ModuleLibrary.register_module(
-    readout_dpm=ModuleLibrary.get_module(
+ml.register_module(
+    readout_dpm=ml.get_module(
         "readout_rf",
         {
             "pulse_cfg": {
@@ -1298,7 +1298,7 @@ ModuleLibrary.register_module(
 ## T2Ramsey
 
 ```python
-orig_qf = ModuleLibrary.get_module("pi2_amp")["freq"]
+orig_qf = ml.get_module("pi2_amp")["freq"]
 orig_qf
 ```
 
@@ -1415,7 +1415,7 @@ t2echo_exp.save(
 exp_cfg = {
     "reset": "reset_120",
     "qub_pulse": "pi_amp",
-    "readout": ModuleLibrary.get_module(
+    "readout": ml.get_module(
         "readout_dpm",
         {
             "pulse_cfg": {
