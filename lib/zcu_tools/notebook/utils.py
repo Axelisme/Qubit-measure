@@ -1,5 +1,6 @@
-from typing import Dict, Optional, Union
 import json
+from copy import deepcopy
+from typing import Dict, Optional, Union
 
 
 def make_sweep(
@@ -93,7 +94,7 @@ def get_ip_address(iface: str) -> str:
             raise OSError(f"Interface {iface} not found or has no IPv4 address.")
 
 
-def make_comment(cfg: dict, prepend: str = "") -> str:
+def make_comment(cfg: dict, comment: str = "") -> str:
     """
     Generate a formatted comment string from a configuration dictionary.
 
@@ -105,4 +106,7 @@ def make_comment(cfg: dict, prepend: str = "") -> str:
         str: A formatted comment string.
     """
     # pretty convert cfg to string
-    return prepend + "\n" + json.dumps(cfg, indent=2)
+    cfg = deepcopy(cfg)
+    cfg["comment"] = comment
+
+    return json.dumps(cfg, indent=2)
