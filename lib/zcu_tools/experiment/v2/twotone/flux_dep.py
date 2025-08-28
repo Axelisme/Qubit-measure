@@ -103,6 +103,9 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
     ) -> FluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        if "rf_dev" not in cfg["dev"]:
+            raise ValueError("RF source is not configured")
+
         flux_cfg = cfg["dev"]["flux_dev"]
 
         qub_pulse = cfg["qub_pulse"]
