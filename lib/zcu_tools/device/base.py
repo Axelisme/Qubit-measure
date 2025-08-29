@@ -1,8 +1,12 @@
 import sys
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
-import pyvisa as visa
+if TYPE_CHECKING:
+    try:
+        from pyvisa import ResourceManager
+    except ImportError:
+        ResourceManager = object
 
 
 class BaseDevice(ABC):
@@ -10,8 +14,10 @@ class BaseDevice(ABC):
     Base class for all devices.
     """
 
-    def __init__(self, VISAaddress: str, rm: visa.ResourceManager) -> None:
+    def __init__(self, VISAaddress: str, rm: "ResourceManager") -> None:
         self.VISAaddress = VISAaddress
+
+        import pyvisa as visa
 
         try:
             self.session = rm.open_resource(VISAaddress)
