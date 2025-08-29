@@ -107,7 +107,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         plt.tight_layout()
         plt.plot(fpts, amps, label="signal", marker="o", markersize=3)
         plt.plot(fpts, y_fit, label=f"fit, $kappa$={kappa:.1g} MHz")
-        label = f"$f_res$ = {freq:.5g} +/- {freq_err:.1g} MHz"
+        label = f"$f_res$ = {freq:.7g} +/- {freq_err:.1g} MHz"
         plt.axvline(freq, color="r", ls="--", label=label)
         plt.xlabel("Frequency (MHz)")
         plt.ylabel("Magnitude (a.u.)")
