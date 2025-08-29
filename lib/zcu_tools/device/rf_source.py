@@ -61,7 +61,7 @@ class RFSource(BaseDevice):
     def get_info(self) -> DeviceInfo:
         return {
             "type": self.__class__.__name__,
-            "address": self.VISAaddress,
+            "VISAaddress": self.VISAaddress,
             "freq": self.get_frequency(),
             "power": self.get_power(),
             "alc": self.get_alc(),

@@ -226,7 +226,7 @@ class YOKOGS200(BaseDevice):
 
         return {
             "type": self.__class__.__name__,
-            "address": self.VISAaddress,
+            "VISAaddress": self.VISAaddress,
             "mode": mode,
             "value": value,
         }
