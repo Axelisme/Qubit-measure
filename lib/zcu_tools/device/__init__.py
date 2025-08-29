@@ -1,6 +1,6 @@
 from typing import Any, Dict
 
-from .base import BaseDevice
+from .base import BaseDevice, DeviceInfo
 
 
 class GlobalDeviceManager:
@@ -30,11 +30,11 @@ class GlobalDeviceManager:
     def setup_devices(
         cls, dev_cfg: Dict[str, Dict[str, Any]], *, progress: bool = True
     ) -> None:
-        for cfg in dev_cfg.values():
-            cls.get_device(cfg["name"]).setup(cfg, progress=progress)
+        for name, cfg in dev_cfg.items():
+            cls.get_device(name).setup(cfg, progress=progress)
 
     @classmethod
-    def get_all_info(cls) -> Dict[str, Dict[str, Any]]:
+    def get_all_info(cls) -> Dict[str, DeviceInfo]:
         return {
             name: device.get_info() for name, device in cls.get_all_devices().items()
         }

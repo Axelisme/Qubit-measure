@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import numpy as np
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 from zcu_tools.program.v2 import OneToneProgram, sweep2param
@@ -33,8 +33,6 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
     ) -> FluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        flux_cfg = cfg["dev"]["flux_dev"]
-
         res_pulse = cfg["readout"]["pulse_cfg"]
         fpt_sweep = cfg["sweep"]["freq"]
         flx_sweep = cfg["sweep"]["flux"]
@@ -46,13 +44,11 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
         fpts = sweep2array(fpt_sweep)  # predicted frequency points
 
         res_pulse["freq"] = sweep2param("freq", fpt_sweep)
-        flux_cfg["value"] = dev_values[0]
 
         def updateCfg(cfg, _, value) -> None:
-            if flux_cfg["mode"] == "current":
-                value *= 1e-3  # convert mA to A
+            set_flux_in_dev_cfg(cfg["dev"], value)
 
-            cfg["dev"]["flux_dev"]["value"] = value
+        updateCfg(cfg, 0, dev_values[0])  # set initial flux value
 
         def measure_fn(
             cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
@@ -64,13 +60,13 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
             cfg,
             measure_fn,
             LivePlotter2DwithLine(
-                f"Flux ({'mA' if flux_cfg['mode'] == 'current' else 'V'})",
+                "Flux device value",
                 "Frequency (MHz)",
                 line_axis=1,
                 num_lines=2,
                 disable=not progress,
             ),
-            xs=dev_values * (1e3 if flux_cfg["mode"] == "current" else 1),  # mA / V
+            xs=dev_values,
             ys=fpts,
             updateCfg=updateCfg,
             signal2real=fluxdep_signal2real,

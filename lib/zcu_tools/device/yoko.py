@@ -1,13 +1,10 @@
 import time
-from typing import TYPE_CHECKING, Any, Dict, Literal, Optional
-
-if TYPE_CHECKING:
-    import pyvisa as visa
+from typing import Any, Dict, Literal, Optional
 
 import numpy as np
 from tqdm.auto import tqdm
 
-from .base import BaseDevice
+from .base import BaseDevice, ResourceManager, DeviceInfo
 
 DEFAULT_RAMPSTEP = 1e-6  # increment step when setting voltage/current
 DEFAULT_RAMPINTERVAL = 0.01  # dwell time for each voltage step # Default MATLAB is 0.01, CANNOT be lower than 0.001 otherwise fridge heats up
@@ -16,7 +13,7 @@ DEFAULT_RAMPINTERVAL = 0.01  # dwell time for each voltage step # Default MATLAB
 class YOKOGS200(BaseDevice):
     # Initializes session for device.
     # VISAaddress: address of device, rm: VISA resource manager
-    def __init__(self, VISAaddress: str, rm: visa.ResourceManager) -> None:
+    def __init__(self, VISAaddress: str, rm: ResourceManager) -> None:
         super().__init__(VISAaddress, rm)
 
         self._rampstep = DEFAULT_RAMPSTEP
@@ -182,11 +179,7 @@ class YOKOGS200(BaseDevice):
 
     # ==========================================================================#
 
-    def setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
-        """
-        Setup the device with the given configuration.
-        """
-
+    def _setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
         cur_mode = self.get_mode()
 
         if cfg["mode"] != cur_mode:
@@ -197,28 +190,26 @@ class YOKOGS200(BaseDevice):
                 "Remember to turn value to zero before changing mode"
             )
 
-        self.output_on()
-
-        CURRENT_LIMIT = 20e-3
-        VOLTAGE_LIMIT = 20
+        CHECK_CURRENT_LIMIT = 20e-3
+        CHECK_VOLTAGE_LIMIT = 20
 
         value = cfg["value"]
         if cur_mode == "current":
             # protect large current
-            if abs(value) > CURRENT_LIMIT:
+            if abs(value) > CHECK_CURRENT_LIMIT:
                 if cfg.get("enable_large_value", False):
                     raise RuntimeError(
-                        f"Try to set current to over {CURRENT_LIMIT}A, are you sure you want to do this?"
+                        f"Try to set current to over {CHECK_CURRENT_LIMIT}A, are you sure you want to do this?"
                         "If you are sure, set enable_large_value=True to override"
                     )
 
             self.set_current(value, progress=progress)
         elif cur_mode == "voltage":
             # protect large voltage
-            if abs(value) > VOLTAGE_LIMIT:
+            if abs(value) > CHECK_VOLTAGE_LIMIT:
                 if cfg.get("enable_large_value", False):
                     raise RuntimeError(
-                        f"Try to set voltage to over {VOLTAGE_LIMIT}V, are you sure you want to do this?"
+                        f"Try to set voltage to over {CHECK_VOLTAGE_LIMIT}V, are you sure you want to do this?"
                         "If you are sure, set enable_large_value=True to override"
                     )
 
@@ -226,7 +217,7 @@ class YOKOGS200(BaseDevice):
         else:
             raise RuntimeError(f"Unknown mode {cur_mode} in device {self.VISAaddress}")
 
-    def get_info(self) -> Dict[str, Any]:
+    def get_info(self) -> DeviceInfo:
         mode = self.get_mode()
         if mode == "voltage":
             value = self.get_voltage()

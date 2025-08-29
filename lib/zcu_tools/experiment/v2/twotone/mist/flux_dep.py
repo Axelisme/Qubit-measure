@@ -1,5 +1,4 @@
 from copy import deepcopy
-from re import A
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -8,7 +7,7 @@ import plotly.graph_objects as go
 from numpy import ndarray
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
 from zcu_tools.liveplot.jupyter import LivePlotter2DwithLine
 from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.simulate import mA2flx
@@ -31,8 +30,6 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
     ) -> MISTFluxPowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        flux_cfg = cfg["dev"]["flux_dev"]
-
         pdr_sweep = cfg["sweep"]["gain"]
         flx_sweep = cfg["sweep"]["flux"]
 
@@ -42,13 +39,10 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
         dev_values = sweep2array(flx_sweep, allow_array=True)  # predicted currents
         pdrs = sweep2array(pdr_sweep)  # predicted gains
 
-        flux_cfg["value"] = dev_values[0]
-
         def updateCfg(cfg, _, value):
-            if flux_cfg["mode"] == "current":
-                value *= 1e-3  # convert mA to A
+            set_flux_in_dev_cfg(cfg["dev"], value)
 
-            cfg["dev"]["flux_dev"]["value"] = value
+        updateCfg(cfg, 0, dev_values[0])  # set initial flux value
 
         def signal2real(signal: ndarray) -> ndarray:
             return np.abs(signal - signal[:, 0][:, None])
@@ -63,12 +57,12 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
             cfg,
             measure_fn,
             LivePlotter2DwithLine(
-                f"Flux ({'mA' if flux_cfg['mode'] == 'current' else 'V'})",
+                "Flux device value",
                 "Drive power (a.u.)",
                 line_axis=1,
                 num_lines=2,
             ),
-            xs=dev_values * (1e3 if flux_cfg["mode"] == "current" else 1),  # mA / V
+            xs=dev_values,
             ys=pdrs,
             updateCfg=updateCfg,
             signal2real=signal2real,

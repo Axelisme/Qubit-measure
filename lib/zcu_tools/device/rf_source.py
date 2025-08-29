@@ -1,6 +1,6 @@
 from typing import Any, Dict, Literal
 
-from .base import BaseDevice
+from .base import BaseDevice, DeviceInfo
 
 
 # Rohde&Schwarz RF Source
@@ -51,14 +51,14 @@ class RFSource(BaseDevice):
         result = self.session.read()
         return result.rstrip("\n")
 
-    def setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
+    def _setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
         self.output_on()
 
         self.set_frequency(cfg["freq"])
         self.set_power(cfg["power"])
         self.set_alc(cfg["alc"])
 
-    def get_info(self) -> Dict[str, Any]:
+    def get_info(self) -> DeviceInfo:
         return {
             "type": self.__class__.__name__,
             "address": self.VISAaddress,
