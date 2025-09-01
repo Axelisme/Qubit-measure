@@ -11,7 +11,9 @@ from .search import (
     calculate_esys,
     calculate_f01,
     calculate_m01,
+    calculate_snr,
     calculate_t1,
     generate_params_table,
     plot_scan_results,
 )
+from .snr import calc_snr

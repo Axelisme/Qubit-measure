@@ -1,14 +1,39 @@
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
-from plotly.graph_objs._figure import Figure
 from plotly.subplots import make_subplots
+
+
+def plot_chi_and_snr_over_photon(
+    photons: np.ndarray,
+    chi_over_n: np.ndarray,
+    snrs: np.ndarray,
+    qub_name: str,
+    flx: float,
+) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
+    best_n = photons[np.argsort(snrs)[-3]]
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    ax1.set_title(f"{qub_name} at flux = {flx:.1f}")
+    ax1.plot(photons, chi_over_n)
+    ax1.set_ylabel(r"$\chi_{01}$ [GHz]")
+    ax1.grid()
+
+    ax2.plot(photons, snrs)
+    ax2.axvline(x=best_n, color="red", linestyle="--", label=f"n = {best_n:.1f}")
+    ax2.set_ylabel(r"SNR")
+    ax2.set_xlabel(r"Photon number")
+    ax2.grid()
+    ax2.legend()
+
+    return fig, (ax1, ax2)
 
 
 def plot_populations_over_photon(
     branchs: List[int], photons: np.ndarray, branch_populations: Dict[int, List[float]]
-) -> Figure:
+) -> go.Figure:
     fig = go.Figure()
 
     for b in branchs:
@@ -62,7 +87,7 @@ def plot_cn_over_flx(
     photons: np.ndarray,
     populations_over_flx: np.ndarray,
     critical_levels: Dict[int, float],
-) -> Figure:
+) -> go.Figure:
     # plot the critical photon number as a function of flux
     fig = make_subplots(
         rows=2,
@@ -116,7 +141,7 @@ def plot_cn_with_mist(
     mist_flxs: np.ndarray,
     mist_photons: np.ndarray,
     mist_amps: np.ndarray,
-) -> Figure:
+) -> go.Figure:
     # plot the critical photon number as a function of flux
     fig = go.Figure()
 

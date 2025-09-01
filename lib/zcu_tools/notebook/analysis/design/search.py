@@ -11,6 +11,7 @@ from tqdm.auto import tqdm
 
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate.fluxonium import calculate_chi_sweep, calculate_dispersive
+from zcu_tools.simulate.fluxonium.branch.floquet import calc_ge_snr
 
 DESIGN_CUTOFF = 40
 DESIGN_EVALS_COUNT = 15
@@ -85,7 +86,7 @@ def calculate_esys(params_table: pd.DataFrame) -> None:
         fluxonium.EL = row["EL"]
         return fluxonium.eigensys(evals_count=fluxonium.truncated_dim)
 
-    tqdm.pandas()
+    tqdm.pandas(desc="Calculating esys")
     params_table["esys"] = params_table.progress_apply(calc_single_esys, axis=1)
 
 
@@ -144,6 +145,31 @@ def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) 
 
     chis = calculate_chi_sweep(params_list, update_fn, g, r_f, progress=True)
     params_table["Chi"] = np.abs(chis[:, 1] - chis[:, 0])
+
+
+def calculate_snr(
+    params_table: pd.DataFrame, g: float, r_f: float, rf_w: float, max_photon: int
+) -> None:
+    # check if esys is calculated
+    if "esys" not in params_table.columns:
+        raise ValueError("This function requires esys to be calculated")
+
+    def _calc_single_snr(row) -> float:
+        _, snrs = calc_ge_snr(
+            params=(row["EJ"], row["EC"], row["EL"]),
+            flx=row["flx"],
+            r_f=r_f,
+            rf_w=rf_w,
+            g=g,
+            qub_dim=DESIGN_EVALS_COUNT,
+            qub_cutoff=DESIGN_CUTOFF,
+            max_photon=max_photon,
+            esys=row["esys"],
+        )
+        return np.sort(snrs)[-3]
+
+    tqdm.pandas(desc="Calculating snr")
+    params_table["snr"] = params_table.progress_apply(_calc_single_snr, axis=1)
 
 
 def calculate_t1(
@@ -236,20 +262,11 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
     params_table = params_table.copy()
     plot_table = params_table.drop(columns=["esys"], errors="ignore")
 
-    # convert Chi from GHz to MHz
-    plot_table["Chi"] *= 1e3
     # convert t1 from ns to us
     plot_table["t1"] *= 1e-3
 
     # Helper to build a descriptive label that conditionally includes additional flags
     def _build_label(row: pd.Series) -> str:
-        """Return a label string for hover info.
-
-        It always shows EJ, EC and EL, and conditionally appends the state of
-        optional columns (collision, low_f01, low_m01) only when they exist in
-        the dataframe.
-        """
-
         parts = [
             f"EJ={row['EJ']:.2f}",
             f"EC={row['EC']:.3f}",
@@ -267,14 +284,14 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
     # 繪製散點圖
     fig = px.scatter(
         plot_table,
-        x="Chi",
+        x="snr",
         y="t1",
         color="valid",
         color_discrete_map={True: "blue", False: "red"},
         log_x=True,
         log_y=True,
         hover_name="Label",
-        labels={"Chi": "Chi", "T1 (us)": "t1"},
+        labels={"SNR": "snr", "T1 (us)": "t1"},
     )
     fig.update_traces(marker=dict(size=3))
 
@@ -287,7 +304,7 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
 
     fig.update_layout(
         title_x=0.501,
-        xaxis_title="Chi (MHz)",
+        xaxis_title="SNR",
         yaxis_title="T1 (us)",
         template="plotly_white",
         showlegend=True,
@@ -303,13 +320,13 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
 def annotate_best_point(fig, data: pd.DataFrame) -> Tuple[float, float, float]:
     """
     Find and plot the best snr's param on the plot, the equation of snr is:
-        snr = Chi * sqrt(T1)
+        snr = snr * sqrt(T1)
     """
 
     # filter out invalid params
     valid_data = data[data["valid"]]
 
-    snrs = valid_data["Chi"] * np.sqrt(valid_data["t1"])
+    snrs = valid_data["snr"] * np.sqrt(valid_data["t1"])
     best_param = valid_data.iloc[np.argmax(snrs)]
 
     EJ, EC, EL = (
@@ -319,7 +336,7 @@ def annotate_best_point(fig, data: pd.DataFrame) -> Tuple[float, float, float]:
     )
 
     fig.add_annotation(
-        x=np.log10(best_param["Chi"] * 1e3),
+        x=np.log10(best_param["snr"]),
         y=np.log10(best_param["t1"] * 1e-3),
         text=f"{EJ:.2f}/{EC:.2f}/{EL:.2f}",
         showarrow=True,
@@ -328,19 +345,6 @@ def annotate_best_point(fig, data: pd.DataFrame) -> Tuple[float, float, float]:
         ax=0,
         ay=-20,
     )
-
-    # draw a line of same snr across best_param
-    # xs = np.linspace(valid_data["Chi"].min(), valid_data["Chi"].max(), 100)
-    # ys = (best_param["Chi"] * np.sqrt(best_param["t1"]) / xs) ** 2
-    # fig.add_trace(
-    #     go.Scatter(
-    #         x=xs,
-    #         y=ys,
-    #         mode="lines",
-    #         name="Same SNR",
-    #         line=dict(color="black", width=1, dash="dot"),
-    #     )
-    # )
 
     return EJ, EC, EL
 
@@ -352,6 +356,8 @@ def add_real_sample(
     Temp: float,
     flx: float = 0.5,
     result_dir: Optional[str] = None,
+    rf_w: float = 7e-3,
+    max_photon: int = 70,
 ) -> None:
     """
     Add a real chip sample to the plot
@@ -379,8 +385,17 @@ def add_real_sample(
     t1 = freq_df["T1 (us)"].iloc[idx]
 
     # calculate chi
-    rf_0, rf_1 = calculate_dispersive(param, flx, r_f, g)
-    chi = np.abs(rf_0 - rf_1) * 1e3
+    _, snrs = calc_ge_snr(
+        params=param,
+        flx=flx,
+        r_f=r_f,
+        rf_w=rf_w,
+        g=g,
+        qub_dim=DESIGN_EVALS_COUNT,
+        qub_cutoff=DESIGN_CUTOFF,
+        max_photon=max_photon,
+    )
+    snr = np.sort(snrs)[-3]
 
     # calculate t1
     fluxonium = scq.Fluxonium(*param, flux=flx, cutoff=DESIGN_CUTOFF, truncated_dim=2)
@@ -393,9 +408,9 @@ def add_real_sample(
     # 添加從實際t1到預測t1的線段
     fig.add_shape(
         type="line",
-        x0=chi,
+        x0=snr,
         y0=t1,
-        x1=chi,
+        x1=snr,
         y1=predict_t1,
         line=dict(color="red", width=1, dash="dot"),
         name=chip_name,
@@ -405,14 +420,14 @@ def add_real_sample(
 
     # 添加實際t1的點
     fig.add_scatter(
-        x=[chi],
+        x=[snr],
         y=[t1],
         mode="markers+text",
         marker=dict(symbol="x", size=5, color="black"),
         text=[chip_name],
         textposition="top center",
         hovertemplate=f"<b>{chip_name}</b><br>"
-        + f"χ: {chi:.2f} MHz<br>"
+        + f"SNR: {snr:.2f}<br>"
         + f"T1: {t1:.2f} us<br>"
         + f"EJ: {param[0]:.3f} GHz<br>"
         + f"EC: {param[1]:.3f} GHz<br>"
@@ -423,7 +438,7 @@ def add_real_sample(
 
     # 添加預測t1的點
     fig.add_scatter(
-        x=[chi],
+        x=[snr],
         y=[predict_t1],
         mode="markers",
         marker=dict(symbol="x", size=5, color="red"),

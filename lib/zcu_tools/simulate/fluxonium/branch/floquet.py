@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import qutip as qt
@@ -15,6 +15,7 @@ class FloquetBranchAnalysis:
         flx: float = 0.5,
         qub_dim: int = 40,
         qub_cutoff: int = 60,
+        esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
     ) -> None:
         self.r_f = r_f
         self.g = g
@@ -24,7 +25,8 @@ class FloquetBranchAnalysis:
         fluxonium = scq.Fluxonium(
             *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
         )
-        esys = fluxonium.eigensys(evals_count=qub_dim)
+        if esys is None:
+            esys = fluxonium.eigensys(evals_count=qub_dim)
         H = qt.Qobj(fluxonium.hamiltonian(energy_esys=esys))
         n_op = qt.Qobj(fluxonium.n_operator(energy_esys=esys))
         self.H_with_drive = [H, [n_op, lambda t, amp: amp * np.cos(r_f * t)]]
@@ -103,6 +105,82 @@ class FloquetBranchAnalysis:
         return branch_populations
 
 
+def calc_branch_infos(
+    branchs: List[int],
+    *,
+    params: Tuple[float, float, float],
+    r_f: float,
+    g: float,
+    flx: float,
+    qub_dim: int,
+    qub_cutoff: int,
+    photons: np.ndarray,
+    avg_times: Optional[np.ndarray] = None,
+    progress: bool = True,
+    esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+) -> Tuple[Dict[int, List[int]], Dict[int, List[float]]]:
+    fb_analysis = FloquetBranchAnalysis(
+        params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff, esys=esys
+    )
+
+    fbasis_n = Parallel(n_jobs=-1)(
+        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
+        for photon in tqdm(
+            photons, desc="Computing Floquet basis", disable=not progress
+        )
+    )
+
+    branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
+    return branch_infos, fbasis_n
+
+
+def calc_ge_snr(
+    params: Tuple[float, float, float],
+    flx: float,
+    r_f: float,
+    rf_w: float,
+    g: float,
+    qub_dim: int,
+    qub_cutoff: int,
+    max_photon: int,
+    esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    branchs = [0, 1]
+
+    amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
+    photons = (amps / (2 * g)) ** 2
+
+    branch_infos, fbasis_n = calc_branch_infos(
+        branchs=branchs,
+        params=params,
+        r_f=r_f,
+        g=g,
+        flx=flx,
+        qub_dim=qub_dim,
+        qub_cutoff=qub_cutoff,
+        photons=photons,
+        progress=False,
+        esys=esys,
+    )
+
+    branch_energies = np.array(
+        [
+            [fbasis.e_quasi[branch_infos[b][n]] for n, fbasis in enumerate(fbasis_n)]
+            for b in branchs
+        ]
+    )
+
+    f01_over_n = branch_energies[1] - branch_energies[0]
+    chi_over_n = (f01_over_n[1:] - f01_over_n[:-1]) / (photons[1:] - photons[:-1])
+
+    def signal_diff(x: np.ndarray) -> np.ndarray:
+        return 1 - np.exp(-(x**2) / (2 * rf_w**2))
+
+    snrs = np.abs(signal_diff(chi_over_n) * np.sqrt(photons[:-1]))
+
+    return photons[:-1], snrs
+
+
 class FloquetWithTLSBranchAnalysis:
     def __init__(
         self,
@@ -114,6 +192,7 @@ class FloquetWithTLSBranchAnalysis:
         flx: float = 0.5,
         qub_dim: int = 40,
         qub_cutoff: int = 60,
+        esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
     ) -> None:
         self.r_f = r_f
         self.g = g
@@ -123,7 +202,8 @@ class FloquetWithTLSBranchAnalysis:
         fluxonium = scq.Fluxonium(
             *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
         )
-        esys = fluxonium.eigensys(evals_count=qub_dim)
+        if esys is None:
+            esys = fluxonium.eigensys(evals_count=qub_dim)
         H = qt.Qobj(fluxonium.hamiltonian(energy_esys=esys))
         n_op = qt.Qobj(fluxonium.n_operator(energy_esys=esys))
 
@@ -218,3 +298,42 @@ class FloquetWithTLSBranchAnalysis:
         branch_populations = dict(branch_populations)
 
         return branch_populations
+
+
+def calc_branch_infos_with_tls(
+    branchs: List[int],
+    *,
+    params: Tuple[float, float, float],
+    r_f: float,
+    g: float,
+    E_tls: float,
+    g_tls: float,
+    flx: float,
+    qub_dim: int,
+    qub_cutoff: int,
+    photons: np.ndarray,
+    avg_times: Optional[np.ndarray] = None,
+    progress: bool = True,
+    esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+) -> Tuple[Dict[int, List[int]], Dict[int, List[float]]]:
+    fb_analysis = FloquetWithTLSBranchAnalysis(
+        params,
+        r_f,
+        g,
+        E_tls,
+        g_tls,
+        flx=flx,
+        qub_dim=qub_dim,
+        qub_cutoff=qub_cutoff,
+        esys=esys,
+    )
+
+    fbasis_n = Parallel(n_jobs=-1)(
+        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
+        for photon in tqdm(
+            photons, desc="Computing Floquet basis", disable=not progress
+        )
+    )
+
+    branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
+    return branch_infos, fbasis_n

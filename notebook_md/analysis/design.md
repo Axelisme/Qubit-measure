@@ -36,6 +36,7 @@ import zcu_tools.notebook.analysis.design as zd
 import zcu_tools.notebook.analysis.plot as zp
 import zcu_tools.simulate.equation as zeq
 from zcu_tools.notebook.persistance import dump_result
+from zcu_tools.notebook.analysis.branch import plot_chi_and_snr_over_photon
 ```
 
 ```python
@@ -74,13 +75,14 @@ flxs = np.linspace(0.0, 0.55, 1000)
 ```
 
 ```python
-params_table = zd.generate_params_table(EJb, ECb, ELb, flx)
+params_table = zd.generate_params_table(EJb, ECb, ELb, flx, precision=0.1)
 
 zd.calculate_esys(params_table)
 zd.calculate_f01(params_table)
 zd.calculate_m01(params_table)
 zd.calculate_t1(params_table, noise_channels, Temp)
-zd.calculate_dipersive_shift(params_table, g=g, r_f=r_f)
+# zd.calculate_dipersive_shift(params_table, g=g, r_f=r_f)
+zd.calculate_snr(params_table, g, r_f, rf_w=7e-3, max_photon=70)
 ```
 
 ```python
@@ -89,12 +91,12 @@ zd.avoid_collision(params_table, avoid_freqs, threshold=0.4)
 zd.avoid_low_f01(params_table, f01_threshold=0.08)
 zd.avoid_low_m01(params_table, m01_threshold=0.07)
 result_table = params_table.drop(["esys"], axis=1)
-result_table.to_parquet(f"../../result/{qub_name}/result_table.parquet")
+result_table.to_parquet(f"../../result/{qub_name}/design_table.parquet")
 result_table
 ```
 
 ```python
-result_table = pd.read_parquet(f"../../result/{qub_name}/result_table.parquet")
+result_table = pd.read_parquet(f"../../result/{qub_name}/design_table.parquet")
 
 fig = zd.plot_scan_results(result_table)
 fig.update_layout(
@@ -114,7 +116,7 @@ fig.show()
 ```
 
 ```python
-save_name = f"t1vsChi_rf{r_f:.2f}"
+save_name = f"t1vsSNR_rf{r_f:.2f}"
 fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
 
@@ -178,6 +180,27 @@ fig.show()
 save_name = f"Chi_rf{r_f:.2f}"
 fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
 fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
+```
+
+```python
+rf_w = 0.006
+g = 0.1
+flx = 0.5
+
+qub_dim = 20
+qub_cutoff = 60
+max_photon = 70
+
+photons, chi_over_n, snrs = zd.calc_snr(
+    best_params, r_f, g, flx, qub_dim, qub_cutoff, max_photon, rf_w
+)
+
+fig, (ax1, ax2) = plot_chi_and_snr_over_photon(photons, chi_over_n, snrs, qub_name, flx)
+# ax1.set_ylim(0.002, 0.006)
+# ax2.set_ylim(0.0, 1.5)
+
+os.makedirs(f"../../result/{qub_name}/image/branch_floquet", exist_ok=True)
+fig.savefig(f"../../result/{qub_name}/image/branch_floquet/snr_over_n.png")
 ```
 
 ```python
@@ -252,7 +275,7 @@ project_name = "FluxoniumX400"
 ```
 
 ```python
-EC = 1.1 * 1.1 / 0.9
+EC = (1.1 * 1.1 / 0.9 * 1.1) ** 0.5
 # EC = best_params[1]
 
 Cap = zeq.EC2C(EC)
@@ -266,7 +289,7 @@ print(f"Inductance: {Lj:.5g} nH")
 
 ```python
 # result_path = f"../../result/{qub_name}/{project_name}/X325_Y51,5.csv"
-result_path = f"../../result/{qub_name}/{project_name}/X325_Y29_2.csv"
+result_path = f"../../result/{qub_name}/{project_name}/X35_Y2.csv"
 fig, ax, c_Lj, c_freq, width = zd.fit_hfss_anticross(result_path)
 
 hfss_C = zeq.Lfreq2C(c_Lj, c_freq)

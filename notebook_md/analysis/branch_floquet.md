@@ -18,7 +18,6 @@ import os
 from typing import Dict, List, Tuple
 
 import numpy as np
-import plotly.graph_objects as go
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
@@ -29,17 +28,19 @@ from zcu_tools.notebook.persistance import load_result
 from zcu_tools.notebook.analysis.branch import (
     plot_cn_over_flx,
     plot_populations_over_photon,
+    plot_chi_and_snr_over_photon,
 )
 from zcu_tools.simulate.fluxonium.branch.floquet import (
     FloquetBranchAnalysis,
     FloquetWithTLSBranchAnalysis,
 )
+from zcu_tools.notebook.analysis.design import calc_snr
 ```
 
 # Load Parameters
 
 ```python
-qub_name = "SimQubit"
+qub_name = "DesignR59"
 
 os.makedirs(f"../../result/{qub_name}/image/branch_floquet", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/web/branch_floquet", exist_ok=True)
@@ -60,12 +61,36 @@ elif "r_f" in allows:
     print(f"r_f: {r_f} GHz")
 ```
 
+# SNR power dependence
+
+```python
+r_f = 5.927
+rf_w = 0.006
+g = 0.1
+flx = 0.5
+
+qub_dim = 20
+qub_cutoff = 60
+max_photon = 70
+
+photons, chi_over_n, snrs = calc_snr(
+    params, r_f, g, flx, qub_dim, qub_cutoff, max_photon, rf_w
+)
+```
+
+```python
+fig, _ = plot_chi_and_snr_over_photon(photons, chi_over_n, snrs, qub_name, flx)
+
+fig.savefig(f"../../result/{qub_name}/image/branch_floquet/snr_over_n.png")
+plt.show()
+```
+
 # Single
 
 ```python
-r_f = 5.25
+# r_f = 5.25
 rf_w = 0.006
-g = 0.11
+# g = 0.11
 flx = 0.5
 
 qub_dim = 40
@@ -78,7 +103,7 @@ photons = (amps / (2 * g)) ** 2
 
 def calc_populations(
     branchs: List[int], progress: bool = True
-) -> Tuple[np.ndarray, Dict[int, List[float]]]:
+) -> Tuple[Dict[int, List[int]], Dict[int, List[float]]]:
     avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
 
     fb_analysis = FloquetBranchAnalysis(
@@ -97,24 +122,21 @@ def calc_populations(
         fbasis_n, branch_infos, avg_times, progress=progress
     )
 
-    return photons, branch_populations
+    return branch_populations
 ```
 
 ```python
 branchs = list(range(15))
 
-photons, branch_populations = calc_populations(branchs)
+branch_populations = calc_populations(branchs)
 ```
 
 ```python
 fig = plot_populations_over_photon(branchs, photons, branch_populations)
 
-fig.write_html(
-    f"../../result/{qub_name}/web/branch_floquet/populations_phi{flx:0.2f}.html"
-)
-fig.write_image(
-    f"../../result/{qub_name}/image/branch_floquet/populations_phi{flx:0.2f}.png"
-)
+prefix = f"../../result/{qub_name}/web/branch_floquet"
+fig.write_html(os.path.join(prefix, "populations_phi{flx:0.2f}.html"))
+fig.write_image(os.path.join(prefix, "populations_phi{flx:0.2f}.png"))
 fig.show()
 ```
 
