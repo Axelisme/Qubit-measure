@@ -129,7 +129,7 @@ class YOKOGS200(BaseDevice):
                 value = self.get_current()
             if value != 0.0 and not force:
                 raise RuntimeError(
-                    "Try to change mode while value is not zero. Please set value to zero before changing mode"
+                    "Try to change mode while value is not zero. Please set value to zero before changing mode, "
                     "Or set force=True to override, make sure you know what you are doing"
                 )
 
@@ -184,9 +184,9 @@ class YOKOGS200(BaseDevice):
 
         if cfg["mode"] != cur_mode:
             raise RuntimeError(
-                f"Current mode {cur_mode} in device {self.VISAaddress}, but cfg requires {cfg['mode']}"
-                "YOKOGS200 does not support implicit setup mode to prevent sudden current/voltage change"
-                "Please change the device mode manually before calling setup"
+                f"Current mode: {cur_mode} in device {self.VISAaddress}, but cfg requires: {cfg['mode']} mode, "
+                "YOKOGS200 does not support implicit setup mode to prevent sudden current/voltage change, "
+                "Please change the device mode manually before calling setup, "
                 "Remember to turn value to zero before changing mode"
             )
 
@@ -199,7 +199,7 @@ class YOKOGS200(BaseDevice):
             if abs(value) > CHECK_CURRENT_LIMIT:
                 if cfg.get("enable_large_value", False):
                     raise RuntimeError(
-                        f"Try to set current to over {CHECK_CURRENT_LIMIT}A, are you sure you want to do this?"
+                        f"Try to set current to over {CHECK_CURRENT_LIMIT}A, are you sure you want to do this? "
                         "If you are sure, set enable_large_value=True to override"
                     )
 
@@ -209,7 +209,7 @@ class YOKOGS200(BaseDevice):
             if abs(value) > CHECK_VOLTAGE_LIMIT:
                 if cfg.get("enable_large_value", False):
                     raise RuntimeError(
-                        f"Try to set voltage to over {CHECK_VOLTAGE_LIMIT}V, are you sure you want to do this?"
+                        f"Try to set voltage to over {CHECK_VOLTAGE_LIMIT}V, are you sure you want to do this? "
                         "If you are sure, set enable_large_value=True to override"
                     )
 
