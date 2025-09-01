@@ -120,6 +120,7 @@ class ModuleLibrary:
 
     def dump(self) -> None:
         dump_cfg = dict(waveforms=self.waveforms, modules=self.modules)
+        dump_cfg = numpy2number(deepcopy(dump_cfg))
 
         with open(self.cfg_path, "w") as f:
             yaml.dump(dump_cfg, f)
