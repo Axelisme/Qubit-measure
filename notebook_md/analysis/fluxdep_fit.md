@@ -41,7 +41,7 @@ from zcu_tools.simulate import mA2flx
 ```
 
 ```python
-qub_name = "SF010"
+qub_name = "Q3_2D/Q1"
 
 server_ip = "021-zcu216"
 port = 4999
@@ -66,7 +66,7 @@ pprint(allows)
 # Load Spectrum
 
 ```python
-spect_path = r"../../Database/SF010/SF010_flux_6.hdf5"
+spect_path = r"../../Database/Q3_2D/Q1/003_qubit_flux_spec_ge_Q1_1.hdf5"
 # spect_path = r"../../Database/SF010/3D5,9G_flux_2.hdf5"
 spectrum, _fpts, _As = load_data(spect_path, server_ip=server_ip, port=port)
 mAs, fpts, spectrum = zp.format_rawdata(_As, _fpts, spectrum)
@@ -119,12 +119,12 @@ s_spects.keys()
 # Save & Load
 
 ```python
-processed_spect_path = f"../../result/{qub_name}/spect.hdf5"
+processed_spect_path = f"../../result/{qub_name}/data/fluxdep/spectrums.hdf5"
 zp.dump_spects(processed_spect_path, s_spects, mode="x")
 ```
 
 ```python
-processed_spect_path = f"../../result/{qub_name}/spect.hdf5"
+processed_spect_path = f"../../result/{qub_name}/data/fluxdep/spectrums.hdf5"
 s_spects = zp.load_spects(processed_spect_path)
 s_spects.keys()
 ```
@@ -181,7 +181,7 @@ s_flxs = mA2flx(s_mAs, mA_c, period)
 
 ```python
 # general
-EJb = (3.0, 15.0)
+EJb = (2.0, 15.0)
 ECb = (0.2, 2.0)
 ELb = (0.1, 2.0)
 # interger
@@ -202,12 +202,13 @@ ELb = (0.1, 2.0)
 
 ```python
 allows = {
-    "transitions": [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3)],
+    "transitions": [(0, 1), (0, 2), (0, 3), (1, 2)],
     # "transitions": [(0, 1), (0, 2)],
     # "red side": [(0, 1), (0, 2), (1, 2), (0, 3)],
-    # "mirror": [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (1, 3)],
+    "mirror": [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (1, 3)],
+    "mirror2": [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (1, 3)],
     # "r_f": 7.527,
-    # "sample_f": 9.584640 / 2,
+    "sample_f": 9.584640 / 2,
     # "sample_f": 6.881280 / 2,
 }
 allows = {
@@ -217,8 +218,6 @@ allows = {
     # "blue side": [(i, j) for i in (0, 1, 2) for j in range(8) if i < j],
     # "mirror": [(i, j) for i in (0, 1) for j in range(10) if i < j],
     # "transitions2": [(i, j) for i in (0, 1, 2) for j in range(11) if i < j],
-    # "red side2": [(i, j) for i in (0, 1, 2) for j in range(8) if i < j],
-    # "blue side2": [(i, j) for i in (0, 1, 2) for j in range(8) if i < j],
     # "mirror2": [(i, j) for i in (0, 1, 2) for j in range(8) if i < j],
 }
 ```
@@ -244,6 +243,7 @@ v_allows = {
     # "red side": [(i, j) for i in [0, 1, 2] for j in range(i + 1, 15)],
     # "mirror": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
     # "mirror red": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
+    "transitions2": [(0, 1), (0, 2), (1, 2), (0, 3)],
 }
 
 vs = zf.VisualizeSpet(
@@ -308,7 +308,7 @@ zp.dump_result(savepath, qub_name, sp_params, mA_c, period, allows)
 ```
 
 ```python
-savepath = f"../../result/{qub_name}/selected.npz"
+savepath = f"../../result/{qub_name}/data/fluxdep/selected_points.npz"
 
 np.savez(savepath, flxs=s_flxs, fpts=s_fpts, selected=s_selected)
 ```

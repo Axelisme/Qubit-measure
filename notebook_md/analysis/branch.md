@@ -19,10 +19,11 @@ from zcu_tools.simulate.fluxonium.branch.full_quantum import (
 ```
 
 ```python
-qub_name = "SF010"
+qub_name = "Q12_2D/Q4"
 
 os.makedirs(f"../../result/{qub_name}/image/branch", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/web/branch", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/data/branch", exist_ok=True)
 ```
 
 ```python
@@ -42,8 +43,8 @@ elif "r_f" in allows:
 
 ```python
 # params = (7.0, 1.1, 1.4)
-r_f = 5.9
-g = 0.1
+# r_f = 5.9
+# g = 0.1
 
 
 qub_dim = 20
@@ -149,7 +150,7 @@ populations_over_flx = calc_branch_population_over_flux(
 
 ```python
 np.savez_compressed(
-    f"../../result/{qub_name}/branch_populations.npz",
+    f"../../result/{qub_name}/branch/populations_over_flx.npz",
     flxs=flxs,
     branchs=branchs,
     photons=photons,
@@ -158,7 +159,7 @@ np.savez_compressed(
 ```
 
 ```python
-data = np.load(f"../../result/{qub_name}/branch_populations.npz")
+data = np.load(f"../../result/{qub_name}/branch/populations_over_flx.npz")
 flxs = data["flxs"]
 photons = data["photons"]
 populations_over_flx = data["populations_over_flx"]

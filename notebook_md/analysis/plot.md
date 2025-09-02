@@ -41,7 +41,7 @@ from zcu_tools.simulate.fluxonium import (
 ```
 
 ```python
-qub_name = "SF010"
+qub_name = "Q3_2D/Q2"
 
 server_ip = "021-zcu216"
 port = 4999
@@ -127,7 +127,8 @@ v_allows = {
     # **allows,
     "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
     # "transitions2": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
-    # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 3)],
+    "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 4)],
+    "blue side": [(i, j) for i in (0, 1) for j in range(i + 1, 4)],
     # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
     # "mirror": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 15)],
     # "mirror red": [(i, j) for i in (0, 1, 2, 3) for j in range(i + 1, 15)],

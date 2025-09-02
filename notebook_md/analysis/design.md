@@ -42,8 +42,9 @@ from zcu_tools.notebook.analysis.branch import plot_chi_and_snr_over_photon
 ```python
 qub_name = "DesignR59"
 
-os.makedirs(f"../../result/{qub_name}/image", exist_ok=True)
-os.makedirs(f"../../result/{qub_name}/web", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/image/design", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/web/design", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/data/design", exist_ok=True)
 ```
 
 # Scan params
@@ -91,12 +92,12 @@ zd.avoid_collision(params_table, avoid_freqs, threshold=0.4)
 zd.avoid_low_f01(params_table, f01_threshold=0.08)
 zd.avoid_low_m01(params_table, m01_threshold=0.07)
 result_table = params_table.drop(["esys"], axis=1)
-result_table.to_parquet(f"../../result/{qub_name}/design_table.parquet")
+result_table.to_parquet(f"../../result/{qub_name}/data/design_table.parquet")
 result_table
 ```
 
 ```python
-result_table = pd.read_parquet(f"../../result/{qub_name}/design_table.parquet")
+result_table = pd.read_parquet(f"../../result/{qub_name}/data/design_table.parquet")
 
 fig = zd.plot_scan_results(result_table)
 fig.update_layout(
@@ -117,8 +118,10 @@ fig.show()
 
 ```python
 save_name = f"t1vsSNR_rf{r_f:.2f}"
-fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
-fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
+fig.write_html(
+    f"../../result/{qub_name}/web/design/{save_name}.html", include_plotlyjs="cdn"
+)
+fig.write_image(f"../../result/{qub_name}/image/design/{save_name}.png", format="png")
 
 dump_result(
     f"../../result/{qub_name}/params.json",
@@ -154,8 +157,10 @@ fig.show()
 
 ```python
 save_name = f"f01_rf{r_f:.2f}"
-fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
-fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
+fig.write_html(
+    f"../../result/{qub_name}/web/design/{save_name}.html", include_plotlyjs="cdn"
+)
+fig.write_image(f"../../result/{qub_name}/image/design/{save_name}.png", format="png")
 ```
 
 ```python
@@ -167,8 +172,10 @@ fig.show()
 
 ```python
 save_name = f"Matrix_rf{r_f:.2f}"
-fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
-fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
+fig.write_html(
+    f"../../result/{qub_name}/web/design/{save_name}.html", include_plotlyjs="cdn"
+)
+fig.write_image(f"../../result/{qub_name}/image/design/{save_name}.png", format="png")
 ```
 
 ```python
@@ -178,8 +185,10 @@ fig.show()
 
 ```python
 save_name = f"Chi_rf{r_f:.2f}"
-fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
-fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
+fig.write_html(
+    f"../../result/{qub_name}/web/design/{save_name}.html", include_plotlyjs="cdn"
+)
+fig.write_image(f"../../result/{qub_name}/image/design/{save_name}.png", format="png")
 ```
 
 ```python
@@ -234,8 +243,10 @@ fig.show()
 
 ```python
 save_name = f"T1_rf{r_f:.2f}"
-fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
-fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
+fig.write_html(
+    f"../../result/{qub_name}/web/design/{save_name}.html", include_plotlyjs="cdn"
+)
+fig.write_image(f"../../result/{qub_name}/image/design/{save_name}.png", format="png")
 ```
 
 ```python
@@ -264,8 +275,10 @@ fig.show()
 
 ```python
 save_name = f"T1_percell_rf{r_f:.2f}"
-fig.write_html(f"../../result/{qub_name}/web/{save_name}.html", include_plotlyjs="cdn")
-fig.write_image(f"../../result/{qub_name}/image/{save_name}.png", format="png")
+fig.write_html(
+    f"../../result/{qub_name}/web/design/{save_name}.html", include_plotlyjs="cdn"
+)
+fig.write_image(f"../../result/{qub_name}/image/design/{save_name}.png", format="png")
 ```
 
 # EC to C
@@ -279,8 +292,8 @@ EC = (1.1 * 1.1 / 0.9 * 1.1) ** 0.5
 # EC = best_params[1]
 
 Cap = zeq.EC2C(EC)
-# Lj = zeq.Cfreq2L(Cap, 6.3652)
-Lj = zeq.Cfreq2L(Cap, c_freq)
+Lj = zeq.Cfreq2L(Cap, 6.3652)
+# Lj = zeq.Cfreq2L(Cap, c_freq)
 
 print(f"EC: {EC:.4g} GHz")
 print(f"Capacitance: {Cap:.4g} fF")
