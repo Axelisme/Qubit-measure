@@ -61,7 +61,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                 ),
                 Pulse(
                     name="pi2_pulse2",
-                    cfg={
+                    cfg={  # activate detune
                         **cfg["pi2_pulse"],
                         "phase": cfg["pi2_pulse"].get("phase", 0.0)
                         + 360 * detune * t2r_spans,

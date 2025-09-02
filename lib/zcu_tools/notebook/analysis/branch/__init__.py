@@ -17,9 +17,10 @@ def plot_chi_and_snr_over_photon(
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
     ax1.set_title(f"{qub_name} at flux = {flx:.1f}")
-    ax1.plot(photons, chi_over_n)
-    ax1.set_ylabel(r"$\chi_{01}$ [GHz]")
+    ax1.plot(photons, np.abs(chi_over_n))
+    ax1.set_ylabel(r"$|\chi_{01}|$ [GHz]")
     ax1.grid()
+    ax1.set_ylim(bottom=0)
 
     ax2.plot(photons, snrs)
     ax2.axvline(x=best_n, color="red", linestyle="--", label=f"n = {best_n:.1f}")
@@ -27,6 +28,7 @@ def plot_chi_and_snr_over_photon(
     ax2.set_xlabel(r"Photon number")
     ax2.grid()
     ax2.legend()
+    ax2.set_ylim(bottom=0)
 
     return fig, (ax1, ax2)
 
