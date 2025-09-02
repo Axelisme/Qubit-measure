@@ -6,11 +6,10 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import scqubits as scq
 from tqdm.auto import tqdm
 
 from zcu_tools.notebook.persistance import load_result
-from zcu_tools.simulate.fluxonium import calculate_chi_sweep, calculate_dispersive
+from zcu_tools.simulate.fluxonium import calculate_chi_sweep
 from zcu_tools.simulate.fluxonium.branch.floquet import calc_ge_snr
 
 DESIGN_CUTOFF = 40
@@ -73,6 +72,8 @@ def calculate_esys(params_table: pd.DataFrame) -> None:
     會在 params_table 中新增一個 "esys" 欄位
     """
 
+    import scqubits as scq  # lazy import
+
     fluxonium = scq.Fluxonium(
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
@@ -119,6 +120,8 @@ def calculate_m01(params_table: pd.DataFrame) -> None:
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
 
+    import scqubits as scq  # lazy import
+
     fluxonium = scq.Fluxonium(
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
@@ -136,6 +139,8 @@ def calculate_m01(params_table: pd.DataFrame) -> None:
 
 def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) -> None:
     params_list = params_table.to_dict(orient="records")
+
+    import scqubits as scq  # lazy import
 
     def update_fn(fluxonium: scq.Fluxonium, row: Dict[str, Any]) -> None:
         fluxonium.flux = row["flx"]
@@ -185,6 +190,8 @@ def calculate_t1(
 
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
+
+    import scqubits as scq  # lazy import
 
     fluxonium = scq.Fluxonium(
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
@@ -396,6 +403,8 @@ def add_real_sample(
         max_photon=max_photon,
     )
     snr = np.sort(snrs)[-3]
+
+    import scqubits as scq  # lazy import
 
     # calculate t1
     fluxonium = scq.Fluxonium(*param, flux=flx, cutoff=DESIGN_CUTOFF, truncated_dim=2)
