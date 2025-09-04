@@ -19,6 +19,7 @@ CLAUDE.md
 qick/
 labber_api/
 abcd_rf_fit/
+qiskit-metal
 
 *.bak
 *.yaml
