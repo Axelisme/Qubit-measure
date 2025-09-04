@@ -33,11 +33,7 @@ import pandas as pd
 import zcu_tools.notebook.analysis.plot as zp
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate import flx2mA, mA2flx
-from zcu_tools.simulate.fluxonium import (
-    calculate_energy_vs_flx,
-    calculate_dispersive_vs_flx,
-    calculate_chi_vs_flx,
-)
+from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 ```
 
 ```python
@@ -59,8 +55,11 @@ print(allows)
 if dispersive_cfg := data_dict.get("dispersive"):
     g = dispersive_cfg["g"]
     r_f = dispersive_cfg["r_f"]
+    print(f"g: {g}, r_f: {r_f}")
 elif "r_f" in allows:
     r_f = allows["r_f"]
+    g = 1e-3
+    print(f"r_f: {r_f}")
 
 if "sample_f" in allows:
     sample_f = allows["sample_f"]
@@ -113,6 +112,10 @@ fig.write_image(f"../../result/{qub_name}/image/matrixelem.png", format="png")
 
 ```python
 fig = zp.plot_dispersive_shift(params, flxs, r_f=r_f, g=g, upto=30)
+```
+
+```python
+fig.update_yaxes(range=[-3e-4, 3e-4])
 fig.show()
 ```
 
