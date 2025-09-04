@@ -83,8 +83,7 @@ class TwoPulseReadout(AbsReadout):
         self.pulse2_cfg = deepcopy(pulse2_cfg)
 
         # TODO: support post delay
-        pulse2_name = f"{name}_pulse2"
-        force_no_post_delay(self.pulse2_cfg, pulse2_name)
+        force_no_post_delay(self.pulse2_cfg, f"{name}_pulse2")
 
         self.pulse1 = Pulse(name=f"{name}_pulse1", cfg=self.pulse1_cfg)
         self.pulse2 = Pulse(
