@@ -6,7 +6,6 @@ from .search import (
     avoid_low_f01,
     avoid_low_m01,
     calculate_chi_sweep,
-    calculate_dispersive,
     calculate_esys,
     calculate_f01,
     calculate_m01,
