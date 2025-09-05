@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Literal
 
 import numpy as np
 
@@ -13,7 +13,14 @@ from zcu_tools.experiment.utils import (
 )
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import (
+    TwoToneProgram,
+    sweep2param,
+    ModularProgramV2,
+    make_readout,
+    make_reset,
+    Pulse,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
@@ -159,19 +166,95 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
 
         return dev_values, fpts, signals2D
 
+    def run_fastflux(
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+    ) -> FluxDepResultType:
+        cfg = deepcopy(cfg)  # prevent in-place modification
+
+        qub_pulse = cfg["qub_pulse"]
+        flx_pulse = cfg["flx_pulse"]
+
+        flx_sweep = cfg["sweep"]["flux"]
+        fpt_sweep = cfg["sweep"]["freq"]
+
+        # Remove flux from sweep dict - will be handled by soft loop
+        cfg["sweep"] = {"freq": fpt_sweep}
+
+        gains = sweep2array(flx_sweep, allow_array=True)
+        fpts = sweep2array(fpt_sweep)  # predicted frequency points
+
+        # Frequency is swept by FPGA (hard sweep)
+        qub_pulse["freq"] = sweep2param("freq", fpt_sweep)
+        flx_pulse["gain"] = gains[0]  # set initial gain
+
+        def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
+            cfg["flx_pulse"]["gain"] = value
+
+        updateCfg(cfg, 0, gains[0])  # set initial flux
+
+        def measure_fn(
+            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+        ) -> np.ndarray:
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    make_reset("reset", reset_cfg=cfg.get("reset")),
+                    Pulse(name="flux_pulse", cfg=cfg["flx_pulse"]),
+                    Pulse(name="qubit_pulse", cfg=cfg["qub_pulse"]),
+                    make_readout("readout", readout_cfg=cfg["readout"]),
+                ],
+            )
+            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
+        # Run 2D soft-hard sweep (flux soft, frequency hard)
+        signals2D = sweep2D_soft_hard_template(
+            cfg,
+            measure_fn,
+            LivePlotter2DwithLine(
+                "Local flux gain (a.u.)",
+                "Frequency (MHz)",
+                line_axis=1,
+                num_lines=2,
+                disable=not progress,
+            ),
+            xs=gains,
+            ys=fpts,
+            updateCfg=updateCfg,
+            signal2real=fluxdep_signal2real,
+            progress=progress,
+        )
+
+        # Get the actual frequency points used by FPGA
+        prog = ModularProgramV2(
+            soccfg, cfg, modules=[Pulse(name="qubit_pulse", cfg=cfg["qub_pulse"])]
+        )
+        fpts_real = prog.get_pulse_param("qubit_pulse", "freq", as_array=True)
+        assert isinstance(fpts_real, np.ndarray), "fpts should be an array"
+
+        # Cache results
+        self.last_cfg = cfg
+        self.last_result = (gains, fpts_real, signals2D)
+
+        return gains, fpts_real, signals2D
+
     def run(
         self,
         soc,
         soccfg,
         cfg: Dict[str, Any],
         *,
-        with_rf_source: bool = False,
+        method: Literal["pure_zcu", "with_rf_source", "fastflux"] = "pure_zcu",
         progress: bool = True,
     ) -> FluxDepResultType:
-        if with_rf_source:
-            return self.run_with_rf_source(soc, soccfg, cfg, progress=progress)
-        else:
+        if method == "pure_zcu":
             return self.run_pure_zcu(soc, soccfg, cfg, progress=progress)
+        elif method == "with_rf_source":
+            return self.run_with_rf_source(soc, soccfg, cfg, progress=progress)
+        elif method == "fastflux":
+            return self.run_fastflux(soc, soccfg, cfg, progress=progress)
+        else:
+            raise ValueError(f"Unknown method: {method}")
 
     def analyze(
         self,
