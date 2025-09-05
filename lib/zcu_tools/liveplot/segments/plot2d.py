@@ -7,16 +7,24 @@ from .base import AbsSegment
 
 
 class Plot2DSegment(AbsSegment):
-    def __init__(self, xlabel: str, ylabel: str, title: Optional[str] = None) -> None:
+    def __init__(
+        self, xlabel: str, ylabel: str, title: Optional[str] = None, flip: bool = False
+    ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel
         self.title = title
+        self.flip = flip
 
         self.im: Optional[plt.AxesImage] = None
 
     def init_ax(self, ax: plt.Axes) -> None:
-        ax.set_xlabel(self.xlabel)
-        ax.set_ylabel(self.ylabel)
+        if self.flip:
+            ax.set_xlabel(self.ylabel)
+            ax.set_ylabel(self.xlabel)
+        else:
+            ax.set_xlabel(self.xlabel)
+            ax.set_ylabel(self.ylabel)
+
         if self.title is not None:
             ax.set_title(self.title)
 
@@ -35,8 +43,13 @@ class Plot2DSegment(AbsSegment):
         if self.im is None:
             raise RuntimeError("Image not initialized.")
 
-        self.im.set_extent([xs[0], xs[-1], ys[0], ys[-1]])
-        self.im.set_data(signals.T)
+        if self.flip:
+            self.im.set_extent([ys[0], ys[-1], xs[0], xs[-1]])
+            self.im.set_data(signals)
+        else:
+            self.im.set_extent([xs[0], xs[-1], ys[0], ys[-1]])
+            self.im.set_data(signals.T)
+
         self.im.autoscale()
 
         if title is not None:

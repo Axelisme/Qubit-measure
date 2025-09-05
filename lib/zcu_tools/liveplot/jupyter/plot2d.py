@@ -14,10 +14,11 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         xlabel: str,
         ylabel: str,
         title: Optional[str] = None,
+        flip: bool = False,
         figsize: Optional[Tuple[int, int]] = None,
         disable: bool = False,
     ) -> None:
-        segment = Plot2DSegment(xlabel, ylabel, title)
+        segment = Plot2DSegment(xlabel, ylabel, title, flip=flip)
         super().__init__([segment], figsize=figsize, disable=disable)
 
     def update(
@@ -48,10 +49,11 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         line_axis: Literal[0, 1],
         num_lines: int = 1,
         title: Optional[str] = None,
+        flip: bool = False,
         figsize: Optional[Tuple[int, int]] = None,
         disable: bool = False,
     ) -> None:
-        segment2d = Plot2DSegment(xlabel, ylabel, title)
+        segment2d = Plot2DSegment(xlabel, ylabel, title, flip=flip)
         xlbael1d = xlabel if line_axis == 0 else ylabel
         segment1d = Plot1DSegment(xlbael1d, "", num_lines)
         super().__init__([segment2d, segment1d], figsize=figsize, disable=disable)
