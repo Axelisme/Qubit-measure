@@ -148,6 +148,13 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         else:
             real_signals = np.abs(signals)
 
+        nan_mask = np.isnan(real_signals)
+        if np.all(nan_mask):
+            raise ValueError("All data are NaN!")
+
+        lens = lens[~nan_mask]
+        real_signals = real_signals[~nan_mask]
+
         pi_len, pi2_len, y_fit, _ = fit_rabi(lens, real_signals, decay=decay)
 
         if plot:
