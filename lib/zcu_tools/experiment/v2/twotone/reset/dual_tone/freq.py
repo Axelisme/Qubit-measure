@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +9,7 @@ from scipy.ndimage import gaussian_filter
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -17,11 +17,12 @@ from zcu_tools.program.v2 import (
     make_readout,
     make_reset,
     sweep2param,
+    TwoPulseReset,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ....template import sweep_hard_template
+from ....template import sweep_hard_template, sweep2D_soft_hard_template
 
 
 def dual_reset_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -37,16 +38,86 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
 
     Measures the optimal frequencies for a dual-tone reset sequence by sweeping both
     reset pulse frequencies and observing the qubit state after initialization and reset.
-
-    The experiment performs:
-    1. Initial reset (optional)
-    2. Qubit initialization pulse (to prepare a state to reset from)
-    3. First reset probe pulse with variable frequency
-    4. Second reset probe pulse with variable frequency
-    5. Readout to measure reset effectiveness
     """
 
-    def run(
+    def run_soft(
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+    ) -> DualToneResetFreqResultType:
+        cfg = deepcopy(cfg)  # prevent in-place modification
+
+        # Check that reset pulse is dual pulse type
+        tested_reset = cfg["tested_reset"]
+        if tested_reset["type"] != "two_pulse":
+            raise ValueError("This experiment only supports dual-tone reset")
+
+        fpt1_sweep = cfg["sweep"]["freq1"]
+        fpt2_sweep = cfg["sweep"]["freq2"]
+        cfg["sweep"] = {"freq1": fpt1_sweep}
+
+        fpts1 = sweep2array(fpt1_sweep)  # predicted frequency points
+        fpts2 = sweep2array(fpt2_sweep)  # predicted frequency points
+
+        cfg["tested_reset"]["pulse1_cfg"]["freq"] = sweep2param("freq1", fpt1_sweep)
+
+        def updateCfg(cfg: Dict[str, Any], _: int, fpt2: Any) -> None:
+            cfg["tested_reset"]["pulse2_cfg"]["freq"] = fpt2
+
+        updateCfg(cfg, 0, fpts2[0])  # initialize cfg
+
+        def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
+            tested_cfg = cfg["tested_reset"]
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    make_reset("reset", reset_cfg=cfg.get("reset")),
+                    Pulse("init_pulse", cfg=cfg.get("init_pulse")),
+                    TwoPulseReset(
+                        "tested_reset",
+                        pulse1_cfg=tested_cfg["pulse1_cfg"],
+                        pulse2_cfg=tested_cfg["pulse2_cfg"],
+                        post_pulse_cfg=tested_cfg.get("post_pulse_cfg"),
+                    ),
+                    make_readout("readout", readout_cfg=cfg["readout"]),
+                ],
+            )
+            return prog.acquire(soc, progress=progress, callback=callback)[0][0].dot(
+                [1, 1j]
+            )
+
+        signals = sweep2D_soft_hard_template(
+            cfg,
+            measure_fn,
+            LivePlotter2DwithLine(
+                "Frequency2 (MHz)",
+                "Frequency1 (MHz)",
+                line_axis=1,
+                disable=not progress,
+            ),
+            xs=fpts2,
+            ys=fpts1,
+            updateCfg=updateCfg,
+            signal2real=dual_reset_signal2real,
+        )
+
+        # Get the actual frequency points used by FPGA
+        prog = ModularProgramV2(
+            soccfg,
+            cfg,
+            modules=[
+                Pulse("reset_probe_pulse1", cfg=cfg["tested_reset"]["pulse1_cfg"])
+            ],
+        )
+        fpts1 = prog.get_pulse_param("reset_probe_pulse1", "freq", as_array=True)
+        assert isinstance(fpts1, np.ndarray), "fpts1 should be an array"
+
+        # Cache results
+        self.last_cfg = cfg
+        self.last_result = (fpts1, fpts2, signals)
+
+        return fpts1, fpts2, signals
+
+    def run_hard(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> DualToneResetFreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
@@ -113,6 +184,20 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
         self.last_result = (fpts1, fpts2, signals)
 
         return fpts1, fpts2, signals
+
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        method: Literal["soft", "hard"] = "soft",
+        progress: bool = True,
+    ) -> DualToneResetFreqResultType:
+        if method == "soft":
+            return self.run_soft(soc, soccfg, cfg, progress=progress)
+        else:
+            return self.run_hard(soc, soccfg, cfg, progress=progress)
 
     def analyze(
         self,
