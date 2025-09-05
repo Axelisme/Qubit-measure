@@ -81,7 +81,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
                     make_readout("readout", readout_cfg=cfg["readout"]),
                 ],
             )
-            return prog.acquire(soc, progress=progress, callback=callback)[0][0].dot(
+            return prog.acquire(soc, progress=False, callback=callback)[0][0].dot(
                 [1, 1j]
             )
 
