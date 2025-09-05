@@ -92,6 +92,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
                 "Frequency2 (MHz)",
                 "Frequency1 (MHz)",
                 line_axis=1,
+                flip=True,
                 disable=not progress,
             ),
             xs=fpts2,
