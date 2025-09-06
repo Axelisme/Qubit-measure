@@ -100,6 +100,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
             updateCfg=updateCfg,
             signal2real=dual_reset_signal2real,
         )
+        signals = signals.T
 
         # Get the actual frequency points used by FPGA
         prog = ModularProgramV2(
