@@ -36,5 +36,8 @@ def sweep2param(name: str, sweep: Dict[str, Any]) -> QickParam:
     Returns:
         QickSweep1D: Qick v2 sweep parameter object
     """
+    if not isinstance(sweep, dict):
+        raise ValueError("To convert sweep to QickParam, sweep must be a dict")
+
     # convert formatted sweep to qick v2 sweep param
     return QickSweep1D(name, sweep["start"], sweep["stop"])

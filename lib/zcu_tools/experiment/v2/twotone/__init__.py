@@ -2,7 +2,6 @@ from . import mist, reset, ro_optimize
 from .ac_stark import AcStarkByRamseyExperiment, AcStarkExperiment
 from .allxy import AllXYExperiment
 from .dispersive import DispersiveExperiment
-from .flux_dep import FluxDepExperiment
 from .freq import FreqExperiment
 from .power_dep import PowerDepExperiment
 from .rabi import AmpRabiExperiment, LenRabiExperiment
@@ -17,7 +16,6 @@ __all__ = [
     "AcStarkByRamseyExperiment",
     "AllXYExperiment",
     "DispersiveExperiment",
-    "FluxDepExperiment",
     "FreqExperiment",
     "PowerDepExperiment",
     "AmpRabiExperiment",

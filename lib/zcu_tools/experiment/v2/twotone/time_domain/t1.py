@@ -123,18 +123,18 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             if dual_exp:
                 t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
 
-            plt.figure(figsize=config.figsize)
-            plt.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-            plt.plot(xs, y_fit, label="fit")
+            fig, ax = plt.subplots(figsize=config.figsize)
+            ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
+            ax.plot(xs, y_fit, label="fit")
             if dual_exp:
-                plt.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
-                plt.title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
+                ax.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
+                ax.set_title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
             else:
-                plt.title(f"T1 = {t1_str}", fontsize=15)
-            plt.xlabel("Time (us)")
-            plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
-            plt.legend()
-            plt.tight_layout()
+                ax.set_title(f"T1 = {t1_str}", fontsize=15)
+            ax.set_xlabel("Time (us)")
+            ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+            ax.legend()
+            fig.tight_layout()
             plt.show()
 
         return t1, t1err

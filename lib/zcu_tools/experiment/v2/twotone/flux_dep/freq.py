@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Literal
 
 import numpy as np
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
     sweep2array,
     set_flux_in_dev_cfg,
@@ -24,25 +24,20 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
-from ..template import sweep2D_soft_hard_template, sweep2D_soft_template
+from ...template import sweep2D_soft_hard_template, sweep2D_soft_template
+from .util import check_flux_pulse
 
-FluxDepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+FreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
-def fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
+def freq_signal2real(signals: np.ndarray) -> np.ndarray:
     return np.abs(minus_background(signals, axis=1))
 
 
-class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
-    """Two-tone flux dependence experiment.
-
-    Sweeps flux bias and qubit frequency to map out the
-    qubit transition as a function of magnetic flux.
-    """
-
+class FreqExperiment(AbsExperiment[FreqResultType]):
     def run_pure_zcu(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> FluxDepResultType:
+    ) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         qub_pulse = cfg["qub_pulse"]
@@ -83,7 +78,7 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
             xs=dev_values,
             ys=fpts,
             updateCfg=updateCfg,
-            signal2real=fluxdep_signal2real,
+            signal2real=freq_signal2real,
             progress=progress,
         )
 
@@ -105,13 +100,11 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
         cfg: Dict[str, Any],
         *,
         progress: bool = True,
-    ) -> FluxDepResultType:
+    ) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         if "rf_dev" not in cfg["dev"]:
             raise ValueError("RF source is not configured")
-
-        flux_cfg = cfg["dev"]["flux_dev"]
 
         qub_pulse = cfg["qub_pulse"]
         flx_sweep = cfg["sweep"]["flux"]
@@ -156,7 +149,7 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
             ys=fpts,
             updateCfg_x=updateCfg_x,
             updateCfg_y=updateCfg_y,
-            signal2real=fluxdep_signal2real,
+            signal2real=freq_signal2real,
             progress=progress,
         )
 
@@ -168,11 +161,13 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
 
     def run_fastflux(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> FluxDepResultType:
+    ) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         qub_pulse = cfg["qub_pulse"]
         flx_pulse = cfg["flx_pulse"]
+
+        check_flux_pulse(flx_pulse)
 
         flx_sweep = cfg["sweep"]["flux"]
         fpt_sweep = cfg["sweep"]["freq"]
@@ -221,7 +216,7 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
             xs=gains,
             ys=fpts,
             updateCfg=updateCfg,
-            signal2real=fluxdep_signal2real,
+            signal2real=freq_signal2real,
             progress=progress,
         )
 
@@ -246,7 +241,7 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
         *,
         method: Literal["pure_zcu", "with_rf_source", "fastflux"] = "pure_zcu",
         progress: bool = True,
-    ) -> FluxDepResultType:
+    ) -> FreqResultType:
         if method == "pure_zcu":
             return self.run_pure_zcu(soc, soccfg, cfg, progress=progress)
         elif method == "with_rf_source":
@@ -258,7 +253,7 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
 
     def analyze(
         self,
-        result: Optional[FluxDepResultType] = None,
+        result: Optional[FreqResultType] = None,
         mA_c: Optional[float] = None,
         mA_e: Optional[float] = None,
     ) -> InteractiveLines:
@@ -282,9 +277,9 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
     def save(
         self,
         filepath: str,
-        result: Optional[FluxDepResultType] = None,
+        result: Optional[FreqResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/flux_dep",
+        tag: str = "twotone/flux_dep/freq",
         **kwargs,
     ) -> None:
         if result is None:
