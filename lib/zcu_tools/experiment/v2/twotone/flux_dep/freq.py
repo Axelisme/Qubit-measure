@@ -25,7 +25,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
 from ...template import sweep2D_soft_hard_template, sweep2D_soft_template
-from .util import check_flux_pulse
+from .util import check_flux_pulse, derive_flux_pulse_from_pulse
 
 FreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -167,8 +167,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         qub_pulse = cfg["qub_pulse"]
         flx_pulse = cfg["flx_pulse"]
 
-        flx_pulse["length"] = qub_pulse["length"] + qub_pulse.get("t", 0.0) + 0.1
-        qub_pulse["t"] = qub_pulse.get("t", 0.0) + 0.05
+        flx_pulse = derive_flux_pulse_from_pulse(qub_pulse, flx_pulse)
         check_flux_pulse(flx_pulse)
 
         flx_sweep = cfg["sweep"]["flux"]
