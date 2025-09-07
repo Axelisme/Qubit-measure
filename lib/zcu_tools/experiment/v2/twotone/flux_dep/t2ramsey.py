@@ -18,7 +18,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..template import sweep2D_soft_hard_template
+from ...template import sweep2D_soft_hard_template
 from .util import check_flux_pulse
 
 T2RamseyResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -28,7 +28,7 @@ def t2ramsey_signal2real(signals: np.ndarray) -> np.ndarray:
     return rotate2real(signals).real
 
 
-class T1Experiment(AbsExperiment[T2RamseyResultType]):
+class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
     def run(
         self,
         soc,

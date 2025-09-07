@@ -167,6 +167,8 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         qub_pulse = cfg["qub_pulse"]
         flx_pulse = cfg["flx_pulse"]
 
+        flx_pulse["length"] = qub_pulse["length"] + qub_pulse.get("t", 0.0) + 0.1
+        qub_pulse["t"] = qub_pulse.get("t", 0.0) + 0.05
         check_flux_pulse(flx_pulse)
 
         flx_sweep = cfg["sweep"]["flux"]

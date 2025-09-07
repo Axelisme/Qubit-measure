@@ -18,7 +18,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..template import sweep2D_soft_hard_template
+from ...template import sweep2D_soft_hard_template
 from .util import check_flux_pulse
 
 T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]

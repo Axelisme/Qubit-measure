@@ -1,4 +1,4 @@
-from . import mist, reset, ro_optimize
+from . import mist, reset, ro_optimize, flux_dep
 from .ac_stark import AcStarkByRamseyExperiment, AcStarkExperiment
 from .allxy import AllXYExperiment
 from .dispersive import DispersiveExperiment
@@ -12,6 +12,7 @@ __all__ = [
     "reset",
     "mist",
     "ro_optimize",
+    "flux_dep",
     "AcStarkExperiment",
     "AcStarkByRamseyExperiment",
     "AllXYExperiment",

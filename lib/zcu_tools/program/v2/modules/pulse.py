@@ -10,8 +10,9 @@ def check_no_post_delay(cfg: Dict[str, Any], name: str) -> None:
     if cfg.get("post_delay") is not None:
         warnings.warn(
             f"{name} has post_delay, this may potentially make two pulses not overlap. "
-            "Make sure this is what you want."
+            "\nForce set post_delay to None."
         )
+    cfg["post_delay"] = None
 
 
 class Pulse(Module):

@@ -78,8 +78,12 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
             return
 
         # use the last non-nan line as current line
-        current_line = np.where(~np.isnan(signals))[1 - self.line_axis][-1]
-        line_start = max(0, current_line - self.num_lines + 1)
+        if np.all(np.isnan(signals)):
+            line_start = 0
+        else:
+            current_line = np.where(~np.isnan(signals))[1 - self.line_axis][-1]
+            line_start = max(0, current_line - self.num_lines + 1)
+
         if self.line_axis == 0:
             lines_signals = signals[:, line_start:]
             line_xs = xs
