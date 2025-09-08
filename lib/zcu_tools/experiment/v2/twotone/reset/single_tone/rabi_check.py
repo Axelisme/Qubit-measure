@@ -74,7 +74,7 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
 
         # Scale reset pulse by factor (0=off, 1=on)
         reset_pulse["gain"] = reset_factor * reset_pulse["gain"]
-        reset_pulse["length"] = reset_factor * reset_pulse["length"] + 0.005
+        reset_pulse["length"] = reset_factor * reset_pulse["length"] + 0.01
 
         # Handle flat_top pulse style to prevent negative length
         if reset_pulse.get("style") == "flat_top" and "raise_pulse" in reset_pulse:
