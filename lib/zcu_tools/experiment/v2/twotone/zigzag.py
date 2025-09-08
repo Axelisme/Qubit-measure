@@ -41,6 +41,7 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
         soccfg,
         cfg: Dict[str, Any],
         *,
+        repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
         progress: bool = True,
     ) -> ZigZagResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
@@ -49,13 +50,18 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
         times = sweep2array(cfg["sweep"]["times"], allow_array=True)  # predicted
         del cfg["sweep"]
 
-        cfg["zigzag_pi_time"] = times[0]  # initial value
+        cfg["zigzag_time"] = times[0]  # initial value
 
         def updateCfg(cfg: Dict[str, Any], _: int, time: Any) -> None:
-            cfg["zigzag_pi_time"] = time
+            cfg["zigzag_time"] = time
 
         def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
-            pi_time = cfg["zigzag_pi_time"]
+            repeat_time = cfg["zigzag_time"]
+
+            if repeat_on == "X90_pulse":
+                sequence = list(range(2 * repeat_time))
+            elif repeat_on == "X180_pulse":
+                sequence = list(range(repeat_time))
 
             prog = ModularProgramV2(
                 soccfg,
@@ -65,10 +71,11 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
                     Pulse(name="X90_pulse", cfg=cfg["X90_pulse"]),
                     *[
                         Pulse(
-                            name=f"X180_pulse_{i}",
-                            cfg=cfg["X180_pulse"],
+                            name=f"{repeat_on}_{i}",
+                            cfg=cfg[repeat_on],
+                            pulse_name=f"{repeat_on}_0",
                         )
-                        for i in range(pi_time)
+                        for i in sequence
                     ],
                     make_readout("readout", cfg["readout"]),
                 ],
@@ -139,6 +146,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         soccfg,
         cfg: Dict[str, Any],
         *,
+        repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
         progress: bool = True,
     ) -> ZigZagSweepResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
@@ -153,17 +161,22 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         x_info = self.SWEEP_MAP[x_key]
         values = sweep2array(cfg["sweep"][x_key])  # predicted
 
-        cfg["X180_pulse"][x_info["param_key"]] = sweep2param(
+        cfg[repeat_on][x_info["param_key"]] = sweep2param(
             x_info["param_key"], cfg["sweep"][x_key]
         )
 
         def updateCfg(cfg: Dict[str, Any], _: int, time: Any) -> None:
-            cfg["zigzag_pi_time"] = time
+            cfg["zigzag_time"] = time
 
         updateCfg(cfg, 0, times[0])  # initial update
 
-        def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
-            pi_time = cfg["zigzag_pi_time"]
+        def make_prog(cfg: Dict[str, Any]) -> ModularProgramV2:
+            repeat_time = cfg["zigzag_time"]
+
+            if repeat_on == "X90_pulse":
+                sequence = list(range(2 * repeat_time))
+            elif repeat_on == "X180_pulse":
+                sequence = list(range(repeat_time))
 
             prog = ModularProgramV2(
                 soccfg,
@@ -173,19 +186,28 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
                     Pulse(name="X90_pulse", cfg=cfg["X90_pulse"]),
                     *[
                         Pulse(
-                            name=f"X180_pulse_{i}",
-                            cfg=cfg["X180_pulse"],
-                            pulse_name="X180_pulse",
+                            name=f"{repeat_on}_{i}",
+                            cfg=cfg[repeat_on],
+                            pulse_name=f"{repeat_on}_0",
                         )
-                        for i in range(pi_time)
+                        for i in sequence
                     ],
                     make_readout("readout", cfg["readout"]),
                 ],
             )
 
+            return prog
+
+        def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
+            prog = make_prog(cfg)
             return prog.acquire(soc, progress=False, callback=callback)[0][0].dot(
                 [1, 1j]
             )
+
+        # test max times is valid
+        tested_cfg = deepcopy(cfg)
+        updateCfg(tested_cfg, 0, times[-1])
+        make_prog(tested_cfg)  # may raise error
 
         signals = sweep2D_soft_hard_template(
             cfg,
@@ -203,10 +225,10 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         )
 
         prog = ModularProgramV2(
-            soccfg, cfg, modules=[Pulse(name="X180_pulse", cfg=cfg["X180_pulse"])]
+            soccfg, cfg, modules=[Pulse(name=repeat_on, cfg=cfg[repeat_on])]
         )
         real_values = prog.get_pulse_param(
-            "X180_pulse", x_info["param_key"], as_array=True
+            repeat_on, x_info["param_key"], as_array=True
         )
         real_values += values[0] - real_values[0]
 
@@ -222,6 +244,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         soccfg,
         cfg: Dict[str, Any],
         *,
+        repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
         progress: bool = True,
     ) -> ZigZagSweepResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
@@ -239,16 +262,21 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         del cfg["sweep"]  # no hard sweep
 
         def updateCfg_x(cfg: Dict[str, Any], _: int, time: Any) -> None:
-            cfg["zigzag_pi_time"] = time
+            cfg["zigzag_time"] = time
 
         def updateCfg_y(cfg: Dict[str, Any], _: int, value: Any) -> None:
-            cfg["X180_pulse"][x_info["param_key"]] = value
+            cfg[repeat_on][x_info["param_key"]] = value
 
         updateCfg_x(cfg, 0, times[0])  # initial update
         updateCfg_y(cfg, 0, values[0])  # initial update
 
         def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
-            pi_time = cfg["zigzag_pi_time"]
+            repeat_time = cfg["zigzag_time"]
+
+            if repeat_on == "X90_pulse":
+                sequence = list(range(2 * repeat_time))
+            elif repeat_on == "X180_pulse":
+                sequence = list(range(repeat_time))
 
             prog = ModularProgramV2(
                 soccfg,
@@ -258,11 +286,11 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
                     Pulse(name="X90_pulse", cfg=cfg["X90_pulse"]),
                     *[
                         Pulse(
-                            name=f"X180_pulse_{i}",
-                            cfg=cfg["X180_pulse"],
-                            pulse_name="X180_pulse",
+                            name=f"{repeat_on}_{i}",
+                            cfg=cfg[repeat_on],
+                            pulse_name=f"{repeat_on}_0",
                         )
-                        for i in range(pi_time)
+                        for i in sequence
                     ],
                     make_readout("readout", cfg["readout"]),
                 ],
@@ -301,12 +329,17 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         cfg: Dict[str, Any],
         *,
         method: Literal["hard", "soft"] = "hard",
+        repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
         progress: bool = True,
     ) -> ZigZagSweepResultType:
         if method == "hard":
-            return self.run_hard(soc, soccfg, cfg, progress=progress)
+            return self.run_hard(
+                soc, soccfg, cfg, repeat_on=repeat_on, progress=progress
+            )
         elif method == "soft":
-            return self.run_soft(soc, soccfg, cfg, progress=progress)
+            return self.run_soft(
+                soc, soccfg, cfg, repeat_on=repeat_on, progress=progress
+            )
         else:
             raise ValueError(f"Unsupported method: {method}")
 
