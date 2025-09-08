@@ -23,10 +23,13 @@ def derive_flux_pulse_from_pulse(
     return derive_pulse
 
 
-def check_flux_pulse(flx_cfg: Dict[str, Any], name: str = "flux_pulse") -> None:
+def check_flux_pulse(
+    flx_cfg: Dict[str, Any], name: str = "flux_pulse", check_delay: bool = True
+) -> None:
     if flx_cfg["style"] not in ["const", "flat_top"]:
         raise ValueError(
             f"Flux pulse style {flx_cfg['style']} not supported in flux sweep."
         )
 
-    check_no_post_delay(flx_cfg, name)
+    if check_delay:
+        check_no_post_delay(flx_cfg, name)
