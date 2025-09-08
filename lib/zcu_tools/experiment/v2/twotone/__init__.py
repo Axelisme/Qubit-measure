@@ -7,7 +7,7 @@ from .power_dep import PowerDepExperiment
 from .rabi import AmpRabiExperiment, LenRabiExperiment
 from .singleshot import SingleShotExperiment
 from .time_domain import T1Experiment, T2EchoExperiment, T2RamseyExperiment
-from .zigzag import ZigZagExperiment
+from .zigzag import ZigZagExperiment, ZigZagSweepExperiment
 
 __all__ = [
     "reset",
@@ -27,4 +27,5 @@ __all__ = [
     "T2EchoExperiment",
     "T2RamseyExperiment",
     "ZigZagExperiment",
+    "ZigZagSweepExperiment",
 ]

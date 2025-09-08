@@ -5,21 +5,27 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, make_readout, make_reset
+from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
+from zcu_tools.program.v2 import (
+    ModularProgramV2,
+    Pulse,
+    make_readout,
+    make_reset,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..template import sweep1D_soft_template
+from ..template import sweep1D_soft_template, sweep2D_soft_hard_template
 
 
 def zigzag_signal2real(signals: np.ndarray) -> np.ndarray:
     return rotate2real(signals).real  # type: ignore
 
 
-ZigZagResultType = Tuple[np.ndarray, np.ndarray]  # (lens, signals)
+ZigZagResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
 
 
 class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
@@ -107,6 +113,120 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
             filepath=filepath,
             x_info={"name": "Times", "unit": "a.u.", "values": times},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+            comment=comment,
+            tag=tag,
+            **kwargs,
+        )
+
+
+ZigZagSweepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]  # (xs,times, signals)
+
+
+class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
+    SWEEP_MAP = {
+        "length": {"name": "Length (us)", "param_key": "length"},
+        "gain": {"name": "Gain (a.u.)", "param_key": "gain"},
+        "freq": {"name": "Frequency (MHz)", "param_key": "freq"},
+    }
+
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        progress: bool = True,
+    ) -> ZigZagSweepResultType:
+        cfg = deepcopy(cfg)  # avoid in-place modification
+
+        time_sweep = cfg["sweep"].pop("times")
+        times = sweep2array(time_sweep, allow_array=True)  # predicted
+
+        # extract sweep parameters
+        x_key = list(cfg["sweep"].keys())[0]
+        if x_key not in self.SWEEP_MAP:
+            raise ValueError(f"Unsupported sweep key: {x_key}")
+        x_info = self.SWEEP_MAP[x_key]
+        values = sweep2array(cfg["sweep"][x_key])  # predicted
+
+        cfg["X180_pulse"][x_info["param_key"]] = sweep2param(
+            x_info["param_key"], cfg["sweep"][x_key]
+        )
+
+        def updateCfg(cfg: Dict[str, Any], _: int, time: Any) -> None:
+            cfg["zigzag_pi_time"] = time
+
+        updateCfg(cfg, 0, times[0])  # initial update
+
+        def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
+            pi_time = cfg["zigzag_pi_time"]
+
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    make_reset("reset", cfg.get("reset")),
+                    Pulse(name="X90_pulse", cfg=cfg["X90_pulse"]),
+                    *[
+                        Pulse(
+                            name=f"X180_pulse_{i}",
+                            cfg=cfg["X180_pulse"],
+                        )
+                        for i in range(pi_time)
+                    ],
+                    make_readout("readout", cfg["readout"]),
+                ],
+            )
+
+            return prog.acquire(soc, progress=False, callback=callback)[0][0].dot(
+                [1, 1j]
+            )
+
+        signals = sweep2D_soft_hard_template(
+            cfg,
+            measure_fn,
+            LivePlotter2D(
+                "Times",
+                x_info["name"],
+                disable=not progress,
+            ),
+            xs=times,
+            ys=values,
+            updateCfg=updateCfg,
+            signal2real=zigzag_signal2real,
+            progress=progress,
+        )
+
+        # record last cfg and result
+        self.last_cfg = cfg
+        self.last_result = (times, values, signals)
+
+        return times, values, signals
+
+    def analyze(
+        self,
+        result: Optional[ZigZagResultType] = None,
+    ) -> Tuple[float, float]:
+        raise NotImplementedError("Not implemented")
+
+    def save(
+        self,
+        filepath: str,
+        result: Optional[ZigZagResultType] = None,
+        comment: Optional[str] = None,
+        tag: str = "twotone/ge/zigzag_sweep",
+        **kwargs,
+    ) -> None:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        times, values, signals = result
+        save_data(
+            filepath=filepath,
+            x_info={"name": "Times", "unit": "a.u.", "values": times},
+            y_info={"name": "Sweep value", "unit": "a.u.", "values": values},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,
             **kwargs,
