@@ -22,7 +22,7 @@ def format_sweep1D(
         A dictionary in regular format with 'name' as the key
     """
 
-    if isinstance(sweep, np.ndarray):
+    if isinstance(sweep, np.ndarray) or isinstance(sweep, list):
         return {name: sweep}
 
     elif isinstance(sweep, dict):
