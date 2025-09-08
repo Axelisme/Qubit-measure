@@ -150,7 +150,7 @@ class AsyncFunc(Generic[P]):
                 self._have_new_job.clear()
 
                 # If context exited and nothing left to do => quit
-                if self._closed and self._last_job is None:
+                if self._closed or self._last_job is None:
                     break
 
                 job = self._last_job
