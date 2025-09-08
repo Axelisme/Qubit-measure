@@ -8,6 +8,7 @@ class TwoToneProgram(BaseCustomProgramV2):
     def make_modules(self, cfg: Dict[str, Any]) -> List[Module]:
         return [
             make_reset("reset", reset_cfg=cfg.get("reset")),
+            Pulse(name="init_pulse", cfg=cfg.get("init_pulse")),
             Pulse(name="qubit_pulse", cfg=cfg["qub_pulse"]),
             make_readout("readout", readout_cfg=cfg["readout"]),
         ]
