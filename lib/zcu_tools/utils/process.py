@@ -44,7 +44,7 @@ def rotate2real(
     val_signals = signals[~np.isnan(signals)]
 
     if len(val_signals) < 2:
-        return signals
+        return signals.reshape(orig_shape)
 
     # calculate the covariance matrix
     cov = np.cov(val_signals.real, val_signals.imag)  # (2, 2)
