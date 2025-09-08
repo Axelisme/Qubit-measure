@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple, Literal
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -46,6 +47,8 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
     ) -> ZigZagResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
+        X90_pulse = deepcopy(cfg["X90_pulse"])
+
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "times")
         times = sweep2array(cfg["sweep"]["times"], allow_array=True)  # predicted
         del cfg["sweep"]
@@ -68,7 +71,7 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
                 cfg,
                 modules=[
                     make_reset("reset", cfg.get("reset")),
-                    Pulse(name="X90_pulse", cfg=cfg["X90_pulse"]),
+                    Pulse(name="X90_pulse", cfg=X90_pulse),
                     *[
                         Pulse(
                             name=f"{repeat_on}_{i}",
@@ -151,6 +154,8 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
     ) -> ZigZagSweepResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
+        X90_pulse = deepcopy(cfg["X90_pulse"])
+
         time_sweep = cfg["sweep"].pop("times")
         times = sweep2array(time_sweep, allow_array=True)  # predicted
 
@@ -183,7 +188,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
                 cfg,
                 modules=[
                     make_reset("reset", cfg.get("reset")),
-                    Pulse(name="X90_pulse", cfg=cfg["X90_pulse"]),
+                    Pulse(name="X90_pulse", cfg=X90_pulse),
                     *[
                         Pulse(
                             name=f"{repeat_on}_{i}",
@@ -249,6 +254,8 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
     ) -> ZigZagSweepResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
+        X90_pulse = deepcopy(cfg["X90_pulse"])
+
         time_sweep = cfg["sweep"].pop("times")
         times = sweep2array(time_sweep, allow_array=True)  # predicted
 
@@ -283,7 +290,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
                 cfg,
                 modules=[
                     make_reset("reset", cfg.get("reset")),
-                    Pulse(name="X90_pulse", cfg=cfg["X90_pulse"]),
+                    Pulse(name="X90_pulse", cfg=X90_pulse),
                     *[
                         Pulse(
                             name=f"{repeat_on}_{i}",
@@ -347,7 +354,36 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         self,
         result: Optional[ZigZagResultType] = None,
     ) -> Tuple[float, float]:
-        raise NotImplementedError("Not implemented")
+        if result is None:
+            result = self.last_result
+
+        times, values, signals = result
+
+        real_signals = zigzag_signal2real(signals)
+        valid_cutoff = np.min(np.sum(~np.isnan(real_signals), axis=0))
+
+        if valid_cutoff < 2:
+            raise ValueError("Not enough valid data points for analysis")
+
+        times = times[:valid_cutoff]
+        real_signals = real_signals[:, :valid_cutoff]
+
+        cum_diff = np.sum(np.abs(np.diff(real_signals, axis=0)), axis=0)
+        min_value = values[np.argmin(cum_diff)]
+
+        fig, ax = plt.subplots()
+        ax.plot(values, cum_diff, marker=".")
+        ax.axvline(
+            x=min_value,
+            color="red",
+            linestyle="--",
+            label=f"x = {min_value:.3f}",
+        )
+        ax.legend()
+        ax.set_xlabel("Sweep value (a.u.)")
+        ax.set_ylabel("Cumulative difference (a.u.)")
+
+        return min_value
 
     def save(
         self,
