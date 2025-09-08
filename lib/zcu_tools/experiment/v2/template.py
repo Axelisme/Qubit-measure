@@ -229,7 +229,7 @@ def sweep2D_soft_template(
                     ys_tqdm.reset()
                     ys_tqdm.refresh()
 
-                    for j, y in enumerate(ys_tqdm):
+                    for j, y in enumerate(ys):
                         updateCfg_y(cfg, j, y)
 
                         GlobalDeviceManager.setup_devices(cfg["dev"], progress=False)
