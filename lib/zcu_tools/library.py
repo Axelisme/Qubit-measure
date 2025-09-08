@@ -153,7 +153,7 @@ class ModuleLibrary:
                 waveform["delta"] = wav_cfg["delta"]
                 waveform["alpha"] = wav_cfg["alpha"]
 
-        self.waveforms[name] = waveform  # directly overwrite
+            self.waveforms[name] = waveform  # directly overwrite
 
     @_sync("after")
     def register_module(self, **mod_kwargs) -> None:
