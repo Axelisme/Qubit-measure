@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Literal
 
 import numpy as np
 
@@ -18,7 +18,11 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..template import sweep1D_soft_template, sweep2D_soft_hard_template
+from ..template import (
+    sweep1D_soft_template,
+    sweep2D_soft_hard_template,
+    sweep2D_soft_template,
+)
 
 
 def zigzag_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -129,7 +133,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},
     }
 
-    def run(
+    def run_hard(
         self,
         soc,
         soccfg,
@@ -171,6 +175,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
                         Pulse(
                             name=f"X180_pulse_{i}",
                             cfg=cfg["X180_pulse"],
+                            pulse_name="X180_pulse",
                         )
                         for i in range(pi_time)
                     ],
@@ -197,11 +202,113 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
             progress=progress,
         )
 
+        prog = ModularProgramV2(
+            soccfg, cfg, modules=[Pulse(name="X180_pulse", cfg=cfg["X180_pulse"])]
+        )
+        real_values = prog.get_pulse_param(
+            "X180_pulse", x_info["param_key"], as_array=True
+        )
+        real_values += values[0] - real_values[0]
+
+        # record last cfg and result
+        self.last_cfg = cfg
+        self.last_result = (times, real_values, signals)
+
+        return times, real_values, signals
+
+    def run_soft(
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        progress: bool = True,
+    ) -> ZigZagSweepResultType:
+        cfg = deepcopy(cfg)  # avoid in-place modification
+
+        time_sweep = cfg["sweep"].pop("times")
+        times = sweep2array(time_sweep, allow_array=True)  # predicted
+
+        # extract sweep parameters
+        x_key = list(cfg["sweep"].keys())[0]
+        if x_key not in self.SWEEP_MAP:
+            raise ValueError(f"Unsupported sweep key: {x_key}")
+        x_info = self.SWEEP_MAP[x_key]
+        values = sweep2array(cfg["sweep"][x_key])  # predicted
+
+        del cfg["sweep"]  # no hard sweep
+
+        def updateCfg_x(cfg: Dict[str, Any], _: int, time: Any) -> None:
+            cfg["zigzag_pi_time"] = time
+
+        def updateCfg_y(cfg: Dict[str, Any], _: int, value: Any) -> None:
+            cfg["X180_pulse"][x_info["param_key"]] = value
+
+        updateCfg_x(cfg, 0, times[0])  # initial update
+        updateCfg_y(cfg, 0, values[0])  # initial update
+
+        def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
+            pi_time = cfg["zigzag_pi_time"]
+
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    make_reset("reset", cfg.get("reset")),
+                    Pulse(name="X90_pulse", cfg=cfg["X90_pulse"]),
+                    *[
+                        Pulse(
+                            name=f"X180_pulse_{i}",
+                            cfg=cfg["X180_pulse"],
+                            pulse_name="X180_pulse",
+                        )
+                        for i in range(pi_time)
+                    ],
+                    make_readout("readout", cfg["readout"]),
+                ],
+            )
+
+            return prog.acquire(soc, progress=False, callback=callback)[0][0].dot(
+                [1, 1j]
+            )
+
+        signals = sweep2D_soft_template(
+            cfg,
+            measure_fn,
+            LivePlotter2D(
+                "Times",
+                x_info["name"],
+                disable=not progress,
+            ),
+            xs=times,
+            ys=values,
+            updateCfg_x=updateCfg_x,
+            updateCfg_y=updateCfg_y,
+            signal2real=zigzag_signal2real,
+            progress=progress,
+        )
+
         # record last cfg and result
         self.last_cfg = cfg
         self.last_result = (times, values, signals)
 
         return times, values, signals
+
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        method: Literal["hard", "soft"] = "hard",
+        progress: bool = True,
+    ) -> ZigZagSweepResultType:
+        if method == "hard":
+            return self.run_hard(soc, soccfg, cfg, progress=progress)
+        elif method == "soft":
+            return self.run_soft(soc, soccfg, cfg, progress=progress)
+        else:
+            raise ValueError(f"Unsupported method: {method}")
 
     def analyze(
         self,
