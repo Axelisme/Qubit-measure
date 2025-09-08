@@ -35,9 +35,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         flx_pulse = cfg["flx_pulse"]
-        pi_pulse = cfg["pi_pulse"]
-
-        check_flux_pulse(flx_pulse)
+        check_flux_pulse(flx_pulse, check_delay=False)
 
         flx_sweep = cfg["sweep"]["flux"]
         len_sweep = cfg["sweep"]["length"]
@@ -49,8 +47,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         lens = sweep2array(len_sweep)
 
         # Frequency is swept by FPGA (hard sweep)
-        flx_pulse["gain"] = gains[0]  # set initial gain
-        pi_pulse["post_delay"] = sweep2param(len_sweep)
+        flx_pulse["length"] = sweep2param("length", len_sweep)
 
         def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
             cfg["flx_pulse"]["gain"] = value
@@ -65,8 +62,8 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                 cfg,
                 modules=[
                     make_reset("reset", reset_cfg=cfg.get("reset")),
-                    Pulse(name="flux_pulse", cfg=cfg["flx_pulse"]),
                     Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                    Pulse(name="flux_pulse", cfg=cfg["flx_pulse"]),
                     make_readout("readout", readout_cfg=cfg["readout"]),
                 ],
             )
@@ -92,10 +89,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         # Get the actual frequency points used by FPGA
         prog = ModularProgramV2(
-            soccfg, cfg, modules=[Pulse(name="pi_pulse", cfg=cfg["pi_pulse"])]
+            soccfg, cfg, modules=[Pulse(name="flux_pulse", cfg=cfg["flx_pulse"])]
         )
-        real_ts = prog.get_time_param("pi_pulse_post_delay", "t", as_array=True)
+        real_ts = prog.get_pulse_param("flux_pulse", "length", as_array=True)
         assert isinstance(real_ts, np.ndarray), "fpts should be an array"
+        real_ts += lens[0] - real_ts[0]  # correct absolute offset
 
         # Cache results
         self.last_cfg = cfg
