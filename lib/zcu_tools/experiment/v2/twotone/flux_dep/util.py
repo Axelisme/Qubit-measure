@@ -1,4 +1,6 @@
 from typing import Any, Dict, Tuple
+from copy import deepcopy
+
 from zcu_tools.program.v2 import check_no_post_delay
 from zcu_tools.utils import deepupdate
 
@@ -11,7 +13,8 @@ def wrap_with_flux_pulse(
     """Derive a flux pulse waveform and parameters from a given pulse, and delay the pulse t if need
     It will not overrid the existing value in flx_cfg.
     """
-    derive_pulse = {"nqz": 1, "freq": 0.0}
+    pulse = deepcopy(pulse)
+    derive_pulse = {"nqz": 1, "freq": 0.0, "phase": 0.0}
     if margin > 0.0:
         derive_pulse.update(
             style="flat_top",
@@ -48,7 +51,7 @@ def wrap_with_flux_pulse(
 
     deepupdate(derive_pulse, flx_cfg, behavior="force")
 
-    return derive_pulse
+    return pulse, derive_pulse
 
 
 def check_flux_pulse(

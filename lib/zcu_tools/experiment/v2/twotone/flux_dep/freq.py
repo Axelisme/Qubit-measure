@@ -170,12 +170,12 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
     ) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        cfg["qub_pulse"], cfg["flx_pulse"] = wrap_with_flux_pulse(
+            cfg["qub_pulse"], cfg["flx_pulse"], margin=flx_margin
+        )
+
         qub_pulse = cfg["qub_pulse"]
         flx_pulse = cfg["flx_pulse"]
-
-        qub_pulse, flx_pulse = wrap_with_flux_pulse(
-            qub_pulse, flx_pulse, margin=flx_margin
-        )
         check_flux_pulse(flx_pulse)
 
         flx_sweep = cfg["sweep"]["flux"]
