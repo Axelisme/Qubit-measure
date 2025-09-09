@@ -55,7 +55,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
 
         # Frequency is swept by FPGA (hard sweep)
         flx_pulse["gain"] = gains[0]  # set initial gain
-        t2r_spans = sweep2param(len_sweep)
+        t2r_spans = sweep2param("length", len_sweep)
 
         def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
             cfg["flx_pulse"]["gain"] = value
@@ -114,9 +114,9 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                 Pulse(name="flux_pulse", cfg={**cfg["flx_pulse"], "length": t2r_spans})
             ],
         )
-        real_ts = prog.get_time_param("flux_pulse_post_delay", "t", as_array=True)
-        assert isinstance(real_ts, np.ndarray), "real_ts should be an array"
-        real_ts += ts[0] - real_ts[0]  # adjust to start from the first time
+        real_ts = prog.get_pulse_param("flux_pulse", "length", as_array=True)
+        assert isinstance(real_ts, np.ndarray), "fpts should be an array"
+        real_ts += ts[0] - real_ts[0]  # correct absolute offset
 
         # Cache results
         self.last_cfg = cfg
