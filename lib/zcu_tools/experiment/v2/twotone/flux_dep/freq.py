@@ -25,7 +25,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
 from ...template import sweep2D_soft_hard_template, sweep2D_soft_template
-from .util import check_flux_pulse, derive_flux_pulse_from_pulse
+from .util import check_flux_pulse, wrap_with_flux_pulse
 
 FreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -35,7 +35,7 @@ def freq_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class FreqExperiment(AbsExperiment[FreqResultType]):
-    def run_pure_zcu(
+    def run_with_yoko(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
@@ -93,7 +93,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         return dev_values, fpts_real, signals2D
 
-    def run_with_rf_source(
+    def run_with_rf_yoko(
         self,
         soc,
         soccfg,
@@ -160,14 +160,22 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         return dev_values, fpts, signals2D
 
     def run_fastflux(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        flx_margin: float = 0.0,
+        progress: bool = True,
     ) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         qub_pulse = cfg["qub_pulse"]
         flx_pulse = cfg["flx_pulse"]
 
-        flx_pulse = derive_flux_pulse_from_pulse(qub_pulse, flx_pulse)
+        qub_pulse, flx_pulse = wrap_with_flux_pulse(
+            qub_pulse, flx_pulse, margin=flx_margin
+        )
         check_flux_pulse(flx_pulse)
 
         flx_sweep = cfg["sweep"]["flux"]
@@ -240,15 +248,16 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         soccfg,
         cfg: Dict[str, Any],
         *,
-        method: Literal["pure_zcu", "with_rf_source", "fastflux"] = "pure_zcu",
+        method: Literal["yoko", "rf_yoko", "fastflux"] = "yoko",
         progress: bool = True,
+        **kwargs,
     ) -> FreqResultType:
-        if method == "pure_zcu":
-            return self.run_pure_zcu(soc, soccfg, cfg, progress=progress)
-        elif method == "with_rf_source":
-            return self.run_with_rf_source(soc, soccfg, cfg, progress=progress)
+        if method == "yoko":
+            return self.run_with_yoko(soc, soccfg, cfg, progress=progress, **kwargs)
+        elif method == "rf_yoko":
+            return self.run_with_rf_yoko(soc, soccfg, cfg, progress=progress, **kwargs)
         elif method == "fastflux":
-            return self.run_fastflux(soc, soccfg, cfg, progress=progress)
+            return self.run_fastflux(soc, soccfg, cfg, progress=progress, **kwargs)
         else:
             raise ValueError(f"Unknown method: {method}")
 
