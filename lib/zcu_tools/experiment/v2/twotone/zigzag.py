@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Tuple, Literal
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -366,9 +367,10 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
             raise ValueError("Not enough valid data points for analysis")
 
         times = times[:valid_cutoff]
-        real_signals = real_signals[:, :valid_cutoff]
+        real_signals = real_signals[:valid_cutoff]
 
         cum_diff = np.sum(np.abs(np.diff(real_signals, axis=0)), axis=0)
+        cum_diff = gaussian_filter1d(cum_diff, sigma=1)
         min_value = values[np.argmin(cum_diff)]
 
         fig, ax = plt.subplots()
