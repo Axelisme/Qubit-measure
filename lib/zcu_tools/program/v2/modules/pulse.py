@@ -2,6 +2,8 @@ import warnings
 from typing import Any, Dict, Optional
 from copy import deepcopy
 
+import qick.asm_v2 as qasm
+
 from ..base import MyProgramV2, add_pulse, create_waveform
 from .base import Module
 
@@ -13,6 +15,16 @@ def check_no_post_delay(cfg: Dict[str, Any], name: str) -> None:
             "\nForce set post_delay to None."
         )
     cfg["post_delay"] = None
+
+
+class DelayOn(qasm.Macro):
+    def __init__(self, gen_ch: int, t: float) -> None:
+        self.gen_ch = gen_ch
+        self.t = t
+
+    def preprocess(self, prog):
+        cur_t = prog.get_timestamp(gen_ch=self.gen_ch)
+        prog.set_timestamp(cur_t + self.t, gen_ch=self.gen_ch)
 
 
 class Pulse(Module):
@@ -81,8 +93,17 @@ class Pulse(Module):
         if cfg is None:
             return
 
-        prog.pulse(cfg["ch"], self.pulse_name, t=cfg.get("t", "auto"), tag=self.name)
+        t = cfg["t"]
 
-        post_delay = cfg.get("post_delay", 0.0)
+        # directly set puls(t = t, ...) will use absolute time
+        # this make t relative to last pulse end,
+        # TODO: other non-hacky way to do this?
+        if t != "auto":
+            prog.append_macro(DelayOn(cfg["ch"], t))
+            t = "auto"
+
+        prog.pulse(cfg["ch"], self.pulse_name, t=t, tag=self.name)
+
+        post_delay = cfg["post_delay"]
         if post_delay is not None:
             prog.delay_auto(post_delay, ros=False, tag=f"{self.name}_post_delay")
