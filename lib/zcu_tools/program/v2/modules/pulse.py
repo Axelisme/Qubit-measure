@@ -22,9 +22,12 @@ class DelayOn(qasm.Macro):
         self.gen_ch = gen_ch
         self.t = t
 
-    def preprocess(self, prog):
+    def preprocess(self, prog: MyProgramV2) -> None:
         cur_t = prog.get_timestamp(gen_ch=self.gen_ch)
         prog.set_timestamp(cur_t + self.t, gen_ch=self.gen_ch)
+
+    def expand(self, prog: MyProgramV2) -> None:
+        return []
 
 
 class Pulse(Module):
