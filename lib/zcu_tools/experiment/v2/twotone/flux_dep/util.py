@@ -15,13 +15,6 @@ def wrap_with_flux_pulse(
     """
     pulse = deepcopy(pulse)
     derive_pulse = {"nqz": 1, "freq": 0.0, "phase": 0.0}
-    if margin > 0.0:
-        derive_pulse.update(
-            style="flat_top",
-            raise_pulse=dict(style="cosine", length=margin),
-        )
-    else:
-        derive_pulse.update(style="const")
 
     if isinstance(pulse["t"], QickParam):
         raise ValueError("pulse t cannot be a QickParam when using flux pulse wrap.")
