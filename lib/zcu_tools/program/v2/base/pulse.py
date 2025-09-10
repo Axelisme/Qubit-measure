@@ -13,17 +13,6 @@ def force_no_post_delay(pulse: Dict[str, Any], name: str) -> None:
     pulse["post_delay"] = None
 
 
-def trigger_pulse(prog: MyProgramV2, pulse: Dict[str, Any], name: str) -> None:
-    ch = pulse["ch"]
-    post_delay = pulse.get("post_delay", 0.0)
-    t = pulse.get("t", 0.0)
-
-    prog.pulse(ch, name, t=t, tag=f"ch{ch}_{name}")
-
-    if post_delay is not None:
-        prog.delay_auto(post_delay, ros=False, tag=f"ch{ch}_{name}_post_delay")
-
-
 def create_waveform(prog: MyProgramV2, name: str, pulse: Dict[str, Any]) -> None:
     ch: int = pulse["ch"]
     style: str = pulse["style"]
