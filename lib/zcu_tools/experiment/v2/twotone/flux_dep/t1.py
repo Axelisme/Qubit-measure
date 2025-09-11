@@ -104,7 +104,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         return gains, real_ts, signals2D
 
     def analyze(
-        self, result: Optional[T1ResultType] = None, *, start_idx: int = 0
+        self,
+        result: Optional[T1ResultType] = None,
+        *,
+        start_idx: int = 0,
+        t1_cutoff: float = np.inf,
     ) -> Tuple[np.ndarray, np.ndarray]:
         if result is None:
             result = self.last_result
@@ -135,6 +139,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
             t1, t1err, *_ = fit_decay(ts, real_signals)
 
+            if t1 > t1_cutoff or t1err > 0.5 * t1:
+                continue
+
             t1s[i] = t1
             t1errs[i] = t1err
 
@@ -146,7 +153,8 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         ax.errorbar(gains, t1s, yerr=t1errs, label="Fitting T1")
         ax.set_xlabel("Flux pulse gain (a.u.)")
         ax.set_ylabel("T1 (us)")
-        plt.plot(fig)
+        ax.set_ylim(bottom=0)
+        plt.plot()
 
         return t1s, t1errs
 
