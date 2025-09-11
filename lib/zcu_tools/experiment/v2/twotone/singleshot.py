@@ -86,7 +86,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         self,
         result: Optional[SingleShotResultType] = None,
         backend: Literal["center", "regression", "pca"] = "pca",
-    ) -> Tuple[float, np.ndarray]:
+    ) -> Tuple[float, float, float, np.ndarray]:
         if result is None:
             result = self.last_result
         assert result is not None, (
