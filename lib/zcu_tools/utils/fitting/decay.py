@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Optional
 
 import numpy as np
 
@@ -50,11 +50,13 @@ def fit_dual_decay(
 
 
 def fit_decay_fringe(
-    xs: np.ndarray, real_signals: np.ndarray
+    xs: np.ndarray,
+    real_signals: np.ndarray,
+    fit_params: Optional[Tuple[float, ...]] = None,
 ) -> Tuple[
     float, float, float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]
 ]:
-    pOpt, pCov = fitdecaycos(xs, real_signals)
+    pOpt, pCov = fitdecaycos(xs, real_signals, fitparams=fit_params)
 
     fit_signals = decaycos(xs, *pOpt)
 
