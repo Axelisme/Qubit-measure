@@ -4,7 +4,6 @@ from copy import deepcopy
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
-import matplotlib.pyplot as plt
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -18,10 +17,9 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
-from zcu_tools.utils.fitting import fit_decay
 
 from ...template import sweep_hard_template
-from .util import check_flux_pulse, check_no_post_delay
+from .util import check_flux_pulse
 
 FluxLookbackResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -38,8 +36,12 @@ class FluxLookbackExperiment(AbsExperiment[FluxLookbackResultType]):
 
         flx_pulse = cfg["flx_pulse"]
         qub_pulse = cfg["qub_pulse"]
+
+        flx_pulse.setdefault("nqz", 1)
+        flx_pulse.setdefault("freq", 0.0)
+        flx_pulse.setdefault("phase", 0.0)
+
         check_flux_pulse(flx_pulse)
-        check_no_post_delay(qub_pulse, "qub_pulse")
 
         # let length be outer loop
         cfg["sweep"] = {
@@ -60,8 +62,8 @@ class FluxLookbackExperiment(AbsExperiment[FluxLookbackResultType]):
             cfg,
             modules=[
                 make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
                 Pulse(name="flux_pulse", cfg=cfg["flx_pulse"]),
+                Pulse(name="qub_pulse", cfg=cfg["qub_pulse"]),
                 make_readout("readout", readout_cfg=cfg["readout"]),
             ],
         )
@@ -69,7 +71,7 @@ class FluxLookbackExperiment(AbsExperiment[FluxLookbackResultType]):
         def measure_fn(
             _: Dict[str, Any], cb: Optional[Callable[..., None]]
         ) -> np.ndarray:
-            return prog.acquire(soc, progress=True, callback=cb)[0][0].dot([1, 1j])
+            return prog.acquire(soc, progress=progress, callback=cb)[0][0].dot([1, 1j])
 
         # Run 2D soft-hard sweep (flux soft, length hard)
         signals2D = sweep_hard_template(
@@ -82,19 +84,13 @@ class FluxLookbackExperiment(AbsExperiment[FluxLookbackResultType]):
             ),
             ticks=(lens, fpts),
             signal2real=fluxlookback_signal2real,
-            progress=progress,
         )
-
-        # Get the actual frequency points used by FPGA
-        real_lens = prog.get_time_param("qub_pulse", as_array=True)
-        assert isinstance(real_lens, np.ndarray), "fpts should be an array"
-        real_lens += lens[0] - real_lens[0]  # correct absolute offset
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (real_lens, fpts, signals2D)
+        self.last_result = (lens, fpts, signals2D)
 
-        return real_lens, fpts, signals2D
+        return lens, fpts, signals2D
 
     def analyze(self, result: Optional[FluxLookbackResultType] = None) -> None:
         if result is None:

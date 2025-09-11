@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -20,7 +20,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.fitting import fit_decay
 
-from ...template import sweep2D_soft_hard_template
+from ...template import sweep_hard_template
 from .util import check_flux_pulse
 
 T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -37,71 +37,72 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         flx_pulse = cfg["flx_pulse"]
+
+        flx_pulse.setdefault("nqz", 1)
+        flx_pulse.setdefault("freq", 0.0)
+        flx_pulse.setdefault("phase", 0.0)
+        flx_pulse.setdefault("post_delay", 0.0)
+
         check_flux_pulse(flx_pulse, check_delay=False)
 
         flx_sweep = cfg["sweep"]["flux"]
         len_sweep = cfg["sweep"]["length"]
 
-        # Remove flux from sweep dict - will be handled by soft loop
-        cfg["sweep"] = {"length": len_sweep}
+        # Flux sweep be outer loop
+        cfg["sweep"] = {
+            "flux": flx_sweep,
+            "length": len_sweep,
+        }
 
-        gains = sweep2array(flx_sweep, allow_array=True)
+        # predict sweep points
+        gains = sweep2array(flx_sweep)
         lens = sweep2array(len_sweep)
 
         # Frequency is swept by FPGA (hard sweep)
+        flx_pulse["gain"] = sweep2param("flux", flx_sweep)
         flx_pulse["length"] = sweep2param("length", len_sweep)
 
-        def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
-            cfg["flx_pulse"]["gain"] = value
-
-        updateCfg(cfg, 0, gains[0])  # set initial flux
+        prog = ModularProgramV2(
+            soccfg,
+            cfg,
+            modules=[
+                make_reset("reset", reset_cfg=cfg.get("reset")),
+                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                Pulse(name="flux_pulse", cfg=cfg["flx_pulse"]),
+                make_readout("readout", readout_cfg=cfg["readout"]),
+            ],
+        )
 
         def measure_fn(
             cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
         ) -> np.ndarray:
-            prog = ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    make_reset("reset", reset_cfg=cfg.get("reset")),
-                    Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                    Pulse(name="flux_pulse", cfg=cfg["flx_pulse"]),
-                    make_readout("readout", readout_cfg=cfg["readout"]),
-                ],
-            )
-            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+            return prog.acquire(soc, progress=progress, callback=cb)[0][0].dot([1, 1j])
 
         # Run 2D soft-hard sweep (flux soft, length hard)
-        signals2D = sweep2D_soft_hard_template(
+        signals2D = sweep_hard_template(
             cfg,
             measure_fn,
-            LivePlotter2DwithLine(
+            LivePlotter2D(
                 "Local flux gain (a.u.)",
                 "Time (us)",
-                line_axis=1,
-                num_lines=2,
                 disable=not progress,
             ),
-            xs=gains,
-            ys=lens,
-            updateCfg=updateCfg,
+            ticks=(gains, lens),
             signal2real=t1_signal2real,
-            progress=progress,
         )
 
         # Get the actual frequency points used by FPGA
-        prog = ModularProgramV2(
-            soccfg, cfg, modules=[Pulse(name="flux_pulse", cfg=cfg["flx_pulse"])]
-        )
+        real_gains = prog.get_pulse_param("flux_pulse", "gain", as_array=True)
         real_ts = prog.get_pulse_param("flux_pulse", "length", as_array=True)
+        assert isinstance(real_gains, np.ndarray), "fpts should be an array"
         assert isinstance(real_ts, np.ndarray), "fpts should be an array"
         real_ts += lens[0] - real_ts[0]  # correct absolute offset
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (gains, real_ts, signals2D)
+        self.last_result = (real_gains, real_ts, signals2D)
 
-        return gains, real_ts, signals2D
+        return real_gains, real_ts, signals2D
 
     def analyze(
         self,
