@@ -56,6 +56,7 @@ def fit_decay_fringe(
 ) -> Tuple[
     float, float, float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]
 ]:
+    """return t2f, t2ferr, detune, detune_err, fit_signals, (pOpt, pCov)"""
     pOpt, pCov = fitdecaycos(xs, real_signals, fitparams=fit_params)
 
     fit_signals = decaycos(xs, *pOpt)

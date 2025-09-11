@@ -144,6 +144,8 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
 
         t2s = np.full(len(gains), np.nan, dtype=np.float64)
         t2errs = np.zeros_like(t2s)
+        detunes = np.full_like(t2s, np.nan)
+        detune_errs = np.zeros_like(t2s)
 
         fit_params = None
         for i in range(len(gains)):
@@ -153,7 +155,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             if np.any(np.isnan(real_signals)):
                 continue
 
-            t2r, t2err, *_, (pOpt, _) = fit_decay_fringe(
+            t2r, t2err, detune, derr, _, (pOpt, _) = fit_decay_fringe(
                 ts, real_signals, fit_params=fit_params
             )
 
@@ -164,19 +166,24 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
 
             t2s[i] = t2r
             t2errs[i] = t2err
+            detunes[i] = detune
+            detune_errs[i] = derr
 
         if np.all(np.isnan(t2s)):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
 
-        fig, ax = plt.subplots(1, 1)
-        assert isinstance(ax, plt.Axes)
-        ax.errorbar(gains, t2s, yerr=t2errs, label="Fitting T2")
-        ax.set_xlabel("Flux pulse gain (a.u.)")
-        ax.set_ylabel("T2 (us)")
-        ax.set_ylim(bottom=0)
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        assert isinstance(ax1, plt.Axes)
+        assert isinstance(ax2, plt.Axes)
+        ax1.errorbar(gains, t2s, yerr=t2errs, label="Fitting T2")
+        ax1.set_ylabel("T2 (us)")
+        ax1.set_ylim(bottom=0)
+        ax2.errorbar(gains, detunes, yerr=detune_errs, label="Fitting detune")
+        ax2.set_ylabel("Detune (MHz)")
+        ax2.set_xlabel("Flux pulse gain (a.u.)")
         plt.plot()
 
-        return t2s, t2errs
+        return t2s, t2errs, detunes, detune_errs
 
     def save(
         self,
