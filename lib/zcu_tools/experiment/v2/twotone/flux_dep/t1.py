@@ -166,9 +166,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            y_info={"name": "Flux pulse gain", "unit": "a.u.", "values": gains},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+            x_info={"name": "Flux pulse gain", "unit": "a.u.", "values": gains},
+            y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
             tag=tag,
             **kwargs,

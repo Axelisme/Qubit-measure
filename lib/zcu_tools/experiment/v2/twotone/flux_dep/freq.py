@@ -300,9 +300,9 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-            y_info={"name": "Flux device value", "unit": "a.u.", "values": values},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+            x_info={"name": "Flux device value", "unit": "a.u.", "values": values},
+            y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
             tag=tag,
             **kwargs,
