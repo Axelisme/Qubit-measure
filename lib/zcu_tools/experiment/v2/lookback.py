@@ -133,8 +133,13 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
             signals = gaussian_filter1d(signals, smooth)
         y = np.abs(signals)
 
-        # find first idx where y is larger than ratio * max_y
-        offset = Ts[np.argmax(y > ratio * np.max(y))]
+        # start from max point, find largest idx where y is smaller than ratio * max_y
+        max_idx = np.argmax(y)
+        candidate_mask = y[:max_idx] < ratio * y[max_idx]
+        if not np.any(candidate_mask):
+            offset = Ts[0]
+        else:
+            offset = Ts[np.nonzero(candidate_mask)[0][-1]]
 
         plt.figure(figsize=config.figsize)
         plt.plot(Ts, signals.real, label="I value")
