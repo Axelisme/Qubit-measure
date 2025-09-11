@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -17,6 +18,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.fitting import fit_decay
 
 from ...template import sweep2D_soft_hard_template
 from .util import check_flux_pulse
@@ -102,12 +104,51 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         return gains, real_ts, signals2D
 
     def analyze(
-        self,
-        result: Optional[T1ResultType] = None,
-        mA_c: Optional[float] = None,
-        mA_e: Optional[float] = None,
-    ) -> None:
-        raise NotImplementedError("Analysis not implemented yet")
+        self, result: Optional[T1ResultType] = None, *, start_idx: int = 0
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        gains, ts, signals2D = result
+
+        if start_idx > len(ts) - 4:
+            raise ValueError(
+                f"not enough data to analyze under start_idx={start_idx}, while total length={len(ts)}"
+            )
+
+        # start from start_idx
+        ts = ts[start_idx:]
+        signals2D = signals2D[:, start_idx:]
+
+        real_signals2D = rotate2real(signals2D).real
+
+        t1s = np.full(len(gains), np.nan, dtype=np.float64)
+        t1errs = np.zeros_like(t1s)
+
+        for i in range(len(gains)):
+            real_signals = real_signals2D[i, :]
+
+            # skip if have nan data
+            if np.any(np.isnan(real_signals)):
+                continue
+
+            t1, t1err, *_ = fit_decay(ts, real_signals)
+
+            t1s[i] = t1
+            t1errs[i] = t1err
+
+        if np.all(np.isnan(t1s)):
+            raise ValueError("No valid Fitting T1 found. Please check the data.")
+
+        fig, ax = plt.subplots(1, 1)
+        assert isinstance(ax, plt.Axes)
+        ax.errorbar(gains, t1s, yerr=t1errs, label="Fitting T1")
+        ax.set_xlabel("Flux pulse gain (a.u.)")
+        ax.set_ylabel("T1 (us)")
+        plt.plot(fig)
+
+        return t1s, t1errs
 
     def save(
         self,
