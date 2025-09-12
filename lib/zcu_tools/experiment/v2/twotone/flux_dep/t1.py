@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Literal
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
+from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -20,7 +20,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.fitting import fit_decay
 
-from ...template import sweep_hard_template
+from ...template import sweep_hard_template, sweep2D_soft_hard_template
 from .util import check_flux_pulse
 
 T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -32,6 +32,22 @@ def t1_signal2real(signals: np.ndarray) -> np.ndarray:
 
 class T1Experiment(AbsExperiment[T1ResultType]):
     def run(
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        method: Literal["fastflux", "yoko"] = "fastflux",
+        progress: bool = True,
+    ) -> T1ResultType:
+        if method == "fastflux":
+            return self.run_fastflux(soc, soccfg, cfg, progress=progress)
+        elif method == "yoko":
+            return self.run_yoko(soc, soccfg, cfg, progress=progress)
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+    def run_fastflux(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> T1ResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
@@ -74,7 +90,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         )
 
         def measure_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+            _: Dict[str, Any], cb: Optional[Callable[..., None]]
         ) -> np.ndarray:
             return prog.acquire(soc, progress=progress, callback=cb)[0][0].dot([1, 1j])
 
@@ -103,6 +119,75 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         self.last_result = (real_gains, real_ts, signals2D)
 
         return real_gains, real_ts, signals2D
+
+    def run_yoko(
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+    ) -> T1ResultType:
+        cfg = deepcopy(cfg)  # prevent in-place modification
+
+        flx_sweep = cfg["sweep"]["flux"]
+        len_sweep = cfg["sweep"]["length"]
+
+        # Flux sweep be soft loop
+        cfg["sweep"] = {"length": len_sweep}
+
+        # predict sweep points
+        values = sweep2array(flx_sweep)
+        lens = sweep2array(len_sweep)
+
+        # Frequency is swept by FPGA (hard sweep)
+        cfg["pi_pulse"]["post_delay"] = sweep2param("length", len_sweep)
+
+        def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
+            set_flux_in_dev_cfg(cfg["dev"], value)
+
+        updateCfg(cfg, 0, values[0])  # set initial flux
+
+        def measure_fn(
+            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+        ) -> np.ndarray:
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    make_reset("reset", reset_cfg=cfg.get("reset")),
+                    Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                    make_readout("readout", readout_cfg=cfg["readout"]),
+                ],
+            )
+            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
+        # Run 2D soft-hard sweep (flux soft, length hard)
+        signals2D = sweep2D_soft_hard_template(
+            cfg,
+            measure_fn,
+            LivePlotter2DwithLine(
+                "Flux device value",
+                "Time (us)",
+                line_axis=1,
+                num_lines=2,
+                disable=not progress,
+            ),
+            xs=values,
+            ys=lens,
+            updateCfg=updateCfg,
+            signal2real=t1_signal2real,
+            progress=progress,
+        )
+
+        # Get the actual frequency points used by FPGA
+        prog = ModularProgramV2(
+            soccfg, cfg, modules=[Pulse(name="pi_pulse", cfg=cfg["pi_pulse"])]
+        )
+        real_ts = prog.get_time_param("pi_pulse_post_delay", "t", as_array=True)
+        assert isinstance(real_ts, np.ndarray), "fpts should be an array"
+        real_ts += lens[0] - real_ts[0]  # correct absolute offset
+
+        # Cache results
+        self.last_cfg = cfg
+        self.last_result = (values, real_ts, signals2D)
+
+        return values, real_ts, signals2D
 
     def analyze(
         self,
@@ -149,7 +234,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         if np.all(np.isnan(t1s)):
             raise ValueError("No valid Fitting T1 found. Please check the data.")
 
-        fig, ax = plt.subplots(1, 1)
+        _, ax = plt.subplots(1, 1)
         assert isinstance(ax, plt.Axes)
         ax.errorbar(gains, t1s, yerr=t1errs, label="Fitting T1")
         ax.set_xlabel("Flux pulse gain (a.u.)")
