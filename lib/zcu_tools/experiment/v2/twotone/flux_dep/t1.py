@@ -39,11 +39,12 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         *,
         method: Literal["fastflux", "yoko"] = "fastflux",
         progress: bool = True,
+        **kwargs,
     ) -> T1ResultType:
         if method == "fastflux":
-            return self.run_fastflux(soc, soccfg, cfg, progress=progress)
+            return self.run_fastflux(soc, soccfg, cfg, progress=progress, **kwargs)
         elif method == "yoko":
-            return self.run_yoko(soc, soccfg, cfg, progress=progress)
+            return self.run_yoko(soc, soccfg, cfg, progress=progress, **kwargs)
         else:
             raise ValueError(f"Unknown method: {method}")
 
@@ -121,9 +122,17 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         return real_gains, real_ts, signals2D
 
     def run_yoko(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        freq_map: Tuple[np.ndarray, np.ndarray],
+        progress: bool = True,
     ) -> T1ResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
+
+        map_values, map_freqs = freq_map
 
         flx_sweep = cfg["sweep"]["flux"]
         len_sweep = cfg["sweep"]["length"]
@@ -135,11 +144,17 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         values = sweep2array(flx_sweep)
         lens = sweep2array(len_sweep)
 
+        if np.any(values < map_values.min()) or np.any(values > map_values.max()):
+            raise ValueError(
+                f"Sweep values from {values.min()} to {values.max()} exceed the freq_map range [{map_values.min()}, {map_values.max()}]"
+            )
+
         # Frequency is swept by FPGA (hard sweep)
         cfg["pi_pulse"]["post_delay"] = sweep2param("length", len_sweep)
 
         def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
             set_flux_in_dev_cfg(cfg["dev"], value)
+            cfg["pi_pulse"]["freq"] = np.interp(value, map_values, map_freqs)
 
         updateCfg(cfg, 0, values[0])  # set initial flux
 
