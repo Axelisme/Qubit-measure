@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Literal
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
+from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -20,7 +20,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.fitting import fit_decay_fringe
 
-from ...template import sweep_hard_template
+from ...template import sweep_hard_template, sweep2D_soft_hard_template
 from .util import check_flux_pulse
 
 T2RamseyResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -32,6 +32,140 @@ def t2ramsey_signal2real(signals: np.ndarray) -> np.ndarray:
 
 class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
     def run(
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        method: Literal["fastflux", "yoko"] = "fastflux",
+        detune: float = 0.0,
+        progress: bool = True,
+        **kwargs,
+    ) -> T2RamseyResultType:
+        if method == "fastflux":
+            return self.run_fastflux(
+                soc, soccfg, cfg, detune=detune, progress=progress, **kwargs
+            )
+        elif method == "yoko":
+            return self.run_yoko(
+                soc, soccfg, cfg, detune=detune, progress=progress, **kwargs
+            )
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+    def run_yoko(
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        freq_map: Tuple[np.ndarray, np.ndarray],
+        detune: float = 0.0,
+        progress: bool = True,
+    ) -> T2RamseyResultType:
+        cfg = deepcopy(cfg)  # prevent in-place modification
+
+        map_values, map_freqs = freq_map
+
+        flx_sweep = cfg["sweep"]["flux"]
+        len_sweep = cfg["sweep"]["length"]
+
+        # Flux sweep be soft loop
+        cfg["sweep"] = {"length": len_sweep}
+
+        # predict sweep points
+        values = sweep2array(flx_sweep)
+        lens = sweep2array(len_sweep)
+
+        if np.any(values < map_values.min()) or np.any(values > map_values.max()):
+            raise ValueError(
+                f"Sweep values from {values.min()} to {values.max()} exceed the freq_map range [{map_values.min()}, {map_values.max()}]"
+            )
+
+        # Frequency is swept by FPGA (hard sweep)
+        t2spans = sweep2param("length", len_sweep)
+
+        def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
+            set_flux_in_dev_cfg(cfg["dev"], value)
+            predict_freq = np.interp(value, map_values, map_freqs)
+            cfg["pi_pulse"]["freq"] = predict_freq
+            cfg["pi2_pulse"]["freq"] = predict_freq
+
+        updateCfg(cfg, 0, values[0])  # set initial flux
+
+        def measure_fn(
+            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+        ) -> np.ndarray:
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    make_reset("reset", reset_cfg=cfg.get("reset")),
+                    Pulse(
+                        name="pi2_pulse1",
+                        cfg={
+                            **cfg["pi2_pulse"],
+                            "post_delay": t2spans,
+                        },
+                    ),
+                    Pulse(
+                        name="pi2_pulse2",
+                        cfg={  # activate detune
+                            **cfg["pi2_pulse"],
+                            "phase": cfg["pi2_pulse"]["phase"] + 360 * detune * t2spans,
+                        },
+                    ),
+                    make_readout("readout", readout_cfg=cfg["readout"]),
+                ],
+            )
+            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
+        def t2r_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
+            real_signals = rotate2real(signals).real
+            mean_val = np.mean(real_signals, axis=1)
+            std_val = np.std(real_signals, axis=1)
+            return (real_signals - mean_val[:, None]) / std_val[:, None]
+
+        # Run 2D soft-hard sweep (flux soft, length hard)
+        signals2D = sweep2D_soft_hard_template(
+            cfg,
+            measure_fn,
+            LivePlotter2DwithLine(
+                "Flux device value",
+                "Time (us)",
+                line_axis=1,
+                num_lines=2,
+                disable=not progress,
+            ),
+            xs=values,
+            ys=lens,
+            updateCfg=updateCfg,
+            signal2real=t2r_yoko_signal2real,
+            progress=progress,
+        )
+
+        # Get the actual frequency points used by FPGA
+        prog = ModularProgramV2(
+            soccfg,
+            cfg,
+            modules=[
+                Pulse(
+                    name="pi2_pulse",
+                    cfg={**cfg["pi2_pulse"], "post_delay": t2spans},
+                )
+            ],
+        )
+        real_ts = prog.get_time_param("pi2_pulse_post_delay", "t", as_array=True)
+        assert isinstance(real_ts, np.ndarray), "lens should be an array"
+        real_ts += lens[0] - real_ts[0]  # correct absolute offset
+
+        # Cache results
+        self.last_cfg = cfg
+        self.last_result = (values, real_ts, signals2D)
+
+        return values, real_ts, signals2D
+
+    def run_fastflux(
         self,
         soc,
         soccfg,
