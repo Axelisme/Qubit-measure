@@ -12,7 +12,10 @@ from zcu_tools.experiment.utils import (
     set_freq_in_dev_cfg,
 )
 from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
+from zcu_tools.notebook.analysis.fluxdep.interactive import (
+    InteractiveLines,
+    InteractiveFindPoints,
+)
 from zcu_tools.program.v2 import (
     TwoToneProgram,
     sweep2param,
@@ -274,15 +277,24 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         values, fpts, signals2D = result
 
         actline = InteractiveLines(
-            signals2D,
-            mAs=values,
-            fpts=fpts,
-            mA_c=mA_c,
-            mA_e=mA_e,
-            use_phase=True,
+            signals2D, mAs=values, fpts=fpts, mA_c=mA_c, mA_e=mA_e
         )
 
         return actline
+
+    def extract_points(
+        self,
+        result: Optional[FreqResultType] = None,
+    ) -> InteractiveFindPoints:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        values, fpts, signals2D = result
+
+        point_selector = InteractiveFindPoints(signals2D, mAs=values, fpts=fpts)
+
+        return point_selector
 
     def save(
         self,
