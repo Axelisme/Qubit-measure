@@ -276,8 +276,10 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         values, fpts, signals2D = result
 
+        signals2D = minus_background(signals2D, axis=1)
+
         actline = InteractiveLines(
-            signals2D, mAs=values, fpts=fpts, mA_c=mA_c, mA_e=mA_e
+            signals2D.T, mAs=values, fpts=fpts, mA_c=mA_c, mA_e=mA_e
         )
 
         return actline
@@ -292,7 +294,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         values, fpts, signals2D = result
 
-        point_selector = InteractiveFindPoints(signals2D, mAs=values, fpts=fpts)
+        point_selector = InteractiveFindPoints(signals2D.T, mAs=values, fpts=fpts)
 
         return point_selector
 

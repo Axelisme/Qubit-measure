@@ -172,6 +172,12 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             )
             return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
 
+        def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
+            real_signals = rotate2real(signals).real
+            min_val = np.min(real_signals, axis=1)
+            max_val = np.max(real_signals, axis=1)
+            return (real_signals - min_val[:, None]) / (max_val - min_val)[:, None]
+
         # Run 2D soft-hard sweep (flux soft, length hard)
         signals2D = sweep2D_soft_hard_template(
             cfg,
@@ -180,13 +186,13 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                 "Flux device value",
                 "Time (us)",
                 line_axis=1,
-                num_lines=2,
+                num_lines=5,
                 disable=not progress,
             ),
             xs=values,
             ys=lens,
             updateCfg=updateCfg,
-            signal2real=t1_signal2real,
+            signal2real=t1_yoko_signal2real,
             progress=progress,
         )
 
