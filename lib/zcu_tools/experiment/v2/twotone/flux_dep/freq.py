@@ -121,6 +121,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         # Frequency is swept by RF source, zcu only controls the waveform
         qub_pulse["freq"] = 0.0
+        qub_pulse.setdefault("outsel", "input")
 
         def updateCfg_x(cfg: Dict[str, Any], _: int, value: float) -> None:
             set_flux_in_dev_cfg(cfg["dev"], value)
