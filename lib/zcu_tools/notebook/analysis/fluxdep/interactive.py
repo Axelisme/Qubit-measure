@@ -708,6 +708,7 @@ class InteractiveLines:
         # 總是使用spectrum來計算(包含phase資訊)
         diff_amps = diff_mirror(self.mAs, self.spectrum.T, x).T
         self.zoom_im.set_data(diff_amps)
+        self.zoom_im.autoscale()
 
         mirror_loss = np.mean(diff_amps[diff_amps != 0.0])
 
