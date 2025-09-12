@@ -14,7 +14,7 @@ def wrap_with_flux_pulse(
     It will not overrid the existing value in flx_cfg.
     """
     pulse = deepcopy(pulse)
-    derive_pulse = {"nqz": 1, "freq": 0.0, "phase": 0.0}
+    derive_pulse = {"nqz": 1, "freq": 0.0, "phase": 0.0, "outsel": "input"}
 
     if isinstance(pulse["t"], QickParam):
         raise ValueError("pulse t cannot be a QickParam when using flux pulse wrap.")

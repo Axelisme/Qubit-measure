@@ -47,6 +47,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         flx_pulse.setdefault("nqz", 1)
         flx_pulse.setdefault("freq", 0.0)
         flx_pulse.setdefault("phase", 0.0)
+        flx_pulse.setdefault("outsel", "input")
         flx_pulse.setdefault("post_delay", 0.0)
 
         check_flux_pulse(flx_pulse, check_delay=False)

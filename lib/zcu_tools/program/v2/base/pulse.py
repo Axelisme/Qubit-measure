@@ -74,4 +74,7 @@ def add_pulse(
     if "mask" in pulse:
         wav_kwargs["mask"] = pulse["mask"]
 
+    if "outsel" in pulse:
+        wav_kwargs["outsel"] = pulse["outsel"]
+
     prog.add_pulse(ch, waveform, ro_ch=ro_ch, **wav_kwargs, **kwargs)

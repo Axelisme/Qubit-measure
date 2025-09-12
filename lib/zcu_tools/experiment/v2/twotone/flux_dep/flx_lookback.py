@@ -40,6 +40,8 @@ class FluxLookbackExperiment(AbsExperiment[FluxLookbackResultType]):
         flx_pulse.setdefault("nqz", 1)
         flx_pulse.setdefault("freq", 0.0)
         flx_pulse.setdefault("phase", 0.0)
+        flx_pulse.setdefault("outsel", "input")
+        flx_pulse.setdefault("post_delay", None)
 
         check_flux_pulse(flx_pulse)
 
