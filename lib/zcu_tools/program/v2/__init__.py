@@ -17,6 +17,8 @@ from .modules import (
     check_no_post_delay,
     make_readout,
     make_reset,
+    derive_readout_cfg,
+    derive_reset_cfg,
 )
 from .onetone import OneToneProgram
 from .twotone import TwoToneProgram

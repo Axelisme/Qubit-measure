@@ -13,6 +13,7 @@ from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.library import ModuleLibrary
 
 from ...template import sweep1D_soft_template, sweep_hard_template
 
@@ -27,6 +28,18 @@ LenRabiResultType = Tuple[np.ndarray, np.ndarray]  # (lens, signals)
 class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
     """Rabi oscillation by varying pulse *length*."""
 
+    def derive_cfg(
+        self, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+
+        cfg = TwoToneProgram.derive_cfg(ml, cfg)
+
+        return cfg
+
     def _run_for_flat(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> LenRabiResultType:
@@ -38,12 +51,9 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
             "This method only supports const and flat_top pulse style"
         )
 
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        len_sweep = cfg["sweep"]["length"]
+        lens = sweep2array(cfg["sweep"]["length"])  # predicted
 
-        lens = sweep2array(len_sweep)  # predicted
-
-        qub_pulse["length"] = sweep2param("length", len_sweep)
+        qub_pulse["length"] = sweep2param("length", cfg["sweep"]["length"])
 
         prog = TwoToneProgram(soccfg, cfg)
 
@@ -72,11 +82,8 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
     ) -> LenRabiResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        len_sweep = cfg["sweep"]["length"]
+        lens = sweep2array(cfg["sweep"]["length"])  # predicted
         del cfg["sweep"]
-
-        lens = sweep2array(len_sweep)  # predicted
 
         def updateCfg(cfg: Dict[str, Any], _: int, length: Any) -> None:
             qub_pulse = cfg["qub_pulse"]

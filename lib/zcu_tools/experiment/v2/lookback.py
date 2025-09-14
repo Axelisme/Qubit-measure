@@ -10,7 +10,7 @@ from scipy.ndimage import gaussian_filter1d
 from tqdm.auto import tqdm
 
 from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment, config, ModuleLibrary
 from zcu_tools.liveplot import AbsLivePlotter, LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
 from zcu_tools.utils.datasaver import save_data
@@ -20,6 +20,24 @@ LookbackResultType = Tuple[np.ndarray, np.ndarray]
 
 
 class LookbackExperiment(AbsExperiment[LookbackResultType]):
+    def derive_cfg(
+        self, ml: ModuleLibrary, exp_cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        exp_cfg = deepcopy(exp_cfg)
+        exp_cfg.update(kwargs)
+
+        exp_cfg.setdefault("reps", 1)
+        if exp_cfg["reps"] != 1:
+            warnings.warn("reps is not 1 in config, this will be ignored.")
+            exp_cfg["reps"] = 1
+
+        if "qub_pulse" in exp_cfg:
+            exp_cfg = TwoToneProgram.derive_cfg(ml, exp_cfg)
+        else:
+            exp_cfg = OneToneProgram.derive_cfg(ml, exp_cfg)
+
+        return exp_cfg
+
     def run(
         self,
         soc,
@@ -31,11 +49,6 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
         qub_pulse: bool = False,
     ) -> LookbackResultType:
         cfg = deepcopy(cfg)
-
-        cfg.setdefault("reps", 1)
-        if cfg["reps"] != 1:
-            warnings.warn("reps is not 1 in config, this will be ignored.")
-            cfg["reps"] = 1
 
         GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 

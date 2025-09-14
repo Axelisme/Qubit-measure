@@ -13,6 +13,7 @@ from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_resonence_freq
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.library import ModuleLibrary
 
 from ..template import sweep1D_soft_template, sweep_hard_template
 
@@ -25,6 +26,18 @@ FreqResultType = Tuple[np.ndarray, np.ndarray]
 
 
 class FreqExperiment(AbsExperiment[FreqResultType]):
+    def derive_cfg(
+        self, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
+
+        cfg = TwoToneProgram.derive_cfg(ml, cfg)
+
+        return cfg
+
     def run_pure_zcu(
         self,
         soc,
@@ -35,17 +48,11 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
     ) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        qub_pulse = cfg["qub_pulse"]
-
-        # canonicalise sweep section to single-axis form «{'freq': ...}»
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        sweep_cfg = cfg["sweep"]["freq"]
-
         # predicted sweep points before FPGA coercion
-        fpts = sweep2array(sweep_cfg)  # MHz
+        fpts = sweep2array(cfg["sweep"]["freq"])  # MHz
 
         # bind sweep parameter as *QickParam* so it is executed by FPGA
-        qub_pulse["freq"] = sweep2param("freq", sweep_cfg)
+        cfg["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
         prog = TwoToneProgram(soccfg, cfg)
 
@@ -82,11 +89,10 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         if "rf_dev" not in cfg["dev"]:
             raise ValueError("RF source is not configured")
 
-        sweep_cfg = format_sweep1D(cfg["sweep"], "freq")
-        del cfg["sweep"]  # use soft loop
-
         # predicted sweep points before FPGA coercion
-        fpts = sweep2array(sweep_cfg)  # MHz
+        fpts = sweep2array(cfg["sweep"]["freq"])  # MHz
+
+        del cfg["sweep"]  # use soft loop
 
         # Frequency is swept by RF source, zcu only controls the waveform
         cfg["qub_pulse"]["freq"] = 0.0

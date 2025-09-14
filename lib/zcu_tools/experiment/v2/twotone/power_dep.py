@@ -11,6 +11,7 @@ from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
+from zcu_tools.library import ModuleLibrary
 
 from ..template import sweep_hard_template
 
@@ -28,6 +29,22 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
     the qubit response as a function of drive strength.
     """
 
+    def derive_cfg(
+        self, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        # Ensure gain is the outer loop for better visualization
+        cfg["sweep"] = {
+            "gain": cfg["sweep"]["gain"],
+            "freq": cfg["sweep"]["freq"],
+        }
+
+        cfg = TwoToneProgram.derive_cfg(ml, cfg)
+
+        return cfg
+
     def run(
         self,
         soc,
@@ -39,12 +56,6 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         qub_pulse = cfg["qub_pulse"]
-
-        # Ensure gain is the outer loop for better visualization
-        cfg["sweep"] = {
-            "gain": cfg["sweep"]["gain"],
-            "freq": cfg["sweep"]["freq"],
-        }
 
         pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points

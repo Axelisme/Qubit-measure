@@ -12,15 +12,6 @@ from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.utils import deepupdate, numpy2number
 
 
-def is_module_cfg(name: str, module_cfg: Any) -> bool:
-    # TODO: use better method to check if it is a module configuration
-    if "reset" in name or "readout" in name or "pulse" in name:
-        if isinstance(module_cfg, dict):
-            return "type" in module_cfg or "style" in module_cfg
-        return isinstance(module_cfg, str)
-    return False
-
-
 def auto_derive_module(
     ml: ModuleLibrary, name: str, module_cfg: Union[str, Dict[str, Any]]
 ) -> Dict[str, Any]:
@@ -37,11 +28,6 @@ def auto_derive_module(
         module_cfg.setdefault("phase", 0.0)
         module_cfg.setdefault("t", 0.0)
         module_cfg.setdefault("post_delay", 0.0)
-
-    # derive pulse in module
-    for key, value in module_cfg.items():
-        if is_module_cfg(key, value):
-            module_cfg[key] = auto_derive_module(ml, key, value)
 
     return module_cfg
 
@@ -105,10 +91,6 @@ class ModuleLibrary:
         dev_cfg = GlobalDeviceManager.get_all_info()
         deepupdate(dev_cfg, exp_cfg.get("dev", {}), behavior="force")
         exp_cfg["dev"] = dev_cfg
-
-        for name, sub_cfg in exp_cfg.items():
-            if is_module_cfg(name, sub_cfg):
-                exp_cfg[name] = auto_derive_module(self, name, sub_cfg)
 
         return numpy2number(exp_cfg)
 

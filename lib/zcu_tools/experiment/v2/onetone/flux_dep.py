@@ -5,13 +5,14 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 from zcu_tools.program.v2 import OneToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
+from zcu_tools.library import ModuleLibrary
 
 from ..template import sweep2D_soft_hard_template
 
@@ -23,6 +24,23 @@ def fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
+    @classmethod
+    def derive_cfg(
+        cls, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        # make flux be the outer sweep
+        cfg["sweep"] = {
+            "flux": cfg["sweep"]["flux"],
+            "freq": cfg["sweep"]["freq"],
+        }
+
+        cfg = OneToneProgram.derive_cfg(ml, cfg)
+
+        return cfg
+
     def run(
         self,
         soc,
@@ -34,8 +52,8 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         res_pulse = cfg["readout"]["pulse_cfg"]
-        fpt_sweep = cfg["sweep"]["freq"]
         flx_sweep = cfg["sweep"]["flux"]
+        fpt_sweep = cfg["sweep"]["freq"]
 
         # remove flux from sweep dict, will be handled by soft loop
         cfg["sweep"] = {"freq": fpt_sweep}

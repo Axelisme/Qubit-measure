@@ -26,6 +26,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
+from zcu_tools.library import ModuleLibrary
 
 from ...template import sweep2D_soft_hard_template, sweep2D_soft_template
 from .util import check_flux_pulse, wrap_with_flux_pulse
@@ -38,6 +39,26 @@ def freq_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class FreqExperiment(AbsExperiment[FreqResultType]):
+    def derive_cfg(
+        self, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        # Ensure the outer loop
+        cfg["sweep"] = {
+            "flux": cfg["sweep"]["flux"],
+            "freq": cfg["sweep"]["freq"],
+        }
+        if "flx_pulse" in cfg:
+            flx_pulse = cfg["flx_pulse"]
+            flx_pulse.setdefault("nqz", 1)
+            flx_pulse.setdefault("freq", 0.0)
+            flx_pulse.setdefault("outsel", "input")
+            flx_pulse.setdefault("post_delay", None)
+
+        return cfg
+
     def run_with_yoko(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> FreqResultType:

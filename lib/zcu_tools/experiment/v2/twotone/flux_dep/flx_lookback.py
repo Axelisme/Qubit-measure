@@ -14,9 +14,12 @@ from zcu_tools.program.v2 import (
     make_readout,
     make_reset,
     sweep2param,
+    derive_readout_cfg,
+    derive_reset_cfg,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.library import ModuleLibrary
 
 from ...template import sweep_hard_template
 from .util import check_flux_pulse
@@ -29,27 +32,38 @@ def fluxlookback_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class FluxLookbackExperiment(AbsExperiment[FluxLookbackResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> FluxLookbackResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def derive_cfg(
+        self, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        # Ensure the outer loop
+        cfg["sweep"] = {
+            "length": cfg["sweep"]["length"],
+            "freq": cfg["sweep"]["freq"],
+        }
+
+        if "reset" in cfg:
+            cfg["reset"] = derive_reset_cfg(ml, cfg["reset"])
 
         flx_pulse = cfg["flx_pulse"]
-        qub_pulse = cfg["qub_pulse"]
-
         flx_pulse.setdefault("nqz", 1)
         flx_pulse.setdefault("freq", 0.0)
         flx_pulse.setdefault("phase", 0.0)
         flx_pulse.setdefault("outsel", "input")
         flx_pulse.setdefault("post_delay", None)
 
-        check_flux_pulse(flx_pulse)
+        return cfg
 
-        # let length be outer loop
-        cfg["sweep"] = {
-            "length": cfg["sweep"]["length"],
-            "freq": cfg["sweep"]["freq"],
-        }
+    def run(
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+    ) -> FluxLookbackResultType:
+        cfg = deepcopy(cfg)  # prevent in-place modification
+
+        qub_pulse = cfg["qub_pulse"]
+
+        check_flux_pulse(cfg["flx_pulse"])
 
         # predict point
         lens = sweep2array(cfg["sweep"]["length"])

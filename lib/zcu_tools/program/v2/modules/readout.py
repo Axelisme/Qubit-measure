@@ -1,13 +1,30 @@
 from copy import deepcopy
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING, Union
 
 from ..base import force_no_post_delay
-from .base import Module
-from .pulse import MyProgramV2, Pulse
+from .base import Module, MyProgramV2, str2module
+from .pulse import Pulse
+
+if TYPE_CHECKING:
+    from ..modules import ModuleLibrary
 
 
 class AbsReadout(Module):
     pass
+
+
+def derive_readout_cfg(
+    ml: ModuleLibrary, readout_cfg: Union[str, Dict[str, Any]]
+) -> Dict[str, Any]:
+    readout_cfg = str2module(ml, readout_cfg)
+
+    ro_type = readout_cfg["type"]
+    if ro_type == "base":
+        return BaseReadout.derive_cfg(ml, readout_cfg)
+    elif ro_type == "two_pulse":
+        return TwoPulseReadout.derive_cfg(ml, readout_cfg)
+    else:
+        raise ValueError(f"Unknown readout type: {ro_type}")
 
 
 def make_readout(name: str, readout_cfg: Dict[str, Any]) -> AbsReadout:
@@ -47,6 +64,21 @@ class BaseReadout(AbsReadout):
         self.pulse = Pulse(
             name=pulse_name, cfg=self.pulse_cfg, ro_ch=self.ro_cfg["ro_ch"]
         )
+
+    @classmethod
+    def derive_cfg(
+        cls, ml: ModuleLibrary, module_cfg: Union[str, Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        module_cfg = deepcopy(module_cfg)
+
+        module_cfg = str2module(ml, module_cfg)
+
+        if module_cfg["type"] != "base":
+            raise ValueError("BaseReadout can only derive from 'base' type")
+
+        module_cfg["pulse_cfg"] = str2module(ml, module_cfg["pulse_cfg"])
+
+        return module_cfg
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse.init(prog)
@@ -89,6 +121,22 @@ class TwoPulseReadout(AbsReadout):
         self.pulse2 = Pulse(
             name=f"{name}_pulse2", cfg=self.pulse2_cfg, ro_ch=self.ro_cfg["ro_ch"]
         )
+
+    @classmethod
+    def derive_cfg(
+        cls, ml: ModuleLibrary, module_cfg: Union[str, Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        module_cfg = deepcopy(module_cfg)
+
+        module_cfg = str2module(ml, module_cfg)
+
+        if module_cfg["type"] != "two_pulse":
+            raise ValueError("TwoPulseReadout can only derive from 'two_pulse' type")
+
+        module_cfg["pulse1_cfg"] = str2module(ml, module_cfg["pulse1_cfg"])
+        module_cfg["pulse2_cfg"] = str2module(ml, module_cfg["pulse2_cfg"])
+
+        return module_cfg
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse1.init(prog)

@@ -13,6 +13,7 @@ from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.library import ModuleLibrary
 
 from ...template import sweep_hard_template
 
@@ -27,6 +28,18 @@ AmpRabiResultType = Tuple[np.ndarray, np.ndarray]  # (amps, signals)
 class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
     """Rabi oscillation by varying pulse *amplitude* (gain)."""
 
+    def derive_cfg(
+        self, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
+
+        cfg = TwoToneProgram.derive_cfg(ml, cfg)
+
+        return cfg
+
     def run(
         self,
         soc,
@@ -37,7 +50,6 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
     ) -> AmpRabiResultType:
         cfg = deepcopy(cfg)
 
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         gain_sweep = cfg["sweep"]["gain"]
 
         cfg["qub_pulse"]["gain"] = sweep2param("gain", gain_sweep)

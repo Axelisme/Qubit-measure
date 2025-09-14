@@ -16,10 +16,13 @@ from zcu_tools.program.v2 import (
     make_readout,
     make_reset,
     sweep2param,
+    derive_readout_cfg,
+    derive_reset_cfg,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.library import ModuleLibrary
 
 from ...template import sweep_hard_template
 
@@ -38,6 +41,21 @@ class T1Experiment(AbsExperiment[T1ResultType]):
     to measure the qubit's energy relaxation.
     """
 
+    def derive_cfg(
+        self, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+
+        if "reset" in cfg:
+            cfg["reset"] = derive_reset_cfg(ml, cfg["reset"])
+        cfg["pi_pulse"] = Pulse.derive_cfg(ml, cfg["pi_pulse"])
+        cfg["readout"] = derive_readout_cfg(ml, cfg["readout"])
+
+        return cfg
+
     def run(
         self,
         soc,
@@ -48,9 +66,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
     ) -> T1ResultType:
         cfg = deepcopy(cfg)
 
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        sweep_cfg = cfg["sweep"]["length"]
-
         prog = ModularProgramV2(
             soccfg,
             cfg,
@@ -60,14 +75,14 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     name="pi_pulse",
                     cfg={
                         **cfg["pi_pulse"],
-                        "post_delay": sweep2param("length", sweep_cfg),
+                        "post_delay": sweep2param("length", cfg["sweep"]["length"]),
                     },
                 ),
                 make_readout("readout", readout_cfg=cfg["readout"]),
             ],
         )
 
-        ts = sweep2array(sweep_cfg)  # predicted times
+        ts = sweep2array(cfg["sweep"]["length"])  # predicted times
         signals = sweep_hard_template(
             cfg,
             lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(

@@ -12,6 +12,7 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_resonence_freq
+from zcu_tools.library import ModuleLibrary
 
 from ..template import sweep_hard_template
 
@@ -19,6 +20,19 @@ FreqResultType = Tuple[np.ndarray, np.ndarray]
 
 
 class FreqExperiment(AbsExperiment[FreqResultType]):
+    @classmethod
+    def derive_cfg(
+        cls, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
+
+        cfg = OneToneProgram.derive_cfg(ml, cfg)
+
+        return cfg
+
     def run(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> FreqResultType:
@@ -26,16 +40,12 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         res_pulse = cfg["readout"]["pulse_cfg"]
 
-        # Ensure the sweep section is in canonical single-axis form.
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        sweep_cfg = cfg["sweep"]["freq"]
-
         # Predicted frequency points (before mapping to ADC domain)
-        fpts = sweep2array(sweep_cfg)  # MHz
+        fpts = sweep2array(cfg["sweep"]["freq"])  # MHz
 
         # Attach sweep parameter to the QICK program – using a *QickParam* so
         # that it is executed inside the FPGA loop («hard sweep»).
-        res_pulse["freq"] = sweep2param("freq", sweep_cfg)
+        res_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
         # Build program once; *OneToneProgram* will evaluate the sweep
         prog = OneToneProgram(soccfg, cfg)

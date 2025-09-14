@@ -5,12 +5,13 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import numpy as np
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import OneToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background, rescale
+from zcu_tools.library import ModuleLibrary
 
 from ..template import sweep2D_soft_hard_template
 
@@ -22,6 +23,23 @@ def pdrdep_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
+    @classmethod
+    def derive_cfg(
+        cls, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        # make gain be the outer sweep
+        cfg["sweep"] = {
+            "gain": cfg["sweep"]["gain"],
+            "freq": cfg["sweep"]["freq"],
+        }
+
+        cfg = OneToneProgram.derive_cfg(ml, cfg)
+
+        return cfg
+
     def run(
         self,
         soc,

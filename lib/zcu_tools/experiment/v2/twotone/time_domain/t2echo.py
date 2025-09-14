@@ -15,10 +15,13 @@ from zcu_tools.program.v2 import (
     make_readout,
     make_reset,
     sweep2param,
+    derive_readout_cfg,
+    derive_reset_cfg,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.library import ModuleLibrary
 
 from ...template import sweep_hard_template
 
@@ -31,6 +34,22 @@ T2EchoResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
 
 
 class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
+    def derive_cfg(
+        self, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+
+        if "reset" in cfg:
+            cfg["reset"] = derive_reset_cfg(ml, cfg["reset"])
+        cfg["pi2_pulse"] = Pulse.derive_cfg(ml, cfg["pi2_pulse"])
+        cfg["pi_pulse"] = Pulse.derive_cfg(ml, cfg["pi_pulse"])
+        cfg["readout"] = derive_readout_cfg(ml, cfg["readout"])
+
+        return cfg
+
     def run(
         self,
         soc,
@@ -42,10 +61,7 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
     ) -> T2EchoResultType:
         cfg = deepcopy(cfg)
 
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        sweep_cfg = cfg["sweep"]["length"]
-
-        t2e_spans = sweep2param("length", sweep_cfg)
+        t2e_spans = sweep2param("length", cfg["sweep"]["length"])
 
         prog = ModularProgramV2(
             soccfg,
@@ -78,7 +94,7 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
             ],
         )
 
-        ts = sweep2array(sweep_cfg)  # predicted times
+        ts = sweep2array(cfg["sweep"]["length"])  # predicted times
         signals = sweep_hard_template(
             cfg,
             lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(

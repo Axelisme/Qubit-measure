@@ -1,11 +1,15 @@
+from __future__ import annotations
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union, TYPE_CHECKING
 from copy import deepcopy
 
 import qick.asm_v2 as qasm
 
 from ..base import MyProgramV2, add_pulse, create_waveform
-from .base import Module
+from .base import Module, str2module
+
+if TYPE_CHECKING:
+    from ..modules import ModuleLibrary
 
 
 def check_no_post_delay(cfg: Dict[str, Any], name: str) -> None:
@@ -47,6 +51,36 @@ class Pulse(Module):
         else:
             self.pulse_name = pulse_name
 
+    @classmethod
+    def derive_cfg(
+        cls, ml: ModuleLibrary, module_cfg: Optional[Union[str, Dict[str, Any]]]
+    ) -> Optional[Dict[str, Any]]:
+        if module_cfg is None:
+            return None
+
+        module_cfg = str2module(ml, module_cfg)
+
+        # if it also a pulse cfg, exclude raise_pulse in flat_top
+        module_cfg.setdefault("phase", 0.0)
+        module_cfg.setdefault("t", 0.0)
+        module_cfg.setdefault("post_delay", 0.0)
+
+        GAUSS_RATIO = 0.25
+
+        style = module_cfg["style"]
+        if style == "gauss":
+            length = module_cfg.get("length")
+            if length is not None:
+                module_cfg.setdefault("sigma", length * GAUSS_RATIO)
+        elif style == "flat_top":
+            raise_pulse = module_cfg["raise_pulse"]
+            if raise_pulse["style"] == "gauss":
+                raise_length = raise_pulse.get("length")
+                if raise_length is not None:
+                    raise_pulse.setdefault("sigma", raise_length * GAUSS_RATIO)
+
+        return module_cfg
+
     def init(self, prog: MyProgramV2) -> None:
         if self.cfg is None:
             return
@@ -73,7 +107,7 @@ class Pulse(Module):
     # -----------------------
 
     def init_pulse(self, prog: MyProgramV2, name: str) -> None:
-        ro_ch = self.ro_ch if self.cfg.get("mixer_freq") is not None else None
+        ro_ch = self.ro_ch
 
         prog.declare_gen(
             self.cfg["ch"],

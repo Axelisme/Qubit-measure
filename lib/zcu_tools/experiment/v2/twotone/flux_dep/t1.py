@@ -15,10 +15,13 @@ from zcu_tools.program.v2 import (
     make_readout,
     make_reset,
     sweep2param,
+    derive_readout_cfg,
+    derive_reset_cfg,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.fitting import fit_decay
+from zcu_tools.library import ModuleLibrary
 
 from ...template import sweep_hard_template, sweep2D_soft_hard_template
 from .util import check_flux_pulse
@@ -31,6 +34,27 @@ def t1_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class T1Experiment(AbsExperiment[T1ResultType]):
+    def derive_cfg(
+        self, ml: ModuleLibrary, cfg: Dict[str, Any], **kwargs
+    ) -> Dict[str, Any]:
+        cfg = deepcopy(cfg)
+        cfg.update(kwargs)
+
+        if "reset" in cfg:
+            cfg["reset"] = derive_reset_cfg(ml, cfg["reset"])
+        cfg["pi_pulse"] = Pulse.derive_cfg(ml, cfg["pi_pulse"])
+
+        if "flx_pulse" in cfg:
+            flx_pulse = cfg["flx_pulse"]
+            flx_pulse.setdefault("nqz", 1)
+            flx_pulse.setdefault("freq", 0.0)
+            flx_pulse.setdefault("phase", 0.0)
+            flx_pulse.setdefault("outsel", "input")
+
+        cfg["readout"] = derive_readout_cfg(ml, cfg["readout"])
+
+        return cfg
+
     def run(
         self,
         soc,
