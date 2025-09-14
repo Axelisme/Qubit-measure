@@ -30,9 +30,10 @@ def fitlor(xdata, ydata, fitparams=None):
 
     # bounds
     yscale = fitparams[2]
+    max_slope = (np.max(ydata) - np.min(ydata)) / (xdata.max() - xdata.min())
     bounds = (
-        [np.min(ydata), -np.inf, -2 * np.abs(yscale), -np.inf, 0],
-        [np.max(ydata), np.inf, 2 * np.abs(yscale), np.inf, np.inf],
+        [np.min(ydata), -max_slope, -2 * np.abs(yscale), xdata.min(), 0],
+        [np.max(ydata), max_slope, 2 * np.abs(yscale), xdata.max(), np.inf],
     )
 
     return fit_func(xdata, ydata, lorfunc, fitparams, bounds)
