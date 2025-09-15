@@ -6,7 +6,12 @@ from .freq import FreqExperiment
 from .power_dep import PowerDepExperiment
 from .rabi import AmpRabiExperiment, LenRabiExperiment
 from .singleshot import SingleShotExperiment
-from .time_domain import T1Experiment, T2EchoExperiment, T2RamseyExperiment
+from .time_domain import (
+    T1Experiment,
+    T2EchoExperiment,
+    T2RamseyExperiment,
+    CPMGExperiment,
+)
 from .zigzag import ZigZagExperiment, ZigZagSweepExperiment
 
 __all__ = [
@@ -26,6 +31,7 @@ __all__ = [
     "T1Experiment",
     "T2EchoExperiment",
     "T2RamseyExperiment",
+    "CPMGExperiment",
     "ZigZagExperiment",
     "ZigZagSweepExperiment",
 ]
