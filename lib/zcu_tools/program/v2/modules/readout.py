@@ -54,7 +54,7 @@ class BaseReadout(AbsReadout):
         prog.declare_readout(ch=self.ro_cfg["ro_ch"], length=self.ro_cfg["ro_length"])
         prog.add_readoutconfig(
             ch=self.ro_cfg["ro_ch"],
-            name=f"{self.name}_readout_adc",
+            name=f"{self.name}_adc",
             freq=self.ro_cfg.get("ro_freq", self.pulse_cfg["freq"]),
             gen_ch=self.pulse_cfg["ch"],
         )
@@ -62,7 +62,7 @@ class BaseReadout(AbsReadout):
     def run(self, prog: MyProgramV2) -> None:
         ro_ch: int = self.ro_cfg["ro_ch"]
 
-        prog.send_readoutconfig(ro_ch, f"{self.name}_readout_adc", t=0)
+        prog.send_readoutconfig(ro_ch, f"{self.name}_adc", t=0)
 
         self.pulse.run(prog)
 
@@ -97,7 +97,7 @@ class TwoPulseReadout(AbsReadout):
         prog.declare_readout(ch=self.ro_cfg["ro_ch"], length=self.ro_cfg["ro_length"])
         prog.add_readoutconfig(
             ch=self.ro_cfg["ro_ch"],
-            name=f"{self.name}_readout_adc",
+            name=f"{self.name}_adc",
             freq=self.ro_cfg.get("ro_freq", self.pulse2_cfg["freq"]),
             gen_ch=self.pulse2_cfg["ch"],
         )
@@ -105,7 +105,7 @@ class TwoPulseReadout(AbsReadout):
     def run(self, prog: MyProgramV2) -> None:
         ro_ch: int = self.ro_cfg["ro_ch"]
 
-        prog.send_readoutconfig(ro_ch, f"{self.name}_readout_adc", t=0)
+        prog.send_readoutconfig(ro_ch, f"{self.name}_adc", t=0)
 
         self.pulse1.run(prog)
         self.pulse2.run(prog)
