@@ -34,7 +34,9 @@ class ModularProgramV2(MyProgramV2):
             if isinstance(module, Macro):
                 self.append_macro(module)
             else:
-                assert isinstance(module, Module)
+                assert isinstance(module, Module), (
+                    f"Invalid module type: {type(module)}"
+                )
                 module.run(self)
 
 
