@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple, Callable
 
 import numpy as np
+import matplotlib.pyplot as plt
 import qick.asm_v2 as qasm
 
 from zcu_tools.experiment import AbsExperiment
@@ -18,6 +19,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.fitting import fit_decay
 
 from ...template import sweep2D_soft_hard_template
 
@@ -131,21 +133,50 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
 
         return times, ts, signals
 
-    def analyze(
-        self,
-        result: Optional[CPMGResultType] = None,
-        *,
-        plot: bool = True,
-        max_contrast: bool = True,
-        fit_fringe: bool = True,
-    ) -> Tuple[float, float, float, float]:
+    def analyze(self, result: Optional[CPMGResultType] = None) -> Tuple[float, float]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         times, Ts, signals2D = result
 
-        raise NotImplementedError("fit_fringe is not implemented yet")
+        real_signals2D = rotate2real(signals2D).real
+
+        t2s = np.full(len(times), np.nan, dtype=np.float64)
+        t2errs = np.zeros_like(t2s)
+
+        fit_params = None
+        for i in range(len(times)):
+            real_signals = real_signals2D[i, :]
+
+            # skip if have nan data
+            if np.any(np.isnan(real_signals)):
+                continue
+
+            t2r, t2err, _, (pOpt, _) = fit_decay(
+                Ts, real_signals, fit_params=fit_params
+            )
+
+            if t2err > 0.5 * t2r:
+                continue
+
+            fit_params = tuple(pOpt)
+
+            t2s[i] = t2r
+            t2errs[i] = t2err
+
+        if np.all(np.isnan(t2s)):
+            raise ValueError("No valid Fitting T2 found. Please check the data.")
+
+        fig, ax = plt.subplots(1, 1)
+        assert isinstance(ax, plt.Axes)
+        ax.errorbar(times, t2s, yerr=t2errs, label="Fitting T2")
+        ax.set_ylabel("T2 (us)")
+        ax.set_ylim(bottom=0)
+        ax.set_xlabel("Flux pulse gain (a.u.)")
+        plt.plot()
+
+        return t2s, t2errs
 
     def save(
         self,
