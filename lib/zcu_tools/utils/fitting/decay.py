@@ -6,9 +6,11 @@ from .base import decaycos, dual_expfunc, expfunc, fit_dualexp, fitdecaycos, fit
 
 
 def fit_decay(
-    xs: np.ndarray, real_signals: np.ndarray
+    xs: np.ndarray,
+    real_signals: np.ndarray,
+    fit_params: Optional[Tuple[float, ...]] = None,
 ) -> Tuple[float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
-    pOpt, pCov = fitexp(xs, real_signals)
+    pOpt, pCov = fitexp(xs, real_signals, fitparams=fit_params)
 
     fit_signals = expfunc(xs, *pOpt)
 
