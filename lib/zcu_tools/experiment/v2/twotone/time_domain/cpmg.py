@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple, Callable
 
 import numpy as np
+import qick.asm_v2 as qasm
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -42,23 +43,22 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
         times_sweep = cfg["sweep"]["times"]
         len_sweep = cfg["sweep"]["length"]
 
-        times = sweep2array(times_sweep)
+        cfg["sweep"].pop("times")
+
+        times = sweep2array(times_sweep, allow_array=True)
         ts = sweep2array(len_sweep)  # predicted times
 
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
 
         def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
-            cfg["time"] = value
+            cfg["time"] = int(value)
 
         updateCfg(cfg, 0, times[0])  # set initial flux
 
         cpmg_spans = sweep2param("length", len_sweep)
 
-        def measure_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> np.ndarray:
-            time = cfg["time"]
+        def make_prog(cfg, time):
             interval = cpmg_spans / time
             prog = ModularProgramV2(
                 soccfg,
@@ -67,29 +67,18 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
                     make_reset("reset", reset_cfg=cfg.get("reset")),
                     Pulse(
                         name="pi2_pulse1",
-                        cfg={
-                            **cfg["pi2_pulse"],
-                            "post_delay": 0.5 * interval,
-                        },
+                        cfg={**cfg["pi2_pulse"], "post_delay": 0.5 * interval},
                         pulse_name="pi2_pulse",
                     ),
-                    *[
-                        Pulse(
-                            name=f"pi_pulse_{i}",
-                            cfg={
-                                **cfg["pi_pulse"],
-                                "post_delay": interval,
-                            },
-                            pulse_name="pi_pulse",
-                        )
-                        for i in range(time - 1)
-                    ],
+                    qasm.OpenLoop(name="pi_loop", n=time - 1),
                     Pulse(
-                        name=f"pi_pulse_{time - 1}",
-                        cfg={
-                            **cfg["pi_pulse"],
-                            "post_delay": 0.5 * interval,
-                        },
+                        name="pi_pulse",
+                        cfg={**cfg["pi_pulse"], "post_delay": interval},
+                    ),
+                    qasm.CloseLoop(),
+                    Pulse(
+                        name="last_pi_pulse",
+                        cfg={**cfg["pi_pulse"], "post_delay": 0.5 * interval},
                         pulse_name="pi_pulse",
                     ),
                     Pulse(
@@ -98,42 +87,38 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
                     make_readout("readout", readout_cfg=cfg["readout"]),
                 ],
             )
+
+            return prog
+
+        def measure_fn(
+            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+        ) -> np.ndarray:
+            prog = make_prog(cfg, time=cfg["time"])
             return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
+        make_prog(cfg, time=np.max(times))  # test compile
 
         signals = sweep2D_soft_hard_template(
             cfg,
             measure_fn,
             LivePlotter2DwithLine(
+                "Number of Pi",
                 "Time (us)",
-                "CPMG Time",
                 line_axis=1,
                 num_lines=2,
                 disable=not progress,
             ),
-            ticks=(times, ts),
+            xs=times,
+            ys=ts,
             updateCfg=updateCfg,
             signal2real=cpmg_signal2real,
         )
 
-        # get actual times
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                Pulse(
-                    name="pi_pulse", cfg={**cfg["pi_pulse"], "post_delay": cpmg_spans}
-                )
-            ],
-        )
-        real_ts = prog.get_time_param("pi_pulse_post_delay", "t", as_array=True)
-        assert isinstance(real_ts, np.ndarray), "real_ts should be an array"
-        real_ts += ts[0] - real_ts[0]  # adjust to start from the first time
-
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (times, real_ts, signals)
+        self.last_result = (times, ts, signals)
 
-        return times, real_ts, signals
+        return times, ts, signals
 
     def analyze(
         self,
