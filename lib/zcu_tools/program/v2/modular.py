@@ -27,7 +27,6 @@ class ModularProgramV2(MyProgramV2):
 
         for module in self.modules:
             if isinstance(module, Module):
-                print(self.pulses.keys())
                 module.init(self)
 
     def _body(self, cfg: Dict[str, Any]) -> None:
@@ -36,7 +35,7 @@ class ModularProgramV2(MyProgramV2):
                 self.append_macro(module)
             else:
                 assert isinstance(module, Module)
-                module.init(self)
+                module.run(self)
 
 
 class BaseCustomProgramV2(ModularProgramV2):
