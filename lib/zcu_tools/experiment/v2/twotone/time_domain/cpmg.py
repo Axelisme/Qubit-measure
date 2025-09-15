@@ -64,7 +64,7 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
         def make_prog(cfg, time):
             interval = cpmg_spans / time
 
-            if time > 1:
+            if time > 1:  # zero Loop mean infinite loop in qick
                 cpmg_pi_loop = [
                     qasm.OpenLoop(name="cpmg_pi_loop", n=time - 1),
                     Pulse(
