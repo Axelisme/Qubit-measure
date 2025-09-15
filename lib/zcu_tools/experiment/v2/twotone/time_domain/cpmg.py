@@ -23,7 +23,10 @@ from ...template import sweep2D_soft_hard_template
 
 
 def cpmg_signal2real(signals: np.ndarray) -> np.ndarray:
-    return rotate2real(signals).real  # type: ignore
+    real_signals = rotate2real(signals).real
+    max_vals = np.max(real_signals, axis=1, keepdims=True)
+    min_vals = np.min(real_signals, axis=1, keepdims=True)
+    return (real_signals - min_vals) / (max_vals - min_vals)
 
 
 CPMGResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
@@ -60,6 +63,19 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
 
         def make_prog(cfg, time):
             interval = cpmg_spans / time
+
+            if time > 1:
+                cpmg_pi_loop = [
+                    qasm.OpenLoop(name="cpmg_pi_loop", n=time - 1),
+                    Pulse(
+                        name="pi_pulse",
+                        cfg={**cfg["pi_pulse"], "post_delay": interval},
+                    ),
+                    qasm.CloseLoop(),
+                ]
+            else:
+                cpmg_pi_loop = []
+
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
@@ -70,12 +86,7 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
                         cfg={**cfg["pi2_pulse"], "post_delay": 0.5 * interval},
                         pulse_name="pi2_pulse",
                     ),
-                    qasm.OpenLoop(name="pi_loop", n=time - 1),
-                    Pulse(
-                        name="pi_pulse",
-                        cfg={**cfg["pi_pulse"], "post_delay": interval},
-                    ),
-                    qasm.CloseLoop(),
+                    *cpmg_pi_loop,
                     Pulse(
                         name="last_pi_pulse",
                         cfg={**cfg["pi_pulse"], "post_delay": 0.5 * interval},
