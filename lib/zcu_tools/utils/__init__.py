@@ -1,6 +1,6 @@
 from typing import Any, Dict, Literal
 
-from . import datasaver, fitting, process
+from . import datasaver, fitting, process, tomography
 from .async_func import AsyncFunc
 
 
