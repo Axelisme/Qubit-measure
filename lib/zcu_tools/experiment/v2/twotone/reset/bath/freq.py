@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Callable
 
 import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -17,17 +17,17 @@ from zcu_tools.program.v2 import (
     BathReset,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.process import minus_background
+from zcu_tools.utils.process import rotate2real
 
 from ....template import sweep_hard_template
 
 
-def bath_reset_signal2real(signals: np.ndarray) -> np.ndarray:
-    return np.abs(minus_background(signals))
-
-
 # (fpts, phases, signals_2d)
 FreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+
+
+def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
+    return rotate2real(signals).real
 
 
 class FreqExperiment(AbsExperiment[FreqResultType]):
@@ -41,11 +41,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         if tested_reset["type"] != "bath":
             raise ValueError("This experiment only supports bath reset")
 
-        # Ensure frequency is the outer loop
-        cfg["sweep"] = {
-            "freq": cfg["sweep"]["freq"],
-            "phase": cfg["sweep"]["phase"],
-        }
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
 
         prog = ModularProgramV2(
             soccfg,
@@ -62,7 +58,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
                     },
                     pi2_cfg={
                         **tested_reset["pi2_cfg"],
-                        "phase": sweep2param("phase", cfg["sweep"]["phase"]),
+                        "phase": 90,  # Y gate
                     },
                 ),
                 make_readout("readout", readout_cfg=cfg["readout"]),
@@ -70,31 +66,30 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         )
 
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
-        phases = sweep2array(cfg["sweep"]["phase"])  # predicted phase points
 
         signals = sweep_hard_template(
             cfg,
             lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
                 [1, 1j]
             ),
-            LivePlotter2D(
-                "Cavity Frequency (MHz)", "Pi/2 phase (deg)", disable=not progress
+            LivePlotter1D(
+                "Cavity Frequency (MHz)",
+                "Signal difference (a.u.)",
+                disable=not progress,
             ),
-            ticks=(fpts, phases),
-            signal2real=bath_reset_signal2real,
+            ticks=(fpts,),
+            signal2real=bathreset_signal2real,
         )
 
         # Get the actual frequency points used by FPGA
         fpts = prog.get_pulse_param("tested_reset_res_pulse", "freq", as_array=True)
-        phases = prog.get_pulse_param("tested_reset_pi2_pulse", "phase", as_array=True)
         assert isinstance(fpts, np.ndarray), "fpts should be an array"
-        assert isinstance(phases, np.ndarray), "phases should be an array"
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (fpts, phases, signals)
+        self.last_result = (fpts, signals)
 
-        return fpts, phases, signals
+        return fpts, signals
 
     def analyze(
         self,
@@ -124,13 +119,12 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts, phases, signals2D = result
+        fpts, signals = result
 
         save_data(
             filepath=filepath,
             x_info={"name": "Cavity Frequency", "unit": "Hz", "values": fpts * 1e6},
-            y_info={"name": "Pi/2 Phase", "unit": "deg", "values": phases},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,
             **kwargs,
