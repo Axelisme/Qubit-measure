@@ -30,7 +30,7 @@ def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
     return rotate2real(signals).real
 
 
-class FreqExperiment(AbsExperiment[LengthResultType]):
+class LengthExperiment(AbsExperiment[LengthResultType]):
     def run(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> LengthResultType:
@@ -103,7 +103,7 @@ class FreqExperiment(AbsExperiment[LengthResultType]):
         filepath: str,
         result: Optional[LengthResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/reset/bath/param",
+        tag: str = "twotone/reset/bath/length",
         **kwargs,
     ) -> None:
         if result is None:
