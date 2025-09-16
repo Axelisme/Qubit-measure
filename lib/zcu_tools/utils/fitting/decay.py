@@ -85,7 +85,9 @@ def fit_gauss_decay(
     real_signals: np.ndarray,
     fit_params: Optional[Tuple[float, ...]] = None,
 ) -> Tuple[float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
-    pOpt, pCov = fit_gauss(xs, real_signals, fixedparams=[None, 0.0, None])
+    pOpt, pCov = fit_gauss(
+        xs, real_signals, fitparams=fit_params, fixedparams=[None, None, 0.0, None]
+    )
 
     fit_signals = gauss_func(xs, *pOpt)
 

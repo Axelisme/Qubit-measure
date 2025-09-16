@@ -1,37 +1,58 @@
 import numpy as np
 
-from .base import batch_fit_func, fit_func
+from .base import batch_fit_func, fit_func, assign_init_p
 
 
 # Gaussian function
-def gauss_func(x, yscale, x_c, sigma):
-    """params: [yscale, x_c, sigma]"""
-    return yscale * np.exp(-0.5 * ((x - x_c) / sigma) ** 2)
+def gauss_func(x, y0, yscale, x_c, sigma):
+    """params: [y0, yscale, x_c, sigma]"""
+    return y0 + yscale * np.exp(-0.5 * ((x - x_c) / sigma) ** 2)
 
 
-def fit_gauss(xdata, ydata, fixedparams=None):
-    """params: [yscale, x_c, sigma]"""
-    if fixedparams is not None and len(fixedparams) != 3:
+def fit_gauss(xdata, ydata, fitparams=None, fixedparams=None):
+    """params: [y0, yscale, x_c, sigma]"""
+    if fixedparams is not None and len(fixedparams) != 4:
         raise ValueError(
-            "Fixed parameters must be a list of three elements: [yscale, x_c, sigma]"
+            "Fixed parameters must be a list of four elements: [y0, yscale, x_c, sigma]"
         )
 
+    if fitparams is None:
+        fitparams = [None] * 4
+
     # guess initial parameters
-    max_idx = np.argmax(np.abs(ydata))
-    yscale = ydata[max_idx]
-    x_c = xdata[max_idx]
-    sigma = (
-        0.5
-        * (xdata.max() - xdata.min())
-        * np.sum(np.abs(ydata) > np.abs(yscale) / 2)
-        / len(xdata)
-    )
-    fitparams = [yscale, x_c, sigma]
+    if any([p is None for p in fitparams]):
+        # guess initial parameters
+        if np.max(ydata) + np.min(ydata) > 2 * np.mean(ydata):
+            y0 = np.min(ydata)
+        else:
+            y0 = np.max(ydata)
+        norm_ydata = np.abs(ydata - y0)
+        yscale = np.max(ydata)
+        max_idx = np.argmax(norm_ydata)
+        x_c = xdata[max_idx]
+        sigma = (
+            0.5
+            * (xdata.max() - xdata.min())
+            / (len(xdata) - 1)
+            * np.sum(norm_ydata > 0.5 * np.abs(yscale))
+        )
+        assign_init_p(fitparams, [y0, yscale, x_c, sigma])
 
     # bounds
+    y0, yscale, x_c, sigma = fitparams
     bounds = (
-        [-2 * np.abs(fitparams[0]), xdata.min(), 0],
-        [2 * np.abs(fitparams[0]), xdata.max(), xdata.max() - xdata.min()],
+        [
+            y0 - 0.5 * np.abs(yscale),
+            -2 * np.abs(yscale),
+            xdata.min(),
+            0,
+        ],
+        [
+            y0 + 0.5 * np.abs(yscale),
+            2 * np.abs(yscale),
+            xdata.max(),
+            xdata.max() - xdata.min(),
+        ],
     )
 
     return fit_func(xdata, ydata, gauss_func, fitparams, bounds, fixedparams)
@@ -39,7 +60,9 @@ def fit_gauss(xdata, ydata, fixedparams=None):
 
 # # Dual Gaussian function
 def dual_gauss_func(x, yscale1, x_c1, sigma1, yscale2, x_c2, sigma2):
-    return gauss_func(x, yscale1, x_c1, sigma1) + gauss_func(x, yscale2, x_c2, sigma2)
+    return gauss_func(x, 0.0, yscale1, x_c1, sigma1) + gauss_func(
+        x, 0.0, yscale2, x_c2, sigma2
+    )
 
 
 def guess_dual_gauss_params(xdata, ydata):
