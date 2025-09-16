@@ -30,6 +30,13 @@ def make_reset(name: str, reset_cfg: Optional[Dict[str, Any]]) -> AbsReset:
             pulse2_cfg=reset_cfg["pulse2_cfg"],
             post_pulse_cfg=reset_cfg.get("post_pulse_cfg"),
         )
+    elif reset_type == "bath":
+        return BathReset(
+            name,
+            qubit_tone_cfg=reset_cfg["qubit_tone_cfg"],
+            cavity_tone_cfg=reset_cfg["cavity_tone_cfg"],
+            pi2_cfg=reset_cfg["pi2_cfg"],
+        )
     else:
         raise ValueError(f"Unknown reset type: {reset_type}")
 
@@ -103,3 +110,30 @@ class TwoPulseReset(AbsReset):
 
         if self.post_reset_pulse is not None:
             self.post_reset_pulse.run(prog)
+
+
+class BathReset(AbsReset):
+    def __init__(
+        self,
+        name: str,
+        qubit_tone_cfg: Dict[str, Any],
+        cavity_tone_cfg: Dict[str, Any],
+        pi2_cfg: Dict[str, Any],
+    ) -> None:
+        self.name = name
+
+        check_no_post_delay(qubit_tone_cfg, f"{name}_qub_pulse")
+
+        self.qub_pulse = Pulse(name=f"{name}_qub_pulse", cfg=qubit_tone_cfg)
+        self.res_pulse = Pulse(name=f"{name}_res_pulse", cfg=cavity_tone_cfg)
+        self.pi2_pulse = Pulse(name=f"{name}_pi2_pulse", cfg=pi2_cfg)
+
+    def init(self, prog: MyProgramV2) -> None:
+        self.qub_pulse.init(prog)
+        self.res_pulse.init(prog)
+        self.pi2_pulse.init(prog)
+
+    def run(self, prog: MyProgramV2) -> None:
+        self.qub_pulse.run(prog)
+        self.res_pulse.run(prog)
+        self.pi2_pulse.run(prog)

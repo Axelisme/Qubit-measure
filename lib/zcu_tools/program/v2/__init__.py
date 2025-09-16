@@ -14,6 +14,7 @@ from .modules import (
     PulseReset,
     TwoPulseReadout,
     TwoPulseReset,
+    BathReset,
     check_no_post_delay,
     make_readout,
     make_reset,
