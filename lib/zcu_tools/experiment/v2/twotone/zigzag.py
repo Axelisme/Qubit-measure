@@ -264,17 +264,25 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         cum_diff = gaussian_filter1d(cum_diff, sigma=1)
         min_value = values[np.argmin(cum_diff)]
 
-        fig, ax = plt.subplots()
-        ax.plot(values, cum_diff, marker=".")
-        ax.axvline(
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        ax1.imshow(
+            zigzag_signal2real(signals),
+            aspect="auto",
+            extent=[values[0], values[-1], times[0], times[-1]],
+            origin="lower",
+            interpolation="none",
+        )
+        ax1.set_ylabel("Number of gate")
+        ax2.plot(values, cum_diff, marker=".")
+        ax2.axvline(
             x=min_value,
             color="red",
             linestyle="--",
             label=f"x = {min_value:.3f}",
         )
-        ax.legend()
-        ax.set_xlabel("Sweep value (a.u.)")
-        ax.set_ylabel("Cumulative difference (a.u.)")
+        ax2.legend()
+        ax2.set_xlabel("Sweep value (a.u.)")
+        ax2.set_ylabel("Cumulative difference (a.u.)")
 
         return min_value
 

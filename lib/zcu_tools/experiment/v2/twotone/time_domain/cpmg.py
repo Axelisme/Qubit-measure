@@ -168,12 +168,21 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
         if np.all(np.isnan(t2s)):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
 
-        fig, ax = plt.subplots(1, 1)
-        assert isinstance(ax, plt.Axes)
-        ax.errorbar(times, t2s, yerr=t2errs, label="Fitting T2")
-        ax.set_ylabel("T2 (us)")
-        ax.set_ylim(bottom=0)
-        ax.set_xlabel("Flux pulse gain (a.u.)")
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        assert isinstance(ax1, plt.Axes)
+        ax1.errorbar(times, t2s, yerr=t2errs, label="Fitting T2")
+        ax1.set_ylabel("T2 (us)")
+        ax1.set_ylim(bottom=0)
+        ax1.grid()
+        ax2.imshow(
+            cpmg_signal2real(signals2D).T,
+            aspect="auto",
+            origin="lower",
+            interpolation="none",
+            extent=(times[0], times[-1], Ts[0], Ts[-1]),
+        )
+        ax2.set_ylabel("Time (us)")
+        ax2.set_xlabel("Number of Pi")
         plt.plot()
 
         return t2s, t2errs
