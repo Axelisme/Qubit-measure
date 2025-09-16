@@ -14,10 +14,18 @@ from zcu_tools.utils import deepupdate, numpy2number
 
 def is_module_cfg(name: str, module_cfg: Any) -> bool:
     # TODO: use better method to check if it is a module configuration
-    if "reset" in name or "readout" in name or "pulse" in name:
-        if isinstance(module_cfg, dict):
-            return "type" in module_cfg or "style" in module_cfg
-        return isinstance(module_cfg, str)
+
+    # common modules
+    if name in ["reset", "tested_reset", "readout"]:
+        return True
+
+    # inside common modules
+    if "_cfg" in name:
+        return True
+
+    # pulse modules
+    if "_pulse" in name:
+        return True
     return False
 
 
