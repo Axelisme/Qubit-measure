@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple, Callable
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -18,12 +19,13 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.fitting import fit_resonence_freq
 
 from ....template import sweep_hard_template
 
 
-# (fpts, phases, signals_2d)
-FreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+# (fpts, signals_2d)
+FreqResultType = Tuple[np.ndarray, np.ndarray]
 
 
 def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -56,10 +58,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
                         **tested_reset["cavity_tone_cfg"],
                         "freq": sweep2param("freq", cfg["sweep"]["freq"]),
                     },
-                    pi2_cfg={
-                        **tested_reset["pi2_cfg"],
-                        "phase": 90,  # Y gate
-                    },
+                    pi2_cfg=tested_reset["pi2_cfg"],
                 ),
                 make_readout("readout", readout_cfg=cfg["readout"]),
             ],
@@ -74,7 +73,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
             ),
             LivePlotter1D(
                 "Cavity Frequency (MHz)",
-                "Signal difference (a.u.)",
+                "Signal (a.u.)",
                 disable=not progress,
             ),
             ticks=(fpts,),
@@ -91,21 +90,34 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         return fpts, signals
 
-    def analyze(
-        self,
-        result: Optional[FreqResultType] = None,
-        *,
-        plot: bool = True,
-        smooth: float = 1.0,
-        xname: Optional[str] = None,
-        yname: Optional[str] = None,
-        corner_as_background: bool = False,
-    ) -> Tuple[float, float]:
+    def analyze(self, result: Optional[FreqResultType] = None) -> float:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        raise NotImplementedError("Analysis not implemented yet")
+        fpts, signals = result
+
+        # discard NaNs (possible early abort)
+        val_mask = ~np.isnan(signals)
+        fpts = fpts[val_mask]
+        signals = signals[val_mask]
+
+        y = rotate2real(signals).real
+
+        freq, freq_err, _, _, y_fit, _ = fit_resonence_freq(fpts, y, type, asym=False)
+
+        fig, ax = plt.subplots()
+        fig.tight_layout()
+        ax.plot(fpts, y, label="signal", marker="o", markersize=3)
+        ax.plot(fpts, y_fit, label=f"fit, f_q={freq:.5g} MHz")
+        label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"
+        ax.axvline(freq, color="r", ls="--", label=label)
+        ax.set_xlabel("Frequency (MHz)")
+        ax.set_ylabel("Signal Real (a.u.)")
+        ax.legend()
+        plt.show()
+
+        return freq
 
     def save(
         self,
