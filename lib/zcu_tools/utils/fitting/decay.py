@@ -2,7 +2,16 @@ from typing import Tuple, Optional
 
 import numpy as np
 
-from .base import decaycos, dual_expfunc, expfunc, fit_dualexp, fitdecaycos, fitexp
+from .base import (
+    decaycos,
+    dual_expfunc,
+    expfunc,
+    gauss_func,
+    fit_dualexp,
+    fitdecaycos,
+    fitexp,
+    fit_gauss,
+)
 
 
 def fit_decay(
@@ -69,3 +78,23 @@ def fit_decay_fringe(
     detune_err: float = np.sqrt(pCov[2, 2])
 
     return t2f, t2ferr, detune, detune_err, fit_signals, (pOpt, pCov)
+
+
+def fit_gauss_decay(
+    xs: np.ndarray,
+    real_signals: np.ndarray,
+    fit_params: Optional[Tuple[float, ...]] = None,
+) -> Tuple[float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
+    pOpt, pCov = fit_gauss(xs, real_signals, fixedparams=[None, 0.0, None])
+
+    fit_signals = gauss_func(xs, *pOpt)
+
+    sigma: float = pOpt[2]
+    sigma_err: float = np.sqrt(pCov[2, 2])
+
+    # effective T2
+    # f(0) * exp(-1) = f(0) * exp(-t2^2 / (2*sigma^2))
+    t2 = np.sqrt(2) * sigma
+    t2_err = np.sqrt(2) * sigma_err
+
+    return t2, t2_err, fit_signals, (pOpt, pCov)

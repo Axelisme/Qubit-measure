@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,7 +17,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
+from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe, fit_gauss_decay
 from zcu_tools.utils.process import rotate2real
 
 from ...template import sweep_hard_template
@@ -115,7 +115,7 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
         *,
         plot: bool = True,
         max_contrast: bool = True,
-        fit_fringe: bool = True,
+        fit_method: Literal["fringe", "decay", "gauss"] = "fringe",
     ) -> Tuple[float, float, float, float]:
         if result is None:
             result = self.last_result
@@ -128,14 +128,20 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
         else:
             real_signals = np.abs(signals)
 
-        if fit_fringe:
+        if fit_method == "fringe":
             t2e, t2eerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
                 xs, real_signals
             )
-        else:
+        elif fit_method == "decay":
             t2e, t2eerr, y_fit, _ = fit_decay(xs, real_signals)
             detune = 0.0
             detune_err = 0.0
+        elif fit_method == "gauss":
+            t2e, t2eerr, y_fit, _ = fit_gauss_decay(xs, real_signals)
+            detune = 0.0
+            detune_err = 0.0
+        else:
+            raise ValueError(f"Unknown fit_method: {fit_method}")
 
         if plot:
             plt.figure(figsize=config.figsize)
@@ -143,11 +149,15 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
             plt.plot(xs, y_fit, label="fit")
 
             t2e_str = f"{t2e:.2f}us ± {t2eerr:.2f}us"
-            if fit_fringe:
+            if fit_method == "fringe":
                 detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
                 plt.title(f"T2 fringe = {t2e_str}, detune = {detune_str}", fontsize=15)
-            else:
+            elif fit_method == "decay":
                 plt.title(f"T2 decay = {t2e_str}", fontsize=15)
+            elif fit_method == "gauss":
+                plt.title(f"Effective T2 = {t2e_str}", fontsize=15)
+            else:
+                raise ValueError(f"Unknown fit_method: {fit_method}")
 
             plt.xlabel("Time (us)")
             plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")

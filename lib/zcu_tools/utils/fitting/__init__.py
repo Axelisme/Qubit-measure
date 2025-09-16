@@ -22,6 +22,6 @@ from .base import (
     lorfunc,
     sincfunc,
 )
-from .decay import fit_decay, fit_decay_fringe, fit_dual_decay
+from .decay import fit_decay, fit_decay_fringe, fit_dual_decay, fit_gauss_decay
 from .rabi import fit_rabi
 from .resonence import fit_resonence_freq

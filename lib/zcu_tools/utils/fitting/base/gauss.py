@@ -5,10 +5,12 @@ from .base import batch_fit_func, fit_func
 
 # Gaussian function
 def gauss_func(x, yscale, x_c, sigma):
+    """params: [yscale, x_c, sigma]"""
     return yscale * np.exp(-0.5 * ((x - x_c) / sigma) ** 2)
 
 
 def fit_gauss(xdata, ydata, fixedparams=None):
+    """params: [yscale, x_c, sigma]"""
     if fixedparams is not None and len(fixedparams) != 3:
         raise ValueError(
             "Fixed parameters must be a list of three elements: [yscale, x_c, sigma]"
