@@ -115,7 +115,7 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
         *,
         plot: bool = True,
         max_contrast: bool = True,
-        fit_method: Literal["fringe", "decay", "gauss"] = "fringe",
+        fit_method: Literal["fringe", "decay", "gauss"] = "decay",
     ) -> Tuple[float, float, float, float]:
         if result is None:
             result = self.last_result
