@@ -8,7 +8,7 @@ from .base import cosfunc, decaycos, fitcos, fitdecaycos
 def fit_rabi(
     xs: np.ndarray, real_signals: np.ndarray, *, decay: bool = False
 ) -> Tuple[float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
-    """Return (pi_x, pi2_x)"""
+    """Return (pi_x, pi2_x, freq)"""
 
     # choose fitting function
     fit_func = fitdecaycos if decay else fitcos
@@ -32,4 +32,4 @@ def fit_rabi(
         pi_x = (1.0 - phase / 360) / freq
         pi2_x = (0.75 - phase / 360) / freq
 
-    return float(pi_x), float(pi2_x), fit_signals, (pOpt, pCov)
+    return float(pi_x), float(pi2_x), float(freq), fit_signals, (pOpt, pCov)
