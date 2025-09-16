@@ -82,7 +82,7 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
         else:
             real_signals = np.abs(signals)
 
-        pi_amp, pi2_amp, y_fit, _ = fit_rabi(pdrs, real_signals, decay=decay)
+        pi_amp, pi2_amp, _, y_fit, _ = fit_rabi(pdrs, real_signals, decay=decay)
 
         if plot:
             plt.figure(figsize=config.figsize)

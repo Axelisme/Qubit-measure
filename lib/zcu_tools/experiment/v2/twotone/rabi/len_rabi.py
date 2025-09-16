@@ -155,7 +155,7 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         lens = lens[~nan_mask]
         real_signals = real_signals[~nan_mask]
 
-        pi_len, pi2_len, y_fit, _ = fit_rabi(lens, real_signals, decay=decay)
+        pi_len, pi2_len, freq, y_fit, _ = fit_rabi(lens, real_signals, decay=decay)
 
         if plot:
             plt.figure(figsize=config.figsize)
@@ -166,10 +166,11 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
             plt.axvline(pi2_len, ls="--", c="red", label=f"pi/2 = {pi2_len:.3g}")
             plt.xlabel("Pulse length (us)")
             plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+            plt.title(f"Rabi Oscillation (f={freq:.3f} MHz)")
             plt.legend(loc=4)
             plt.show()
 
-        return pi_len, pi2_len
+        return pi_len, pi2_len, freq
 
     def save(
         self,
