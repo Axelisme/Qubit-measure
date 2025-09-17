@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional, Tuple
 from copy import deepcopy
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -17,6 +18,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.fitting.base import fitcos, cosfunc
 
 from ....template import sweep_hard_template
 
@@ -88,7 +90,26 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        raise NotImplementedError("Analysis not implemented yet")
+        phases, signals = result
+
+        real_signals = bathreset_signal2real(signals)
+
+        pOpt, _ = fitcos(phases, real_signals)
+        y_fit = cosfunc(phases, *pOpt)
+
+        max_phase = np.argmax(real_signals)
+        min_phase = np.argmin(real_signals)
+
+        fig, ax = plt.subplots()
+        ax.plot(phases, real_signals, "o", label="data")
+        ax.plot(phases, y_fit, "-", label="fit")
+        ax.axvline(phases[max_phase], color="C1", linestyle="--", label="max")
+        ax.axvline(phases[min_phase], color="C2", linestyle="--", label="min")
+        ax.set_xlabel("Phase (deg)")
+        ax.set_ylabel("Signal (a.u.)")
+        ax.legend()
+
+        return max_phase, min_phase
 
     def save(
         self,
