@@ -97,14 +97,18 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
         pOpt, _ = fitcos(phases, real_signals)
         y_fit = cosfunc(phases, *pOpt)
 
-        max_phase = np.argmax(real_signals)
-        min_phase = np.argmin(real_signals)
+        max_phase = phases[np.argmax(y_fit)]
+        min_phase = phases[np.argmin(y_fit)]
 
         fig, ax = plt.subplots()
-        ax.plot(phases, real_signals, "o", label="data")
+        ax.plot(phases, real_signals, ".-", label="data")
         ax.plot(phases, y_fit, "-", label="fit")
-        ax.axvline(phases[max_phase], color="C1", linestyle="--", label="max")
-        ax.axvline(phases[min_phase], color="C2", linestyle="--", label="min")
+        ax.axvline(
+            max_phase, color="C1", linestyle="--", label=f"max: {max_phase:.2f} deg"
+        )
+        ax.axvline(
+            min_phase, color="C2", linestyle="--", label=f"min: {min_phase:.2f} deg"
+        )
         ax.set_xlabel("Phase (deg)")
         ax.set_ylabel("Signal (a.u.)")
         ax.legend()
