@@ -54,11 +54,11 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
                     name="tested_reset",
                     qubit_tone_cfg={
                         **tested_reset["qubit_tone_cfg"],
-                        "freq": sweep2param("freq", cfg["sweep"]["freq"]),
+                        "gain": sweep2param("gain", cfg["sweep"]["gain"]),
                     },
                     cavity_tone_cfg={
                         **tested_reset["cavity_tone_cfg"],
-                        "gain": sweep2param("gain", cfg["sweep"]["gain"]),
+                        "freq": sweep2param("freq", cfg["sweep"]["freq"]),
                     },
                     pi2_cfg=tested_reset["pi2_cfg"],
                 ),
@@ -75,8 +75,8 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
                 [1, 1j]
             ),
             LivePlotter2D(
-                "Cavity Gain (a.u.)",
-                "Qubit drive Frequency (MHz)",
+                "Qubit drive Gain (a.u.)",
+                "Cavity Frequency (MHz)",
                 flip=True,
                 disable=not progress,
             ),
@@ -85,8 +85,8 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
         )
 
         # Get the actual frequency points used by FPGA
-        gains = prog.get_pulse_param("tested_reset_res_pulse", "gain", as_array=True)
-        fpts = prog.get_pulse_param("tested_reset_qub_pulse", "freq", as_array=True)
+        gains = prog.get_pulse_param("tested_reset_qub_pulse", "gain", as_array=True)
+        fpts = prog.get_pulse_param("tested_reset_res_pulse", "freq", as_array=True)
         assert isinstance(gains, np.ndarray), "gains should be an array"
         assert isinstance(fpts, np.ndarray), "fpts should be an array"
 
@@ -119,12 +119,8 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Cavity Gain", "unit": "a.u.", "values": gains},
-            y_info={
-                "name": "Qubit drive Frequency",
-                "unit": "Hz",
-                "values": fpts * 1e6,
-            },
+            x_info={"name": "Qubit drive Gain", "unit": "a.u.", "values": gains},
+            y_info={"name": "Cavity Frequency", "unit": "Hz", "values": fpts * 1e6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,

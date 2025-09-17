@@ -32,7 +32,13 @@ def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
 
 class LengthExperiment(AbsExperiment[LengthResultType]):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        progress: bool = True,
+        detune: float = 0.0,
     ) -> LengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -43,6 +49,7 @@ class LengthExperiment(AbsExperiment[LengthResultType]):
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
+        len_spans = sweep2param("length", cfg["sweep"]["length"])
         prog = ModularProgramV2(
             soccfg,
             cfg,
@@ -53,13 +60,17 @@ class LengthExperiment(AbsExperiment[LengthResultType]):
                     name="tested_reset",
                     qubit_tone_cfg={
                         **tested_reset["qubit_tone_cfg"],
-                        "length": sweep2param("length", cfg["sweep"]["length"]),
+                        "length": len_spans,
                     },
                     cavity_tone_cfg={
                         **tested_reset["cavity_tone_cfg"],
-                        "length": sweep2param("length", cfg["sweep"]["length"]),
+                        "length": len_spans,
                     },
-                    pi2_cfg=tested_reset["pi2_cfg"],
+                    pi2_cfg={
+                        **tested_reset["pi2_cfg"],
+                        "phase": tested_reset["pi2_cfg"]["phase"]
+                        + 360 * detune * len_spans,
+                    },
                 ),
                 make_readout("readout", readout_cfg=cfg["readout"]),
             ],
@@ -80,10 +91,6 @@ class LengthExperiment(AbsExperiment[LengthResultType]):
             ticks=(lens,),
             signal2real=bathreset_signal2real,
         )
-
-        # Get the actual frequency points used by FPGA
-        lens = prog.get_pulse_param("tested_reset_res_pulse", "length", as_array=True)
-        assert isinstance(lens, np.ndarray), "length should be an array"
 
         # Cache results
         self.last_cfg = cfg
