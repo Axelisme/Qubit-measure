@@ -87,12 +87,53 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
 
         return fpts_real, signals
 
+    def fitt_wo_abcd(
+        self,
+        fpts: np.ndarray,
+        g_signals: np.ndarray,
+        e_signals: np.ndarray,
+        asym: bool = True,
+    ) -> Tuple[float, float, float, float, np.ndarray, np.ndarray]:
+        g_amps, e_amps = np.abs(g_signals), np.abs(e_signals)
+        g_freq, _, g_kappa, _, g_fit, _ = fit_resonence_freq(fpts, g_amps, asym=asym)
+        e_freq, _, e_kappa, _, e_fit, _ = fit_resonence_freq(fpts, e_amps, asym=asym)
+        return g_freq, g_kappa, e_freq, e_kappa, g_fit, e_fit
+
+    def fitt_by_abcd(
+        self, fpts: np.ndarray, g_signals: np.ndarray, e_signals: np.ndarray
+    ) -> Tuple[float, float, float, float, np.ndarray, np.ndarray]:
+        try:
+            from abcd_rf_fit import analyze
+        except ImportError:
+            print(
+                "cannot import abcd_rf_fit, do you have it installed? please check: <https://github.com/UlysseREGLADE/abcd_rf_fit.git>"
+            )
+            raise
+
+        g_fit = analyze(1e6 * fpts, g_signals, "hm", fit_edelay=True)
+        g_param = g_fit.tolist()
+        g_freq, g_kappa = g_param[0] * 1e-6, g_param[1] * 1e-6  # MHz
+
+        e_fit = analyze(1e6 * fpts, e_signals, "hm", fit_edelay=True)
+        e_param = e_fit.tolist()
+        e_freq, e_kappa = e_param[0] * 1e-6, e_param[1] * 1e-6  # MHz
+
+        return (
+            g_freq,
+            g_kappa,
+            e_freq,
+            e_kappa,
+            np.abs(g_fit(1e6 * fpts)),
+            np.abs(e_fit(1e6 * fpts)),
+        )
+
     def analyze(
         self,
         result: Optional[DispersiveResultType] = None,
         *,
-        asym: bool = True,
         plot: bool = True,
+        use_abcd: bool = False,
+        **kwargs,
     ) -> Tuple[float, float]:
         if result is None:
             result = self.last_result
@@ -102,8 +143,14 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
         amps = np.abs(signals)
         g_amps, e_amps = amps[0, :], amps[1, :]
 
-        g_freq, _, g_kappa, _, g_fit, _ = fit_resonence_freq(fpts, g_amps, asym=asym)
-        e_freq, _, e_kappa, _, e_fit, _ = fit_resonence_freq(fpts, e_amps, asym=asym)
+        if use_abcd:
+            g_freq, g_kappa, e_freq, e_kappa, g_fit, e_fit = self.fitt_by_abcd(
+                fpts, signals[0, :], signals[1, :], **kwargs
+            )
+        else:
+            g_freq, g_kappa, e_freq, e_kappa, g_fit, e_fit = self.fitt_wo_abcd(
+                fpts, signals[0, :], signals[1, :], **kwargs
+            )
 
         # Calculate dispersive shift and average linewidth
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
