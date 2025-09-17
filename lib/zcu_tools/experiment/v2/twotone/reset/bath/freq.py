@@ -145,7 +145,7 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
         filepath: str,
         result: Optional[FreqGainResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/reset/bath/param",
+        tag: str = "twotone/reset/bath/freq_gain",
         **kwargs,
     ) -> None:
         if result is None:
