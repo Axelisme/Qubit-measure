@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Literal
 
 import numpy as np
+import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -96,12 +98,47 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
 
         return gains, fpts, signals
 
-    def analyze(self, result: Optional[FreqGainResultType] = None) -> None:
+    def analyze(
+        self,
+        result: Optional[FreqGainResultType] = None,
+        smooth: float = 1.0,
+        background: Literal["max", "min"] = "min",
+    ) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        raise NotImplementedError("Analysis not implemented for frequency scan.")
+        gains, fpts, signals = result
+
+        # Apply smoothing for peak finding
+        signals_smooth = gaussian_filter(signals, smooth)
+
+        # Find peak in amplitude
+        real_signals = bathreset_signal2real(signals_smooth).real
+
+        if background == "min":
+            gain_opt = gains[np.argmax(np.max(real_signals, axis=1))]
+            freq_opt = fpts[np.argmax(np.max(real_signals, axis=0))]
+        else:
+            gain_opt = gains[np.argmin(np.min(real_signals, axis=1))]
+            freq_opt = fpts[np.argmin(np.min(real_signals, axis=0))]
+
+        fig, ax = plt.subplots()
+        fig.tight_layout()
+        ax.imshow(
+            real_signals.T,
+            aspect="auto",
+            origin="lower",
+            interpolation="none",
+            extent=(gains[0], gains[-1], fpts[0], fpts[-1]),
+        )
+        peak_label = f"({gain_opt:.1f} a.u., {freq_opt:.1f}) MHz"
+        ax.scatter(gain_opt, freq_opt, color="r", s=40, marker="*", label=peak_label)
+        ax.legend(fontsize="x-large")
+        ax.tick_params(axis="both", which="major", labelsize=12)
+        plt.show()
+
+        return gain_opt, freq_opt
 
     def save(
         self,
