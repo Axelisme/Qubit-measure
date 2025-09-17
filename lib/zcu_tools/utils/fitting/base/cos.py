@@ -5,11 +5,13 @@ from .base import assign_init_p, fit_func
 
 # sinusoidal function
 def cosfunc(x, *p):
+    """p = [y0, yscale, freq, phase]"""
     y0, yscale, freq, phase = p
     return y0 + yscale * np.cos(2 * np.pi * (freq * x + phase / 360))
 
 
 def fitcos(xdata, ydata, fitparams=None):
+    """fitparams = [y0, yscale, freq, phase]"""
     if fitparams is None:
         fitparams = [None] * 4
 
