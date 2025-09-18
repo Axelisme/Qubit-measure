@@ -135,6 +135,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         map_values, map_freqs = freq_map
 
+        # sort for interpolation
+        sort_idxs = np.argsort(map_values)
+        map_values = map_values[sort_idxs]
+        map_freqs = map_freqs[sort_idxs]
+
         flx_sweep = cfg["sweep"]["flux"]
         len_sweep = cfg["sweep"]["length"]
 

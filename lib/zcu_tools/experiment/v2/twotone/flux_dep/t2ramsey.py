@@ -67,6 +67,11 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
 
         map_values, map_freqs = freq_map
 
+        # sort for interpolation
+        sort_idxs = np.argsort(map_values)
+        map_values = map_values[sort_idxs]
+        map_freqs = map_freqs[sort_idxs]
+
         flx_sweep = cfg["sweep"]["flux"]
         len_sweep = cfg["sweep"]["length"]
 
@@ -77,7 +82,10 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         values = sweep2array(flx_sweep)
         lens = sweep2array(len_sweep)
 
-        if np.any(values < map_values.min()) or np.any(values > map_values.max()):
+        map_range = map_values.max() - map_values.min()
+        if np.any(values < map_values.min() - 0.01 * map_range) or np.any(
+            values > map_values.max() + 0.01 * map_range
+        ):
             raise ValueError(
                 f"Sweep values from {values.min()} to {values.max()} exceed the freq_map range [{map_values.min()}, {map_values.max()}]"
             )
@@ -88,7 +96,6 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
             set_flux_in_dev_cfg(cfg["dev"], value)
             predict_freq = np.interp(value, map_values, map_freqs)
-            cfg["pi_pulse"]["freq"] = predict_freq
             cfg["pi2_pulse"]["freq"] = predict_freq
 
         updateCfg(cfg, 0, values[0])  # set initial flux
