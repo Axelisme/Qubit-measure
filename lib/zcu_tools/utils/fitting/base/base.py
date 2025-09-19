@@ -57,7 +57,7 @@ def fit_func(
     except RuntimeError as e:
         print("Warning: fit failed!")
         print(e)
-        pOpt = init_p
+        pOpt = list(init_p)
         pCov = np.full(shape=(len(init_p), len(init_p)), fill_value=np.inf)
 
     if fixedparams is not None and len(fixedparams) > 0:
