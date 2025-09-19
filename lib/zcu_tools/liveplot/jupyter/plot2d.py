@@ -61,6 +61,9 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         self.num_lines = num_lines
         self.line_axis = line_axis
 
+        # set grid to 1d plot
+        self.axs[1].grid()
+
     def update(
         self,
         xs: np.ndarray,
