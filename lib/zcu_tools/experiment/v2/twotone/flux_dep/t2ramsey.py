@@ -263,53 +263,51 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
     def analyze(
         self,
         result: Optional[T2RamseyResultType] = None,
-        *,
-        start_idx: int = 0,
-        t2r_cutoff: float = np.inf,
+        freq_map: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        activate_detune: float = 0.0,
     ) -> Tuple[np.ndarray, np.ndarray]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, ts, signals2D = result
+        values, ts, signals2D = result
 
-        if start_idx > len(ts) - 5:
-            raise ValueError(
-                f"not enough data to analyze under start_idx={start_idx}, while total length={len(ts)}"
-            )
+        if freq_map is not None:
+            map_values, map_freqs = freq_map
 
-        # start from start_idx
-        ts = ts[start_idx:]
-        signals2D = signals2D[:, start_idx:]
+            # sort for interpolation
+            sort_idxs = np.argsort(map_values)
+            map_values = map_values[sort_idxs]
+            map_freqs = map_freqs[sort_idxs]
 
         real_signals2D = rotate2real(signals2D).real
 
-        t2s = np.full(len(gains), np.nan, dtype=np.float64)
+        t2s = np.full(len(values), np.nan, dtype=np.float64)
         t2errs = np.zeros_like(t2s)
         detunes = np.full_like(t2s, np.nan)
         detune_errs = np.zeros_like(t2s)
 
-        fit_params = None
-        for i in range(len(gains)):
+        for i in range(len(values)):
             real_signals = real_signals2D[i, :]
 
             # skip if have nan data
             if np.any(np.isnan(real_signals)):
                 continue
 
-            t2r, t2err, detune, derr, _, (pOpt, _) = fit_decay_fringe(
-                ts, real_signals, fit_params=fit_params
-            )
+            t2r, t2err, detune, derr, *_ = fit_decay_fringe(ts, real_signals)
 
-            if t2r > t2r_cutoff or t2err > 0.5 * t2r:
+            if t2err > 0.5 * t2r:
                 continue
-
-            fit_params = tuple(pOpt)
 
             t2s[i] = t2r
             t2errs[i] = t2err
-            detunes[i] = detune
+            detunes[i] = activate_detune - detune
             detune_errs[i] = derr
+
+            if freq_map is not None:
+                # convert detune to absolute freq
+                predict_freq = np.interp(values[i], map_values, map_freqs)
+                detunes[i] += predict_freq
 
         if np.all(np.isnan(t2s)):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
@@ -317,12 +315,15 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
         assert isinstance(ax1, plt.Axes)
         assert isinstance(ax2, plt.Axes)
-        ax1.errorbar(gains, t2s, yerr=t2errs, label="Fitting T2")
+        fig.suptitle("T2Ramsey over Flux")
+        ax1.errorbar(values, t2s, yerr=t2errs, label="Fitting T2")
         ax1.set_ylabel("T2 (us)")
         ax1.set_ylim(bottom=0)
-        ax2.errorbar(gains, detunes, yerr=detune_errs, label="Fitting detune")
+        ax1.grid()
+        ax2.errorbar(values, detunes, yerr=detune_errs, label="Fitting detune")
         ax2.set_ylabel("Detune (MHz)")
-        ax2.set_xlabel("Flux pulse gain (a.u.)")
+        ax2.set_xlabel("Flux value (a.u.)")
+        ax2.grid()
         plt.plot()
 
         return t2s, t2errs, detunes, detune_errs
