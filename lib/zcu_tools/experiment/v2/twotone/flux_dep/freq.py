@@ -26,6 +26,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
+from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 from ...template import sweep2D_soft_hard_template, sweep2D_soft_template
 from .util import check_flux_pulse, wrap_with_flux_pulse
@@ -317,6 +318,126 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
             filepath=filepath,
             x_info={"name": "Flux device value", "unit": "a.u.", "values": values},
             y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
+            comment=comment,
+            tag=tag,
+            **kwargs,
+        )
+
+
+class SmartFreqExperiment(AbsExperiment[FreqResultType]):
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: Dict[str, Any],
+        *,
+        progress: bool = True,
+        predictor: FluxoniumPredictor,
+        ref_flux: float,
+        drive_oper: Literal["n", "phi"] = "n",
+    ) -> FreqResultType:
+        cfg = deepcopy(cfg)  # prevent in-place modification
+
+        ref_gain = cfg["qub_pulse"]["gain"]
+        ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
+
+        flx_sweep = cfg["sweep"]["flux"]
+        detune_sweep = cfg["sweep"]["detune"]
+
+        # Remove flux from sweep dict - will be handled by soft loop
+        cfg["sweep"] = {"detune": detune_sweep}
+
+        dev_values = sweep2array(flx_sweep, allow_array=True)
+        detunes = sweep2array(detune_sweep)  # predicted detune points
+
+        detune_params = sweep2param("detune", detune_sweep)
+
+        def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
+            set_flux_in_dev_cfg(cfg["dev"], value)
+
+            predict_freq = predictor.predict_freq(value)
+            predict_m = predictor.predict_matrix_element(value, operator=drive_oper)
+
+            cfg["qub_pulse"]["freq"] = predict_freq + detune_params
+            cfg["qub_pulse"]["gain"] = min(1.0, ref_gain * ref_m / predict_m)
+
+        updateCfg(cfg, 0, dev_values[0])  # set initial flux
+
+        def measure_fn(
+            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+        ) -> np.ndarray:
+            prog = TwoToneProgram(soccfg, cfg)
+            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
+        # Run 2D soft-hard sweep (flux soft, frequency hard)
+        signals2D = sweep2D_soft_hard_template(
+            cfg,
+            measure_fn,
+            LivePlotter2DwithLine(
+                "Flux device value",
+                "Detune Frequency (MHz)",
+                line_axis=1,
+                num_lines=2,
+                disable=not progress,
+            ),
+            xs=dev_values,
+            ys=detunes,
+            updateCfg=updateCfg,
+            signal2real=freq_signal2real,
+            progress=progress,
+        )
+
+        # Cache results
+        self.last_cfg = cfg
+        self.last_result = (dev_values, detunes, signals2D)
+
+        return dev_values, detunes, signals2D
+
+    def analyze(
+        self,
+        result: Optional[FreqResultType] = None,
+        mA_c: Optional[float] = None,
+        mA_e: Optional[float] = None,
+    ) -> InteractiveLines:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        raise NotImplementedError("SmartFreqExperiment does not support analyze yet")
+
+    def extract_points(
+        self,
+        result: Optional[FreqResultType] = None,
+    ) -> InteractiveFindPoints:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        values, fpts, signals2D = result
+
+        point_selector = InteractiveFindPoints(signals2D.T, mAs=values, fpts=fpts)
+
+        return point_selector
+
+    def save(
+        self,
+        filepath: str,
+        result: Optional[FreqResultType] = None,
+        comment: Optional[str] = None,
+        tag: str = "twotone/flux_dep/freq_smart",
+        **kwargs,
+    ) -> None:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        values, detunes, signals2D = result
+
+        save_data(
+            filepath=filepath,
+            x_info={"name": "Flux device value", "unit": "a.u.", "values": values},
+            y_info={"name": "Detune", "unit": "Hz", "values": detunes * 1e6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
             tag=tag,
