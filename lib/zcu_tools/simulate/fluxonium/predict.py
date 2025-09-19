@@ -1,5 +1,5 @@
 import json
-from typing import Tuple
+from typing import Tuple, Literal
 
 import numpy as np
 from scipy.optimize import root_scalar
@@ -87,26 +87,27 @@ class FluxoniumPredictor:
 
         return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
 
-    def predict_lenrabi(self, cur_A: float, ref_A: float, ref_pilen: float) -> float:
+    def predict_matrix_element(
+        self,
+        cur_A: float,
+        transition: Tuple[int, int] = (0, 1),
+        operator: Literal["phi", "n"] = "n",
+    ) -> float:
         """
-        Predict the length of Pi pulse for a given current.
+        Predict the matrix element of operator between two levels of a fluxonium qubit.
         Args:
             cur_A (float): Current in A.
-            ref_A (float): Reference current in A.
-            ref_len (float): Reference length of Pi pulse in ns.
+            transition (Tuple[from, to]): transition between which level
+            operator (str): 'phi' or 'n'
         Returns:
-            float: Length of Pi pulse in ns.
+            float: matrix element of operator between two levels.
         """
-        flx, ref_flx = self.A_to_flx(cur_A), self.A_to_flx(ref_A)
+        flx = self.A_to_flx(cur_A)
 
         self.fluxonium.flux = flx
-        n_oper = self.fluxonium.n_operator(energy_esys=True)
-        m01 = np.abs(n_oper[0, 1])
+        if operator == "n":
+            oper = self.fluxonium.n_operator(energy_esys=True)
+        elif operator == "phi":
+            oper = self.fluxonium.phi_operator(energy_esys=True)
 
-        self.fluxonium.flux = ref_flx
-        ref_n_oper = self.fluxonium.n_operator(energy_esys=True)
-        ref_m01 = np.abs(ref_n_oper[0, 1])
-
-        # the length of pi pulse is inversely proportional to matrix element of capacitance operator
-        # so we need to calculate the ratio of matrix element at cur_A and ref_A
-        return ref_pilen * ref_m01 / m01
+        return float(np.abs(oper[transition[0], transition[1]]))
