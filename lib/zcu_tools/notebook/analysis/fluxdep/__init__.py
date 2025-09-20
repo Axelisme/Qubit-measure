@@ -6,7 +6,7 @@ from .interactive import (
     InteractiveFindPoints,
     InteractiveLines,
     InteractiveSelector,
-    VisualizeSpet,
+    VisualizeSpect,
 )
 
 # Physical models
