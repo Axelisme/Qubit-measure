@@ -312,21 +312,41 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         if np.all(np.isnan(t2s)):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
 
+        valid_idxs = ~np.isnan(t2s)
+        values = values[valid_idxs]
+        t2s = t2s[valid_idxs]
+        t2errs = t2errs[valid_idxs]
+        detunes = detunes[valid_idxs]
+
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
         assert isinstance(ax1, plt.Axes)
         assert isinstance(ax2, plt.Axes)
         fig.suptitle("T2Ramsey over Flux")
-        ax1.errorbar(values, t2s, yerr=t2errs, label="Fitting T2")
+        ax1.errorbar(
+            values,
+            t2s,
+            yerr=t2errs,
+            label="Fitting T2",
+            elinewidth=1,
+            capsize=1,
+        )
         ax1.set_ylabel("T2 (us)")
         ax1.set_ylim(bottom=0)
         ax1.grid()
-        ax2.errorbar(values, detunes, yerr=detune_errs, label="Fitting detune")
+        ax2.errorbar(
+            values,
+            detunes,
+            yerr=detune_errs,
+            label="Fitting detune",
+            elinewidth=1,
+            capsize=1,
+        )
         ax2.set_ylabel("Detune (MHz)")
         ax2.set_xlabel("Flux value (a.u.)")
         ax2.grid()
         plt.plot()
 
-        return t2s, t2errs, detunes, detune_errs
+        return values, t2s, t2errs, detunes, detune_errs
 
     def save(
         self,
