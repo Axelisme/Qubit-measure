@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output, display
 from numpy import ndarray
-from scipy.ndimage import gaussian_filter1d
 
 from ..processing import cast2real_and_norm, spectrum2d_findpoint
 
@@ -39,28 +38,35 @@ class InteractiveFindPoints:
         self.init_callback()
 
         display(
-            widgets.HBox(
+            widgets.VBox(
                 [
-                    self.fig.canvas,
-                    widgets.VBox(
+                    widgets.HBox(
                         [
-                            self.threshold_slider,
-                            self.width_slider,
-                            self.smooth_slider,
-                            self.operation_tb,
-                            widgets.HBox(
+                            widgets.VBox(
                                 [
+                                    self.threshold_slider,
+                                    self.width_slider,
+                                    self.smooth_slider,
+                                ]
+                            ),
+                            widgets.VBox(
+                                [
+                                    self.operation_tb,
                                     self.show_mask_box,
                                     self.show_origin_box,
-                                    widgets.VBox(
-                                        [self.perform_all_bt, self.finish_button]
-                                    ),
+                                ]
+                            ),
+                            widgets.VBox(
+                                [
+                                    self.perform_all_bt,
+                                    self.finish_button,
                                 ]
                             ),
                         ]
                     ),
+                    self.fig.canvas,
                 ]
-            )
+            ),
         )
 
     def create_widgets(self, threshold, brush_width) -> None:
