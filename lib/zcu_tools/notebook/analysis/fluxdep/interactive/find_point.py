@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output, display
 from numpy import ndarray
-from scipy.ndimage import gaussian_filter1d
 
 from ..processing import cast2real_and_norm, spectrum2d_findpoint
 

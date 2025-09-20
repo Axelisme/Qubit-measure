@@ -394,12 +394,7 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
 
         return dev_values, detunes, signals2D
 
-    def analyze(
-        self,
-        result: Optional[FreqResultType] = None,
-        mA_c: Optional[float] = None,
-        mA_e: Optional[float] = None,
-    ) -> InteractiveLines:
+    def analyze(self, result: Optional[FreqResultType] = None) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -407,8 +402,7 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
         raise NotImplementedError("SmartFreqExperiment does not support analyze yet")
 
     def extract_points(
-        self,
-        result: Optional[FreqResultType] = None,
+        self, result: Optional[FreqResultType] = None
     ) -> InteractiveFindPoints:
         if result is None:
             result = self.last_result
