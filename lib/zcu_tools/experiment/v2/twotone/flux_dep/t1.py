@@ -16,6 +16,7 @@ from zcu_tools.program.v2 import (
     make_reset,
     sweep2param,
 )
+from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.fitting import fit_decay
@@ -129,6 +130,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         cfg: Dict[str, Any],
         *,
         freq_map: Tuple[np.ndarray, np.ndarray],
+        predictor: Optional[FluxoniumPredictor] = None,
+        ref_flux: float = 0.0,
+        drive_oper: Literal["n", "phi"] = "n",
         progress: bool = True,
     ) -> T1ResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
@@ -139,6 +143,10 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         sort_idxs = np.argsort(map_values)
         map_values = map_values[sort_idxs]
         map_freqs = map_freqs[sort_idxs]
+
+        if predictor is not None:
+            ref_gain = cfg["pi_pulse"]["gain"]
+            ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
 
         flx_sweep = cfg["sweep"]["flux"]
         len_sweep = cfg["sweep"]["length"]
@@ -161,6 +169,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
             set_flux_in_dev_cfg(cfg["dev"], value)
             cfg["pi_pulse"]["freq"] = np.interp(value, map_values, map_freqs)
+            if predictor is not None:
+                cur_m = predictor.predict_matrix_element(value, operator=drive_oper)
+                cfg["pi_pulse"]["gain"] = ref_gain * ref_m / cur_m
 
         updateCfg(cfg, 0, values[0])  # set initial flux
 
@@ -179,7 +190,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
 
         def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
-            real_signals = rotate2real(signals).real
+            real_signals = np.zeros_like(signals, dtype=np.float64)
+            for i in range(signals.shape[0]):
+                real_signals[i, :] = rotate2real(signals[i, :]).real
             min_val = np.min(real_signals, axis=1)
             max_val = np.max(real_signals, axis=1)
             return (real_signals - min_val[:, None]) / (max_val - min_val)[:, None]
@@ -227,7 +240,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, ts, signals2D = result
+        values, ts, signals2D = result
 
         if start_idx > len(ts) - 4:
             raise ValueError(
@@ -240,10 +253,10 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         real_signals2D = rotate2real(signals2D).real
 
-        t1s = np.full(len(gains), np.nan, dtype=np.float64)
+        t1s = np.full(len(values), np.nan, dtype=np.float64)
         t1errs = np.zeros_like(t1s)
 
-        for i in range(len(gains)):
+        for i in range(len(values)):
             real_signals = real_signals2D[i, :]
 
             # skip if have nan data
@@ -252,7 +265,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
             t1, t1err, *_ = fit_decay(ts, real_signals)
 
-            if t1 > t1_cutoff or t1err > 0.5 * t1:
+            if t1 > t1_cutoff or t1err > 0.3 * t1:
                 continue
 
             t1s[i] = t1
@@ -261,15 +274,28 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         if np.all(np.isnan(t1s)):
             raise ValueError("No valid Fitting T1 found. Please check the data.")
 
+        valid_idxs = ~np.isnan(t1s)
+        gains = values[valid_idxs]
+        t1s = t1s[valid_idxs]
+        t1errs = t1errs[valid_idxs]
+
         _, ax = plt.subplots(1, 1)
         assert isinstance(ax, plt.Axes)
-        ax.errorbar(gains, t1s, yerr=t1errs, label="Fitting T1")
+        ax.errorbar(
+            gains,
+            t1s,
+            yerr=t1errs,
+            label="Fitting T1",
+            elinewidth=1,
+            capsize=1,
+        )
         ax.set_xlabel("Flux pulse gain (a.u.)")
         ax.set_ylabel("T1 (us)")
         ax.set_ylim(bottom=0)
+        ax.grid()
         plt.plot()
 
-        return t1s, t1errs
+        return gains, t1s, t1errs
 
     def save(
         self,
