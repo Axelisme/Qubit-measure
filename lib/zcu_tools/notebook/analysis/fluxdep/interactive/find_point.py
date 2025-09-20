@@ -243,4 +243,8 @@ class InteractiveFindPoints:
         if not self.is_finished and finish:
             self.finish_interactive()
 
+        sorted_idxs = np.argsort(self.s_mAs)
+        self.s_mAs = self.s_mAs[sorted_idxs]
+        self.s_fpts = self.s_fpts[sorted_idxs]
+
         return self.s_mAs, self.s_fpts
