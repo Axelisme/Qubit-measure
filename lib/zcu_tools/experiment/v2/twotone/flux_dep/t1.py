@@ -169,6 +169,8 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
             set_flux_in_dev_cfg(cfg["dev"], value)
             cfg["pi_pulse"]["freq"] = np.interp(value, map_values, map_freqs)
+            if "mixer_freq" in cfg["pi_pulse"]:
+                cfg["pi_pulse"]["mixer_freq"] = cfg["pi_pulse"]["freq"]
             if predictor is not None:
                 cur_m = predictor.predict_matrix_element(value, operator=drive_oper)
                 cfg["pi_pulse"]["gain"] = ref_gain * ref_m / cur_m

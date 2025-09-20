@@ -25,7 +25,7 @@ from zcu_tools.program.v2 import (
     Pulse,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.process import minus_background
+from zcu_tools.utils.process import minus_background, rotate2real
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 from ...template import sweep2D_soft_hard_template, sweep2D_soft_template
@@ -325,6 +325,21 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         )
 
 
+def smartfreq_signal2real(signals: np.ndarray) -> np.ndarray:
+    real_signals = np.zeros_like(signals, dtype=np.float64)
+    for i in range(signals.shape[0]):
+        real_signals[i, :] = rotate2real(signals[i, :]).real
+
+        if np.all(np.isnan(real_signals[i, :])):
+            continue
+
+        # normalize
+        min_val = np.min(real_signals[i, :])
+        max_val = np.max(real_signals[i, :])
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+    return real_signals
+
+
 class SmartFreqExperiment(AbsExperiment[FreqResultType]):
     def run(
         self,
@@ -360,6 +375,8 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
             predict_m = predictor.predict_matrix_element(value, operator=drive_oper)
 
             cfg["qub_pulse"]["freq"] = predict_freq + detune_params
+            if "mixer_freq" in cfg["qub_pulse"]:
+                cfg["qub_pulse"]["mixer_freq"] = predict_freq
             cfg["qub_pulse"]["gain"] = min(1.0, ref_gain * ref_m / predict_m)
 
         updateCfg(cfg, 0, dev_values[0])  # set initial flux
@@ -384,7 +401,7 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
             xs=dev_values,
             ys=detunes,
             updateCfg=updateCfg,
-            signal2real=freq_signal2real,
+            signal2real=smartfreq_signal2real,
             progress=progress,
         )
 

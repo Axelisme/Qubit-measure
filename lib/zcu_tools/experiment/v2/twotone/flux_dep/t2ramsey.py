@@ -97,6 +97,8 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             set_flux_in_dev_cfg(cfg["dev"], value)
             predict_freq = np.interp(value, map_values, map_freqs)
             cfg["pi2_pulse"]["freq"] = predict_freq
+            if "mixer_freq" in cfg["pi2_pulse"]:
+                cfg["pi2_pulse"]["mixer_freq"] = cfg["pi2_pulse"]["freq"]
 
         updateCfg(cfg, 0, values[0])  # set initial flux
 
