@@ -37,6 +37,7 @@ def sweep_hard_template(
     raw2signal: Raw2SignalFn = avg_as_signal,
     signal2real: Signal2RealFn = take_signal_abs,
     catch_interrupt: bool = True,
+    realsignal_callback: Optional[Callable[[int, np.ndarray], None]] = None,
 ) -> ndarray:
     # set flux first
     GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
@@ -49,7 +50,11 @@ def sweep_hard_template(
         ) -> None:
             nonlocal signals
             signals = raw2signal(ir, avg_d, std_d)
-            viewer.update(*ticks, signal2real(signals))
+            real_signals = signal2real(signals)
+            viewer.update(*ticks, real_signals)
+
+            if realsignal_callback is not None:
+                realsignal_callback(ir, real_signals)
 
         try:
             signals = measure_fn(cfg, callback)
@@ -131,6 +136,7 @@ def sweep2D_soft_hard_template(
     progress: bool = True,
     catch_interrupt: bool = True,
     data_shape: Optional[tuple] = None,
+    realsignal_callback: Optional[Callable[[int, int, np.ndarray], None]] = None,
 ) -> ndarray:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -167,7 +173,11 @@ def sweep2D_soft_hard_template(
                         avgs_tqdm.refresh()
 
                         _signals2D[i] = raw2signal(ir, avg_d, std_d)
-                        viewer.update(xs, ys, signal2real(_signals2D))
+                        real_signals2D = signal2real(_signals2D)
+                        viewer.update(xs, ys, real_signals2D)
+
+                        if realsignal_callback is not None:
+                            realsignal_callback(i, ir, real_signals2D)
 
                     signals2D[i] = measure_fn(cfg, callback)
 
