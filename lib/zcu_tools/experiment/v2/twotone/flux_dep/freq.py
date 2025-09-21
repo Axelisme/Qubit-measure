@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any, Callable, Dict, Optional, Tuple, Literal
+import warnings
 
 import numpy as np
 
@@ -368,16 +369,30 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
 
         detune_params = sweep2param("detune", detune_sweep)
 
-        def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
+        predict_freqs = np.array(list(map(predictor.predict_freq, dev_values)))
+        predict_ms = np.array(
+            [
+                predictor.predict_matrix_element(fx, operator=drive_oper)
+                for fx in dev_values
+            ]
+        )
+        predict_gains = ref_gain * ref_m / predict_ms
+        if np.any(predict_gains > 1.0):
+            warnings.warn(
+                "Some predicted gains are larger than 1.0, which may cause distortion."
+            )
+            predict_gains = np.clip(predict_gains, 0.0, 1.0)
+
+        def updateCfg(cfg: Dict[str, Any], i: int, value: float) -> None:
             set_flux_in_dev_cfg(cfg["dev"], value)
 
-            predict_freq = predictor.predict_freq(value)
-            predict_m = predictor.predict_matrix_element(value, operator=drive_oper)
+            predict_freq = predict_freqs[i]
+            predict_gain = predict_gains[i]
 
             cfg["qub_pulse"]["freq"] = predict_freq + detune_params
             if "mixer_freq" in cfg["qub_pulse"]:
                 cfg["qub_pulse"]["mixer_freq"] = predict_freq
-            cfg["qub_pulse"]["gain"] = min(1.0, ref_gain * ref_m / predict_m)
+            cfg["qub_pulse"]["gain"] = predict_gain
 
         updateCfg(cfg, 0, dev_values[0])  # set initial flux
 
@@ -407,9 +422,9 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (dev_values, detunes, signals2D)
+        self.last_result = (dev_values, detunes, signals2D, predict_freqs)
 
-        return dev_values, detunes, signals2D
+        return dev_values, detunes, signals2D, predict_freqs
 
     def analyze(self, result: Optional[FreqResultType] = None) -> None:
         if result is None:
@@ -425,7 +440,7 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, fpts, signals2D = result
+        values, fpts, signals2D, _ = result
 
         point_selector = InteractiveFindPoints(signals2D.T, mAs=values, fpts=fpts)
 
@@ -443,7 +458,7 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, detunes, signals2D = result
+        values, detunes, signals2D, _ = result
 
         save_data(
             filepath=filepath,

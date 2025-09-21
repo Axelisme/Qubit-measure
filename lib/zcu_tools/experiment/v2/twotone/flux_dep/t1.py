@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from copy import deepcopy
 from typing import Any, Callable, Dict, Optional, Tuple, Literal
 
@@ -8,7 +9,7 @@ import matplotlib.pyplot as plt
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
-from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -21,8 +22,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.fitting import fit_decay
 
-from ...template import sweep_hard_template, sweep2D_soft_hard_template
-from .util import check_flux_pulse
+from ...template import sweep2D_soft_hard_template
 
 T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -43,85 +43,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         **kwargs,
     ) -> T1ResultType:
         if method == "fastflux":
-            return self.run_fastflux(soc, soccfg, cfg, progress=progress, **kwargs)
+            raise NotImplementedError("fastflux method is not implemented yet")
         elif method == "yoko":
             return self.run_yoko(soc, soccfg, cfg, progress=progress, **kwargs)
         else:
             raise ValueError(f"Unknown method: {method}")
-
-    def run_fastflux(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> T1ResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        flx_pulse = cfg["flx_pulse"]
-
-        flx_pulse.setdefault("nqz", 1)
-        flx_pulse.setdefault("freq", 0.0)
-        flx_pulse.setdefault("phase", 0.0)
-        flx_pulse.setdefault("outsel", "input")
-        flx_pulse.setdefault("post_delay", 0.0)
-
-        check_flux_pulse(flx_pulse, check_delay=False)
-
-        flx_sweep = cfg["sweep"]["flux"]
-        len_sweep = cfg["sweep"]["length"]
-
-        # Flux sweep be outer loop
-        cfg["sweep"] = {
-            "flux": flx_sweep,
-            "length": len_sweep,
-        }
-
-        # predict sweep points
-        gains = sweep2array(flx_sweep)
-        lens = sweep2array(len_sweep)
-
-        # Frequency is swept by FPGA (hard sweep)
-        flx_pulse["gain"] = sweep2param("flux", flx_sweep)
-        flx_pulse["length"] = sweep2param("length", len_sweep)
-
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                Pulse(name="flux_pulse", cfg=cfg["flx_pulse"]),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
-        )
-
-        def measure_fn(
-            _: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> np.ndarray:
-            return prog.acquire(soc, progress=progress, callback=cb)[0][0].dot([1, 1j])
-
-        # Run 2D soft-hard sweep (flux soft, length hard)
-        signals2D = sweep_hard_template(
-            cfg,
-            measure_fn,
-            LivePlotter2D(
-                "Local flux gain (a.u.)",
-                "Time (us)",
-                disable=not progress,
-            ),
-            ticks=(gains, lens),
-            signal2real=t1_signal2real,
-        )
-
-        # Get the actual frequency points used by FPGA
-        real_gains = prog.get_pulse_param("flux_pulse", "gain", as_array=True)
-        real_ts = prog.get_pulse_param("flux_pulse", "length", as_array=True)
-        assert isinstance(real_gains, np.ndarray), "fpts should be an array"
-        assert isinstance(real_ts, np.ndarray), "fpts should be an array"
-        real_ts += lens[0] - real_ts[0]  # correct absolute offset
-
-        # Cache results
-        self.last_cfg = cfg
-        self.last_result = (real_gains, real_ts, signals2D)
-
-        return real_gains, real_ts, signals2D
 
     def run_yoko(
         self,
@@ -144,10 +70,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         map_values = map_values[sort_idxs]
         map_freqs = map_freqs[sort_idxs]
 
-        if predictor is not None:
-            ref_gain = cfg["pi_pulse"]["gain"]
-            ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
-
         flx_sweep = cfg["sweep"]["flux"]
         len_sweep = cfg["sweep"]["length"]
 
@@ -163,19 +85,41 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                 f"Sweep values from {values.min()} to {values.max()} exceed the freq_map range [{map_values.min()}, {map_values.max()}]"
             )
 
-        # Frequency is swept by FPGA (hard sweep)
-        cfg["pi_pulse"]["post_delay"] = sweep2param("length", len_sweep)
+        predict_freqs = np.array(
+            [np.interp(fx, map_values, map_freqs) for fx in values]
+        )
+        if predictor is not None:
+            ref_gain = cfg["pi_pulse"]["gain"]
+            ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
 
-        def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
+            predict_ms = np.array(
+                [
+                    predictor.predict_matrix_element(fx, operator=drive_oper)
+                    for fx in values
+                ]
+            )
+            predict_gains = ref_gain * ref_m / predict_ms
+            if np.any(predict_gains > 1.0):
+                warnings.warn(
+                    "Some predicted gains are larger than 1.0, which may cause distortion."
+                )
+                predict_gains = np.clip(predict_gains, 0.0, 1.0)
+
+        def updateCfg(cfg: Dict[str, Any], i: int, value: float) -> None:
             set_flux_in_dev_cfg(cfg["dev"], value)
-            cfg["pi_pulse"]["freq"] = np.interp(value, map_values, map_freqs)
+
+            predict_freq = predict_freqs[i]
+
+            cfg["pi_pulse"]["freq"] = predict_freq
             if "mixer_freq" in cfg["pi_pulse"]:
-                cfg["pi_pulse"]["mixer_freq"] = cfg["pi_pulse"]["freq"]
+                cfg["pi_pulse"]["mixer_freq"] = predict_freq
             if predictor is not None:
-                cur_m = predictor.predict_matrix_element(value, operator=drive_oper)
-                cfg["pi_pulse"]["gain"] = ref_gain * ref_m / cur_m
+                cfg["pi_pulse"]["gain"] = predict_gains[i]
 
         updateCfg(cfg, 0, values[0])  # set initial flux
+
+        # Frequency is swept by FPGA (hard sweep)
+        cfg["pi_pulse"]["post_delay"] = sweep2param("length", len_sweep)
 
         def measure_fn(
             cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
@@ -227,9 +171,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (values, real_ts, signals2D)
+        self.last_result = (values, real_ts, signals2D, predict_freqs)
 
-        return values, real_ts, signals2D
+        return values, real_ts, signals2D, predict_freqs
 
     def analyze(
         self,
@@ -242,7 +186,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, ts, signals2D = result
+        values, ts, signals2D, _ = result
 
         if start_idx > len(ts) - 4:
             raise ValueError(
@@ -311,11 +255,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, Ts, signals2D = result
+        values, Ts, signals2D, _ = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Flux pulse gain", "unit": "a.u.", "values": gains},
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
             y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
