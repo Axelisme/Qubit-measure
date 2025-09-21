@@ -30,7 +30,7 @@ from zcu_tools.utils.process import minus_background, rotate2real
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 from ...template import sweep2D_soft_hard_template, sweep2D_soft_template
-from .util import check_flux_pulse, wrap_with_flux_pulse
+from .util import check_flux_pulse, wrap_with_flux_pulse, calc_snr
 
 FreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -352,6 +352,7 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
         predictor: FluxoniumPredictor,
         ref_flux: float,
         drive_oper: Literal["n", "phi"] = "n",
+        earlystop_snr: Optional[float] = None,
     ) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -396,11 +397,26 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
 
         updateCfg(cfg, 0, dev_values[0])  # set initial flux
 
+        prog = None
+
         def measure_fn(
             cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
         ) -> np.ndarray:
+            nonlocal prog
             prog = TwoToneProgram(soccfg, cfg)
             return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
+        earlystop_callback = None
+        if earlystop_snr is not None:
+
+            def earlystop_callback(i: int, ir: int, real_signals: np.ndarray) -> None:
+                nonlocal prog
+                if ir < int(0.1 * cfg["rounds"]):
+                    return  # at least 10% averages
+
+                snr = calc_snr(real_signals[i, :])
+                if snr >= earlystop_snr:
+                    prog.set_early_stop()
 
         # Run 2D soft-hard sweep (flux soft, frequency hard)
         signals2D = sweep2D_soft_hard_template(
@@ -418,6 +434,7 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
             updateCfg=updateCfg,
             signal2real=smartfreq_signal2real,
             progress=progress,
+            realsignal_callback=earlystop_callback,
         )
 
         # Cache results

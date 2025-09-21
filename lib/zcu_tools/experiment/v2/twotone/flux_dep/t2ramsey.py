@@ -21,6 +21,7 @@ from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.fitting import fit_decay_fringe
 
 from ...template import sweep2D_soft_hard_template
+from .util import calc_snr
 
 T2RamseyResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -59,6 +60,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         freq_map: Tuple[np.ndarray, np.ndarray],
         detune: float = 0.0,
         progress: bool = True,
+        earlystop_snr: Optional[float] = None,
     ) -> T2RamseyResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -105,9 +107,12 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         # Frequency is swept by FPGA (hard sweep)
         t2spans = sweep2param("length", len_sweep)
 
+        prog = None
+
         def measure_fn(
             cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
         ) -> np.ndarray:
+            nonlocal prog
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
@@ -132,6 +137,18 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             )
             return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
 
+        earlystop_callback = None
+        if earlystop_snr is not None:
+
+            def earlystop_callback(i: int, ir: int, real_signals: np.ndarray) -> None:
+                nonlocal prog
+                if ir < int(0.1 * cfg["rounds"]):
+                    return  # at least 10% averages
+
+                snr = calc_snr(real_signals[i, :])
+                if snr >= earlystop_snr:
+                    prog.set_early_stop()
+
         def t2r_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
             real_signals = rotate2real(signals).real
             mean_val = np.mean(real_signals, axis=1)
@@ -154,20 +171,11 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             updateCfg=updateCfg,
             signal2real=t2r_yoko_signal2real,
             progress=progress,
+            realsignal_callback=earlystop_callback,
         )
 
         # Get the actual frequency points used by FPGA
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                Pulse(
-                    name="pi2_pulse",
-                    cfg={**cfg["pi2_pulse"], "post_delay": t2spans},
-                )
-            ],
-        )
-        real_ts = prog.get_time_param("pi2_pulse_post_delay", "t", as_array=True)
+        real_ts = prog.get_time_param("pi2_pulse1_post_delay", "t", as_array=True)
         assert isinstance(real_ts, np.ndarray), "lens should be an array"
         real_ts += lens[0] - real_ts[0]  # correct absolute offset
 

@@ -23,6 +23,7 @@ from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.fitting import fit_decay
 
 from ...template import sweep2D_soft_hard_template
+from .util import calc_snr
 
 T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -60,6 +61,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         ref_flux: float = 0.0,
         drive_oper: Literal["n", "phi"] = "n",
         progress: bool = True,
+        earlystop_snr: Optional[float] = None,
     ) -> T1ResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -121,9 +123,12 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         # Frequency is swept by FPGA (hard sweep)
         cfg["pi_pulse"]["post_delay"] = sweep2param("length", len_sweep)
 
+        prog = None
+
         def measure_fn(
             cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
         ) -> np.ndarray:
+            nonlocal prog
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
@@ -134,6 +139,18 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                 ],
             )
             return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
+        earlystop_callback = None
+        if earlystop_snr is not None:
+
+            def earlystop_callback(i: int, ir: int, real_signals: np.ndarray) -> None:
+                nonlocal prog
+                if ir < int(0.1 * cfg["rounds"]):
+                    return  # at least 10% averages
+
+                snr = calc_snr(real_signals[i, :])
+                if snr >= earlystop_snr:
+                    prog.set_early_stop()
 
         def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
             real_signals = np.zeros_like(signals, dtype=np.float64)
@@ -159,12 +176,10 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             updateCfg=updateCfg,
             signal2real=t1_yoko_signal2real,
             progress=progress,
+            realsignal_callback=earlystop_callback,
         )
 
         # Get the actual frequency points used by FPGA
-        prog = ModularProgramV2(
-            soccfg, cfg, modules=[Pulse(name="pi_pulse", cfg=cfg["pi_pulse"])]
-        )
         real_ts = prog.get_time_param("pi_pulse_post_delay", "t", as_array=True)
         assert isinstance(real_ts, np.ndarray), "fpts should be an array"
         real_ts += lens[0] - real_ts[0]  # correct absolute offset

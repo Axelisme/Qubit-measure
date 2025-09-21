@@ -1,10 +1,19 @@
 from typing import Any, Dict, Tuple
 from copy import deepcopy
 
+import numpy as np
+from scipy.ndimage import gaussian_filter
+
 from zcu_tools.program.v2 import check_no_post_delay
 from zcu_tools.utils import deepupdate
 
 from qick.asm_v2 import QickParam
+
+
+def calc_snr(real_signals: np.ndarray) -> float:
+    smooth_signals = gaussian_filter(real_signals, sigma=1)
+    noise = np.mean(np.abs(real_signals - smooth_signals))
+    return (np.max(smooth_signals) - np.min(smooth_signals)) / noise
 
 
 def wrap_with_flux_pulse(
