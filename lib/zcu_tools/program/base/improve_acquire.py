@@ -153,9 +153,10 @@ class EarlyStopMixin(AcquireMixin):
         super().__init__(*args, **kwargs)
         self.early_stop = False
 
-    def set_early_stop(self) -> None:
+    def set_early_stop(self, silent: bool = False) -> None:
         # tell program to return as soon as this round is finished
-        print("Program received early stop signal")
+        if not silent:
+            print("Program received early stop signal")
         self.early_stop = True
 
     def acquire(self, *args, **kwargs) -> List[np.ndarray]:

@@ -411,12 +411,12 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
 
             def earlystop_callback(i: int, ir: int, real_signals: np.ndarray) -> None:
                 nonlocal prog
-                if ir < int(0.1 * cfg["rounds"]):
+                if ir < int(0.01 * cfg["rounds"]):
                     return  # at least 10% averages
 
                 snr = calc_snr(real_signals[i, :])
                 if snr >= earlystop_snr:
-                    prog.set_early_stop()
+                    prog.set_early_stop(silent=True)
 
         # Run 2D soft-hard sweep (flux soft, frequency hard)
         signals2D = sweep2D_soft_hard_template(

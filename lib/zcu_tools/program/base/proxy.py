@@ -25,7 +25,7 @@ class AbsProxy(ABC):
         pass
 
     @abstractmethod
-    def set_early_stop(self) -> None:
+    def set_early_stop(self, silent: bool = False) -> None:
         pass
 
     @abstractmethod
@@ -70,11 +70,11 @@ class ProxyAcquireMixin(AcquireMixin):
         self.proxy_shots_expired = False
         self.proxy_round_expired = False
 
-    def set_early_stop(self) -> None:
+    def set_early_stop(self, silent: bool = False) -> None:
         if self.is_use_proxy():
             # tell proxy to set early stop
-            self.proxy.set_early_stop()
-        super().set_early_stop()  # set locally for safe
+            self.proxy.set_early_stop(silent=silent)
+        super().set_early_stop(silent=silent)  # set locally for safe
 
     def _set_expired(self) -> None:
         self.proxy_buf_expired = True

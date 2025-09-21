@@ -34,9 +34,10 @@ class ProgramServer:
 
     @Pyro4.expose
     @Pyro4.oneway
-    def set_early_stop(self) -> None:
+    def set_early_stop(self, silent: bool = False) -> None:
         if self.last_prog is not None:
-            self.last_prog.set_early_stop()  # set interrupt flag in program
+            # set interrupt flag in program
+            self.last_prog.set_early_stop(silent=silent)
         else:
             print("Warning: no program is running but received early stop signal")
 

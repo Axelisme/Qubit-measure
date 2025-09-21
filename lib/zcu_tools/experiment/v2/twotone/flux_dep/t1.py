@@ -150,7 +150,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
                 snr = calc_snr(real_signals[i, :])
                 if snr >= earlystop_snr:
-                    prog.set_early_stop()
+                    prog.set_early_stop(silent=True)
 
         def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
             real_signals = np.zeros_like(signals, dtype=np.float64)
