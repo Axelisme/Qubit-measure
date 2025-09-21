@@ -72,7 +72,11 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
         return fpts, snrs  # fpts
 
     def analyze(
-        self, result: Optional[FreqResultType] = None, *, plot: bool = True
+        self,
+        result: Optional[FreqResultType] = None,
+        *,
+        plot: bool = True,
+        smooth: float = 1.0,
     ) -> float:
         if result is None:
             result = self.last_result
@@ -84,7 +88,7 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0
 
-        snrs = gaussian_filter1d(snrs, 1)
+        snrs = gaussian_filter1d(snrs, smooth)
 
         max_id = np.argmax(snrs)
         max_fpt = float(fpts[max_id])
