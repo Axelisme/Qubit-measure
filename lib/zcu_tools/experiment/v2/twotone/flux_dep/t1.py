@@ -28,8 +28,13 @@ from .util import calc_snr
 T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
-def t1_signal2real(signals: np.ndarray) -> np.ndarray:
-    return rotate2real(signals).real
+def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
+    real_signals = np.zeros_like(signals, dtype=np.float64)
+    for i in range(signals.shape[0]):
+        real_signals[i, :] = rotate2real(signals[i, :]).real
+    min_val = np.min(real_signals, axis=1)
+    max_val = np.max(real_signals, axis=1)
+    return (real_signals - min_val[:, None]) / (max_val - min_val)[:, None]
 
 
 class T1Experiment(AbsExperiment[T1ResultType]):
@@ -152,14 +157,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                 if snr >= earlystop_snr:
                     prog.set_early_stop(silent=True)
 
-        def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
-            real_signals = np.zeros_like(signals, dtype=np.float64)
-            for i in range(signals.shape[0]):
-                real_signals[i, :] = rotate2real(signals[i, :]).real
-            min_val = np.min(real_signals, axis=1)
-            max_val = np.max(real_signals, axis=1)
-            return (real_signals - min_val[:, None]) / (max_val - min_val)[:, None]
-
         # Run 2D soft-hard sweep (flux soft, length hard)
         signals2D = sweep2D_soft_hard_template(
             cfg,
@@ -194,8 +191,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         self,
         result: Optional[T1ResultType] = None,
         *,
-        start_idx: int = 0,
-        t1_cutoff: float = np.inf,
+        snr_threshold: float = 3.0,
     ) -> Tuple[np.ndarray, np.ndarray]:
         if result is None:
             result = self.last_result
@@ -203,16 +199,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         values, ts, signals2D, _ = result
 
-        if start_idx > len(ts) - 4:
-            raise ValueError(
-                f"not enough data to analyze under start_idx={start_idx}, while total length={len(ts)}"
-            )
-
-        # start from start_idx
-        ts = ts[start_idx:]
-        signals2D = signals2D[:, start_idx:]
-
-        real_signals2D = rotate2real(signals2D).real
+        real_signals2D = t1_yoko_signal2real(signals2D)
 
         t1s = np.full(len(values), np.nan, dtype=np.float64)
         t1errs = np.zeros_like(t1s)
@@ -226,7 +213,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
             t1, t1err, *_ = fit_decay(ts, real_signals)
 
-            if t1 > t1_cutoff or t1err > 0.3 * t1:
+            if t1err > 0.3 * t1:
+                continue
+
+            snr = calc_snr(real_signals)
+            if snr < snr_threshold:
                 continue
 
             t1s[i] = t1
@@ -236,19 +227,14 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             raise ValueError("No valid Fitting T1 found. Please check the data.")
 
         valid_idxs = ~np.isnan(t1s)
-        gains = values[valid_idxs]
+        values = values[valid_idxs]
         t1s = t1s[valid_idxs]
         t1errs = t1errs[valid_idxs]
 
         _, ax = plt.subplots(1, 1)
         assert isinstance(ax, plt.Axes)
         ax.errorbar(
-            gains,
-            t1s,
-            yerr=t1errs,
-            label="Fitting T1",
-            elinewidth=1,
-            capsize=1,
+            values, t1s, yerr=t1errs, label="Fitting T1", elinewidth=1, capsize=1
         )
         ax.set_xlabel("Flux pulse gain (a.u.)")
         ax.set_ylabel("T1 (us)")
@@ -256,7 +242,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         ax.grid()
         plt.plot()
 
-        return gains, t1s, t1errs
+        return values, t1s, t1errs
 
     def save(
         self,
