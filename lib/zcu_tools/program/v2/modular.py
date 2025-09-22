@@ -1,7 +1,8 @@
 from typing import Any, Dict, List, Union
 
-from qick import QickConfig
 from qick.asm_v2 import Macro
+
+from qick import QickConfig
 
 from .base import MyProgramV2
 from .modules import Module
@@ -31,13 +32,7 @@ class ModularProgramV2(MyProgramV2):
 
     def _body(self, cfg: Dict[str, Any]) -> None:
         for module in self.modules:
-            if isinstance(module, Macro):
-                self.append_macro(module)
-            else:
-                assert isinstance(module, Module), (
-                    f"Invalid module type: {type(module)}"
-                )
-                module.run(self)
+            module.run(self)
 
 
 class BaseCustomProgramV2(ModularProgramV2):

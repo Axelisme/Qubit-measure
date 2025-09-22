@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple, Callable
+from typing import Any, Callable, Dict, Optional, Tuple
 
-import numpy as np
 import matplotlib.pyplot as plt
-import qick.asm_v2 as qasm
+import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -13,13 +12,14 @@ from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
+    Repeat,
     make_readout,
     make_reset,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.fitting import fit_decay
+from zcu_tools.utils.process import rotate2real
 
 from ...template import sweep2D_soft_hard_template
 
@@ -66,18 +66,6 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
         def make_prog(cfg, time):
             interval = cpmg_spans / time
 
-            if time > 1:  # zero Loop mean infinite loop in qick
-                cpmg_pi_loop = [
-                    qasm.OpenLoop(name="cpmg_pi_loop", n=time - 1),
-                    Pulse(
-                        name="pi_pulse",
-                        cfg={**cfg["pi_pulse"], "post_delay": interval},
-                    ),
-                    qasm.CloseLoop(),
-                ]
-            else:
-                cpmg_pi_loop = []
-
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
@@ -88,7 +76,14 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
                         cfg={**cfg["pi2_pulse"], "post_delay": 0.5 * interval},
                         pulse_name="pi2_pulse",
                     ),
-                    *cpmg_pi_loop,
+                    Repeat(
+                        name="cpmg_pi_loop",
+                        n=time - 1,
+                        sub_module=Pulse(
+                            name="pi_pulse",
+                            cfg={**cfg["pi_pulse"], "post_delay": interval},
+                        ),
+                    ),
                     Pulse(
                         name="last_pi_pulse",
                         cfg={**cfg["pi_pulse"], "post_delay": 0.5 * interval},
