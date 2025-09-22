@@ -54,8 +54,12 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         disable: bool = False,
     ) -> None:
         segment2d = Plot2DSegment(xlabel, ylabel, title, flip=flip)
-        xlbael1d = xlabel if line_axis == 0 else ylabel
-        segment1d = Plot1DSegment(xlbael1d, "", num_lines)
+
+        xlabel1d = xlabel if line_axis == 0 else ylabel
+        line_kwargs = num_lines * [dict(linestyle="-", markersize=5, alpha=0.5)]
+        line_kwargs[-1].update(label="current line", marker=".", alpha=1.0, color="C0")
+
+        segment1d = Plot1DSegment(xlabel1d, "", num_lines, line_kwargs=line_kwargs)
         super().__init__([segment2d, segment1d], figsize=figsize, disable=disable)
 
         self.num_lines = num_lines
@@ -63,6 +67,7 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
 
         # set grid to 1d plot
         self.axs[1].grid()
+        self.axs[1].legend()
 
     def update(
         self,
