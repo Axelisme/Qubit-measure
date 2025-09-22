@@ -1,6 +1,6 @@
 import warnings
-from typing import Any, Dict, Optional
 from copy import deepcopy
+from typing import Any, Dict, Optional
 
 import qick.asm_v2 as qasm
 
