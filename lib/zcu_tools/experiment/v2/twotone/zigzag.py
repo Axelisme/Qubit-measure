@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple, Literal
+from typing import Any, Dict, Literal, Optional, Tuple
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from scipy.ndimage import gaussian_filter1d
-import qick.asm_v2 as qasm
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -14,6 +13,7 @@ from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
+    Repeat,
     make_readout,
     make_reset,
     sweep2param,
@@ -181,22 +181,17 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
             elif repeat_on == "X180_pulse":
                 pulse_num = repeat_time
 
-            if pulse_num > 0:
-                zigzag_loop = [
-                    qasm.OpenLoop(name="zigzag_loop", n=pulse_num),
-                    Pulse(name=f"loop_{repeat_on}", cfg=cfg[repeat_on]),
-                    qasm.CloseLoop(),
-                ]
-            else:
-                zigzag_loop = []
-
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
                     make_reset("reset", cfg.get("reset")),
                     Pulse(name="X90_pulse", cfg=X90_pulse),
-                    *zigzag_loop,
+                    Repeat(
+                        name="zigzag_loop",
+                        n=pulse_num,
+                        sub_module=Pulse(name=f"loop_{repeat_on}", cfg=cfg[repeat_on]),
+                    ),
                     make_readout("readout", cfg["readout"]),
                 ],
             )
