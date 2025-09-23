@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional
 
 from ..base import MyProgramV2
 from .base import Module
-from .pulse import Pulse, check_no_post_delay
+from .pulse import Pulse, check_block_mode
 
 
 class AbsReset(Module):
@@ -18,17 +18,10 @@ def make_reset(name: str, reset_cfg: Optional[Dict[str, Any]]) -> AbsReset:
     if reset_type == "none":
         return NoneReset()
     elif reset_type == "pulse":
-        return PulseReset(
-            name,
-            pulse_cfg=reset_cfg["pulse_cfg"],
-            post_pulse_cfg=reset_cfg.get("post_pulse_cfg"),
-        )
+        return PulseReset(name, pulse_cfg=reset_cfg["pulse_cfg"])
     elif reset_type == "two_pulse":
         return TwoPulseReset(
-            name,
-            pulse1_cfg=reset_cfg["pulse1_cfg"],
-            pulse2_cfg=reset_cfg["pulse2_cfg"],
-            post_pulse_cfg=reset_cfg.get("post_pulse_cfg"),
+            name, pulse1_cfg=reset_cfg["pulse1_cfg"], pulse2_cfg=reset_cfg["pulse2_cfg"]
         )
     elif reset_type == "bath":
         return BathReset(
@@ -45,71 +38,45 @@ class NoneReset(AbsReset):
     def init(self, prog: MyProgramV2) -> None:
         pass
 
-    def run(self, prog: MyProgramV2) -> None:
-        pass
+    def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
+        return t
 
 
 class PulseReset(AbsReset):
-    def __init__(
-        self,
-        name: str,
-        pulse_cfg: Dict[str, Any],
-        post_pulse_cfg: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    def __init__(self, name: str, pulse_cfg: Dict[str, Any]) -> None:
         self.name = name
         self.reset_pulse = Pulse(name=f"{name}_pulse", cfg=pulse_cfg)
 
-        if post_pulse_cfg is not None:
-            self.post_reset_pulse = Pulse(name=f"{name}_post_pulse", cfg=post_pulse_cfg)
-        else:
-            self.post_reset_pulse = None
+        check_block_mode(self.reset_pulse.name, pulse_cfg, want_block=True)
 
     def init(self, prog: MyProgramV2) -> None:
         self.reset_pulse.init(prog)
 
-        if self.post_reset_pulse is not None:
-            self.post_reset_pulse.init(prog)
-
-    def run(self, prog: MyProgramV2) -> None:
-        self.reset_pulse.run(prog)
-
-        if self.post_reset_pulse is not None:
-            self.post_reset_pulse.run(prog)
+    def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
+        return self.reset_pulse.run(prog, t)
 
 
 class TwoPulseReset(AbsReset):
     def __init__(
-        self,
-        name: str,
-        pulse1_cfg: Dict[str, Any],
-        pulse2_cfg: Dict[str, Any],
-        post_pulse_cfg: Optional[Dict[str, Any]] = None,
+        self, name: str, pulse1_cfg: Dict[str, Any], pulse2_cfg: Dict[str, Any]
     ) -> None:
         self.name = name
-
-        check_no_post_delay(pulse1_cfg, f"{name}_pulse1")
 
         self.reset_pulse1 = Pulse(name=f"{name}_pulse1", cfg=pulse1_cfg)
         self.reset_pulse2 = Pulse(name=f"{name}_pulse2", cfg=pulse2_cfg)
 
-        if post_pulse_cfg is not None:
-            self.post_reset_pulse = Pulse(name=f"{name}_post_pulse", cfg=post_pulse_cfg)
-        else:
-            self.post_reset_pulse = None
+        check_block_mode(self.reset_pulse1.name, pulse1_cfg, want_block=False)
+        check_block_mode(self.reset_pulse2.name, pulse2_cfg, want_block=True)
 
     def init(self, prog: MyProgramV2) -> None:
         self.reset_pulse1.init(prog)
         self.reset_pulse2.init(prog)
 
-        if self.post_reset_pulse is not None:
-            self.post_reset_pulse.init(prog)
+    def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
+        t = self.reset_pulse1.run(prog, t)
+        t = self.reset_pulse2.run(prog, t)
 
-    def run(self, prog: MyProgramV2) -> None:
-        self.reset_pulse1.run(prog)
-        self.reset_pulse2.run(prog)
-
-        if self.post_reset_pulse is not None:
-            self.post_reset_pulse.run(prog)
+        return t
 
 
 class BathReset(AbsReset):
@@ -122,18 +89,22 @@ class BathReset(AbsReset):
     ) -> None:
         self.name = name
 
-        check_no_post_delay(qubit_tone_cfg, f"{name}_qub_pulse")
-
         self.qub_pulse = Pulse(name=f"{name}_qub_pulse", cfg=qubit_tone_cfg)
         self.res_pulse = Pulse(name=f"{name}_res_pulse", cfg=cavity_tone_cfg)
         self.pi2_pulse = Pulse(name=f"{name}_pi2_pulse", cfg=pi2_cfg)
+
+        check_block_mode(self.qub_pulse.name, qubit_tone_cfg, want_block=False)
+        check_block_mode(self.res_pulse.name, cavity_tone_cfg, want_block=True)
+        check_block_mode(self.pi2_pulse.name, pi2_cfg, want_block=True)
 
     def init(self, prog: MyProgramV2) -> None:
         self.qub_pulse.init(prog)
         self.res_pulse.init(prog)
         self.pi2_pulse.init(prog)
 
-    def run(self, prog: MyProgramV2) -> None:
-        self.qub_pulse.run(prog)
-        self.res_pulse.run(prog)
-        self.pi2_pulse.run(prog)
+    def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
+        t = self.qub_pulse.run(prog, t)
+        t = self.res_pulse.run(prog, t)
+        t = self.pi2_pulse.run(prog, t)
+
+        return t

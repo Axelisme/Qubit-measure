@@ -40,11 +40,12 @@ def auto_derive_module(
         module_cfg = deepcopy(ml.get_module(name))
     module_cfg["name"] = name
 
-    # if it also a pulse cfg, exclude raise_pulse in flat_top
-    if "style" in module_cfg and name != "raise_pulse":
+    # if it also a pulse cfg, exclude raise_waveform in flat_top
+    if "waveform" in module_cfg and name != "raise_waveform":
         module_cfg.setdefault("phase", 0.0)
-        module_cfg.setdefault("t", 0.0)
+        module_cfg.setdefault("pre_delay", 0.0)
         module_cfg.setdefault("post_delay", 0.0)
+        module_cfg.setdefault("block_mode", True)
 
     # derive pulse in module
     for key, value in module_cfg.items():

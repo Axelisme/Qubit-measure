@@ -1,9 +1,10 @@
+import warnings
 from copy import deepcopy
 from typing import Any, Dict
 
-from ..base import force_no_post_delay
+from ..base import MyProgramV2
 from .base import Module
-from .pulse import MyProgramV2, Pulse
+from .pulse import Pulse, check_block_mode
 
 
 class AbsReadout(Module):
@@ -15,9 +16,7 @@ def make_readout(name: str, readout_cfg: Dict[str, Any]) -> AbsReadout:
 
     if ro_type == "base":
         return BaseReadout(
-            name,
-            pulse_cfg=readout_cfg["pulse_cfg"],
-            ro_cfg=readout_cfg["ro_cfg"],
+            name, pulse_cfg=readout_cfg["pulse_cfg"], ro_cfg=readout_cfg["ro_cfg"]
         )
     elif ro_type == "two_pulse":
         return TwoPulseReadout(
@@ -32,21 +31,21 @@ def make_readout(name: str, readout_cfg: Dict[str, Any]) -> AbsReadout:
 
 class BaseReadout(AbsReadout):
     def __init__(
-        self,
-        name: str,
-        pulse_cfg: Dict[str, Any],
-        ro_cfg: Dict[str, Any],
+        self, name: str, pulse_cfg: Dict[str, Any], ro_cfg: Dict[str, Any]
     ) -> None:
         self.name = name
         self.pulse_cfg = deepcopy(pulse_cfg)
         self.ro_cfg = deepcopy(ro_cfg)
 
-        # TODO: support post delay
-        pulse_name = f"{name}_pulse"
-        force_no_post_delay(self.pulse_cfg, pulse_name)
-        self.pulse = Pulse(
-            name=pulse_name, cfg=self.pulse_cfg, ro_ch=self.ro_cfg["ro_ch"]
-        )
+        ro_ch: int = self.pulse_cfg.get("ro_ch", ro_cfg["ro_ch"])
+        if ro_ch != ro_cfg["ro_ch"]:
+            warnings.warn(
+                f"{name} pulse_cfg.ro_ch is {ro_ch}, this may not be what you want"
+            )
+
+        self.pulse = Pulse(name=f"{name}_pulse", cfg=self.pulse_cfg)
+
+        check_block_mode(self.pulse.name, self.pulse_cfg, want_block=True)
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse.init(prog)
@@ -59,13 +58,15 @@ class BaseReadout(AbsReadout):
             gen_ch=self.pulse_cfg["ch"],
         )
 
-    def run(self, prog: MyProgramV2) -> None:
+    def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
         ro_ch: int = self.ro_cfg["ro_ch"]
 
         prog.send_readoutconfig(ro_ch, f"{self.name}_adc", t=0)
-        prog.trigger([ro_ch], t=self.ro_cfg["trig_offset"])
+        prog.trigger([ro_ch], t=t + self.ro_cfg["trig_offset"])
 
-        self.pulse.run(prog)
+        t = self.pulse.run(prog, t)
+
+        return t
 
 
 class TwoPulseReadout(AbsReadout):
@@ -81,17 +82,23 @@ class TwoPulseReadout(AbsReadout):
         self.pulse1_cfg = deepcopy(pulse1_cfg)
         self.pulse2_cfg = deepcopy(pulse2_cfg)
 
-        # TODO: support post delay
-        force_no_post_delay(self.pulse2_cfg, f"{name}_pulse2")
+        ro_ch: int = self.pulse1_cfg.get("ro_ch", ro_cfg["ro_ch"])
+        if ro_ch != ro_cfg["ro_ch"]:
+            warnings.warn(
+                f"{name} pulse1_cfg.ro_ch is {ro_ch}, this may not be what you want"
+            )
 
-        self.pulse1 = Pulse(
-            name=f"{name}_pulse1",
-            cfg=self.pulse1_cfg,
-            ro_ch=self.pulse1_cfg.get("ro_ch"),
-        )
-        self.pulse2 = Pulse(
-            name=f"{name}_pulse2", cfg=self.pulse2_cfg, ro_ch=self.ro_cfg["ro_ch"]
-        )
+        ro_ch: int = self.pulse2_cfg.get("ro_ch", ro_cfg["ro_ch"])
+        if ro_ch != ro_cfg["ro_ch"]:
+            warnings.warn(
+                f"{name} pulse2_cfg.ro_ch is {ro_ch}, this may not be what you want"
+            )
+
+        self.pulse1 = Pulse(name=f"{name}_pulse1", cfg=self.pulse1_cfg)
+        self.pulse2 = Pulse(name=f"{name}_pulse2", cfg=self.pulse2_cfg)
+
+        check_block_mode(self.pulse1.name, self.pulse1_cfg, want_block=True)
+        check_block_mode(self.pulse2.name, self.pulse2_cfg, want_block=True)
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse1.init(prog)
@@ -105,11 +112,13 @@ class TwoPulseReadout(AbsReadout):
             gen_ch=self.pulse2_cfg["ch"],
         )
 
-    def run(self, prog: MyProgramV2) -> None:
+    def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
         ro_ch: int = self.ro_cfg["ro_ch"]
 
         prog.send_readoutconfig(ro_ch, f"{self.name}_adc", t=0)
-        prog.trigger([ro_ch], t=self.ro_cfg["trig_offset"])
+        prog.trigger([ro_ch], t=t + self.ro_cfg["trig_offset"])
 
-        self.pulse1.run(prog)
-        self.pulse2.run(prog)
+        t = self.pulse1.run(prog, t)
+        t = self.pulse2.run(prog, t)
+
+        return t

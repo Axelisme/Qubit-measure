@@ -1,6 +1,4 @@
-from typing import Any, Dict, List, Union
-
-from qick.asm_v2 import Macro
+from typing import Any, Dict, List
 
 from qick import QickConfig
 
@@ -14,11 +12,7 @@ class ModularProgramV2(MyProgramV2):
     """
 
     def __init__(
-        self,
-        soccfg: QickConfig,
-        cfg: Dict[str, Any],
-        modules: List[Union[Macro, Module]],
-        **kwargs,
+        self, soccfg: QickConfig, cfg: Dict[str, Any], modules: List[Module], **kwargs
     ) -> None:
         self.modules = modules
         super().__init__(soccfg, cfg, **kwargs)
@@ -27,12 +21,12 @@ class ModularProgramV2(MyProgramV2):
         super()._initialize(cfg)
 
         for module in self.modules:
-            if isinstance(module, Module):
-                module.init(self)
+            module.init(self)
 
     def _body(self, cfg: Dict[str, Any]) -> None:
+        t = 0.0
         for module in self.modules:
-            module.run(self)
+            t = module.run(self, t)
 
 
 class BaseCustomProgramV2(ModularProgramV2):
