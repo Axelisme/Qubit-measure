@@ -46,6 +46,9 @@ class Plot1DSegment(AbsSegment):
             lines.append(line)
         self.lines = lines
 
+        if any("label" in (kwargs or {}) for kwargs in self.line_kwargs):
+            ax.legend()
+
     def update(
         self,
         ax: plt.Axes,

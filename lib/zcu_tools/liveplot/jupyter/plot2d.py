@@ -56,7 +56,10 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         segment2d = Plot2DSegment(xlabel, ylabel, title, flip=flip)
 
         xlabel1d = xlabel if line_axis == 0 else ylabel
-        line_kwargs = num_lines * [dict(linestyle="-", markersize=5, alpha=0.5)]
+        line_kwargs = [
+            dict(linestyle="-", markersize=5, alpha=0.3, color="red")
+            for _ in range(num_lines)
+        ]
         line_kwargs[-1].update(label="current line", marker=".", alpha=1.0, color="C0")
 
         segment1d = Plot1DSegment(xlabel1d, "", num_lines, line_kwargs=line_kwargs)
@@ -67,7 +70,6 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
 
         # set grid to 1d plot
         self.axs[1].grid()
-        self.axs[1].legend()
 
     def update(
         self,
@@ -87,20 +89,24 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
 
         # use the last non-nan line as current line
         if np.all(np.isnan(signals)):
-            line_start = 0
+            current_line = -1
         else:
             current_line = np.where(~np.isnan(signals))[1 - self.line_axis][-1]
-            line_start = max(0, current_line - self.num_lines + 1)
 
-        if self.line_axis == 0:
-            lines_signals = signals[:, line_start:]
-            line_xs = xs
-        else:
-            lines_signals = signals[line_start:, :]
-            line_xs = ys
+        line_signals = np.full((self.num_lines, signals.shape[self.line_axis]), np.nan)
+        for i in range(self.num_lines):
+            if current_line - i < 0:
+                break
+
+            if self.line_axis == 0:
+                line_signals[-i - 1, :] = signals[:, current_line - i].T
+            else:
+                line_signals[-i - 1, :] = signals[current_line - i, :]
+
+        line_xs = xs if self.line_axis == 0 else ys
 
         with self.update_lock:
             segment2d.update(ax2d, xs, ys, signals, title)
-            segment1d.update(ax1d, line_xs, lines_signals)
+            segment1d.update(ax1d, line_xs, line_signals)
             if refresh:
                 self._refresh_unchecked()
