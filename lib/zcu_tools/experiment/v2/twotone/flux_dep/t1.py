@@ -30,11 +30,24 @@ T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
     real_signals = np.zeros_like(signals, dtype=np.float64)
+
     for i in range(signals.shape[0]):
         real_signals[i, :] = rotate2real(signals[i, :]).real
-    min_val = np.min(real_signals, axis=1)
-    max_val = np.max(real_signals, axis=1)
-    return (real_signals - min_val[:, None]) / (max_val - min_val)[:, None]
+
+        if np.any(np.isnan(real_signals[i, :])):
+            continue
+
+        # normalize
+        max_val = np.max(real_signals[i, :])
+        min_val = np.min(real_signals[i, :])
+        med_val = np.median(real_signals[i, :])
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+
+        # flip to make peak positive
+        if max_val + min_val < 2 * med_val:
+            real_signals[i, :] = 1.0 - real_signals[i, :]
+
+    return real_signals
 
 
 class T1Experiment(AbsExperiment[T1ResultType]):
@@ -150,7 +163,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
             def earlystop_callback(i: int, ir: int, real_signals: np.ndarray) -> None:
                 nonlocal prog
-                if ir < int(0.1 * cfg["rounds"]):
+                if ir < int(0.01 * cfg["rounds"]):
                     return  # at least 10% averages
 
                 snr = calc_snr(real_signals[i, :])
@@ -191,6 +204,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         self,
         result: Optional[T1ResultType] = None,
         *,
+        start_idx: int = 0,
         snr_threshold: float = 3.0,
     ) -> Tuple[np.ndarray, np.ndarray]:
         if result is None:
@@ -199,7 +213,14 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         values, ts, signals2D, _ = result
 
+        ts = ts[start_idx:]
+        signals2D = signals2D[:, start_idx:]
+
         real_signals2D = t1_yoko_signal2real(signals2D)
+
+        from scipy.ndimage import gaussian_filter
+
+        real_signals2D = gaussian_filter(real_signals2D, sigma=1)
 
         t1s = np.full(len(values), np.nan, dtype=np.float64)
         t1errs = np.zeros_like(t1s)
@@ -211,12 +232,13 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             if np.any(np.isnan(real_signals)):
                 continue
 
-            t1, t1err, *_ = fit_decay(ts, real_signals)
+            t1, t1err, y_fit, *_ = fit_decay(ts, real_signals)
 
             if t1err > 0.3 * t1:
                 continue
 
-            snr = calc_snr(real_signals)
+            contrast = np.max(y_fit) - np.min(y_fit) + 1e-9
+            snr = contrast / np.mean(np.abs(real_signals - y_fit))
             if snr < snr_threshold:
                 continue
 
@@ -227,22 +249,30 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             raise ValueError("No valid Fitting T1 found. Please check the data.")
 
         valid_idxs = ~np.isnan(t1s)
-        values = values[valid_idxs]
+        valid_values = values[valid_idxs]
         t1s = t1s[valid_idxs]
         t1errs = t1errs[valid_idxs]
 
-        _, ax = plt.subplots(1, 1)
-        assert isinstance(ax, plt.Axes)
-        ax.errorbar(
-            values, t1s, yerr=t1errs, label="Fitting T1", elinewidth=1, capsize=1
+        _, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        assert isinstance(ax1, plt.Axes)
+        assert isinstance(ax2, plt.Axes)
+        ax1.imshow(
+            real_signals2D.T,
+            aspect="auto",
+            extent=[values[0], values[-1], t1s[0], t1s[-1]],
+            origin="lower",
         )
-        ax.set_xlabel("Flux pulse gain (a.u.)")
-        ax.set_ylabel("T1 (us)")
-        ax.set_ylim(bottom=0)
-        ax.grid()
+        ax2.errorbar(
+            valid_values, t1s, yerr=t1errs, label="Fitting T1", elinewidth=1, capsize=1
+        )
+        ax2.set_xlabel("Flux value (a.u.)")
+        ax2.set_ylabel("T1 (us)")
+        ax2.set_ylim(bottom=0)
+        ax2.set_xlim(values[0], values[-1])
+        ax2.grid()
         plt.plot()
 
-        return values, t1s, t1errs
+        return valid_values, t1s, t1errs
 
     def save(
         self,

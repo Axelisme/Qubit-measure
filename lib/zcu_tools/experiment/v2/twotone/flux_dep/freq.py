@@ -328,16 +328,23 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
 def smartfreq_signal2real(signals: np.ndarray) -> np.ndarray:
     real_signals = np.zeros_like(signals, dtype=np.float64)
+
     for i in range(signals.shape[0]):
         real_signals[i, :] = rotate2real(signals[i, :]).real
 
-        if np.all(np.isnan(real_signals[i, :])):
+        if np.any(np.isnan(real_signals[i, :])):
             continue
 
         # normalize
-        min_val = np.min(real_signals[i, :])
         max_val = np.max(real_signals[i, :])
+        min_val = np.min(real_signals[i, :])
+        med_val = np.median(real_signals[i, :])
         real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+
+        # flip to make peak positive
+        if max_val + min_val < 2 * med_val:
+            real_signals[i, :] = 1.0 - real_signals[i, :]
+
     return real_signals
 
 
