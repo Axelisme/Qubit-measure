@@ -63,10 +63,9 @@ class BaseReadout(AbsReadout):
         ro_ch: int = self.ro_cfg["ro_ch"]
 
         prog.send_readoutconfig(ro_ch, f"{self.name}_adc", t=0)
+        prog.trigger([ro_ch], t=self.ro_cfg["trig_offset"])
 
         self.pulse.run(prog)
-
-        prog.trigger([ro_ch], t=self.ro_cfg["trig_offset"])
 
 
 class TwoPulseReadout(AbsReadout):
@@ -85,7 +84,11 @@ class TwoPulseReadout(AbsReadout):
         # TODO: support post delay
         force_no_post_delay(self.pulse2_cfg, f"{name}_pulse2")
 
-        self.pulse1 = Pulse(name=f"{name}_pulse1", cfg=self.pulse1_cfg)
+        self.pulse1 = Pulse(
+            name=f"{name}_pulse1",
+            cfg=self.pulse1_cfg,
+            ro_ch=self.pulse1_cfg.get("ro_ch"),
+        )
         self.pulse2 = Pulse(
             name=f"{name}_pulse2", cfg=self.pulse2_cfg, ro_ch=self.ro_cfg["ro_ch"]
         )
@@ -106,8 +109,7 @@ class TwoPulseReadout(AbsReadout):
         ro_ch: int = self.ro_cfg["ro_ch"]
 
         prog.send_readoutconfig(ro_ch, f"{self.name}_adc", t=0)
+        prog.trigger([ro_ch], t=self.ro_cfg["trig_offset"])
 
         self.pulse1.run(prog)
         self.pulse2.run(prog)
-
-        prog.trigger([ro_ch], t=self.ro_cfg["trig_offset"])
