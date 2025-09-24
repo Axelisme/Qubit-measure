@@ -8,7 +8,7 @@ from scipy.ndimage import gaussian_filter1d
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 from ...template import sweep_hard_template
@@ -23,7 +23,6 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
     ) -> PowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        res_pulse = cfg["readout"]["pulse_cfg"]
         qub_pulse = cfg["qub_pulse"]
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "power")
@@ -37,7 +36,9 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
         }
 
         qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
-        res_pulse["gain"] = sweep2param("power", cfg["sweep"]["power"])
+        set_readout_cfg(
+            cfg["readout"], "gain", sweep2param("power", cfg["sweep"]["power"])
+        )
 
         prog = TwoToneProgram(soccfg, cfg)
 

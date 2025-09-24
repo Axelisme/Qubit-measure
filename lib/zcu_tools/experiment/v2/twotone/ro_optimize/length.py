@@ -8,7 +8,7 @@ from scipy.ndimage import gaussian_filter1d
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 from ...template import sweep1D_soft_template
@@ -23,8 +23,6 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
     ) -> LengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        res_pulse = cfg["readout"]["pulse_cfg"]
-        ro_cfg = cfg["readout"]["ro_cfg"]
         qub_pulse = cfg["qub_pulse"]
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -39,11 +37,15 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         lengths = sweep2array(length_sweep)  # predicted readout lengths
 
         # set initial readout length and adjust pulse length
-        ro_cfg["ro_length"] = lengths[0]
-        res_pulse["waveform"]["length"] = lengths.max() + ro_cfg["trig_offset"] + 0.1
+        set_readout_cfg(cfg["readout"], "ro_length", lengths[0])
+        set_readout_cfg(
+            cfg["readout"],
+            "length",
+            lengths.max() + cfg["readout"]["ro_cfg"]["trig_offset"] + 0.1,
+        )
 
         def updateCfg(cfg, _, ro_len) -> None:
-            cfg["readout"]["ro_cfg"]["ro_length"] = ro_len
+            set_readout_cfg(cfg["readout"], "ro_length", ro_len)
 
         def measure_fn(
             cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
