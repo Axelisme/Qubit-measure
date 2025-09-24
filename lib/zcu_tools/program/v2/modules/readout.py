@@ -8,7 +8,11 @@ from .pulse import Pulse, check_block_mode
 
 
 class AbsReadout(Module):
-    pass
+    @classmethod
+    def set_param(
+        cls, readout_cfg: Dict[str, Any], param_name: str, param_value: float
+    ) -> None:
+        raise NotImplementedError
 
 
 def make_readout(name: str, readout_cfg: Dict[str, Any]) -> AbsReadout:
@@ -25,6 +29,19 @@ def make_readout(name: str, readout_cfg: Dict[str, Any]) -> AbsReadout:
             pulse2_cfg=readout_cfg["pulse2_cfg"],
             ro_cfg=readout_cfg["ro_cfg"],
         )
+    else:
+        raise ValueError(f"Unknown readout type: {ro_type}")
+
+
+def set_readout_cfg(
+    readout_cfg: Dict[str, Any], param_name: str, param_value: float
+) -> None:
+    ro_type = readout_cfg["type"]
+
+    if ro_type == "base":
+        return BaseReadout.set_param(readout_cfg, param_name, param_value)
+    elif ro_type == "two_pulse":
+        return TwoPulseReadout.set_param(readout_cfg, param_name, param_value)
     else:
         raise ValueError(f"Unknown readout type: {ro_type}")
 
@@ -46,6 +63,22 @@ class BaseReadout(AbsReadout):
         self.pulse = Pulse(name=f"{name}_pulse", cfg=self.pulse_cfg)
 
         check_block_mode(self.pulse.name, self.pulse_cfg, want_block=True)
+
+    @classmethod
+    def set_param(
+        cls, readout_cfg: Dict[str, Any], param_name: str, param_value: float
+    ) -> None:
+        if param_name == "gain":
+            readout_cfg["pulse_cfg"]["gain"] = param_value
+        elif param_name == "freq":
+            readout_cfg["pulse_cfg"]["freq"] = param_value
+            # readout_cfg["ro_cfg"]["ro_freq"] = param_value
+        elif param_name == "length":
+            readout_cfg["pulse_cfg"]["waveform"]["length"] = param_value
+        elif param_name == "ro_length":
+            readout_cfg["ro_cfg"]["ro_length"] = param_value
+        else:
+            raise ValueError(f"Unknown parameter: {param_name}")
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse.init(prog)
@@ -99,6 +132,22 @@ class TwoPulseReadout(AbsReadout):
 
         check_block_mode(self.pulse1.name, self.pulse1_cfg, want_block=True)
         check_block_mode(self.pulse2.name, self.pulse2_cfg, want_block=True)
+
+    @classmethod
+    def set_param(
+        cls, readout_cfg: Dict[str, Any], param_name: str, param_value: float
+    ) -> None:
+        if param_name == "gain":
+            readout_cfg["pulse2_cfg"]["gain"] = param_value
+        elif param_name == "freq":
+            readout_cfg["pulse1_cfg"]["freq"] = param_value
+            readout_cfg["pulse2_cfg"]["freq"] = param_value
+        elif param_name == "length":
+            readout_cfg["pulse2_cfg"]["waveform"]["length"] = param_value
+        elif param_name == "ro_length":
+            readout_cfg["ro_cfg"]["ro_length"] = param_value
+        else:
+            raise ValueError(f"Unknown parameter: {param_name}")
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse1.init(prog)

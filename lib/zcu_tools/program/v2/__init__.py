@@ -9,8 +9,8 @@ from .modules import (
     AbsReset,
     BaseReadout,
     BathReset,
-    Module,
     Delay,
+    Module,
     NoneReset,
     Pulse,
     PulseReset,
@@ -19,6 +19,7 @@ from .modules import (
     TwoPulseReset,
     make_readout,
     make_reset,
+    set_readout_cfg,
 )
 from .onetone import OneToneProgram
 from .twotone import TwoToneProgram
