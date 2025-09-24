@@ -38,11 +38,7 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
 
         # set initial readout length and adjust pulse length
         set_readout_cfg(cfg["readout"], "ro_length", lengths[0])
-        set_readout_cfg(
-            cfg["readout"],
-            "length",
-            lengths.max() + cfg["readout"]["ro_cfg"]["trig_offset"] + 0.1,
-        )
+        set_readout_cfg(cfg["readout"], "length", lengths.max() + 0.1)
 
         def updateCfg(cfg, _, ro_len) -> None:
             set_readout_cfg(cfg["readout"], "ro_length", ro_len)

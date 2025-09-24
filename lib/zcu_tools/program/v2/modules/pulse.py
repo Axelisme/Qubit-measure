@@ -2,6 +2,7 @@ import warnings
 from copy import deepcopy
 from typing import Any, Dict, Optional
 
+
 from ..base import MyProgramV2
 from .base import Module
 from .waveform import make_waveform
@@ -81,6 +82,15 @@ class Pulse(Module):
 
         # register the pulse
         self.register(prog, name)
+
+    def total_length(self) -> float:
+        if self.cfg is None:
+            return 0.0
+        return (
+            self.cfg["pre_delay"]
+            + self.cfg["waveform"]["length"]
+            + self.cfg["post_delay"]
+        )
 
     # -----------------------
     # TODO: better way to share pulse between modules?

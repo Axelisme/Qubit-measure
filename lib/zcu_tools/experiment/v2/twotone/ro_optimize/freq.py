@@ -62,10 +62,6 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
             raw2signal=snr_as_signal,
         )
 
-        # get the actual pulse gains and frequency points
-        fpts = prog.get_pulse_param("readout_pulse", "freq", as_array=True)
-        assert isinstance(fpts, np.ndarray), "fpts should be an array"
-
         # record the last cfg and result
         self.last_cfg = cfg
         self.last_result = (fpts, snrs)

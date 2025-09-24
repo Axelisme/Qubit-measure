@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Optional, Tuple, Literal
 
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
@@ -217,8 +218,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         signals2D = signals2D[:, start_idx:]
 
         real_signals2D = t1_yoko_signal2real(signals2D)
-
-        from scipy.ndimage import gaussian_filter
 
         real_signals2D = gaussian_filter(real_signals2D, sigma=1)
 

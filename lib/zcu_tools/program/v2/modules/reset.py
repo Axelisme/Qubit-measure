@@ -36,7 +36,7 @@ def make_reset(name: str, reset_cfg: Optional[Dict[str, Any]]) -> AbsReset:
 
 class NoneReset(AbsReset):
     def init(self, prog: MyProgramV2) -> None:
-        pass
+        self.name = "none"
 
     def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
         return t

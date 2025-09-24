@@ -93,13 +93,26 @@ class BaseReadout(AbsReadout):
 
     def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
         ro_ch: int = self.ro_cfg["ro_ch"]
+        trig_offset: float = self.ro_cfg["trig_offset"]
 
         prog.send_readoutconfig(ro_ch, f"{self.name}_adc", t=0)
-        prog.trigger([ro_ch], t=t + self.ro_cfg["trig_offset"])
+        prog.trigger([ro_ch], t=t + trig_offset)
 
-        t = self.pulse.run(prog, t)
+        self.pulse.run(prog, t)
 
-        return t
+        # use readout end as the new time
+        ro_time = trig_offset + self.ro_cfg["ro_length"]
+        pulse_time = self.pulse.total_length()
+
+        if not (ro_time > pulse_time or ro_time < pulse_time):
+            warnings.warn(
+                f"Cannot determine the end time of {self.name}, this may cause unexpected behavior"
+            )
+
+        if ro_time > pulse_time:
+            return t + ro_time
+        else:
+            return t + pulse_time
 
 
 class TwoPulseReadout(AbsReadout):
@@ -163,11 +176,24 @@ class TwoPulseReadout(AbsReadout):
 
     def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
         ro_ch: int = self.ro_cfg["ro_ch"]
+        trig_offset: float = self.ro_cfg["trig_offset"]
 
         prog.send_readoutconfig(ro_ch, f"{self.name}_adc", t=0)
-        prog.trigger([ro_ch], t=t + self.ro_cfg["trig_offset"])
+        prog.trigger([ro_ch], t=t + trig_offset)
 
-        t = self.pulse1.run(prog, t)
-        t = self.pulse2.run(prog, t)
+        cur_t = self.pulse1.run(prog, t)
+        self.pulse2.run(prog, cur_t)
 
-        return t
+        # use readout end as the new time
+        ro_time = trig_offset + self.ro_cfg["ro_length"]
+        pulse_time = self.pulse1.total_length() + self.pulse2.total_length()
+
+        if not (ro_time > pulse_time or ro_time < pulse_time):
+            warnings.warn(
+                f"Cannot determine the end time of {self.name}, this may cause unexpected behavior"
+            )
+
+        if ro_time > pulse_time:
+            return t + ro_time
+        else:
+            return t + pulse_time

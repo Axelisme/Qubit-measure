@@ -53,7 +53,9 @@ class LengthExperiment(AbsExperiment[SingleToneResetLengthResultType]):
 
         # Attach length sweep parameter to the reset pulse
         reset_pulse = tested_reset["pulse_cfg"]
-        reset_pulse["length"] = sweep2param("length", cfg["sweep"]["length"])
+        reset_pulse["waveform"]["length"] = sweep2param(
+            "length", cfg["sweep"]["length"]
+        )
 
         prog = ModularProgramV2(
             soccfg,

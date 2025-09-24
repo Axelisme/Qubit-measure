@@ -1,4 +1,4 @@
-from . import mist, reset, ro_optimize, flux_dep
+from . import mist, reset, ro_optimize, flux_dep, time_domain
 from .ac_stark import AcStarkByRamseyExperiment, AcStarkExperiment
 from .allxy import AllXYExperiment
 from .dispersive import DispersiveExperiment
@@ -11,6 +11,7 @@ from .time_domain import (
     T2EchoExperiment,
     T2RamseyExperiment,
     CPMGExperiment,
+    T1WithToneExperiment,
 )
 from .zigzag import ZigZagExperiment, ZigZagSweepExperiment
 
@@ -19,6 +20,7 @@ __all__ = [
     "mist",
     "ro_optimize",
     "flux_dep",
+    "time_domain",
     "AcStarkExperiment",
     "AcStarkByRamseyExperiment",
     "AllXYExperiment",
@@ -28,10 +30,6 @@ __all__ = [
     "AmpRabiExperiment",
     "LenRabiExperiment",
     "SingleShotExperiment",
-    "T1Experiment",
-    "T2EchoExperiment",
-    "T2RamseyExperiment",
-    "CPMGExperiment",
     "ZigZagExperiment",
     "ZigZagSweepExperiment",
 ]

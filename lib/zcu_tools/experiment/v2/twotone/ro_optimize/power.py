@@ -27,7 +27,7 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "power")
 
-        powers = sweep2array(cfg["sweep"]["power"])  # predicted power points
+        gains = sweep2array(cfg["sweep"]["power"])  # predicted power points
 
         # prepend ge sweep as outer loop
         cfg["sweep"] = {
@@ -58,19 +58,15 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
             cfg,
             measure_fn,
             LivePlotter1D("Readout Power", "SNR", disable=not progress),
-            ticks=(powers,),
+            ticks=(gains,),
             raw2signal=snr_as_signal,
         )
 
-        # get the actual pulse gains/powers
-        powers = prog.get_pulse_param("readout_pulse", "gain", as_array=True)
-        assert isinstance(powers, np.ndarray), "powers should be an array"
-
         # record the last cfg and result
         self.last_cfg = cfg
-        self.last_result = (powers, snrs)
+        self.last_result = (gains, snrs)
 
-        return powers, snrs
+        return gains, snrs
 
     def analyze(
         self, result: Optional[PowerResultType] = None, *, plot: bool = True

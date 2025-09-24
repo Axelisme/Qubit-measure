@@ -1,7 +1,21 @@
 from abc import ABC, abstractmethod
+from typing import Union
 
+from qick.asm_v2 import QickParam
 
 from ..base import MyProgramV2
+
+# --- Helpers functions --- #
+
+
+def param2str(param: Union[float, QickParam]) -> str:
+    if isinstance(param, QickParam):
+        if param.is_sweep():
+            return f"sweep({param.minval()}, {param.maxval()})"
+        else:
+            return str(float(param))
+    else:
+        return str(param)
 
 
 class Module(ABC):
