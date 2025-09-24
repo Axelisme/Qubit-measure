@@ -12,6 +12,7 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
+    Delay,
     make_readout,
     make_reset,
     sweep2param,
@@ -52,19 +53,13 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             cfg,
             modules=[
                 make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse(
-                    name="pi2_pulse1",
-                    cfg={
-                        **cfg["pi2_pulse"],
-                        "post_delay": t2r_spans,
-                    },
-                ),
+                Pulse(name="pi2_pulse1", cfg=cfg["pi2_pulse"]),
+                Delay(name="t2_delay", delay=t2r_spans),
                 Pulse(
                     name="pi2_pulse2",
                     cfg={  # activate detune
                         **cfg["pi2_pulse"],
-                        "phase": cfg["pi2_pulse"].get("phase", 0.0)
-                        + 360 * detune * t2r_spans,
+                        "phase": cfg["pi2_pulse"]["phase"] + 360 * detune * t2r_spans,
                     },
                 ),
                 make_readout("readout", readout_cfg=cfg["readout"]),
@@ -88,7 +83,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         )
 
         # get actual times
-        real_ts = prog.get_time_param("pi2_pulse1_post_delay", "t", as_array=True)
+        real_ts = prog.get_time_param("t2_delay", "t", as_array=True)
         assert isinstance(real_ts, np.ndarray), "real_ts should be an array"
         real_ts += ts[0] - real_ts[0]  # adjust to start from the first time
 

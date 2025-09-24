@@ -4,7 +4,6 @@ from copy import deepcopy
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from zcu_tools.program.v2 import check_no_post_delay
 from zcu_tools.utils import deepupdate
 
 from qick.asm_v2 import QickParam
@@ -56,13 +55,8 @@ def wrap_with_flux_pulse(
     return pulse, derive_pulse
 
 
-def check_flux_pulse(
-    flx_cfg: Dict[str, Any], name: str = "flux_pulse", check_delay: bool = True
-) -> None:
+def check_flux_pulse(flx_cfg: Dict[str, Any], name: str = "flux_pulse") -> None:
     if flx_cfg["style"] not in ["const", "flat_top"]:
         raise ValueError(
             f"Flux pulse style {flx_cfg['style']} not supported in flux sweep."
         )
-
-    if check_delay:
-        check_no_post_delay(flx_cfg, name)

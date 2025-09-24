@@ -13,6 +13,7 @@ from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
     Repeat,
+    Delay,
     make_readout,
     make_reset,
     sweep2param,
@@ -72,23 +73,21 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
                 modules=[
                     make_reset("reset", reset_cfg=cfg.get("reset")),
                     Pulse(
-                        name="pi2_pulse1",
-                        cfg={**cfg["pi2_pulse"], "post_delay": 0.5 * interval},
-                        pulse_name="pi2_pulse",
+                        name="pi2_pulse1", cfg=cfg["pi2_pulse"], pulse_name="pi2_pulse"
                     ),
+                    Delay(name="initial_delay", delay=0.5 * interval),
                     Repeat(
                         name="cpmg_pi_loop",
                         n=time - 1,
-                        sub_module=Pulse(
-                            name="pi_pulse",
-                            cfg={**cfg["pi_pulse"], "post_delay": interval},
-                        ),
+                        sub_module=[
+                            Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                            Delay(name="interval_delay", delay=interval),
+                        ],
                     ),
                     Pulse(
-                        name="last_pi_pulse",
-                        cfg={**cfg["pi_pulse"], "post_delay": 0.5 * interval},
-                        pulse_name="pi_pulse",
+                        name="last_pi_pulse", cfg=cfg["pi_pulse"], pulse_name="pi_pulse"
                     ),
+                    Delay(name="final_delay", delay=0.5 * interval),
                     Pulse(
                         name="pi2_pulse2", cfg=cfg["pi2_pulse"], pulse_name="pi2_pulse"
                     ),

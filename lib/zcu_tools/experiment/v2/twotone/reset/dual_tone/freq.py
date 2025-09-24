@@ -13,7 +13,6 @@ from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
-    check_no_post_delay,
     make_readout,
     make_reset,
     sweep2param,
@@ -128,9 +127,6 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
         tested_reset = cfg["tested_reset"]
         if tested_reset["type"] != "two_pulse":
             raise ValueError("This experiment only supports dual-tone reset")
-
-        # Check that first pulse has no post_delay
-        check_no_post_delay(tested_reset["pulse1_cfg"], "tested_reset.pulse1_cfg")
 
         # Ensure freq1 is the outer loop for better visualization
         cfg["sweep"] = {

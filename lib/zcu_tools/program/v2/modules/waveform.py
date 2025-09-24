@@ -97,6 +97,8 @@ class FlatTopWaveform(AbsWaveform):
 
         assert wav_cfg["style"] in self.SUPPORT_STYLES
 
+        kwargs.setdefault("even_length", True)
+
         self.raise_waveform.create(prog, ch, **kwargs)
 
 

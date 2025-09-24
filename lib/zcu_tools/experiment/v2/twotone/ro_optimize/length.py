@@ -40,7 +40,7 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
 
         # set initial readout length and adjust pulse length
         ro_cfg["ro_length"] = lengths[0]
-        res_pulse["length"] = lengths.max() + ro_cfg["trig_offset"] + 0.1
+        res_pulse["waveform"]["length"] = lengths.max() + ro_cfg["trig_offset"] + 0.1
 
         def updateCfg(cfg, _, ro_len) -> None:
             cfg["readout"]["ro_cfg"]["ro_length"] = ro_len

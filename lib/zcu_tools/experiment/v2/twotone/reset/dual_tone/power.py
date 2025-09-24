@@ -13,7 +13,6 @@ from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
-    check_no_post_delay,
     make_readout,
     make_reset,
     sweep2param,

@@ -37,7 +37,7 @@ class BaseReadout(AbsReadout):
         self.pulse_cfg = deepcopy(pulse_cfg)
         self.ro_cfg = deepcopy(ro_cfg)
 
-        ro_ch: int = self.pulse_cfg.get("ro_ch", ro_cfg["ro_ch"])
+        ro_ch: int = self.pulse_cfg.setdefault("ro_ch", ro_cfg["ro_ch"])
         if ro_ch != ro_cfg["ro_ch"]:
             warnings.warn(
                 f"{name} pulse_cfg.ro_ch is {ro_ch}, this may not be what you want"
@@ -82,13 +82,13 @@ class TwoPulseReadout(AbsReadout):
         self.pulse1_cfg = deepcopy(pulse1_cfg)
         self.pulse2_cfg = deepcopy(pulse2_cfg)
 
-        ro_ch: int = self.pulse1_cfg.get("ro_ch", ro_cfg["ro_ch"])
+        ro_ch: int = self.pulse1_cfg.setdefault("ro_ch", ro_cfg["ro_ch"])
         if ro_ch != ro_cfg["ro_ch"]:
             warnings.warn(
                 f"{name} pulse1_cfg.ro_ch is {ro_ch}, this may not be what you want"
             )
 
-        ro_ch: int = self.pulse2_cfg.get("ro_ch", ro_cfg["ro_ch"])
+        ro_ch: int = self.pulse2_cfg.setdefault("ro_ch", ro_cfg["ro_ch"])
         if ro_ch != ro_cfg["ro_ch"]:
             warnings.warn(
                 f"{name} pulse2_cfg.ro_ch is {ro_ch}, this may not be what you want"

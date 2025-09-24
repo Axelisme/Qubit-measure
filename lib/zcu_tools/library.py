@@ -156,7 +156,7 @@ class ModuleLibrary:
         for name, wav_cfg in wav_kwargs.items():
             waveform = dict(style=wav_cfg["style"], length=wav_cfg["length"])
             if waveform["style"] == "flat_top":
-                waveform["raise_pulse"] = wav_cfg["raise_pulse"]
+                waveform["raise_waveform"] = wav_cfg["raise_waveform"]
             elif waveform["style"] in ["gauss", "drag"]:
                 waveform["sigma"] = wav_cfg["sigma"]
 
@@ -171,8 +171,13 @@ class ModuleLibrary:
         self.modules.update(deepcopy(mod_kwargs))
 
     @_sync("before")
-    def get_waveform(self, name: str) -> Dict[str, Any]:
-        return deepcopy(self.waveforms[name])
+    def get_waveform(
+        self, name: str, override_cfg: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        waveform = deepcopy(self.waveforms[name])
+        if override_cfg is not None:
+            deepupdate(waveform, override_cfg, behavior="force")
+        return waveform
 
     @_sync("before")
     def get_module(

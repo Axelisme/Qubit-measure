@@ -57,12 +57,12 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
             cfg["zigzag_time"] = time
 
         def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
-            repeat_time = cfg["zigzag_time"]
+            zigzag_time = cfg["zigzag_time"]
 
             if repeat_on == "X90_pulse":
-                sequence = list(range(2 * repeat_time))
+                repeat_time = 2 * zigzag_time
             elif repeat_on == "X180_pulse":
-                sequence = list(range(repeat_time))
+                repeat_time = zigzag_time
 
             prog = ModularProgramV2(
                 soccfg,
@@ -70,14 +70,11 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
                 modules=[
                     make_reset("reset", cfg.get("reset")),
                     Pulse(name="X90_pulse", cfg=X90_pulse),
-                    *[
-                        Pulse(
-                            name=f"{repeat_on}_{i}",
-                            cfg=cfg[repeat_on],
-                            pulse_name=f"{repeat_on}_0",
-                        )
-                        for i in sequence
-                    ],
+                    Repeat(
+                        name="zigzag_loop",
+                        n=repeat_time,
+                        sub_module=Pulse(name=f"loop_{repeat_on}", cfg=cfg[repeat_on]),
+                    ),
                     make_readout("readout", cfg["readout"]),
                 ],
             )
@@ -136,7 +133,6 @@ ZigZagSweepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]  # (xs,times, 
 
 class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
     SWEEP_MAP = {
-        "length": {"name": "Length (us)", "param_key": "length"},
         "gain": {"name": "Gain (a.u.)", "param_key": "gain"},
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},
     }
@@ -167,8 +163,6 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         cfg[repeat_on][x_info["param_key"]] = sweep2param(
             x_info["param_key"], cfg["sweep"][x_key]
         )
-        if x_key == "length" and cfg[repeat_on]["style"] == "gauss":
-            cfg[repeat_on]["sigma"] = cfg[repeat_on]["length"] / 5
 
         def updateCfg(cfg: Dict[str, Any], _: int, time: Any) -> None:
             cfg["zigzag_time"] = time

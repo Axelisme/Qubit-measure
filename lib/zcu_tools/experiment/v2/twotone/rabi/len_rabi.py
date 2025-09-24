@@ -34,7 +34,7 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
 
         qub_pulse = cfg["qub_pulse"]
 
-        assert qub_pulse["style"] in ["const", "flat_top"], (
+        assert qub_pulse["waveform"]["style"] in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
 
@@ -43,7 +43,7 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
 
         lens = sweep2array(len_sweep)  # predicted
 
-        qub_pulse["length"] = sweep2param("length", len_sweep)
+        qub_pulse["waveform"]["length"] = sweep2param("length", len_sweep)
 
         prog = TwoToneProgram(soccfg, cfg)
 
@@ -79,12 +79,12 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         lens = sweep2array(len_sweep)  # predicted
 
         def updateCfg(cfg: Dict[str, Any], _: int, length: Any) -> None:
-            qub_pulse = cfg["qub_pulse"]
+            qub_waveform = cfg["qub_pulse"]["waveform"]
 
-            qub_pulse["length"] = length
-            if qub_pulse["style"] == "gauss":
+            qub_waveform["length"] = length
+            if qub_waveform["style"] == "gauss":
                 # TODO: better way to derive sigma?
-                qub_pulse["sigma"] = length / 5.0
+                qub_waveform["sigma"] = length / 5.0
 
         # initialize pulse length
         updateCfg(cfg, 0, lens[0])
@@ -120,9 +120,9 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         *,
         progress: bool = True,
     ) -> LenRabiResultType:
-        qub_pulse = cfg["qub_pulse"]
+        qub_waveform = cfg["qub_pulse"]["waveform"]
 
-        if qub_pulse["style"] in ["const", "flat_top"]:
+        if qub_waveform["style"] in ["const", "flat_top"]:
             # use hard sweep for flat top pulse
             return self._run_for_flat(soc, soccfg, cfg, progress=progress)
         else:

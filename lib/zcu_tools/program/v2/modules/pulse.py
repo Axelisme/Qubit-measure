@@ -23,7 +23,8 @@ class Pulse(Module):
     ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
-        self.waveform = make_waveform(f"{name}_waveform", self.cfg["waveform"])
+        if self.cfg is not None:
+            self.waveform = make_waveform(f"{name}_waveform", self.cfg["waveform"])
 
         self.pulse_name = name if pulse_name is None else pulse_name
 
@@ -37,7 +38,9 @@ class Pulse(Module):
 
     def init_pulse(self, prog: MyProgramV2, name: str) -> None:
         cfg = self.cfg
+        assert cfg is not None
 
+        ro_ch = cfg.get("ro_ch") if "mixer_freq" in cfg else None
         prog.declare_gen(
             cfg["ch"],
             nqz=cfg["nqz"],
@@ -45,23 +48,26 @@ class Pulse(Module):
             mux_freqs=cfg.get("mux_freqs"),
             mux_gains=cfg.get("mux_gains"),
             mux_phases=cfg.get("mux_phases"),
-            ro_ch=cfg.get("ro_ch"),
+            ro_ch=ro_ch,
         )
 
         self.waveform.create(prog, cfg["ch"])
 
         # derive pulse style
-        wav_style = cfg["waveform"]["style"]
+        waveform_cfg = cfg["waveform"]
+        wav_style = waveform_cfg["style"]
         wav_kwargs = dict(freq=cfg["freq"], phase=cfg["phase"], gain=cfg["gain"])
 
         if wav_style == "const":
             wav_kwargs["style"] = "const"
-            wav_kwargs["length"] = cfg["length"]
+            wav_kwargs["length"] = waveform_cfg["length"]
         else:
             wav_kwargs["envelope"] = self.waveform.name
             if wav_style == "flat_top":
                 wav_kwargs["style"] = "flat_top"
-                wav_kwargs["length"] = cfg["length"] - cfg["raise_pulse"]["length"]
+                wav_kwargs["length"] = (
+                    waveform_cfg["length"] - waveform_cfg["raise_waveform"]["length"]
+                )
             else:
                 wav_kwargs["style"] = "arb"
 

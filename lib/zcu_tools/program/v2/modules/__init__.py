@@ -1,4 +1,4 @@
-from .base import Module
+from .base import Module, Delay
 from .loop import Repeat
 from .pulse import Pulse
 from .readout import AbsReadout, BaseReadout, TwoPulseReadout, make_readout

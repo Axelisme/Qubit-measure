@@ -13,7 +13,6 @@ from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
-    check_no_post_delay,
     make_readout,
     make_reset,
     sweep2param,
@@ -70,9 +69,6 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
         progress: bool = True,
     ) -> AcStarkResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
-
-        # Ensure stark_pulse1 has no post_delay to avoid timing conflicts
-        check_no_post_delay(cfg["stark_pulse1"], "stark_pulse1")
 
         # Force the order of sweep (gain outer, freq inner for better visualization)
         gain_sweep = cfg["sweep"]["gain"]
