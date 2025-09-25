@@ -10,10 +10,15 @@ def cosfunc(x, *p):
     return y0 + yscale * np.cos(2 * np.pi * (freq * x + phase / 360))
 
 
-def fitcos(xdata, ydata, fitparams=None):
+def fitcos(xdata, ydata, fitparams=None, fixedparams=None):
     """fitparams = [y0, yscale, freq, phase]"""
     if fitparams is None:
         fitparams = [None] * 4
+
+    if fixedparams is not None and len(fixedparams) != 4:
+        raise ValueError(
+            "Fixed parameters must be a list of four elements: [y0, yscale, freq, phase]"
+        )
 
     # guess initial parameters
     if any([p is None for p in fitparams]):
@@ -48,15 +53,22 @@ def fitcos(xdata, ydata, fitparams=None):
 
 # damped sinusoidal function
 def decaycos(x, *p):
+    """p = [y0, yscale, freq, phase, decay]"""
     y0, yscale, freq, phase, decay = p
     return y0 + yscale * np.cos(2 * np.pi * (freq * x + phase / 360)) * np.exp(
         -x / decay
     )
 
 
-def fitdecaycos(xdata, ydata, fitparams=None):
+def fitdecaycos(xdata, ydata, fitparams=None, fixedparams=None):
+    """fitparams = [y0, yscale, freq, phase, decay]"""
     if fitparams is None:
         fitparams = [None] * 5
+
+    if fixedparams is not None and len(fixedparams) != 5:
+        raise ValueError(
+            "Fixed parameters must be a list of five elements: [y0, yscale, freq, phase, decay]"
+        )
 
     # guess initial parameters
     if any([p is None for p in fitparams]):

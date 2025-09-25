@@ -155,7 +155,9 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         lens = lens[~nan_mask]
         real_signals = real_signals[~nan_mask]
 
-        pi_len, pi2_len, freq, y_fit, _ = fit_rabi(lens, real_signals, decay=decay)
+        pi_len, pi2_len, freq, y_fit, _ = fit_rabi(
+            lens, real_signals, decay=decay, init_phase=None
+        )
 
         if plot:
             plt.figure(figsize=config.figsize)
