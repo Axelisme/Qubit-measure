@@ -14,6 +14,7 @@ from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
+    Delay,
     make_readout,
     make_reset,
     sweep2param,
@@ -26,7 +27,7 @@ from zcu_tools.utils.fitting import fit_decay
 from ...template import sweep2D_soft_hard_template
 from .util import calc_snr
 
-T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
 
 
 def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -41,11 +42,13 @@ def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
         # normalize
         max_val = np.max(real_signals[i, :])
         min_val = np.min(real_signals[i, :])
-        med_val = np.median(real_signals[i, :])
         real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
 
         # flip to make peak positive
-        if max_val + min_val < 2 * med_val:
+        half_len = len(real_signals[i, :]) // 2
+        first_half_mean = np.mean(real_signals[i, :half_len])
+        second_half_mean = np.mean(real_signals[i, half_len:])
+        if first_half_mean < second_half_mean:
             real_signals[i, :] = 1.0 - real_signals[i, :]
 
     return real_signals
@@ -106,9 +109,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                 f"Sweep values from {values.min()} to {values.max()} exceed the freq_map range [{map_values.min()}, {map_values.max()}]"
             )
 
-        predict_freqs = np.array(
-            [np.interp(fx, map_values, map_freqs) for fx in values]
-        )
+        nearest_idx = np.argmin(np.abs(map_values[:, None] - values[None, :]), axis=0)
+        nearest_idx = np.unique(nearest_idx)  # only predict unique points
+        values = map_values[nearest_idx]
+        predict_freqs = map_freqs[nearest_idx]
+
         if predictor is not None:
             ref_gain = cfg["pi_pulse"]["gain"]
             ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
@@ -139,9 +144,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         updateCfg(cfg, 0, values[0])  # set initial flux
 
-        # Frequency is swept by FPGA (hard sweep)
-        cfg["pi_pulse"]["post_delay"] = sweep2param("length", len_sweep)
-
         prog = None
 
         def measure_fn(
@@ -154,6 +156,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                 modules=[
                     make_reset("reset", reset_cfg=cfg.get("reset")),
                     Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                    Delay(name="t1_delay", delay=sweep2param("length", len_sweep)),
                     make_readout("readout", readout_cfg=cfg["readout"]),
                 ],
             )
@@ -191,7 +194,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         )
 
         # Get the actual frequency points used by FPGA
-        real_ts = prog.get_time_param("pi_pulse_post_delay", "t", as_array=True)
+        real_ts = prog.get_time_param("t1_delay", "t", as_array=True)
         assert isinstance(real_ts, np.ndarray), "fpts should be an array"
         real_ts += lens[0] - real_ts[0]  # correct absolute offset
 
