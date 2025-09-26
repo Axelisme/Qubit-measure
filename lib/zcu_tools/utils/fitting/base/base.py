@@ -38,7 +38,14 @@ def add_fixed_params_back(pOpt, pCov, fixedparams):
 
 
 def fit_func(
-    xdata, ydata, fitfunc, init_p=None, bounds=None, fixedparams=None, **kwargs
+    xdata,
+    ydata,
+    fitfunc,
+    init_p=None,
+    bounds=None,
+    fixedparams=None,
+    estimate_sigma: bool = True,
+    **kwargs,
 ):
     if fixedparams is not None and any([p is not None for p in fixedparams]):
         if init_p is None:
@@ -51,18 +58,14 @@ def fit_func(
         )
 
     # estimate the sigma
-    sigma = np.std(np.diff(ydata)) / np.sqrt(2)
+    if estimate_sigma:
+        sigma = np.std(np.diff(ydata)) / np.sqrt(2)
+        kwargs.setdefault("sigma", np.full_like(ydata, sigma))
+        kwargs.setdefault("absolute_sigma", True)
 
     try:
         pOpt, pCov = sp.optimize.curve_fit(
-            fitfunc,
-            xdata,
-            ydata,
-            p0=init_p,
-            bounds=bounds,
-            sigma=np.full_like(ydata, sigma),
-            absolute_sigma=True,
-            **kwargs,
+            fitfunc, xdata, ydata, p0=init_p, bounds=bounds, **kwargs
         )
     except RuntimeError as e:
         print("Warning: fit failed!")
