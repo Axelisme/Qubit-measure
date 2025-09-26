@@ -50,9 +50,19 @@ def fit_func(
             fitfunc, init_p, bounds, fixedparams
         )
 
+    # estimate the sigma
+    sigma = np.std(np.diff(ydata)) / np.sqrt(2)
+
     try:
         pOpt, pCov = sp.optimize.curve_fit(
-            fitfunc, xdata, ydata, p0=init_p, bounds=bounds, **kwargs
+            fitfunc,
+            xdata,
+            ydata,
+            p0=init_p,
+            bounds=bounds,
+            sigma=np.full_like(ydata, sigma),
+            absolute_sigma=True,
+            **kwargs,
         )
     except RuntimeError as e:
         print("Warning: fit failed!")
