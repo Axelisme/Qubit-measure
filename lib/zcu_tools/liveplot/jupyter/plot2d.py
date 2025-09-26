@@ -1,10 +1,10 @@
-from typing import Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from ..base import AbsLivePlotter
-from ..segments import Plot1DSegment, Plot2DSegment
+from ..segments import Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment
 from .base import JupyterPlotMixin
 
 
@@ -15,10 +15,14 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         ylabel: str,
         title: Optional[str] = None,
         flip: bool = False,
+        uniform: bool = True,
         figsize: Optional[Tuple[int, int]] = None,
         disable: bool = False,
     ) -> None:
-        segment = Plot2DSegment(xlabel, ylabel, title, flip=flip)
+        if uniform:
+            segment = Plot2DSegment(xlabel, ylabel, title, flip=flip)
+        else:
+            segment = PlotNonUniform2DSegment(xlabel, ylabel, title, flip=flip)
         super().__init__([segment], figsize=figsize, disable=disable)
 
     def update(
@@ -30,7 +34,7 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         refresh: bool = True,
     ) -> None:
         ax: plt.Axes = self.axs[0]
-        segment: Plot2DSegment = self.segments[0]
+        segment: Union[Plot2DSegment, PlotNonUniform2DSegment] = self.segments[0]
 
         if self.disable:
             return
