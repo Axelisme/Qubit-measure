@@ -13,6 +13,7 @@ def fit_resonence_freq(
 ) -> Tuple[
     float, float, float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]
 ]:
+    """[freq, freq_err, kappa, kappa_err, fit_singals, (pOpt, pCov)]"""
     if type == "lor":
         if asym:
             pOpt, pCov = fit_asym_lor(fpts, real_signals)
