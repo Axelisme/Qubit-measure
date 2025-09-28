@@ -11,16 +11,14 @@ from zcu_tools.utils.async_func import AsyncFunc
 from zcu_tools.utils.debug import print_traceback
 
 # TODO: support user controlled callback function
-
-MeasureFn = Callable[[Dict[str, Any], Optional[Callable[..., None]]], ndarray]
-Raw2SignalFn = Callable[[int, List[ndarray], Optional[List[ndarray]]], ndarray]
+CallbackFn = Callable[[int, List[ndarray], ...], None]
+MeasureFn = Callable[[Dict[str, Any], Optional[CallbackFn]], ndarray]
+Raw2SignalFn = Callable[[int, List[ndarray], ...], ndarray]
 Signal2RealFn = Callable[[ndarray], ndarray]
 UpdateCfgFn = Callable[[Dict[str, Any], int, Any], None]
 
 
-def avg_as_signal(
-    ir: int, avg_d: List[ndarray], std_d: Optional[List[ndarray]]
-) -> ndarray:
+def avg_as_signal(ir: int, avg_d: List[ndarray], *args, **kwargs) -> ndarray:
     return avg_d[0][0].dot([1, 1j])  # (*sweep)
 
 
@@ -36,7 +34,6 @@ def sweep_hard_template(
     ticks: Tuple[ndarray, ...],
     raw2signal: Raw2SignalFn = avg_as_signal,
     signal2real: Signal2RealFn = take_signal_abs,
-    catch_interrupt: bool = True,
     realsignal_callback: Optional[Callable[[int, np.ndarray], None]] = None,
 ) -> ndarray:
     # set flux first
@@ -45,11 +42,9 @@ def sweep_hard_template(
     signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
     with liveplotter as viewer:
 
-        def callback(
-            ir: int, avg_d: List[ndarray], std_d: Optional[List[ndarray]]
-        ) -> None:
+        def callback(ir: int, *args, **kwargs) -> None:
             nonlocal signals
-            signals = raw2signal(ir, avg_d, std_d)
+            signals = raw2signal(ir, *args, **kwargs)
             real_signals = signal2real(signals)
             viewer.update(*ticks, real_signals)
 
@@ -59,12 +54,8 @@ def sweep_hard_template(
         try:
             signals = measure_fn(cfg, callback)
         except KeyboardInterrupt:
-            if not catch_interrupt:
-                raise
             print("Received KeyboardInterrupt, early stopping the program")
         except Exception:
-            if not catch_interrupt:
-                raise
             print("Error during measurement:")
             print_traceback()
         viewer.update(*ticks, signal2real(signals))
@@ -81,7 +72,6 @@ def sweep1D_soft_template(
     updateCfg: UpdateCfgFn,
     signal2real: Signal2RealFn = take_signal_abs,
     progress: bool = True,
-    catch_interrupt: bool = True,
     data_shape: Optional[tuple] = None,
 ) -> ndarray:
     cfg = deepcopy(cfg)  # prevent in-place modification
@@ -110,12 +100,8 @@ def sweep1D_soft_template(
                     async_draw(xs, signal2real(signals))
 
         except KeyboardInterrupt:
-            if not catch_interrupt:
-                raise
             print("Received KeyboardInterrupt, early stopping the program")
         except Exception:
-            if not catch_interrupt:
-                raise
             print("Error during measurement:")
             print_traceback()
         viewer.update(xs, signal2real(signals))
@@ -134,7 +120,6 @@ def sweep2D_soft_hard_template(
     raw2signal: Raw2SignalFn = avg_as_signal,
     signal2real: Signal2RealFn = take_signal_abs,
     progress: bool = True,
-    catch_interrupt: bool = True,
     data_shape: Optional[tuple] = None,
     realsignal_callback: Optional[Callable[[int, int, np.ndarray], None]] = None,
 ) -> ndarray:
@@ -165,14 +150,12 @@ def sweep2D_soft_hard_template(
 
                     _signals2D = signals2D.copy()  # prevent overwrite
 
-                    def callback(
-                        ir: int, avg_d: List[ndarray], std_d: Optional[List[ndarray]]
-                    ) -> None:
+                    def callback(ir: int, *args, **kwargs) -> None:
                         nonlocal _signals2D, avgs_tqdm
                         avgs_tqdm.update(max(ir - avgs_tqdm.n, 0))
                         avgs_tqdm.refresh()
 
-                        _signals2D[i] = raw2signal(ir, avg_d, std_d)
+                        _signals2D[i] = raw2signal(ir, *args, **kwargs)
                         real_signals2D = signal2real(_signals2D)
                         viewer.update(xs, ys, real_signals2D)
 
@@ -187,13 +170,9 @@ def sweep2D_soft_hard_template(
                     async_draw(xs, ys, signal2real(signals2D))
 
         except KeyboardInterrupt:
-            if not catch_interrupt:
-                raise
             print("Received KeyboardInterrupt, early stopping the program")
             viewer.update(xs, ys, signal2real(signals2D))
         except Exception:
-            if not catch_interrupt:
-                raise
             print("Error during measurement:")
             print_traceback()
         finally:
@@ -214,7 +193,6 @@ def sweep2D_soft_template(
     updateCfg_y: UpdateCfgFn,
     signal2real: Signal2RealFn = take_signal_abs,
     progress: bool = True,
-    catch_interrupt: bool = True,
     data_shape: Optional[tuple] = None,
 ) -> ndarray:
     cfg = deepcopy(cfg)  # prevent in-place modification
@@ -252,13 +230,9 @@ def sweep2D_soft_template(
                         async_draw(xs, ys, signal2real(signals2D))
 
         except KeyboardInterrupt:
-            if not catch_interrupt:
-                raise
             print("Received KeyboardInterrupt, early stopping the program")
             viewer.update(xs, ys, signal2real(signals2D))
         except Exception:
-            if not catch_interrupt:
-                raise
             print("Error during measurement:")
             print_traceback()
         finally:

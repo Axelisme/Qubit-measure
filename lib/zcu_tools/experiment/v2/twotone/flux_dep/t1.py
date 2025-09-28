@@ -2,28 +2,27 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple, Literal
+from typing import Any, Callable, Dict, Literal, Optional, Tuple
 
-import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter
+import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program.v2 import (
+    Delay,
     ModularProgramV2,
     Pulse,
-    Delay,
     make_readout,
     make_reset,
     sweep2param,
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.process import rotate2real, minus_background
 from zcu_tools.utils.fitting import fit_decay, fit_resonence_freq
-from zcu_tools.notebook.utils import make_sweep
+from zcu_tools.utils.process import minus_background, rotate2real
 
 from ...template import sweep2D_soft_hard_template
 from .util import calc_snr
@@ -57,23 +56,6 @@ def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
 
 class T1Experiment(AbsExperiment[T1ResultType]):
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        method: Literal["fastflux", "yoko"] = "fastflux",
-        progress: bool = True,
-        **kwargs,
-    ) -> T1ResultType:
-        if method == "fastflux":
-            raise NotImplementedError("fastflux method is not implemented yet")
-        elif method == "yoko":
-            return self.run_yoko(soc, soccfg, cfg, progress=progress, **kwargs)
-        else:
-            raise ValueError(f"Unknown method: {method}")
-
-    def run_yoko(
         self,
         soc,
         soccfg,

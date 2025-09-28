@@ -1,8 +1,9 @@
 from typing import Any, Dict
 
-from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 from zcu_tools.program.base import MyProgram
+
+from qick import QickConfig
 
 
 class MyProgramV2(MyProgram, AveragerProgramV2):
@@ -14,17 +15,9 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             reps=cfg["reps"],
             initial_delay=0.0,
             final_delay=cfg["relax_delay"],
+            final_wait=cfg.get("final_wait", 0),
             **kwargs,
         )
-
-    def _initialize_sweep(self, cfg: Dict[str, Any]) -> None:
-        # add v2 sweep loops
-        if "sweep" in cfg:
-            for name, sweep in cfg["sweep"].items():
-                self.add_loop(name, count=sweep["expts"])
-
-    def _initialize(self, cfg: Dict[str, Any]) -> None:
-        self._initialize_sweep(cfg)
 
     def acquire(self, soc, **kwargs) -> list:
         # v2 program need to pass rounds to acquire

@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,11 +15,10 @@ class LivePlotterHistogram(JupyterPlotMixin, AbsLivePlotter):
         ylabel: str,
         bins: int = 50,
         title: Optional[str] = None,
-        figsize: Optional[Tuple[int, int]] = None,
         disable: bool = False,
     ) -> None:
         segment = HistogramSegment(xlabel, ylabel, title, bins)
-        super().__init__([segment], figsize=figsize, disable=disable)
+        super().__init__([[segment]], disable=disable)
 
     def update(
         self,
@@ -27,8 +26,10 @@ class LivePlotterHistogram(JupyterPlotMixin, AbsLivePlotter):
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:
-        ax: plt.Axes = self.axs[0]
-        segment: HistogramSegment = self.segments[0]
+        ax = self.axs[0][0]
+        segment = self.segments[0][0]
+        assert isinstance(ax, plt.Axes)
+        assert isinstance(segment, HistogramSegment)
 
         if self.disable:
             return
@@ -36,4 +37,4 @@ class LivePlotterHistogram(JupyterPlotMixin, AbsLivePlotter):
         with self.update_lock:
             segment.update(ax, signals, title)
             if refresh:
-                self._refresh_unchecked()
+                self._refresh_while_lock()

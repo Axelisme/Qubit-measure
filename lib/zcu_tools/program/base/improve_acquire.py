@@ -133,9 +133,8 @@ class CallbackMixin(StdErrorMixin):
                 std_d = self.get_stderr()
                 callback(round_n, avg_d, std_d)
             elif self.acquire_params["type"] == "decimated":
-                # currently not supported callback with data
-                # dec_d = self._summarize_decimated(self.rounds_buf)
-                callback(round_n)
+                dec_d = self._summarize_decimated(self.rounds_buf)
+                callback(round_n, dec_d)
             else:
                 raise NotImplementedError(
                     "Callback is not implemented for type other than accumulated or decimated"

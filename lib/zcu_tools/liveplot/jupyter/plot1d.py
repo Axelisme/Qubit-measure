@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,12 +13,11 @@ class LivePlotter1D(JupyterPlotMixin, AbsLivePlotter):
         self,
         xlabel: str,
         ylabel: str,
-        figsize: Optional[Tuple[int, int]] = None,
         disable: bool = False,
         **kwargs,
     ) -> None:
         segment = Plot1DSegment(xlabel, ylabel, **kwargs)
-        super().__init__([segment], figsize=figsize, disable=disable)
+        super().__init__([[segment]], disable=disable)
 
     def update(
         self,
@@ -27,8 +26,9 @@ class LivePlotter1D(JupyterPlotMixin, AbsLivePlotter):
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:
-        ax: plt.Axes = self.axs[0]
-        segment = self.segments[0]
+        ax = self.axs[0][0]
+        segment = self.segments[0][0]
+        assert isinstance(ax, plt.Axes)
         assert isinstance(segment, Plot1DSegment)
 
         if self.disable:
@@ -37,4 +37,4 @@ class LivePlotter1D(JupyterPlotMixin, AbsLivePlotter):
         with self.update_lock:
             segment.update(ax, xs, signals, title)
             if refresh:
-                self._refresh_unchecked()
+                self._refresh_while_lock()

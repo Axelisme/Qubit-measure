@@ -7,106 +7,38 @@ from typing import Any, Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
-from tqdm.auto import tqdm
 
-from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.liveplot import AbsLivePlotter, LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram, TwoToneProgram
+from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program.v2 import OneToneProgram
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.debug import print_traceback
+
+from .template import sweep_hard_template
 
 LookbackResultType = Tuple[np.ndarray, np.ndarray]
 
 
 class LookbackExperiment(AbsExperiment[LookbackResultType]):
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-        liveplotter: Optional[AbsLivePlotter] = None,
-        qub_pulse: bool = False,
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> LookbackResultType:
         cfg = deepcopy(cfg)
 
-        cfg.setdefault("reps", 1)
-        if cfg["reps"] != 1:
+        if cfg.setdefault("reps", 1) != 1:
             warnings.warn("reps is not 1 in config, this will be ignored.")
             cfg["reps"] = 1
 
-        GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+        prog = OneToneProgram(soccfg, cfg)
+        Ts = prog.get_time_axis(ro_index=0)
 
-        MAX_LEN = 3.32  # us
-        ro_cfg = cfg["readout"]["ro_cfg"]
-
-        def run_once(cfg, progress: bool = True) -> LookbackResultType:
-            try:
-                prog = (
-                    TwoToneProgram(soccfg, cfg)
-                    if qub_pulse
-                    else OneToneProgram(soccfg, cfg)
-                )
-
-                Ts = prog.get_time_axis(ro_index=0)
-                IQlist = prog.acquire_decimated(soc, progress=progress)
-
-            except Exception:
-                print("Error during measurement:")
-                print_traceback()
-                raise
-
-            Ts += cfg["readout"]["ro_cfg"]["trig_offset"]
-
-            return Ts, IQlist[0].dot([1, 1j])
-
-        if ro_cfg["ro_length"] <= MAX_LEN:
-            Ts, signals = run_once(cfg, progress=progress)
-        else:
-            # measure multiple times
-            trig_offset = ro_cfg["trig_offset"]
-            total_len = trig_offset + ro_cfg["ro_length"]
-            ro_cfg["ro_length"] = MAX_LEN
-
-            bar = tqdm(
-                total=int((total_len - trig_offset) / MAX_LEN + 0.999),
-                desc="Readout",
-                smoothing=0,
-                disable=not progress,
-            )
-
-            Ts = []
-            signals = []
-            if liveplotter is None:
-                liveplotter = LivePlotter1D(
-                    "Time (us)", "Amplitude", title="Readout", disable=not progress
-                )
-
-            with liveplotter as viewer:
-                while trig_offset < total_len:
-                    ro_cfg["trig_offset"] = trig_offset
-
-                    Ts_, singals_ = run_once(cfg, progress=False)
-
-                    Ts.append(Ts_)
-                    signals.append(singals_)
-
-                    viewer.update(np.concatenate(Ts), np.concatenate(signals))
-
-                    trig_offset += MAX_LEN
-                    bar.update()
-
-                bar.close()
-                Ts = np.concatenate(Ts)
-                signals = np.concatenate(signals)
-
-                sort_idxs = np.argsort(Ts, kind="stable")
-                Ts = Ts[sort_idxs]
-                signals = signals[sort_idxs]
-
-                viewer.update(Ts, np.abs(signals))
+        signals = sweep_hard_template(
+            cfg,
+            lambda _, cb: prog.acquire_decimated(soc, progress=progress, callback=cb)[
+                0
+            ][0].dot([1, 1j]),
+            LivePlotter1D("Time (us)", "Amplitude", disable=not progress),
+            ticks=(Ts,),
+        )
 
         # record last cfg and result
         self.last_cfg = cfg

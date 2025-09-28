@@ -1,29 +1,9 @@
 from typing import Any, Dict, List
 
 from qick import QickConfig
-from qick.asm_v2 import Macro
 
 from .base import MyProgramV2
 from .modules import Module
-
-
-class PrintTimeStamp(Macro):
-    def __init__(self, prefix: str = "") -> None:
-        self.prefix = prefix
-
-    def expand(self, prog):
-        return []
-
-    def preprocess(self, prog):
-        from pprint import pprint
-        from .modules.base import param2str
-
-        timestamps = []
-        timestamps += list(prog._gen_ts)
-        timestamps += list(prog._ro_ts)
-        print(self.prefix)
-        for i, t in enumerate(timestamps):
-            print(f"\t[{i}] " + param2str(t))
 
 
 class ModularProgramV2(MyProgramV2):
@@ -40,6 +20,11 @@ class ModularProgramV2(MyProgramV2):
     def _initialize(self, cfg: Dict[str, Any]) -> None:
         super()._initialize(cfg)
 
+        # add v2 sweep loops
+        for name, sweep in cfg.get("sweep", {}).items():
+            self.add_loop(name, count=sweep["expts"])
+
+        # initialize modules
         for module in self.modules:
             module.init(self)
 
