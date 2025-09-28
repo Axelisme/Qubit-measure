@@ -21,8 +21,9 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.process import rotate2real
-from zcu_tools.utils.fitting import fit_decay
+from zcu_tools.utils.process import rotate2real, minus_background
+from zcu_tools.utils.fitting import fit_decay, fit_resonence_freq
+from zcu_tools.notebook.utils import make_sweep
 
 from ...template import sweep2D_soft_hard_template
 from .util import calc_snr
@@ -78,21 +79,13 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         soccfg,
         cfg: Dict[str, Any],
         *,
-        freq_map: Tuple[np.ndarray, np.ndarray],
-        predictor: Optional[FluxoniumPredictor] = None,
+        predictor: FluxoniumPredictor,
         ref_flux: float = 0.0,
         drive_oper: Literal["n", "phi"] = "n",
         progress: bool = True,
         earlystop_snr: Optional[float] = None,
     ) -> T1ResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
-
-        map_values, map_freqs = freq_map
-
-        # sort for interpolation
-        sort_idxs = np.argsort(map_values)
-        map_values = map_values[sort_idxs]
-        map_freqs = map_freqs[sort_idxs]
 
         flx_sweep = cfg["sweep"]["flux"]
         len_sweep = cfg["sweep"]["length"]
@@ -104,32 +97,20 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         values = sweep2array(flx_sweep)
         lens = sweep2array(len_sweep)
 
-        if np.any(values < map_values.min()) or np.any(values > map_values.max()):
-            raise ValueError(
-                f"Sweep values from {values.min()} to {values.max()} exceed the freq_map range [{map_values.min()}, {map_values.max()}]"
+        ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
+
+        predict_freqs = np.array([predictor.predict_freq(fx) for fx in values])
+        predict_ms = np.array(
+            [predictor.predict_matrix_element(fx, operator=drive_oper) for fx in values]
+        )
+        predict_pi_gains = cfg["pi_pulse"]["gain"] * ref_m / predict_ms
+        predict_qub_gains = cfg["qub_pulse"]["gain"] * ref_m / predict_ms
+        if np.any(predict_pi_gains > 1.0) or np.any(predict_qub_gains > 1.0):
+            warnings.warn(
+                "Some predicted gains are larger than 1.0, which may cause distortion."
             )
-
-        nearest_idx = np.argmin(np.abs(map_values[:, None] - values[None, :]), axis=0)
-        nearest_idx = np.unique(nearest_idx)  # only predict unique points
-        values = map_values[nearest_idx]
-        predict_freqs = map_freqs[nearest_idx]
-
-        if predictor is not None:
-            ref_gain = cfg["pi_pulse"]["gain"]
-            ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
-
-            predict_ms = np.array(
-                [
-                    predictor.predict_matrix_element(fx, operator=drive_oper)
-                    for fx in values
-                ]
-            )
-            predict_gains = ref_gain * ref_m / predict_ms
-            if np.any(predict_gains > 1.0):
-                warnings.warn(
-                    "Some predicted gains are larger than 1.0, which may cause distortion."
-                )
-                predict_gains = np.clip(predict_gains, 0.0, 1.0)
+            predict_pi_gains = np.clip(predict_pi_gains, 0.0, 1.0)
+            predict_qub_gains = np.clip(predict_qub_gains, 0.0, 1.0)
 
         def updateCfg(cfg: Dict[str, Any], i: int, value: float) -> None:
             set_flux_in_dev_cfg(cfg["dev"], value)
@@ -139,17 +120,68 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             cfg["pi_pulse"]["freq"] = predict_freq
             if "mixer_freq" in cfg["pi_pulse"]:
                 cfg["pi_pulse"]["mixer_freq"] = predict_freq
-            if predictor is not None:
-                cfg["pi_pulse"]["gain"] = predict_gains[i]
+            cfg["pi_pulse"]["gain"] = predict_pi_gains[i]
+
+            cfg["qub_pulse"]["freq"] = predict_freq
+            if "mixer_freq" in cfg["qub_pulse"]:
+                cfg["qub_pulse"]["mixer_freq"] = predict_freq
+            cfg["qub_pulse"]["gain"] = predict_qub_gains[i]
 
         updateCfg(cfg, 0, values[0])  # set initial flux
 
         prog = None
+        measure_freqs = []
+
+        def measure_freq_fn(
+            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+        ) -> Optional[float]:
+            nonlocal prog
+            predict_freq = cfg["qub_pulse"]["freq"]
+            cfg["sweep"] = {
+                "freq": make_sweep(predict_freq - 10, predict_freq + 10, len(lens))
+            }
+            cfg["relax_delay"] = 0.0  # no relax delay for freq measurement
+
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    make_reset("reset", reset_cfg=cfg.get("reset")),
+                    Pulse(
+                        name="qub_pulse",
+                        cfg={
+                            **cfg["qub_pulse"],
+                            "freq": sweep2param("freq", cfg["sweep"]["freq"]),
+                        },
+                    ),
+                    make_readout("readout", readout_cfg=cfg["readout"]),
+                ],
+            )
+            signals = prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+
+            fpts = sweep2array(cfg["sweep"]["freq"])
+            real_signals = np.abs(minus_background(signals))
+            freq, freq_err, kappa, *_ = fit_resonence_freq(fpts, real_signals)
+
+            if freq_err > 0.5 * kappa:  # fit failed
+                return None
+
+            return freq
 
         def measure_fn(
             cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
         ) -> np.ndarray:
             nonlocal prog
+
+            freq = measure_freq_fn(deepcopy(cfg), cb)
+            measure_freqs.append(freq)
+            if freq is None:
+                return np.full(len(lens), np.nan, dtype=np.complex128)
+
+            cfg["pi_pulse"]["freq"] = freq
+            if "mixer_freq" in cfg["pi_pulse"]:
+                cfg["pi_pulse"]["mixer_freq"] = freq
+
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
@@ -198,11 +230,13 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         assert isinstance(real_ts, np.ndarray), "fpts should be an array"
         real_ts += lens[0] - real_ts[0]  # correct absolute offset
 
+        measure_freqs = np.array(measure_freqs)
+
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (values, real_ts, signals2D, predict_freqs)
+        self.last_result = (values, real_ts, signals2D, measure_freqs)
 
-        return values, real_ts, signals2D, predict_freqs
+        return values, real_ts, signals2D, measure_freqs
 
     def analyze(
         self,
@@ -215,14 +249,14 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, ts, signals2D, _ = result
+        values, ts, signals2D, freqs = result
 
         ts = ts[start_idx:]
         signals2D = signals2D[:, start_idx:]
 
         real_signals2D = t1_yoko_signal2real(signals2D)
 
-        real_signals2D = gaussian_filter(real_signals2D, sigma=1)
+        # real_signals2D = gaussian_filter(real_signals2D, sigma=1)
 
         t1s = np.full(len(values), np.nan, dtype=np.float64)
         t1errs = np.zeros_like(t1s)
@@ -252,6 +286,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         valid_idxs = ~np.isnan(t1s)
         valid_values = values[valid_idxs]
+        valid_freqs = freqs[valid_idxs]
         t1s = t1s[valid_idxs]
         t1errs = t1errs[valid_idxs]
 
@@ -274,7 +309,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         ax2.grid()
         plt.plot()
 
-        return valid_values, t1s, t1errs
+        return valid_values, t1s, t1errs, valid_freqs
 
     def save(
         self,
