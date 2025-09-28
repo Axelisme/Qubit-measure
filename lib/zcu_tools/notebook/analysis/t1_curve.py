@@ -19,7 +19,7 @@ def plot_sample_t1(
 ) -> Tuple[plt.Figure, plt.Axes]:
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
 
-    ax.errorbar(s_mAs, s_T1s, yerr=s_T1errs, fmt=".-", label="Current")
+    ax.errorbar(s_mAs, s_T1s, yerr=s_T1errs, fmt=".", label="Current")
 
     ax.grid()
     ax.set_xlabel(r"Current (mA)", fontsize=14)
