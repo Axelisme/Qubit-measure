@@ -1,5 +1,6 @@
 import json
-from typing import Tuple, Literal
+from collections import Iterable
+from typing import Literal, Tuple
 
 import numpy as np
 from scipy.optimize import root_scalar
@@ -44,8 +45,8 @@ class FluxoniumPredictor:
             float: fitting bias current in A (fit_A - cur_A).
         """
 
-        def freq_diff_func(test_A):
-            return self.predict_freq(test_A, transition) - cur_freq
+        def freq_diff_func(test_A: float) -> float:
+            return self._predict_freq(test_A, transition) - cur_freq
 
         try:
             result = root_scalar(
@@ -70,6 +71,14 @@ class FluxoniumPredictor:
     def update_bias(self, bias: float) -> None:
         self.bias = bias
 
+    def _predict_freq(self, cur_A: float, transition: Tuple[int, int]) -> float:
+        flx = self.A_to_flx(cur_A)
+
+        self.fluxonium.flux = flx
+        energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 1)
+
+        return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
+
     def predict_freq(self, cur_A: float, transition: Tuple[int, int] = (0, 1)) -> float:
         """
         Predict the transition frequency of a fluxonium qubit.
@@ -79,13 +88,22 @@ class FluxoniumPredictor:
         Returns:
             float: transition frequency in MHz.
         """
+        if isinstance(cur_A, Iterable):
+            return np.array([self._predict_freq(ca, transition) for ca in cur_A])
+        return self._predict_freq(cur_A, transition)
 
+    def _predict_matrix_element(
+        self, cur_A: float, transition: Tuple[int, int], operator: Literal["phi", "n"]
+    ) -> float:
         flx = self.A_to_flx(cur_A)
 
         self.fluxonium.flux = flx
-        energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 1)
+        if operator == "n":
+            oper = self.fluxonium.n_operator(energy_esys=True)
+        elif operator == "phi":
+            oper = self.fluxonium.phi_operator(energy_esys=True)
 
-        return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
+        return float(np.abs(oper[transition[0], transition[1]]))
 
     def predict_matrix_element(
         self,
@@ -102,12 +120,8 @@ class FluxoniumPredictor:
         Returns:
             float: matrix element of operator between two levels.
         """
-        flx = self.A_to_flx(cur_A)
-
-        self.fluxonium.flux = flx
-        if operator == "n":
-            oper = self.fluxonium.n_operator(energy_esys=True)
-        elif operator == "phi":
-            oper = self.fluxonium.phi_operator(energy_esys=True)
-
-        return float(np.abs(oper[transition[0], transition[1]]))
+        if isinstance(cur_A, Iterable):
+            return np.array(
+                [self._predict_matrix_element(ca, transition, operator) for ca in cur_A]
+            )
+        return self._predict_matrix_element(cur_A, transition, operator)

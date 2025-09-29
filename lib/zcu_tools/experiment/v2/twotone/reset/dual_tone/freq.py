@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple, Literal
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,15 +13,15 @@ from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
+    TwoPulseReset,
     make_readout,
     make_reset,
     sweep2param,
-    TwoPulseReset,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ....template import sweep_hard_template, sweep2D_soft_hard_template
+from ....template import sweep2D_soft_hard_template, sweep_hard_template
 
 
 def dual_reset_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -95,7 +95,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
                 disable=not progress,
             ),
             xs=fpts2,
-            ys=fpts1,
+            ticks=(fpts1,),
             updateCfg=updateCfg,
             signal2real=dual_reset_signal2real,
         )

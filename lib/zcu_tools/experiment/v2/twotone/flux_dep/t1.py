@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Any, Callable, Dict, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.notebook.utils import make_sweep
+from zcu_tools.liveplot import LivePlotter2DwithLine, MultiLivePlotter, make_plot_frame
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
@@ -24,10 +23,10 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay, fit_resonence_freq
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ...template import sweep2D_soft_hard_template
+from ...template import sweep_soft_batch_template
 from .util import calc_snr
 
-T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
 
 
 def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -43,13 +42,6 @@ def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
         max_val = np.max(real_signals[i, :])
         min_val = np.min(real_signals[i, :])
         real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
-
-        # flip to make peak positive
-        half_len = len(real_signals[i, :]) // 2
-        first_half_mean = np.mean(real_signals[i, :half_len])
-        second_half_mean = np.mean(real_signals[i, half_len:])
-        if first_half_mean < second_half_mean:
-            real_signals[i, :] = 1.0 - real_signals[i, :]
 
     return real_signals
 
@@ -70,29 +62,33 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         flx_sweep = cfg["sweep"]["flux"]
+        detune_sweep = cfg["sweep"]["detune"]
         len_sweep = cfg["sweep"]["length"]
 
-        # Flux sweep be soft loop
-        cfg["sweep"] = {"length": len_sweep}
+        # delete sweep dicts, it will be added back later
+        del cfg["sweep"]
 
         # predict sweep points
         values = sweep2array(flx_sweep)
+        detunes = sweep2array(detune_sweep)
         lens = sweep2array(len_sweep)
 
         ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
 
-        predict_freqs = np.array([predictor.predict_freq(fx) for fx in values])
-        predict_ms = np.array(
-            [predictor.predict_matrix_element(fx, operator=drive_oper) for fx in values]
-        )
-        predict_pi_gains = cfg["pi_pulse"]["gain"] * ref_m / predict_ms
-        predict_qub_gains = cfg["qub_pulse"]["gain"] * ref_m / predict_ms
-        if np.any(predict_pi_gains > 1.0) or np.any(predict_qub_gains > 1.0):
-            warnings.warn(
-                "Some predicted gains are larger than 1.0, which may cause distortion."
-            )
-            predict_pi_gains = np.clip(predict_pi_gains, 0.0, 1.0)
-            predict_qub_gains = np.clip(predict_qub_gains, 0.0, 1.0)
+        predict_freqs = predictor.predict_freq(values)
+        predict_ms = predictor.predict_matrix_element(values, operator=drive_oper)
+
+        def calc_gains(gain: float, name: str) -> np.ndarray:
+            predict_gains = gain * ref_m / predict_ms
+            if np.any(predict_gains > 1.0):
+                warnings.warn(
+                    f"Some predicted {name} gains are larger than 1.0, which may cause distortion."
+                )
+                predict_gains = np.clip(predict_gains, 0.0, 1.0)
+            return predict_gains
+
+        predict_qub_gains = calc_gains(cfg["qub_pulse"]["gain"], "qubit")
+        predict_pi_gains = calc_gains(cfg["pi_pulse"]["gain"], "pi")
 
         def updateCfg(cfg: Dict[str, Any], i: int, value: float) -> None:
             set_flux_in_dev_cfg(cfg["dev"], value)
@@ -111,19 +107,23 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         updateCfg(cfg, 0, values[0])  # set initial flux
 
+        # -- Measure --
+
         prog = None
         measure_freqs = []
 
         def measure_freq_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> Optional[float]:
+            cfg: Dict[str, Any], i: int, _, cb: Optional[Callable[..., None]]
+        ) -> np.ndarray:
             nonlocal prog
-            predict_freq = cfg["qub_pulse"]["freq"]
-            cfg["sweep"] = {
-                "freq": make_sweep(predict_freq - 10, predict_freq + 10, len(lens))
-            }
-            cfg["relax_delay"] = 0.0  # no relax delay for freq measurement
+            cfg = deepcopy(cfg)
 
+            cfg["sweep"] = {"detune": detune_sweep}
+            cfg["relax_delay"] = 0.0
+
+            detune_params = sweep2param("detune", cfg["sweep"]["detune"])
+
+            predict_freq = cfg["qub_pulse"]["freq"]
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
@@ -133,36 +133,41 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                         name="qub_pulse",
                         cfg={
                             **cfg["qub_pulse"],
-                            "freq": sweep2param("freq", cfg["sweep"]["freq"]),
+                            "freq": predict_freq + detune_params,
                         },
                     ),
                     make_readout("readout", readout_cfg=cfg["readout"]),
                 ],
             )
-            signals = prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
 
-            fpts = sweep2array(cfg["sweep"]["freq"])
-            real_signals = np.abs(minus_background(signals))
-            freq, freq_err, kappa, *_ = fit_resonence_freq(fpts, real_signals)
-
-            if freq_err > 0.5 * kappa:  # fit failed
-                return None
-
-            return freq
-
-        def measure_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
+        def measure_t1_fn(
+            cfg: Dict[str, Any],
+            i: int,
+            signal_dict: Dict[str, np.ndarray],
+            cb: Optional[Callable[..., None]],
         ) -> np.ndarray:
             nonlocal prog
+            cfg = deepcopy(cfg)
 
-            freq = measure_freq_fn(deepcopy(cfg), cb)
-            measure_freqs.append(freq)
-            if freq is None:
+            freq_signals = signal_dict["freq"][i]
+            real_freq_signals = np.abs(minus_background(freq_signals))
+            detune, freq_err, kappa, *_ = fit_resonence_freq(detunes, real_freq_signals)
+            if freq_err > 0.5 * kappa:
+                measure_freq = None
+            else:
+                measure_freq = detune + cfg["qub_pulse"]["freq"]
+            measure_freqs.append(measure_freq)
+
+            if measure_freq is None:
                 return np.full(len(lens), np.nan, dtype=np.complex128)
 
-            cfg["pi_pulse"]["freq"] = freq
+            cfg["sweep"] = {"length": len_sweep}
+            cfg["pi_pulse"]["freq"] = measure_freq
             if "mixer_freq" in cfg["pi_pulse"]:
-                cfg["pi_pulse"]["mixer_freq"] = freq
+                cfg["pi_pulse"]["mixer_freq"] = measure_freq
+
+            length_params = sweep2param("length", cfg["sweep"]["length"])
 
             prog = ModularProgramV2(
                 soccfg,
@@ -170,7 +175,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                 modules=[
                     make_reset("reset", reset_cfg=cfg.get("reset")),
                     Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                    Delay(name="t1_delay", delay=sweep2param("length", len_sweep)),
+                    Delay(name="t1_delay", delay=length_params),
                     make_readout("readout", readout_cfg=cfg["readout"]),
                 ],
             )
@@ -188,37 +193,62 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                 if snr >= earlystop_snr:
                     prog.set_early_stop(silent=True)
 
-        # Run 2D soft-hard sweep (flux soft, length hard)
-        signals2D = sweep2D_soft_hard_template(
-            cfg,
-            measure_fn,
-            LivePlotter2DwithLine(
-                "Flux device value",
-                "Time (us)",
-                line_axis=1,
-                num_lines=5,
-                disable=not progress,
-            ),
-            xs=values,
-            ys=lens,
-            updateCfg=updateCfg,
-            signal2real=t1_yoko_signal2real,
-            progress=progress,
-            realsignal_callback=earlystop_callback,
+        # -- LivePlot --
+        fig, axs, dh = make_plot_frame(n_row=2, n_col=2)
+
+        liveplotter = MultiLivePlotter(
+            [
+                LivePlotter2DwithLine(
+                    "Flux device value",
+                    "Frequency (MHz)",
+                    line_axis=1,
+                    num_lines=5,
+                    existed_frames=(fig, [axs[0]], dh),
+                    disable=not progress,
+                ),
+                LivePlotter2DwithLine(
+                    "Flux device value",
+                    "Time (us)",
+                    line_axis=1,
+                    num_lines=5,
+                    existed_frames=(fig, [axs[1]], dh),
+                    disable=not progress,
+                ),
+            ],
+            lambda name, *args: [args, None] if name == "freq" else [None, args],
         )
 
-        # Get the actual frequency points used by FPGA
-        real_ts = prog.get_time_param("t1_delay", "t", as_array=True)
-        assert isinstance(real_ts, np.ndarray), "fpts should be an array"
-        real_ts += lens[0] - real_ts[0]  # correct absolute offset
+        signals_dict = sweep_soft_batch_template(
+            cfg,
+            dict(
+                freq=(
+                    measure_freq_fn,
+                    (detunes,),
+                    None,
+                    lambda x: np.abs(minus_background(x)),
+                    earlystop_callback,
+                ),
+                t1=(
+                    measure_t1_fn,
+                    (lens,),
+                    None,
+                    lambda x: rotate2real(x).real,
+                    earlystop_callback,
+                ),
+            ),
+            liveplotter,
+            xs=values,
+            updateCfg=updateCfg,
+            progress=progress,
+        )
 
         measure_freqs = np.array(measure_freqs)
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (values, real_ts, signals2D, measure_freqs)
+        self.last_result = (values, measure_freqs, lens, signals_dict)
 
-        return values, real_ts, signals2D, measure_freqs
+        return values, measure_freqs, lens, signals_dict
 
     def analyze(
         self,
@@ -231,7 +261,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, ts, signals2D, freqs = result
+        values, freqs, ts, signals_dict = result
+
+        signals2D = signals_dict["t1"]
 
         ts = ts[start_idx:]
         signals2D = signals2D[:, start_idx:]
@@ -305,13 +337,25 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, Ts, signals2D, _ = result
+        values, freqs, ts, signals_dict = result
+        freq_signals = signals_dict["freq"]
+        t1_signals = signals_dict["t1"]
 
         save_data(
             filepath=filepath,
             x_info={"name": "Flux value", "unit": "a.u.", "values": values},
-            y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
+            y_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": freq_signals.T},
+            comment=comment,
+            tag=tag,
+            **kwargs,
+        )
+
+        save_data(
+            filepath=filepath,
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
+            y_info={"name": "Time", "unit": "s", "values": ts * 1e-6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": t1_signals.T},
             comment=comment,
             tag=tag,
             **kwargs,

@@ -91,7 +91,7 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
                 disable=not progress,
             ),
             xs=pdrs,
-            ys=fpts,
+            ticks=(fpts,),
             updateCfg=updateCfg,
             signal2real=pdrdep_signal2real,
             progress=progress,

@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 from numpy import ndarray
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot.jupyter import LivePlotter2DwithLine
 from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.simulate import mA2flx
@@ -63,7 +63,7 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
                 num_lines=2,
             ),
             xs=dev_values,
-            ys=pdrs,
+            ticks=(pdrs,),
             updateCfg=updateCfg,
             signal2real=signal2real,
         )

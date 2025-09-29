@@ -34,12 +34,17 @@ def sweep_hard_template(
     ticks: Tuple[ndarray, ...],
     raw2signal: Raw2SignalFn = avg_as_signal,
     signal2real: Signal2RealFn = take_signal_abs,
+    init_signals: Optional[ndarray] = None,
     realsignal_callback: Optional[Callable[[int, np.ndarray], None]] = None,
 ) -> ndarray:
     # set flux first
     GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
-    signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
+    if init_signals is not None:
+        signals = init_signals.copy()
+    else:
+        signals = np.full(tuple(len(t) for t in ticks), np.nan, dtype=complex)
+
     with liveplotter as viewer:
 
         def callback(ir: int, *args, **kwargs) -> None:
@@ -69,18 +74,18 @@ def sweep1D_soft_template(
     liveplotter: AbsLivePlotter,
     *,
     xs: ndarray,
+    init_signals: Optional[ndarray] = None,
     updateCfg: UpdateCfgFn,
     signal2real: Signal2RealFn = take_signal_abs,
     progress: bool = True,
-    data_shape: Optional[tuple] = None,
 ) -> ndarray:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     # set flux first
     GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
-    if data_shape is not None:
-        signals = np.full((len(xs), *data_shape), np.nan, dtype=complex)
+    if init_signals is not None:
+        signals = init_signals.copy()
     else:
         signals = np.full_like(xs, np.nan, dtype=complex)
 
@@ -115,12 +120,12 @@ def sweep2D_soft_hard_template(
     liveplotter: AbsLivePlotter,
     *,
     xs: ndarray,
-    ys: ndarray,
+    ticks: Tuple[ndarray, ...],
+    init_signals: Optional[ndarray] = None,
     updateCfg: UpdateCfgFn,
     raw2signal: Raw2SignalFn = avg_as_signal,
     signal2real: Signal2RealFn = take_signal_abs,
     progress: bool = True,
-    data_shape: Optional[tuple] = None,
     realsignal_callback: Optional[Callable[[int, int, np.ndarray], None]] = None,
 ) -> ndarray:
     cfg = deepcopy(cfg)  # prevent in-place modification
@@ -128,10 +133,12 @@ def sweep2D_soft_hard_template(
     # set initial flux
     GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
-    if data_shape is not None:
-        signals2D = np.full((len(xs), len(ys), *data_shape), np.nan, dtype=complex)
+    if init_signals is not None:
+        signals = init_signals.copy()
     else:
-        signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
+        signals = np.full(
+            (len(xs), *tuple(len(t) for t in ticks)), np.nan, dtype=complex
+        )
 
     with liveplotter as viewer:
         try:
@@ -148,30 +155,30 @@ def sweep2D_soft_hard_template(
                     avgs_tqdm.reset()
                     avgs_tqdm.refresh()
 
-                    _signals2D = signals2D.copy()  # prevent overwrite
+                    _signals = signals.copy()  # prevent overwrite
 
                     def callback(ir: int, *args, **kwargs) -> None:
-                        nonlocal _signals2D, avgs_tqdm
+                        nonlocal _signals, avgs_tqdm
                         avgs_tqdm.update(max(ir - avgs_tqdm.n, 0))
                         avgs_tqdm.refresh()
 
-                        _signals2D[i] = raw2signal(ir, *args, **kwargs)
-                        real_signals2D = signal2real(_signals2D)
-                        viewer.update(xs, ys, real_signals2D)
+                        _signals[i] = raw2signal(ir, *args, **kwargs)
+                        real_signals = signal2real(_signals)
+                        viewer.update(xs, *ticks, real_signals)
 
                         if realsignal_callback is not None:
-                            realsignal_callback(i, ir, real_signals2D)
+                            realsignal_callback(i, ir, real_signals)
 
-                    signals2D[i] = measure_fn(cfg, callback)
+                    signals[i] = measure_fn(cfg, callback)
 
                     avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
                     avgs_tqdm.refresh()
 
-                    async_draw(xs, ys, signal2real(signals2D))
+                    async_draw(xs, *ticks, signal2real(signals))
 
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
-            viewer.update(xs, ys, signal2real(signals2D))
+            viewer.update(xs, *ticks, signal2real(signals))
         except Exception:
             print("Error during measurement:")
             print_traceback()
@@ -179,7 +186,7 @@ def sweep2D_soft_hard_template(
             xs_tqdm.close()
             avgs_tqdm.close()
 
-    return signals2D
+    return signals
 
 
 def sweep2D_soft_template(
@@ -189,19 +196,19 @@ def sweep2D_soft_template(
     *,
     xs: ndarray,
     ys: ndarray,
+    init_signals: Optional[ndarray] = None,
     updateCfg_x: UpdateCfgFn,
     updateCfg_y: UpdateCfgFn,
     signal2real: Signal2RealFn = take_signal_abs,
     progress: bool = True,
-    data_shape: Optional[tuple] = None,
 ) -> ndarray:
     cfg = deepcopy(cfg)  # prevent in-place modification
 
     # set initial flux
     GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
-    if data_shape is not None:
-        signals2D = np.full((len(xs), len(ys), *data_shape), np.nan, dtype=complex)
+    if init_signals is not None:
+        signals2D = init_signals.copy()
     else:
         signals2D = np.full((len(xs), len(ys)), np.nan, dtype=complex)
 
@@ -240,3 +247,100 @@ def sweep2D_soft_template(
             ys_tqdm.close()
 
     return signals2D
+
+
+def sweep_soft_batch_template(
+    cfg: Dict[str, Any],
+    measure_blocks: Dict[
+        str,
+        Tuple[
+            Callable[
+                [Dict[str, Any], int, List[ndarray], Optional[CallbackFn]], ndarray
+            ],
+            Tuple[ndarray, ...],
+            Optional[Raw2SignalFn],
+            Optional[Signal2RealFn],
+            Optional[Callable[[int, int, np.ndarray], None]],
+        ],
+    ],
+    liveplotter: AbsLivePlotter,
+    *,
+    xs: ndarray,
+    updateCfg: UpdateCfgFn,
+    progress: bool = True,
+) -> Dict[str, ndarray]:
+    cfg = deepcopy(cfg)  # prevent in-place modification
+
+    # set initial flux
+    GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+
+    signal_dict: Dict[str, ndarray] = {
+        name: np.full(
+            (len(xs), *tuple(len(t) for t in block[1])), np.nan, dtype=complex
+        )
+        for name, block in measure_blocks.items()
+    }
+
+    with liveplotter as viewer:
+        try:
+            xs_tqdm = tqdm(xs, smoothing=0, disable=not progress)
+            avgs_tqdm = tqdm(total=cfg["rounds"], smoothing=0, disable=not progress)
+            with AsyncFunc(viewer.update) as async_draw:
+                assert async_draw is not None
+                for i, x in enumerate(xs_tqdm):
+                    updateCfg(cfg, i, x)
+
+                    GlobalDeviceManager.setup_devices(cfg["dev"], progress=False)
+
+                    for name, block in measure_blocks.items():
+                        (
+                            measure_fn,
+                            ticks,
+                            raw2signal,
+                            signal2real,
+                            realsignal_callback,
+                        ) = block
+
+                        if raw2signal is None:
+                            raw2signal = avg_as_signal
+                        if signal2real is None:
+                            signal2real = take_signal_abs
+
+                        avgs_tqdm.total = cfg["rounds"]
+                        avgs_tqdm.reset()
+                        avgs_tqdm.refresh()
+
+                        temp_signal = signal_dict[name].copy()
+
+                        def callback(ir: int, *args, **kwargs) -> None:
+                            nonlocal temp_signal, avgs_tqdm
+                            avgs_tqdm.update(max(ir - avgs_tqdm.n, 0))
+                            avgs_tqdm.refresh()
+
+                            temp_signal[i] = raw2signal(ir, *args, **kwargs)
+                            real_signal = signal2real(temp_signal)
+                            viewer.update(name, xs, *ticks, real_signal)
+
+                            if realsignal_callback is not None:
+                                realsignal_callback(i, ir, real_signal)
+
+                        signal_dict[name][i] = measure_fn(cfg, i, signal_dict, callback)
+
+                        avgs_tqdm.update(avgs_tqdm.total - avgs_tqdm.n)
+                        avgs_tqdm.refresh()
+
+                        async_draw(name, xs, *ticks, signal2real(signal_dict[name]))
+
+        except KeyboardInterrupt:
+            print("Received KeyboardInterrupt, early stopping the program")
+            for name, block in measure_blocks.items():
+                _, ticks, _, signal2real, _ = block
+                viewer.update(name, xs, *ticks, signal2real(signal_dict[name]))
+        except Exception:
+            print("Error during measurement:")
+            print_traceback()
+        finally:
+            xs_tqdm.close()
+            avgs_tqdm.close()
+
+    return signal_dict

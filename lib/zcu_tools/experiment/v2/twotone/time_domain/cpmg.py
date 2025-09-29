@@ -10,10 +10,10 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
+    Delay,
     ModularProgramV2,
     Pulse,
     Repeat,
-    Delay,
     make_readout,
     make_reset,
     sweep2param,
@@ -116,7 +116,7 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
                 disable=not progress,
             ),
             xs=times,
-            ys=ts,
+            ticks=(ts,),
             updateCfg=updateCfg,
             signal2real=cpmg_signal2real,
         )

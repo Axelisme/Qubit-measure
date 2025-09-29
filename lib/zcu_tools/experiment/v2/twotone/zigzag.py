@@ -211,7 +211,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
                 disable=not progress,
             ),
             xs=times,
-            ys=values,
+            ticks=(values,),
             updateCfg=updateCfg,
             signal2real=zigzag_signal2real,
             progress=progress,

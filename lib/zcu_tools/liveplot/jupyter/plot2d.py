@@ -13,16 +13,20 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         self,
         xlabel: str,
         ylabel: str,
-        title: Optional[str] = None,
-        flip: bool = False,
+        *,
         uniform: bool = True,
-        disable: bool = False,
+        segment_kwargs: Optional[dict] = None,
+        **kwargs,
     ) -> None:
+        if segment_kwargs is None:
+            segment_kwargs = {}
+
         if uniform:
-            segment = Plot2DSegment(xlabel, ylabel, title, flip=flip)
+            segment = Plot2DSegment(xlabel, ylabel, **segment_kwargs)
         else:
-            segment = PlotNonUniform2DSegment(xlabel, ylabel, title, flip=flip)
-        super().__init__([[segment]], disable=disable)
+            segment = PlotNonUniform2DSegment(xlabel, ylabel, **segment_kwargs)
+
+        super().__init__([[segment]], **kwargs)
 
     def update(
         self,
@@ -54,14 +58,19 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         line_axis: Literal[0, 1],
         num_lines: int = 1,
         title: Optional[str] = None,
-        flip: bool = False,
         uniform: bool = True,
-        disable: bool = False,
+        segment2d_kwargs: Optional[dict] = None,
+        **kwargs,
     ) -> None:
+        if segment2d_kwargs is None:
+            segment2d_kwargs = {}
+
         if uniform:
-            segment2d = Plot2DSegment(xlabel, ylabel, title, flip=flip)
+            segment2d = Plot2DSegment(xlabel, ylabel, title, **segment2d_kwargs)
         else:
-            segment2d = PlotNonUniform2DSegment(xlabel, ylabel, title, flip=flip)
+            segment2d = PlotNonUniform2DSegment(
+                xlabel, ylabel, title, **segment2d_kwargs
+            )
 
         xlabel1d = xlabel if line_axis == 0 else ylabel
         line_kwargs = [
@@ -71,7 +80,7 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         line_kwargs[-1].update(label="current line", marker=".", alpha=1.0, color="C0")
 
         segment1d = Plot1DSegment(xlabel1d, "", num_lines, line_kwargs=line_kwargs)
-        super().__init__([[segment2d, segment1d]], disable=disable)
+        super().__init__([[segment2d, segment1d]], **kwargs)
 
         self.num_lines = num_lines
         self.line_axis = line_axis
@@ -89,6 +98,9 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:
+        if self.disable:
+            return
+
         ax2d = self.axs[0][0]
         ax1d = self.axs[0][1]
         segment2d = self.segments[0][0]
@@ -97,9 +109,6 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         assert isinstance(ax1d, plt.Axes)
         assert isinstance(segment2d, (PlotNonUniform2DSegment, Plot2DSegment))
         assert isinstance(segment1d, Plot1DSegment)
-
-        if self.disable:
-            return
 
         # use the last non-nan line as current line
         if np.all(np.isnan(signals)):

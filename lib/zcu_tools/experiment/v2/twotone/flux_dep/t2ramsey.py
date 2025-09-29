@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple, Literal
+from typing import Any, Callable, Dict, Literal, Optional, Tuple
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -17,8 +17,8 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.fitting import fit_decay_fringe
+from zcu_tools.utils.process import rotate2real
 
 from ...template import sweep2D_soft_hard_template
 from .util import calc_snr
@@ -167,7 +167,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                 disable=not progress,
             ),
             xs=values,
-            ys=lens,
+            ticks=(lens,),
             updateCfg=updateCfg,
             signal2real=t2r_yoko_signal2real,
             progress=progress,

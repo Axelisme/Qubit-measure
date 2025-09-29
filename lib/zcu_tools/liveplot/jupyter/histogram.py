@@ -13,12 +13,14 @@ class LivePlotterHistogram(JupyterPlotMixin, AbsLivePlotter):
         self,
         xlabel: str,
         ylabel: str,
-        bins: int = 50,
-        title: Optional[str] = None,
-        disable: bool = False,
+        *,
+        segment_kwargs: Optional[dict] = None,
+        **kwargs,
     ) -> None:
-        segment = HistogramSegment(xlabel, ylabel, title, bins)
-        super().__init__([[segment]], disable=disable)
+        if segment_kwargs is None:
+            segment_kwargs = {}
+        segment = HistogramSegment(xlabel, ylabel, **segment_kwargs)
+        super().__init__([[segment]], **kwargs)
 
     def update(
         self,
@@ -26,13 +28,13 @@ class LivePlotterHistogram(JupyterPlotMixin, AbsLivePlotter):
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:
+        if self.disable:
+            return
+
         ax = self.axs[0][0]
         segment = self.segments[0][0]
         assert isinstance(ax, plt.Axes)
         assert isinstance(segment, HistogramSegment)
-
-        if self.disable:
-            return
 
         with self.update_lock:
             segment.update(ax, signals, title)

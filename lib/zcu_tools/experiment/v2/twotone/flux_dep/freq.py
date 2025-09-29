@@ -1,36 +1,36 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple, Literal
 import warnings
+from copy import deepcopy
+from typing import Any, Callable, Dict, Literal, Optional, Tuple
 
 import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
-    sweep2array,
     set_flux_in_dev_cfg,
     set_freq_in_dev_cfg,
+    sweep2array,
 )
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
-    InteractiveLines,
     InteractiveFindPoints,
+    InteractiveLines,
 )
 from zcu_tools.program.v2 import (
-    TwoToneProgram,
-    sweep2param,
     ModularProgramV2,
+    Pulse,
+    TwoToneProgram,
     make_readout,
     make_reset,
-    Pulse,
+    sweep2param,
 )
+from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background, rotate2real
-from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 from ...template import sweep2D_soft_hard_template, sweep2D_soft_template
-from .util import check_flux_pulse, wrap_with_flux_pulse, calc_snr
+from .util import calc_snr, check_flux_pulse, wrap_with_flux_pulse
 
 FreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -81,7 +81,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
                 disable=not progress,
             ),
             xs=dev_values,
-            ys=fpts,
+            ticks=(fpts,),
             updateCfg=updateCfg,
             signal2real=freq_signal2real,
             progress=progress,
@@ -229,7 +229,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
                 disable=not progress,
             ),
             xs=gains,
-            ys=fpts,
+            ticks=(fpts,),
             updateCfg=updateCfg,
             signal2real=freq_signal2real,
             progress=progress,
@@ -437,7 +437,7 @@ class SmartFreqExperiment(AbsExperiment[FreqResultType]):
                 disable=not progress,
             ),
             xs=dev_values,
-            ys=detunes,
+            ticks=(detunes,),
             updateCfg=updateCfg,
             signal2real=smartfreq_signal2real,
             progress=progress,

@@ -11,8 +11,8 @@ class Plot1DSegment(AbsSegment):
         self,
         xlabel: str,
         ylabel: str,
-        num_lines: int = 1,
         title: Optional[str] = None,
+        num_lines: int = 1,
         line_kwargs: Optional[List[Optional[dict]]] = None,
     ) -> None:
         self.xlabel = xlabel

@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import numpy as np
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import sweep2array, set_flux_in_dev_cfg
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 from zcu_tools.program.v2 import OneToneProgram, sweep2param
@@ -67,7 +67,7 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
                 disable=not progress,
             ),
             xs=dev_values,
-            ys=fpts,
+            ticks=(fpts,),
             updateCfg=updateCfg,
             signal2real=fluxdep_signal2real,
             progress=progress,

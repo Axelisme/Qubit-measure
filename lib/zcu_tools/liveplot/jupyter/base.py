@@ -1,9 +1,9 @@
 from itertools import chain
 from threading import Lock
-from typing import List, Optional, TypeVar
+from typing import List, Optional, Tuple, TypeVar
 
 import matplotlib.pyplot as plt
-from IPython.display import display
+from IPython.display import DisplayHandle, display
 
 from ..segments import AbsSegment
 
@@ -12,13 +12,27 @@ from ..segments import AbsSegment
 T_JupyterPlotMixin = TypeVar("T_JupyterPlotMixin", bound="JupyterPlotMixin")
 
 
+def make_plot_frame(
+    n_row: int, n_col: int, **kwargs
+) -> Tuple[plt.FigureBase, List[List[plt.Axes]], DisplayHandle]:
+    fig, axs = plt.subplots(n_row, n_col, squeeze=False, **kwargs)
+    dh = display(fig, display_id=True)
+
+    assert isinstance(fig, plt.FigureBase)
+
+    return fig, axs, dh
+
+
 class JupyterPlotMixin:
     """live plotters in Jupyter notebooks."""
 
     def __init__(
         self,
         segments: List[List[AbsSegment]],
-        provide_axs: Optional[List[List[plt.Axes]]] = None,
+        existed_frames: Optional[
+            Tuple[plt.FigureBase, List[List[plt.Axes]], DisplayHandle]
+        ] = None,
+        auto_close: bool = True,
         disable: bool = False,
     ) -> None:
         if len(chain.from_iterable(segments)) == 0:
@@ -33,14 +47,21 @@ class JupyterPlotMixin:
                     "Number of segments in each row must match number of columns."
                 )
 
-        self.fig = None
-        self.axs = [[None for _ in range(n_col)] for _ in range(n_row)]
-        self.dh = None
-        self.host_by_self = False
-        if provide_axs is not None:
+        self.segments = segments
+        self.update_lock = Lock()
+        self.auto_close = auto_close
+        self.disable = disable
+
+        if disable:
+            return  # early return
+
+        if existed_frames is not None:
+            # if provided axes and display handle, use them
+            provided_fig, provided_axs, provided_dh = existed_frames
+
             # validate check
-            valid = len(provide_axs) == n_row
-            for a_row in provide_axs:
+            valid = len(provided_axs) == n_row
+            for a_row in provided_axs:
                 if len(a_row) != n_col:
                     valid = False
             if not valid:
@@ -48,21 +69,12 @@ class JupyterPlotMixin:
                     "The shape of provided axes must match the shape of segments."
                 )
 
-            self.axs = provide_axs
-
-        # if not provided axes, create figure and display handle
-        if provide_axs is None and not disable:
-            self.fig = plt.figure(figsize=(6 * n_col, 5 * n_row))
-            assert isinstance(self.fig, plt.FigureBase)
-
-            self.axs = self.fig.subplots(n_row, n_col, squeeze=False)
-            self.dh = display(self.fig, display_id=True)
-
-            self.host_by_self = True  # host figure by self
-
-        self.segments = segments
-        self.update_lock = Lock()
-        self.disable = disable
+            self.fig = provided_fig
+            self.axs = provided_axs
+            self.dh = provided_dh
+        else:
+            # if not provided axes, create figure and display handle
+            self.fig, self.axs, self.dh = make_plot_frame(n_row, n_col)
 
     def clear(self) -> None:
         if self.disable:
@@ -80,10 +92,7 @@ class JupyterPlotMixin:
         if self.disable:
             return
 
-        if self.host_by_self:
-            assert self.dh is not None
-            assert self.fig is not None
-            self.dh.update(self.fig)
+        self.dh.update(self.fig)
 
     def refresh(self) -> None:
         if self.disable:
@@ -106,6 +115,5 @@ class JupyterPlotMixin:
         if self.disable:
             return
 
-        if self.host_by_self:
-            assert self.fig is not None
+        if self.auto_close:
             plt.close(self.fig)
