@@ -3,10 +3,9 @@ from typing import Any, Dict
 from zcu_tools.utils.async_func import AsyncFunc
 
 from .improve_acquire import ImproveAcquireMixin
-from .proxy import AbsProxy, ProxyAcquireMixin
 
 
-class MyProgram(ProxyAcquireMixin, ImproveAcquireMixin):
+class MyProgram(ImproveAcquireMixin):
     """
     Add some functionality to the base program class
     including:
