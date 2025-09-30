@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: axelenv13
+    display_name: Python 3
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.5
+    version: 3.13.2
 ---
 
 ```python
@@ -32,6 +32,7 @@ import pandas as pd
 
 %autoreload 2
 import zcu_tools.notebook.analysis.plot as zp
+from zcu_tools.notebook.analysis.fluxdep.utils import FreqFluxDependVisualizer
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate import flx2mA, mA2flx
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
@@ -100,7 +101,9 @@ freqs_df.head(10)
 ```python
 show_idxs = [(i, j) for i in range(2) for j in range(5) if j > i]
 
-fig, _ = zp.plot_matrix_elements(params, flxs, show_idxs, spectrum_data=spectrum_data)
+fig, _ = zp.plot_matrix_elements(
+    params, flxs, show_idxs, mAs=mAs, spectrum_data=spectrum_data
+)
 fig.show()
 ```
 
@@ -112,11 +115,11 @@ fig.write_image(f"../../result/{qub_name}/image/matrixelem.png", format="png")
 # Dispersive
 
 ```python
-fig = zp.plot_dispersive_shift(params, flxs, r_f=r_f, g=g, upto=3)
+fig = zp.plot_dispersive_shift(params, flxs, r_f=r_f, g=g, mAs=mAs, upto=1)
 ```
 
 ```python
-fig.update_yaxes(range=[-3, 3])
+fig.update_yaxes(range=[-1e-3, 1e-3])
 fig.show()
 ```
 
@@ -142,31 +145,15 @@ v_allows = {
     # "sample_f": sample_f,
 }
 
-import plotly.graph_objects as go
-from zcu_tools.notebook.analysis.fluxdep import energy2transition
-
-fig = go.Figure()
-freqs, names = energy2transition(energies, v_allows)
-for i in range(len(names)):
-    fig.add_trace(go.Scatter(x=mAs, y=freqs[:, i], mode="lines", name=f"{names[i]}"))
-    # fig.add_trace(go.Scatter(x=flxs, y=freqs[:, i], mode="lines", name=f"{names[i]}"))
-# for j in range(1, 10):
-#     for i in range(len(names)):
-#         fig.add_trace(
-#             go.Scatter(x=mAs, y=freqs[:, i] / j, mode="lines", name=f"{j}_{names[i]}")
-#         )
-
-fig.add_hline(y=v_allows["r_f"], line_dash="dash", line_color="black", line_width=2)
-fig.add_hline(
-    y=v_allows["sample_f"], line_dash="dash", line_color="black", line_width=2
+fig = (
+    FreqFluxDependVisualizer()
+    .plot_simulation_lines(flxs, energies, v_allows)
+    .add_constant_freq(v_allows["r_f"], "r_f")
+    .add_constant_freq(v_allows["sample_f"], "sample_f")
+    .plot_sample_points(freqs_df, lambda x: mA2flx(x, mA_c, period))
+    .add_secondary_xaxis(flxs, mAs)
+    .get_figure()
 )
-# fig.add_hline(
-#     y=2 * v_allows["sample_f"] - v_allows["r_f"],
-#     line_dash="dash",
-#     line_color="black",
-#     line_width=2,
-# )
-
 fig.update_layout(
     title=f"EJ/EC/EL = ({params[0]:.2f}, {params[1]:.2f}, {params[2]:.2f})",
     title_x=0.501,
@@ -184,7 +171,7 @@ Q_cap = 7.0e5
 # Q_ind = 1.0e7
 # x_qp = 1.0e-8
 
-noise_channels=[
+noise_channels = [
     ("t1_capacitive", dict(Q_cap=Q_cap)),
     # ("t1_inductive", dict(Q_ind=Q_ind)),
     # ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
@@ -195,6 +182,7 @@ fig, t1s = zp.plot_t1s(
     flxs,
     noise_channels=noise_channels,
     Temp=Temp,
+    mAs=mAs,
 )
 title1 = f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}"
 title2 = ", ".join(
@@ -202,8 +190,11 @@ title2 = ", ".join(
     for _, p_dict in noise_channels
 )
 fig.update_layout(
-    title=title1 + "<br>" + title2,
-    title_x=0.515,
+    title=dict(
+        text=title1 + "<br>" + title2,
+        xanchor="center",
+        yanchor="top",
+    ),
     yaxis_range=[np.log10(0.5 * t1s.min()), np.log10(1.5 * t1s.max())],
 )
 fig.show()

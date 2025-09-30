@@ -51,8 +51,8 @@ mA_e = None
 period = None
 s_spects = {}
 
-os.makedirs(f"../../result/{qub_name}/image", exist_ok=True)
-os.makedirs(f"../../result/{qub_name}/web", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/image/fluxdep_fit", exist_ok=True)
+os.makedirs(f"../../result/{qub_name}/web/fluxdep_fit", exist_ok=True)
 ```
 
 ```python
@@ -129,26 +129,7 @@ s_spects = zp.load_spects(processed_spect_path)
 s_spects.keys()
 ```
 
-```python
-# del s_spects["s002_onetone_flux_Q2_4.hdf5"]
-```
-
 # Align half flux
-
-```python
-# for val in s_spects.values():  # swap mA_c and mA_e
-#     val["mA_c"] = val["mA_c"] + 0.5 * period
-```
-
-```python
-mA_c = list(s_spects.values())[-1]["mA_c"]
-period = list(s_spects.values())[-1]["period"]
-for spect in s_spects.values():
-    shift = mA_c - spect["mA_c"]
-    spect["mA_c"] += shift
-    spect["spectrum"]["mAs"] += shift
-    spect["points"]["mAs"] += shift
-```
 
 ```python
 mA_bound = (
@@ -243,18 +224,22 @@ v_allows = {
     # "red side": [(i, j) for i in [0, 1, 2] for j in range(i + 1, 15)],
     # "mirror": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
     # "mirror red": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
-    "transitions2": [(0, 1), (0, 2), (1, 2), (0, 3)],
+    # "transitions2": [(0, 1), (0, 2), (1, 2), (0, 3)],
 }
 
-vs = zf.VisualizeSpet(
-    s_spects, s_mAs, s_fpts, t_mAs, energies, v_allows, auto_hide=False
+fig = (
+    zf.FreqFluxDependVisualizer()
+    .plot_background(s_spects)
+    .plot_simulation_lines(t_flxs, energies, v_allows)
+    .plot_points(s_flxs, s_fpts, marker_color="blue", opacity=0.5)
+    .add_secondary_xaxis(s_flxs, s_mAs)
+    .auto_derive_limits()
+    .get_figure()
 )
-fig = vs.create_figure()
 _ = fig.update_layout(
     title=f"EJ/EC/EL = ({best_params[0]:.2f}, {best_params[1]:.2f}, {best_params[2]:.2f})",
     title_x=0.501,
 )
-# fig.update_yaxes(range=[allows["r_f"] - 0.01, allows["r_f"] + 0.01])
 fig.update_layout(height=1000)
 fig.show()
 ```
@@ -280,16 +265,20 @@ v_allows = {
     # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
 }
 
-vs = zf.VisualizeSpet(
-    s_spects, s_mAs, s_fpts, t_mAs, energies, v_allows, auto_hide=True
+fig = (
+    zf.FreqFluxDependVisualizer()
+    .plot_background(s_spects)
+    .plot_simulation_lines(t_flxs, energies, v_allows)
+    .plot_points(s_flxs, s_fpts, marker_color="blue", opacity=0.5)
+    .add_secondary_xaxis(s_flxs, s_mAs)
+    .auto_derive_limits()
+    .get_figure()
 )
-fig = vs.create_figure()
-fig.update_layout(
-    title=f"EJ/EC/EL = ({sp_params[0]:.3f}, {sp_params[1]:.3f}, {sp_params[2]:.3f})",
+_ = fig.update_layout(
+    title=f"EJ/EC/EL = ({best_params[0]:.2f}, {best_params[1]:.2f}, {best_params[2]:.2f})",
     title_x=0.501,
 )
-# fig.update_yaxes(range=[allows["r_f"] - 0.01, allows["r_f"] + 0.01])
-# fig.update_layout(height=1000)
+fig.update_layout(height=1000)
 fig.show()
 ```
 
