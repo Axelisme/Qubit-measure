@@ -29,15 +29,16 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
             cfg["reps"] = 1
 
         prog = OneToneProgram(soccfg, cfg)
-        Ts = prog.get_time_axis(ro_index=0)
+        Ts = prog.get_time_axis(ro_index=0) + cfg["readout"]["ro_cfg"]["trig_offset"]
 
         signals = sweep_hard_template(
             cfg,
             lambda _, cb: prog.acquire_decimated(soc, progress=progress, callback=cb)[
                 0
-            ][0].dot([1, 1j]),
+            ].dot([1, 1j]),
             LivePlotter1D("Time (us)", "Amplitude", disable=not progress),
             ticks=(Ts,),
+            raw2signal=lambda _, dec_d: dec_d[0].dot([1, 1j]),
         )
 
         # record last cfg and result

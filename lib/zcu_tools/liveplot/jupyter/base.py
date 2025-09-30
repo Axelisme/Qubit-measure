@@ -35,7 +35,7 @@ class JupyterPlotMixin:
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:
-        if len(chain.from_iterable(segments)) == 0:
+        if len(list(chain.from_iterable(segments))) == 0:
             raise ValueError("At least one segment is required.")
         n_row = len(segments)
         n_col = len(segments[0])

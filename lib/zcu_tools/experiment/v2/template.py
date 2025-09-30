@@ -11,9 +11,9 @@ from zcu_tools.utils.async_func import AsyncFunc
 from zcu_tools.utils.debug import print_traceback
 
 # TODO: support user controlled callback function
-CallbackFn = Callable[[int, List[ndarray], ...], None]
+CallbackFn = Callable[[int, List[ndarray]], None]
 MeasureFn = Callable[[Dict[str, Any], Optional[CallbackFn]], ndarray]
-Raw2SignalFn = Callable[[int, List[ndarray], ...], ndarray]
+Raw2SignalFn = Callable[[int, List[ndarray]], ndarray]
 Signal2RealFn = Callable[[ndarray], ndarray]
 UpdateCfgFn = Callable[[Dict[str, Any], int, Any], None]
 

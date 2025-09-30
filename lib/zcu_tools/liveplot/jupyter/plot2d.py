@@ -79,7 +79,9 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         ]
         line_kwargs[-1].update(label="current line", marker=".", alpha=1.0, color="C0")
 
-        segment1d = Plot1DSegment(xlabel1d, "", num_lines, line_kwargs=line_kwargs)
+        segment1d = Plot1DSegment(
+            xlabel1d, "", num_lines=num_lines, line_kwargs=line_kwargs
+        )
         super().__init__([[segment2d, segment1d]], **kwargs)
 
         self.num_lines = num_lines

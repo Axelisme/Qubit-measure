@@ -32,8 +32,9 @@ T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
 def t1_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
     real_signals = np.zeros_like(signals, dtype=np.float64)
 
-    for i in range(signals.shape[0]):
-        real_signals[i, :] = rotate2real(signals[i, :]).real
+    flx_len = signals.shape[0]
+    for i in range(flx_len):
+        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
 
         if np.any(np.isnan(real_signals[i, :])):
             continue
@@ -154,12 +155,12 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             real_freq_signals = np.abs(minus_background(freq_signals))
             detune, freq_err, kappa, *_ = fit_resonence_freq(detunes, real_freq_signals)
             if freq_err > 0.5 * kappa:
-                measure_freq = None
+                measure_freq = np.nan
             else:
                 measure_freq = detune + cfg["qub_pulse"]["freq"]
             measure_freqs.append(measure_freq)
 
-            if measure_freq is None:
+            if np.isnan(measure_freq):
                 return np.full(len(lens), np.nan, dtype=np.complex128)
 
             cfg["sweep"] = {"length": len_sweep}
@@ -194,7 +195,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     prog.set_early_stop(silent=True)
 
         # -- LivePlot --
-        fig, axs, dh = make_plot_frame(n_row=2, n_col=2)
+        fig, axs, dh = make_plot_frame(n_row=2, n_col=2, figsize=(12, 10))
 
         liveplotter = MultiLivePlotter(
             [
@@ -225,14 +226,14 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     measure_freq_fn,
                     (detunes,),
                     None,
-                    lambda x: np.abs(minus_background(x)),
+                    t1_yoko_signal2real,
                     earlystop_callback,
                 ),
                 t1=(
                     measure_t1_fn,
                     (lens,),
                     None,
-                    lambda x: rotate2real(x).real,
+                    t1_yoko_signal2real,
                     earlystop_callback,
                 ),
             ),
@@ -338,18 +339,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         assert result is not None, "no result found"
 
         values, freqs, ts, signals_dict = result
-        freq_signals = signals_dict["freq"]
         t1_signals = signals_dict["t1"]
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
-            y_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": freq_signals.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
 
         save_data(
             filepath=filepath,

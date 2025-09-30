@@ -73,7 +73,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             LivePlotter1D(
                 "Time (us)",
                 "Amplitude",
-                title="T1 relaxation",
+                segment_kwargs={"title": "T1 relaxation"},
                 disable=not progress,
             ),
             ticks=(ts,),

@@ -30,7 +30,7 @@ class Plot2DSegment(AbsSegment):
             ax.set_title(self.title)
 
         self.im = ax.imshow(
-            [[0, 1]], aspect="auto", origin="lower", interpolation="nearest"
+            [[0, 1e-6]], aspect="auto", origin="lower", interpolation="nearest"
         )
 
     def update(

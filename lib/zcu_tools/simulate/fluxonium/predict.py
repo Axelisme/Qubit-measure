@@ -1,5 +1,5 @@
 import json
-from collections import Iterable
+from collections.abc import Iterable
 from typing import Literal, Tuple
 
 import numpy as np

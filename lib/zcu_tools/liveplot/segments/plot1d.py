@@ -25,7 +25,7 @@ class Plot1DSegment(AbsSegment):
         assert line_kwargs is not None
 
         assert len(line_kwargs) == self.num_line, (
-            f"Expected {self.num_line} line_kwargs, got {len(self.line_kwargs)}."
+            f"Expected {self.num_line} line_kwargs, got {len(line_kwargs)}."
         )
 
         self.lines: Optional[List[plt.Line2D]] = None
