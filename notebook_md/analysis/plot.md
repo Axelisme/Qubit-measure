@@ -78,7 +78,7 @@ spectrum_data = None
 
 ```python
 # loading points
-loadpath = f"../../result/{qub_name}/sample.csv"
+loadpath = f"../../result/{qub_name}/samples.csv"
 
 freqs_df = pd.read_csv(loadpath)
 s_mAs = freqs_df["calibrated mA"].values  # mA

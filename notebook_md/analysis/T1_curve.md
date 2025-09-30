@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: Python 3
+    display_name: axelenv13
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.2
+    version: 3.13.5
 ---
 
 ```python
@@ -48,7 +48,7 @@ from zcu_tools.simulate.fluxonium import (
 ```
 
 ```python
-qub_name = "Q12_2D[3]/Q1"
+qub_name = "Q3_2D/Q2"
 ```
 
 # Load data
@@ -60,7 +60,7 @@ loadpath = f"../../result/{qub_name}/params.json"
 _, params, mA_c, period, allows, results = load_result(loadpath)
 EJ, EC, EL = params
 
-mA_c = 3.81
+# mA_c = 3.81
 
 print(allows)
 
@@ -75,18 +75,23 @@ if "sample_f" in allows:
 
 ```python
 # loading points
-loadpath = f"../../result/{qub_name}/sample.csv"
+loadpath = f"../../result/{qub_name}/samples.csv"
 
 freqs_df = pd.read_csv(loadpath)
 freqs_df = freqs_df[~np.isnan(freqs_df["T1 (us)"])]
 s_mAs = freqs_df["calibrated mA"].values  # mA
-s_fpts = freqs_df["Freq (MHz)"].values * 1e-3  # GHz
 s_T1s = freqs_df["T1 (us)"].values
 s_T1errs = freqs_df["T1err (us)"].values
 
+# filter out bad points
+valid = s_T1errs < 0.1 * s_T1s
+s_mAs = s_mAs[valid]
+s_T1s = s_T1s[valid]
+s_T1errs = s_T1errs[valid]
+
 # sort by flux
-s_mAs, s_fpts, s_T1s, s_T1errs = tuple(
-    np.array(a) for a in zip(*sorted(zip(s_mAs, s_fpts, s_T1s, s_T1errs)))
+s_mAs, s_T1s, s_T1errs = tuple(
+    np.array(a) for a in zip(*sorted(zip(s_mAs, s_T1s, s_T1errs)))
 )
 s_flxs = mA2flx(s_mAs, mA_c, period)
 
@@ -116,8 +121,8 @@ spectrum_data = fluxonium.get_spectrum_vs_paramvals(
 # T1 curve
 
 ```python
-# Temp = 113e-3
-Temp = 100e-3
+Temp = 113e-3
+# Temp = 50e-3
 # Temp = fit_temp
 
 plot_args = (s_mAs, s_T1s, s_T1errs, mA_c, period, fluxonium, spectrum_data, t_flxs)
@@ -127,7 +132,7 @@ plot_args = (s_mAs, s_T1s, s_T1errs, mA_c, period, fluxonium, spectrum_data, t_f
 
 ```python
 # Q_cap = fit_noise[0][1]["Q_cap"]
-Q_cap = 7e5
+Q_cap = 7.0e5
 
 fig, _ = plot_t1_with_sample(
     *plot_args,
@@ -164,7 +169,7 @@ plt.show()
 
 ```python
 # Q_ind = fit_noise[2][1]["Q_ind"]
-Q_ind = 2e7
+Q_ind = 7e7
 
 fig, ax = plot_t1_with_sample(
     *plot_args,
@@ -241,7 +246,7 @@ Temp = fit_temp
 noise_channels = [
     ("t1_capacitive", dict(Q_cap=Q_cap)),
     # ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
-    # ("t1_inductive", dict(Q_ind=Q_ind)),
+    ("t1_inductive", dict(Q_ind=Q_ind)),
 ]
 
 noise_label = "\n".join(
@@ -259,10 +264,10 @@ t1_effs = calculate_eff_t1_vs_flx_with(
 )
 ```
 
-# Percell Effect
+## Percell Effect
 
 ```python
-rf_w = 7e-3  # GHz
+rf_w = 2e-3  # GHz
 g = results["dispersive"]["g"]
 r_f = results["dispersive"]["r_f"]
 
