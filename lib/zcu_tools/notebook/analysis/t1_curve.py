@@ -155,6 +155,7 @@ def plot_t1_with_sample(
     noise_name: str,
     values: list[float],
     Temp: float,
+    **other_noise_options: dict,
 ) -> Tuple[plt.Figure, plt.Axes]:
     t_mAs = flx2mA(t_flxs, mA_c=mA_c, period=period)
 
@@ -165,6 +166,7 @@ def plot_t1_with_sample(
             Temp=Temp,
             fluxonium=fluxonium,
             spectrum_data=spectrum_data,
+            **other_noise_options,
         )
         for v in values
     ]
@@ -174,8 +176,9 @@ def plot_t1_with_sample(
 
     ax.errorbar(s_mAs, s_T1s * 1e3, yerr=s_T1errs * 1e3, fmt=".-", label="T1")
 
-    for v, t1_eff in zip(values, t1_effs):
-        ax.plot(t_mAs, t1_eff, label=f"{name} = {v:.1e}", linestyle="--")
+    for i, (v, t1_eff) in enumerate(zip(values, t1_effs)):
+        label = f"{name}(w)_{i}" if callable(v) else f"{name} = {v:.1e}"
+        ax.plot(t_mAs, t1_eff, label=label, linestyle="--")
 
     ax.set_xlim(s_mAs.min() - 0.03, s_mAs.max() + 0.03)
     ax.set_ylim(0.5e3 * s_T1s.min(), 3.0e3 * s_T1s.max())

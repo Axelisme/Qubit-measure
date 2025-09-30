@@ -13,6 +13,7 @@ def calculate_eff_t1_with(
     Temp: float,
     fluxonium: "scq.Fluxonium",
     esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+    **other_noise_options: dict,
 ) -> float:
     import scqubits as scq  # lazy import
 
@@ -20,7 +21,7 @@ def calculate_eff_t1_with(
     fluxonium.flux = flx
     return fluxonium.t1_effective(
         noise_channels=noise_channels,
-        common_noise_options=dict(i=1, j=0, T=Temp),
+        common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
         esys=esys,
     )
 
@@ -32,6 +33,7 @@ def calculate_eff_t1(
     params: Tuple[float, float, float],
     cutoff: int = 40,
     evals_count: int = 20,
+    **other_noise_options: dict,
 ) -> float:
     import scqubits as scq  # lazy import
 
@@ -40,7 +42,8 @@ def calculate_eff_t1(
         *params, flux=flx, cutoff=cutoff, truncated_dim=evals_count
     )
     return fluxonium.t1_effective(
-        noise_channels=noise_channels, common_noise_options=dict(i=1, j=0, T=Temp)
+        noise_channels=noise_channels,
+        common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
     )
 
 
@@ -50,6 +53,7 @@ def calculate_eff_t1_vs_flx_with(
     Temp: float,
     fluxonium: "scq.Fluxonium",
     spectrum_data: Optional["scq.SpectrumData"] = None,
+    **other_noise_options: dict,
 ) -> np.ndarray:
     import scqubits as scq  # lazy import
 
@@ -58,7 +62,7 @@ def calculate_eff_t1_vs_flx_with(
         [
             fluxonium.set_and_return("flux", flx).t1_effective(
                 noise_channels=noise_channels,
-                common_noise_options=dict(i=1, j=0, T=Temp),
+                common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
                 esys=(spectrum_data.energy_table[i, :], spectrum_data.state_table[i]),
             )
             for i, flx in enumerate(flxs)
@@ -73,6 +77,7 @@ def calculate_eff_t1_vs_flx(
     params: Tuple[float, float, float],
     cutoff: int = 40,
     evals_count: int = 20,
+    **other_noise_options: dict,
 ) -> np.ndarray:
     from scqubits import Fluxonium  # lazy import
 
@@ -85,5 +90,5 @@ def calculate_eff_t1_vs_flx(
         get_eigenstates=True,
     )
     return calculate_eff_t1_vs_flx_with(
-        flxs, noise_channels, Temp, fluxonium, spectrum_data
+        flxs, noise_channels, Temp, fluxonium, spectrum_data, **other_noise_options
     )

@@ -313,6 +313,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             aspect="auto",
             extent=[values[0], values[-1], t1s[0], t1s[-1]],
             origin="lower",
+            interpolation="none",
         )
         ax2.errorbar(
             valid_values, t1s, yerr=t1errs, label="Fitting T1", elinewidth=1, capsize=1

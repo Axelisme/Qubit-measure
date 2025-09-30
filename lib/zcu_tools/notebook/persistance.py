@@ -10,16 +10,15 @@ def format_rawdata(
     As: np.ndarray, fpts: np.ndarray, spectrum: np.ndarray
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     fpts = fpts / 1e9  # convert to GHz
-    mAs = As * 1e3  # convert to mA
 
-    if mAs[0] > mAs[-1]:  # Ensure that the fluxes are in increasing
-        mAs = mAs[::-1]
+    if As[0] > As[-1]:  # Ensure that the fluxes are in increasing
+        As = As[::-1]
         spectrum = spectrum[:, ::-1]
     if fpts[0] > fpts[-1]:  # Ensure that the frequencies are in increasing
         fpts = fpts[::-1]
         spectrum = spectrum[::-1, :]
 
-    return mAs, fpts, spectrum
+    return As, fpts, spectrum
 
 
 def dump_result(

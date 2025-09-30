@@ -1,5 +1,6 @@
 import asyncio
 import contextvars
+import sys
 import threading
 from copy import deepcopy
 from functools import wraps
@@ -102,8 +103,13 @@ class AsyncFunc(Generic[P]):
         # the new context becomes active again.
         self._closed = False
         self._last_job = None
-        self._have_new_job = asyncio.Event(loop=loop)
         self._worker_done = threading.Event()
+
+        # for python >=3.10, no loop argument is needed
+        if sys.version_info >= (3, 10):
+            self._have_new_job = asyncio.Event()
+        else:
+            self._have_new_job = asyncio.Event(loop=loop)
 
         # Register a dedicated worker coroutine for *this* context instance.
         loop.call_soon_threadsafe(

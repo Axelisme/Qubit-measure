@@ -4,8 +4,8 @@ import numpy as np
 import plotly.graph_objects as go
 import scqubits as scq
 
+from zcu_tools.notebook.analysis.fluxdep.utils import add_secondary_xaxis
 from zcu_tools.simulate.fluxonium import (
-    calculate_dispersive_vs_flx,
     calculate_eff_t1_vs_flx,
     calculate_energy_vs_flx,
     calculate_n_oper_vs_flx,
@@ -20,6 +20,7 @@ def plot_matrix_elements(
     params: Tuple[float, float, float],
     flxs: np.ndarray,
     show_idxs: List[Tuple[int, int]],
+    mAs: Optional[np.ndarray] = None,
     spectrum_data: Optional[scq.SpectrumData] = None,
 ) -> Tuple[go.Figure, scq.SpectrumData]:
     need_dim = max(max(i, j) for i, j in show_idxs) + 1
@@ -46,6 +47,10 @@ def plot_matrix_elements(
         yaxis_title="Matrix elements",
     )
 
+    # Add a secondary top x-axis using provided mAs as tick labels
+    if mAs is not None:
+        add_secondary_xaxis(fig, flxs, mAs)
+
     return fig, spectrum_data
 
 
@@ -54,6 +59,7 @@ def plot_dispersive_shift(
     flxs: np.ndarray,
     r_f: float,
     g: float,
+    mAs: Optional[np.ndarray] = None,
     upto: int = 2,
 ) -> go.Figure:
     fig = go.Figure()
@@ -77,12 +83,19 @@ def plot_dispersive_shift(
         yaxis_title="Chi (MHz)",
     )
 
+    if mAs is not None:
+        add_secondary_xaxis(fig, flxs, mAs)
+
     return fig
 
 
 def plot_t1s(
-    params: Tuple[float, float, float], flxs: np.ndarray, noise_channels, Temp: float
-) -> go.Figure:
+    params: Tuple[float, float, float],
+    flxs: np.ndarray,
+    noise_channels,
+    Temp: float,
+    mAs: Optional[np.ndarray] = None,
+) -> Tuple[go.Figure, np.ndarray]:
     fig = go.Figure()
 
     t1s = calculate_eff_t1_vs_flx(
@@ -96,13 +109,18 @@ def plot_t1s(
 
     fig.add_trace(go.Scatter(x=flxs, y=t1s, mode="lines", name="t1"))
     fig.update_layout(
-        title=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
-        title_x=0.51,
+        title=dict(
+            text=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
+            x=0.51,
+        ),
         xaxis_title=r"$\phi_{ext}/\phi_0$",
         yaxis_title="T1 (ns)",
         yaxis_type="log",
     )
     fig.update_yaxes(exponentformat="power")
+
+    if mAs is not None:
+        add_secondary_xaxis(fig, flxs, mAs)
 
     return fig, t1s
 
