@@ -1,6 +1,6 @@
 from .base import Delay, Module
 from .loop import Repeat
-from .pulse import Pulse
+from .pulse import Pulse, check_block_mode
 from .readout import (
     AbsReadout,
     BaseReadout,

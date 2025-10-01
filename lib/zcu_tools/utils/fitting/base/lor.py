@@ -1,15 +1,22 @@
+from typing import Any, List, Optional, Tuple
+
 import numpy as np
 
 from .base import assign_init_p, fit_func
 
 
 # lorentzian function
-def lorfunc(x, *p):
+def lorfunc(x: np.ndarray, *p) -> np.ndarray:
+    """p = [y0, slope, yscale, x0, gamma]"""
     y0, slope, yscale, x0, gamma = p
     return y0 + slope * (x - x0) + yscale / (1 + ((x - x0) / gamma) ** 2)
 
 
-def fitlor(xdata, ydata, fitparams=None):
+def fitlor(
+    xdata: np.ndarray,
+    ydata: np.ndarray,
+    fitparams: Optional[List[Optional[float]]] = None,
+) -> Tuple[List[float], Any]:
     if fitparams is None:
         fitparams = [None] * 5
 
@@ -40,7 +47,8 @@ def fitlor(xdata, ydata, fitparams=None):
 
 
 # asymmtric lorentzian function
-def asym_lorfunc(x, *p):
+def asym_lorfunc(x: np.ndarray, *p) -> np.ndarray:
+    """p = [y0, slope, yscale, x0, gamma, alpha]"""
     y0, slope, yscale, x0, gamma, alpha = p
     return (
         y0
@@ -49,7 +57,11 @@ def asym_lorfunc(x, *p):
     )
 
 
-def fit_asym_lor(xdata, ydata, fitparams=None):
+def fit_asym_lor(
+    xdata: np.ndarray,
+    ydata: np.ndarray,
+    fitparams: Optional[List[Optional[float]]] = None,
+) -> Tuple[List[float], Any]:
     if fitparams is None:
         fitparams = [None] * 6
 

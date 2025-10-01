@@ -17,6 +17,7 @@ from .modules import (
     Repeat,
     TwoPulseReadout,
     TwoPulseReset,
+    check_block_mode,
     make_readout,
     make_reset,
     set_readout_cfg,

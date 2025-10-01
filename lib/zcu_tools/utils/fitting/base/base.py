@@ -1,21 +1,27 @@
 from copy import deepcopy
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 import scipy as sp
 
 
-def with_fixed_params(fitfunc, init_p, bounds, fixedparams):
+def with_fixed_params(
+    fitfunc: Callable[..., np.ndarray],
+    init_p: List[float],
+    bounds: Tuple[List[float], List[float]],
+    fixedparams: List[Optional[float]],
+) -> Tuple[Callable[..., np.ndarray], np.ndarray, np.ndarray]:
     fixedparams = np.array(fixedparams, dtype=float)
     non_fixed_idxs = np.isnan(fixedparams)
 
     cur_p = deepcopy(fixedparams)
 
-    def wrapped_func(xs, *args):
+    def wrapped_func(xs: np.ndarray, *args) -> np.ndarray:
         if len(args) != np.sum(non_fixed_idxs):
             raise ValueError(
                 f"Expected {np.sum(non_fixed_idxs)} arguments, got {len(args)}."
             )
-        cur_p[non_fixed_idxs] = args
+        cur_p[non_fixed_idxs] = args  #
         return fitfunc(xs, *cur_p)
 
     if bounds is not None:
@@ -24,7 +30,9 @@ def with_fixed_params(fitfunc, init_p, bounds, fixedparams):
     return wrapped_func, np.array(init_p)[non_fixed_idxs], bounds
 
 
-def add_fixed_params_back(pOpt, pCov, fixedparams):
+def add_fixed_params_back(
+    pOpt: List[float], pCov: np.ndarray, fixedparams: List[Optional[float]]
+) -> Tuple[List[float], np.ndarray]:
     fixedparams = np.array(fixedparams, dtype=float)
     non_fixed_idxs = np.isnan(fixedparams)
 
@@ -38,15 +46,15 @@ def add_fixed_params_back(pOpt, pCov, fixedparams):
 
 
 def fit_func(
-    xdata,
-    ydata,
-    fitfunc,
-    init_p=None,
-    bounds=None,
-    fixedparams=None,
+    xdata: np.ndarray,
+    ydata: np.ndarray,
+    fitfunc: Callable[..., np.ndarray],
+    init_p: Optional[List[float]] = None,
+    bounds: Optional[Tuple[List[float], List[float]]] = None,
+    fixedparams: Optional[List[Optional[float]]] = None,
     estimate_sigma: bool = True,
     **kwargs,
-):
+) -> Tuple[List[float], np.ndarray]:
     if fixedparams is not None and any([p is not None for p in fixedparams]):
         if init_p is None:
             raise ValueError(
@@ -192,15 +200,21 @@ def batch_fit_func(
     return list_popt, list_pcov
 
 
-def assign_init_p(fitparams, init_p):
+def assign_init_p(
+    fitparams: List[Optional[float]], init_p: List[float]
+) -> List[Optional[float]]:
     for i, p in enumerate(init_p):
         if fitparams[i] is None:
             fitparams[i] = p
     return fitparams
 
 
-def fit_line(xdata, ydata, fitparams=None):
-    def fitfunc(x, a, b):
+def fit_line(
+    xdata: np.ndarray,
+    ydata: np.ndarray,
+    fitparams: Optional[List[Optional[float]]] = None,
+) -> Tuple[List[float], np.ndarray]:
+    def fitfunc(x: np.ndarray, a: float, b: float) -> np.ndarray:
         return a * x + b
 
     if fitparams is None:

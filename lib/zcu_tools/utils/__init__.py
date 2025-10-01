@@ -72,4 +72,5 @@ __all__ = [
     "datasaver",
     "fitting",
     "process",
+    "tomography",
 ]
