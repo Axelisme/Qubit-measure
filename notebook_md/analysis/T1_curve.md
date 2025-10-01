@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: axelenv13
+    display_name: Python 3
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.5
+    version: 3.13.2
 ---
 
 ```python
@@ -80,18 +80,20 @@ loadpath = f"../../result/{qub_name}/samples.csv"
 freqs_df = pd.read_csv(loadpath)
 freqs_df = freqs_df[~np.isnan(freqs_df["T1 (us)"])]
 s_mAs = freqs_df["calibrated mA"].values  # mA
+s_fpts = freqs_df["Freq (MHz)"].values
 s_T1s = freqs_df["T1 (us)"].values
 s_T1errs = freqs_df["T1err (us)"].values
 
 # filter out bad points
-valid = s_T1errs < 0.1 * s_T1s
+valid = s_T1errs < 0.2 * s_T1s
 s_mAs = s_mAs[valid]
+s_fpts = s_fpts[valid]
 s_T1s = s_T1s[valid]
 s_T1errs = s_T1errs[valid]
 
 # sort by flux
-s_mAs, s_T1s, s_T1errs = tuple(
-    np.array(a) for a in zip(*sorted(zip(s_mAs, s_T1s, s_T1errs)))
+s_mAs, s_fpts, s_T1s, s_T1errs = tuple(
+    np.array(a) for a in zip(*sorted(zip(s_mAs, s_fpts, s_T1s, s_T1errs)))
 )
 s_flxs = mA2flx(s_mAs, mA_c, period)
 
@@ -116,6 +118,33 @@ fluxonium = scq.Fluxonium(*params, flux=0.5, cutoff=40, truncated_dim=6)
 spectrum_data = fluxonium.get_spectrum_vs_paramvals(
     "flux", t_flxs, evals_count=20, get_eigenstates=True
 )
+t_fpts = (spectrum_data.energy_table[:, 1] - spectrum_data.energy_table[:, 0]) * 1e3
+```
+
+```python
+s_n_elements = np.abs(
+    fluxonium.get_matelements_vs_paramvals(
+        "n_operator", "flux", s_flxs, evals_count=20
+    ).matrixelem_table[:, 0, 1]
+)
+s_n_spectral = 1 / (s_T1s * s_n_elements**2)
+s_n_spectral_err = s_T1errs / (s_T1s * s_n_elements) ** 2
+s_phi_elements = np.abs(
+    fluxonium.get_matelements_vs_paramvals(
+        "phi_operator", "flux", s_flxs, evals_count=20
+    ).matrixelem_table[:, 0, 1]
+)
+s_phi_spectral = 1 / (s_T1s * s_phi_elements**2)
+s_phi_spectral_err = s_T1errs / (s_T1s * s_phi_elements) ** 2
+```
+
+```python
+plt.title(r"$S(w)/\hbar^2$")
+plt.errorbar(s_fpts, s_n_spectral, yerr=s_n_spectral_err, fmt=".", label="n")
+plt.errorbar(s_fpts, s_phi_spectral, yerr=s_phi_spectral_err, fmt=".", label="phi")
+plt.legend()
+plt.grid()
+plt.show()
 ```
 
 # T1 curve
@@ -142,7 +171,7 @@ fig, _ = plot_t1_with_sample(
     Temp=Temp,
 )
 
-fig.savefig(f"../../result/{qub_name}/image/T1s_fit_Qcap.png")
+# fig.savefig(f"../../result/{qub_name}/image/T1s_fit_Qcap.png")
 plt.show()
 ```
 
@@ -193,12 +222,12 @@ fit_noise, fit_temp = fit_noise_and_temp(
     fluxonium,
     init_guess_noise=[
         ("t1_capacitive", dict(Q_cap=Q_cap)),
-        ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
+        # ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
         ("t1_inductive", dict(Q_ind=Q_ind)),
     ],
     bounds_noise=[
         ("t1_capacitive", dict(Q_cap=(0.5 * Q_cap, 10 * Q_cap))),
-        ("t1_quasiparticle_tunneling", dict(x_qp=(0.1 * x_qp, 2 * x_qp))),
+        # ("t1_quasiparticle_tunneling", dict(x_qp=(0.1 * x_qp, 2 * x_qp))),
         ("t1_inductive", dict(Q_ind=(0.5 * Q_ind, 10 * Q_ind))),
     ],
     init_guess_temp=Temp,
