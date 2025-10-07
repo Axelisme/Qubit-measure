@@ -7,6 +7,7 @@ if TYPE_CHECKING:
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy as sp
+from scipy.optimize import minimize
 
 from zcu_tools.simulate import flx2mA, mA2flx
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flx_with
@@ -35,9 +36,9 @@ def calc_Qcap_vs_omega(
 
     EJ, EC, EL = params
 
-    def spectral_density(omega, T) -> float:
+    def spectral_density(omega) -> float:
         """omega: rad/ns, EC: GHz, T: K"""
-        therm_ratio = calc_therm_ratio(omega, T)
+        therm_ratio = calc_therm_ratio(omega, guess_Temp)
         s = (
             2
             * 8
@@ -49,7 +50,7 @@ def calc_Qcap_vs_omega(
         return s
 
     # calculate Qcap vs omega
-    other_factors = spectral_density(omegas, guess_Temp)
+    other_factors = spectral_density(omegas) + spectral_density(-omegas)
     Qcap_vs_omega = T1s * np.abs(n_elements) ** 2 * other_factors
 
     if T1errs is not None:
@@ -73,9 +74,9 @@ def calc_Qind_vs_omega(
 
     EJ, EC, EL = params
 
-    def spectral_density(omega, T) -> float:
+    def spectral_density(omega) -> float:
         """omega: rad/ns, EL: GHz, T: K"""
-        therm_ratio = calc_therm_ratio(omega, T)
+        therm_ratio = calc_therm_ratio(omega, guess_Temp)
         s = (
             2
             * EL
@@ -87,7 +88,7 @@ def calc_Qind_vs_omega(
         return s
 
     # calculate Qcap vs omega
-    other_factors = spectral_density(omegas, guess_Temp)
+    other_factors = spectral_density(omegas) + spectral_density(-omegas)
     Qind_vs_omega = T1s * np.abs(phi_elements) ** 2 * other_factors
 
     if T1errs is not None:
@@ -96,6 +97,22 @@ def calc_Qind_vs_omega(
         return Qind_vs_omega, Qind_vs_omega_err
     else:
         return Qind_vs_omega
+
+
+def find_proper_Temp(
+    guess_Temp: float,
+    calc_Q_fn: Callable[[float], np.ndarray],
+) -> float:
+    """use scipy.optimize.minimize to find the proper Temp, the proper Temp is the one that minimizes the difference between all Q values"""
+
+    res = minimize(
+        lambda T: np.std(calc_Q_fn(T)),
+        x0=[guess_Temp],
+        bounds=[(10e-3, 300e-3)],
+        method="L-BFGS-B",
+    )
+
+    return float(res.x[0]) if res.success else guess_Temp
 
 
 def plot_Q_vs_omega(
@@ -148,7 +165,7 @@ def add_Q_fit(
         mean_Q = np.mean(Q_vs_omega)
         fit_Qs = np.full_like(omegas, mean_Q)
 
-        ax.plot(omegas, fit_Qs, label=rf"$Q(\omega) = {mean_Q:.1g}$")
+        ax.plot(omegas, fit_Qs, label=rf"$Q = {mean_Q:.1g}$")
 
     else:
         a, b = np.polyfit(np.log(omegas), np.log(Q_vs_omega), 1)
