@@ -37,8 +37,12 @@ from zcu_tools.notebook.analysis.t1_curve import (
     plot_t1_with_sample,
     plot_sample_t1,
     plot_eff_t1_with_sample,
-    fit_noise_and_temp,
     calculate_eff_t1_vs_flx_with,
+    plot_Q_vs_omega,
+    calc_Qcap_vs_omega,
+    add_Q_fit,
+    calc_Qind_vs_omega,
+    freq2omega,
 )
 from zcu_tools.simulate import flx2mA, mA2flx
 from zcu_tools.simulate.fluxonium import (
@@ -69,6 +73,10 @@ if "r_f" in allows:
 
 if "sample_f" in allows:
     sample_f = allows["sample_f"]
+
+if "dispersive" in allows:
+    g = allows["dispersive"]["g"]
+    r_f = allows["dispersive"]["r_f"]
 ```
 
 ## Load Sample Points
@@ -80,12 +88,12 @@ loadpath = f"../../result/{qub_name}/samples.csv"
 freqs_df = pd.read_csv(loadpath)
 freqs_df = freqs_df[~np.isnan(freqs_df["T1 (us)"])]
 s_mAs = freqs_df["calibrated mA"].values  # mA
-s_fpts = freqs_df["Freq (MHz)"].values
-s_T1s = freqs_df["T1 (us)"].values
-s_T1errs = freqs_df["T1err (us)"].values
+s_fpts = 1e-3 * freqs_df["Freq (MHz)"].values  # GHz
+s_T1s = 1e3 * freqs_df["T1 (us)"].values  # ns
+s_T1errs = 1e3 * freqs_df["T1err (us)"].values  # ns
 
 # filter out bad points
-valid = s_T1errs < 0.2 * s_T1s
+valid = np.logical_or(s_T1errs < 0.2 * s_T1s, np.isnan(s_T1errs))
 s_mAs = s_mAs[valid]
 s_fpts = s_fpts[valid]
 s_T1s = s_T1s[valid]
@@ -109,76 +117,86 @@ plt.show()
 # Simulation
 
 ```python
-t_flxs = np.linspace(0.0, 0.6, 1000)
+t_flxs = np.linspace(0.0, 1.0, 1000)
 t_mAs = flx2mA(t_flxs, mA_c, period)
 ```
 
 ```python
 fluxonium = scq.Fluxonium(*params, flux=0.5, cutoff=40, truncated_dim=6)
-spectrum_data = fluxonium.get_spectrum_vs_paramvals(
+
+t_spectrum_data = fluxonium.get_spectrum_vs_paramvals(
     "flux", t_flxs, evals_count=20, get_eigenstates=True
 )
-t_fpts = (spectrum_data.energy_table[:, 1] - spectrum_data.energy_table[:, 0]) * 1e3
-```
-
-```python
-s_n_elements = np.abs(
-    fluxonium.get_matelements_vs_paramvals(
-        "n_operator", "flux", s_flxs, evals_count=20
-    ).matrixelem_table[:, 0, 1]
+s_spectrum_data = fluxonium.get_spectrum_vs_paramvals(
+    "flux", s_flxs, evals_count=20, get_eigenstates=True
 )
-s_n_spectral = 1 / (s_T1s * s_n_elements**2)
-s_n_spectral_err = s_T1errs / (s_T1s * s_n_elements) ** 2
-s_phi_elements = np.abs(
-    fluxonium.get_matelements_vs_paramvals(
-        "phi_operator", "flux", s_flxs, evals_count=20
-    ).matrixelem_table[:, 0, 1]
-)
-s_phi_spectral = 1 / (s_T1s * s_phi_elements**2)
-s_phi_spectral_err = s_T1errs / (s_T1s * s_phi_elements) ** 2
-```
-
-```python
-plt.title(r"$S(w)/\hbar^2$")
-plt.errorbar(s_fpts, s_n_spectral, yerr=s_n_spectral_err, fmt=".", label="n")
-plt.errorbar(s_fpts, s_phi_spectral, yerr=s_phi_spectral_err, fmt=".", label="phi")
-plt.legend()
-plt.grid()
-plt.show()
 ```
 
 # T1 curve
 
 ```python
-Temp = 113e-3
+Temp = 20e-3
 # Temp = 50e-3
-# Temp = fit_temp
 
-plot_args = (s_mAs, s_T1s, s_T1errs, mA_c, period, fluxonium, spectrum_data, t_flxs)
+plot_args = (s_mAs, s_T1s, s_T1errs, mA_c, period, fluxonium, t_spectrum_data, t_flxs)
 ```
 
 ## Q_cap
 
 ```python
-# Q_cap = fit_noise[0][1]["Q_cap"]
-Q_cap = 7.0e5
+s_n_elements = fluxonium.get_matelements_vs_paramvals(
+    "n_operator", "flux", s_flxs, evals_count=20
+).matrixelem_table[:, 0, 1]
+```
+
+```python
+Qcaps, Qcaps_err = calc_Qcap_vs_omega(
+    params, s_fpts, s_T1s, s_n_elements, T1errs=s_T1errs, guess_Temp=20e-3
+)
+
+fig, ax = plot_Q_vs_omega(s_fpts, Qcaps, Qcaps_err, Qname=r"$Q_{cap}$")
+
+fit_Qcaps = []
+# fit_Qcaps.append(add_Q_fit(ax, s_fpts, Qcaps))
+fit_Qcaps.append(add_Q_fit(ax, s_fpts, Qcaps, w_range=(None, 12), fit_constant=True))
+fit_Qcaps.append(add_Q_fit(ax, s_fpts, Qcaps, w_range=(15, None)))
+
+
+fit_Qcaps = list(map(np.array, fit_Qcaps))
+fit_Qcaps = np.concatenate(fit_Qcaps, axis=1)
+fit_Qcaps = fit_Qcaps[:, np.argsort(fit_Qcaps[0])]
+
+
+def fitted_Qcap(w: np.ndarray, T: float) -> np.ndarray:
+    return np.interp(w, fit_Qcaps[0], fit_Qcaps[1])
+
+
+fig.savefig(f"../../result/{qub_name}/image/Qcap_vs_omega.png")
+plt.show()
+```
+
+```python
+# Q_cap = 0.1e3
+
+Q_cap_array = fitted_Qcap(freq2omega(s_fpts), Temp)
+Q_cap_max, Q_cap_min = np.max(Q_cap_array), np.min(Q_cap_array)
 
 fig, _ = plot_t1_with_sample(
     *plot_args,
     name="Q_cap",
     noise_name="t1_capacitive",
-    values=[Q_cap / 2, Q_cap, Q_cap * 2],
+    # values=[Q_cap / 2, Q_cap, Q_cap * 2],
+    values=[Q_cap_min, fitted_Qcap, Q_cap_max],
     Temp=Temp,
 )
 
-# fig.savefig(f"../../result/{qub_name}/image/T1s_fit_Qcap.png")
+fig.savefig(f"../../result/{qub_name}/image/T1s_fit_Qcap.png")
 plt.show()
 ```
 
 ## Q_qp
 
 ```python
-# x_qp = fit_noise[1][1]["x_qp"]
 x_qp = 1.5e-6
 
 fig, _ = plot_t1_with_sample(
@@ -197,14 +215,49 @@ plt.show()
 ## Q_ind
 
 ```python
-# Q_ind = fit_noise[2][1]["Q_ind"]
-Q_ind = 7e7
+s_phi_elements = fluxonium.get_matelements_vs_paramvals(
+    "phi_operator", "flux", s_flxs, evals_count=20
+).matrixelem_table[:, 0, 1]
+```
+
+```python
+Qind_array, Qind_array_err = calc_Qind_vs_omega(
+    params, s_fpts, s_T1s, s_phi_elements, T1errs=s_T1errs, guess_Temp=20e-3
+)
+
+fig, ax = plot_Q_vs_omega(s_fpts, Qind_array, Qind_array_err, Qname=r"$Q_{ind}$")
+
+Qind_params = []
+# Qind_params.append(add_Q_fit(ax, s_fpts, Qind_array))
+Qind_params.append(add_Q_fit(ax, s_fpts, Qind_array, w_range=(None, 12)))
+Qind_params.append(add_Q_fit(ax, s_fpts, Qind_array, w_range=(15, None)))
+
+
+Qind_params = list(map(np.array, Qind_params))
+Qind_params = np.concatenate(Qind_params, axis=1)
+Qind_params = Qind_params[:, np.argsort(Qind_params[0])]
+
+
+def fitted_Qind(w: np.ndarray, T: float) -> np.ndarray:
+    return np.interp(w, Qind_params[0], Qind_params[1])
+
+
+fig.savefig(f"../../result/{qub_name}/image/Qind_vs_omega.png")
+plt.show()
+```
+
+```python
+# Q_ind = 7e7
+
+Q_ind_array = fitted_Qind(freq2omega(s_fpts), Temp)
+Q_ind_max, Q_ind_min = np.max(Q_ind_array), np.min(Q_ind_array)
 
 fig, ax = plot_t1_with_sample(
     *plot_args,
     name="Q_ind",
     noise_name="t1_inductive",
-    values=[Q_ind / 2, Q_ind, Q_ind * 2],
+    # values=[Q_ind / 2, Q_ind, Q_ind * 2],
+    values=[Q_ind_min, fitted_Qind, Q_ind_max],
     Temp=Temp,
 )
 # ax.set_xlim(-5, -4)
@@ -213,74 +266,23 @@ fig.savefig(f"../../result/{qub_name}/image/T1s_fit_Q_ind.png")
 plt.show()
 ```
 
-## Fitting eff
-
-```python
-fit_noise, fit_temp = fit_noise_and_temp(
-    s_flxs,
-    1e3 * s_T1s,
-    fluxonium,
-    init_guess_noise=[
-        ("t1_capacitive", dict(Q_cap=Q_cap)),
-        # ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
-        ("t1_inductive", dict(Q_ind=Q_ind)),
-    ],
-    bounds_noise=[
-        ("t1_capacitive", dict(Q_cap=(0.5 * Q_cap, 10 * Q_cap))),
-        # ("t1_quasiparticle_tunneling", dict(x_qp=(0.1 * x_qp, 2 * x_qp))),
-        ("t1_inductive", dict(Q_ind=(0.5 * Q_ind, 10 * Q_ind))),
-    ],
-    init_guess_temp=Temp,
-    bounds_temp=(10e-3, 500e-3),
-    asym_loss_weight=2.0,
-)
-print("Noise channels:")
-for ch_name, noise_params in fit_noise:
-    print("\t" + ch_name + ":")
-    for name, value in noise_params.items():
-        print(f"\t\t{name}: {value:.1e}")
-print(f"Temperature: {1e3 * fit_temp:.2f} mK")
-
-
-fit_t1_effs = calculate_eff_t1_vs_flx_with(
-    t_flxs, fit_noise, Temp, fluxonium=fluxonium, spectrum_data=spectrum_data
-)
-
-fig, ax = plot_eff_t1_with_sample(
-    s_mAs,
-    s_T1s,
-    s_T1errs,
-    fit_t1_effs,
-    mA_c,
-    period,
-    t_flxs,
-    title=f"Temperature = {fit_temp * 1e3:.2f} mK",
-)
-
-fig.savefig(f"../../result/{qub_name}/image/T1s_fit_eff.png")
-plt.show()
-```
-
-```python
-Q_cap = fit_noise[0][1]["Q_cap"]
-x_qp = fit_noise[1][1]["x_qp"]
-Q_ind = fit_noise[2][1]["Q_ind"]
-Temp = fit_temp
-```
-
 # Advance
 
 ```python
 # noise_channels = fit_noise
 noise_channels = [
-    ("t1_capacitive", dict(Q_cap=Q_cap)),
+    # ("t1_capacitive", dict(Q_cap=Q_cap)),
+    # ("t1_capacitive", dict(Q_cap=fitted_Qcap)),
+    ("t1_capacitive", dict(Q_cap=Q_cap_max)),
     # ("t1_quasiparticle_tunneling", dict(x_qp=x_qp)),
-    ("t1_inductive", dict(Q_ind=Q_ind)),
+    # ("t1_inductive", dict(Q_ind=Q_ind)),
+    # ("t1_inductive", dict(Q_ind=fitted_Qind)),
+    ("t1_inductive", dict(Q_ind=Q_ind_max)),
 ]
 
 noise_label = "\n".join(
     [
-        f"{name:<5} = {value:.1e}"
+        f"{name:<5} = " + f"{name}(w)" if callable(value) else f"{value:.1e}"
         for ch in noise_channels
         for name, value in ch[1].items()
     ]
@@ -289,16 +291,15 @@ noise_label = "\n".join(
 
 ```python
 t1_effs = calculate_eff_t1_vs_flx_with(
-    t_flxs, noise_channels, Temp, fluxonium=fluxonium, spectrum_data=spectrum_data
+    t_flxs, noise_channels, Temp, fluxonium=fluxonium, spectrum_data=t_spectrum_data
 )
 ```
 
 ## Percell Effect
 
 ```python
-rf_w = 2e-3  # GHz
-g = results["dispersive"]["g"]
-r_f = results["dispersive"]["r_f"]
+rf_w = 5e-3  # GHz
+g = 0.1
 
 percell_t1s = calculate_percell_t1_vs_flx(
     t_flxs, r_f=r_f, kappa=rf_w, g=g, Temp=Temp, params=params
