@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,6 +8,27 @@ from scipy.optimize import least_squares
 
 from zcu_tools.simulate import flx2mA, mA2flx
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flx_with
+
+
+def calc_noise_spectral(
+    flxs: np.ndarray,
+    T1s: np.ndarray,
+    fluxonium: scq.Fluxonium,
+    T1errs: Optional[np.ndarray] = None,
+    operator: Literal["n_operator", "phi_operator"] = "n_operator",
+) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+    elements = np.abs(
+        fluxonium.get_matelements_vs_paramvals(
+            operator, "flux", flxs, evals_count=20
+        ).matrixelem_table[:, 0, 1]
+    )
+
+    noise_spectrum = 1 / (T1s * elements**2)
+    if T1errs is not None:
+        noise_spectrum_err = T1errs / (T1s * elements) ** 2
+        return noise_spectrum, noise_spectrum_err
+    else:
+        return noise_spectrum
 
 
 def plot_sample_t1(
@@ -174,7 +195,7 @@ def plot_t1_with_sample(
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     fig.suptitle(f"Temperature = {Temp * 1e3:.2f} mK")
 
-    ax.errorbar(s_mAs, s_T1s * 1e3, yerr=s_T1errs * 1e3, fmt=".-", label="T1")
+    ax.errorbar(s_mAs, s_T1s * 1e3, yerr=s_T1errs * 1e3, fmt=".", label="T1")
 
     for i, (v, t1_eff) in enumerate(zip(values, t1_effs)):
         label = f"{name}(w)_{i}" if callable(v) else f"{name} = {v:.1e}"
