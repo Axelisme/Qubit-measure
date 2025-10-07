@@ -209,25 +209,11 @@ def assign_init_p(
     return fitparams
 
 
-def fit_line(
-    xdata: np.ndarray,
-    ydata: np.ndarray,
-    fitparams: Optional[List[Optional[float]]] = None,
-) -> Tuple[List[float], np.ndarray]:
-    def fitfunc(x: np.ndarray, a: float, b: float) -> np.ndarray:
-        return a * x + b
+def fit_line(xdata: np.ndarray, ydata: np.ndarray) -> Tuple[float, float]:
+    """params: [a, b] -> y = a * x + b"""
 
-    if fitparams is None:
-        fitparams = [None] * 2
+    from scipy.stats import linregress
 
-    if any([p is None for p in fitparams]):
-        a = (ydata[-1] - ydata[0]) / (xdata[-1] - xdata[0])
-        b = ydata[0] - a * xdata[0]
-        assign_init_p(fitparams, [a, b])
+    a, b, *_ = linregress(xdata, ydata)
 
-    bounds = (
-        [-np.inf, -np.inf],
-        [np.inf, np.inf],
-    )
-
-    return fit_func(xdata, ydata, fitfunc, fitparams, bounds)
+    return a, b

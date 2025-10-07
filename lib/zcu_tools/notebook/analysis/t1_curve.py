@@ -3,8 +3,8 @@ from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy as sp
 import scqubits as scq
-from scipy.optimize import least_squares
 
 from zcu_tools.simulate import flx2mA, mA2flx
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flx_with
@@ -13,15 +13,17 @@ from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flx_with
 def calc_noise_spectral(
     flxs: np.ndarray,
     T1s: np.ndarray,
-    fluxonium: scq.Fluxonium,
     T1errs: Optional[np.ndarray] = None,
     operator: Literal["n_operator", "phi_operator"] = "n_operator",
+    fluxonium: Optional[scq.Fluxonium] = None,
+    spectrum_data: Optional[scq.SpectrumData] = None,
 ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
-    elements = np.abs(
-        fluxonium.get_matelements_vs_paramvals(
+    if spectrum_data is None:
+        assert fluxonium is not None
+        spectrum_data = fluxonium.get_matelements_vs_paramvals(
             operator, "flux", flxs, evals_count=20
-        ).matrixelem_table[:, 0, 1]
-    )
+        )
+    elements = np.abs(spectrum_data.matrixelem_table[:, 0, 1])
 
     noise_spectrum = 1 / (T1s * elements**2)
     if T1errs is not None:
@@ -29,6 +31,88 @@ def calc_noise_spectral(
         return noise_spectrum, noise_spectrum_err
     else:
         return noise_spectrum
+
+
+def plot_t1_vs_n01_and_fit_Qcap(
+    params: List[float],
+    fpts: np.ndarray,
+    noise_spectrum: np.ndarray,
+    noise_spectrum_err: np.ndarray,
+    guess_Temp: float = 20e-3,
+    fit_order: int = 1,
+) -> Tuple[plt.Figure, plt.Axes, List[float]]:
+    omegas = 2 * np.pi * fpts * 1e-3  # MHz -> rad/ns
+
+    EJ, EC, EL = params
+
+    def calc_thermal_factor(omega, T):
+        therm_ratio = (sp.constants.hbar * omega * 1e9) / (sp.constants.k * T)
+        return (
+            32
+            * np.pi
+            * EC
+            / (np.tanh(0.5 * np.abs(therm_ratio)) * (1 + np.exp(-therm_ratio)))
+        )
+
+    # calculate spectrum without thermal factor
+    thermal_factors = calc_thermal_factor(omegas, guess_Temp)
+    spectrum_wo_thermal = noise_spectrum / thermal_factors
+    spectrum_err_wo_thermal = noise_spectrum_err / thermal_factors
+
+    # fit the spectrum with n order polynomial
+    params = np.polyfit(omegas, np.log(spectrum_wo_thermal), deg=fit_order)
+
+    fig, ax = plt.subplots()
+    ax.set_title(r"$S(w)/\hbar^2 \; vs \; \omega$")
+    ax.errorbar(omegas, spectrum_wo_thermal, yerr=spectrum_err_wo_thermal, fmt=".")
+    ax.plot(
+        omegas,
+        np.exp(np.polyval(params, omegas)),
+        label=f"fit with order {fit_order}",
+    )
+
+    ax.set_yscale("log")
+    ax.set_xlabel(r"$\omega$ (rad/ns)")
+    ax.set_ylabel(r"$(T_1|n_{01}|^2)^{-1}$")
+    ax.legend()
+    ax.grid()
+
+    return fig, ax, params
+
+
+def plot_t1_vs_m01(
+    elements: np.ndarray,
+    T1s: np.ndarray,
+    T1errs: Optional[np.ndarray] = None,
+    op_name: str = r"$n_{01}$",
+) -> Tuple[plt.Figure, plt.Axes]:
+    fig, ax = plt.subplots()
+
+    ax.errorbar(np.abs(elements) ** 2, 1e3 * T1s, yerr=1e3 * T1errs, fmt=".")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel(f"|{op_name}|^2")
+    ax.set_ylabel(r"$T_1$ (ns)")
+    ax.set_title(r"$T_1 \; vs \; |n_{01}|^2$")
+    ax.grid()
+
+    T1_n01_2 = 1e3 * T1s * np.abs(elements) ** 2
+    up_line_value = np.exp(np.mean(np.log(T1_n01_2)) + 2 * np.std(np.log(T1_n01_2)))
+    down_line_value = np.exp(np.mean(np.log(T1_n01_2)) - 2 * np.std(np.log(T1_n01_2)))
+    ax.plot(
+        np.abs(elements) ** 2,
+        up_line_value / np.abs(elements) ** 2,
+        "k--",
+        label=f"{1 / up_line_value:.2e}",
+    )
+    ax.plot(
+        np.abs(elements) ** 2,
+        down_line_value / np.abs(elements) ** 2,
+        "k--",
+        label=f"{1 / down_line_value:.2e}",
+    )
+    ax.legend()
+    return fig, ax
 
 
 def plot_sample_t1(
@@ -45,6 +129,7 @@ def plot_sample_t1(
     ax.grid()
     ax.set_xlabel(r"Current (mA)", fontsize=14)
     ax.set_ylabel(r"$T_1$ ($\mu s$)", fontsize=14)
+    ax.set_yscale("log")
 
     ax2 = ax.secondary_xaxis(
         "top",
@@ -56,110 +141,6 @@ def plot_sample_t1(
     ax2.set_xlabel(r"$\phi_{ext}/\phi_0$", fontsize=14)
 
     return fig, ax
-
-
-def fit_noise_and_temp(
-    s_flxs: np.ndarray,
-    s_T1s: np.ndarray,
-    fluxonium: scq.Fluxonium,
-    init_guess_noise: List[Tuple[str, Dict[str, float]]],
-    bounds_noise: List[Tuple[str, Dict[str, Optional[Tuple[float, float]]]]],
-    init_guess_temp: float,
-    bounds_temp: Optional[Tuple[float, float]] = None,
-    evals_count: int = 20,
-    asym_loss_weight: float = 1.0,
-) -> Tuple[List[Tuple[str, Dict[str, float]]], float]:
-    spectrum_data = fluxonium.get_spectrum_vs_paramvals(
-        "flux", s_flxs, evals_count=evals_count, get_eigenstates=True
-    )
-
-    # Flatten initial guesses and construct bounds vectors
-    # initial values for free parameters
-    param_init: List[float] = []
-    # mapping of free param index -> (channel_idx, param_name)
-    param_meta: List[Tuple[int, str]] = []
-    lower_bounds: List[float] = []
-    upper_bounds: List[float] = []
-
-    # Build fast look-up for (low, high) bounds for each channel/parameter.
-    bounds_dicts = {idx: params for idx, (_, params) in enumerate(bounds_noise)}
-
-    for ch_idx, (_, param_dict) in enumerate(init_guess_noise):
-        bdict = bounds_dicts.get(ch_idx, {})
-        for p_name, p_val in param_dict.items():
-            # bounds may be None -> fixed parameter
-            bound_pair = bdict.get(p_name, (0.0, np.inf))
-            if bound_pair is None:
-                # leave value fixed, not part of optimization vector
-                continue
-            low, high = bound_pair
-            param_init.append(p_val)
-            param_meta.append((ch_idx, p_name))
-            lower_bounds.append(low)
-            upper_bounds.append(high)
-
-    # Append temperature as the last parameter and its bounds
-    temp_is_variable = bounds_temp is not None
-    if temp_is_variable:
-        low_temp, high_temp = bounds_temp
-        param_init.append(init_guess_temp)
-        lower_bounds.append(low_temp)
-        upper_bounds.append(high_temp)
-
-    def vector_to_noise_channels(
-        x: np.ndarray,
-    ) -> Tuple[List[Tuple[str, Dict[str, float]]], float]:
-        """Convert flat parameter vector back to noise_channels list and Temp."""
-        # Deep-copy the channel structure with updated parameter values
-        noise_channels = [
-            (ch_name, {k: v for k, v in params.items()})
-            for ch_name, params in init_guess_noise
-        ]
-
-        x_iter = iter(x)
-
-        # Fill in optimized noise parameters
-        for idx, (ch_idx, p_name) in enumerate(param_meta):
-            noise_channels[ch_idx][1][p_name] = next(x_iter)
-
-        if temp_is_variable:
-            Temp = float(next(x_iter))
-        else:
-            Temp = init_guess_temp
-        return noise_channels, Temp
-
-    # Residual function in log-space to equally weight different magnitudes
-    def residuals(x: np.ndarray) -> np.ndarray:
-        noise_channels, Temp = vector_to_noise_channels(x)
-        t1_theory = calculate_eff_t1_vs_flx_with(
-            s_flxs,
-            noise_channels,
-            Temp,
-            fluxonium=fluxonium,
-            spectrum_data=spectrum_data,
-        )
-        # Avoid log of zero or negative by flooring at a tiny value
-        t1_theory = np.clip(t1_theory, 1e-20, None)
-        diff = np.log10(t1_theory) - np.log10(s_T1s)
-
-        # Asymmetric weighting: penalize diff < 0 by factor 10 (sqrt factor for residuals)
-        weight = np.where(diff < 0, np.sqrt(asym_loss_weight), 1.0)
-        return weight * diff
-
-    if len(param_init) == 0:
-        # No parameters free -> return initial guess directly
-        return init_guess_noise, init_guess_temp
-
-    result = least_squares(
-        residuals,
-        x0=np.asarray(param_init, dtype=float),
-        bounds=(lower_bounds, upper_bounds),
-        method="trf",
-    )
-
-    fitted_noise_channels, fitted_Temp = vector_to_noise_channels(result.x)
-
-    return fitted_noise_channels, fitted_Temp
 
 
 def plot_t1_with_sample(
@@ -198,7 +179,7 @@ def plot_t1_with_sample(
     ax.errorbar(s_mAs, s_T1s * 1e3, yerr=s_T1errs * 1e3, fmt=".", label="T1")
 
     for i, (v, t1_eff) in enumerate(zip(values, t1_effs)):
-        label = f"{name}(w)_{i}" if callable(v) else f"{name} = {v:.1e}"
+        label = f"{name}(w)" if callable(v) else f"{name} = {v:.1e}"
         ax.plot(t_mAs, t1_eff, label=label, linestyle="--")
 
     ax.set_xlim(s_mAs.min() - 0.03, s_mAs.max() + 0.03)
