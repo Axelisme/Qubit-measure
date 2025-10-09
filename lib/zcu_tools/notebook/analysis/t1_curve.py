@@ -125,7 +125,6 @@ def plot_Q_vs_omega(
     omegas = freq2omega(fpts)
 
     fig, ax = plt.subplots()
-    fig.suptitle(Qname + r"$\; vs \; \omega$")
     ax.errorbar(omegas, Q_vs_omega, yerr=Q_vs_omega_err, fmt=".", label="data")
 
     ax.set_xscale("log")
@@ -162,7 +161,7 @@ def add_Q_fit(
         w_range = (None, None)
 
     if fit_constant:  # if fit_constant is True, fit a constant
-        mean_Q = np.mean(Q_vs_omega)
+        mean_Q = np.exp(np.mean(np.log(Q_vs_omega)))
         fit_Qs = np.full_like(omegas, mean_Q)
 
         ax.plot(omegas, fit_Qs, label=rf"$Q = {mean_Q:.1g}$")

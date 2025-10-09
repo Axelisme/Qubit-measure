@@ -13,9 +13,13 @@ from zcu_tools.liveplot.jupyter import LivePlotter1D
 from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
-from ...template import sweep_hard_template
+from ...runner import HardTask, Runner
 
 MISTPowerDepResultType = Tuple[np.ndarray, np.ndarray]
+
+
+def mist_signal2real(signal: np.ndarray) -> np.ndarray:
+    return np.abs(signal - signal[0])
 
 
 class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
@@ -24,30 +28,26 @@ class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
     ) -> MISTPowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        qub_pulse = cfg["qub_pulse"]
-
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        pdr_sweep = cfg["sweep"]["gain"]
+        pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
-        qub_pulse["gain"] = sweep2param("gain", pdr_sweep)
+        cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
 
-        pdrs = sweep2array(pdr_sweep)  # predicted amplitudes
-
-        prog = TwoToneProgram(soccfg, cfg)
-
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D("Pulse gain", "MIST", disable=not progress),
-            ticks=(pdrs,),
-            catch_interrupt=progress,
-        )
-
-        # get the actual amplitudes
-        pdrs = prog.get_pulse_param("qubit_pulse", "gain", as_array=True)  # type: ignore
-        assert isinstance(pdrs, np.ndarray), "pdrs should be an array"
+        with LivePlotter1D("Pulse gain", "MIST", disable=not progress) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        TwoToneProgram(soccfg, ctx.cfg).acquire(
+                            soc, progress=False, callback=update_hook
+                        )
+                    ),
+                    result_shape=(len(pdrs),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    pdrs, mist_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record the last result
         self.last_cfg = cfg

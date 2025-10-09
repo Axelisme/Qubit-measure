@@ -48,13 +48,13 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         if "sweep" in cfg:
             warnings.warn("sweep will be overwritten by singleshot measurement")
 
-        qub_pulse = cfg["qub_pulse"]
-
         # Create ge sweep: 0 (ground) and full gain (excited)
-        cfg["sweep"] = {"ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2}}
+        cfg["sweep"] = {
+            "ge": {"start": 0, "stop": cfg["qub_pulse"]["gain"], "expts": 2}
+        }
 
         # Set qubit pulse gain from sweep parameter
-        qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+        cfg["qub_pulse"]["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
         # Set flux device
         GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)

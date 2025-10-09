@@ -1,4 +1,4 @@
-from .base import AbsLivePlotter, MultiLivePlotter
+from .base import AbsLivePlotter, MultiLivePlotter, NonePlotter
 from .jupyter import (
     LivePlotter1D,
     LivePlotter2D,

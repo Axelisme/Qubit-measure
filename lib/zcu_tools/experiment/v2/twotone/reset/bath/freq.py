@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple, Literal
+from typing import Any, Dict, Literal, Optional, Tuple
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from zcu_tools.experiment import AbsExperiment
@@ -15,13 +15,13 @@ from zcu_tools.program.v2 import (
     Pulse,
     make_readout,
     make_reset,
+    set_reset_cfg,
     sweep2param,
-    BathReset,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ....template import sweep_hard_template
+from ....runner import HardTask, Runner
 
 FreqGainResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -37,8 +37,7 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
-        tested_reset = cfg["tested_reset"]
-        if tested_reset["type"] != "bath":
+        if cfg["tested_reset"]["type"] != "bath":
             raise ValueError("This experiment only supports bath reset")
 
         cfg["sweep"] = {
@@ -46,51 +45,43 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
             "freq": cfg["sweep"]["freq"],
         }
 
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse("init_pulse", cfg=cfg.get("init_pulse")),
-                BathReset(
-                    name="tested_reset",
-                    qubit_tone_cfg={
-                        **tested_reset["qubit_tone_cfg"],
-                        "gain": sweep2param("gain", cfg["sweep"]["gain"]),
-                    },
-                    cavity_tone_cfg={
-                        **tested_reset["cavity_tone_cfg"],
-                        "freq": sweep2param("freq", cfg["sweep"]["freq"]),
-                    },
-                    pi2_cfg=tested_reset["pi2_cfg"],
-                ),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
-        )
-
         gains = sweep2array(cfg["sweep"]["gain"])  # predicted gain points
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter2D(
-                "Qubit drive Gain (a.u.)",
-                "Cavity Frequency (MHz)",
-                flip=True,
-                disable=not progress,
-            ),
-            ticks=(gains, fpts),
-            signal2real=bathreset_signal2real,
+        set_reset_cfg(
+            cfg["tested_reset"], "qub_gain", sweep2param("gain", cfg["sweep"]["gain"])
+        )
+        set_reset_cfg(
+            cfg["tested_reset"], "res_freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
-        # Get the actual frequency points used by FPGA
-        gains = prog.get_pulse_param("tested_reset_qub_pulse", "gain", as_array=True)
-        fpts = prog.get_pulse_param("tested_reset_res_pulse", "freq", as_array=True)
-        assert isinstance(gains, np.ndarray), "gains should be an array"
-        assert isinstance(fpts, np.ndarray), "fpts should be an array"
+        with LivePlotter2D(
+            "Qubit drive Gain (a.u.)",
+            "Cavity Frequency (MHz)",
+            segment_kwargs={"flip": True},
+            disable=not progress,
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                make_reset("reset", ctx.cfg.get("reset")),
+                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
+                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
+                                make_readout("readout", ctx.cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
+                    result_shape=(len(gains), len(fpts)),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    gains, fpts, bathreset_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg

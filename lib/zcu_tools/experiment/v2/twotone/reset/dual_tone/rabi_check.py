@@ -13,12 +13,13 @@ from zcu_tools.program.v2 import (
     Pulse,
     make_readout,
     make_reset,
+    set_reset_cfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ....template import sweep_hard_template
+from ....runner import HardTask, Runner
 
 # (pdrs, signals_2d)  # signals shape: (2, len(pdrs)) for [w/o reset, w/ reset]
 ResetRabiCheckResultType = Tuple[np.ndarray, np.ndarray]
@@ -29,88 +30,56 @@ def reset_rabi_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
-    """Reset rabi check experiment for dual-tone reset.
-
-    Measures the effectiveness of dual-tone reset by sweeping the initialization pulse
-    amplitude and comparing signals with and without reset. This helps verify that the
-    dual-tone reset is working properly across different qubit states.
-
-    The experiment performs:
-    1. Initial reset (optional)
-    2. Initialization pulse with variable amplitude (to prepare different states)
-    3. Dual reset pulses (controlled by w/o_reset factor: 0=off, 1=on)
-    4. Readout to measure reset effectiveness
-    """
-
     def run(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> ResetRabiCheckResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        # Get reset and init pulse configurations
-        reset_cfg = cfg["tested_reset"]
-        init_pulse = cfg["init_pulse"]
-
         # Check that reset pulse is dual pulse type
-        if reset_cfg["type"] != "two_pulse":
+        if cfg["tested_reset"]["type"] != "two_pulse":
             raise ValueError("This experiment only supports dual-tone reset")
 
         # Canonicalise sweep section to single-axis form
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        gain_sweep = cfg["sweep"]["gain"]
 
         # Create 2D sweep: w/o_reset (outer) x gain (inner)
         cfg["sweep"] = {
             "w/o_reset": {"start": 0, "stop": 1.0, "expts": 2},
-            "gain": gain_sweep,
+            "gain": cfg["sweep"]["gain"],
         }
 
+        pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
+
         # Attach gain sweep to initialization pulse
-        init_pulse["gain"] = sweep2param("gain", gain_sweep)
-
-        # Attach reset factor to control reset on/off
-        reset_factor = sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"])
-        reset_pulse1 = reset_cfg["pulse1_cfg"]
-        reset_pulse2 = reset_cfg["pulse2_cfg"]
-
-        # Scale both reset pulses by factor (0=off, 1=on)
-        reset_pulse1["gain"] = reset_factor * reset_pulse1["gain"]
-        reset_pulse2["gain"] = reset_factor * reset_pulse2["gain"]
-        reset_pulse1["length"] = reset_factor * reset_pulse1["length"] + 0.01
-        reset_pulse2["length"] = reset_factor * reset_pulse2["length"] + 0.01
-
-        # Handle flat_top pulse style to prevent negative length
-        if reset_pulse1.get("style") == "flat_top" and "raise_pulse" in reset_pulse1:
-            reset_pulse1["length"] += reset_pulse1["raise_pulse"]["length"]
-        if reset_pulse2.get("style") == "flat_top" and "raise_pulse" in reset_pulse2:
-            reset_pulse2["length"] += reset_pulse2["raise_pulse"]["length"]
-
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse("init_pulse", cfg=cfg.get("init_pulse")),
-                make_reset("tested_reset", reset_cfg=reset_cfg),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
+        set_reset_cfg(
+            cfg["tested_reset"],
+            "on/off",
+            sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"]),
         )
+        cfg["init_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
 
-        pdrs = sweep2array(gain_sweep)  # predicted amplitudes
-
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D("Pulse gain", "Amplitude", num_lines=2, disable=not progress),
-            ticks=(pdrs,),
-            signal2real=reset_rabi_signal2real,
-        )
-
-        # Get actual parameters used by the FPGA
-        pdrs = prog.get_pulse_param("init_pulse", "gain", as_array=True)
-        assert isinstance(pdrs, np.ndarray), "pdrs should be an array"
+        with LivePlotter1D("Gain (a.u.)", "Amplitude", disable=not progress) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                make_reset("reset", ctx.cfg.get("reset")),
+                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
+                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
+                                make_readout("readout", ctx.cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
+                    result_shape=(len(pdrs),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    pdrs, reset_rabi_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg

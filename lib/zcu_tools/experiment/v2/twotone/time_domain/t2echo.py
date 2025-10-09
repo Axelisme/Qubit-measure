@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple, Literal
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +10,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
+    Delay,
     ModularProgramV2,
     Pulse,
     make_readout,
@@ -20,7 +21,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe, fit_gauss_decay
 from zcu_tools.utils.process import rotate2real
 
-from ...template import sweep_hard_template
+from ...runner import HardTask, Runner
 
 
 def t2echo_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -43,71 +44,54 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
         cfg = deepcopy(cfg)
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        sweep_cfg = cfg["sweep"]["length"]
 
-        t2e_spans = sweep2param("length", sweep_cfg)
+        ts = sweep2array(cfg["sweep"]["length"])
 
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse(
-                    name="pi2_pulse1",
-                    cfg={
-                        **cfg["pi2_pulse"],
-                        "post_delay": 0.5 * t2e_spans,
-                    },
+        t2e_spans = sweep2param("length", cfg["sweep"]["length"])
+
+        with LivePlotter1D(
+            "Time (us)",
+            "Amplitude",
+            segment_kwargs={"title": "T2 Echo"},
+            disable=not progress,
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                make_reset("reset", ctx.cfg.get("reset")),
+                                Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
+                                Delay("t2e_delay", delay=0.5 * t2e_spans),
+                                Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                                Delay("t2e_delay", delay=0.5 * t2e_spans),
+                                Pulse(
+                                    name="pi2_pulse2",
+                                    cfg={
+                                        **ctx.cfg["pi2_pulse"],
+                                        "phase": ctx.cfg["pi2_pulse"]["phase"]
+                                        + 360 * detune * t2e_spans,
+                                    },
+                                ),
+                                make_readout("readout", ctx.cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
+                    result_shape=(len(ts),),
                 ),
-                Pulse(
-                    name="pi_pulse",
-                    cfg={
-                        **cfg["pi_pulse"],
-                        "post_delay": 0.5 * t2e_spans,
-                    },
+                update_hook=lambda ctx: viewer.update(
+                    ts, t2echo_signal2real(np.asarray(ctx.get_data()))
                 ),
-                Pulse(
-                    name="pi2_pulse2",
-                    cfg={
-                        **cfg["pi2_pulse"],
-                        "phase": cfg["pi2_pulse"].get("phase", 0.0)
-                        + 360 * detune * t2e_spans,
-                    },
-                ),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
-        )
-
-        ts = sweep2array(sweep_cfg)  # predicted times
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D(
-                "Time (us)",
-                "Amplitude",
-                title="T2 Echo",
-                disable=not progress,
-            ),
-            ticks=(ts,),
-            signal2real=t2echo_signal2real,
-        )
-
-        # get actual times
-        real_ts1 = prog.get_time_param("pi2_pulse1_post_delay", "t", as_array=True)
-        real_ts2 = prog.get_time_param("pi_pulse_post_delay", "t", as_array=True)
-        assert isinstance(real_ts1, np.ndarray), "real_ts1 should be an array"
-        assert isinstance(real_ts2, np.ndarray), "real_ts2 should be an array"
-        real_ts = real_ts1 + real_ts2
-
-        real_ts += ts[0] - real_ts[0]  # adjust to start from the first time
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (real_ts, signals)
+        self.last_result = (ts, signals)
 
-        return real_ts, signals
+        return ts, signals
 
     def analyze(
         self,

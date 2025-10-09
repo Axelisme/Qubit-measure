@@ -2,10 +2,11 @@ import warnings
 from copy import deepcopy
 from typing import Any, Dict, Optional
 
+from qick.asm_v2 import QickParam
 
 from ..base import MyProgramV2
 from .base import Module
-from .waveform import make_waveform
+from .waveform import make_waveform, set_waveform_param
 
 
 def check_block_mode(name: str, cfg: Dict[str, Any], want_block: bool) -> None:
@@ -24,14 +25,14 @@ class Pulse(Module):
     ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
-        if self.cfg is not None:
-            self.waveform = make_waveform(f"{name}_waveform", self.cfg["waveform"])
 
         self.pulse_name = name if pulse_name is None else pulse_name
 
     def init(self, prog: MyProgramV2) -> None:
         if self.cfg is None:
             return
+
+        self.waveform = make_waveform(f"{self.name}_waveform", self.cfg["waveform"])
 
         # if this is the first time to init the pulse, init it
         if not self.has_registered(prog, self.pulse_name):
@@ -124,3 +125,20 @@ class Pulse(Module):
             return t + pre_delay + length + post_delay
         else:
             return t  # no block, return the start time as the end time
+
+    @classmethod
+    def set_param(
+        cls, pulse_cfg: Dict[str, Any], param_name: str, param_value: QickParam
+    ) -> None:
+        if param_name == "on/off":
+            pulse_cfg["gain"] = param_value * pulse_cfg["gain"]
+
+            # if the pulse is const or flat_top, also shrink the waveform length
+            if pulse_cfg["waveform"]["style"] in ["const", "flat_top"]:
+                set_waveform_param(pulse_cfg["waveform"], param_name, param_value)
+        elif param_name == "length":
+            set_waveform_param(pulse_cfg["waveform"], param_name, param_value)
+        elif param_name in ["gain", "freq", "phase"]:
+            pulse_cfg[param_name] = param_value
+        else:
+            raise ValueError(f"Unknown parameter: {param_name}")

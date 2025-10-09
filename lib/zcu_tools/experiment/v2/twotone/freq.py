@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +14,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_resonence_freq
 from zcu_tools.utils.process import rotate2real
 
-from ..template import sweep1D_soft_template, sweep_hard_template
+from ..runner import HardTask, Runner
 
 
 def qubfreq_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -25,110 +25,49 @@ FreqResultType = Tuple[np.ndarray, np.ndarray]
 
 
 class FreqExperiment(AbsExperiment[FreqResultType]):
-    def run_pure_zcu(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> FreqResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        qub_pulse = cfg["qub_pulse"]
-
-        # canonicalise sweep section to single-axis form «{'freq': ...}»
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        sweep_cfg = cfg["sweep"]["freq"]
-
-        # predicted sweep points before FPGA coercion
-        fpts = sweep2array(sweep_cfg)  # MHz
-
-        # bind sweep parameter as *QickParam* so it is executed by FPGA
-        qub_pulse["freq"] = sweep2param("freq", sweep_cfg)
-
-        prog = TwoToneProgram(soccfg, cfg)
-
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D("Frequency (MHz)", "Amplitude", disable=not progress),
-            ticks=(fpts,),
-            signal2real=qubfreq_signal2real,
-        )
-
-        # actual frequencies used by the FPGA
-        fpts_real = prog.get_pulse_param("qubit_pulse", "freq", as_array=True)
-        assert isinstance(fpts_real, np.ndarray), "fpts should be an array"
-
-        # cache
-        self.last_cfg = cfg
-        self.last_result = (fpts_real, signals)
-
-        return fpts_real, signals
-
-    def run_with_rf_source(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> FreqResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        if "rf_dev" not in cfg["dev"]:
-            raise ValueError("RF source is not configured")
-
-        sweep_cfg = format_sweep1D(cfg["sweep"], "freq")
-        del cfg["sweep"]  # use soft loop
-
-        # predicted sweep points before FPGA coercion
-        fpts = sweep2array(sweep_cfg)  # MHz
-
-        # Frequency is swept by RF source, zcu only controls the waveform
-        cfg["qub_pulse"]["freq"] = 0.0
-
-        def updateCfg(cfg: Dict[str, Any], _: int, fpt: float) -> None:
-            cfg["dev"]["rf_dev"]["freq"] = fpt * 1e6  # convert MHz to Hz
-
-        def measure_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> np.ndarray:
-            prog = TwoToneProgram(soccfg, cfg)
-            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
-
-        signals = sweep1D_soft_template(
-            cfg,
-            measure_fn,
-            LivePlotter1D("Frequency (MHz)", "Amplitude", disable=not progress),
-            xs=fpts,
-            updateCfg=updateCfg,
-            signal2real=qubfreq_signal2real,
-            progress=progress,
-        )
-
-        # cache
-        self.last_cfg = cfg
-        self.last_result = (fpts, signals)
-
-        return fpts, signals
-
     def run(
         self,
         soc,
         soccfg,
         cfg: Dict[str, Any],
         *,
-        with_rf_source: bool = False,
         progress: bool = True,
     ) -> FreqResultType:
-        if with_rf_source:
-            return self.run_with_rf_source(soc, soccfg, cfg, progress=progress)
-        else:
-            return self.run_pure_zcu(soc, soccfg, cfg, progress=progress)
+        cfg = deepcopy(cfg)  # prevent in-place modification
+
+        # canonicalise sweep section to single-axis form «{'freq': ...}»
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
+
+        # predicted sweep points before FPGA coercion
+        fpts = sweep2array(cfg["sweep"]["freq"])  # MHz
+
+        # bind sweep parameter as *QickParam* so it is executed by FPGA
+        cfg["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
+
+        with LivePlotter1D(
+            "Frequency (MHz)", "Amplitude", disable=not progress
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        TwoToneProgram(soccfg, ctx.cfg).acquire(
+                            soc, progress=False, callback=update_hook
+                        )
+                    ),
+                    result_shape=(len(fpts),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    fpts,
+                    qubfreq_signal2real(np.asarray(ctx.get_data())),
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
+
+        # cache
+        self.last_cfg = cfg
+        self.last_result = (fpts, signals)
+
+        return fpts, signals
 
     def analyze(
         self,

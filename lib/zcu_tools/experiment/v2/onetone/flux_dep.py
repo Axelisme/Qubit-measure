@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
-from zcu_tools.program.v2 import OneToneProgram, sweep2param
+from zcu_tools.program.v2 import OneToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
-from ..template import sweep2D_soft_hard_template
+from ..runner import HardTask, Runner, SoftTask
 
 FluxDepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -33,7 +33,6 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
     ) -> FluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        res_pulse = cfg["readout"]["pulse_cfg"]
         fpt_sweep = cfg["sweep"]["freq"]
         flx_sweep = cfg["sweep"]["flux"]
 
@@ -43,46 +42,42 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
         dev_values = sweep2array(flx_sweep, allow_array=True)
         fpts = sweep2array(fpt_sweep)  # predicted frequency points
 
-        res_pulse["freq"] = sweep2param("freq", fpt_sweep)
+        set_readout_cfg(cfg["readout"], "freq", sweep2param("freq", fpt_sweep))
 
-        def updateCfg(cfg, _, value) -> None:
-            set_flux_in_dev_cfg(cfg["dev"], value)
-
-        updateCfg(cfg, 0, dev_values[0])  # set initial flux value
-
-        def measure_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> np.ndarray:
-            prog = OneToneProgram(soccfg, cfg)
-            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
-
-        signals2D = sweep2D_soft_hard_template(
-            cfg,
-            measure_fn,
-            LivePlotter2DwithLine(
-                "Flux device value",
-                "Frequency (MHz)",
-                line_axis=1,
-                num_lines=2,
-                disable=not progress,
-            ),
-            xs=dev_values,
-            ticks=(fpts,),
-            updateCfg=updateCfg,
-            signal2real=fluxdep_signal2real,
-            progress=progress,
-        )
-
-        # get the actual frequency points
-        prog = OneToneProgram(soccfg, cfg)
-        fpts = prog.get_pulse_param("readout_pulse", "freq", as_array=True)
-        assert isinstance(fpts, np.ndarray), "fpts should be an array"
+        with LivePlotter2DwithLine(
+            "Flux device value",
+            "Frequency (MHz)",
+            line_axis=1,
+            num_lines=2,
+            disable=not progress,
+        ) as viewer:
+            signals = Runner(
+                task=SoftTask(
+                    sweep_name="flux",
+                    sweep_values=dev_values,
+                    update_cfg_fn=lambda i, ctx, flx: set_flux_in_dev_cfg(
+                        ctx.cfg["dev"], flx
+                    ),
+                    sub_task=HardTask(
+                        measure_fn=lambda ctx, update_hook: (
+                            OneToneProgram(soccfg, ctx.cfg).acquire(
+                                soc, progress=False, callback=update_hook
+                            )
+                        ),
+                        result_shape=(len(fpts),),
+                    ),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    dev_values, fpts, fluxdep_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (dev_values, fpts, signals2D)
+        self.last_result = (dev_values, fpts, signals)
 
-        return dev_values, fpts, signals2D
+        return dev_values, fpts, signals
 
     def analyze(
         self,

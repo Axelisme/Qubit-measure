@@ -13,14 +13,13 @@ from zcu_tools.program.v2 import (
     Pulse,
     make_readout,
     make_reset,
+    set_reset_cfg,
     sweep2param,
-    BathReset,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ....template import sweep_hard_template
-
+from ....runner import HardTask, Runner
 
 # (fpts, phases, signals_2d)
 LengthResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -43,54 +42,41 @@ class LengthExperiment(AbsExperiment[LengthResultType]):
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
-        tested_reset = cfg["tested_reset"]
-        if tested_reset["type"] != "bath":
+        if cfg["tested_reset"]["type"] != "bath":
             raise ValueError("This experiment only supports bath reset")
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
-        len_spans = sweep2param("length", cfg["sweep"]["length"])
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse("init_pulse", cfg=cfg.get("init_pulse")),
-                BathReset(
-                    name="tested_reset",
-                    qubit_tone_cfg={
-                        **tested_reset["qubit_tone_cfg"],
-                        "length": len_spans,
-                    },
-                    cavity_tone_cfg={
-                        **tested_reset["cavity_tone_cfg"],
-                        "length": len_spans,
-                    },
-                    pi2_cfg={
-                        **tested_reset["pi2_cfg"],
-                        "phase": tested_reset["pi2_cfg"]["phase"]
-                        + 360 * detune * len_spans,
-                    },
-                ),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
-        )
-
         lens = sweep2array(cfg["sweep"]["length"])  # predicted frequency points
 
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D(
-                "Length (us)",
-                "Signal (a.u.)",
-                disable=not progress,
-            ),
-            ticks=(lens,),
-            signal2real=bathreset_signal2real,
-        )
+        len_spans = sweep2param("length", cfg["sweep"]["length"])
+        set_reset_cfg(cfg["tested_reset"], "length", len_spans)
+        set_reset_cfg(cfg["tested_reset"], "pi2_phase", 360 * detune * len_spans)
+
+        with LivePlotter1D(
+            "Length (us)", "Signal (a.u.)", disable=not progress
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                make_reset("reset", ctx.cfg.get("reset")),
+                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
+                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
+                                make_readout("readout", ctx.cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
+                    result_shape=(len(lens),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    lens, bathreset_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg

@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict
 
+from qick.asm_v2 import QickParam
+
 from ..base import MyProgramV2
 
 
@@ -19,6 +21,14 @@ class AbsWaveform(ABC):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
         pass
 
+    @classmethod
+    def set_param(
+        cls, waveform_cfg: Dict[str, Any], param_name: str, param_value: QickParam
+    ) -> None:
+        raise NotImplementedError(
+            f"{cls.__name__} does not support set {param_name} params with {param_value}"
+        )
+
 
 class ConstWaveform(AbsWaveform):
     SUPPORT_STYLES = ["const"]
@@ -27,6 +37,17 @@ class ConstWaveform(AbsWaveform):
         wav_cfg = self.waveform_cfg
 
         assert wav_cfg["style"] in self.SUPPORT_STYLES
+
+    @classmethod
+    def set_param(
+        cls, waveform_cfg: Dict[str, Any], param_name: str, param_value: QickParam
+    ) -> None:
+        if param_name == "on/off":
+            waveform_cfg["length"] = param_value * waveform_cfg["length"] + 0.01
+        elif param_name == "length":
+            waveform_cfg["length"] = param_value
+        else:
+            raise ValueError(f"Unknown parameter: {param_name}")
 
 
 class CosineWaveform(AbsWaveform):
@@ -101,6 +122,21 @@ class FlatTopWaveform(AbsWaveform):
 
         self.raise_waveform.create(prog, ch, **kwargs)
 
+    @classmethod
+    def set_param(
+        cls, waveform_cfg: Dict[str, Any], param_name: str, param_value: QickParam
+    ) -> None:
+        if param_name == "on/off":
+            waveform_cfg["length"] = (
+                param_value * waveform_cfg["length"]
+                + waveform_cfg["raise_waveform"]["length"]
+                + 0.01
+            )
+        elif param_name == "length":
+            waveform_cfg["length"] = param_value
+        else:
+            raise ValueError(f"Unknown parameter: {param_name}")
+
 
 def make_waveform(name: str, waveform_cfg: Dict[str, Any]) -> AbsWaveform:
     style = waveform_cfg["style"]
@@ -114,5 +150,23 @@ def make_waveform(name: str, waveform_cfg: Dict[str, Any]) -> AbsWaveform:
         return DragWaveform(name, waveform_cfg)
     elif style == "flat_top":
         return FlatTopWaveform(name, waveform_cfg)
+    else:
+        raise ValueError(f"Unknown waveform style: {style}")
+
+
+def set_waveform_param(
+    waveform_cfg: Dict[str, Any], param_name: str, param_value: QickParam
+) -> None:
+    style = waveform_cfg["style"]
+    if style == "const":
+        return ConstWaveform.set_param(waveform_cfg, param_name, param_value)
+    elif style == "cosine":
+        return CosineWaveform.set_param(waveform_cfg, param_name, param_value)
+    elif style == "gauss":
+        return GaussWaveform.set_param(waveform_cfg, param_name, param_value)
+    elif style == "drag":
+        return DragWaveform.set_param(waveform_cfg, param_name, param_value)
+    elif style == "flat_top":
+        return FlatTopWaveform.set_param(waveform_cfg, param_name, param_value)
     else:
         raise ValueError(f"Unknown waveform style: {style}")

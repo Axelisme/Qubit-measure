@@ -13,10 +13,10 @@ from zcu_tools.program.v2 import ModularProgramV2, Pulse, make_readout, make_res
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..template import sweep1D_soft_template
+from ..runner import BatchTask, HardTask, Runner
 
 # (sequence, signals)
-AllXYResultType = Tuple[List[Tuple[str, str]], np.ndarray]
+AllXYResultType = Dict[Tuple[str, str], np.ndarray]
 
 # Standard AllXY sequence of 21 gate pairs
 ALLXY_SEQUENCE = [
@@ -83,9 +83,10 @@ def predict_state_with_error(
         raise ValueError(f"Invalid gate pair: {gates}")
 
 
-def allxy_signal2real(signals: np.ndarray) -> np.ndarray:
+def allxy_signal2real(signals_dict: Dict[Tuple[str, str], np.ndarray]) -> np.ndarray:
     """Convert complex signals to real values for AllXY analysis."""
-    return rotate2real(signals).real  # type: ignore
+    all_signals = np.concatenate(list(signals_dict.values()))
+    return rotate2real(all_signals).real  # type: ignore
 
 
 # ------------------------------------------------------------------------------
@@ -94,21 +95,6 @@ def allxy_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class AllXYExperiment(AbsExperiment[AllXYResultType]):
-    """AllXY gate characterization experiment.
-
-    Performs a comprehensive test of single-qubit gates using the AllXY sequence,
-    which consists of 21 specific gate pairs designed to reveal various types of
-    gate errors including calibration errors, cross-talk, and decoherence.
-
-    The experiment performs:
-    1. Initial reset (optional)
-    2. First gate from the gate pair
-    3. Second gate from the gate pair
-    4. Readout to measure final state
-
-    Each gate pair is executed in sequence using a soft sweep approach.
-    """
-
     def run(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> AllXYResultType:
@@ -133,66 +119,60 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             if gate_name != "I" and pulse_cfg is None:
                 raise ValueError(f"Gate '{gate_name}' pulse configuration is missing")
 
-        sequence = ALLXY_SEQUENCE
-
-        def updateCfg(cfg: Dict[str, Any], i: int, _: Any) -> None:
-            """Update configuration for each gate pair in the sequence."""
-            cfg["current_gates"] = sequence[i]
-
-        def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
-            """Measure function for each gate pair."""
-            gate1, gate2 = cfg["current_gates"]
-
-            prog = ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    make_reset("reset", reset_cfg=cfg.get("reset")),
-                    Pulse(name="first_pulse", cfg=gate2pulse_map[gate1]),
-                    Pulse(name="second_pulse", cfg=gate2pulse_map[gate2]),
-                    make_readout("readout", readout_cfg=cfg["readout"]),
-                ],
-            )
-
-            result = prog.acquire(soc, progress=False, callback=callback)
-            return result[0][0].dot([1, 1j])
-
-        # Set up live plotter with gate labels
         liveplotter = LivePlotter1D(
             xlabel="Gate",
             ylabel="Signal",
             disable=not progress,
-            line_kwargs=[dict(marker="o", linestyle="None", markersize=5)],
+            segment_kwargs=dict(
+                line_kwargs=[dict(marker="o", linestyle=None, markersize=5)],
+            ),
         )
 
         # Configure x-axis labels if plotter is available
-        if not liveplotter.disable and liveplotter.axs:
-            ax = liveplotter.axs[0]
-            if isinstance(ax, plt.Axes):
-                ax.set_xticks(np.arange(len(sequence)))
-                ax.set_xticklabels(
-                    [f"({gate1}, {gate2})" for gate1, gate2 in sequence],
-                    rotation=45,
-                    ha="right",
-                )
-                ax.grid(True)
+        if not liveplotter.disable:
+            ax = liveplotter.axs[0][0]
+            assert isinstance(ax, plt.Axes)
 
-        # Execute soft sweep over all gate pairs
-        signals = sweep1D_soft_template(
-            cfg,
-            measure_fn,
-            liveplotter,
-            xs=np.arange(len(sequence)),
-            updateCfg=updateCfg,
-            signal2real=allxy_signal2real,
-            progress=progress,
-        )
+            ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
+            ax.set_xticklabels(
+                [f"({gate1}, {gate2})" for gate1, gate2 in ALLXY_SEQUENCE],
+                rotation=45,
+                ha="right",
+            )
+            ax.grid(True)
+
+        with liveplotter as viewer:
+            signals_dict = Runner(
+                task=BatchTask(
+                    tasks={
+                        (gate1, gate2): HardTask(
+                            measure_fn=lambda ctx, update_hook: (
+                                ModularProgramV2(
+                                    soccfg,
+                                    ctx.cfg,
+                                    modules=[
+                                        make_reset("reset", ctx.cfg.get("reset")),
+                                        Pulse("first_pulse", gate2pulse_map[gate1]),
+                                        Pulse("second_pulse", gate2pulse_map[gate2]),
+                                        make_readout("readout", ctx.cfg["readout"]),
+                                    ],
+                                ).acquire(soc, progress=False, callback=update_hook)
+                            )
+                        )
+                        for gate1, gate2 in ALLXY_SEQUENCE
+                    }
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    np.arange(len(ALLXY_SEQUENCE)),
+                    allxy_signal2real(ctx.get_data()),
+                ),
+            ).run(cfg)
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (sequence, signals)
+        self.last_result = signals_dict
 
-        return sequence, signals
+        return signals_dict
 
     def analyze(
         self, result: Optional[AllXYResultType] = None, fit_ge: bool = False
@@ -203,17 +183,18 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             "No measurement data available. Run experiment first."
         )
 
-        sequence, signals = result
+        signals_dict = result
 
         # Rotate IQ data so that the contrast lies on the real axis and take only
         # the real part for further analysis.
-        real_signals = allxy_signal2real(signals)
+        sequence = list(signals_dict.keys())
+        real_signals = allxy_signal2real(signals_dict)
 
         # ------------------------------------------------------------------
         # fitting the signal with error
         # ------------------------------------------------------------------
 
-        g_signal = real_signals[sequence.index(("I", "I"))]
+        g_signal = real_signals[signals_dict[("I", "I")]]
         init_center = 0.5 * (np.max(real_signals) + np.min(real_signals))
         init_contrast = np.ptp(real_signals)
         if g_signal < init_center:
@@ -316,20 +297,16 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             "No measurement data available. Run experiment first."
         )
 
-        sequence, signals = result
+        signals_dict = result
+        sequence = list(signals_dict.keys())
+        signals = np.concatenate(list(signals_dict.values()))
 
         # Create gate indices and labels
         gate_indices = np.arange(len(sequence))
-        gate_labels = [f"{gate1}-{gate2}" for gate1, gate2 in sequence]
 
         save_data(
             filepath=filepath,
-            x_info={
-                "name": "Gate Pair Index",
-                "unit": "",
-                "values": gate_indices,
-                "labels": gate_labels,  # Include gate labels for reference
-            },
+            x_info={"name": "Gate Pair Index", "unit": "", "values": gate_indices},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,

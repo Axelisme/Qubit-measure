@@ -5,14 +5,14 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
-from ..template import sweep_hard_template
+from ..runner import HardTask, Runner
 
 PowerDepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -22,12 +22,6 @@ def pdrdep_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
-    """Two-tone power dependence experiment.
-
-    Sweeps both qubit drive power and frequency to characterize
-    the qubit response as a function of drive strength.
-    """
-
     def run(
         self,
         soc,
@@ -37,8 +31,6 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
         progress: bool = True,
     ) -> PowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
-
-        qub_pulse = cfg["qub_pulse"]
 
         # Ensure gain is the outer loop for better visualization
         cfg["sweep"] = {
@@ -50,33 +42,32 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
         # Attach both sweep parameters to the qubit pulse
-        qub_pulse["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
-        qub_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
+        cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+        cfg["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
-        prog = TwoToneProgram(soccfg, cfg)
-
-        # Run 2D hard sweep
-        signals2D = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter2D("Pulse Gain (a.u.)", "Frequency (MHz)", disable=not progress),
-            ticks=(pdrs, fpts),
-            signal2real=pdrdep_signal2real,
-        )
-
-        # Get actual parameters used by the FPGA
-        pdrs_real = prog.get_pulse_param("qubit_pulse", "gain", as_array=True)
-        fpts_real = prog.get_pulse_param("qubit_pulse", "freq", as_array=True)
-        assert isinstance(pdrs_real, np.ndarray), "pdrs should be an array"
-        assert isinstance(fpts_real, np.ndarray), "fpts should be an array"
+        with LivePlotter2D(
+            "Pulse Gain (a.u.)", "Frequency (MHz)", disable=not progress
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        TwoToneProgram(soccfg, ctx.cfg).acquire(
+                            soc, progress=False, callback=update_hook
+                        )
+                    ),
+                    result_shape=(len(pdrs), len(fpts)),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    pdrs, fpts, pdrdep_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (pdrs_real, fpts_real, signals2D)
+        self.last_result = (pdrs, fpts, signals)
 
-        return pdrs_real, fpts_real, signals2D
+        return pdrs, fpts, signals
 
     def analyze(
         self,

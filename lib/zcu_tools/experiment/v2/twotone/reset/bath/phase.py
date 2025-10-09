@@ -1,9 +1,10 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional, Tuple
-from copy import deepcopy
 
-import numpy as np
+from copy import deepcopy
+from typing import Any, Dict, Optional, Tuple
+
 import matplotlib.pyplot as plt
+import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -13,15 +14,14 @@ from zcu_tools.program.v2 import (
     Pulse,
     make_readout,
     make_reset,
+    set_reset_cfg,
     sweep2param,
-    BathReset,
 )
 from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.fitting.base import cosfunc, fitcos
 from zcu_tools.utils.process import rotate2real
-from zcu_tools.utils.fitting.base import fitcos, cosfunc
 
-from ....template import sweep_hard_template
-
+from ....runner import HardTask, Runner
 
 # (phases, signals)
 PhaseResultType = Tuple[np.ndarray, np.ndarray]
@@ -38,46 +38,40 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
-        tested_reset = cfg["tested_reset"]
-        if tested_reset["type"] != "bath":
+        if cfg["tested_reset"]["type"] != "bath":
             raise ValueError("This experiment only supports bath reset")
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "phase")
 
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse("init_pulse", cfg=cfg.get("init_pulse")),
-                BathReset(
-                    name="tested_reset",
-                    qubit_tone_cfg=tested_reset["qubit_tone_cfg"],
-                    cavity_tone_cfg=tested_reset["cavity_tone_cfg"],
-                    pi2_cfg={
-                        **tested_reset["pi2_cfg"],
-                        "phase": sweep2param("phase", cfg["sweep"]["phase"]),
-                    },
-                ),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
-        )
-
         phases = sweep2array(cfg["sweep"]["phase"])  # predicted phase points
 
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D(
-                "Phase (deg)",
-                "Signal (a.u.)",
-                disable=not progress,
-            ),
-            ticks=(phases,),
-            signal2real=bathreset_signal2real,
-        )
+        phase_param = sweep2param("phase", cfg["sweep"]["phase"])
+        set_reset_cfg(cfg["tested_reset"], "pi2_phase", phase_param)
+
+        with LivePlotter1D(
+            "Phase (deg)", "Signal (a.u.)", disable=not progress
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                make_reset("reset", ctx.cfg.get("reset")),
+                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
+                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
+                                make_readout("readout", ctx.cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
+                    result_shape=(len(phases),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    phases, bathreset_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg

@@ -9,12 +9,12 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneProgram, sweep2param, Pulse
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
-from ...template import sweep1D_soft_template, sweep_hard_template
+from ...runner import HardTask, Runner, SoftTask
 
 
 def rabi_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -25,47 +25,44 @@ LenRabiResultType = Tuple[np.ndarray, np.ndarray]  # (lens, signals)
 
 
 class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
-    """Rabi oscillation by varying pulse *length*."""
-
     def _run_for_flat(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> LenRabiResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
-        qub_pulse = cfg["qub_pulse"]
-
-        assert qub_pulse["waveform"]["style"] in ["const", "flat_top"], (
+        assert cfg["qub_pulse"]["waveform"]["style"] in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        len_sweep = cfg["sweep"]["length"]
 
-        lens = sweep2array(len_sweep)  # predicted
+        lens = sweep2array(cfg["sweep"]["length"])  # predicted
 
-        qub_pulse["waveform"]["length"] = sweep2param("length", len_sweep)
-
-        prog = TwoToneProgram(soccfg, cfg)
-
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D("Length (us)", "Signal", disable=not progress),
-            ticks=(lens,),
-            signal2real=rabi_signal2real,
+        Pulse.set_param(
+            cfg["qub_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
         )
 
-        real_lens = prog.get_pulse_param("qubit_pulse", "length", as_array=True)
-        assert isinstance(real_lens, np.ndarray)
-        real_lens += lens[0] - real_lens[0]  # correct absolute offset
+        with LivePlotter1D("Length (us)", "Signal", disable=not progress) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        TwoToneProgram(soccfg, ctx.cfg).acquire(
+                            soc, progress=False, callback=update_hook
+                        )
+                    ),
+                    result_shape=(len(lens),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    lens, rabi_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (real_lens, signals)
+        self.last_result = (lens, signals)
 
-        return real_lens, signals
+        return lens, signals
 
     def _run_for_arb(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
@@ -73,38 +70,31 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        len_sweep = cfg["sweep"]["length"]
-        del cfg["sweep"]
+        len_sweep = cfg["sweep"].pop("length")
 
         lens = sweep2array(len_sweep)  # predicted
 
-        def updateCfg(cfg: Dict[str, Any], _: int, length: Any) -> None:
-            qub_waveform = cfg["qub_pulse"]["waveform"]
-
-            qub_waveform["length"] = length
-            if qub_waveform["style"] == "gauss":
-                # TODO: better way to derive sigma?
-                qub_waveform["sigma"] = length / 5.0
-
-        # initialize pulse length
-        updateCfg(cfg, 0, lens[0])
-
-        def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
-            return (
-                TwoToneProgram(soccfg, cfg)
-                .acquire(soc, progress=False, callback=callback)[0][0]
-                .dot([1, 1j])
-            )
-
-        signals = sweep1D_soft_template(
-            cfg,
-            measure_fn,
-            LivePlotter1D("Length (us)", "Signal", disable=not progress),
-            xs=lens,
-            updateCfg=updateCfg,
-            signal2real=rabi_signal2real,
-            progress=progress,
-        )
+        with LivePlotter1D("Length (us)", "Signal", disable=not progress) as viewer:
+            signals = Runner(
+                task=SoftTask(
+                    sweep_name="length",
+                    sweep_values=lens,
+                    update_cfg_fn=lambda _, ctx, length: Pulse.set_param(
+                        ctx.cfg["qub_pulse"], "length", length
+                    ),
+                    sub_task=HardTask(
+                        measure_fn=lambda ctx, update_hook: (
+                            TwoToneProgram(soccfg, ctx.cfg).acquire(
+                                soc, progress=False, callback=update_hook
+                            )
+                        ),
+                    ),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    lens, rabi_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg

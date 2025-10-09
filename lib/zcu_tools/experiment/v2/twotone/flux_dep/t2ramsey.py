@@ -1,33 +1,53 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Literal, Optional, Tuple
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlotter2DwithLine, MultiLivePlotter, make_plot_frame
 from zcu_tools.program.v2 import (
+    Delay,
     ModularProgramV2,
     Pulse,
     make_readout,
     make_reset,
     sweep2param,
 )
+from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_decay_fringe
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.fitting import fit_decay_fringe, fit_resonence_freq
+from zcu_tools.utils.process import minus_background, rotate2real
 
-from ...template import sweep2D_soft_hard_template
-from .util import calc_snr
+from ...runner import BatchTask, HardTask, Runner, SoftTask, TaskContext, AnalysisTask
+from .util import check_gains
+from ...utils import set_pulse_freq, wrap_earlystop_check
 
-T2RamseyResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+T2RamseyResultType = Tuple[
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]
+]
 
 
 def t2ramsey_signal2real(signals: np.ndarray) -> np.ndarray:
-    return rotate2real(signals).real
+    real_signals = np.zeros_like(signals, dtype=np.float64)
+
+    flx_len = signals.shape[0]
+    for i in range(flx_len):
+        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
+
+        if np.any(np.isnan(real_signals[i, :])):
+            continue
+
+        # normalize
+        max_val = np.max(real_signals[i, :])
+        min_val = np.min(real_signals[i, :])
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+
+    return real_signals
 
 
 class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
@@ -37,202 +57,246 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         soccfg,
         cfg: Dict[str, Any],
         *,
-        method: Literal["fastflux", "yoko"] = "fastflux",
-        detune: float = 0.0,
-        progress: bool = True,
-        **kwargs,
-    ) -> T2RamseyResultType:
-        if method == "fastflux":
-            raise NotImplementedError("fastflux method is not implemented yet")
-        elif method == "yoko":
-            return self.run_yoko(
-                soc, soccfg, cfg, detune=detune, progress=progress, **kwargs
-            )
-        else:
-            raise ValueError(f"Unknown method: {method}")
-
-    def run_yoko(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        freq_map: Tuple[np.ndarray, np.ndarray],
-        detune: float = 0.0,
+        predictor: FluxoniumPredictor,
+        activate_detune: float = 0.0,
+        ref_flux: float = 0.0,
+        drive_oper: Literal["n", "phi"] = "n",
         progress: bool = True,
         earlystop_snr: Optional[float] = None,
     ) -> T2RamseyResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        map_values, map_freqs = freq_map
-
-        # sort for interpolation
-        sort_idxs = np.argsort(map_values)
-        map_values = map_values[sort_idxs]
-        map_freqs = map_freqs[sort_idxs]
-
         flx_sweep = cfg["sweep"]["flux"]
+        detune_sweep = cfg["sweep"]["detune"]
         len_sweep = cfg["sweep"]["length"]
 
-        # Flux sweep be soft loop
-        cfg["sweep"] = {"length": len_sweep}
+        # delete sweep dicts, it will be added back later
+        del cfg["sweep"]
 
         # predict sweep points
         values = sweep2array(flx_sweep)
+        detunes = sweep2array(detune_sweep)
         lens = sweep2array(len_sweep)
 
-        map_range = map_values.max() - map_values.min()
-        if np.any(values < map_values.min() - 0.01 * map_range) or np.any(
-            values > map_values.max() + 0.01 * map_range
-        ):
-            raise ValueError(
-                f"Sweep values from {values.min()} to {values.max()} exceed the freq_map range [{map_values.min()}, {map_values.max()}]"
-            )
+        # get reference matrix element
+        ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
 
-        predict_freqs = np.array(
-            [np.interp(fx, map_values, map_freqs) for fx in values]
-        )
+        predict_freqs = predictor.predict_freq(values)
+        predict_ms = predictor.predict_matrix_element(values, operator=drive_oper)
 
-        def updateCfg(cfg: Dict[str, Any], i: int, value: float) -> None:
-            set_flux_in_dev_cfg(cfg["dev"], value)
+        predict_qub_gains = cfg["qub_pulse"]["gain"] * ref_m / predict_ms
+        predict_pi2_gains = cfg["pi2_pulse"]["gain"] * ref_m / predict_ms
+        check_gains(predict_qub_gains, "qubit")
+        check_gains(predict_pi2_gains, "pi2")
+
+        def updateCfg(i: int, ctx: TaskContext, value: float) -> None:
+            set_flux_in_dev_cfg(ctx.cfg["dev"], value)
 
             predict_freq = predict_freqs[i]
 
-            cfg["pi2_pulse"]["freq"] = predict_freq
-            if "mixer_freq" in cfg["pi2_pulse"]:
-                cfg["pi2_pulse"]["mixer_freq"] = predict_freq
+            set_pulse_freq(ctx.cfg["qub_pulse"], predict_freq)
+            set_pulse_freq(ctx.cfg["pi2_pulse"], predict_freq)
+            ctx.cfg["qub_pulse"]["gain"] = predict_qub_gains[i]
+            ctx.cfg["pi2_pulse"]["gain"] = predict_pi2_gains[i]
 
-        updateCfg(cfg, 0, values[0])  # set initial flux
+        # -- Define Measure Functions --
 
-        # Frequency is swept by FPGA (hard sweep)
-        t2spans = sweep2param("length", len_sweep)
+        def measure_freq_fn(ctx: TaskContext, update_hook: Callable) -> np.ndarray:
+            cfg = deepcopy(ctx.cfg)
 
-        prog = None
+            cfg["sweep"] = {"detune": detune_sweep}
+            cfg["relax_delay"] = 0.0  # no need for freq measurement
 
-        def measure_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> np.ndarray:
-            nonlocal prog
+            detune_params = sweep2param("detune", cfg["sweep"]["detune"])
+
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
                     make_reset("reset", reset_cfg=cfg.get("reset")),
                     Pulse(
-                        name="pi2_pulse1",
+                        name="qub_pulse",
                         cfg={
-                            **cfg["pi2_pulse"],
-                            "post_delay": t2spans,
-                        },
-                    ),
-                    Pulse(
-                        name="pi2_pulse2",
-                        cfg={  # activate detune
-                            **cfg["pi2_pulse"],
-                            "phase": cfg["pi2_pulse"]["phase"] + 360 * detune * t2spans,
+                            **cfg["qub_pulse"],
+                            "freq": cfg["qub_pulse"]["freq"] + detune_params,
                         },
                     ),
                     make_readout("readout", readout_cfg=cfg["readout"]),
                 ],
             )
-            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
+            return prog.acquire(
+                soc,
+                progress=False,
+                callback=wrap_earlystop_check(prog, update_hook, earlystop_snr),
+            )
 
-        earlystop_callback = None
-        if earlystop_snr is not None:
+        def fit_last_freq(ctx: TaskContext) -> float:
+            freq_signals = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], "freq"])
 
-            def earlystop_callback(i: int, ir: int, real_signals: np.ndarray) -> None:
-                nonlocal prog
-                if ir < int(0.1 * cfg["rounds"]):
-                    return  # at least 10% averages
+            real_freq_signals = np.abs(minus_background(freq_signals))
+            detune, freq_err, kappa, *_ = fit_resonence_freq(detunes, real_freq_signals)
+            if freq_err > 0.5 * kappa:
+                return np.nan
+            else:
+                return detune + ctx.cfg["qub_pulse"]["freq"]
 
-                snr = calc_snr(real_signals[i, :])
-                if snr >= earlystop_snr:
-                    prog.set_early_stop(silent=True)
+        def measure_t2ramsey_fn(ctx: TaskContext, update_hook: Callable) -> np.ndarray:
+            cfg = deepcopy(ctx.cfg)
 
-        def t2r_yoko_signal2real(signals: np.ndarray) -> np.ndarray:
-            real_signals = rotate2real(signals).real
-            mean_val = np.mean(real_signals, axis=1)
-            std_val = np.std(real_signals, axis=1)
-            return (real_signals - mean_val[:, None]) / std_val[:, None]
+            fit_freq = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], "fit_freq"])
 
-        # Run 2D soft-hard sweep (flux soft, length hard)
-        signals2D = sweep2D_soft_hard_template(
-            cfg,
-            measure_fn,
-            LivePlotter2DwithLine(
-                "Flux device value",
-                "Time (us)",
-                line_axis=1,
-                num_lines=2,
-                disable=not progress,
+            if np.isnan(fit_freq):  # skip if freq measurement failed
+                return np.full(len(lens), np.nan, dtype=np.complex128)
+
+            cfg["sweep"] = {"length": len_sweep}
+            set_pulse_freq(cfg["pi_pulse"], fit_freq)
+            set_pulse_freq(cfg["pi2_pulse"], fit_freq)
+
+            t2r_spans = sweep2param("length", cfg["sweep"]["length"])
+
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    make_reset("reset", reset_cfg=cfg.get("reset")),
+                    Pulse(name="pi2_pulse1", cfg=cfg["pi2_pulse"]),
+                    Delay(name="t2r_delay", delay=t2r_spans),
+                    Pulse(
+                        name="pi2_pulse2",
+                        cfg={
+                            **ctx.cfg["pi2_pulse"],
+                            "phase": ctx.cfg["pi2_pulse"]["phase"]
+                            + 360 * activate_detune * t2r_spans,
+                        },
+                    ),
+                    make_readout("readout", readout_cfg=cfg["readout"]),
+                ],
+            )
+            return prog.acquire(
+                soc,
+                progress=False,
+                callback=wrap_earlystop_check(prog, update_hook, earlystop_snr),
+            )
+
+        def upwrap_signal(
+            results: List[Dict[str, np.ndarray]],
+        ) -> Dict[str, np.ndarray]:
+            return {name: np.array([r[name] for r in results]) for name in results[0]}
+
+        # -- Run Experiment --
+        fig, axs, dh = make_plot_frame(n_row=2, n_col=2, figsize=(12, 10))
+
+        with MultiLivePlotter(
+            dict(
+                freq=LivePlotter2DwithLine(
+                    "Flux device value",
+                    "Frequency (MHz)",
+                    line_axis=1,
+                    num_lines=5,
+                    existed_frames=(fig, [axs[0]], dh),
+                    disable=not progress,
+                ),
+                t2ramsey=LivePlotter2DwithLine(
+                    "Flux device value",
+                    "Time (us)",
+                    line_axis=1,
+                    num_lines=5,
+                    existed_frames=(fig, [axs[1]], dh),
+                    disable=not progress,
+                ),
             ),
-            xs=values,
-            ticks=(lens,),
-            updateCfg=updateCfg,
-            signal2real=t2r_yoko_signal2real,
-            progress=progress,
-            realsignal_callback=earlystop_callback,
-        )
+        ) as viewer:
 
-        # Get the actual frequency points used by FPGA
-        real_ts = prog.get_time_param("pi2_pulse1_post_delay", "t", as_array=True)
-        assert isinstance(real_ts, np.ndarray), "lens should be an array"
-        real_ts += lens[0] - real_ts[0]  # correct absolute offset
+            def plot_fn(ctx: TaskContext) -> None:
+                signals = upwrap_signal(ctx.get_data())
+                plot_kwargs = dict(
+                    freq=(values, detunes, t2ramsey_signal2real(signals["freq"])),
+                    t2ramsey=(values, lens, t2ramsey_signal2real(signals["t2ramsey"])),
+                )
+                if not ctx.is_empty():
+                    cur_task = ctx.addr_stack[-1]
+                    # only update current liveplotter for speed
+                    if cur_task in ["freq", "t2ramsey"]:
+                        plot_kwargs = {cur_task: plot_kwargs[cur_task]}
+                    elif cur_task == "fit_freq":
+                        return  # skip plotting when fitting
+
+                viewer.update(plot_kwargs)
+
+            results = Runner(
+                task=SoftTask(
+                    sweep_name="flux",
+                    sweep_values=values,
+                    update_cfg_fn=updateCfg,
+                    sub_task=BatchTask(
+                        tasks=dict(
+                            freq=HardTask(
+                                measure_fn=measure_freq_fn,
+                                result_shape=(len(detunes),),
+                            ),
+                            fit_freq=AnalysisTask(
+                                analyze_fn=fit_last_freq,
+                                init_result=np.array(np.nan),
+                            ),
+                            t2ramsey=HardTask(
+                                measure_fn=measure_t2ramsey_fn,
+                                result_shape=(len(lens),),
+                            ),
+                        ),
+                    ),
+                ),
+                update_hook=plot_fn,
+            )
+            signals_dict = upwrap_signal(results)
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (values, real_ts, signals2D)
+        self.last_result = (values, detunes, lens, signals_dict)
 
-        return values, real_ts, signals2D
+        return values, detunes, lens, signals_dict
 
     def analyze(
         self,
         result: Optional[T2RamseyResultType] = None,
-        freq_map: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         activate_detune: float = 0.0,
+        snr_threshold: float = 3.0,
     ) -> Tuple[np.ndarray, np.ndarray]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, ts, signals2D = result
+        values, freqs, ts, signals_dict = result
+        fit_freqs = signals_dict["fit_freq"]
+        t2r_signals = signals_dict["t2ramsey"]
 
-        if freq_map is not None:
-            map_values, map_freqs = freq_map
-
-            # sort for interpolation
-            sort_idxs = np.argsort(map_values)
-            map_values = map_values[sort_idxs]
-            map_freqs = map_freqs[sort_idxs]
-
-        real_signals2D = rotate2real(signals2D).real
+        real_t2r_signals = t2ramsey_signal2real(t2r_signals)
 
         t2s = np.full(len(values), np.nan, dtype=np.float64)
         t2errs = np.zeros_like(t2s)
-        detunes = np.full_like(t2s, np.nan)
-        detune_errs = np.zeros_like(t2s)
+        freqs = np.full_like(t2s, np.nan)
+        freq_errs = np.zeros_like(t2s)
 
         for i in range(len(values)):
-            real_signals = real_signals2D[i, :]
+            real_signals = real_t2r_signals[i, :]
 
             # skip if have nan data
             if np.any(np.isnan(real_signals)):
                 continue
 
-            t2r, t2err, detune, derr, *_ = fit_decay_fringe(ts, real_signals)
+            t2r, t2err, detune, derr, y_fit, *_ = fit_decay_fringe(ts, real_signals)
 
-            if t2err > 0.5 * t2r:
+            if t2err > 0.3 * t2r:
+                continue
+
+            contrast = np.max(y_fit) - np.min(y_fit) + 1e-9
+            snr = contrast / np.mean(np.abs(real_signals - y_fit))
+            if snr < snr_threshold:
                 continue
 
             t2s[i] = t2r
             t2errs[i] = t2err
-            detunes[i] = activate_detune - detune
-            detune_errs[i] = derr
-
-            if freq_map is not None:
-                # convert detune to absolute freq
-                predict_freq = np.interp(values[i], map_values, map_freqs)
-                detunes[i] += predict_freq
+            freqs[i] = activate_detune - detune + fit_freqs[i]
+            freq_errs[i] = derr
 
         if np.all(np.isnan(t2s)):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
@@ -241,28 +305,24 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         values = values[valid_idxs]
         t2s = t2s[valid_idxs]
         t2errs = t2errs[valid_idxs]
-        detunes = detunes[valid_idxs]
+        freqs = freqs[valid_idxs]
+        freq_errs = freq_errs[valid_idxs]
 
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
         assert isinstance(ax1, plt.Axes)
         assert isinstance(ax2, plt.Axes)
         fig.suptitle("T2Ramsey over Flux")
         ax1.errorbar(
-            values,
-            t2s,
-            yerr=t2errs,
-            label="Fitting T2",
-            elinewidth=1,
-            capsize=1,
+            values, t2s, yerr=t2errs, label="Fitting T2", elinewidth=1, capsize=1
         )
         ax1.set_ylabel("T2 (us)")
         ax1.set_ylim(bottom=0)
         ax1.grid()
         ax2.errorbar(
             values,
-            detunes,
-            yerr=detune_errs,
-            label="Fitting detune",
+            freqs,
+            yerr=freq_errs,
+            label="Fitting frequency",
             elinewidth=1,
             capsize=1,
         )
@@ -271,28 +331,52 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         ax2.grid()
         plt.plot()
 
-        return values, t2s, t2errs, detunes, detune_errs
+        return values, t2s, t2errs, freqs, freq_errs
 
     def save(
         self,
         filepath: str,
         result: Optional[T2RamseyResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/flux_dep/ge/t2ramsey",
+        tag: str = "twotone/flux_dep/ge/batch",
         **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, Ts, signals2D = result
+        values, detunes, ts, signals_dict = result
+        freq_singals = signals_dict["freq"]
+        fit_freqs = signals_dict["fit_freq"]
+        t2r_signals = signals_dict["t2ramsey"]
+
+        filepath = Path(filepath)
 
         save_data(
-            filepath=filepath,
-            x_info={"name": "Flux pulse gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
+            filepath=filepath.with_stem(filepath.stem + "_freq"),
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
+            y_info={"name": "Detune", "unit": "Hz", "values": detunes * 1e6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": freq_singals.T},
             comment=comment,
-            tag=tag,
+            tag=tag + "/freq",
+            **kwargs,
+        )
+
+        save_data(
+            filepath=filepath.with_stem(filepath.stem + "_fit_freq"),
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
+            z_info={"name": "Frequency", "unit": "Hz", "values": fit_freqs * 1e6},
+            comment=comment,
+            tag=tag + "/fit_freq",
+            **kwargs,
+        )
+
+        save_data(
+            filepath=filepath.with_stem(filepath.stem + "_t2ramsey"),
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
+            y_info={"name": "Time", "unit": "s", "values": ts * 1e-6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": t2r_signals.T},
+            comment=comment,
+            tag=tag + "/t2ramsey",
             **kwargs,
         )

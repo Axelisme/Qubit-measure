@@ -9,13 +9,17 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram, sweep2param
+from zcu_tools.program.v2 import OneToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_resonence_freq
 
-from ..template import sweep_hard_template
+from ..runner import HardTask, Runner
 
 FreqResultType = Tuple[np.ndarray, np.ndarray]
+
+
+def freq_signal2real(signals: np.ndarray) -> np.ndarray:
+    return np.abs(signals)
 
 
 class FreqExperiment(AbsExperiment[FreqResultType]):
@@ -24,42 +28,41 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
     ) -> FreqResultType:
         cfg = deepcopy(cfg)
 
-        res_pulse = cfg["readout"]["pulse_cfg"]
-
         # Ensure the sweep section is in canonical single-axis form.
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        sweep_cfg = cfg["sweep"]["freq"]
 
         # Predicted frequency points (before mapping to ADC domain)
-        fpts = sweep2array(sweep_cfg)  # MHz
+        fpts = sweep2array(cfg["sweep"]["freq"])  # MHz
 
-        # Attach sweep parameter to the QICK program – using a *QickParam* so
-        # that it is executed inside the FPGA loop («hard sweep»).
-        res_pulse["freq"] = sweep2param("freq", sweep_cfg)
-
-        # Build program once; *OneToneProgram* will evaluate the sweep
-        prog = OneToneProgram(soccfg, cfg)
-
-        # Run acquisition via common *template* helper
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D("Frequency (MHz)", "Amplitude", disable=not progress),
-            ticks=(fpts,),
+        # set readout frequency as sweep param
+        set_readout_cfg(
+            cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
-        # Retrieve the actual frequencies *used* by the program; because of
-        # FPGA coercion they can differ slightly from the requested points.
-        fpts_real = prog.get_pulse_param("readout_pulse", "freq", as_array=True)
-        assert isinstance(fpts_real, np.ndarray), "fpts should be an ndarray"
+        # run experiment
+        with LivePlotter1D(
+            "Frequency (MHz)", "Amplitude", disable=not progress
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        OneToneProgram(soccfg, ctx.cfg).acquire(
+                            soc, progress=progress, callback=update_hook
+                        )
+                    ),
+                    result_shape=(len(fpts),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    fpts, freq_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (fpts_real, signals)
+        self.last_result = (fpts, signals)
 
-        return fpts_real, signals
+        return fpts, signals
 
     def analyze_by_abcd(
         self,

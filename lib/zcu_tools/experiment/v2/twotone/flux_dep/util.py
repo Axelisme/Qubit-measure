@@ -1,18 +1,11 @@
-from typing import Any, Dict, Tuple
+import warnings
 from copy import deepcopy
+from typing import Any, Dict, Tuple
 
 import numpy as np
-from scipy.ndimage import gaussian_filter
-
-from zcu_tools.utils import deepupdate
-
 from qick.asm_v2 import QickParam
 
-
-def calc_snr(real_signals: np.ndarray) -> float:
-    smooth_signals = gaussian_filter(real_signals, sigma=1)
-    noise = np.mean(np.abs(real_signals - smooth_signals))
-    return (np.max(smooth_signals) - np.min(smooth_signals)) / noise
+from zcu_tools.utils import deepupdate
 
 
 def wrap_with_flux_pulse(
@@ -22,35 +15,56 @@ def wrap_with_flux_pulse(
     It will not overrid the existing value in flx_cfg.
     """
     pulse = deepcopy(pulse)
-    derive_pulse = {"nqz": 1, "freq": 0.0, "phase": 0.0, "outsel": "input"}
+    derive_pulse = {
+        "nqz": 1,
+        "freq": 0.0,
+        "phase": 0.0,
+        "outsel": "input",
+        "block_mode": False,
+    }
 
-    if isinstance(pulse["t"], QickParam):
-        raise ValueError("pulse t cannot be a QickParam when using flux pulse wrap.")
-    if isinstance(pulse["post_delay"], QickParam):
-        raise ValueError(
-            "pulse post_delay cannot be a QickParam when using flux pulse wrap."
-        )
+    def check_delay(delay: str) -> None:
+        if isinstance(pulse[delay], QickParam):
+            raise ValueError(
+                f"pulse {delay} cannot be a QickParam when using flux pulse wrap."
+            )
+
+    check_delay("pre_delay")
+    check_delay("post_delay")
 
     # derive t
-    pulse_t = pulse["t"]
-    if pulse_t >= margin:
-        flux_t = pulse_t - margin
+    pre_delay = pulse["pre_delay"]
+    if pre_delay >= margin:
+        flux_pre_delay = pre_delay - margin
     else:
-        flux_t = 0.0
-        pulse_t = margin
-    pulse["t"] = pulse_t
+        flux_pre_delay = 0.0
+        pre_delay = margin
+    pulse["pre_delay"] = pre_delay
 
     # derive length
-    flux_length = pulse["length"] + 2 * margin
+    flux_length = pulse["waveform"]["length"] + 2 * margin
 
     # derive post_delay
-    pulse_post_delay = pulse["post_delay"]
-    if pulse_post_delay is not None and pulse_post_delay >= margin:
-        pulse_post_delay = pulse_post_delay - margin
+    post_delay = pulse["post_delay"]
+    if post_delay >= margin:
+        flux_post_delay = post_delay - margin
+    else:
+        flux_post_delay = 0.0
+        post_delay = margin
+    pulse["post_delay"] = post_delay
 
-    derive_pulse.update(t=flux_t, length=flux_length, post_delay=None)
+    derive_pulse.update(
+        pre_delay=flux_pre_delay,
+        length=flux_length,
+        post_delay=flux_post_delay,
+    )
 
     deepupdate(derive_pulse, flx_cfg, behavior="force")
+
+    if derive_pulse["block_mode"]:
+        warnings.warn(
+            "Wrapped flux pulse is in block mode, this will block the inner pulse to start"
+        )
 
     return pulse, derive_pulse
 
@@ -58,5 +72,14 @@ def wrap_with_flux_pulse(
 def check_flux_pulse(flx_cfg: Dict[str, Any], name: str = "flux_pulse") -> None:
     if flx_cfg["style"] not in ["const", "flat_top"]:
         raise ValueError(
-            f"Flux pulse style {flx_cfg['style']} not supported in flux sweep."
+            f"{name} style {flx_cfg['style']} not supported in flux sweep."
         )
+
+
+def check_gains(gains: float, name: str) -> np.ndarray:
+    if np.any(gains > 1.0):
+        warnings.warn(
+            f"Some {name} gains are larger than 1.0, force clip to 1.0, which may cause distortion."
+        )
+        gains = np.clip(gains, 0.0, 1.0)
+    return gains

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,7 +22,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
-from ...template import sweep2D_soft_hard_template
+from ...runner import HardTask, Runner, SoftTask
 
 
 def cpmg_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -37,12 +37,7 @@ CPMGResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
 
 class CPMGExperiment(AbsExperiment[CPMGResultType]):
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> CPMGResultType:
         cfg = deepcopy(cfg)
 
@@ -54,72 +49,61 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
         times = sweep2array(times_sweep, allow_array=True)
         ts = sweep2array(len_sweep)  # predicted times
 
+        cpmg_spans = sweep2param("length", len_sweep)
+
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
 
-        def updateCfg(cfg: Dict[str, Any], _: int, value: float) -> None:
-            cfg["time"] = int(value)
+        def updateCfg(_, ctx, time: int) -> None:
+            ctx.cfg["time"] = time
 
-        updateCfg(cfg, 0, times[0])  # set initial flux
-
-        cpmg_spans = sweep2param("length", len_sweep)
-
-        def make_prog(cfg, time):
-            interval = cpmg_spans / time
-
-            prog = ModularProgramV2(
+        def measure_fn(ctx, update_hook) -> np.ndarray:
+            interval = cpmg_spans / ctx.cfg["time"]
+            return ModularProgramV2(
                 soccfg,
-                cfg,
+                ctx.cfg,
                 modules=[
-                    make_reset("reset", reset_cfg=cfg.get("reset")),
-                    Pulse(
-                        name="pi2_pulse1", cfg=cfg["pi2_pulse"], pulse_name="pi2_pulse"
-                    ),
-                    Delay(name="initial_delay", delay=0.5 * interval),
+                    make_reset("reset", ctx.cfg.get("reset")),
+                    Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"], pulse_name="pi2_pulse"),
+                    Delay("initial_cpmg_delay", delay=0.5 * interval),
                     Repeat(
                         name="cpmg_pi_loop",
-                        n=time - 1,
+                        n=ctx.cfg["time"] - 1,
                         sub_module=[
-                            Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                            Delay(name="interval_delay", delay=interval),
+                            Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                            Delay("interval_cpmg_delay", delay=interval),
                         ],
                     ),
-                    Pulse(
-                        name="last_pi_pulse", cfg=cfg["pi_pulse"], pulse_name="pi_pulse"
-                    ),
-                    Delay(name="final_delay", delay=0.5 * interval),
-                    Pulse(
-                        name="pi2_pulse2", cfg=cfg["pi2_pulse"], pulse_name="pi2_pulse"
-                    ),
-                    make_readout("readout", readout_cfg=cfg["readout"]),
+                    Pulse("last_pi_pulse", ctx.cfg["pi_pulse"], pulse_name="pi_pulse"),
+                    Delay("final_cpmg_delay", delay=0.5 * interval),
+                    Pulse("pi2_pulse2", ctx.cfg["pi2_pulse"], pulse_name="pi2_pulse"),
+                    make_readout("readout", ctx.cfg["readout"]),
                 ],
-            )
+            ).acquire(soc, progress=False, callback=update_hook)
 
-            return prog
-
-        def measure_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> np.ndarray:
-            prog = make_prog(cfg, time=cfg["time"])
-            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
-
-        make_prog(cfg, time=np.max(times))  # test compile
-
-        signals = sweep2D_soft_hard_template(
-            cfg,
-            measure_fn,
-            LivePlotter2DwithLine(
-                "Number of Pi",
-                "Time (us)",
-                line_axis=1,
-                num_lines=2,
-                disable=not progress,
-            ),
-            xs=times,
-            ticks=(ts,),
-            updateCfg=updateCfg,
-            signal2real=cpmg_signal2real,
-        )
+        with LivePlotter2DwithLine(
+            "Number of Pi",
+            "Time (us)",
+            line_axis=1,
+            num_lines=2,
+            segment_kwargs={"title": "CPMG"},
+            disable=not progress,
+        ) as viewer:
+            signals = Runner(
+                task=SoftTask(
+                    sweep_name="times",
+                    sweep_values=times,
+                    update_cfg_fn=updateCfg,
+                    sub_task=HardTask(
+                        measure_fn=measure_fn,
+                        result_shape=(len(ts),),
+                    ),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    times, ts, cpmg_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg

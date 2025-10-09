@@ -21,7 +21,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..template import sweep1D_soft_template, sweep2D_soft_hard_template
+from ..runner import HardTask, Runner, SoftTask
 
 
 def zigzag_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -49,49 +49,50 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "times")
         times = sweep2array(cfg["sweep"]["times"], allow_array=True)  # predicted
+
         del cfg["sweep"]
 
-        cfg["zigzag_time"] = times[0]  # initial value
+        def updateCfg(_, ctx, time: int) -> None:
+            ctx.cfg["zigzag_time"] = time
 
-        def updateCfg(cfg: Dict[str, Any], _: int, time: Any) -> None:
-            cfg["zigzag_time"] = time
-
-        def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
-            zigzag_time = cfg["zigzag_time"]
+        def measure_fn(ctx, update_hook) -> np.ndarray:
+            zigzag_time = ctx.cfg["zigzag_time"]
 
             if repeat_on == "X90_pulse":
                 repeat_time = 2 * zigzag_time
             elif repeat_on == "X180_pulse":
                 repeat_time = zigzag_time
 
-            prog = ModularProgramV2(
+            return ModularProgramV2(
                 soccfg,
-                cfg,
+                ctx.cfg,
                 modules=[
-                    make_reset("reset", cfg.get("reset")),
+                    make_reset("reset", ctx.cfg.get("reset")),
                     Pulse(name="X90_pulse", cfg=X90_pulse),
                     Repeat(
                         name="zigzag_loop",
                         n=repeat_time,
-                        sub_module=Pulse(name=f"loop_{repeat_on}", cfg=cfg[repeat_on]),
+                        sub_module=Pulse(
+                            name=f"loop_{repeat_on}", cfg=ctx.cfg[repeat_on]
+                        ),
                     ),
-                    make_readout("readout", cfg["readout"]),
+                    make_readout("readout", ctx.cfg["readout"]),
                 ],
-            )
+            ).acquire(soc, progress=False, callback=update_hook)
 
-            return prog.acquire(soc, progress=False, callback=callback)[0][0].dot(
-                [1, 1j]
-            )
-
-        signals = sweep1D_soft_template(
-            cfg,
-            measure_fn,
-            LivePlotter1D("Times", "Signal", disable=not progress),
-            xs=times,
-            updateCfg=updateCfg,
-            signal2real=zigzag_signal2real,
-            progress=progress,
-        )
+        with LivePlotter1D("Times", "Signal", disable=not progress) as viewer:
+            signals = Runner(
+                task=SoftTask(
+                    sweep_name="times",
+                    sweep_values=times,
+                    update_cfg_fn=updateCfg,
+                    sub_task=HardTask(measure_fn=measure_fn),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    times, zigzag_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -164,72 +165,62 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
             x_info["param_key"], cfg["sweep"][x_key]
         )
 
-        def updateCfg(cfg: Dict[str, Any], _: int, time: Any) -> None:
-            cfg["zigzag_time"] = time
+        def updateCfg(_, ctx, time: int) -> None:
+            ctx.cfg["zigzag_time"] = time
 
-        updateCfg(cfg, 0, times[0])  # initial update
+        def measure_fn(ctx, update_hook) -> np.ndarray:
+            zigzag_time = ctx.cfg["zigzag_time"]
 
-        def make_prog(cfg: Dict[str, Any], repeat_time: int) -> ModularProgramV2:
             if repeat_on == "X90_pulse":
-                pulse_num = 2 * repeat_time
+                repeat_time = 2 * zigzag_time
             elif repeat_on == "X180_pulse":
-                pulse_num = repeat_time
+                repeat_time = zigzag_time
 
-            prog = ModularProgramV2(
+            return ModularProgramV2(
                 soccfg,
-                cfg,
+                ctx.cfg,
                 modules=[
-                    make_reset("reset", cfg.get("reset")),
+                    make_reset("reset", ctx.cfg.get("reset")),
                     Pulse(name="X90_pulse", cfg=X90_pulse),
                     Repeat(
                         name="zigzag_loop",
-                        n=pulse_num,
-                        sub_module=Pulse(name=f"loop_{repeat_on}", cfg=cfg[repeat_on]),
+                        n=repeat_time,
+                        sub_module=Pulse(
+                            name=f"loop_{repeat_on}", cfg=ctx.cfg[repeat_on]
+                        ),
                     ),
-                    make_readout("readout", cfg["readout"]),
+                    make_readout("readout", ctx.cfg["readout"]),
                 ],
-            )
+            ).acquire(soc, progress=False, callback=update_hook)
 
-            return prog
-
-        def measure_fn(cfg: Dict[str, Any], callback) -> np.ndarray:
-            prog = make_prog(cfg, repeat_time=cfg["zigzag_time"])
-            return prog.acquire(soc, progress=False, callback=callback)[0][0].dot(
-                [1, 1j]
-            )
-
-        make_prog(cfg, np.max(times))  # may raise error
-
-        signals = sweep2D_soft_hard_template(
-            cfg,
-            measure_fn,
-            LivePlotter2DwithLine(
+        signals = Runner(
+            task=SoftTask(
+                sweep_name="times",
+                sweep_values=times,
+                update_cfg_fn=updateCfg,
+                sub_task=HardTask(
+                    measure_fn=measure_fn,
+                    result_shape=(len(values),),
+                ),
+            ),
+            liveplotter=LivePlotter2DwithLine(
                 "Times",
                 x_info["name"],
                 line_axis=1,
                 num_lines=3,
                 disable=not progress,
             ),
-            xs=times,
-            ticks=(values,),
-            updateCfg=updateCfg,
-            signal2real=zigzag_signal2real,
-            progress=progress,
-        )
-
-        prog = ModularProgramV2(
-            soccfg, cfg, modules=[Pulse(name=repeat_on, cfg=cfg[repeat_on])]
-        )
-        real_values = prog.get_pulse_param(
-            repeat_on, x_info["param_key"], as_array=True
-        )
-        real_values += values[0] - real_values[0]
+            update_hook=lambda viewer, ctx: viewer.update(
+                times, values, zigzag_signal2real(np.asarray(ctx.get_data()))
+            ),
+        ).run(cfg)
+        signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (times, real_values, signals)
+        self.last_result = (times, values, signals)
 
-        return times, real_values, signals
+        return times, values, signals
 
     def analyze(
         self,

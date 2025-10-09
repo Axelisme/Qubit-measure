@@ -14,91 +14,70 @@ from zcu_tools.program.v2 import (
     Pulse,
     make_readout,
     make_reset,
+    set_reset_cfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ....template import sweep_hard_template
+from ....runner import HardTask, Runner
 
 # (lens, signals)
 DualToneResetLengthResultType = Tuple[np.ndarray, np.ndarray]
 
 
+def reset_length_signal2real(signals: np.ndarray) -> np.ndarray:
+    return rotate2real(signals).real
+
+
 class LengthExperiment(AbsExperiment[DualToneResetLengthResultType]):
-    """Dual-tone reset length measurement experiment.
-
-    Measures the optimal length for a dual-tone reset sequence by sweeping both
-    reset pulse lengths simultaneously and observing the qubit state after
-    initialization and reset.
-
-    The experiment performs:
-    1. Initial reset (optional)
-    2. Qubit initialization pulse (to prepare a state to reset from)
-    3. First reset pulse with variable length
-    4. Second reset pulse with variable length (same as first)
-    5. Readout to measure reset effectiveness
-    """
-
     def run(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> DualToneResetLengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        # Check that reset pulse is dual pulse type
+        if cfg["tested_reset"]["type"] != "two_pulse":
+            raise ValueError("This experiment only supports dual-tone reset")
+
         # Canonicalise sweep section to single-axis form
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
-        # Check that reset pulse is dual pulse type
-        tested_reset = cfg["tested_reset"]
-        if tested_reset["type"] != "two_pulse":
-            raise ValueError("This experiment only supports dual-tone reset")
-
-        # Attach length sweep parameter to both reset pulses
-        len_params = sweep2param("length", cfg["sweep"]["length"])
-        reset_pulse1 = tested_reset["pulse1_cfg"]
-        reset_pulse2 = tested_reset["pulse2_cfg"]
-
-        reset_pulse1["length"] = len_params
-        reset_pulse2["length"] = len_params
-
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse("init_pulse", cfg=cfg.get("init_pulse")),
-                make_reset("tested_reset", reset_cfg=tested_reset),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
-        )
-
         lens = sweep2array(cfg["sweep"]["length"])  # predicted pulse lengths
 
-        def reset_length_signal2real(signals: np.ndarray) -> np.ndarray:
-            return rotate2real(signals).real
-
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D("Length (us)", "Amplitude", disable=not progress),
-            ticks=(lens,),
-            signal2real=reset_length_signal2real,
+        # Attach length sweep parameter to both reset pulses
+        set_reset_cfg(
+            cfg["tested_reset"], "length", sweep2param("length", cfg["sweep"]["length"])
         )
 
-        # Get the actual pulse length used by FPGA (use first pulse as reference)
-        real_lens = prog.get_pulse_param("tested_reset_pulse1", "length", as_array=True)
-        assert isinstance(real_lens, np.ndarray), "real_lens should be an array"
-
-        # Add back the side length of the pulse (compensation for hardware timing)
-        real_lens += lens[0] - real_lens[0]
+        with LivePlotter1D("Length (us)", "Amplitude", disable=not progress) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                make_reset("reset", ctx.cfg.get("reset")),
+                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
+                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
+                                make_readout("readout", ctx.cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
+                    result_shape=(len(lens),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    lens, reset_length_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (real_lens, signals)
+        self.last_result = (lens, signals)
 
-        return real_lens, signals
+        return lens, signals
 
     def analyze(
         self,

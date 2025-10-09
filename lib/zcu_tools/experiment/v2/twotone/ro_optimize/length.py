@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,8 +11,8 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
-from ...template import sweep1D_soft_template
-from .base import calc_snr
+from ...runner import HardTask, Runner, SoftTask
+from .base import signal2snr
 
 LengthResultType = Tuple[np.ndarray, np.ndarray]  # (lengths, snrs)
 
@@ -23,16 +23,16 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
     ) -> LengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        qub_pulse = cfg["qub_pulse"]
-
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         length_sweep = cfg["sweep"]["length"]
 
         # replace length sweep with ge sweep, and use soft loop for length
-        cfg["sweep"] = {"ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2}}
+        cfg["sweep"] = {
+            "ge": {"start": 0, "stop": cfg["qub_pulse"]["gain"], "expts": 2}
+        }
 
         # set with / without pi gain for qubit pulse
-        qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+        cfg["qub_pulse"]["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
 
         lengths = sweep2array(length_sweep)  # predicted readout lengths
 
@@ -40,37 +40,35 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         set_readout_cfg(cfg["readout"], "ro_length", lengths[0])
         set_readout_cfg(cfg["readout"], "length", lengths.max() + 0.1)
 
-        def updateCfg(cfg, _, ro_len) -> None:
-            set_readout_cfg(cfg["readout"], "ro_length", ro_len)
-
-        def measure_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> np.ndarray:
-            prog = TwoToneProgram(soccfg, cfg)
-
-            avg_d = prog.acquire(soc, progress=False, callback=cb, record_stderr=True)
-            std_d = prog.get_stderr()
-            assert std_d is not None, "stds should not be None"
-
-            avg_s = avg_d[0][0].dot([1, 1j])  # (ge, *sweep)
-            std_s = std_d[0][0].dot([1, 1j])  # (ge, *sweep)
-
-            return calc_snr(avg_s, std_s)
-
-        snrs = sweep1D_soft_template(
-            cfg,
-            measure_fn,
-            LivePlotter1D("Readout Length (us)", "SNR", disable=not progress),
-            xs=lengths,
-            progress=progress,
-            updateCfg=updateCfg,
-        )
+        with LivePlotter1D(
+            "Readout Length (us)", "SNR", disable=not progress
+        ) as viewer:
+            signals = Runner(
+                task=SoftTask(
+                    sweep_name="length",
+                    sweep_values=lengths,
+                    update_cfg_fn=lambda _, ctx, length: set_readout_cfg(
+                        ctx.cfg["readout"], "ro_length", length
+                    ),
+                    sub_task=HardTask(
+                        measure_fn=lambda ctx, update_hook: (
+                            TwoToneProgram(soccfg, ctx.cfg).acquire(
+                                soc, progress=False, callback=update_hook
+                            )
+                        )
+                    ),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    lengths, signal2snr(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record the last cfg and result
         self.last_cfg = cfg
-        self.last_result = (lengths, snrs)
+        self.last_result = (lengths, signals)
 
-        return lengths, snrs
+        return lengths, signals
 
     def analyze(
         self,
@@ -82,9 +80,9 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         if result is None:
             result = self.last_result
 
-        lengths, snrs = result
+        lengths, signals = result
 
-        snrs = np.abs(snrs)
+        snrs = signal2snr(signals)
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0
@@ -123,12 +121,13 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         if result is None:
             result = self.last_result
 
-        lengths, snrs = result
+        lengths, signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Readout Length", "unit": "s", "values": lengths * 1e-6},
-            z_info={"name": "SNR", "unit": "a.u.", "values": snrs},
+            x_info={"name": "ge", "unit": "a.u.", "values": np.array([0, 1])},
+            y_info={"name": "Readout Length", "unit": "s", "values": lengths * 1e-6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,
             **kwargs,

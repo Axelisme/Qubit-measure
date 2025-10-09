@@ -34,12 +34,33 @@ def make_reset(name: str, reset_cfg: Optional[Dict[str, Any]]) -> AbsReset:
         raise ValueError(f"Unknown reset type: {reset_type}")
 
 
+def set_reset_cfg(
+    reset_cfg: Optional[Dict[str, Any]], param_name: str, param_value: float
+) -> None:
+    if reset_cfg is None:
+        return
+
+    reset_type = reset_cfg["type"]
+
+    if reset_type == "pulse":
+        return PulseReset.set_param(reset_cfg, param_name, param_value)
+    elif reset_type == "two_pulse":
+        return TwoPulseReset.set_param(reset_cfg, param_name, param_value)
+    elif reset_type == "bath":
+        return BathReset.set_param(reset_cfg, param_name, param_value)
+    else:
+        raise ValueError(f"Unknown reset type: {reset_type}")
+
+
 class NoneReset(AbsReset):
     def init(self, prog: MyProgramV2) -> None:
         self.name = "none"
 
     def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
         return t
+
+    def set_param(self, param_name: str, param_value: float) -> None:
+        pass
 
 
 class PulseReset(AbsReset):
@@ -54,6 +75,9 @@ class PulseReset(AbsReset):
 
     def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
         return self.reset_pulse.run(prog, t)
+
+    def set_param(self, param_name: str, param_value: float) -> None:
+        self.reset_pulse.set_param(param_name, param_value)
 
 
 class TwoPulseReset(AbsReset):
@@ -77,6 +101,20 @@ class TwoPulseReset(AbsReset):
         t = self.reset_pulse2.run(prog, t)
 
         return t
+
+    def set_param(self, param_name: str, param_value: float) -> None:
+        if param_name == "on/off":
+            self.reset_pulse1.set_param("on/off", param_value)
+            self.reset_pulse2.set_param("on/off", param_value)
+        elif param_name in ["gain1", "freq1"]:
+            self.reset_pulse1.set_param(param_name, param_value)
+        elif param_name in ["gain2", "freq2"]:
+            self.reset_pulse2.set_param(param_name, param_value)
+        elif param_name == "length":
+            self.reset_pulse1.set_param("length", param_value)
+            self.reset_pulse2.set_param("length", param_value)
+        else:
+            raise ValueError(f"Unknown parameter: {param_name}")
 
 
 class BathReset(AbsReset):
@@ -108,3 +146,20 @@ class BathReset(AbsReset):
         t = self.pi2_pulse.run(prog, t)
 
         return t
+
+    def set_param(self, param_name: str, param_value: float) -> None:
+        if param_name == "on/off":
+            self.qub_pulse.set_param("on/off", param_value)
+            self.res_pulse.set_param("on/off", param_value)
+            self.pi2_pulse.set_param("on/off", param_value)
+        elif param_name in ["qub_gain", "qub_freq"]:
+            self.qub_pulse.set_param(param_name, param_value)
+        elif param_name in ["res_gain", "res_freq"]:
+            self.res_pulse.set_param(param_name, param_value)
+        elif param_name == "length":
+            self.qub_pulse.set_param("length", param_value)
+            self.res_pulse.set_param("length", param_value)
+        elif param_name == "pi2_phase":
+            self.pi2_pulse.set_param("phase", param_value)
+        else:
+            raise ValueError(f"Unknown parameter: {param_name}")

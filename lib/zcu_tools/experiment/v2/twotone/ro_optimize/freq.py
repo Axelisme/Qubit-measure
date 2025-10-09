@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,8 +11,8 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
-from ...template import sweep_hard_template
-from .base import calc_snr, snr_as_signal
+from ...runner import HardTask, Runner
+from .base import signal2snr
 
 FreqResultType = Tuple[np.ndarray, np.ndarray]  # (fpts, snrs)
 
@@ -23,50 +23,42 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
     ) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        qub_pulse = cfg["qub_pulse"]
-
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
 
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
         # prepend ge sweep as outer loop
         cfg["sweep"] = {
-            "ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2},
+            "ge": {"start": 0, "stop": cfg["qub_pulse"]["gain"], "expts": 2},
             "freq": cfg["sweep"]["freq"],
         }
 
-        qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+        cfg["qub_pulse"]["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
         set_readout_cfg(
             cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
-        prog = TwoToneProgram(soccfg, cfg)
-
-        def measure_fn(_, cb: Optional[Callable[..., None]]) -> np.ndarray:
-            avg_d = prog.acquire(
-                soc, progress=progress, callback=cb, record_stderr=True
-            )
-            std_d = prog.get_stderr()
-            assert std_d is not None, "stds should not be None"
-
-            avg_s = avg_d[0][0].dot([1, 1j])  # (ge, *sweep)
-            std_s = std_d[0][0].dot([1, 1j])  # (ge, *sweep)
-
-            return calc_snr(avg_s, std_s)
-
-        snrs = sweep_hard_template(
-            cfg,
-            measure_fn,
-            LivePlotter1D("Frequency (MHz)", "SNR", disable=not progress),
-            ticks=(fpts,),
-            raw2signal=snr_as_signal,
-        )
+        with LivePlotter1D("Frequency (MHz)", "SNR", disable=not progress) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        TwoToneProgram(soccfg, ctx.cfg).acquire(
+                            soc, progress=False, callback=update_hook
+                        )
+                    ),
+                    result_shape=(2, len(fpts)),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    fpts, signal2snr(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record the last cfg and result
         self.last_cfg = cfg
-        self.last_result = (fpts, snrs)
+        self.last_result = (fpts, signals)
 
-        return fpts, snrs  # fpts
+        return fpts, signals  # fpts
 
     def analyze(
         self,
@@ -78,9 +70,9 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
         if result is None:
             result = self.last_result
 
-        fpts, snrs = result
+        fpts, signals = result
 
-        snrs = np.abs(snrs)
+        snrs = signal2snr(signals)
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0
@@ -113,12 +105,13 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
         if result is None:
             result = self.last_result
 
-        fpts, snrs = result
+        fpts, singals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-            z_info={"name": "SNR", "unit": "a.u.", "values": snrs},
+            x_info={"name": "ge", "unit": "a.u.", "values": np.array([0, 1])},
+            y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": singals.T},
             comment=comment,
             tag=tag,
             **kwargs,

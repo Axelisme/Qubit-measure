@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -22,7 +22,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ..template import sweep2D_soft_hard_template, sweep_hard_template
+from ..runner import HardTask, Runner, SoftTask
 
 # (amps, freqs, signals2D)
 AcStarkResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -33,7 +33,7 @@ def acstark_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 def get_resonance_freq(
-    xs: np.ndarray, fpts: np.ndarray, amps: np.ndarray, cutoff=None
+    xs: np.ndarray, fpts: np.ndarray, amps: np.ndarray
 ) -> np.ndarray:
     s_xs = []
     s_fpts = []
@@ -53,102 +53,65 @@ def get_resonance_freq(
 
 
 class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
-    """AC Stark shift experiment.
-
-    Measures the frequency shift of a qubit transition as a function
-    of the amplitude of a drive field (Stark pulse).
-    This experiment uses two pulses: one with variable amplitude (stark_pulse1)
-    and another with variable frequency (stark_pulse2).
-    """
-
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> AcStarkResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        # Force the order of sweep (gain outer, freq inner for better visualization)
-        gain_sweep = cfg["sweep"]["gain"]
-        freq_sweep = cfg["sweep"]["freq"]
-
-        # use soft sweep for gain
-        cfg["sweep"] = dict(freq=freq_sweep)
+        gain_sweep = cfg["sweep"].pop("gain")
 
         # uniform in square space
+        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequencies
         pdrs = np.sqrt(
             np.linspace(
-                gain_sweep["start"] ** 2,
-                gain_sweep["stop"] ** 2,
-                gain_sweep["expts"],
+                gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
             )
         )
-        freqs = sweep2array(freq_sweep)  # predicted frequencies
 
-        cfg["stark_pulse1"]["gain"] = pdrs[0]
-        cfg["stark_pulse2"]["freq"] = sweep2param("freq", freq_sweep)
+        cfg["stark_pulse2"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
-        def updateCfg(cfg, _, pdr) -> None:
-            cfg["stark_pulse1"]["gain"] = pdr
-
-        def measure_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> np.ndarray:
-            # Create modular program with Stark pulses
-            prog = ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    make_reset("reset", reset_cfg=cfg.get("reset")),
-                    Pulse(name="stark_pulse1", cfg=cfg["stark_pulse1"]),
-                    Pulse(name="stark_pulse2", cfg=cfg["stark_pulse2"]),
-                    make_readout("readout", readout_cfg=cfg["readout"]),
-                ],
-            )
-
-            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
-
-        # Run 2D soft-hard sweep
-        signals2D = sweep2D_soft_hard_template(
-            cfg,
-            measure_fn,
-            LivePlotter2DwithLine(
-                "Stark Pulse Gain (a.u.)",
-                "Frequency (MHz)",
-                line_axis=1,
-                num_lines=2,
-                uniform=False,
-                disable=not progress,
-            ),
-            xs=pdrs,
-            ticks=(freqs,),
-            updateCfg=updateCfg,
-            signal2real=acstark_signal2real,
-            progress=progress,
-        )
-
-        # Get actual parameters used by the FPGA
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse(name="stark_pulse1", cfg=cfg["stark_pulse1"]),
-                Pulse(name="stark_pulse2", cfg=cfg["stark_pulse2"]),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
-        )
-        fpts = prog.get_pulse_param("stark_pulse2", "freq", as_array=True)
-        assert isinstance(fpts, np.ndarray), "freqs should be an array"
+        with LivePlotter2DwithLine(
+            "Stark Pulse Gain (a.u.)",
+            "Frequency (MHz)",
+            line_axis=1,
+            num_lines=2,
+            uniform=False,
+            disable=not progress,
+        ) as viewer:
+            signals = Runner(
+                task=SoftTask(
+                    sweep_name="resonator gain",
+                    sweep_values=pdrs,
+                    update_cfg_fn=lambda _, ctx, pdr: Pulse.set_param(
+                        ctx.cfg["stark_pulse1"], "gain", pdr
+                    ),
+                    sub_task=HardTask(
+                        measure_fn=lambda ctx, update_hook: (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    make_reset("reset", ctx.cfg.get("reset")),
+                                    Pulse("stark_pulse1", ctx.cfg["stark_pulse1"]),
+                                    Pulse("stark_pulse2", ctx.cfg["stark_pulse2"]),
+                                    make_readout("readout", ctx.cfg["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        ),
+                        result_shape=(len(fpts),),
+                    ),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    pdrs, fpts, acstark_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (pdrs, fpts, signals2D)
+        self.last_result = (pdrs, fpts, signals)
 
-        return pdrs, fpts, signals2D
+        return pdrs, fpts, signals
 
     def analyze(
         self,
@@ -300,39 +263,36 @@ class PhotonLookbackExperiment(AbsExperiment[PhotonLookbackResultType]):
         qub_pulse["pre_delay"] = sweep2param("offset", cfg["sweep"]["offset"])
         qub_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
-        def measure_fn(
-            _: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> np.ndarray:
-            prog = ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    make_reset("reset", reset_cfg=cfg.get("reset")),
-                    Pulse(name="qub_pulse", cfg=cfg["qub_pulse"]),
-                    Pulse(name="probe_pulse", cfg=cfg["probe_pulse"]),
-                    make_readout("readout", readout_cfg=cfg["readout"]),
-                ],
-            )
-            return prog.acquire(soc, progress=progress, callback=cb)[0][0].dot([1, 1j])
-
-        # Run 2D soft-hard sweep (flux soft, length hard)
-        signals2D = sweep_hard_template(
-            cfg,
-            measure_fn,
-            LivePlotter2D(
-                "Time (us)",
-                "Frequency (MHz)",
-                disable=not progress,
+        signals = Runner(
+            task=HardTask(
+                measure_fn=lambda ctx, update_hook: (
+                    ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            make_reset("reset", reset_cfg=ctx.cfg.get("reset")),
+                            Pulse(name="qub_pulse", cfg=ctx.cfg["qub_pulse"]),
+                            Pulse(name="probe_pulse", cfg=ctx.cfg["probe_pulse"]),
+                            make_readout("readout", readout_cfg=ctx.cfg["readout"]),
+                        ],
+                    ).acquire(soc, progress=progress, callback=update_hook)
+                ),
+                result_shape=(len(offsets), len(fpts)),
             ),
-            ticks=(offsets, fpts),
-            signal2real=photonlookback_signal2real,
-        )
+            liveplotter=LivePlotter2D(
+                "Time (us)", "Frequency (MHz)", disable=not progress
+            ),
+            update_hook=lambda viewer, ctx: viewer.update(
+                offsets, fpts, photonlookback_signal2real(np.asarray(ctx.get_data()))
+            ),
+        ).run(cfg)
+        signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (offsets, fpts, signals2D)
+        self.last_result = (offsets, fpts, signals)
 
-        return offsets, fpts, signals2D
+        return offsets, fpts, signals
 
     def analyze(self, result: Optional[PhotonLookbackResultType] = None) -> float:
         if result is None:

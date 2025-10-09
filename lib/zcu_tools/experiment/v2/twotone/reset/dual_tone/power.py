@@ -15,42 +15,26 @@ from zcu_tools.program.v2 import (
     Pulse,
     make_readout,
     make_reset,
+    set_reset_cfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
 
-from ....template import sweep_hard_template
+from ....runner import HardTask, Runner
 
 # (pdrs1, pdrs2, signals_2d)
 DualToneResetPowerResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
-    """Dual-tone reset power measurement experiment.
-
-    Measures the optimal power levels for a dual-tone reset sequence by sweeping both
-    reset pulse powers and observing the qubit state after initialization and reset.
-
-    The experiment performs:
-    1. Initial reset (optional)
-    2. Qubit initialization pulse (to prepare a state to reset from)
-    3. First reset probe pulse with variable power
-    4. Second reset probe pulse with variable power
-    5. Readout to measure reset effectiveness
-    """
-
     def run(
         self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> DualToneResetPowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
-        tested_reset = cfg["tested_reset"]
-        if tested_reset["type"] != "two_pulse":
+        if cfg["tested_reset"]["type"] != "two_pulse":
             raise ValueError("This experiment only supports dual-tone reset")
-
-        # Check that first pulse has no post_delay
-        check_no_post_delay(tested_reset["pulse1_cfg"], "tested_reset.pulse1_cfg")
 
         # Ensure gain1 is the outer loop for better visualization
         cfg["sweep"] = {
@@ -58,32 +42,15 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
             "gain2": cfg["sweep"]["gain2"],
         }
 
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse("init_pulse", cfg=cfg.get("init_pulse")),
-                Pulse(
-                    "reset_probe_pulse1",
-                    cfg={
-                        **tested_reset["pulse1_cfg"],
-                        "gain": sweep2param("gain1", cfg["sweep"]["gain1"]),
-                    },
-                ),
-                Pulse(
-                    "reset_probe_pulse2",
-                    cfg={
-                        **tested_reset["pulse2_cfg"],
-                        "gain": sweep2param("gain2", cfg["sweep"]["gain2"]),
-                    },
-                ),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
-        )
-
         pdrs1 = sweep2array(cfg["sweep"]["gain1"])  # predicted amplitudes
         pdrs2 = sweep2array(cfg["sweep"]["gain2"])  # predicted amplitudes
+
+        set_reset_cfg(
+            cfg["tested_reset"], "gain1", sweep2param("gain1", cfg["sweep"]["gain1"])
+        )
+        set_reset_cfg(
+            cfg["tested_reset"], "gain2", sweep2param("gain2", cfg["sweep"]["gain2"])
+        )
 
         def dual_reset_pdr_signal2real(signals: np.ndarray) -> np.ndarray:
             # Choose reference point based on sweep direction (use minimum power point)
@@ -91,21 +58,30 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
             ref_j = 0 if pdrs2[0] < pdrs2[-1] else -1
             return np.abs(signals - signals[ref_i, ref_j])
 
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter2D("Gain1 (a.u.)", "Gain2 (a.u.)", disable=not progress),
-            ticks=(pdrs1, pdrs2),
-            signal2real=dual_reset_pdr_signal2real,
-        )
-
-        # Get the actual power points used by FPGA
-        pdrs1 = prog.get_pulse_param("reset_probe_pulse1", "gain", as_array=True)
-        pdrs2 = prog.get_pulse_param("reset_probe_pulse2", "gain", as_array=True)
-        assert isinstance(pdrs1, np.ndarray), "pdrs1 should be an array"
-        assert isinstance(pdrs2, np.ndarray), "pdrs2 should be an array"
+        with LivePlotter2D(
+            "Gain1 (a.u.)", "Gain2 (a.u.)", disable=not progress
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                make_reset("reset", ctx.cfg.get("reset")),
+                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
+                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
+                                make_readout("readout", ctx.cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
+                    result_shape=(len(pdrs1), len(pdrs2)),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    pdrs1, pdrs2, dual_reset_pdr_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg

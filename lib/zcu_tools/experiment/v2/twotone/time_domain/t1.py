@@ -12,9 +12,9 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.program.v2 import (
+    Delay,
     ModularProgramV2,
     Pulse,
-    Delay,
     make_readout,
     make_reset,
     sweep2param,
@@ -23,7 +23,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
-from ...template import sweep_hard_template
+from ...runner import HardTask, Runner
 
 
 def t1_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -51,45 +51,47 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         cfg = deepcopy(cfg)
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        sweep_cfg = cfg["sweep"]["length"]
 
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                Delay(name="t1_delay", delay=sweep2param("length", sweep_cfg)),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
-        )
+        ts = sweep2array(cfg["sweep"]["length"])
 
-        ts = sweep2array(sweep_cfg)  # predicted times
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D(
-                "Time (us)",
-                "Amplitude",
-                segment_kwargs={"title": "T1 relaxation"},
-                disable=not progress,
-            ),
-            ticks=(ts,),
-            signal2real=t1_signal2real,
-        )
-
-        # get actual times
-        real_ts = prog.get_time_param("t1_delay", "t", as_array=True)
-        assert isinstance(real_ts, np.ndarray), "real_ts should be an array"
-        real_ts += ts[0] - real_ts[0]  # adjust to start from the first time
+        with LivePlotter1D(
+            "Time (us)",
+            "Amplitude",
+            segment_kwargs={"title": "T1 relaxation"},
+            disable=not progress,
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                make_reset("reset", ctx.cfg.get("reset")),
+                                Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                                Delay(
+                                    name="t1_delay",
+                                    delay=sweep2param(
+                                        "length", ctx.cfg["sweep"]["length"]
+                                    ),
+                                ),
+                                make_readout("readout", ctx.cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
+                    result_shape=(len(ts),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    ts, t1_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (real_ts, signals)
+        self.last_result = (ts, signals)
 
-        return real_ts, signals
+        return ts, signals
 
     def analyze(
         self,
@@ -171,36 +173,40 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
         cfg = deepcopy(cfg)
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        sweep_cfg = cfg["sweep"]["length"]
 
-        cfg["test_pulse"]["waveform"]["length"] = sweep2param("length", sweep_cfg)
-
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
+        cfg["test_pulse"]["waveform"]["length"] = sweep2param(
+            "length", cfg["sweep"]["length"]
         )
 
-        ts = sweep2array(sweep_cfg)  # predicted times
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
+        ts = sweep2array(cfg["sweep"]["length"])
+
+        signals = Runner(
+            task=HardTask(
+                measure_fn=lambda ctx, update_hook: (
+                    ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            make_reset("reset", reset_cfg=cfg.get("reset")),
+                            Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                            Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
+                            make_readout("readout", readout_cfg=cfg["readout"]),
+                        ],
+                    ).acquire(soc, progress=progress, callback=update_hook)
+                ),
+                result_shape=(len(ts),),
             ),
-            LivePlotter1D(
+            liveplotter=LivePlotter1D(
                 "Time (us)",
                 "Amplitude",
-                title="T1 relaxation",
+                segment_kwargs={"title": "T1 relaxation"},
                 disable=not progress,
             ),
-            ticks=(ts,),
-            signal2real=t1_signal2real,
-        )
+            update_hook=lambda viewer, ctx: viewer.update(
+                ts, t1_signal2real(np.asarray(ctx.get_data()))
+            ),
+        ).run(cfg)
+        signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -314,32 +320,35 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
             x_info["param_key"], cfg["sweep"][x_key]
         )
 
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
-                make_readout("readout", readout_cfg=cfg["readout"]),
-            ],
-        )
-
         values = sweep2array(cfg["sweep"][x_key])  # predicted
         ts = sweep2array(cfg["sweep"]["length"])  # predicted times
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
+
+        signals = Runner(
+            task=HardTask(
+                measure_fn=lambda ctx, update_hook: (
+                    ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            make_reset("reset", reset_cfg=cfg.get("reset")),
+                            Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                            Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
+                            make_readout("readout", readout_cfg=cfg["readout"]),
+                        ],
+                    ).acquire(soc, progress=progress, callback=update_hook)
+                ),
+                result_shape=(len(values), len(ts)),
             ),
-            LivePlotter2D(
+            liveplotter=LivePlotter2D(
                 x_info["name"],
                 "Time (us)",
                 disable=not progress,
             ),
-            ticks=(values, ts),
-            signal2real=t1_signal2real,
-        )
+            update_hook=lambda viewer, ctx: viewer.update(
+                values, ts, t1_signal2real(np.asarray(ctx.get_data()))
+            ),
+        ).run(cfg)
+        signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -422,7 +431,7 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
             filepath=filepath,
             x_info={"name": "Sweep Value", "unit": "a.u.", "values": values},
             y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,
             **kwargs,

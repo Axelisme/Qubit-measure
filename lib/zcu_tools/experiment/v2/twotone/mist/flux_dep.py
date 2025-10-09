@@ -1,10 +1,9 @@
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
-from numpy import ndarray
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
@@ -12,13 +11,12 @@ from zcu_tools.liveplot.jupyter import LivePlotter2DwithLine
 from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.simulate import mA2flx
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.process import rotate2real
 
-from ...template import sweep2D_soft_hard_template
+from ...runner import HardTask, Runner, SoftTask
 
 
 def mist_signal2real(signal: np.ndarray) -> np.ndarray:
-    return rotate2real(signal).real  # type: ignore
+    return np.abs(signal - signal[:, 0][:, None])
 
 
 MISTFluxPowerDepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -30,54 +28,43 @@ class MISTFluxPowerDep(AbsExperiment[MISTFluxPowerDepResultType]):
     ) -> MISTFluxPowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        pdr_sweep = cfg["sweep"]["gain"]
-        flx_sweep = cfg["sweep"]["flux"]
+        flx_sweep = cfg["sweep"].pop("flux")
 
-        del cfg["sweep"]["flux"]  # use soft loop
-        cfg["qub_pulse"]["gain"] = sweep2param("gain", pdr_sweep)
+        values = sweep2array(flx_sweep, allow_array=True)
+        pdrs = sweep2array(cfg["sweep"]["gain"])
 
-        dev_values = sweep2array(flx_sweep, allow_array=True)  # predicted currents
-        pdrs = sweep2array(pdr_sweep)  # predicted gains
+        cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
 
-        def updateCfg(cfg, _, value):
-            set_flux_in_dev_cfg(cfg["dev"], value)
-
-        updateCfg(cfg, 0, dev_values[0])  # set initial flux value
-
-        def signal2real(signal: ndarray) -> ndarray:
-            return np.abs(signal - signal[:, 0][:, None])
-
-        def measure_fn(
-            cfg: Dict[str, Any], cb: Optional[Callable[..., None]]
-        ) -> np.ndarray:
-            prog = TwoToneProgram(soccfg, cfg)
-            return prog.acquire(soc, progress=False, callback=cb)[0][0].dot([1, 1j])
-
-        signals2D = sweep2D_soft_hard_template(
-            cfg,
-            measure_fn,
-            LivePlotter2DwithLine(
-                "Flux device value",
-                "Drive power (a.u.)",
-                line_axis=1,
-                num_lines=2,
-            ),
-            xs=dev_values,
-            ticks=(pdrs,),
-            updateCfg=updateCfg,
-            signal2real=signal2real,
-        )
-
-        # get the actual lengths
-        prog = TwoToneProgram(soccfg, cfg)
-        pdrs = prog.get_pulse_param("qubit_pulse", "gain", as_array=True)  # type: ignore
-        assert isinstance(pdrs, np.ndarray), "pdrs should be an array"
+        with LivePlotter2DwithLine(
+            "Flux device value", "Drive power (a.u.)", line_axis=1, num_lines=2
+        ) as viewer:
+            signals = Runner(
+                task=SoftTask(
+                    sweep_name="flux",
+                    sweep_values=values,
+                    update_cfg_fn=lambda _, ctx, flx: set_flux_in_dev_cfg(
+                        ctx.cfg["dev"], flx
+                    ),
+                    sub_task=HardTask(
+                        measure_fn=lambda ctx, update_hook: (
+                            TwoToneProgram(soccfg, ctx.cfg).acquire(
+                                soc, progress=False, callback=update_hook
+                            )
+                        ),
+                        result_shape=(len(pdrs),),
+                    ),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    values, pdrs, mist_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result = (dev_values, pdrs, signals2D)
+        self.last_result = (values, pdrs, signals)
 
-        return dev_values, pdrs, signals2D
+        return values, pdrs, signals
 
     def analyze_only_mist(
         self,

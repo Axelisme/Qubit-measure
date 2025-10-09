@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
@@ -9,44 +7,24 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_resonence_freq
 
-from ..template import sweep_hard_template
+from ..runner import HardTask, Runner
 
 DispersiveResultType = Tuple[np.ndarray, np.ndarray]
 
 
 def dispersive_signal2real(signals: np.ndarray) -> np.ndarray:
-    return np.abs(signals)
+    return np.abs(signals[1, :] - signals[0, :])
 
 
 class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
-    """Dispersive shift measurement experiment.
-
-    Measures the resonator frequency response with and without a qubit π pulse
-    to characterize the dispersive coupling between qubit and resonator.
-
-    The experiment sweeps the readout frequency with two different qubit states:
-    1. Ground state (no qubit pulse)
-    2. Excited state (with π pulse)
-
-    This allows measurement of the dispersive shift χ/2π and resonator linewidth κ.
-    """
-
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> DispersiveResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
-
-        res_pulse = cfg["readout"]["pulse_cfg"]
-        qub_pulse = cfg["qub_pulse"]
 
         # Canonicalise sweep section to single-axis form
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
@@ -55,37 +33,39 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
 
         # Prepend ge sweep to inner loop for measuring both ground and excited states
         cfg["sweep"] = {
-            "ge": {"start": 0, "stop": qub_pulse["gain"], "expts": 2},
+            "ge": {"start": 0, "stop": cfg["qub_pulse"]["gain"], "expts": 2},
             "freq": cfg["sweep"]["freq"],
         }
 
         # Set with/without π gain for qubit pulse
-        qub_pulse["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
-        res_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
-
-        prog = TwoToneProgram(soccfg, cfg)
-
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D(
-                "Frequency (MHz)", "Amplitude", num_lines=2, disable=not progress
-            ),
-            ticks=(fpts,),
-            signal2real=dispersive_signal2real,
+        cfg["qub_pulse"]["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+        set_readout_cfg(
+            cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
-        # Get the actual pulse gains and frequency points
-        fpts_real = prog.get_pulse_param("readout_pulse", "freq", as_array=True)
-        assert isinstance(fpts_real, np.ndarray), "fpts should be an array"
+        with LivePlotter1D(
+            "Frequency (MHz)", "Amplitude", num_lines=2, disable=not progress
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        TwoToneProgram(soccfg, ctx.cfg).acquire(
+                            soc, progress=False, callback=update_hook
+                        )
+                    ),
+                    result_shape=(2, len(fpts)),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    fpts, dispersive_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (fpts_real, signals)
+        self.last_result = (fpts, signals)
 
-        return fpts_real, signals
+        return fpts, signals
 
     def fitt_wo_abcd(
         self,

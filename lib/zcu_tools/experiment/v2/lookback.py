@@ -13,9 +13,13 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram
 from zcu_tools.utils.datasaver import save_data
 
-from .template import sweep_hard_template
+from .runner import HardTask, Runner
 
 LookbackResultType = Tuple[np.ndarray, np.ndarray]
+
+
+def lookback_signal2real(signals: np.ndarray) -> np.ndarray:
+    return np.abs(signals)
 
 
 class LookbackExperiment(AbsExperiment[LookbackResultType]):
@@ -31,15 +35,22 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
         prog = OneToneProgram(soccfg, cfg)
         Ts = prog.get_time_axis(ro_index=0) + cfg["readout"]["ro_cfg"]["trig_offset"]
 
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire_decimated(soc, progress=progress, callback=cb)[
-                0
-            ].dot([1, 1j]),
-            LivePlotter1D("Time (us)", "Amplitude", disable=not progress),
-            ticks=(Ts,),
-            raw2signal=lambda _, dec_d: dec_d[0].dot([1, 1j]),
-        )
+        with LivePlotter1D("Time (us)", "Amplitude", disable=not progress) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        OneToneProgram(soccfg, ctx.cfg).acquire_decimated(
+                            soc, progress=progress, callback=update_hook
+                        )
+                    ),
+                    raw2signal_fn=lambda x: x[0].dot([1, 1j]),
+                    result_shape=(len(Ts),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    Ts, lookback_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg

@@ -14,7 +14,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
-from ...template import sweep_hard_template
+from ...runner import HardTask, Runner
 
 
 def rabi_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -25,44 +25,37 @@ AmpRabiResultType = Tuple[np.ndarray, np.ndarray]  # (amps, signals)
 
 
 class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
-    """Rabi oscillation by varying pulse *amplitude* (gain)."""
-
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
     ) -> AmpRabiResultType:
         cfg = deepcopy(cfg)
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        gain_sweep = cfg["sweep"]["gain"]
 
-        cfg["qub_pulse"]["gain"] = sweep2param("gain", gain_sweep)
+        amps = sweep2array(cfg["sweep"]["gain"])  # predicted
 
-        amps = sweep2array(gain_sweep)  # predicted
+        cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
 
-        prog = TwoToneProgram(soccfg, cfg)
-
-        signals = sweep_hard_template(
-            cfg,
-            lambda _, cb: prog.acquire(soc, progress=progress, callback=cb)[0][0].dot(
-                [1, 1j]
-            ),
-            LivePlotter1D("Pulse gain", "Amplitude", disable=not progress),
-            ticks=(amps,),
-            signal2real=rabi_signal2real,
-        )
-
-        amps_real = prog.get_pulse_param("qubit_pulse", "gain", as_array=True)
-        assert isinstance(amps_real, np.ndarray)
+        with LivePlotter1D("Pulse gain", "Amplitude", disable=not progress) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        TwoToneProgram(soccfg, ctx.cfg).acquire(
+                            soc, progress=False, callback=update_hook
+                        )
+                    ),
+                    result_shape=(len(amps),),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    amps, rabi_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         self.last_cfg = cfg
-        self.last_result = (amps_real, signals)
+        self.last_result = (amps, signals)
 
-        return amps_real, signals
+        return amps, signals
 
     def analyze(
         self,

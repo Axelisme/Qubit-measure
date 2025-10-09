@@ -1,0 +1,40 @@
+from typing import Callable, Any, Optional, Dict
+from functools import wraps
+
+import numpy as np
+from scipy.ndimage import gaussian_filter
+
+from zcu_tools.program.v2 import ModularProgramV2
+from .runner import default_raw2signal_fn
+
+
+def calc_snr(real_signals: np.ndarray) -> float:
+    smooth_signals = gaussian_filter(real_signals, sigma=1)
+    noise = np.mean(np.abs(real_signals - smooth_signals))
+    return (np.max(smooth_signals) - np.min(smooth_signals)) / noise
+
+
+def set_pulse_freq(pulse_cfg: Dict[str, Any], freq: float) -> None:
+    pulse_cfg["freq"] = freq
+    if "mixer_freq" in pulse_cfg:
+        pulse_cfg["mixer_freq"] = freq
+    return pulse_cfg
+
+
+def wrap_earlystop_check(
+    prog: ModularProgramV2,
+    update_hook: Callable[[int, Any], None],
+    snr_threshold: Optional[float],
+    raw2signal_fn: Callable[[Any], np.ndarray] = default_raw2signal_fn,
+) -> Callable[[int, Any], None]:
+    if snr_threshold is None:
+        return update_hook
+
+    @wraps(update_hook)
+    def wrapped_update_hook(i: int, raw: Any) -> None:
+        update_hook(i, raw)
+        signals = raw2signal_fn(raw)
+        if calc_snr(signals) >= snr_threshold:
+            prog.set_early_stop(silent=True)
+
+    return wrapped_update_hook
