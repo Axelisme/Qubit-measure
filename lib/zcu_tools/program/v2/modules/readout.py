@@ -7,6 +7,17 @@ from .base import Module
 from .pulse import Pulse, check_block_mode
 
 
+READOUT_REGISTRY = {}
+
+
+def register_readout(ro_type: str):
+    def decorator(cls):
+        READOUT_REGISTRY[ro_type] = cls
+        return cls
+
+    return decorator
+
+
 class AbsReadout(Module):
     @classmethod
     def set_param(
@@ -18,19 +29,11 @@ class AbsReadout(Module):
 def make_readout(name: str, readout_cfg: Dict[str, Any]) -> AbsReadout:
     ro_type = readout_cfg["type"]
 
-    if ro_type == "base":
-        return BaseReadout(
-            name, pulse_cfg=readout_cfg["pulse_cfg"], ro_cfg=readout_cfg["ro_cfg"]
-        )
-    elif ro_type == "two_pulse":
-        return TwoPulseReadout(
-            name,
-            pulse1_cfg=readout_cfg["pulse1_cfg"],
-            pulse2_cfg=readout_cfg["pulse2_cfg"],
-            ro_cfg=readout_cfg["ro_cfg"],
-        )
-    else:
+    if ro_type not in READOUT_REGISTRY:
         raise ValueError(f"Unknown readout type: {ro_type}")
+
+    readout_cls = READOUT_REGISTRY[ro_type]
+    return readout_cls(name, cfg=readout_cfg)
 
 
 def set_readout_cfg(
@@ -38,24 +41,22 @@ def set_readout_cfg(
 ) -> None:
     ro_type = readout_cfg["type"]
 
-    if ro_type == "base":
-        return BaseReadout.set_param(readout_cfg, param_name, param_value)
-    elif ro_type == "two_pulse":
-        return TwoPulseReadout.set_param(readout_cfg, param_name, param_value)
-    else:
+    if ro_type not in READOUT_REGISTRY:
         raise ValueError(f"Unknown readout type: {ro_type}")
 
+    readout_cls = READOUT_REGISTRY[ro_type]
+    readout_cls.set_param(readout_cfg, param_name, param_value)
 
+
+@register_readout("base")
 class BaseReadout(AbsReadout):
-    def __init__(
-        self, name: str, pulse_cfg: Dict[str, Any], ro_cfg: Dict[str, Any]
-    ) -> None:
+    def __init__(self, name: str, cfg: Dict[str, Any]) -> None:
         self.name = name
-        self.pulse_cfg = deepcopy(pulse_cfg)
-        self.ro_cfg = deepcopy(ro_cfg)
+        self.pulse_cfg = deepcopy(cfg["pulse_cfg"])
+        self.ro_cfg = deepcopy(cfg["ro_cfg"])
 
-        ro_ch: int = self.pulse_cfg.setdefault("ro_ch", ro_cfg["ro_ch"])
-        if ro_ch != ro_cfg["ro_ch"]:
+        ro_ch: int = self.pulse_cfg.setdefault("ro_ch", self.ro_cfg["ro_ch"])
+        if ro_ch != self.ro_cfg["ro_ch"]:
             warnings.warn(
                 f"{name} pulse_cfg.ro_ch is {ro_ch}, this may not be what you want"
             )
@@ -115,27 +116,22 @@ class BaseReadout(AbsReadout):
             return t + pulse_time
 
 
+@register_readout("two_pulse")
 class TwoPulseReadout(AbsReadout):
-    def __init__(
-        self,
-        name: str,
-        pulse1_cfg: Dict[str, Any],
-        pulse2_cfg: Dict[str, Any],
-        ro_cfg: Dict[str, Any],
-    ) -> None:
+    def __init__(self, name: str, cfg: Dict[str, Any]) -> None:
         self.name = name
-        self.ro_cfg = ro_cfg
-        self.pulse1_cfg = deepcopy(pulse1_cfg)
-        self.pulse2_cfg = deepcopy(pulse2_cfg)
+        self.ro_cfg = cfg["ro_cfg"]
+        self.pulse1_cfg = deepcopy(cfg["pulse1_cfg"])
+        self.pulse2_cfg = deepcopy(cfg["pulse2_cfg"])
 
-        ro_ch: int = self.pulse1_cfg.setdefault("ro_ch", ro_cfg["ro_ch"])
-        if ro_ch != ro_cfg["ro_ch"]:
+        ro_ch: int = self.pulse1_cfg.setdefault("ro_ch", self.ro_cfg["ro_ch"])
+        if ro_ch != self.ro_cfg["ro_ch"]:
             warnings.warn(
                 f"{name} pulse1_cfg.ro_ch is {ro_ch}, this may not be what you want"
             )
 
-        ro_ch: int = self.pulse2_cfg.setdefault("ro_ch", ro_cfg["ro_ch"])
-        if ro_ch != ro_cfg["ro_ch"]:
+        ro_ch: int = self.pulse2_cfg.setdefault("ro_ch", self.ro_cfg["ro_ch"])
+        if ro_ch != self.ro_cfg["ro_ch"]:
             warnings.warn(
                 f"{name} pulse2_cfg.ro_ch is {ro_ch}, this may not be what you want"
             )
