@@ -1,4 +1,4 @@
-from typing import Callable, Any, Optional, Dict
+from typing import Callable, Any, Optional, Dict, TypeVar
 from functools import wraps
 
 import numpy as np
@@ -21,17 +21,20 @@ def set_pulse_freq(pulse_cfg: Dict[str, Any], freq: float) -> None:
     return pulse_cfg
 
 
+T_RawResult = TypeVar("T_RawResult")
+
+
 def wrap_earlystop_check(
     prog: ModularProgramV2,
-    update_hook: Callable[[int, Any], None],
+    update_hook: Callable[[int, T_RawResult], None],
     snr_threshold: Optional[float],
-    raw2signal_fn: Callable[[Any], np.ndarray] = default_raw2signal_fn,
-) -> Callable[[int, Any], None]:
+    raw2signal_fn: Callable[[T_RawResult], np.ndarray] = default_raw2signal_fn,
+) -> Callable[[int, T_RawResult], None]:
     if snr_threshold is None:
         return update_hook
 
     @wraps(update_hook)
-    def wrapped_update_hook(i: int, raw: Any) -> None:
+    def wrapped_update_hook(i: int, raw: T_RawResult) -> None:
         update_hook(i, raw)
         signals = raw2signal_fn(raw)
         if calc_snr(signals) >= snr_threshold:

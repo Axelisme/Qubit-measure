@@ -1,7 +1,6 @@
 import warnings
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -9,7 +8,6 @@ from numpy import ndarray
 from tqdm.auto import tqdm
 
 from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.liveplot import AbsLivePlotter
 from zcu_tools.utils.async_func import AsyncFunc
 from zcu_tools.utils.debug import print_traceback
 
