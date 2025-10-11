@@ -1,17 +1,20 @@
+from __future__ import annotations
+
 import warnings
 from copy import deepcopy
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Type, TypeVar
 
 from ..base import MyProgramV2
 from .base import Module
 from .pulse import Pulse, check_block_mode
 
+READOUT_REGISTRY: Dict[str, Type[AbsReadout]] = {}
 
-READOUT_REGISTRY = {}
+T_Readout = TypeVar("T_Readout", bound="AbsReadout")
 
 
-def register_readout(ro_type: str):
-    def decorator(cls):
+def register_readout(ro_type: str) -> Callable[[T_Readout], T_Readout]:
+    def decorator(cls: T_Readout) -> T_Readout:
         READOUT_REGISTRY[ro_type] = cls
         return cls
 

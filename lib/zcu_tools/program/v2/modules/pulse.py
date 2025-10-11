@@ -126,9 +126,9 @@ class Pulse(Module):
         else:
             return t  # no block, return the start time as the end time
 
-    @classmethod
+    @staticmethod
     def set_param(
-        cls, pulse_cfg: Dict[str, Any], param_name: str, param_value: QickParam
+        pulse_cfg: Dict[str, Any], param_name: str, param_value: QickParam
     ) -> None:
         if param_name == "on/off":
             pulse_cfg["gain"] = param_value * pulse_cfg["gain"]

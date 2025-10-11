@@ -1,15 +1,18 @@
-from typing import Any, Dict, Optional
+from __future__ import annotations
+
+from typing import Any, Callable, Dict, Optional, Type, TypeVar
 
 from ..base import MyProgramV2
 from .base import Module
 from .pulse import Pulse, check_block_mode
 
+RESET_REGISTRY: Dict[str, Type[AbsReset]] = {}
 
-RESET_REGISTRY = {}
+T_Reset = TypeVar("T_Reset", bound="AbsReset")
 
 
-def register_reset(reset_type: str):
-    def decorator(cls):
+def register_reset(reset_type: str) -> Callable[[T_Reset], T_Reset]:
+    def decorator(cls: T_Reset) -> T_Reset:
         RESET_REGISTRY[reset_type] = cls
         return cls
 
@@ -75,7 +78,9 @@ class PulseReset(AbsReset):
         return self.reset_pulse.run(prog, t)
 
     @staticmethod
-    def set_param(reset_cfg: Dict[str, Any], param_name: str, param_value: float) -> None:
+    def set_param(
+        reset_cfg: Dict[str, Any], param_name: str, param_value: float
+    ) -> None:
         Pulse.set_param(reset_cfg["pulse_cfg"], param_name, param_value)
 
 
@@ -102,14 +107,20 @@ class TwoPulseReset(AbsReset):
         return t
 
     @staticmethod
-    def set_param(reset_cfg: Dict[str, Any], param_name: str, param_value: float) -> None:
+    def set_param(
+        reset_cfg: Dict[str, Any], param_name: str, param_value: float
+    ) -> None:
         if param_name == "on/off":
             Pulse.set_param(reset_cfg["pulse1_cfg"], "on/off", param_value)
             Pulse.set_param(reset_cfg["pulse2_cfg"], "on/off", param_value)
         elif param_name in ["gain1", "freq1"]:
-            Pulse.set_param(reset_cfg["pulse1_cfg"], param_name.replace("1", ""), param_value)
+            Pulse.set_param(
+                reset_cfg["pulse1_cfg"], param_name.replace("1", ""), param_value
+            )
         elif param_name in ["gain2", "freq2"]:
-            Pulse.set_param(reset_cfg["pulse2_cfg"], param_name.replace("2", ""), param_value)
+            Pulse.set_param(
+                reset_cfg["pulse2_cfg"], param_name.replace("2", ""), param_value
+            )
         elif param_name == "length":
             Pulse.set_param(reset_cfg["pulse1_cfg"], "length", param_value)
             Pulse.set_param(reset_cfg["pulse2_cfg"], "length", param_value)
@@ -145,15 +156,23 @@ class BathReset(AbsReset):
         return t
 
     @staticmethod
-    def set_param(reset_cfg: Dict[str, Any], param_name: str, param_value: float) -> None:
+    def set_param(
+        reset_cfg: Dict[str, Any], param_name: str, param_value: float
+    ) -> None:
         if param_name == "on/off":
             Pulse.set_param(reset_cfg["qubit_tone_cfg"], "on/off", param_value)
             Pulse.set_param(reset_cfg["cavity_tone_cfg"], "on/off", param_value)
             Pulse.set_param(reset_cfg["pi2_cfg"], "on/off", param_value)
         elif param_name in ["qub_gain", "qub_freq"]:
-            Pulse.set_param(reset_cfg["qubit_tone_cfg"], param_name.replace("qub_", ""), param_value)
+            Pulse.set_param(
+                reset_cfg["qubit_tone_cfg"], param_name.replace("qub_", ""), param_value
+            )
         elif param_name in ["res_gain", "res_freq"]:
-            Pulse.set_param(reset_cfg["cavity_tone_cfg"], param_name.replace("res_", ""), param_value)
+            Pulse.set_param(
+                reset_cfg["cavity_tone_cfg"],
+                param_name.replace("res_", ""),
+                param_value,
+            )
         elif param_name == "length":
             Pulse.set_param(reset_cfg["qubit_tone_cfg"], "length", param_value)
             Pulse.set_param(reset_cfg["cavity_tone_cfg"], "length", param_value)
