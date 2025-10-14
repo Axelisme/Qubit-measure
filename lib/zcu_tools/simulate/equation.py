@@ -9,6 +9,10 @@ def C2EC(C: float) -> float:
     """C: fF -> EC: GHz"""
     return sc.e**2 / (2 * sc.h * C * 1e-15) * 1e-9
 
+def invC2EC(invC: float) -> float:
+    """invC: 1/fF -> EC: GHz"""
+    return sc.e**2 / (2 * sc.h) * invC * 1e15 * 1e-9
+
 
 def EC2C(EC: float) -> float:
     """EC: GHz -> C: fF"""
