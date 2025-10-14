@@ -21,20 +21,20 @@ import scipy as sp
 
 ```python
 def kappa_func(coeff, rf, lc, lt) -> float:
-    return coeff * rf * np.sin(np.pi / 2 * lc / lt)
+    return coeff * rf * np.sin(np.pi / 2 * lc / lt) ** 2
 ```
 
 ```python
 fpts = np.array([7.447])  # GHz
 lcs = np.array([0.500])  # um
 lts = np.array([4.000])  # um
-kappas = np.array([2.4861])  # MHz
+kappas = np.array([2.42])  # MHz
 
 coeff = np.mean(kappas / kappa_func(1, fpts, lcs, lts))
 ```
 
 ```python
-want_rf = 5.8294  # GHz
+want_rf = 5.9294  # GHz
 lt = lts[0] * (fpts[0] / want_rf)  # um
 print(lt)
 ```
@@ -47,6 +47,10 @@ result = sp.optimize.root(
 )
 lc = result.x[0]
 print(lc)
+```
+
+```python
+
 ```
 
 ```python
