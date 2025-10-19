@@ -8,7 +8,6 @@ from numpy import ndarray
 from tqdm.auto import tqdm
 
 from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.utils.async_func import AsyncFunc
 from zcu_tools.utils.debug import print_traceback
 
 ResultType = Union[Dict[Any, "ResultType"], List["ResultType"], ndarray]
@@ -199,7 +198,7 @@ class HardTask(AbsTask):
         self.avg_pbar = None
 
     def init(self, ctx: TaskContext, keep = True) -> None:
-        self.avg_pbar = tqdm(total=ctx.cfg["rounds"], smoothing=0, desc="rounds", leave=keep, position=5)
+        self.avg_pbar = tqdm(total=ctx.cfg["rounds"], smoothing=0, desc="rounds", leave=keep)
 
     def run(self, ctx: TaskContext) -> None:
         assert self.avg_pbar is not None
@@ -256,18 +255,6 @@ class Runner:
 
         GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
-        # with AsyncFunc(self.update_hook) as async_update:
-        #     ctx = TaskContext(cfg, init_result, async_update)
-
-        #     try:
-        #         self.task.init(ctx)
-        #         self.task.run(ctx)
-        #         self.task.cleanup()
-        #     except KeyboardInterrupt:
-        #         print("Received KeyboardInterrupt, early stopping the program")
-        #     except Exception:
-        #         print("Error during measurement:")
-        #         print_traceback()
         ctx = TaskContext(cfg, init_result, self.update_hook)
 
         try:
