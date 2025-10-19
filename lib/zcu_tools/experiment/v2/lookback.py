@@ -40,7 +40,7 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         OneToneProgram(soccfg, ctx.cfg).acquire_decimated(
-                            soc, progress=progress, callback=update_hook
+                            soc, progress=False, callback=update_hook
                         )
                     ),
                     raw2signal_fn=lambda x: x[0].dot([1, 1j]),

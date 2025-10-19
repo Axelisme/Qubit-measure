@@ -84,8 +84,7 @@ def predict_state_with_error(
 
 
 def allxy_signal2real(signals_dict: Dict[Tuple[str, str], np.ndarray]) -> np.ndarray:
-    """Convert complex signals to real values for AllXY analysis."""
-    all_signals = np.concatenate(list(signals_dict.values()))
+    all_signals = np.array(list(signals_dict.values()))
     return rotate2real(all_signals).real  # type: ignore
 
 
@@ -163,9 +162,10 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
                     }
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    np.arange(len(ALLXY_SEQUENCE)),
-                    allxy_signal2real(ctx.get_data()),
+                        np.arange(len(ALLXY_SEQUENCE)),
+                        allxy_signal2real(ctx.get_data()),
                 ),
+                # update_hook=lambda ctx: None
             ).run(cfg)
 
         # Cache results

@@ -47,7 +47,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         OneToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=progress, callback=update_hook
+                            soc, progress=False, callback=update_hook
                         )
                     ),
                     result_shape=(len(fpts),),
@@ -72,7 +72,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         fit_edelay: bool = True,
     ) -> Dict[str, float]:
         try:
-            from abcd_rf_fit import analyze
+            from abcd_rf_fit import analyze # type: ignore
         except ImportError:
             print(
                 "cannot import abcd_rf_fit, do you have it installed? please check: <https://github.com/UlysseREGLADE/abcd_rf_fit.git>"

@@ -94,10 +94,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
             predict_freq = predict_freqs[i]
 
-            set_pulse_freq(ctx.cfg["pi_pulse"], predict_freq)
             set_pulse_freq(ctx.cfg["qub_pulse"], predict_freq)
-            ctx.cfg["pi_pulse"]["gain"] = predict_pi_gains[i]
+            set_pulse_freq(ctx.cfg["pi_pulse"], predict_freq)
             ctx.cfg["qub_pulse"]["gain"] = predict_qub_gains[i]
+            ctx.cfg["pi_pulse"]["gain"] = predict_pi_gains[i]
+
 
         # -- Define Measure Functions --
 
@@ -146,11 +147,10 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             fit_freq = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], "fit_freq"])
 
             if np.isnan(fit_freq):  # skip if freq measurement failed
-                return np.full(len(lens), np.nan, dtype=np.complex128)
+                return [np.full((1, len(lens), 2), np.nan, dtype=float)]
 
             cfg["sweep"] = {"length": len_sweep}
             set_pulse_freq(cfg["pi_pulse"], fit_freq)
-            set_pulse_freq(cfg["pi2_pulse"], fit_freq)
 
             t1_span = sweep2param("length", cfg["sweep"]["length"])
 
@@ -227,7 +227,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                                 result_shape=(len(detunes),),
                             ),
                             fit_freq=AnalysisTask(
-                                analyze_fn=fit_last_freq,
+                                analysis_fn=fit_last_freq,
                                 init_result=np.array(np.nan),
                             ),
                             t1=HardTask(
@@ -238,7 +238,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     ),
                 ),
                 update_hook=plot_fn,
-            )
+            ).run(cfg)
             signals_dict = upwrap_signal(results)
 
         # Cache results

@@ -146,10 +146,9 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             fit_freq = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], "fit_freq"])
 
             if np.isnan(fit_freq):  # skip if freq measurement failed
-                return np.full(len(lens), np.nan, dtype=np.complex128)
+                return [np.full((1, len(lens), 2), np.nan, dtype=float)]
 
             cfg["sweep"] = {"length": len_sweep}
-            set_pulse_freq(cfg["pi_pulse"], fit_freq)
             set_pulse_freq(cfg["pi2_pulse"], fit_freq)
 
             t2r_spans = sweep2param("length", cfg["sweep"]["length"])
@@ -235,7 +234,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                                 result_shape=(len(detunes),),
                             ),
                             fit_freq=AnalysisTask(
-                                analyze_fn=fit_last_freq,
+                                analysis_fn=fit_last_freq,
                                 init_result=np.array(np.nan),
                             ),
                             t2ramsey=HardTask(
@@ -246,7 +245,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                     ),
                 ),
                 update_hook=plot_fn,
-            )
+            ).run(cfg)
             signals_dict = upwrap_signal(results)
 
         # Cache results

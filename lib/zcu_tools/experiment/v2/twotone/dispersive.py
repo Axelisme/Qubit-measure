@@ -10,6 +10,7 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_resonence_freq
+from zcu_tools.utils.process import rotate2real
 
 from ..runner import HardTask, Runner
 
@@ -17,7 +18,7 @@ DispersiveResultType = Tuple[np.ndarray, np.ndarray]
 
 
 def dispersive_signal2real(signals: np.ndarray) -> np.ndarray:
-    return np.abs(signals[1, :] - signals[0, :])
+    return np.abs(signals)
 
 
 class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
@@ -28,14 +29,12 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
 
         # Canonicalise sweep section to single-axis form
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
-
-        # Prepend ge sweep to inner loop for measuring both ground and excited states
-        cfg["sweep"] = {
+        cfg["sweep"] = { # Prepend ge sweep to inner loop for measuring both ground and excited states
             "ge": {"start": 0, "stop": cfg["qub_pulse"]["gain"], "expts": 2},
             "freq": cfg["sweep"]["freq"],
         }
+
+        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
         # Set with/without π gain for qubit pulse
         cfg["qub_pulse"]["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
@@ -44,7 +43,7 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
         )
 
         with LivePlotter1D(
-            "Frequency (MHz)", "Amplitude", num_lines=2, disable=not progress
+            "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2), disable=not progress
         ) as viewer:
             signals = Runner(
                 task=HardTask(
@@ -120,7 +119,7 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
         assert result is not None, "no result found"
 
         fpts, signals = result
-        amps = np.abs(signals)
+        amps = dispersive_signal2real(signals)
         g_amps, e_amps = amps[0, :], amps[1, :]
 
         if use_abcd:

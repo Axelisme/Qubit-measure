@@ -15,7 +15,9 @@ T_JupyterPlotMixin = TypeVar("T_JupyterPlotMixin", bound="JupyterPlotMixin")
 def make_plot_frame(
     n_row: int, n_col: int, **kwargs
 ) -> Tuple[plt.FigureBase, List[List[plt.Axes]], DisplayHandle]:
-    fig, axs = plt.subplots(n_row, n_col, squeeze=False, **kwargs)
+    kwargs.setdefault("squeeze", False)
+    kwargs.setdefault("figsize", (6 * n_col, 5 * n_row))
+    fig, axs = plt.subplots(n_row, n_col, **kwargs)
     dh = display(fig, display_id=True)
 
     assert isinstance(fig, plt.FigureBase)

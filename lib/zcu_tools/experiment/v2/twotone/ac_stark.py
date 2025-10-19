@@ -37,17 +37,23 @@ def get_resonance_freq(
 ) -> np.ndarray:
     s_xs = []
     s_fpts = []
-    prev_freq = fitlor(fpts, amps[0])[0][3]
 
-    fitparams = [None, None, None, prev_freq, None]
+    prev_freq = np.nan
+    fitparams = [None, None, None, None, None]
     for x, amp in zip(xs, amps):
-        curr_freq = fitlor(fpts, amp, fitparams=fitparams)[0][3]
-        if abs(curr_freq - prev_freq) < 0.1 * (fpts[-1] - fpts[0]):
-            s_xs.append(x)
-            s_fpts.append(curr_freq)
+        if np.any(np.isnan(amp)):
+            continue
 
-            prev_freq = curr_freq
-            fitparams[3] = curr_freq
+        curr_freq = fitlor(fpts, amp, fitparams=fitparams)[0][3]
+
+        if abs(curr_freq - prev_freq) > 0.1 * (fpts[-1] - fpts[0]):
+            continue
+
+        prev_freq = curr_freq
+        fitparams[3] = curr_freq
+
+        s_xs.append(x)
+        s_fpts.append(curr_freq)
 
     return np.array(s_xs), np.array(s_fpts)
 

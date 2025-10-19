@@ -86,7 +86,7 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
             "Time (us)",
             line_axis=1,
             num_lines=2,
-            segment_kwargs={"title": "CPMG"},
+            title="CPMG",
             disable=not progress,
         ) as viewer:
             signals = Runner(
