@@ -165,7 +165,6 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
                         np.arange(len(ALLXY_SEQUENCE)),
                         allxy_signal2real(ctx.get_data()),
                 ),
-                # update_hook=lambda ctx: None
             ).run(cfg)
 
         # Cache results

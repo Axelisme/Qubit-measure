@@ -47,9 +47,6 @@ Typical usage
 _LOOP_READY = threading.Event()
 _BG_LOOP: Optional[asyncio.AbstractEventLoop] = None
 
-total = 0
-executed = 0
-
 def _run_loop() -> None:
     """Target for the background daemon thread: create & run loop."""
     global _BG_LOOP
@@ -129,9 +126,6 @@ class AsyncFunc(Generic[P]):
             ctx = contextvars.copy_context()
             self._last_job = (ctx, deepcopy(args), deepcopy(kwargs))
             # Must set the asyncio.Event from the correct thread
-            print(f"recieve int {self.func}", flush=True)
-            global total
-            total += 1
             loop.call_soon_threadsafe(self._have_new_job.set)  # type: ignore[arg-type]
 
         return wrapper
@@ -168,14 +162,9 @@ class AsyncFunc(Generic[P]):
                 job = self._last_job
                 self._last_job = None  # keep only one job
 
-                global executed
-                executed += 1
-                print(f"{executed} / {total}")
-
                 ctx, args, kwargs = job
                 try:
                     # run synchronous func in executor to avoid blocking loop
-                    print(f"add {self.func} to loop", flush=True)
                     await asyncio.get_running_loop().run_in_executor(
                         None, lambda: ctx.run(self.func, *args, **kwargs)
                     )
