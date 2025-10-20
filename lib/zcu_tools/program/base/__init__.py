@@ -22,14 +22,14 @@ class MyProgram(ImproveAcquireMixin):
 
     def acquire(self, soc, **kwargs) -> list:
         # let callback be executd as a coroutine
-        with AsyncFunc(kwargs.get("callback")) as cb:
+        with AsyncFunc(kwargs.get("callback"), min_interval=0.1) as cb:
             kwargs["callback"] = cb
 
             return super().acquire(soc, **kwargs)
 
     def acquire_decimated(self, soc, **kwargs) -> list:
         # let callback be executd as a coroutine
-        with AsyncFunc(kwargs.get("callback")) as cb:
+        with AsyncFunc(kwargs.get("callback"), min_interval=0.1) as cb:
             kwargs["callback"] = cb
 
             return super().acquire_decimated(soc, **kwargs)
