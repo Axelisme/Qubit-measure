@@ -2,6 +2,7 @@ import asyncio
 import contextvars
 import sys
 import threading
+import time
 from copy import deepcopy
 from functools import wraps
 from typing import Callable, Dict, Generic, Optional, Tuple
@@ -47,6 +48,7 @@ Typical usage
 _LOOP_READY = threading.Event()
 _BG_LOOP: Optional[asyncio.AbstractEventLoop] = None
 
+
 def _run_loop() -> None:
     """Target for the background daemon thread: create & run loop."""
     global _BG_LOOP
@@ -74,10 +76,18 @@ P = ParamSpec("P")
 class AsyncFunc(Generic[P]):
     """See module-level docstring for behaviour details."""
 
-    def __init__(self, func: Optional[Callable[P, None]]) -> None:
+    def __init__(
+        self, func: Optional[Callable[P, None]], min_interval: float = 0.0
+    ) -> None:
+        """
+        Args:
+            func: The function to wrap.
+            min_interval: The minimum interval between function calls in seconds.
+        """
         if func is not None and not callable(func):
             raise TypeError("func must be callable or None")
         self.func = func
+        self.min_interval = min_interval
 
         # Runtime state
         self._last_job: Optional[Tuple[contextvars.Context, Tuple, Dict]] = None
@@ -150,26 +160,32 @@ class AsyncFunc(Generic[P]):
         assert self.func is not None
         assert self._have_new_job is not None
 
+        # this ensure the first call is executed immediately
+        last_time = time.time() - 2 * self.min_interval
+
         try:
             while True:
                 await self._have_new_job.wait()
-                self._have_new_job.clear()
 
                 # If context exited and nothing left to do => quit
                 if self._closed or self._last_job is None:
                     break
 
+                time_left = self.min_interval - (time.time() - last_time)
+                if time_left > 0:
+                    await asyncio.sleep(time_left)
+                last_time = time.time()
+
                 job = self._last_job
-                self._last_job = None  # keep only one job
+                self._last_job = None
+                self._have_new_job.clear()
 
                 ctx, args, kwargs = job
                 try:
-                    # run synchronous func in executor to avoid blocking loop
-                    await asyncio.get_running_loop().run_in_executor(
-                        None, lambda: ctx.run(self.func, *args, **kwargs)
-                    )
-                except Exception:
-                    print("Error in async func:")
+                    # execute function in the main thread, block the loop
+                    ctx.run(self.func, *args, **kwargs)
+                except Exception as e:
+                    print(f"Error in async func: {e}")
                     print_traceback()
         finally:
             self._worker_done.set()
