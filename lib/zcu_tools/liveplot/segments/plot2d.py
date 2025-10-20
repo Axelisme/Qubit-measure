@@ -2,6 +2,7 @@ from typing import Optional
 
 import matplotlib.pyplot as plt
 from matplotlib.image import NonUniformImage, AxesImage
+from matplotlib.ticker import ScalarFormatter
 import numpy as np
 
 from .base import AbsSegment
@@ -28,6 +29,12 @@ class Plot2DSegment(AbsSegment):
 
         if self.title is not None:
             ax.set_title(self.title)
+
+        # 設定自動格式化刻度
+        formatter = ScalarFormatter(useMathText=True)  # 用漂亮的 10^n 標記
+        formatter.set_powerlimits((-2, 2))  # 超出此範圍就改用科學記號
+        ax.xaxis.set_major_formatter(formatter)
+        ax.yaxis.set_major_formatter(formatter)
 
         self.im = ax.imshow(
             [[0, 1e-6]], aspect="auto", origin="lower", interpolation="nearest"
