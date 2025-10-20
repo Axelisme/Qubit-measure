@@ -75,9 +75,7 @@ def fit_func(
         pOpt, pCov = sp.optimize.curve_fit(
             fitfunc, xdata, ydata, p0=init_p, bounds=bounds, **kwargs
         )
-    except RuntimeError as e:
-        print("Warning: fit failed!")
-        print(e)
+    except RuntimeError:
         pOpt = list(init_p)
         pCov = np.full(shape=(len(init_p), len(init_p)), fill_value=np.inf)
 
@@ -211,9 +209,6 @@ def assign_init_p(
 
 def fit_line(xdata: np.ndarray, ydata: np.ndarray) -> Tuple[float, float]:
     """params: [a, b] -> y = a * x + b"""
-
-    from scipy.stats import linregress
-
-    a, b, *_ = linregress(xdata, ydata)
+    a, b, *_ = sp.stats.linregress(xdata, ydata)
 
     return a, b
