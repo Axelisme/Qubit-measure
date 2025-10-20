@@ -7,7 +7,7 @@ from tqdm.auto import tqdm
 from .base import BaseDevice, ResourceManager, DeviceInfo
 
 DEFAULT_RAMPSTEP = 1e-6  # increment step when setting voltage/current
-DEFAULT_RAMPINTERVAL = 0.01  # dwell time for each voltage step # Default MATLAB is 0.01, CANNOT be lower than 0.001 otherwise fridge heats up
+DEFAULT_RAMPINTERVAL = 0.01  # dwell time for each voltage step, CANNOT be lower than 0.001 otherwise fridge heats up
 
 
 class YOKOGS200(BaseDevice):

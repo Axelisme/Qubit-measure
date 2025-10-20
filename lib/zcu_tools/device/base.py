@@ -29,7 +29,6 @@ class BaseDevice(ABC):
             self.session = rm.open_resource(VISAaddress)
         except visa.Error:
             sys.stderr.write("Couldn't connect to '%s', exiting now..." % VISAaddress)
-            sys.exit()
 
     @abstractmethod
     def _setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
