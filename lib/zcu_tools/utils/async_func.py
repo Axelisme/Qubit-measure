@@ -77,7 +77,7 @@ class AsyncFunc(Generic[P]):
     """See module-level docstring for behaviour details."""
 
     def __init__(
-        self, func: Optional[Callable[P, None]], min_interval: float = 0.0
+        self, func: Optional[Callable[P, None]], min_interval: float = 0.0, deepcopy: bool = False
     ) -> None:
         """
         Args:
@@ -88,6 +88,7 @@ class AsyncFunc(Generic[P]):
             raise TypeError("func must be callable or None")
         self.func = func
         self.min_interval = min_interval
+        self.deepcopy = deepcopy
 
         # Runtime state
         self._last_job: Optional[Tuple[contextvars.Context, Tuple, Dict]] = None
@@ -134,7 +135,10 @@ class AsyncFunc(Generic[P]):
                 return
 
             ctx = contextvars.copy_context()
-            self._last_job = (ctx, deepcopy(args), deepcopy(kwargs))
+            if self.deepcopy:
+                self._last_job = (ctx, deepcopy(args), deepcopy(kwargs))
+            else:
+                self._last_job = (ctx, args, kwargs)
             # Must set the asyncio.Event from the correct thread
             loop.call_soon_threadsafe(self._have_new_job.set)  # type: ignore[arg-type]
 
@@ -179,6 +183,9 @@ class AsyncFunc(Generic[P]):
                 job = self._last_job
                 self._last_job = None
                 self._have_new_job.clear()
+
+                if job is None:
+                    break # may update to None in __exit__
 
                 ctx, args, kwargs = job
                 try:

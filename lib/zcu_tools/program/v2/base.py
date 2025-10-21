@@ -1,9 +1,10 @@
 from typing import Any, Dict
 
+from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 from zcu_tools.program.base import MyProgram
 
-from qick import QickConfig
+
 
 
 class MyProgramV2(MyProgram, AveragerProgramV2):

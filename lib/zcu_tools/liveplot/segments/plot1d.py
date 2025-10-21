@@ -13,12 +13,14 @@ class Plot1DSegment(AbsSegment):
         ylabel: str,
         title: Optional[str] = None,
         num_lines: int = 1,
+        show_grid: bool = False,
         line_kwargs: Optional[List[Optional[dict]]] = None,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel
         self.num_line = num_lines
         self.title = title
+        self.show_grid = show_grid
 
         if line_kwargs is None:
             line_kwargs = [None] * num_lines
@@ -36,6 +38,8 @@ class Plot1DSegment(AbsSegment):
         ax.set_ylabel(self.ylabel)
         if self.title is not None:
             ax.set_title(self.title)
+        if self.show_grid:
+            ax.grid()
 
         lines = []
         for kwargs in self.line_kwargs:

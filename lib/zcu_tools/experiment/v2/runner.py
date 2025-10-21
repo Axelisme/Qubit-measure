@@ -239,6 +239,7 @@ class AnalysisTask(AbsTask):
     def get_default_result(self) -> ResultType:
         return deepcopy(self.init_result)
 
+from zcu_tools.utils.async_func import AsyncFunc
 
 class Runner:
     def __init__(
@@ -253,14 +254,15 @@ class Runner:
         cfg = deepcopy(init_cfg)
         init_result = self.task.get_default_result()
 
-        GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
-
-        ctx = TaskContext(cfg, init_result, self.update_hook)
-
         try:
-            self.task.init(ctx)
-            self.task.run(ctx)
-            self.task.cleanup()
+            with AsyncFunc(self.update_hook, min_interval=1.0) as async_hook:
+                ctx = TaskContext(cfg, init_result, async_hook)
+
+                GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+
+                self.task.init(ctx)
+                self.task.run(ctx)
+                self.task.cleanup()
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
         except Exception:

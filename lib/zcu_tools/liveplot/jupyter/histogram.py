@@ -40,3 +40,9 @@ class LivePlotterHistogram(JupyterPlotMixin, AbsLivePlotter):
             segment.update(ax, signals, title)
             if refresh:
                 self._refresh_while_lock()
+
+    def get_ax(self) -> plt.Axes:
+        return self.axs[0][0]
+
+    def get_segment(self) -> HistogramSegment:
+        return self.segments[0][0]

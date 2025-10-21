@@ -1,4 +1,4 @@
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,19 +36,22 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:
-        ax = self.axs[0][0]
-        segment = self.segments[0][0]
-        assert isinstance(ax, plt.Axes)
-        assert isinstance(segment, (PlotNonUniform2DSegment, Plot2DSegment))
-
         if self.disable:
             return
+
+        ax = self.get_ax()
+        segment = self.get_segment()
 
         with self.update_lock:
             segment.update(ax, xs, ys, signals, title)
             if refresh:
                 self._refresh_while_lock()
 
+    def get_ax(self) -> plt.Axes:
+        return self.axs[0][0]
+
+    def get_segment(self) -> Union[Plot2DSegment, PlotNonUniform2DSegment]:
+        return self.segments[0][0]
 
 class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
     def __init__(
@@ -103,14 +106,8 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         if self.disable:
             return
 
-        ax2d = self.axs[0][0]
-        ax1d = self.axs[0][1]
-        segment2d = self.segments[0][0]
-        segment1d = self.segments[0][1]
-        assert isinstance(ax2d, plt.Axes)
-        assert isinstance(ax1d, plt.Axes)
-        assert isinstance(segment2d, (PlotNonUniform2DSegment, Plot2DSegment))
-        assert isinstance(segment1d, Plot1DSegment)
+        ax2d, ax1d = self.get_ax("2d"), self.get_ax("1d")
+        segment2d, segment1d = self.get_segment("2d"), self.get_segment("1d")
 
         # use the last non-nan line as current line
         if np.all(np.isnan(signals)):
@@ -135,3 +132,11 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
             segment1d.update(ax1d, line_xs, line_signals)
             if refresh:
                 self._refresh_while_lock()
+
+    def get_ax(self, name: Literal["2d", "1d"]) -> plt.Axes:
+        ax_map = ["2d", "1d"]
+        return self.axs[0][ax_map.index(name)]
+
+    def get_segment(self, name: Literal["2d", "1d"]) -> Union[Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment]:
+        segment_map = ["2d", "1d"]
+        return self.segments[0][segment_map.index(name)]

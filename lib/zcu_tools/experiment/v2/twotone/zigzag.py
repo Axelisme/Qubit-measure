@@ -80,7 +80,7 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter1D("Times", "Signal", disable=not progress) as viewer:
+        with LivePlotter1D("Times", "Signal", segment_kwargs=dict(show_grid=True), disable=not progress) as viewer:
             signals = Runner(
                 task=SoftTask(
                     sweep_name="times",

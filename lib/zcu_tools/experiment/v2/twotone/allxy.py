@@ -123,22 +123,20 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             ylabel="Signal",
             disable=not progress,
             segment_kwargs=dict(
+                show_grid=True,
                 line_kwargs=[dict(marker="o", linestyle=None, markersize=5)],
             ),
         )
 
         # Configure x-axis labels if plotter is available
         if not liveplotter.disable:
-            ax = liveplotter.axs[0][0]
-            assert isinstance(ax, plt.Axes)
-
+            ax = liveplotter.get_ax()
             ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
             ax.set_xticklabels(
                 [f"({gate1}, {gate2})" for gate1, gate2 in ALLXY_SEQUENCE],
                 rotation=45,
                 ha="right",
             )
-            ax.grid(True)
 
         with liveplotter as viewer:
             signals_dict = Runner(

@@ -14,6 +14,7 @@ class CallbackMixin(AcquireMixin):
     ) -> List[np.ndarray]:
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(callback=callback)
+
         return super().acquire(*args, extra_args=extra_args, **kwargs)
 
     def acquire_decimated(
@@ -21,7 +22,8 @@ class CallbackMixin(AcquireMixin):
     ) -> List[np.ndarray]:
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(callback=callback)
-        return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)  # type: ignore
+
+        return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
 
     def finish_round(self) -> bool:
         not_finish = super().finish_round()

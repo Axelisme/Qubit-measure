@@ -32,12 +32,16 @@ class LivePlotter1D(JupyterPlotMixin, AbsLivePlotter):
         if self.disable:
             return
 
-        ax = self.axs[0][0]
-        segment = self.segments[0][0]
-        assert isinstance(ax, plt.Axes)
-        assert isinstance(segment, Plot1DSegment)
+        ax = self.get_ax()
+        segment = self.get_segment()
 
         with self.update_lock:
             segment.update(ax, xs, signals, title)
             if refresh:
                 self._refresh_while_lock()
+
+    def get_ax(self) -> plt.Axes:
+        return self.axs[0][0]
+
+    def get_segment(self) -> Plot1DSegment:
+        return self.segments[0][0]
