@@ -102,7 +102,7 @@ def fit_singleshot(
         [
             se if se < sg else np.min(xs),
             sg if sg < se else np.min(xs),
-            5 * (xs[1] - xs[0]),
+            xs[1] - xs[0],
             0.0,
             0.0,
         ],

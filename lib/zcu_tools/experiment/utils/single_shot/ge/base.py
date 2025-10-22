@@ -124,7 +124,7 @@ def fitting_ge_and_plot(
 
     g_pdfs, e_pdfs, bins = hist(Ig, Ie, numbins, axs[1, 0])
 
-    xs = bins[:-1]
+    xs = 0.5 * (bins[:-1] + bins[1:])
     axs[0, 1].hist(xs, bins=bins, weights=g_pdfs, color="b", alpha=0.5)
     axs[1, 1].hist(xs, bins=bins, weights=e_pdfs, color="r", alpha=0.5)
 
