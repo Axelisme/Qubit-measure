@@ -88,6 +88,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         result: Optional[SingleShotResultType] = None,
         backend: Literal["center", "regression", "pca"] = "pca",
         logscale: bool = False,
+        init_p0: Optional[None] = None
     ) -> Tuple[float, float, float, np.ndarray]:
         if result is None:
             result = self.last_result
@@ -98,7 +99,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         signals = result
 
         return singleshot_ge_analysis(
-            signals, backend=backend, length_ratio=length_ratio, logscale=logscale
+            signals, backend=backend, length_ratio=length_ratio, logscale=logscale, init_p0=init_p0
         )
 
     def save(

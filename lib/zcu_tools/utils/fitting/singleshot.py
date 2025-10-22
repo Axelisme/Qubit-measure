@@ -8,9 +8,9 @@ from .base import assign_init_p, fit_func
 
 
 def calc_fc(x, rA, rB) -> np.ndarray:
-    mask_main = (x > 0) & (x <= 1)
-
     f_c = np.zeros_like(x, dtype=float)
+
+    mask_main = (x > 0) & (x <= 1)
     if np.any(mask_main):
         s = x[mask_main]
 
@@ -37,7 +37,10 @@ def calc_noise_fc(xs, rA, rB, s) -> np.ndarray:
 
 def calc_noise_f(xs, rA, rB, s) -> np.ndarray:
     noise_f0 = np.exp(-rA) * stats.norm.pdf(xs, loc=0, scale=s)
-    noise_fc = calc_noise_fc(xs, rA, rB, s)
+    if rA != 0.0 or rB != 0.0:
+        noise_fc = calc_noise_fc(xs, rA, rB, s)
+    else:
+        noise_fc = 0.0
     noise_f = noise_f0 + noise_fc
     return noise_f / np.sum(noise_f)
 
@@ -89,10 +92,18 @@ def fit_singleshot(
         sigma_e = np.sum(e_keep_pdf * np.abs(xs[e_idxs] - se)) / np.sum(e_keep_pdf)
         s = 0.5 * (sigma_g + sigma_e)
 
+        if sg == se:
+            if np.sum(g_pdfs*xs) < np.sum(e_pdfs*xs):
+                sg -= 0.2 * s
+                se += 0.2 * s
+            else:
+                sg += 0.2 * s
+                se -= 0.2 * s
+
         g_tran_pop = np.sum(g_pdfs[e_idxs])
         e_tran_pop = np.sum(e_pdfs[g_idxs])
 
-        p0 = 0.5 * (g_tran_pop + e_tran_pop)
+        p0 = min(0.5 * (g_tran_pop + e_tran_pop), 0.5)
         p_avg = min(e_tran_pop / (g_tran_pop + e_tran_pop), 0.5)
 
         assign_init_p(fitparams, [sg, se, s, p0, p_avg])
