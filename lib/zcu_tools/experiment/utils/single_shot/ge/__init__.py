@@ -83,6 +83,7 @@ def singleshot_ge_analysis(
     signals: np.ndarray,
     angle: float = None,
     backend: Literal["center", "regression", "pca"] = "pca",
+    **kwargs,
 ) -> Tuple[float, float, float, np.ndarray]:
     """
     Analyze ground and excited state signals to determine classification parameters.
@@ -113,12 +114,12 @@ def singleshot_ge_analysis(
         - populations: The populations of ground and excited states
     """
     if angle is not None:
-        return fit_ge_manual(signals, angle)
+        return fit_ge_manual(signals, angle, **kwargs)
 
     if backend == "center":
-        return fit_ge_by_center(signals)
+        return fit_ge_by_center(signals, **kwargs)
     if backend == "pca":
-        return fit_ge_by_pca(signals)
+        return fit_ge_by_pca(signals, **kwargs)
 
     raise ValueError(f"Unknown backend: {backend}")
 

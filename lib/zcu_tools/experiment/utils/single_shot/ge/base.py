@@ -3,7 +3,12 @@ from typing import Callable, Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from zcu_tools.utils.fitting import fit_dual_gauss, gauss_func
+# from zcu_tools.utils.fitting import fit_dual_gauss, gauss_func
+from zcu_tools.utils.fitting.singleshot import (
+    calc_population_pdf,
+    fit_singleshot,
+    gauss_func,
+)
 
 
 def rotate(
@@ -55,18 +60,19 @@ def hist(
     I_tot = np.concatenate((Ie, Ig))
     xlims = [np.min(I_tot), np.max(I_tot)]
     bins = np.linspace(xlims[0], xlims[1], numbins)
+    ng, *_ = np.histogram(Ig, bins=bins, range=xlims)
+    ne, *_ = np.histogram(Ie, bins=bins, range=xlims)
+    ng = ng / np.sum(ng)
+    ne = ne / np.sum(ne)
     if ax is not None:
         plt_params = dict(bins=bins, range=xlims, alpha=0.5)
-        ng, *_ = ax.hist(Ig, color="b", label="g", **plt_params)
-        ne, *_ = ax.hist(Ie, color="r", label="e", **plt_params)
+        ax.hist(bins[:-1], color="b", weights=ng, label="g", **plt_params)
+        ax.hist(bins[:-1], color="r", weights=ne, label="e", **plt_params)
         ax.set_ylabel("Counts", fontsize=14)
         ax.set_xlabel("I [ADC levels]", fontsize=14)
         ax.legend(loc="upper right")
         if title is not None:
             ax.set_title(title, fontsize=14)
-    else:
-        ng, *_ = np.histogram(Ig, bins=bins, range=xlims)
-        ne, *_ = np.histogram(Ie, bins=bins, range=xlims)
     return ng, ne, bins
 
 
@@ -95,7 +101,9 @@ def calculate_fidelity(
 def fitting_ge_and_plot(
     signals: np.ndarray,
     classify_func: Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], Dict],
-    numbins: int = 200,
+    length_ratio: float,
+    numbins: int = 100,
+    logscale: bool = False,
 ) -> Tuple[float, float, float, np.ndarray]:
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
@@ -114,48 +122,51 @@ def fitting_ge_and_plot(
 
     scatter_ge_plot(axs[0, 0], (Ig, Ie), (Qg, Qe), "Rotated")
 
-    ng, ne, bins = hist(Ig, Ie, numbins, axs[1, 0])
+    g_pdfs, e_pdfs, bins = hist(Ig, Ie, numbins, axs[1, 0])
 
     xs = bins[:-1]
-    axs[0, 1].hist(xs, bins=bins, weights=ng, color="b", alpha=0.5)
-    axs[1, 1].hist(xs, bins=bins, weights=ne, color="r", alpha=0.5)
+    axs[0, 1].hist(xs, bins=bins, weights=g_pdfs, color="b", alpha=0.5)
+    axs[1, 1].hist(xs, bins=bins, weights=e_pdfs, color="r", alpha=0.5)
 
-    ge_params, _ = fit_dual_gauss(xs, ng + ne)
-    g_params, _ = fit_dual_gauss(
-        xs, ng, fixedparams=[None, *ge_params[1:3], None, *ge_params[4:6]]
-    )
-    e_params, _ = fit_dual_gauss(
-        xs, ne, fixedparams=[None, *ge_params[1:3], None, *ge_params[4:6]]
-    )
+    g_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, length_ratio)
+    sg, se, s, p0, p_avg = g_params
+    fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio)
+    fit_e_pdfs = calc_population_pdf(xs, sg, se, s, 1.0 - p0, p_avg, length_ratio)
 
-    n_gg, n_ge = g_params[0], g_params[3]
-    n_eg, n_ee = e_params[0], e_params[3]
-    n_gg, n_ge = n_gg / (n_gg + n_ge), n_ge / (n_gg + n_ge)
-    n_eg, n_ee = n_eg / (n_eg + n_ee), n_ee / (n_eg + n_ee)
+    n_gg = 1.0 - p0
+    n_ge = p0
+    n_ee = 1.0 - p0
+    n_eg = p0
 
-    gg_fit = gauss_func(xs, 0.0, *g_params[:3])
-    ge_fit = gauss_func(xs, 0.0, *g_params[3:])
-    eg_fit = gauss_func(xs, 0.0, *e_params[:3])
-    ee_fit = gauss_func(xs, 0.0, *e_params[3:])
-    axs[0, 1].plot(xs, gg_fit + ge_fit, "k-", label="total")
+    gg_fit = n_gg * gauss_func(xs, sg, s)
+    ge_fit = n_ge * gauss_func(xs, se, s)
+    eg_fit = n_eg * gauss_func(xs, sg, s)
+    ee_fit = n_ee * gauss_func(xs, se, s)
+
+    axs[0, 1].plot(xs, fit_g_pdfs, "k-", label="total")
     axs[0, 1].plot(xs, gg_fit, "b-", label="g")
     axs[0, 1].plot(xs, ge_fit, "b--", label="e")
     axs[0, 1].set_title(f"{n_gg:.1%} / {n_ge:.1%}", fontsize=14)
-    axs[1, 1].plot(xs, eg_fit + ee_fit, "k-", label="total")
+    axs[1, 1].plot(xs, fit_e_pdfs, "k-", label="total")
     axs[1, 1].plot(xs, eg_fit, "r-", label="g")
     axs[1, 1].plot(xs, ee_fit, "r--", label="e")
     axs[1, 1].set_title(f"{n_eg:.1%} / {n_ee:.1%}", fontsize=14)
 
-    axs[1, 0].plot(xs, gg_fit + ge_fit, "b-", label="g")
-    axs[1, 0].plot(xs, eg_fit + ee_fit, "r-", label="e")
+    axs[1, 0].plot(xs, fit_g_pdfs, "b-", label="g")
+    axs[1, 0].plot(xs, fit_e_pdfs, "r-", label="e")
 
-    fid, threshold = calculate_fidelity(ng, ne, bins)
+    fid, threshold = calculate_fidelity(g_pdfs, e_pdfs, bins)
 
     title = "${F}_{ge}$"
     axs[1, 0].set_title(f"Histogram ({title}: {fid:.3%})", fontsize=14)
 
     for ax in axs.flat:
         ax.axvline(threshold, color="0.2", linestyle="--")
+
+    if logscale:
+        axs[0, 1].set_yscale("log")
+        axs[1, 0].set_yscale("log")
+        axs[1, 1].set_yscale("log")
 
     plt.subplots_adjust(hspace=0.25, wspace=0.15)
     plt.tight_layout()
@@ -171,4 +182,5 @@ def fitting_ge_and_plot(
                 [n_eg, n_ee],
             ]
         ),
+        g_params,
     )

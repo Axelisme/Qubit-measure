@@ -1,4 +1,4 @@
-from .base import fit_line
+from .base import assign_init_p, batch_fit_func, fit_func, fit_line, with_fixed_params
 from .cos import cosfunc, decaycos, fitcos, fitdecaycos
 from .exp import dual_expfunc, expfunc, fit_dualexp, fitexp
 from .gauss import (
