@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output, display
 from matplotlib.animation import FuncAnimation
-from tqdm.auto import tqdm
 
 from ..processing import cast2real_and_norm, diff_mirror
 
@@ -39,6 +38,8 @@ class InteractiveLines:
             self.mA_e = (
                 self.mA_e - round((self.mA_e - spect_center) / period, 0) * period
             )
+        self.mA_c = float(self.mA_c)
+        self.mA_e = float(self.mA_e)
 
         self.mAs = mAs
         self.fpts = fpts
@@ -183,7 +184,7 @@ class InteractiveLines:
 
         # 設置變數
         self.picked = None
-        self.min_dist = 0.1 * (mAs[-1] - mAs[0])
+        self.min_dist = 0.1 * abs(mAs[-1] - mAs[0])
         self.is_finished = False
         self.active_line = None  # 用來跟踪目前正在移動的線
 
@@ -229,7 +230,7 @@ class InteractiveLines:
         self.anim_zoom = FuncAnimation(
             self.fig_zoom,
             self.update_zoom_view,
-            interval=100,
+            interval=500,
             blit=True,
             cache_frame_data=False,
         )
@@ -303,16 +304,12 @@ class InteractiveLines:
         self.stop_tracking()
 
         # 計算搜索範圍：總寬度的二十分之一
-        total_width = self.mAs[-1] - self.mAs[0]
+        total_width = abs(self.mAs[-1] - self.mAs[0])
         search_width = total_width / 20
 
         # 為紅線和藍線分別找到最佳位置
-        best_red_pos = self._find_best_position(
-            self.mA_c, search_width, pbar_desc="Finding best red position..."
-        )
-        best_blue_pos = self._find_best_position(
-            self.mA_e, search_width, pbar_desc="Finding best blue position..."
-        )
+        best_red_pos = self._find_best_position(self.mA_c, search_width)
+        best_blue_pos = self._find_best_position(self.mA_e, search_width)
 
         # 更新線條位置
         self.mA_c = best_red_pos
@@ -328,29 +325,29 @@ class InteractiveLines:
         # 重新繪製
         self.fig_main.canvas.draw_idle()
 
-    def _find_best_position(
-        self, current_pos: float, search_width: float, pbar_desc: str = ""
-    ) -> float:
+    def _find_best_position(self, current_pos: float, search_width: float) -> float:
         """在給定範圍內找到mirror loss最小的位置"""
         # 計算半格精度
-        precision = 0.25 * (self.mAs[-1] - self.mAs[0]) / len(self.mAs)
+        precision = 0.25 * (self.mAs.max() - self.mAs.min()) / len(self.mAs)
 
         # 定義搜索範圍
-        left_bound = max(self.mAs[0], current_pos - search_width / 2)
-        right_bound = min(self.mAs[-1], current_pos + search_width / 2)
+        left_bound = max(self.mAs.min(), current_pos - search_width / 2)
+        right_bound = min(self.mAs.max(), current_pos + search_width / 2)
 
         # 創建候選位置，只考慮半格的整數倍
         # 將邊界轉換為相對於起始點的格數
-        left_steps = int(np.floor((left_bound - self.mAs[0]) / precision))
-        right_steps = int(np.ceil((right_bound - self.mAs[0]) / precision))
+        left_steps = int(np.floor((left_bound - self.mAs.min()) / precision))
+        right_steps = int(np.ceil((right_bound - self.mAs.min()) / precision))
 
         # 生成候選位置
         candidates = [
-            self.mAs[0] + i * precision for i in range(left_steps, right_steps + 1)
+            self.mAs.min() + i * precision for i in range(left_steps, right_steps + 1)
         ]
 
         # 確保候選位置在有效範圍內
-        candidates = [pos for pos in candidates if self.mAs[0] <= pos <= self.mAs[-1]]
+        candidates = [
+            pos for pos in candidates if self.mAs.min() <= pos <= self.mAs.max()
+        ]
 
         # 如果沒有有效的候選位置，返回當前位置
         if not candidates:
@@ -360,7 +357,7 @@ class InteractiveLines:
         min_loss = float("inf")
 
         # 對每個候選位置計算mirror loss
-        for candidate in tqdm(candidates, desc=pbar_desc):
+        for candidate in candidates:
             # 計算該位置的mirror loss
             # 總是使用spectrum來計算(包含phase資訊)
             diff_amps = diff_mirror(self.mAs, self.spectrum.T, candidate).T
@@ -397,7 +394,7 @@ class InteractiveLines:
         # 選擇最近的線
         if red_dist < blue_dist and red_dist < self.min_dist / 2:
             self.set_picked_red(None)
-        elif blue_dist < red_dist and blue_dist < self.min_dist / 2:
+        elif blue_dist <= red_dist and blue_dist < self.min_dist / 2:
             self.set_picked_blue(None)
 
     def onmove(self, event) -> None:
@@ -468,8 +465,8 @@ class InteractiveLines:
         mirror_loss = np.mean(diff_amps[diff_amps != 0.0])
 
         # set axis limits to simulate zoom
-        Dx = 0.3 * (self.mAs[-1] - self.mAs[0])
-        Dy = 0.3 * (self.fpts[-1] - self.fpts[0])
+        Dx = 0.3 * abs(self.mAs[-1] - self.mAs[0])
+        Dy = 0.3 * abs(self.fpts[-1] - self.fpts[0])
         self.ax_zoom.set_xlim(x - Dx, x + Dx)
         self.ax_zoom.set_ylim(y - Dy, y + Dy)
         self.ax_zoom.set_title(f"mirror loss: {mirror_loss:.4f}")
@@ -494,8 +491,6 @@ class InteractiveLines:
         # 停止動畫
         self.anim_main.event_source.stop()
         self.anim_zoom.event_source.stop()
-        # plt.close(self.fig_main)
-        # plt.close(self.fig_zoom)
 
     def get_positions(self, finish: bool = True) -> Tuple[float, float]:
         """運行交互式選擇器並返回兩條線的位置"""

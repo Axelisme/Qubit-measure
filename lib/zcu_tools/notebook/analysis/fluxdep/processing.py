@@ -101,7 +101,7 @@ def diff_mirror(xs: np.ndarray, data: np.ndarray, center: float) -> np.ndarray:
     # 使用向量化計算，避免 Python for-loop 以提升效能
 
     # 以 xs 的端點為 0 與 N-1，計算 center 對應的連續索引位置 (浮點數)
-    c_idx = (len(xs) - 1) * (center - xs.min()) / (xs.max() - xs.min())
+    c_idx = (len(xs) - 1) * (center - xs[0]) / (xs[-1] - xs[0])
 
     # 建立正向索引 0,1,2,...,N-1
     idxs = np.arange(data.shape[0])
