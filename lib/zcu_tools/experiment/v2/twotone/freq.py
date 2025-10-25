@@ -11,7 +11,7 @@ from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_resonence_freq
+from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 from ..runner import HardTask, Runner
@@ -73,8 +73,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         self,
         result: Optional[FreqResultType] = None,
         *,
-        type: Literal["lor", "sinc"] = "lor",
-        asym: bool = False,
+        model_type: Literal["lor", "sinc"] = "lor",
         plot_fit: bool = True,
         max_contrast: bool = True,
     ) -> Tuple[float, float]:
@@ -91,7 +90,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         y = rotate2real(signals).real if max_contrast else np.abs(signals)
 
-        freq, freq_err, kappa, _, y_fit, _ = fit_resonence_freq(fpts, y, type, asym)
+        freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(fpts, y, model_type)
 
         plt.figure(figsize=config.figsize)
         plt.tight_layout()

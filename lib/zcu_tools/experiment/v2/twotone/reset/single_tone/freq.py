@@ -18,7 +18,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_resonence_freq
+from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 from ....runner import HardTask, Runner
@@ -101,7 +101,7 @@ class FreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
 
         real_signals = reset_signal2real(signals)
 
-        freq, freq_err, kappa, _, y_fit, _ = fit_resonence_freq(
+        freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(
             fpts, real_signals, type=type
         )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from turtle import back
 from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -11,7 +12,7 @@ from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_resonence_freq
+from zcu_tools.utils.fitting import HangerModel, TransmissionModel
 
 from ..runner import HardTask, Runner
 
@@ -64,80 +65,51 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         return fpts, signals
 
-    def analyze_by_abcd(
-        self,
-        fpts: np.ndarray,
-        signals: np.ndarray,
-        solve_type: str = "hm",
-        fit_edelay: bool = True,
-    ) -> Dict[str, float]:
-        try:
-            from abcd_rf_fit import analyze # type: ignore
-        except ImportError:
-            print(
-                "cannot import abcd_rf_fit, do you have it installed? please check: <https://github.com/UlysseREGLADE/abcd_rf_fit.git>"
-            )
-            raise
-
-        fit = analyze(1e6 * fpts, signals, solve_type, fit_edelay=fit_edelay)
-        fit.plot()
-        param = fit.tolist()
-        return {
-            "freq": round(param[0] * 1e-6, 7),  # MHz
-            "kappa": round(param[1] * 1e-6, 4),  # MHz
-            "Qi": round((param[0] / (param[1] - param[2]))),
-            "absQc": round(param[0] / param[2]),
-            "Ql": round(param[0] / param[1]),
-        }
-
-    def analyze_wo_abcd(
-        self,
-        fpts: np.ndarray,
-        signals: np.ndarray,
-        *,
-        type: Literal["lor", "sinc"] = "lor",
-        asym: bool = False,
-    ) -> Dict[str, float]:
-        val_mask = ~np.isnan(signals)
-        fpts = fpts[val_mask]
-        signals = signals[val_mask]
-
-        amps = np.abs(signals)
-
-        freq, freq_err, kappa, _, y_fit, _ = fit_resonence_freq(fpts, amps, type, asym)
-
-        plt.figure(figsize=config.figsize)
-        plt.tight_layout()
-        plt.plot(fpts, amps, label="signal", marker="o", markersize=3)
-        plt.plot(fpts, y_fit, label=f"fit, $kappa$={kappa:.1g} MHz")
-        label = f"$f_res$ = {freq:.7g} +/- {freq_err:.1g} MHz"
-        plt.axvline(freq, color="r", ls="--", label=label)
-        plt.xlabel("Frequency (MHz)")
-        plt.ylabel("Magnitude (a.u.)")
-        plt.legend()
-        plt.show()
-
-        return dict(freq=freq, kappa=kappa, freq_err=freq_err)
-
     def analyze(
         self,
         result: Optional[FreqResultType] = None,
         *,
-        use_abcd: bool = True,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
+        model_type: Literal["hm", "t", "auto"] = "auto",
+        edelay: Optional[float] = None,
+        plot: bool = True,
+    ) -> Tuple[float, float, Dict[str, Any], Optional[plt.Figure]]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         fpts, signals = result
 
-        if use_abcd:
-            params = self.analyze_by_abcd(fpts=fpts, signals=signals, **kwargs)
-        else:
-            params = self.analyze_wo_abcd(fpts=fpts, signals=signals, **kwargs)
+        # remove first and last point, sometimes they have problems
+        fpts = fpts[1:-1]
+        signals = signals[1:-1]
 
-        return params["freq"], params["kappa"], params
+        # discard NaNs (possible early abort)
+        val_mask = ~np.isnan(signals)
+        fpts = fpts[val_mask]
+        signals = signals[val_mask]
+
+        if model_type == "hm":
+            model = HangerModel()
+        elif model_type == "t":
+            model = TransmissionModel()
+        elif model_type == "auto":
+            background = np.abs(0.5 * (signals[0] + signals[-1]))
+            magnitudes = np.abs(signals)
+
+            if magnitudes.max() - background > 0.25 * (background - magnitudes.min()):
+                model = HangerModel()
+            else:
+                model = TransmissionModel()
+        else:
+            raise ValueError(f"Invalid model type: {model_type}")
+
+        param_dict = model.fit(fpts, signals, edelay)
+        if plot:
+            fig = model.visualize_fit(fpts, signals, param_dict)
+        else:
+            fig = None
+
+        return float(param_dict["freq"]), float(param_dict["kappa"]), param_dict, fig
 
     def save(
         self,
@@ -155,7 +127,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Frequency", "unit": "MHz", "values": fpts},
+            x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e-6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,

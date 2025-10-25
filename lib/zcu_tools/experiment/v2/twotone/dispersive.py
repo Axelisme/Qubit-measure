@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +9,7 @@ from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_resonence_freq
+from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 from ..runner import HardTask, Runner
@@ -29,7 +29,9 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
 
         # Canonicalise sweep section to single-axis form
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        cfg["sweep"] = { # Prepend ge sweep to inner loop for measuring both ground and excited states
+        cfg[
+            "sweep"
+        ] = {  # Prepend ge sweep to inner loop for measuring both ground and excited states
             "ge": {"start": 0, "stop": cfg["qub_pulse"]["gain"], "expts": 2},
             "freq": cfg["sweep"]["freq"],
         }
@@ -43,7 +45,10 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
         )
 
         with LivePlotter1D(
-            "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2), disable=not progress
+            "Frequency (MHz)",
+            "Amplitude",
+            segment_kwargs=dict(num_lines=2),
+            disable=not progress,
         ) as viewer:
             signals = Runner(
                 task=HardTask(
@@ -66,53 +71,12 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
 
         return fpts, signals
 
-    def fitt_wo_abcd(
-        self,
-        fpts: np.ndarray,
-        g_signals: np.ndarray,
-        e_signals: np.ndarray,
-        asym: bool = True,
-    ) -> Tuple[float, float, float, float, np.ndarray, np.ndarray]:
-        g_amps, e_amps = np.abs(g_signals), np.abs(e_signals)
-        g_freq, _, g_kappa, _, g_fit, _ = fit_resonence_freq(fpts, g_amps, asym=asym)
-        e_freq, _, e_kappa, _, e_fit, _ = fit_resonence_freq(fpts, e_amps, asym=asym)
-        return g_freq, g_kappa, e_freq, e_kappa, g_fit, e_fit
-
-    def fitt_by_abcd(
-        self, fpts: np.ndarray, g_signals: np.ndarray, e_signals: np.ndarray
-    ) -> Tuple[float, float, float, float, np.ndarray, np.ndarray]:
-        try:
-            from abcd_rf_fit import analyze
-        except ImportError:
-            print(
-                "cannot import abcd_rf_fit, do you have it installed? please check: <https://github.com/UlysseREGLADE/abcd_rf_fit.git>"
-            )
-            raise
-
-        g_fit = analyze(1e6 * fpts, g_signals, "hm", fit_edelay=True)
-        g_param = g_fit.tolist()
-        g_freq, g_kappa = g_param[0] * 1e-6, g_param[1] * 1e-6  # MHz
-
-        e_fit = analyze(1e6 * fpts, e_signals, "hm", fit_edelay=True)
-        e_param = e_fit.tolist()
-        e_freq, e_kappa = e_param[0] * 1e-6, e_param[1] * 1e-6  # MHz
-
-        return (
-            g_freq,
-            g_kappa,
-            e_freq,
-            e_kappa,
-            np.abs(g_fit(1e6 * fpts)),
-            np.abs(e_fit(1e6 * fpts)),
-        )
-
     def analyze(
         self,
         result: Optional[DispersiveResultType] = None,
         *,
         plot: bool = True,
-        use_abcd: bool = False,
-        **kwargs,
+        model_type: Literal["lor", "sinc"] = "lor",
     ) -> Tuple[float, float]:
         if result is None:
             result = self.last_result
@@ -122,14 +86,8 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
         amps = dispersive_signal2real(signals)
         g_amps, e_amps = amps[0, :], amps[1, :]
 
-        if use_abcd:
-            g_freq, g_kappa, e_freq, e_kappa, g_fit, e_fit = self.fitt_by_abcd(
-                fpts, signals[0, :], signals[1, :], **kwargs
-            )
-        else:
-            g_freq, g_kappa, e_freq, e_kappa, g_fit, e_fit = self.fitt_wo_abcd(
-                fpts, signals[0, :], signals[1, :], **kwargs
-            )
+        g_freq, _, g_kappa, _, g_fit, _ = fit_qubit_freq(fpts, g_amps, model_type)
+        e_freq, _, e_kappa, _, e_fit, _ = fit_qubit_freq(fpts, e_amps, model_type)
 
         # Calculate dispersive shift and average linewidth
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π

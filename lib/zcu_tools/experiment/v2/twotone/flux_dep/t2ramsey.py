@@ -20,12 +20,12 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_decay_fringe, fit_resonence_freq
+from zcu_tools.utils.fitting import fit_decay_fringe, fit_qubit_freq
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ...runner import BatchTask, HardTask, Runner, SoftTask, TaskContext, AnalysisTask
-from .util import check_gains
+from ...runner import AnalysisTask, BatchTask, HardTask, Runner, SoftTask, TaskContext
 from ...utils import set_pulse_freq, wrap_earlystop_check
+from .util import check_gains
 
 T2RamseyResultType = Tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]
@@ -134,7 +134,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             freq_signals = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], "freq"])
 
             real_freq_signals = np.abs(minus_background(freq_signals))
-            detune, freq_err, kappa, *_ = fit_resonence_freq(detunes, real_freq_signals)
+            detune, freq_err, kappa, *_ = fit_qubit_freq(detunes, real_freq_signals)
             if freq_err > 0.5 * kappa:
                 return np.nan
             else:
