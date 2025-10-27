@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from turtle import back
 from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -93,10 +92,10 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         elif model_type == "t":
             model = TransmissionModel()
         elif model_type == "auto":
-            background = np.abs(0.5 * (signals[0] + signals[-1]))
+            background = 0.5 * (np.abs(signals[0]) + np.abs(signals[-1]))
             magnitudes = np.abs(signals)
 
-            if magnitudes.max() - background < 0.25 * (background - magnitudes.min()):
+            if magnitudes.max() - background < 3 * (background - magnitudes.min()):
                 model = HangerModel()
             else:
                 model = TransmissionModel()
