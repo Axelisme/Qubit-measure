@@ -96,7 +96,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
             background = np.abs(0.5 * (signals[0] + signals[-1]))
             magnitudes = np.abs(signals)
 
-            if magnitudes.max() - background > 0.25 * (background - magnitudes.min()):
+            if magnitudes.max() - background < 0.25 * (background - magnitudes.min()):
                 model = HangerModel()
             else:
                 model = TransmissionModel()
