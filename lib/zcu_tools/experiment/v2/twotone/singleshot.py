@@ -78,17 +78,17 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = signals
+        self.last_result = (signals,)
 
         return signals
 
     def analyze(
         self,
-        length_ratio: float,
         result: Optional[SingleShotResultType] = None,
         backend: Literal["center", "regression", "pca"] = "pca",
         logscale: bool = False,
-        init_p0: Optional[None] = None
+        length_ratio: Optional[float] = None,
+        init_p0: Optional[None] = None,
     ) -> Tuple[float, float, float, np.ndarray]:
         if result is None:
             result = self.last_result
@@ -96,10 +96,14 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
             "No measurement data available. Run experiment first."
         )
 
-        signals = result
+        (signals,) = result
 
         return singleshot_ge_analysis(
-            signals, backend=backend, length_ratio=length_ratio, logscale=logscale, init_p0=init_p0
+            signals,
+            backend=backend,
+            length_ratio=length_ratio,
+            logscale=logscale,
+            init_p0=init_p0,
         )
 
     def save(
@@ -116,7 +120,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
             "No measurement data available. Run experiment first."
         )
 
-        signals = result
+        (signals,) = result
 
         save_data(
             filepath=filepath,

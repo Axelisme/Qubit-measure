@@ -109,7 +109,7 @@ def fit_resonant_params(
     magnitudes = np.abs(signals - 0.5 * (signals[0] + signals[-1]))
     fwhm = np.ptp(fpts) * np.sum(magnitudes > 0.5 * np.max(magnitudes)) / len(fpts)
 
-    init_freq = fpts[np.argmax(magnitudes)]
+    init_freq = fpts[np.argmax(np.abs(np.diff(signals)))]
     init_Ql = 2 * init_freq / fwhm
     init_theta0 = 0.5 * (np.max(phases) + np.min(phases))
 

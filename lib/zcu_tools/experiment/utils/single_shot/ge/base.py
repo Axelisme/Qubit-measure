@@ -101,10 +101,10 @@ def calculate_fidelity(
 def fitting_ge_and_plot(
     signals: np.ndarray,
     classify_func: Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], Dict],
-    length_ratio: float,
     numbins: int = 100,
     logscale: bool = False,
-    init_p0: Optional[float] = None
+    length_ratio: Optional[float] = None,
+    init_p0: Optional[float] = None,
 ) -> Tuple[float, float, float, np.ndarray]:
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
@@ -119,7 +119,6 @@ def fitting_ge_and_plot(
     Ie, Qe = rotate(Ie, Qe, theta)
 
     fig, axs = plt.subplots(2, 2, figsize=(8, 8))
-    fig.suptitle(f"Rotation angle: {180 * theta / np.pi:.3f} deg")
 
     scatter_ge_plot(axs[0, 0], (Ig, Ie), (Qg, Qe), "Rotated")
 
@@ -129,11 +128,13 @@ def fitting_ge_and_plot(
     axs[0, 1].hist(xs, bins=bins, weights=g_pdfs, color="b", alpha=0.5)
     axs[1, 1].hist(xs, bins=bins, weights=e_pdfs, color="r", alpha=0.5)
 
-    fixedparams = [None] * 5
+    fixedparams = [None] * 6
     if init_p0 is not None:
         fixedparams[3] = init_p0
-    g_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, length_ratio, fixedparams=fixedparams)
-    sg, se, s, p0, p_avg = g_params
+    if length_ratio is not None:
+        fixedparams[5] = length_ratio
+    g_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
+    sg, se, s, p0, p_avg, length_ratio = g_params
     fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio)
     fit_e_pdfs = calc_population_pdf(xs, sg, se, s, 1.0 - p0, p_avg, length_ratio)
 
@@ -149,11 +150,11 @@ def fitting_ge_and_plot(
 
     axs[0, 1].plot(xs, fit_g_pdfs, "k-", label="total")
     axs[0, 1].plot(xs, gg_fit, "b-", label="g")
-    axs[0, 1].plot(xs, ge_fit, "b--", label="e")
+    axs[0, 1].plot(xs, ge_fit, "r--", label="e")
     axs[0, 1].set_title(f"{n_gg:.1%} / {n_ge:.1%}", fontsize=14)
     axs[1, 1].plot(xs, fit_e_pdfs, "k-", label="total")
-    axs[1, 1].plot(xs, eg_fit, "r-", label="g")
-    axs[1, 1].plot(xs, ee_fit, "r--", label="e")
+    axs[1, 1].plot(xs, ee_fit, "r-", label="e")
+    axs[1, 1].plot(xs, eg_fit, "b--", label="g")
     axs[1, 1].set_title(f"{n_eg:.1%} / {n_ee:.1%}", fontsize=14)
 
     axs[1, 0].plot(xs, fit_g_pdfs, "b-", label="g")
@@ -161,8 +162,7 @@ def fitting_ge_and_plot(
 
     fid, threshold = calculate_fidelity(g_pdfs, e_pdfs, bins)
 
-    title = "${F}_{ge}$"
-    axs[1, 0].set_title(f"Histogram ({title}: {fid:.3%})", fontsize=14)
+    axs[1, 0].set_title(r"${F}_{ge}: $" + f"{fid:.3%}", fontsize=14)
 
     for ax in axs.flat:
         ax.axvline(threshold, color="0.2", linestyle="--")
@@ -171,6 +171,8 @@ def fitting_ge_and_plot(
         axs[0, 1].set_yscale("log")
         axs[1, 0].set_yscale("log")
         axs[1, 1].set_yscale("log")
+
+    fig.suptitle(f"Readout length = {length_ratio:.1f} " + r"$T_1$")
 
     plt.subplots_adjust(hspace=0.25, wspace=0.15)
     plt.tight_layout()

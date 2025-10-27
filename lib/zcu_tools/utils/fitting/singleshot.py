@@ -61,17 +61,15 @@ def gauss_func(xs, x_c, s) -> np.ndarray:
     return f / np.sum(f)
 
 
-def fit_singleshot(
-    xs, g_pdfs, e_pdfs, length_ratio: float, fitparams=None, fixedparams=None
-):
-    """fitparams: [sg, se, s, p0, p_avg]"""
-    if fixedparams is not None and len(fixedparams) != 5:
+def fit_singleshot(xs, g_pdfs, e_pdfs, fitparams=None, fixedparams=None):
+    """fitparams: [sg, se, s, p0, p_avg, length_ratio]"""
+    if fixedparams is not None and len(fixedparams) != 6:
         raise ValueError(
-            "Fixed parameters must be a list of six elements: [sg, se, s, p0, p_avg]"
+            "Fixed parameters must be a list of six elements: [sg, se, s, p0, p_avg, length_ratio]"
         )
 
     if fitparams is None:
-        fitparams = [None] * 5
+        fitparams = [None] * 6
 
     # guess initial parameters
     if any([p is None for p in fitparams]):
@@ -93,7 +91,7 @@ def fit_singleshot(
         s = 0.5 * (sigma_g + sigma_e)
 
         if sg == se:
-            if np.sum(g_pdfs*xs) < np.sum(e_pdfs*xs):
+            if np.sum(g_pdfs * xs) < np.sum(e_pdfs * xs):
                 sg -= 0.2 * s
                 se += 0.2 * s
             else:
@@ -105,15 +103,17 @@ def fit_singleshot(
 
         p0 = min(0.5 * (g_tran_pop + e_tran_pop), 0.5)
         p_avg = min(e_tran_pop / (g_tran_pop + e_tran_pop), 0.5)
+        length_ratio = 0.01
 
-        assign_init_p(fitparams, [sg, se, s, p0, p_avg])
+        assign_init_p(fitparams, [sg, se, s, p0, p_avg, length_ratio])
 
-    sg, se, s, p0, p_avg = fitparams
+    sg, se, s, p0, p_avg, length_ratio = fitparams
     bounds = (
         [
             se if se < sg else np.min(xs),
             sg if sg < se else np.min(xs),
             xs[1] - xs[0],
+            0.0,
             0.0,
             0.0,
         ],
@@ -123,6 +123,7 @@ def fit_singleshot(
             xs[-1] - xs[0],
             0.5,
             0.5,
+            3.0,
         ],
     )
 
@@ -137,8 +138,8 @@ def fit_singleshot(
         g_args = list(args)
         e_args = list(args)
         e_args[3] = 1.0 - p0
-        g_pdf = calc_population_pdf(cat_xs[: len(xs)], *g_args, length_ratio)
-        e_pdf = calc_population_pdf(cat_xs[len(xs) :], *e_args, length_ratio)
+        g_pdf = calc_population_pdf(cat_xs[: len(xs)], *g_args)
+        e_pdf = calc_population_pdf(cat_xs[len(xs) :], *e_args)
         return np.concatenate([g_pdf, e_pdf])
 
     return fit_func(
