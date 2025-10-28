@@ -212,7 +212,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                     freq=(values, detunes, t2ramsey_signal2real(signals["freq"])),
                     t2ramsey=(values, lens, t2ramsey_signal2real(signals["t2ramsey"])),
                 )
-                if not ctx.is_empty():
+                if not ctx.is_empty_stack():
                     cur_task = ctx.addr_stack[-1]
                     # only update current liveplotter for speed
                     if cur_task in ["freq", "t2ramsey"]:

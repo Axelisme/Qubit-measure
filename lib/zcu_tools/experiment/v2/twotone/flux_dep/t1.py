@@ -203,7 +203,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     freq=(values, detunes, t1_signal2real(signals["freq"])),
                     t1=(values, lens, t1_signal2real(signals["t1"])),
                 )
-                if not ctx.is_empty():
+                if not ctx.is_empty_stack():
                     cur_task = ctx.addr_stack[-1]
                     # only update current liveplotter for speed
                     if cur_task in ["freq", "t1"]:

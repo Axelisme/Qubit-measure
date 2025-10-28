@@ -60,11 +60,14 @@ def _run_loop() -> None:
 
 def _get_loop() -> asyncio.AbstractEventLoop:
     """Return the shared background loop; create it on first use."""
-    if _BG_LOOP is None:
-        t = threading.Thread(target=_run_loop, daemon=True, name="AsyncFuncLoop")
-        t.start()
-        _LOOP_READY.wait()
-    return _BG_LOOP  # type: ignore[return-value]
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        if _BG_LOOP is None:
+            t = threading.Thread(target=_run_loop, daemon=True, name="AsyncFuncLoop")
+            t.start()
+            _LOOP_READY.wait()
+        return _BG_LOOP  # type: ignore[return-value]
 
 
 # -------------------------------------------------------------
@@ -77,7 +80,10 @@ class AsyncFunc(Generic[P]):
     """See module-level docstring for behaviour details."""
 
     def __init__(
-        self, func: Optional[Callable[P, None]], min_interval: float = 0.0, deepcopy: bool = False
+        self,
+        func: Optional[Callable[P, None]],
+        min_interval: float = 0.0,
+        deepcopy: bool = False,
     ) -> None:
         """
         Args:
@@ -185,7 +191,7 @@ class AsyncFunc(Generic[P]):
                 self._have_new_job.clear()
 
                 if job is None:
-                    break # may update to None in __exit__
+                    break  # may update to None in __exit__
 
                 ctx, args, kwargs = job
                 try:

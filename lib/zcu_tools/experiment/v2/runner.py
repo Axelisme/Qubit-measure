@@ -9,6 +9,7 @@ from tqdm.auto import tqdm
 
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.utils.debug import print_traceback
+from zcu_tools.utils.func_tools import min_interval
 
 ResultType = Union[Dict[Any, "ResultType"], List["ResultType"], ndarray]
 
@@ -46,7 +47,7 @@ class TaskContext:
         self.cfg = self.cfg_stack.pop()  # restore cfg
         self.last_call_addr = None
 
-    def is_empty(self) -> bool:
+    def is_empty_stack(self) -> bool:
         return len(self.addr_stack) == 0
 
     def set_data(
@@ -92,7 +93,7 @@ class TaskContext:
 
 
 class AbsTask(ABC):
-    def init(self, ctx: TaskContext, keep:bool = True) -> None:
+    def init(self, ctx: TaskContext, keep: bool = True) -> None:
         pass
 
     @abstractmethod
@@ -113,7 +114,7 @@ class BatchTask(AbsTask):
 
         self.task_pbar = None
 
-    def init(self, ctx: TaskContext, keep = True) -> None:
+    def init(self, ctx: TaskContext, keep=True) -> None:
         self.task_pbar = tqdm(total=len(self.tasks), smoothing=0, leave=keep)
 
     def run(self, ctx: TaskContext) -> None:
@@ -154,10 +155,11 @@ class SoftTask(AbsTask):
 
         self.sweep_pbar = None
 
-    def init(self, ctx: TaskContext, keep = True) -> None:
+    def init(self, ctx: TaskContext, keep=True) -> None:
         self.sweep_pbar = tqdm(
             total=len(self.sweep_values), smoothing=0, desc=self.sweep_name, leave=keep
         )
+        self.update_cfg_fn(0, ctx, self.sweep_values[0])  # initialize the cfg
         self.sub_task.init(ctx, keep=keep)
 
     def run(self, ctx: TaskContext) -> None:
@@ -197,8 +199,10 @@ class HardTask(AbsTask):
 
         self.avg_pbar = None
 
-    def init(self, ctx: TaskContext, keep = True) -> None:
-        self.avg_pbar = tqdm(total=ctx.cfg["rounds"], smoothing=0, desc="rounds", leave=keep)
+    def init(self, ctx: TaskContext, keep=True) -> None:
+        self.avg_pbar = tqdm(
+            total=ctx.cfg["rounds"], smoothing=0, desc="rounds", leave=keep
+        )
 
     def run(self, ctx: TaskContext) -> None:
         assert self.avg_pbar is not None
@@ -239,7 +243,6 @@ class AnalysisTask(AbsTask):
     def get_default_result(self) -> ResultType:
         return deepcopy(self.init_result)
 
-from zcu_tools.utils.async_func import AsyncFunc
 
 class Runner:
     def __init__(
@@ -254,22 +257,24 @@ class Runner:
         cfg = deepcopy(init_cfg)
         init_result = self.task.get_default_result()
 
+        ctx = TaskContext(cfg, init_result, min_interval(self.update_hook, 1.0))
+
         try:
-            with AsyncFunc(self.update_hook, min_interval=1.0) as async_hook:
-                ctx = TaskContext(cfg, init_result, async_hook)
+            self.task.init(ctx)
 
-                GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+            # initialize devices with progress bar
+            GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
-                self.task.init(ctx)
-                self.task.run(ctx)
-                self.task.cleanup()
+            self.task.run(ctx)
+
+            self.task.cleanup()
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")
         except Exception:
             print("Error during measurement:")
             print_traceback()
 
-        if not ctx.is_empty():
+        if not ctx.is_empty_stack():
             warnings.warn("TaskContext is not empty, some data may be corrupted")
 
         return ctx.get_data()  # force return all data
