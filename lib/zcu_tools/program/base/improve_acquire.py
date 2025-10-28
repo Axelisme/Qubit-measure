@@ -15,21 +15,17 @@ class CallbackMixin(AcquireMixin):
         self, *args, callback: Optional[Callable[..., None]] = None, **kwargs
     ) -> List[np.ndarray]:
         extra_args = kwargs.pop("extra_args", dict())
+        extra_args.update(callback=callback)
 
-        with AsyncFunc(callback) as async_callback:
-            extra_args.update(callback=async_callback)
-
-            return super().acquire(*args, extra_args=extra_args, **kwargs)
+        return super().acquire(*args, extra_args=extra_args, **kwargs)
 
     def acquire_decimated(
         self, *args, callback: Optional[Callable[..., None]] = None, **kwargs
     ) -> List[np.ndarray]:
         extra_args = kwargs.pop("extra_args", dict())
+        extra_args.update(callback=callback)
 
-        with AsyncFunc(callback) as async_callback:
-            extra_args.update(callback=async_callback)
-
-            return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
+        return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
 
     def finish_round(self) -> bool:
         not_finish = super().finish_round()
