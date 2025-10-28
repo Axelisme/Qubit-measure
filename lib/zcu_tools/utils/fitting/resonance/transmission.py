@@ -41,7 +41,7 @@ class TransmissionModel:
 
         rot_signals = remove_edelay(fpts, signals, edelay)
         circle_params = fit_circle_params(rot_signals.real, rot_signals.imag)
-        freq, Ql, theta0 = fit_resonant_params(fpts, rot_signals, circle_params)
+        freq, Ql, theta0 = fit_resonant_params(fpts, rot_signals, circle_params, fit_theta0=False)
         a0 = calc_peak_signals(circle_params, theta0)
 
         return dict(

@@ -1,7 +1,9 @@
-from typing import Tuple
+from typing import Tuple, Optional
 
 import numpy as np
 import scipy as sp
+
+from ..base import fit_func
 
 
 def get_rough_edelay(fpts, signals) -> float:
@@ -84,8 +86,8 @@ def fit_edelay(fpts, signals) -> float:
             ** 2
         )
 
-    fit_range = 1.6 / np.ptp(fpts)
-    edelays = np.linspace(-fit_range, fit_range, 1001)
+    fit_range = 5.0 / np.ptp(fpts)
+    edelays = np.linspace(-fit_range, fit_range, 1000)
     loss_values = [loss_func(edelay) for edelay in edelays]
     edelay = edelays[np.argmin(loss_values)] + rough_edelay
 
@@ -101,7 +103,7 @@ def phase_func(fpts, resonant_f, Ql, theta0: float) -> np.ndarray:
 
 
 def fit_resonant_params(
-    fpts, signals, circle_params: Tuple[float, float, float]
+    fpts, signals, circle_params: Tuple[float, float, float], fit_theta0 = True
 ) -> Tuple[float, float, float]:
     """[resonant_freq, Ql, theta0]"""
     phases = calc_phase(signals, circle_params[0], circle_params[1])
@@ -113,17 +115,28 @@ def fit_resonant_params(
     init_Ql = 2 * init_freq / fwhm
     init_theta0 = 0.5 * (np.max(phases) + np.min(phases))
 
-    # fit the parameters
-    pOpt, _ = sp.optimize.curve_fit(
-        phase_func,
+    fixedparams = [None] * 3
+    if not fit_theta0:
+        init_theta0 = np.angle(circle_params[0] + 1j*circle_params[1])
+        while init_theta0 < np.min(phases):
+            init_theta0 += 2*np.pi
+        while init_theta0 > np.max(phases):
+            init_theta0 -= 2*np.pi
+        fixedparams[2] = init_theta0
+
+
+    pOpt, _ = fit_func(
         fpts,
         phases,
-        p0=[init_freq, init_Ql, init_theta0],
+        phase_func,
+        init_p=[init_freq, init_Ql, init_theta0],
         bounds=(
-            [np.min(fpts), 0, -3 * np.pi],
-            [np.max(fpts), 5 * init_Ql, 3 * np.pi],
+            [np.min(fpts), 0, init_theta0 - np.pi],
+            [np.max(fpts), 5 * init_Ql, init_theta0 + np.pi],
         ),
+        fixedparams=fixedparams
     )
+
     return tuple(pOpt)
 
 
