@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple, Union
 
 import numpy as np
 
@@ -87,8 +87,9 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         result: Optional[SingleShotResultType] = None,
         backend: Literal["center", "regression", "pca"] = "pca",
         logscale: bool = False,
+        numbins: Union[int, str] = "auto",
         length_ratio: Optional[float] = None,
-        init_p0: Optional[None] = None,
+        init_p0: Optional[float] = None,
     ) -> Tuple[float, float, float, np.ndarray]:
         if result is None:
             result = self.last_result
@@ -104,6 +105,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
             length_ratio=length_ratio,
             logscale=logscale,
             init_p0=init_p0,
+            numbins=numbins,
         )
 
     def save(

@@ -63,10 +63,16 @@ def gauss_func(xs, x_c, s) -> np.ndarray:
 
 def fit_singleshot(xs, g_pdfs, e_pdfs, fitparams=None, fixedparams=None):
     """fitparams: [sg, se, s, p0, p_avg, length_ratio]"""
-    if fixedparams is not None and len(fixedparams) != 6:
-        raise ValueError(
-            "Fixed parameters must be a list of six elements: [sg, se, s, p0, p_avg, length_ratio]"
-        )
+    if fixedparams is not None:
+        if len(fixedparams) != 6:
+            raise ValueError(
+                "Fixed parameters must be a list of six elements: [sg, se, s, p0, p_avg, length_ratio]"
+            )
+
+        length_ratio = fixedparams[5]
+        if length_ratio == 0.0:
+            # p_avg not affecting the result
+            fixedparams[4] = 0.5 if fixedparams[4] is None else fixedparams[4]
 
     if fitparams is None:
         fitparams = [None] * 6
