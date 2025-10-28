@@ -43,14 +43,6 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
             cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
-        def measure_fn(ctx, update_hook):
-            prog = OneToneProgram(soccfg, ctx.cfg)
-            return prog.acquire(
-                soc,
-                progress=False,
-                callback=wrap_earlystop_check(prog, update_hook, earlystop_snr),
-            )
-
         # run experiment
         with LivePlotter2DwithLine(
             "Power (a.u.)",
@@ -59,6 +51,23 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
             num_lines=10,
             disable=not progress,
         ) as viewer:
+
+            def measure_fn(ctx, update_hook):
+                prog = OneToneProgram(soccfg, ctx.cfg)
+                return prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=wrap_earlystop_check(
+                        prog,
+                        update_hook,
+                        earlystop_snr,
+                        signal2real_fn=np.abs,
+                        snr_hook=lambda snr: viewer.get_ax("1d").set_title(
+                            f"snr = {snr:.1f}"
+                        ),
+                    ),
+                )
+
             signals = Runner(
                 task=SoftTask(
                     sweep_name="gain",

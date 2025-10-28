@@ -28,7 +28,9 @@ def wrap_earlystop_check(
     prog: ModularProgramV2,
     update_hook: Callable[[int, T_RawResult], None],
     snr_threshold: Optional[float],
+    signal2real_fn: Callable[[np.ndarray], np.ndarray],
     raw2signal_fn: Callable[[T_RawResult], np.ndarray] = default_raw2signal_fn,
+    snr_hook: Optional[Callable[[float], None]] = None,
 ) -> Callable[[int, T_RawResult], None]:
     if snr_threshold is None:
         return update_hook
@@ -37,7 +39,10 @@ def wrap_earlystop_check(
     def wrapped_update_hook(i: int, raw: T_RawResult) -> None:
         update_hook(i, raw)
         signals = raw2signal_fn(raw)
-        if calc_snr(signals) >= snr_threshold:
+        snr = calc_snr(signal2real_fn(signals))
+        if snr >= snr_threshold:
             prog.set_early_stop(silent=True)
+        if snr_hook is not None:
+            snr_hook(snr)
 
     return wrapped_update_hook
