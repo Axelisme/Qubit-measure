@@ -7,9 +7,9 @@ from ..base import fit_func
 
 
 def get_rough_edelay(fpts, signals) -> float:
-    phases = np.unwrap(np.angle(signals))
+    signal_ratios = signals[1:] / (signals[:-1] + 1e-12)
 
-    slope, *_ = sp.stats.linregress(fpts, phases)
+    slope = np.median(np.angle(signal_ratios)) / (fpts[1] - fpts[0])
 
     return -slope / (2 * np.pi)
 
@@ -103,7 +103,7 @@ def phase_func(fpts, resonant_f, Ql, theta0: float) -> np.ndarray:
 
 
 def fit_resonant_params(
-    fpts, signals, circle_params: Tuple[float, float, float], fit_theta0 = True
+    fpts, signals, circle_params: Tuple[float, float, float], fit_theta0=True
 ) -> Tuple[float, float, float]:
     """[resonant_freq, Ql, theta0]"""
     phases = calc_phase(signals, circle_params[0], circle_params[1])
@@ -117,13 +117,12 @@ def fit_resonant_params(
 
     fixedparams = [None] * 3
     if not fit_theta0:
-        init_theta0 = np.angle(circle_params[0] + 1j*circle_params[1])
+        init_theta0 = np.angle(circle_params[0] + 1j * circle_params[1])
         while init_theta0 < np.min(phases):
-            init_theta0 += 2*np.pi
+            init_theta0 += 2 * np.pi
         while init_theta0 > np.max(phases):
-            init_theta0 -= 2*np.pi
+            init_theta0 -= 2 * np.pi
         fixedparams[2] = init_theta0
-
 
     pOpt, _ = fit_func(
         fpts,
@@ -134,7 +133,7 @@ def fit_resonant_params(
             [np.min(fpts), 0, init_theta0 - np.pi],
             [np.max(fpts), 5 * init_Ql, init_theta0 + np.pi],
         ),
-        fixedparams=fixedparams
+        fixedparams=fixedparams,
     )
 
     return tuple(pOpt)
