@@ -1,4 +1,4 @@
-from copy import deepcopy
+from functools import wraps
 from typing import Callable, List, Optional, Tuple
 
 import numpy as np
@@ -11,23 +11,27 @@ def with_fixed_params(
     bounds: Tuple[List[float], List[float]],
     fixedparams: List[Optional[float]],
 ) -> Tuple[Callable[..., np.ndarray], np.ndarray, np.ndarray]:
-    fixedparams = np.array(fixedparams, dtype=float)
+    fixedparams = np.array(fixedparams, dtype=float)  # convert None to nan
     non_fixed_idxs = np.isnan(fixedparams)
 
-    cur_p = deepcopy(fixedparams)
-
+    @wraps(fitfunc)
     def wrapped_func(xs: np.ndarray, *args) -> np.ndarray:
         if len(args) != np.sum(non_fixed_idxs):
             raise ValueError(
                 f"Expected {np.sum(non_fixed_idxs)} arguments, got {len(args)}."
             )
-        cur_p[non_fixed_idxs] = args  #
-        return fitfunc(xs, *cur_p)
+        # assign the arguments to the parameters
+        params = fixedparams.copy()
+        params[non_fixed_idxs] = args
+
+        return fitfunc(xs, *params)
+
+    init_p = np.array(init_p)[non_fixed_idxs]
 
     if bounds is not None:
         bounds = np.array(bounds)[:, non_fixed_idxs]
 
-    return wrapped_func, np.array(init_p)[non_fixed_idxs], bounds
+    return wrapped_func, init_p, bounds
 
 
 def add_fixed_params_back(

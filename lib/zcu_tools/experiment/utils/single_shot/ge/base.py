@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,13 +32,13 @@ def scatter_ge_plot(
 
     rand_gen = np.random.default_rng(42)
     downsample_idx = rand_gen.choice(
-        np.arange(len(Ig)), size=min(1000, len(Ig)), replace=False
+        np.arange(len(Ig)), size=min(10000, len(Ig)), replace=False
     )
     Ig, Qg = Ig[downsample_idx], Qg[downsample_idx]
     Ie, Qe = Ie[downsample_idx], Qe[downsample_idx]
 
-    ax.scatter(Ig, Qg, label="g", color="b", marker=".", edgecolor="None", alpha=0.2)
-    ax.scatter(Ie, Qe, label="e", color="r", marker=".", edgecolor="None", alpha=0.2)
+    ax.scatter(Ig, Qg, label="g", color="b", marker=".", edgecolor="None", alpha=0.5)
+    ax.scatter(Ie, Qe, label="e", color="r", marker=".", edgecolor="None", alpha=0.5)
     plt_params = dict(color="k", linestyle=":", marker="o", markersize=5)
     ax.plot(xg, yg, markerfacecolor="b", **plt_params)
     ax.plot(xe, ye, markerfacecolor="r", **plt_params)
@@ -53,21 +53,23 @@ def scatter_ge_plot(
 def hist(
     Ig: np.ndarray,
     Ie: np.ndarray,
-    numbins: int = 200,
+    numbins: Union[int, str] = "auto",
     ax: Optional[plt.Axes] = None,
     title: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     I_tot = np.concatenate((Ie, Ig))
     xlims = [np.min(I_tot), np.max(I_tot)]
-    bins = np.linspace(xlims[0], xlims[1], numbins)
+    bins = np.histogram_bin_edges(I_tot, bins=numbins)
     ng, *_ = np.histogram(Ig, bins=bins, range=xlims)
     ne, *_ = np.histogram(Ie, bins=bins, range=xlims)
     ng = ng / np.sum(ng)
     ne = ne / np.sum(ne)
     if ax is not None:
-        plt_params = dict(bins=bins, range=xlims, alpha=0.5)
-        ax.hist(bins[:-1], color="b", weights=ng, label="g", **plt_params)
-        ax.hist(bins[:-1], color="r", weights=ne, label="e", **plt_params)
+        plt_params = dict(
+            x=0.5 * (bins[1:] + bins[:-1]), bins=bins, range=xlims, alpha=0.5
+        )
+        ax.hist(color="b", weights=ng, label="g", **plt_params)
+        ax.hist(color="r", weights=ne, label="e", **plt_params)
         ax.set_ylabel("Counts", fontsize=14)
         ax.set_xlabel("I [ADC levels]", fontsize=14)
         ax.legend(loc="upper right")
@@ -91,17 +93,18 @@ def calculate_fidelity(
     cum_ng, cum_ne = np.cumsum(ng), np.cumsum(ne)
     contrast = np.abs(2 * (cum_ng - cum_ne) / (ng.sum() + ne.sum()))
     tind = contrast.argmax()
-    # fid = 0.5 * (1 - ng[tind:].sum() / ng.sum() + 1 - ne[:tind].sum() / ne.sum())
+
     tp, fp = ng[tind:].sum(), ne[tind:].sum()
     tn, fn = ng[:tind].sum(), ne[:tind].sum()
     fid = fidelity_func(tp, tn, fp, fn)
-    return fid, bins[tind]
+
+    return fid, 0.5 * (bins[tind] + bins[tind + 1])
 
 
 def fitting_ge_and_plot(
     signals: np.ndarray,
     classify_func: Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], Dict],
-    numbins: int = 100,
+    numbins: Union[int, str] = "auto",
     logscale: bool = False,
     length_ratio: Optional[float] = None,
     init_p0: Optional[float] = None,
@@ -149,13 +152,19 @@ def fitting_ge_and_plot(
     ee_fit = n_ee * gauss_func(xs, se, s)
 
     axs[0, 1].plot(xs, fit_g_pdfs, "k-", label="total")
-    axs[0, 1].plot(xs, gg_fit, "b-", label="g")
-    axs[0, 1].plot(xs, ge_fit, "r--", label="e")
+    if length_ratio != 0.0:
+        axs[0, 1].plot(xs, gg_fit + ge_fit, "k--", alpha=0.3, label="ideal total")
+    axs[0, 1].plot(xs, gg_fit, "b-", alpha=0.3)
+    axs[0, 1].plot(xs, ge_fit, "r--", alpha=0.3)
     axs[0, 1].set_title(f"{n_gg:.1%} / {n_ge:.1%}", fontsize=14)
+    axs[0, 1].legend()
     axs[1, 1].plot(xs, fit_e_pdfs, "k-", label="total")
-    axs[1, 1].plot(xs, ee_fit, "r-", label="e")
-    axs[1, 1].plot(xs, eg_fit, "b--", label="g")
+    if length_ratio != 0.0:
+        axs[1, 1].plot(xs, eg_fit + ee_fit, "k--", alpha=0.3, label="ideal total")
+    axs[1, 1].plot(xs, ee_fit, "r-", alpha=0.3)
+    axs[1, 1].plot(xs, eg_fit, "b--", alpha=0.3)
     axs[1, 1].set_title(f"{n_eg:.1%} / {n_ee:.1%}", fontsize=14)
+    axs[1, 1].legend()
 
     axs[1, 0].plot(xs, fit_g_pdfs, "b-", label="g")
     axs[1, 0].plot(xs, fit_e_pdfs, "r-", label="e")
@@ -171,6 +180,10 @@ def fitting_ge_and_plot(
         axs[0, 1].set_yscale("log")
         axs[1, 0].set_yscale("log")
         axs[1, 1].set_yscale("log")
+        y_max, y_min = 1.5 * np.max([g_pdfs, e_pdfs]), np.min([g_pdfs, e_pdfs]) + 1e-4
+        axs[0, 1].set_ylim(y_min, y_max)
+        axs[1, 0].set_ylim(y_min, y_max)
+        axs[1, 1].set_ylim(y_min, y_max)
 
     fig.suptitle(f"Readout length = {length_ratio:.1f} " + r"$T_1$")
 
