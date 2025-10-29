@@ -1,6 +1,6 @@
 import time
 from functools import wraps
-from typing import Callable
+from typing import Callable, Optional
 
 from typing_extensions import ParamSpec
 
@@ -8,9 +8,12 @@ P = ParamSpec("P")
 
 
 def min_interval(
-    func: Callable[P, None], min_interval: float = 0.1
-) -> Callable[P, None]:
+    func: Optional[Callable[P, None]], min_interval: float = 0.1
+) -> Optional[Callable[P, None]]:
     """ensures min_interval seconds between function calls"""
+    if func is None:
+        return None
+
     last_time = 0.0
 
     @wraps(func)
