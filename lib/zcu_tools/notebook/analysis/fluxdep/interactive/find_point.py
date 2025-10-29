@@ -104,7 +104,7 @@ class InteractiveFindPoints:
         dx = (mAs[-1] - mAs[0]) / (len(mAs) - 1)
         dy = (fpts[-1] - fpts[0]) / (len(fpts) - 1)
         self.spectrum_img = self.ax.imshow(
-            amps,
+            amps.T,
             aspect="auto",
             origin="lower",
             interpolation="none",
@@ -117,10 +117,10 @@ class InteractiveFindPoints:
         )
 
     def init_mask(self, fpts, mAs) -> None:
-        self.mask = np.ones((len(fpts), len(mAs)), dtype=bool)
+        self.mask = np.ones((len(mAs), len(fpts)), dtype=bool)
 
         self.select_mask = self.ax.imshow(
-            self.mask,
+            self.mask.T,
             aspect="auto",
             origin="lower",
             interpolation="none",
@@ -155,15 +155,15 @@ class InteractiveFindPoints:
 
         # Set spectrum image data based on show_origin checkbox
         if self.show_origin_box.value:
-            self.spectrum_img.set_data(amps)
+            self.spectrum_img.set_data(amps.T)
         else:
-            self.spectrum_img.set_data(self.mask * amps)
+            self.spectrum_img.set_data((self.mask * amps).T)
         self.spectrum_img.autoscale()
 
     def toggle_near_mask(self, x, y, width, mask, mode) -> None:
         x_d = np.abs(self.mAs - x) / (self.mAs[-1] - self.mAs[0])
         y_d = np.abs(self.fpts - y) / (self.fpts[-1] - self.fpts[0])
-        d2 = x_d[None, :] ** 2 + y_d[:, None] ** 2
+        d2 = x_d[:, None] ** 2 + y_d[None, :] ** 2
 
         weight = d2 <= width**2
         if mode == "Select":
@@ -183,7 +183,7 @@ class InteractiveFindPoints:
             return
 
         if self.show_mask_box.value:
-            self.select_mask.set_data(self.mask)
+            self.select_mask.set_data(self.mask.T)
             self.select_mask.set_alpha(0.2)
         else:
             self.select_mask.set_alpha(0)
@@ -210,7 +210,7 @@ class InteractiveFindPoints:
         )
 
         # 更新 mask
-        self.select_mask.set_data(self.mask)
+        self.select_mask.set_data(self.mask.T)
 
         self.update_points()
         self.fig.canvas.draw_idle()
@@ -224,7 +224,7 @@ class InteractiveFindPoints:
         elif self.operation_tb.value == "Erase":
             self.mask = np.zeros_like(self.mask)
 
-        self.select_mask.set_data(self.mask)
+        self.select_mask.set_data(self.mask.T)
 
         self.update_points()
         self.fig.canvas.draw_idle()

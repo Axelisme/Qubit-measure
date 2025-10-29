@@ -161,7 +161,7 @@ class InteractiveLines:
         dx = (mAs[-1] - mAs[0]) / (len(mAs) - 1)
         dy = (fpts[-1] - fpts[0]) / (len(fpts) - 1)
         self.main_im = self.ax_main.imshow(
-            amps,
+            amps.T,
             aspect="auto",
             origin="lower",
             interpolation="none",
@@ -208,7 +208,7 @@ class InteractiveLines:
         dx = (mAs[-1] - mAs[0]) / (len(mAs) - 1)
         dy = (fpts[-1] - fpts[0]) / (len(fpts) - 1)
         self.zoom_im = self.ax_zoom.imshow(
-            amps,
+            amps.T,
             aspect="auto",
             origin="lower",
             interpolation="none",
@@ -360,7 +360,7 @@ class InteractiveLines:
         for candidate in candidates:
             # 計算該位置的mirror loss
             # 總是使用spectrum來計算(包含phase資訊)
-            diff_amps = diff_mirror(self.mAs, self.spectrum.T, candidate).T
+            diff_amps = diff_mirror(self.mAs, self.spectrum, candidate)
             valid_amps = diff_amps[diff_amps != 0.0]
 
             # 確保有有效的數據點
@@ -458,8 +458,8 @@ class InteractiveLines:
         self._mouse_moved = False
 
         # 總是使用spectrum來計算(包含phase資訊)
-        diff_amps = diff_mirror(self.mAs, self.spectrum.T, x).T
-        self.zoom_im.set_data(diff_amps)
+        diff_amps = diff_mirror(self.mAs, self.spectrum, x)
+        self.zoom_im.set_data(diff_amps.T)
         self.zoom_im.autoscale()
 
         mirror_loss = np.mean(diff_amps[diff_amps != 0.0])
@@ -517,7 +517,7 @@ class InteractiveLines:
             self.spectrum, use_phase=not self.only_use_magnitude
         )
 
-        self.main_im.set_data(self.real_signals)
+        self.main_im.set_data(self.real_signals.T)
         self.main_im.autoscale()
 
         # 更新背景影像

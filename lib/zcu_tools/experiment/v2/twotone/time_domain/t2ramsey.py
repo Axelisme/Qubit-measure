@@ -77,17 +77,17 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
-                    result_shape=(len(t2r_spans),),
+                    result_shape=(len(ts),),
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    t2r_spans, t2ramsey_signal2real(np.asarray(ctx.get_data()))
+                    ts, t2ramsey_signal2real(np.asarray(ctx.get_data()))
                 ),
             ).run(cfg)
             signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (t2r_spans, signals)
+        self.last_result = (ts, signals)
 
         return ts, signals
 
@@ -95,10 +95,9 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         self,
         result: Optional[T2RamseyResultType] = None,
         *,
-        plot: bool = True,
         max_contrast: bool = True,
         fit_fringe: bool = True,
-    ) -> Tuple[float, float, float, float]:
+    ) -> Tuple[float, float, float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -119,25 +118,39 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             detune = 0.0
             detune_err = 0.0
 
-        if plot:
-            plt.figure(figsize=config.figsize)
-            plt.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-            plt.plot(xs, y_fit, label="fit")
+        # if plot:
+        #     plt.figure(figsize=config.figsize)
+        #     plt.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        #     plt.plot(xs, y_fit, label="fit")
 
-            t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
-            if fit_fringe:
-                detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
-                plt.title(f"T2 fringe = {t2r_str}, detune = {detune_str}", fontsize=15)
-            else:
-                plt.title(f"T2 decay = {t2r_str}", fontsize=15)
+        #     t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
+        #     if fit_fringe:
+        #         detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
+        #         plt.title(f"T2 fringe = {t2r_str}, detune = {detune_str}", fontsize=15)
+        #     else:
+        #         plt.title(f"T2 decay = {t2r_str}", fontsize=15)
 
-            plt.xlabel("Time (us)")
-            plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
-            plt.legend()
-            plt.tight_layout()
-            plt.show()
+        #     plt.xlabel("Time (us)")
+        #     plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        #     plt.legend()
+        #     plt.tight_layout()
+        #     plt.show()
 
-        return t2r, t2rerr, detune, detune_err
+        fig, ax = plt.subplots(figsize=config.figsize)
+        fig.tight_layout()
+        ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(xs, y_fit, label="fit")
+        t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
+        if fit_fringe:
+            detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
+            ax.set_title(f"T2 fringe = {t2r_str}, detune = {detune_str}", fontsize=15)
+        else:
+            ax.set_title(f"T2 decay = {t2r_str}", fontsize=15)
+        ax.set_xlabel("Time (us)")
+        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.legend()
+
+        return t2r, t2rerr, detune, detune_err, fig
 
     def save(
         self,

@@ -55,7 +55,8 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
                             TwoToneProgram(soccfg, ctx.cfg).acquire(
                                 soc, progress=False, callback=update_hook
                             )
-                        )
+                        ),
+                        result_shape=(2,),
                     ),
                 ),
                 update_hook=lambda ctx: viewer.update(
@@ -125,8 +126,8 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
 
         save_data(
             filepath=filepath,
-            x_info={"name": "ge", "unit": "a.u.", "values": np.array([0, 1])},
-            y_info={"name": "Readout Length", "unit": "s", "values": lengths * 1e-6},
+            x_info={"name": "Readout Length", "unit": "s", "values": lengths * 1e-6},
+            y_info={"name": "ge", "unit": "a.u.", "values": np.array([0, 1])},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,

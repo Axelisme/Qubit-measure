@@ -43,7 +43,7 @@ def add_secondary_xaxis(
             side="top",
             tickmode="array",
             tickvals=xticks.tolist(),
-            ticktext=[f"{val:.2f}" for val in mA_ticks],
+            ticktext=[f"{val:.1e}" for val in mA_ticks],
             showgrid=False,
         ),
     )
@@ -93,9 +93,9 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
         for name, spect in spects.items():
             # Get corresponding data and range
             signals = spect["spectrum"]["data"]
-            flx_mask = np.any(~np.isnan(signals), axis=0)
-            fpt_mask = np.any(~np.isnan(signals), axis=1)
-            signals = signals[fpt_mask, :][:, flx_mask]
+            flx_mask = np.any(~np.isnan(signals), axis=1)
+            fpt_mask = np.any(~np.isnan(signals), axis=0)
+            signals = signals[flx_mask, :][:, fpt_mask]
             values = spect["spectrum"]["mAs"][flx_mask]
             fpts = spect["spectrum"]["fpts"][fpt_mask]
 
@@ -108,7 +108,7 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
             # Add heatmap trace
             self.fig.add_trace(
                 go.Heatmap(
-                    z=norm_signals,
+                    z=norm_signals.T,
                     x=flxs,
                     y=fpts,
                     colorscale="Greys",

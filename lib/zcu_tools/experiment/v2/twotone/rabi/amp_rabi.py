@@ -62,9 +62,8 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
         result: Optional[AmpRabiResultType] = None,
         *,
         decay: bool = False,
-        plot: bool = True,
         max_contrast: bool = True,
-    ) -> Tuple[float, float]:
+    ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -79,19 +78,17 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
             pdrs, real_signals, decay=decay, init_phase=0.0
         )
 
-        if plot:
-            plt.figure(figsize=config.figsize)
-            plt.tight_layout()
-            plt.plot(pdrs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-            plt.plot(pdrs, y_fit, label="fit")
-            plt.axvline(pi_amp, ls="--", c="red", label=f"pi = {pi_amp:.3g}")
-            plt.axvline(pi2_amp, ls="--", c="red", label=f"pi/2 = {pi2_amp:.3g}")
-            plt.xlabel("Pulse gain (a.u.)")
-            plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
-            plt.legend(loc=4)
-            plt.show()
+        fig, ax = plt.subplots(figsize=config.figsize)
+        fig.tight_layout()
+        ax.plot(pdrs, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(pdrs, y_fit, label="fit")
+        ax.axvline(pi_amp, ls="--", c="red", label=f"pi = {pi_amp:.3g}")
+        ax.axvline(pi2_amp, ls="--", c="red", label=f"pi/2 = {pi2_amp:.3g}")
+        ax.set_xlabel("Pulse gain (a.u.)")
+        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.legend(loc=4)
 
-        return pi_amp, pi2_amp
+        return pi_amp, pi2_amp, fig
 
     def save(
         self,

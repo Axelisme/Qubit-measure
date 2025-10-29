@@ -116,9 +116,9 @@ class InteractiveSelector:
         for spect in s_pects.values():
             # Get corresponding data and range
             signals = spect["spectrum"]["data"] ** 1.5
-            flx_mask = np.any(~np.isnan(signals), axis=0)
-            fpt_mask = np.any(~np.isnan(signals), axis=1)
-            signals = signals[fpt_mask, :][:, flx_mask]
+            flx_mask = np.any(~np.isnan(signals), axis=1)
+            fpt_mask = np.any(~np.isnan(signals), axis=0)
+            signals = signals[flx_mask, :][:, fpt_mask]
 
             # Normalize data
             amps = cast2real_and_norm(signals)
@@ -127,7 +127,7 @@ class InteractiveSelector:
             sp_mAs = spect["spectrum"]["mAs"][flx_mask]
             sp_fpts = spect["spectrum"]["fpts"][fpt_mask]
             self.ax.imshow(
-                amps,
+                amps.T,
                 aspect="auto",
                 origin="lower",
                 interpolation="none",

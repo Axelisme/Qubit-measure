@@ -49,7 +49,7 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
                     result_shape=(2, len(fpts)),
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    fpts, signal2snr(np.asarray(ctx.get_data()))
+                    fpts, signal2snr(np.asarray(ctx.get_data()), axis=0)
                 ),
             ).run(cfg)
             signals = np.asarray(signals)
@@ -72,7 +72,7 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
 
         fpts, signals = result
 
-        snrs = signal2snr(signals)
+        snrs = signal2snr(signals, axis=0)
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0

@@ -85,3 +85,6 @@ class MultiLivePlotter(AbsLivePlotter):
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         for plotter in self.plotters.values():
             plotter.__exit__(exc_type, exc_value, traceback)
+
+    def get_plotter(self, name: str) -> AbsLivePlotter:
+        return self.plotters[name]

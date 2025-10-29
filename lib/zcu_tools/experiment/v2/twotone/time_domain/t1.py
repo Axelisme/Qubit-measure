@@ -97,10 +97,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         self,
         result: Optional[T1ResultType] = None,
         *,
-        plot: bool = True,
         max_contrast: bool = True,
         dual_exp: bool = False,
-    ) -> Tuple[float, float]:
+    ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -117,26 +116,22 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         else:
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
 
-        if plot:
-            t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
-            if dual_exp:
-                t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
+        fig, ax = plt.subplots(figsize=config.figsize)
+        fig.tight_layout()
+        ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(xs, y_fit, label="fit")
+        t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
+        if dual_exp:
+            t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
+            ax.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
+            ax.set_title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
+        else:
+            ax.set_title(f"T1 = {t1_str}", fontsize=15)
+        ax.set_xlabel("Time (us)")
+        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.legend()
 
-            fig, ax = plt.subplots(figsize=config.figsize)
-            ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-            ax.plot(xs, y_fit, label="fit")
-            if dual_exp:
-                ax.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
-                ax.set_title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
-            else:
-                ax.set_title(f"T1 = {t1_str}", fontsize=15)
-            ax.set_xlabel("Time (us)")
-            ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
-            ax.legend()
-            fig.tight_layout()
-            plt.show()
-
-        return t1, t1err
+        return t1, t1err, fig
 
     def save(
         self,

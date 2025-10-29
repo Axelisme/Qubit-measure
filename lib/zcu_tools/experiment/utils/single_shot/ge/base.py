@@ -108,7 +108,7 @@ def fitting_ge_and_plot(
     logscale: bool = False,
     length_ratio: Optional[float] = None,
     init_p0: Optional[float] = None,
-) -> Tuple[float, float, float, np.ndarray]:
+) -> Tuple[float, float, float, np.ndarray, dict]:
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
 

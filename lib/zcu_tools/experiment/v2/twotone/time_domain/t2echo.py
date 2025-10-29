@@ -64,9 +64,9 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
                             modules=[
                                 make_reset("reset", ctx.cfg.get("reset")),
                                 Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
-                                Delay("t2e_delay", delay=0.5 * t2e_spans),
+                                Delay("t2e_delay1", delay=0.5 * t2e_spans),
                                 Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                Delay("t2e_delay", delay=0.5 * t2e_spans),
+                                Delay("t2e_delay2", delay=0.5 * t2e_spans),
                                 Pulse(
                                     name="pi2_pulse2",
                                     cfg={
@@ -97,10 +97,9 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
         self,
         result: Optional[T2EchoResultType] = None,
         *,
-        plot: bool = True,
         max_contrast: bool = True,
-        fit_method: Literal["fringe", "decay", "gauss"] = "decay",
-    ) -> Tuple[float, float, float, float]:
+        fit_method: Literal["fringe", "decay"] = "decay",
+    ) -> Tuple[float, float, float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -120,36 +119,28 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
             t2e, t2eerr, y_fit, _ = fit_decay(xs, real_signals)
             detune = 0.0
             detune_err = 0.0
-        elif fit_method == "gauss":
-            t2e, t2eerr, y_fit, _ = fit_gauss_decay(xs, real_signals)
-            detune = 0.0
-            detune_err = 0.0
         else:
             raise ValueError(f"Unknown fit_method: {fit_method}")
 
-        if plot:
-            plt.figure(figsize=config.figsize)
-            plt.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-            plt.plot(xs, y_fit, label="fit")
+        fig, ax = plt.subplots(figsize=config.figsize)
+        fig.tight_layout()
+        ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(xs, y_fit, label="fit")
 
-            t2e_str = f"{t2e:.2f}us ± {t2eerr:.2f}us"
-            if fit_method == "fringe":
-                detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
-                plt.title(f"T2 fringe = {t2e_str}, detune = {detune_str}", fontsize=15)
-            elif fit_method == "decay":
-                plt.title(f"T2 decay = {t2e_str}", fontsize=15)
-            elif fit_method == "gauss":
-                plt.title(f"Effective T2 = {t2e_str}", fontsize=15)
-            else:
-                raise ValueError(f"Unknown fit_method: {fit_method}")
+        t2e_str = f"{t2e:.2f}us ± {t2eerr:.2f}us"
+        if fit_method == "fringe":
+            detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
+            ax.set_title(f"T2 fringe = {t2e_str}, detune = {detune_str}", fontsize=15)
+        elif fit_method == "decay":
+            ax.set_title(f"T2 decay = {t2e_str}", fontsize=15)
+        else:
+            raise ValueError(f"Unknown fit_method: {fit_method}")
 
-            plt.xlabel("Time (us)")
-            plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
-            plt.legend()
-            plt.tight_layout()
-            plt.show()
+        ax.set_xlabel("Time (us)")
+        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.legend()
 
-        return t2e, t2eerr, detune, detune_err
+        return t2e, t2eerr, detune, detune_err, fig
 
     def save(
         self,

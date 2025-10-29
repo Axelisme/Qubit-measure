@@ -76,7 +76,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         model_type: Literal["lor", "sinc"] = "lor",
         plot_fit: bool = True,
         max_contrast: bool = True,
-    ) -> Tuple[float, float]:
+    ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -92,19 +92,19 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
         freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(fpts, y, model_type)
 
-        plt.figure(figsize=config.figsize)
-        plt.tight_layout()
-        plt.plot(fpts, y, label="signal", marker="o", markersize=3)
-        if plot_fit:
-            plt.plot(fpts, y_fit, label=f"fit, kappa={kappa:.1g} MHz")
-            label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"
-            plt.axvline(freq, color="r", ls="--", label=label)
-        plt.xlabel("Frequency (MHz)")
-        plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
-        plt.legend()
-        plt.show()
+        fig, ax = plt.subplots(figsize=config.figsize)
+        fig.tight_layout()
 
-        return freq, kappa
+        ax.plot(fpts, y, label="signal", marker="o", markersize=3)
+        if plot_fit:
+            ax.plot(fpts, y_fit, label=f"fit, kappa={kappa:.1g} MHz")
+            label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"
+            ax.axvline(freq, color="r", ls="--", label=label)
+        ax.set_xlabel("Frequency (MHz)")
+        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.legend()
+
+        return freq, kappa, fig
 
     def save(
         self,

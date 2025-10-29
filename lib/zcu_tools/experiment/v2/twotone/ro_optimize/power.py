@@ -43,13 +43,16 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
+                            soc,
+                            progress=False,
+                            callback=update_hook,
+                            record_stderr=True,
                         )
                     ),
                     result_shape=(2, len(gains)),
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    gains, signal2snr(np.asarray(ctx.get_data()))
+                    gains, signal2snr(np.asarray(ctx.get_data()), axis=0)
                 ),
             ).run(cfg)
             signals = np.asarray(signals)
@@ -68,7 +71,7 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
 
         powers, signals = result
 
-        snrs = signal2snr(signals)
+        snrs = signal2snr(signals, axis=0)
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0

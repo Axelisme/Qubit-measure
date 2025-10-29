@@ -19,13 +19,13 @@ def cast2real_and_norm(
     """
 
     if use_phase:
-        signals = signals - np.ma.mean(signals, axis=0)
-        signals = gaussian_filter1d(signals, sigma=sigma, axis=0)
+        signals = signals - np.ma.mean(signals, axis=1, keepdims=True)
+        signals = gaussian_filter1d(signals, sigma=sigma, axis=1)
         amps = np.abs(signals)
-        amps /= np.ma.std(amps, axis=0)
+        amps /= np.ma.std(amps, axis=1, keepdims=True)
     else:
         amps = np.abs(signals)
-        amps = gaussian_filter1d(amps, sigma=sigma, axis=0)
+        amps = gaussian_filter1d(amps, sigma=sigma, axis=1)
 
     return amps
 
@@ -46,12 +46,12 @@ def spectrum2d_findpoint(
 
     s_mAs = []
     s_fpts = []
-    for i in range(amps.shape[1]):
-        peaks, _ = find_peaks(amps[:, i], height=threshold, width=(1, None), distance=5)
+    for i in range(amps.shape[0]):
+        peaks, _ = find_peaks(amps[i, :], height=threshold, width=(1, None), distance=5)
 
         # If too many peaks, take the top 3
         if len(peaks) > 3:
-            peaks = peaks[np.argsort(amps[peaks, i])[-3:]]
+            peaks = peaks[np.argsort(amps[i, peaks])[-3:]]
 
         s_mAs.extend(mAs[i] * np.ones(len(peaks)))
         s_fpts.extend(fpts[peaks])

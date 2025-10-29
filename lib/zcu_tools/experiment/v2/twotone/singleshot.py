@@ -13,7 +13,7 @@ from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 # (signals)
-SingleShotResultType = np.ndarray
+SingleShotResultType = Tuple[np.ndarray]
 
 
 class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
@@ -90,7 +90,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         numbins: Union[int, str] = "auto",
         length_ratio: Optional[float] = None,
         init_p0: Optional[float] = None,
-    ) -> Tuple[float, float, float, np.ndarray]:
+    ) -> Tuple[float, float, float, np.ndarray, dict]:
         if result is None:
             result = self.last_result
         assert result is not None, (

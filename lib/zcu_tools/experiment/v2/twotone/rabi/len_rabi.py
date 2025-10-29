@@ -124,9 +124,8 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         result: Optional[LenRabiResultType] = None,
         *,
         decay: bool = True,
-        plot: bool = True,
         max_contrast: bool = True,
-    ) -> Tuple[float, float]:
+    ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -149,20 +148,18 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
             lens, real_signals, decay=decay, init_phase=None
         )
 
-        if plot:
-            plt.figure(figsize=config.figsize)
-            plt.tight_layout()
-            plt.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)
-            plt.plot(lens, y_fit, label="fit")
-            plt.axvline(pi_len, ls="--", c="red", label=f"pi = {pi_len:.3g}")
-            plt.axvline(pi2_len, ls="--", c="red", label=f"pi/2 = {pi2_len:.3g}")
-            plt.xlabel("Pulse length (us)")
-            plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
-            plt.title(f"Rabi Oscillation (f={freq:.3f} MHz)")
-            plt.legend(loc=4)
-            plt.show()
+        fig, ax = plt.subplots(figsize=config.figsize)
+        fig.tight_layout()
+        ax.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(lens, y_fit, label="fit")
+        ax.axvline(pi_len, ls="--", c="red", label=f"pi = {pi_len:.3g} μs")
+        ax.axvline(pi2_len, ls="--", c="red", label=f"pi/2 = {pi2_len:.3g} μs")
+        ax.set_xlabel("Pulse length (μs)")
+        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.set_title(f"Rabi Oscillation (f={freq:.3f} MHz)")
+        ax.legend(loc=4)
 
-        return pi_len, pi2_len, freq
+        return pi_len, pi2_len, freq, fig
 
     def save(
         self,

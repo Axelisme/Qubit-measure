@@ -13,10 +13,10 @@ def format_rawdata(
 
     if As[0] > As[-1]:  # Ensure that the fluxes are in increasing
         As = As[::-1]
-        spectrum = spectrum[:, ::-1]
+        spectrum = spectrum[::-1, :]
     if fpts[0] > fpts[-1]:  # Ensure that the frequencies are in increasing
         fpts = fpts[::-1]
-        spectrum = spectrum[::-1, :]
+        spectrum = spectrum[:, ::-1]
 
     return As, fpts, spectrum
 
