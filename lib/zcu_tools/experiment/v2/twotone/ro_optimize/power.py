@@ -12,7 +12,7 @@ from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 from ...runner import HardTask, Runner
-from .base import signal2snr
+from .base import snr_as_signal
 
 PowerResultType = Tuple[np.ndarray, np.ndarray]  # (powers, snrs)
 
@@ -49,10 +49,11 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
                             record_stderr=True,
                         )
                     ),
-                    result_shape=(2, len(gains)),
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, axis=0),
+                    result_shape=(len(gains),),
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    gains, signal2snr(np.asarray(ctx.get_data()), axis=0)
+                    gains, np.abs(np.asarray(ctx.get_data()))
                 ),
             ).run(cfg)
             signals = np.asarray(signals)
@@ -71,7 +72,7 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
 
         powers, signals = result
 
-        snrs = signal2snr(signals, axis=0)
+        snrs = np.abs(signals)
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0
@@ -109,9 +110,8 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
 
         save_data(
             filepath=filepath,
-            x_info={"name": "ge", "unit": "a.u.", "values": np.array([0, 1])},
-            y_info={"name": "Probe Power (a.u)", "unit": "s", "values": pdrs},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
+            x_info={"name": "Probe Power", "unit": "a.u.", "values": pdrs},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,
             **kwargs,

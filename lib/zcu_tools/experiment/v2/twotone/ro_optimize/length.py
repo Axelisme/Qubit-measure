@@ -12,7 +12,7 @@ from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 from ...runner import HardTask, Runner, SoftTask
-from .base import signal2snr
+from .base import snr_as_signal
 
 LengthResultType = Tuple[np.ndarray, np.ndarray]  # (lengths, snrs)
 
@@ -53,14 +53,17 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
                             TwoToneProgram(soccfg, ctx.cfg).acquire(
-                                soc, progress=False, callback=update_hook
+                                soc,
+                                progress=False,
+                                callback=update_hook,
+                                record_stderr=True,
                             )
                         ),
-                        result_shape=(2,),
+                        raw2signal_fn=lambda raw: snr_as_signal(raw, axis=-1),
                     ),
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    lengths, signal2snr(np.asarray(ctx.get_data()))
+                    lengths, np.abs(np.asarray(ctx.get_data()))
                 ),
             ).run(cfg)
             signals = np.asarray(signals)
@@ -83,7 +86,7 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
 
         lengths, signals = result
 
-        snrs = signal2snr(signals)
+        snrs = np.abs(signals)
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0
@@ -127,8 +130,7 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         save_data(
             filepath=filepath,
             x_info={"name": "Readout Length", "unit": "s", "values": lengths * 1e-6},
-            y_info={"name": "ge", "unit": "a.u.", "values": np.array([0, 1])},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,
             **kwargs,

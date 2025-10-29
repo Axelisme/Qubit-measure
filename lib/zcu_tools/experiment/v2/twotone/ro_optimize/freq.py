@@ -12,7 +12,7 @@ from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 from ...runner import HardTask, Runner
-from .base import signal2snr
+from .base import snr_as_signal
 
 FreqResultType = Tuple[np.ndarray, np.ndarray]  # (fpts, snrs)
 
@@ -43,13 +43,17 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
+                            soc,
+                            progress=False,
+                            callback=update_hook,
+                            record_stderr=True,
                         )
                     ),
-                    result_shape=(2, len(fpts)),
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, axis=0),
+                    result_shape=(len(fpts),),
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    fpts, signal2snr(np.asarray(ctx.get_data()), axis=0)
+                    fpts, np.abs(np.asarray(ctx.get_data()))
                 ),
             ).run(cfg)
             signals = np.asarray(signals)
@@ -72,7 +76,7 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
 
         fpts, signals = result
 
-        snrs = signal2snr(signals, axis=0)
+        snrs = np.abs(signals)
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0
@@ -109,9 +113,8 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
 
         save_data(
             filepath=filepath,
-            x_info={"name": "ge", "unit": "a.u.", "values": np.array([0, 1])},
-            y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": singals.T},
+            x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": singals},
             comment=comment,
             tag=tag,
             **kwargs,
