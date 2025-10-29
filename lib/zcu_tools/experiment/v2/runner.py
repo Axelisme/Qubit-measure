@@ -249,15 +249,16 @@ class Runner:
         self,
         task: AbsTask,
         update_hook: Optional[Callable[[TaskContext], None]] = None,
+        update_interval: float = 1.0,
     ) -> None:
         self.task = task
-        self.update_hook = update_hook
+        self.update_hook = min_interval(update_hook, update_interval)
 
     def run(self, init_cfg: Dict[str, Any]) -> ResultType:
         cfg = deepcopy(init_cfg)
         init_result = self.task.get_default_result()
 
-        ctx = TaskContext(cfg, init_result, min_interval(self.update_hook, 1.0))
+        ctx = TaskContext(cfg, init_result, self.update_hook)
 
         try:
             self.task.init(ctx)
