@@ -11,14 +11,12 @@ import numpy as np
 
 # import scqubits as scq # use lazy import
 from h5py import File
-from IPython.display import display
 from joblib import Parallel, delayed
 from numba import njit
 from scipy.optimize import least_squares
 from tqdm.auto import tqdm, trange
 
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
-from zcu_tools.utils.async_func import AsyncFunc
 
 from .models import count_max_evals, energy2linearform
 
@@ -46,42 +44,7 @@ def search_in_database(
     best_params = np.full(3, np.nan)
     results = np.full((f_params.shape[0], 2), np.nan)  # (N, 2)
 
-    fig = plt.figure(figsize=(10, 7))
-    gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
-
-    # Frequency comparison plot
-    ax_freq = fig.add_subplot(gs[:, 0])
-    ax_freq.scatter(flxs, fpts, label="Target", color="blue", marker="o")
-    pred_scatter = ax_freq.scatter(
-        flxs, np.zeros_like(fpts), label="Predicted", color="red", marker="x"
-    )
-
-    ax_freq.set_ylabel("Frequency (GHz)")
-    ax_freq.set_xlabel("Flux")
-    ax_freq.legend()
-    ax_freq.grid(True)
-
-    # Create scatter plots for EJ, EC,
-    param_axs = []
-    param_scatters = []
-    best_param_scatters = []
-    name_bounds = [("EJ", EJb), ("EC", ECb), ("EL", ELb)]
-    for i in range(3):
-        name, bound = name_bounds[i]
-        ax_param = fig.add_subplot(gs[i, 1])
-        ax_param.set_xlim(bound[0], bound[1])
-        ax_param.set_xlabel(name)
-        ax_param.set_ylabel("Distance")
-        ax_param.grid()
-        scatter = ax_param.scatter(
-            range(f_params.shape[0]), np.zeros(f_params.shape[0]), s=2
-        )
-        best_scatter = ax_param.scatter([0], [0], color="red", s=50, marker="*")
-        param_axs.append(ax_param)
-        param_scatters.append(scatter)
-        best_param_scatters.append(best_scatter)
-
-    dh = display(fig, display_id=True)
+    idx_bar = trange(f_params.shape[0], desc="Searching...")
 
     def find_close_points(fpts, energies, factor, allows) -> np.ndarray:
         Bs, Cs = energy2linearform(energies, allows)
@@ -89,35 +52,6 @@ def search_in_database(
         dists = np.abs(fs - fpts[:, None])
         min_idx = np.argmin(dists, axis=1)
         return fs[range(len(fpts)), min_idx]
-
-    prev_draw_idx = -1
-
-    def update_plot() -> None:
-        nonlocal best_dist, best_params, results, prev_draw_idx, best_idx
-
-        # Update best result
-        if best_idx != prev_draw_idx:
-            p_fpts = find_close_points(fpts, sf_energies[best_idx], best_factor, allows)
-            pred_scatter.set_offsets(np.c_[flxs, p_fpts])
-            ax_freq.set_ylim(np.min([fpts, p_fpts]), np.max([fpts, p_fpts]))
-
-            fig.suptitle(
-                f"Best Distance: {best_dist:.2g}, EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}"
-            )
-            prev_draw_idx = best_idx
-
-        # Update scatter plots
-        dists, factors = results[:, 0], results[:, 1]
-        if np.sum(np.isfinite(dists)) > 1:
-            for j, (ax, scatter, best_scatter) in enumerate(
-                zip(param_axs, param_scatters, best_param_scatters)
-            ):
-                params_j = f_params[:, j] * factors
-                scatter.set_offsets(np.c_[params_j, dists])
-                best_scatter.set_offsets(np.c_[best_params[j], best_dist])
-                ax.set_ylim(0.0, np.nanmax(dists[np.isfinite(dists)]) * 1.1)
-
-        dh.update(fig)
 
     # ------------------------------------------------------------
     # define the search functions
@@ -311,39 +245,62 @@ def search_in_database(
             return i, *smart_fuzzy_search(fpts, Bs, Cs, a_min, a_max)
         return i, *candidate_breakpoint_search(fpts, Bs, Cs, a_min, a_max)
 
-    idx_bar = trange(f_params.shape[0], desc="Searching...")
     try:
-        with AsyncFunc(update_plot) as async_plot:
-            assert async_plot is not None
-            for i, dist, factor in Parallel(
-                return_as="generator_unordered", n_jobs=n_jobs, require="sharedmem"
-            )(delayed(process_energy)(i, fuzzy) for i in idx_bar):
-                results[i] = dist, factor
+        for i, dist, factor in Parallel(
+            return_as="generator_unordered", n_jobs=n_jobs, require="sharedmem"
+        )(delayed(process_energy)(i, fuzzy) for i in idx_bar):
+            results[i] = dist, factor
 
-                if not np.isnan(dist) and dist < best_dist:
-                    # Update best result
-                    best_idx = i
-                    best_factor = factor
-                    best_params = f_params[i] * factor
-                    best_dist = dist
-
-                # Update plot
-                async_plot()
-            else:
-                idx_bar.set_description_str("Done! ")
+            if not np.isnan(dist) and dist < best_dist:
+                # Update best result
+                best_idx = i
+                best_factor = factor
+                best_params = f_params[i] * factor
+                best_dist = dist
+        else:
+            idx_bar.set_description_str("Done! ")
         if fuzzy:
             # recalculate factor
             best_idx, best_dist, best_factor = process_energy(best_idx, fuzzy=False)
             best_params = f_params[best_idx] * best_factor
-        update_plot()
 
     except KeyboardInterrupt:
         pass
     finally:
         idx_bar.close()
-        plt.close(fig)  # Move plt.close(fig) inside finally block
 
-    plt.ion()
+    fig = plt.figure(figsize=(10, 7))
+    gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
+
+    fig.suptitle(
+        f"Best Distance: {best_dist:.2g}, EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}"
+    )
+
+    p_fpts = find_close_points(fpts, sf_energies[best_idx], best_factor, allows)
+
+    # Frequency comparison plot
+    ax_freq = fig.add_subplot(gs[:, 0])
+    ax_freq.scatter(flxs, fpts, label="Target", color="blue", marker="o")
+    ax_freq.scatter(flxs, p_fpts, label="Predicted", color="red", marker="x")
+    ax_freq.set_ylabel("Frequency (GHz)")
+    ax_freq.set_xlabel("Flux")
+    ax_freq.legend()
+    ax_freq.grid(True)
+
+    # Create scatter plots for EJ, EC,
+    dists, factors = results[:, 0], results[:, 1]
+    for i, (name, bound) in enumerate([("EJ", EJb), ("EC", ECb), ("EL", ELb)]):
+        ax_param = fig.add_subplot(gs[i, 1])
+        ax_param.set_xlim(*bound)
+        ax_param.set_xlabel(name)
+        ax_param.set_ylabel("Distance")
+        ax_param.grid()
+
+        ax_param.scatter(f_params[:, i] * factors, dists, s=2)
+        ax_param.scatter([best_params[i]], [best_dist], color="red", s=50, marker="*")
+        ax_param.set_ylim(0.0, np.nanmax(dists[np.isfinite(dists)]) * 1.1)
+
+    plt.show()
 
     return best_params, fig
 
