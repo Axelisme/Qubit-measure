@@ -60,14 +60,11 @@ def _run_loop() -> None:
 
 def _get_loop() -> asyncio.AbstractEventLoop:
     """Return the shared background loop; create it on first use."""
-    try:
-        return asyncio.get_running_loop()
-    except RuntimeError:
-        if _BG_LOOP is None:
-            t = threading.Thread(target=_run_loop, daemon=True, name="AsyncFuncLoop")
-            t.start()
-            _LOOP_READY.wait()
-        return _BG_LOOP  # type: ignore[return-value]
+    if _BG_LOOP is None:
+        t = threading.Thread(target=_run_loop, daemon=True, name="AsyncFuncLoop")
+        t.start()
+        _LOOP_READY.wait()
+    return _BG_LOOP  # type: ignore[return-value]
 
 
 # -------------------------------------------------------------
