@@ -9,23 +9,28 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
+from zcu_tools.experiment.v2.utils import set_pulse_freq
 from zcu_tools.liveplot import LivePlotter2DwithLine, MultiLivePlotter, make_plot_frame
+from zcu_tools.program.v2 import (
+    ModularProgramV2,
+    Pulse,
+    make_readout,
+    make_reset,
+    sweep2param,
+)
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_decay_fringe
+from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
-from ...runner import BatchTask, Runner, SoftTask, TaskContext
-from ...utils import set_pulse_freq
-from .cell import FitLastFreqTask, MeasureDetuneTask, MeasureT2RamseyTask
+from ...runner import BatchTask, HardTask, Runner, SoftTask, TaskContext
+from .cell import FitLastFreqTask, MeasureDetuneTask
 from .util import check_gains
 
-T2RamseyResultType = Tuple[
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]
-]
+MistResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
 
 
-def t2ramsey_signal2real(signals: np.ndarray) -> np.ndarray:
+def freq_signal2real(signals: np.ndarray) -> np.ndarray:
     real_signals = np.zeros_like(signals, dtype=np.float64)
 
     flx_len = signals.shape[0]
@@ -43,7 +48,16 @@ def t2ramsey_signal2real(signals: np.ndarray) -> np.ndarray:
     return real_signals
 
 
-class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
+def mist_signal2real(signals: np.ndarray) -> np.ndarray:
+    g_signals, e_signals = signals[..., 0], signals[..., 1]  # (flxs, pdrs, ge)
+
+    mist_signals = (e_signals + g_signals) / (e_signals - g_signals)
+    norm_mist_signals = mist_signals - mist_signals[:, 0]
+
+    return np.abs(norm_mist_signals)
+
+
+class MistExperiment(AbsExperiment[MistResultType]):
     def run(
         self,
         soc,
@@ -51,25 +65,24 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         cfg: Dict[str, Any],
         *,
         predictor: FluxoniumPredictor,
-        activate_detune: float = 0.0,
         ref_flux: float = 0.0,
         drive_oper: Literal["n", "phi"] = "n",
         progress: bool = True,
         earlystop_snr: Optional[float] = None,
-    ) -> T2RamseyResultType:
+    ) -> MistResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         flx_sweep = cfg["sweep"]["flux"]
         detune_sweep = cfg["sweep"]["detune"]
-        len_sweep = cfg["sweep"]["length"]
+        pdr_sweep = cfg["sweep"]["gain"]
 
-        # delete sweep dicts, it will be added back in each task
+        # delete sweep dicts, it will be added back later
         del cfg["sweep"]
 
         # predict sweep points
         values = sweep2array(flx_sweep)
         detunes = sweep2array(detune_sweep)
-        lens = sweep2array(len_sweep)
+        gains = sweep2array(pdr_sweep)
 
         # get reference matrix element
         ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
@@ -78,9 +91,9 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         predict_ms = predictor.predict_matrix_element(values, operator=drive_oper)
 
         predict_qub_gains = cfg["qub_pulse"]["gain"] * ref_m / predict_ms
-        predict_pi2_gains = cfg["pi2_pulse"]["gain"] * ref_m / predict_ms
+        predict_pi_gains = cfg["pi_pulse"]["gain"] * ref_m / predict_ms
         check_gains(predict_qub_gains, "qubit")
-        check_gains(predict_pi2_gains, "pi2")
+        check_gains(predict_pi_gains, "pi")
 
         def updateCfg(i: int, ctx: TaskContext, value: float) -> None:
             set_flux_in_dev_cfg(ctx.cfg["dev"], value)
@@ -88,9 +101,9 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             predict_freq = predict_freqs[i]
 
             set_pulse_freq(ctx.cfg["qub_pulse"], predict_freq)
-            set_pulse_freq(ctx.cfg["pi2_pulse"], predict_freq)
+            set_pulse_freq(ctx.cfg["pi_pulse"], predict_freq)
             ctx.cfg["qub_pulse"]["gain"] = predict_qub_gains[i]
-            ctx.cfg["pi2_pulse"]["gain"] = predict_pi2_gains[i]
+            ctx.cfg["pi_pulse"]["gain"] = predict_pi_gains[i]
 
         # -- Define Measure Functions --
 
@@ -112,35 +125,65 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                     existed_frames=(fig, [axs[0]], dh),
                     disable=not progress,
                 ),
-                t2ramsey=LivePlotter2DwithLine(
+                mist=LivePlotter2DwithLine(
                     "Flux device value",
-                    "Time (us)",
+                    "Readout power (a.u.)",
                     line_axis=1,
                     num_lines=5,
                     existed_frames=(fig, [axs[1]], dh),
                     disable=not progress,
                 ),
-            ),
+            )
         ) as viewer:
+            detune_ax = viewer.get_plotter("detune").get_ax("1d")
 
             def plot_fn(ctx: TaskContext) -> None:
                 signals = upwrap_signal(ctx.get_data())
                 plot_kwargs = dict(
-                    detune=(values, detunes, t2ramsey_signal2real(signals["detune"])),
-                    t2ramsey=(values, lens, t2ramsey_signal2real(signals["t2ramsey"])),
+                    detune=(values, detunes, freq_signal2real(signals["detune"])),
+                    mist=(values, gains, mist_signal2real(signals["mist"])),
                 )
                 if not ctx.is_empty_stack():
                     cur_task = ctx.addr_stack[-1]
                     # only update current liveplotter for speed
-                    if cur_task in ["detune", "t2ramsey"]:
+                    if cur_task in ["detune", "mist"]:
                         plot_kwargs = {cur_task: plot_kwargs[cur_task]}
                     elif cur_task == "fit_freq":
-                        return  # skip plotting when fitting
+                        return  # do nothing
 
                 viewer.update(plot_kwargs)
 
-            detune_ax = viewer.get_plotter("detune").get_ax("1d")
-            t2ramsey_ax = viewer.get_plotter("t2ramsey").get_ax("1d")
+            def measure_mist_fn(ctx: TaskContext, update_hook: callable) -> list:
+                cfg = deepcopy(ctx.cfg)
+
+                fit_freq = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], "fit_freq"])
+
+                if np.isnan(fit_freq):  # skip if freq measurement failed
+                    # shape: (ch, ro, lens, ge, iq)
+                    return [np.full((1, pdr_sweep["expts"], 2, 2), np.nan, dtype=float)]
+
+                cfg["sweep"] = {
+                    "gain": pdr_sweep,
+                    "ge": {"start": 0, "stop": cfg["pi_pulse"]["gain"], "expts": 2},
+                }
+
+                pdr_params = sweep2param("gain", cfg["sweep"]["gain"])
+                ge_params = sweep2param("ge", cfg["sweep"]["ge"])
+                set_pulse_freq(cfg["pi_pulse"], fit_freq)
+                Pulse.set_param(cfg["pi_pulse"], "on/off", ge_params)
+                Pulse.set_param(cfg["probe_pulse"], "gain", pdr_params)
+
+                prog = ModularProgramV2(
+                    soccfg,
+                    cfg,
+                    modules=[
+                        make_reset("reset", reset_cfg=cfg.get("reset")),
+                        Pulse(name="probe_pulse", cfg=cfg["probe_pulse"]),
+                        Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                        make_readout("readout", readout_cfg=cfg["readout"]),
+                    ],
+                )
+                return prog.acquire(soc, progress=False, callback=update_hook)
 
             results = Runner(
                 task=SoftTask(
@@ -159,13 +202,9 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                             fit_freq=FitLastFreqTask(
                                 line_ax=detune_ax, detunes=detunes
                             ),
-                            t2ramsey=MeasureT2RamseyTask(
-                                soccfg,
-                                soc,
-                                len_sweep,
-                                activate_detune=activate_detune,
-                                earlystop_snr=earlystop_snr,
-                                snr_ax=t2ramsey_ax,
+                            mist=HardTask(
+                                measure_fn=measure_mist_fn,
+                                result_shape=(len(pdr_sweep), 2),
                             ),
                         ),
                     ),
@@ -176,119 +215,54 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (values, detunes, lens, signals_dict)
+        self.last_result = (values, detunes, gains, signals_dict)
 
-        return values, detunes, lens, signals_dict
+        return values, detunes, gains, signals_dict, fig
 
     def analyze(
         self,
-        result: Optional[T2RamseyResultType] = None,
-        activate_detune: float = 0.0,
+        result: Optional[MistResultType] = None,
+        *,
+        start_idx: int = 0,
         snr_threshold: float = 3.0,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, freqs, ts, signals_dict = result
-        fit_freqs = signals_dict["fit_freq"]
-        t2r_signals = signals_dict["t2ramsey"]
-
-        real_t2r_signals = t2ramsey_signal2real(t2r_signals)
-
-        t2s = np.full(len(values), np.nan, dtype=np.float64)
-        t2errs = np.zeros_like(t2s)
-        freqs = np.full_like(t2s, np.nan)
-        freq_errs = np.zeros_like(t2s)
-
-        for i in range(len(values)):
-            real_signals = real_t2r_signals[i, :]
-
-            # skip if have nan data
-            if np.any(np.isnan(real_signals)):
-                continue
-
-            t2r, t2err, detune, derr, y_fit, *_ = fit_decay_fringe(ts, real_signals)
-
-            if t2err > 0.3 * t2r:
-                continue
-
-            contrast = np.max(y_fit) - np.min(y_fit) + 1e-9
-            snr = contrast / np.mean(np.abs(real_signals - y_fit))
-            if snr < snr_threshold:
-                continue
-
-            t2s[i] = t2r
-            t2errs[i] = t2err
-            freqs[i] = activate_detune - detune + fit_freqs[i]
-            freq_errs[i] = derr
-
-        if np.all(np.isnan(t2s)):
-            raise ValueError("No valid Fitting T2 found. Please check the data.")
-
-        valid_idxs = ~np.isnan(t2s)
-        values = values[valid_idxs]
-        t2s = t2s[valid_idxs]
-        t2errs = t2errs[valid_idxs]
-        freqs = freqs[valid_idxs]
-        freq_errs = freq_errs[valid_idxs]
-
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-        assert isinstance(ax1, plt.Axes)
-        assert isinstance(ax2, plt.Axes)
-        fig.suptitle("T2Ramsey over Flux")
-        ax1.errorbar(
-            values, t2s, yerr=t2errs, label="Fitting T2", elinewidth=1, capsize=1
-        )
-        ax1.set_ylabel("T2 (us)")
-        ax1.set_ylim(bottom=0)
-        ax1.grid()
-        ax2.errorbar(
-            values,
-            freqs,
-            yerr=freq_errs,
-            label="Fitting frequency",
-            elinewidth=1,
-            capsize=1,
-        )
-        ax2.set_ylabel("Detune (MHz)")
-        ax2.set_xlabel("Flux value (a.u.)")
-        ax2.grid()
-        plt.plot()
-
-        return values, t2s, t2errs, freqs, freq_errs
+        raise NotImplementedError("Mist analysis not implemented")
 
     def save(
         self,
         filepath: str,
-        result: Optional[T2RamseyResultType] = None,
+        result: Optional[MistResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/flux_dep/ge/batch",
+        tag: str = "twotone/flux_dep/mist/batch",
         **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, detunes, ts, signals_dict = result
-        detune_singals = signals_dict["detune"]
+        values, detunes, gains, signals_dict = result
+        detune_signals = signals_dict["detune"]
         fit_freqs = signals_dict["fit_freq"]
-        t2r_signals = signals_dict["t2ramsey"]
+        mist_signals = signals_dict["mist"]
 
         filepath = Path(filepath)
 
         save_data(
-            filepath=filepath.with_stem(filepath.stem + "_detune"),
+            filepath=filepath.with_name(filepath.name + "_detune"),
             x_info={"name": "Flux value", "unit": "a.u.", "values": values},
             y_info={"name": "Detune", "unit": "Hz", "values": detunes * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": detune_singals.T},
+            z_info={"name": "Signal", "unit": "a.u.", "values": detune_signals.T},
             comment=comment,
             tag=tag + "/detune",
             **kwargs,
         )
 
         save_data(
-            filepath=filepath.with_stem(filepath.stem + "_fit_freq"),
+            filepath=filepath.with_name(filepath.name + "_fit_freq"),
             x_info={"name": "Flux value", "unit": "a.u.", "values": values},
             z_info={"name": "Frequency", "unit": "Hz", "values": fit_freqs * 1e6},
             comment=comment,
@@ -297,11 +271,21 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         )
 
         save_data(
-            filepath=filepath.with_stem(filepath.stem + "_t2ramsey"),
+            filepath=filepath.with_name(filepath.name + "_mist_g"),
             x_info={"name": "Flux value", "unit": "a.u.", "values": values},
-            y_info={"name": "Time", "unit": "s", "values": ts * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": t2r_signals.T},
+            y_info={"name": "Time", "unit": "s", "values": gains * 1e-6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": mist_signals[..., 0].T},
             comment=comment,
-            tag=tag + "/t2ramsey",
+            tag=tag + "/mist_g",
+            **kwargs,
+        )
+
+        save_data(
+            filepath=filepath.with_name(filepath.name + "_mist_e"),
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
+            y_info={"name": "Time", "unit": "s", "values": gains * 1e-6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": mist_signals[..., 1].T},
+            comment=comment,
+            tag=tag + "/mist_e",
             **kwargs,
         )

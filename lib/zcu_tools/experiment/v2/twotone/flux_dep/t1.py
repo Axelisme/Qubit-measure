@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,21 +10,14 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine, MultiLivePlotter, make_plot_frame
-from zcu_tools.program.v2 import (
-    Delay,
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    sweep2param,
-)
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_decay, fit_qubit_freq
-from zcu_tools.utils.process import minus_background, rotate2real
+from zcu_tools.utils.fitting import fit_decay
+from zcu_tools.utils.process import rotate2real
 
-from ...runner import AnalysisTask, BatchTask, HardTask, Runner, SoftTask, TaskContext
-from ...utils import set_pulse_freq, wrap_earlystop_check
+from ...runner import BatchTask, Runner, SoftTask, TaskContext
+from ...utils import set_pulse_freq
+from .cell import FitLastFreqTask, MeasureDetuneTask, MeasureT1Task
 from .util import check_gains
 
 T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
@@ -108,9 +101,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         with MultiLivePlotter(
             dict(
-                freq=LivePlotter2DwithLine(
+                detune=LivePlotter2DwithLine(
                     "Flux device value",
-                    "Frequency (MHz)",
+                    "Detune (MHz)",
                     line_axis=1,
                     num_lines=5,
                     existed_frames=(fig, [axs[0]], dh),
@@ -127,113 +120,24 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             )
         ) as viewer:
 
-            def measure_freq_fn(ctx: TaskContext, update_hook: Callable) -> np.ndarray:
-                cfg = deepcopy(ctx.cfg)
-
-                cfg["sweep"] = {"detune": detune_sweep}
-                cfg["relax_delay"] = 1.0  # no need for freq measurement
-
-                detune_params = sweep2param("detune", cfg["sweep"]["detune"])
-
-                prog = ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        make_reset("reset", reset_cfg=cfg.get("reset")),
-                        Pulse(
-                            name="qub_pulse",
-                            cfg={
-                                **cfg["qub_pulse"],
-                                "freq": cfg["qub_pulse"]["freq"] + detune_params,
-                            },
-                        ),
-                        make_readout("readout", readout_cfg=cfg["readout"]),
-                    ],
-                )
-                return prog.acquire(
-                    soc,
-                    progress=False,
-                    callback=wrap_earlystop_check(
-                        prog,
-                        update_hook,
-                        earlystop_snr,
-                        signal2real_fn=lambda x: rotate2real(x).real,
-                        snr_hook=lambda snr: viewer.get_plotter("freq")
-                        .get_ax("1d")
-                        .set_title(f"SNR: {snr:.2f}"),
-                    ),
-                )
-
-            detune_line = None
-
-            def fit_last_freq(ctx: TaskContext) -> float:
-                nonlocal detune_line
-                freq_signals = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], "freq"])
-
-                real_freq_signals = np.abs(minus_background(freq_signals))
-                detune, freq_err, kappa, *_ = fit_qubit_freq(detunes, real_freq_signals)
-                if freq_err > 0.5 * kappa:
-                    return np.nan  # fit failed
-                else:
-                    ax1d = viewer.get_plotter("freq").get_ax("1d")
-                    if detune_line is None:
-                        detune_line = ax1d.axvline(detune, color="red", linestyle="--")
-                    else:
-                        detune_line.set_xdata(detune)
-                    return detune + ctx.cfg["qub_pulse"]["freq"]
-
-            def measure_t1_fn(ctx: TaskContext, update_hook: Callable) -> np.ndarray:
-                cfg = deepcopy(ctx.cfg)
-
-                fit_freq = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], "fit_freq"])
-
-                if np.isnan(fit_freq):  # skip if freq measurement failed
-                    return [np.full((1, len(lens), 2), np.nan, dtype=float)]
-
-                cfg["sweep"] = {"length": len_sweep}
-                set_pulse_freq(cfg["pi_pulse"], fit_freq)
-
-                t1_span = sweep2param("length", cfg["sweep"]["length"])
-
-                prog = ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        make_reset("reset", reset_cfg=cfg.get("reset")),
-                        Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                        Delay(name="t1_delay", delay=t1_span),
-                        make_readout("readout", readout_cfg=cfg["readout"]),
-                    ],
-                )
-                return prog.acquire(
-                    soc,
-                    progress=False,
-                    callback=wrap_earlystop_check(
-                        prog,
-                        update_hook,
-                        earlystop_snr,
-                        signal2real_fn=lambda x: rotate2real(x).real,
-                        snr_hook=lambda snr: viewer.get_plotter("t1")
-                        .get_ax("1d")
-                        .set_title(f"SNR: {snr:.2f}"),
-                    ),
-                )
-
             def plot_fn(ctx: TaskContext) -> None:
                 signals = upwrap_signal(ctx.get_data())
                 plot_kwargs = dict(
-                    freq=(values, detunes, t1_signal2real(signals["freq"])),
+                    detune=(values, detunes, t1_signal2real(signals["detune"])),
                     t1=(values, lens, t1_signal2real(signals["t1"])),
                 )
                 if not ctx.is_empty_stack():
                     cur_task = ctx.addr_stack[-1]
                     # only update current liveplotter for speed
-                    if cur_task in ["freq", "t1"]:
+                    if cur_task in ["detune", "t1"]:
                         plot_kwargs = {cur_task: plot_kwargs[cur_task]}
                     elif cur_task == "fit_freq":
                         return  # do nothing
 
                 viewer.update(plot_kwargs)
+
+            detune_ax = viewer.get_plotter("detune").get_ax("1d")
+            t1_ax = viewer.get_plotter("t1").get_ax("1d")
 
             results = Runner(
                 task=SoftTask(
@@ -242,17 +146,22 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     update_cfg_fn=updateCfg,
                     sub_task=BatchTask(
                         tasks=dict(
-                            freq=HardTask(
-                                measure_fn=measure_freq_fn,
-                                result_shape=(len(detunes),),
+                            detune=MeasureDetuneTask(
+                                soccfg,
+                                soc,
+                                detune_sweep,
+                                earlystop_snr=earlystop_snr,
+                                snr_ax=detune_ax,
                             ),
-                            fit_freq=AnalysisTask(
-                                analysis_fn=fit_last_freq,
-                                init_result=np.array(np.nan),
+                            fit_freq=FitLastFreqTask(
+                                line_ax=detune_ax, detunes=detunes
                             ),
-                            t1=HardTask(
-                                measure_fn=measure_t1_fn,
-                                result_shape=(len(lens),),
+                            t1=MeasureT1Task(
+                                soccfg,
+                                soc,
+                                len_sweep,
+                                earlystop_snr=earlystop_snr,
+                                snr_ax=t1_ax,
                             ),
                         ),
                     ),
@@ -355,19 +264,19 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         assert result is not None, "no result found"
 
         values, detunes, ts, signals_dict = result
-        freq_signals = signals_dict["freq"]
+        detune_signals = signals_dict["detune"]
         fit_freqs = signals_dict["fit_freq"]
         t1_signals = signals_dict["t1"]
 
         filepath = Path(filepath)
 
         save_data(
-            filepath=filepath.with_name(filepath.name + "_freq"),
+            filepath=filepath.with_name(filepath.name + "_detune"),
             x_info={"name": "Flux value", "unit": "a.u.", "values": values},
             y_info={"name": "Detune", "unit": "Hz", "values": detunes * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": freq_signals.T},
+            z_info={"name": "Signal", "unit": "a.u.", "values": detune_signals.T},
             comment=comment,
-            tag=tag + "/freq",
+            tag=tag + "/detune",
             **kwargs,
         )
 

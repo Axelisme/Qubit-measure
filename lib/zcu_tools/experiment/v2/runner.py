@@ -22,11 +22,11 @@ class TaskContext:
     def __init__(
         self,
         cfg: Dict[str, Any],
-        init_result: ResultType,
+        data: ResultType,
         update_hook: Optional[Callable[["TaskContext"], None]] = None,
     ) -> None:
         self.cfg = cfg
-        self.data = init_result
+        self.data = data
         self.update_hook = update_hook
 
         self.addr_stack: List[Union[int, Any]] = []

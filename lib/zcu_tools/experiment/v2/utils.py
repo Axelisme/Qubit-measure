@@ -1,10 +1,11 @@
-from typing import Callable, Any, Optional, Dict, TypeVar
 from functools import wraps
+from typing import Any, Callable, Dict, Optional, TypeVar
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from zcu_tools.program.v2 import ModularProgramV2
+
 from .runner import default_raw2signal_fn
 
 
