@@ -132,13 +132,7 @@ def fitting_ge_and_plot(
     axs[0, 1].hist(xs, bins=bins, weights=g_pdfs, color="b", alpha=0.5)
     axs[1, 1].hist(xs, bins=bins, weights=e_pdfs, color="r", alpha=0.5)
 
-    fixedparams = [None] * 6
-    if init_p0 is not None:
-        fixedparams[3] = init_p0
-    if length_ratio is not None:
-        fixedparams[5] = length_ratio
-    if avg_p is not None:
-        fixedparams[4] = avg_p
+    fixedparams = [None, None, None, init_p0, avg_p, length_ratio]
     g_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
     sg, se, s, p0, p_avg, length_ratio = g_params
     fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio)

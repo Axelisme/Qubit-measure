@@ -139,7 +139,7 @@ def fit_singleshot(xs, g_pdfs, e_pdfs, fitparams=None, fixedparams=None):
     cat_xs = np.concatenate([xs, xs])
     cat_pdfs = np.concatenate([g_pdfs, e_pdfs])
 
-    def cat_pdf(cat_xs, *args):
+    def calc_cat_pdf(cat_xs, *args):
         p0 = args[3]
         g_args = list(args)
         e_args = list(args)
@@ -151,7 +151,7 @@ def fit_singleshot(xs, g_pdfs, e_pdfs, fitparams=None, fixedparams=None):
     return fit_func(
         cat_xs,
         cat_pdfs,
-        cat_pdf,
+        calc_cat_pdf,
         init_p=fitparams,
         bounds=bounds,
         fixedparams=fixedparams,

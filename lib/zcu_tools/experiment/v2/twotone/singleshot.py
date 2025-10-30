@@ -4,8 +4,8 @@ import warnings
 from copy import deepcopy
 from typing import Any, Dict, Literal, Optional, Tuple, Union
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment import AbsExperiment
@@ -87,11 +87,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         self,
         result: Optional[SingleShotResultType] = None,
         backend: Literal["center", "regression", "pca"] = "pca",
-        logscale: bool = False,
-        numbins: Union[int, str] = "auto",
-        length_ratio: Optional[float] = None,
-        init_p0: Optional[float] = None,
-        avg_p: Optional[float] = None,
+        **kwargs,
     ) -> Tuple[float, float, float, np.ndarray, dict, plt.Figure]:
         if result is None:
             result = self.last_result
@@ -101,15 +97,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
 
         (signals,) = result
 
-        return singleshot_ge_analysis(
-            signals,
-            backend=backend,
-            length_ratio=length_ratio,
-            logscale=logscale,
-            init_p0=init_p0,
-            avg_p=avg_p,
-            numbins=numbins,
-        )
+        return singleshot_ge_analysis(signals, backend=backend, **kwargs)
 
     def save(
         self,
