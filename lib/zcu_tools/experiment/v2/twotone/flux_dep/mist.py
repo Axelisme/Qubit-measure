@@ -4,7 +4,6 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
@@ -20,7 +19,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
 from ...runner import BatchTask, HardTask, Runner, SoftTask, TaskContext
@@ -40,9 +38,15 @@ def freq_signal2real(signals: np.ndarray) -> np.ndarray:
         if np.any(np.isnan(real_signals[i, :])):
             continue
 
-        # normalize
+        # flip to peak up
         max_val = np.max(real_signals[i, :])
         min_val = np.min(real_signals[i, :])
+        avg_val = np.mean(real_signals[i, :])
+        if max_val + min_val < 2 * avg_val:
+            real_signals[i, :] = -real_signals[i, :]
+            max_val, min_val = -min_val, -max_val
+
+        # normalize
         real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
 
     return real_signals
@@ -51,10 +55,10 @@ def freq_signal2real(signals: np.ndarray) -> np.ndarray:
 def mist_signal2real(signals: np.ndarray) -> np.ndarray:
     g_signals, e_signals = signals[..., 0], signals[..., 1]  # (flxs, pdrs, ge)
 
-    mist_signals = (e_signals + g_signals) / (e_signals - g_signals)
-    norm_mist_signals = mist_signals - mist_signals[:, 0]
+    sum_signals = e_signals + g_signals
+    mist_signals = np.abs(sum_signals - sum_signals[:, 0][:, None])
 
-    return np.abs(norm_mist_signals)
+    return mist_signals
 
 
 class MistExperiment(AbsExperiment[MistResultType]):
@@ -86,24 +90,29 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
         # get reference matrix element
         ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
-
-        predict_freqs = predictor.predict_freq(values)
-        predict_ms = predictor.predict_matrix_element(values, operator=drive_oper)
-
-        predict_qub_gains = cfg["qub_pulse"]["gain"] * ref_m / predict_ms
-        predict_pi_gains = cfg["pi_pulse"]["gain"] * ref_m / predict_ms
-        check_gains(predict_qub_gains, "qubit")
-        check_gains(predict_pi_gains, "pi")
+        ref_qub_gain = cfg["qub_pulse"]["gain"]
+        ref_pi_gain = cfg["pi_pulse"]["gain"]
 
         def updateCfg(i: int, ctx: TaskContext, value: float) -> None:
             set_flux_in_dev_cfg(ctx.cfg["dev"], value)
 
-            predict_freq = predict_freqs[i]
+            if i > 0:
+                last_freq = ctx.get_data(addr_stack=[i - 1, "fit_freq"])
+                if not np.isnan(last_freq):
+                    bias = predictor.calculate_bias(values[i - 1], last_freq)
+                    predictor.update_bias(bias)
+
+            predict_freq = predictor.predict_freq(value)
+            predict_m = predictor.predict_matrix_element(value, operator=drive_oper)
 
             set_pulse_freq(ctx.cfg["qub_pulse"], predict_freq)
             set_pulse_freq(ctx.cfg["pi_pulse"], predict_freq)
-            ctx.cfg["qub_pulse"]["gain"] = predict_qub_gains[i]
-            ctx.cfg["pi_pulse"]["gain"] = predict_pi_gains[i]
+            ctx.cfg["qub_pulse"]["gain"] = check_gains(
+                ref_qub_gain * ref_m / predict_m, "qub_pulse"
+            )
+            ctx.cfg["pi_pulse"]["gain"] = check_gains(
+                ref_pi_gain * ref_m / predict_m, "pi_pulse"
+            )
 
         # -- Define Measure Functions --
 
@@ -113,7 +122,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
             return {name: np.array([r[name] for r in results]) for name in results[0]}
 
         # -- Run Experiment --
-        fig, axs, dh = make_plot_frame(n_row=2, n_col=2, figsize=(12, 10))
+        fig, axs, dh = make_plot_frame(n_row=2, n_col=2, figsize=(8, 7))
 
         with MultiLivePlotter(
             dict(
@@ -204,7 +213,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
                             ),
                             mist=HardTask(
                                 measure_fn=measure_mist_fn,
-                                result_shape=(len(pdr_sweep), 2),
+                                result_shape=(len(gains), 2),
                             ),
                         ),
                     ),

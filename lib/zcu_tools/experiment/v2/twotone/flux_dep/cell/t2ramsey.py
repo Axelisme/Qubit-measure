@@ -41,7 +41,9 @@ class MeasureT2RamseyTask(AbsTask):
         self.earlystop_snr = earlystop_snr
         self.snr_ax = snr_ax
 
-        self.task = HardTask(measure_fn=self.measure_fn, result_shape=(len(len_sweep),))
+        self.task = HardTask(
+            measure_fn=self.measure_fn, result_shape=(len_sweep["expts"],)
+        )
 
     def measure_fn(self, ctx: TaskContext, update_hook: Callable) -> List[np.ndarray]:
         cfg = deepcopy(ctx.cfg)

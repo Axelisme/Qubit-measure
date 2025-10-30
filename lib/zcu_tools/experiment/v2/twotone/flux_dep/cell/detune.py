@@ -41,7 +41,7 @@ class MeasureDetuneTask(AbsTask):
         self.snr_ax = snr_ax
 
         self.task = HardTask(
-            measure_fn=self.measure_fn, result_shape=(len(detune_sweep),)
+            measure_fn=self.measure_fn, result_shape=(detune_sweep["expts"],)
         )
 
     def measure_fn(self, ctx: TaskContext, update_hook: Callable) -> np.ndarray:
