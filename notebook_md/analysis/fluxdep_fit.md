@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: Python 3
+    display_name: axelenv13
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.2
+    version: 3.13.4
 ---
 
 ```python
@@ -41,10 +41,7 @@ from zcu_tools.simulate import mA2flx
 ```
 
 ```python
-qub_name = "Q3_2D/Q1"
-
-server_ip = "021-zcu216"
-port = 4999
+qub_name = "Si001"
 
 mA_c = None
 mA_e = None
@@ -66,9 +63,10 @@ pprint(allows)
 # Load Spectrum
 
 ```python
-spect_path = r"../../Database/Q3_2D/Q1/003_qubit_flux_spec_ge_Q1_1.hdf5"
-# spect_path = r"../../Database/SF010/3D5,9G_flux_2.hdf5"
-spectrum, _fpts, _As = load_data(spect_path, server_ip=server_ip, port=port)
+# spect_path = r"..\..\Database\Si001\2025\10\Data_1028\Si001_flux_1.hdf5"
+# spect_path = r"..\..\Database\Si001\2025\10\Data_1028\Si001_flux_2.hdf5"
+spect_path = r"..\..\Database\Si001\2025\10\Data_1028\Si001_flux_3.hdf5"
+spectrum, _As, _fpts = load_data(spect_path)
 mAs, fpts, spectrum = zp.format_rawdata(_As, _fpts, spectrum)
 ```
 
@@ -120,7 +118,7 @@ s_spects.keys()
 
 ```python
 processed_spect_path = f"../../result/{qub_name}/data/fluxdep/spectrums.hdf5"
-zp.dump_spects(processed_spect_path, s_spects, mode="x")
+zp.dump_spects(processed_spect_path, s_spects, mode="w")
 ```
 
 ```python
@@ -183,29 +181,30 @@ ELb = (0.1, 2.0)
 
 ```python
 allows = {
-    "transitions": [(0, 1), (0, 2), (0, 3), (1, 2)],
+    "transitions": [(0, 1), (0, 2), (1, 2)],
     # "transitions": [(0, 1), (0, 2)],
     # "red side": [(0, 1), (0, 2), (1, 2), (0, 3)],
-    "mirror": [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (1, 3)],
-    "mirror2": [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (1, 3)],
-    # "r_f": 7.527,
+    "mirror": [(0, 1), (0, 2), (1, 3)],
+    # "mirror2": [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (1, 3)],
+    "r_f": 5.927,
     "sample_f": 9.584640 / 2,
     # "sample_f": 6.881280 / 2,
 }
 allows = {
     **allows,
-    # "transitions": [(i, j) for i in (0, 1) for j in range(10) if i < j],
+    # "transitions": [(i, j) for i in (0, 1) for j in range(5) if i < j],
     # "red side": [(i, j) for i in (0, 1) for j in range(10) if i < j],
     # "blue side": [(i, j) for i in (0, 1, 2) for j in range(8) if i < j],
-    # "mirror": [(i, j) for i in (0, 1) for j in range(10) if i < j],
+    # "mirror": [(i, j) for i in (0, 1) for j in range(5) if i < j],
     # "transitions2": [(i, j) for i in (0, 1, 2) for j in range(11) if i < j],
     # "mirror2": [(i, j) for i in (0, 1, 2) for j in range(8) if i < j],
 }
 ```
 
 ```python
+%matplotlib inline
 best_params, fig = zf.search_in_database(
-    s_flxs, s_fpts, "../../Database/simulation/fluxonium_1.h5", allows, EJb, ECb, ELb
+    s_flxs, s_fpts, r"../../Database/simulation/fluxonium_all.h5", allows, EJb, ECb, ELb
 )
 fig.savefig(f"../../result/{qub_name}/image/search_result.png")
 ```
@@ -232,6 +231,8 @@ fig = (
     .plot_background(s_spects)
     .plot_simulation_lines(t_flxs, energies, v_allows)
     .plot_points(s_flxs, s_fpts, marker_color="blue", opacity=0.5)
+    .add_constant_freq(v_allows["r_f"], "r_f")
+    .add_constant_freq(v_allows["sample_f"], "sample_f")
     .add_secondary_xaxis(s_flxs, s_mAs)
     .auto_derive_limits()
     .get_figure()
@@ -261,7 +262,7 @@ _, energies = calculate_energy_vs_flx(sp_params, t_flxs, cutoff=40, evals_count=
 ```python
 v_allows = {
     **allows,
-    # "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 10)],
+    "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 5)],
     # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
 }
 
@@ -270,6 +271,8 @@ fig = (
     .plot_background(s_spects)
     .plot_simulation_lines(t_flxs, energies, v_allows)
     .plot_points(s_flxs, s_fpts, marker_color="blue", opacity=0.5)
+    .add_constant_freq(v_allows["r_f"], "r_f")
+    .add_constant_freq(v_allows["sample_f"], "sample_f")
     .add_secondary_xaxis(s_flxs, s_mAs)
     .auto_derive_limits()
     .get_figure()
