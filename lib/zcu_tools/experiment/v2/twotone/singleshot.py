@@ -5,6 +5,7 @@ from copy import deepcopy
 from typing import Any, Dict, Literal, Optional, Tuple, Union
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment import AbsExperiment
@@ -90,7 +91,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         numbins: Union[int, str] = "auto",
         length_ratio: Optional[float] = None,
         init_p0: Optional[float] = None,
-    ) -> Tuple[float, float, float, np.ndarray, dict]:
+    ) -> Tuple[float, float, float, np.ndarray, dict, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, (

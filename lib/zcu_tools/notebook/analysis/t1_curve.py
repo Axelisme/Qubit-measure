@@ -284,7 +284,8 @@ def plot_t1_with_sample(
         label = f"{name}(w)" if callable(v) else f"{name} = {v:.1e}"
         ax.plot(t_mAs, t1_eff, label=label, linestyle="--")
 
-    ax.set_xlim(s_mAs.min() - 0.03, s_mAs.max() + 0.03)
+    range = np.ptp(s_mAs)
+    ax.set_xlim(s_mAs.min() - 0.01 * range, s_mAs.max() + 0.01 * range)
     ax.set_xlabel(r"Current (mA)", fontsize=14)
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")

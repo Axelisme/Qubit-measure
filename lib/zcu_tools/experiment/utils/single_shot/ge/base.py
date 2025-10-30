@@ -108,7 +108,7 @@ def fitting_ge_and_plot(
     logscale: bool = False,
     length_ratio: Optional[float] = None,
     init_p0: Optional[float] = None,
-) -> Tuple[float, float, float, np.ndarray, dict]:
+) -> Tuple[float, float, float, np.ndarray, dict, plt.Figure]:
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
 
@@ -186,10 +186,8 @@ def fitting_ge_and_plot(
         axs[1, 1].set_ylim(y_min, y_max)
 
     fig.suptitle(f"Readout length = {length_ratio:.1f} " + r"$T_1$")
-
-    plt.subplots_adjust(hspace=0.25, wspace=0.15)
-    plt.tight_layout()
-    plt.show()
+    fig.tight_layout()
+    fig.subplots_adjust(hspace=0.25, wspace=0.15)
 
     return (
         fid,
@@ -202,4 +200,5 @@ def fitting_ge_and_plot(
             ]
         ),
         g_params,
+        fig,
     )

@@ -265,7 +265,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         self.last_cfg = cfg
         self.last_result = (values, detunes, lens, signals_dict)
 
-        return values, detunes, lens, signals_dict
+        return values, detunes, lens, signals_dict, fig
 
     def analyze(
         self,
