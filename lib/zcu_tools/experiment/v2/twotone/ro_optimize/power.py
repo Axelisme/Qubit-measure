@@ -38,17 +38,18 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
             cfg["readout"], "gain", sweep2param("power", cfg["sweep"]["power"])
         )
 
+        def measure_fn(ctx, update_hook):
+            prog = TwoToneProgram(soccfg, ctx.cfg)
+            avg_d = prog.acquire(
+                soc, progress=False, callback=update_hook, record_stderr=True
+            )
+            std_d = prog.get_stderr()
+            return avg_d, std_d
+
         with LivePlotter1D("Readout Power", "SNR", disable=not progress) as viewer:
             signals = Runner(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc,
-                            progress=False,
-                            callback=update_hook,
-                            record_stderr=True,
-                        )
-                    ),
+                    measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, axis=0),
                     result_shape=(len(gains),),
                 ),

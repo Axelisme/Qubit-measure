@@ -40,6 +40,14 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         set_readout_cfg(cfg["readout"], "ro_length", lengths[0])
         set_readout_cfg(cfg["readout"], "length", lengths.max() + 0.1)
 
+        def measure_fn(ctx, update_hook):
+            prog = TwoToneProgram(soccfg, ctx.cfg)
+            avg_d = prog.acquire(
+                soc, progress=False, callback=update_hook, record_stderr=True
+            )
+            std_d = prog.get_stderr()
+            return avg_d, std_d
+
         with LivePlotter1D(
             "Readout Length (us)", "SNR", disable=not progress
         ) as viewer:
@@ -51,14 +59,7 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
                         ctx.cfg["readout"], "ro_length", length
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            TwoToneProgram(soccfg, ctx.cfg).acquire(
-                                soc,
-                                progress=False,
-                                callback=update_hook,
-                                record_stderr=True,
-                            )
-                        ),
+                        measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: snr_as_signal(raw, axis=-1),
                     ),
                 ),
