@@ -91,6 +91,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         numbins: Union[int, str] = "auto",
         length_ratio: Optional[float] = None,
         init_p0: Optional[float] = None,
+        avg_p: Optional[float] = None,
     ) -> Tuple[float, float, float, np.ndarray, dict, plt.Figure]:
         if result is None:
             result = self.last_result
@@ -106,6 +107,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
             length_ratio=length_ratio,
             logscale=logscale,
             init_p0=init_p0,
+            avg_p=avg_p,
             numbins=numbins,
         )
 

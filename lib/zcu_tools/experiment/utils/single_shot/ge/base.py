@@ -108,6 +108,7 @@ def fitting_ge_and_plot(
     logscale: bool = False,
     length_ratio: Optional[float] = None,
     init_p0: Optional[float] = None,
+    avg_p: Optional[float] = None,
 ) -> Tuple[float, float, float, np.ndarray, dict, plt.Figure]:
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
@@ -136,6 +137,8 @@ def fitting_ge_and_plot(
         fixedparams[3] = init_p0
     if length_ratio is not None:
         fixedparams[5] = length_ratio
+    if avg_p is not None:
+        fixedparams[4] = avg_p
     g_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
     sg, se, s, p0, p_avg, length_ratio = g_params
     fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio)

@@ -46,8 +46,8 @@ def calc_noise_f(xs, rA, rB, s) -> np.ndarray:
 
 
 def calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio) -> np.ndarray:
-    rg = (1 - p_avg) * length_ratio
-    re = p_avg * length_ratio
+    rg = p_avg * length_ratio
+    re = (1 - p_avg) * length_ratio
     norm_s = s / abs(se - sg)
     norm_g_f = calc_noise_f((xs - sg) / (se - sg), rg, re, norm_s)
     norm_e_f = calc_noise_f((xs - se) / (sg - se), re, rg, norm_s)
