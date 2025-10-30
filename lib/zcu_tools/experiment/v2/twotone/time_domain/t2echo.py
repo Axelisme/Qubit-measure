@@ -123,7 +123,6 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
             raise ValueError(f"Unknown fit_method: {fit_method}")
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        fig.tight_layout()
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
 
@@ -139,6 +138,8 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
         ax.set_xlabel("Time (us)")
         ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
         ax.legend()
+
+        fig.tight_layout()
 
         return t2e, t2eerr, detune, detune_err, fig
 

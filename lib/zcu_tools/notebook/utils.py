@@ -1,6 +1,9 @@
 import json
 from copy import deepcopy
 from typing import Dict, Optional, Union
+import os
+
+import matplotlib.pyplot as plt
 
 
 def make_sweep(
@@ -110,3 +113,8 @@ def make_comment(cfg: dict, comment: str = "") -> str:
     cfg["comment"] = comment
 
     return json.dumps(cfg, indent=2)
+
+
+def savefig(fig: plt.Figure, filepath: str) -> None:
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    fig.savefig(filepath)

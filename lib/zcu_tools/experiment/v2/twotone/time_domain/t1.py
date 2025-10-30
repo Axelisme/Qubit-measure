@@ -117,7 +117,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        fig.tight_layout()
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
@@ -130,6 +129,8 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         ax.set_xlabel("Time (us)")
         ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
         ax.legend()
+
+        fig.tight_layout()
 
         return t1, t1err, fig
 

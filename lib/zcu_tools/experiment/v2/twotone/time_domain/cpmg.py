@@ -163,7 +163,7 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
         ax2.set_xlabel("Number of Pi")
         plt.plot()
 
-        return t2s, t2errs
+        return t2s, t2errs, fig
 
     def save(
         self,

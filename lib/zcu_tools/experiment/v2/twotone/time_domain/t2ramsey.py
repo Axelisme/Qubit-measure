@@ -118,26 +118,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             detune = 0.0
             detune_err = 0.0
 
-        # if plot:
-        #     plt.figure(figsize=config.figsize)
-        #     plt.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-        #     plt.plot(xs, y_fit, label="fit")
-
-        #     t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
-        #     if fit_fringe:
-        #         detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
-        #         plt.title(f"T2 fringe = {t2r_str}, detune = {detune_str}", fontsize=15)
-        #     else:
-        #         plt.title(f"T2 decay = {t2r_str}", fontsize=15)
-
-        #     plt.xlabel("Time (us)")
-        #     plt.ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
-        #     plt.legend()
-        #     plt.tight_layout()
-        #     plt.show()
-
         fig, ax = plt.subplots(figsize=config.figsize)
-        fig.tight_layout()
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
         t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
@@ -149,6 +130,8 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         ax.set_xlabel("Time (us)")
         ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
         ax.legend()
+
+        fig.tight_layout()
 
         return t2r, t2rerr, detune, detune_err, fig
 
