@@ -11,7 +11,7 @@ from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import HangerModel, TransmissionModel
+from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 
 from ..runner import HardTask, Runner
 
@@ -92,13 +92,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         elif model_type == "t":
             model = TransmissionModel()
         elif model_type == "auto":
-            background = 0.5 * (np.abs(signals[0]) + np.abs(signals[-1]))
-            magnitudes = np.abs(signals)
-
-            if magnitudes.max() - background < 3 * (background - magnitudes.min()):
-                model = HangerModel()
-            else:
-                model = TransmissionModel()
+            model = get_proper_model(fpts, signals)
         else:
             raise ValueError(f"Invalid model type: {model_type}")
 

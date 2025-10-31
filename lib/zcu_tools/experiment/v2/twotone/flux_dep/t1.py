@@ -2,73 +2,29 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
+from zcu_tools.experiment.v2.runner import AutoBatchTask, Runner, SoftTask, TaskContext
+from zcu_tools.experiment.v2.runner.auto import (
+    MeasureDetuneTask,
+    MeasureLenRabiTask,
+    MeasureT1Task,
+)
+from zcu_tools.experiment.v2.utils import merge_result_list, set_pulse_freq
 from zcu_tools.liveplot import LivePlotter2DwithLine, MultiLivePlotter, make_plot_frame
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
-from ...runner import BatchTask, Runner, SoftTask, TaskContext
-from ...utils import set_pulse_freq
-from .cell import (
-    FitLastFreqTask,
-    FitLenRabiTask,
-    MeasureDetuneTask,
-    MeasureLenRabiTask,
-    MeasureT1Task,
-)
-from .util import check_gains
+from .util import check_gains, freq_signal2real, rabi_signal2real
 
 T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
-
-
-def freq_signal2real(signals: np.ndarray) -> np.ndarray:
-    real_signals = np.zeros_like(signals, dtype=np.float64)
-
-    flx_len = signals.shape[0]
-    for i in range(flx_len):
-        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
-
-        if np.any(np.isnan(real_signals[i, :])):
-            continue
-
-        # flip to peak up
-        max_val = np.max(real_signals[i, :])
-        min_val = np.min(real_signals[i, :])
-        avg_val = np.mean(real_signals[i, :])
-        if max_val + min_val < 2 * avg_val:
-            real_signals[i, :] = -real_signals[i, :]
-            max_val, min_val = -min_val, -max_val
-
-        # normalize
-        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
-
-    return real_signals
-
-
-def rabi_signal2real(signals: np.ndarray) -> np.ndarray:
-    real_signals = np.zeros_like(signals, dtype=np.float64)
-
-    flx_len = signals.shape[0]
-    for i in range(flx_len):
-        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
-
-        if np.any(np.isnan(real_signals[i, :])):
-            continue
-
-        # normalize
-        max_val = np.max(real_signals[i, :])
-        min_val = np.min(real_signals[i, :])
-        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
-
-    return real_signals
 
 
 def t1_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -114,9 +70,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         detune_sweep = cfg["sweep"]["detune"]
         rabilen_sweep = cfg["sweep"]["rabi_length"]
         t1len_sweep = cfg["sweep"]["t1_length"]
-
-        # delete sweep dicts, it will be added back later
-        del cfg["sweep"]
+        del cfg["sweep"]  # delete sweep dicts, it will be added back later
 
         # predict sweep points
         values = sweep2array(flx_sweep)
@@ -132,8 +86,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         def updateCfg(i: int, ctx: TaskContext, value: float) -> None:
             set_flux_in_dev_cfg(ctx.cfg["dev"], value)
 
+            # calibrate bias by last fitted frequency
             if i > 0:
-                last_freq = ctx.get_data(addr_stack=[i - 1, "fit_freq"])
+                last_freq = ctx.get_data(
+                    addr_stack=[i - 1, "meta_infos", "detune", "fit_freq"]
+                )
                 if not np.isnan(last_freq):
                     bias = predictor.calculate_bias(values[i - 1], last_freq)
                     predictor.update_bias(bias)
@@ -141,6 +98,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             predict_freq = predictor.predict_freq(value)
             predict_m = predictor.predict_matrix_element(value, operator=drive_oper)
 
+            # set pulse freq to predicted frequency
             set_pulse_freq(ctx.cfg["qub_pulse"], predict_freq)
             set_pulse_freq(ctx.cfg["pi_pulse"], predict_freq)
             ctx.cfg["qub_pulse"]["gain"] = check_gains(
@@ -149,13 +107,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             ctx.cfg["pi_pulse"]["gain"] = check_gains(
                 ref_pi_gain * ref_m / predict_m, "pi_pulse"
             )
-
-        # -- Define Measure Functions --
-
-        def upwrap_signal(
-            results: List[Dict[str, np.ndarray]],
-        ) -> Dict[str, np.ndarray]:
-            return {name: np.array([r[name] for r in results]) for name in results[0]}
 
         # -- Run Experiment --
         fig, axs, dh = make_plot_frame(n_row=2, n_col=3, figsize=(15, 7))
@@ -190,22 +141,27 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         ) as viewer:
 
             def plot_fn(ctx: TaskContext) -> None:
-                signals = upwrap_signal(ctx.get_data())
-                if not ctx.is_empty_stack():
-                    cur_task = ctx.addr_stack[-1]
-                else:
-                    cur_task = None
+                if ctx.is_empty_stack():
+                    return
 
-                plot_kwargs = {}
-                for key, xs, signal2real_fn in [
-                    ("detune", detunes, freq_signal2real),
-                    ("len_rabi", rabilens, rabi_signal2real),
-                    ("t1", t1lens, t1_signal2real),
-                ]:
-                    if cur_task == key or cur_task is None:
-                        plot_kwargs[key] = (values, xs, signal2real_fn(signals[key]))
+                plot_map = {
+                    "detune": (detunes, freq_signal2real),
+                    "len_rabi": (rabilens, rabi_signal2real),
+                    "t1": (t1lens, t1_signal2real),
+                }
 
-                viewer.update(plot_kwargs)
+                signals = merge_result_list(ctx.get_data())
+                cur_task = ctx.addr_stack[-1]
+
+                viewer.update(
+                    {
+                        cur_task: (
+                            values,
+                            plot_map[cur_task][0],
+                            plot_map[cur_task][1](signals[cur_task]),
+                        )
+                    }
+                )
 
             detune_ax = viewer.get_plotter("detune").get_ax("1d")
             rabi_ax = viewer.get_plotter("len_rabi").get_ax("1d")
@@ -216,39 +172,35 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     sweep_name="flux",
                     sweep_values=values,
                     update_cfg_fn=updateCfg,
-                    sub_task=BatchTask(
+                    sub_task=AutoBatchTask(
                         tasks=dict(
                             detune=MeasureDetuneTask(
                                 soccfg,
                                 soc,
                                 detune_sweep,
                                 earlystop_snr=earlystop_snr,
-                                snr_ax=detune_ax,
-                            ),
-                            fit_freq=FitLastFreqTask(
-                                line_ax=detune_ax, detunes=detunes
+                                plot_ax=detune_ax,
                             ),
                             len_rabi=MeasureLenRabiTask(
                                 soccfg,
                                 soc,
                                 rabilen_sweep,
                                 earlystop_snr=earlystop_snr,
-                                snr_ax=rabi_ax,
+                                plot_ax=rabi_ax,
                             ),
-                            fit_pi_len=FitLenRabiTask(line_ax=rabi_ax, lens=rabilens),
                             t1=MeasureT1Task(
                                 soccfg,
                                 soc,
                                 t1len_sweep,
                                 earlystop_snr=earlystop_snr,
-                                snr_ax=t1_ax,
+                                plot_ax=t1_ax,
                             ),
                         ),
                     ),
                 ),
                 update_hook=plot_fn,
             ).run(cfg)
-            signals_dict = upwrap_signal(results)
+            signals_dict = merge_result_list(results)
 
         # Cache results
         self.last_cfg = cfg
@@ -267,11 +219,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, _, ts, signals_dict = result
+        values, _, t1lens, signals_dict = result
+        fit_freqs = signals_dict["meta_infos"]["detune"]["fit_freq"]
         t1_signals = signals_dict["t1"]
-        fit_freqs = signals_dict["fit_freq"]
 
-        ts = ts[start_idx:]
+        t1lens = t1lens[start_idx:]
         t1_signals = t1_signals[:, start_idx:]
 
         real_t1_signals = t1_signal2real(t1_signals)
@@ -286,7 +238,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             if np.any(np.isnan(real_signals)):
                 continue
 
-            t1, t1err, y_fit, *_ = fit_decay(ts, real_signals)
+            t1, t1err, y_fit, *_ = fit_decay(t1lens, real_signals)
 
             if t1err > 0.3 * t1:
                 continue
@@ -343,11 +295,10 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, detunes, rabilens, ts, signals_dict = result
+        values, detunes, rabilens, t1lens, signals_dict = result
         detune_signals = signals_dict["detune"]
-        fit_freqs = signals_dict["fit_freq"]
+        fit_freqs = signals_dict["meta_infos"]["detune"]["fit_freq"]
         rabilen_signals = signals_dict["len_rabi"]
-        fit_pi_lens = signals_dict["fit_pi_len"]
         t1_signals = signals_dict["t1"]
 
         filepath = Path(filepath)
@@ -382,18 +333,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         )
 
         save_data(
-            filepath=filepath.with_name(filepath.name + "_fit_pi_len"),
-            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
-            z_info={"name": "Length", "unit": "s", "values": fit_pi_lens * 1e-6},
-            comment=comment,
-            tag=tag + "/fit_pi_len",
-            **kwargs,
-        )
-
-        save_data(
             filepath=filepath.with_name(filepath.name + "_t1"),
             x_info={"name": "Flux value", "unit": "a.u.", "values": values},
-            y_info={"name": "Time", "unit": "s", "values": ts * 1e-6},
+            y_info={"name": "Time", "unit": "s", "values": t1lens * 1e-6},
             z_info={"name": "Signal", "unit": "a.u.", "values": t1_signals.T},
             comment=comment,
             tag=tag + "/t1",

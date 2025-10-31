@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -6,11 +6,11 @@ from .base import (
     decaycos,
     dual_expfunc,
     expfunc,
-    gauss_func,
     fit_dualexp,
+    fit_gauss,
     fitdecaycos,
     fitexp,
-    fit_gauss,
+    gauss_func,
 )
 
 
@@ -19,6 +19,7 @@ def fit_decay(
     real_signals: np.ndarray,
     fit_params: Optional[Tuple[float, ...]] = None,
 ) -> Tuple[float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
+    """return [t1, t1err, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fitexp(xs, real_signals, fitparams=fit_params)
 
     fit_signals = expfunc(xs, *pOpt)
@@ -38,6 +39,7 @@ def fit_dual_decay(
     np.ndarray,
     Tuple[Tuple[float, ...], np.ndarray],
 ]:
+    """return [t1, t1err, t1b, t1berr, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fit_dualexp(xs, real_signals)
 
     # make sure t1 is the longer one
@@ -67,7 +69,7 @@ def fit_decay_fringe(
 ) -> Tuple[
     float, float, float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]
 ]:
-    """return t2f, t2ferr, detune, detune_err, fit_signals, (pOpt, pCov)"""
+    """return [t2f, t2ferr, detune, detune_err, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fitdecaycos(xs, real_signals, fitparams=fit_params)
 
     fit_signals = decaycos(xs, *pOpt)
@@ -85,6 +87,7 @@ def fit_gauss_decay(
     real_signals: np.ndarray,
     fit_params: Optional[Tuple[float, ...]] = None,
 ) -> Tuple[float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
+    """return [t2g, t2gerr, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fit_gauss(
         xs, real_signals, fitparams=fit_params, fixedparams=[None, None, 0.0, None]
     )

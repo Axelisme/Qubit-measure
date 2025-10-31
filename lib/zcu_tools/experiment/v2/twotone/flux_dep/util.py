@@ -6,6 +6,7 @@ import numpy as np
 from qick.asm_v2 import QickParam
 
 from zcu_tools.utils import deepupdate
+from zcu_tools.utils.process import rotate2real
 
 
 def wrap_with_flux_pulse(
@@ -83,3 +84,45 @@ def check_gains(gains: float, name: str) -> np.ndarray:
         )
         gains = np.clip(gains, 0.0, 1.0)
     return gains
+
+
+def freq_signal2real(signals: np.ndarray) -> np.ndarray:
+    real_signals = np.zeros_like(signals, dtype=np.float64)
+
+    flx_len = signals.shape[0]
+    for i in range(flx_len):
+        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
+
+        if np.any(np.isnan(real_signals[i, :])):
+            continue
+
+        # flip to peak up
+        max_val = np.max(real_signals[i, :])
+        min_val = np.min(real_signals[i, :])
+        avg_val = np.mean(real_signals[i, :])
+        if max_val + min_val < 2 * avg_val:
+            real_signals[i, :] = -real_signals[i, :]
+            max_val, min_val = -min_val, -max_val
+
+        # normalize
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+
+    return real_signals
+
+
+def rabi_signal2real(signals: np.ndarray) -> np.ndarray:
+    real_signals = np.zeros_like(signals, dtype=np.float64)
+
+    flx_len = signals.shape[0]
+    for i in range(flx_len):
+        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
+
+        if np.any(np.isnan(real_signals[i, :])):
+            continue
+
+        # normalize
+        max_val = np.max(real_signals[i, :])
+        min_val = np.min(real_signals[i, :])
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+
+    return real_signals

@@ -23,5 +23,5 @@ from .base import (
 from .decay import fit_decay, fit_decay_fringe, fit_dual_decay, fit_gauss_decay
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi
-from .resonance import HangerModel, TransmissionModel
+from .resonance import HangerModel, TransmissionModel, get_proper_model
 from .singleshot import calc_population_pdf, fit_singleshot, gauss_func

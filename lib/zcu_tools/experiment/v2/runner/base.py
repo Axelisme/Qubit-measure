@@ -54,7 +54,6 @@ class TaskContext:
         self, value: ResultType, addr_stack: Optional[List[Union[int, str]]] = None
     ) -> None:
         """Set data at the current address."""
-        value = np.asarray(value)
 
         # default to current address stack
         if addr_stack is None:
@@ -62,12 +61,14 @@ class TaskContext:
 
         target = self.get_data(addr_stack)
 
-        if not isinstance(target, type(value)):
-            raise TypeError(f"expected {type(target)}, got {type(value)}")
-
         if isinstance(target, dict):
-            target.update(value)
+            if isinstance(value, dict):
+                raise ValueError(f"Expected dict, got {type(value)}")
+            target.update(value)  # not deep update
         elif isinstance(target, list):
+            if isinstance(value, list):
+                raise ValueError(f"Expected list, got {type(value)}")
+            target.clear()
             target.extend(value)
         elif isinstance(target, ndarray):
             np.copyto(target, value)

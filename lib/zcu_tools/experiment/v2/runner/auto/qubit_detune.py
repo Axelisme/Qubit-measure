@@ -1,18 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Callable, Optional
+from typing import Callable, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-from zcu_tools.experiment.v2.runner import (
-    AbsTask,
-    AnalysisTask,
-    HardTask,
-    ResultType,
-    TaskContext,
-)
+from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -22,29 +16,39 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.fitting import fit_qubit_freq
-from zcu_tools.utils.process import minus_background, rotate2real
+from zcu_tools.utils.process import rotate2real
+
+from ..base import HardTask, ResultType, TaskContext
+from .base import AbsAutoTask
 
 
-class MeasureDetuneTask(AbsTask):
+class MeasureDetuneTask(AbsAutoTask):
+    """provide: ["qubit_freq"]"""
+
     def __init__(
         self,
         soccfg,
         soc,
         detune_sweep: dict,
         earlystop_snr: Optional[float] = None,
-        snr_ax: Optional[plt.Axes] = None,
+        plot_ax: Optional[plt.Axes] = None,
     ) -> None:
         self.soccfg = soccfg
         self.soc = soc
         self.detune_sweep = detune_sweep
         self.earlystop_snr = earlystop_snr
-        self.snr_ax = snr_ax
+        self.plot_ax = plot_ax
 
+        self.freq_line = None
         self.task = HardTask(
-            measure_fn=self.measure_fn, result_shape=(detune_sweep["expts"],)
+            measure_fn=self.measure_freq_fn, result_shape=(detune_sweep["expts"],)
         )
 
-    def measure_fn(self, ctx: TaskContext, update_hook: Callable) -> np.ndarray:
+        super().__init__(provided_tags=["qubit_freq"])
+
+    def measure_freq_fn(
+        self, ctx: TaskContext, update_hook: Callable
+    ) -> List[np.ndarray]:
         cfg = deepcopy(ctx.cfg)
 
         cfg["sweep"] = {"detune": self.detune_sweep}
@@ -53,10 +57,10 @@ class MeasureDetuneTask(AbsTask):
         detune_params = sweep2param("detune", cfg["sweep"]["detune"])
 
         snr_hook = None
-        if self.snr_ax is not None:
+        if self.plot_ax is not None:
 
             def snr_hook(snr: float) -> None:
-                self.snr_ax.set_title(f"SNR: {snr:.2f}")
+                self.plot_ax.set_title(f"SNR: {snr:.2f}")
 
         prog = ModularProgramV2(
             self.soccfg,
@@ -88,49 +92,31 @@ class MeasureDetuneTask(AbsTask):
     def init(self, ctx: TaskContext, keep: bool = True) -> None:
         self.task.init(ctx, keep=keep)
 
-    def run(self, ctx: TaskContext) -> None:
+    def run(
+        self, ctx: TaskContext, need_infos: Dict[str, complex]
+    ) -> Dict[str, complex]:
         self.task.run(ctx)
 
-    def cleanup(self) -> None:
-        self.task.cleanup()
+        detunes = sweep2array(self.detune_sweep)
+        signals = ctx.get_current_data()
 
-    def get_default_result(self) -> ResultType:
-        return self.task.get_default_result()
-
-
-class FitLastFreqTask(AbsTask):
-    def __init__(
-        self, line_ax: plt.Axes, detunes: np.ndarray, singal_key: str = "detune"
-    ) -> None:
-        self.line_ax = line_ax
-        self.detunes = detunes
-        self.singal_key = singal_key
-
-        self.line = None
-        self.task = AnalysisTask(
-            analysis_fn=self.analysis_fn, init_result=np.array(np.nan)
-        )
-
-    def analysis_fn(self, ctx: TaskContext) -> np.ndarray:
-        freq_signals = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], self.singal_key])
-
-        real_freq_signals = np.abs(minus_background(freq_signals))
-        detune, freq_err, kappa, *_ = fit_qubit_freq(self.detunes, real_freq_signals)
-        if freq_err > 0.5 * kappa:
-            return np.nan  # fit failed
+        real_signals = rotate2real(signals).real
+        detune, freq_err, kappa, *_ = fit_qubit_freq(detunes, real_signals)
+        if freq_err > 0.3 * kappa:
+            fit_freq = np.nan
         else:
-            if self.line is None:
-                self.line = self.line_ax.axvline(detune, color="red", linestyle="--")
-            else:
-                self.line.set_xdata(detune)
+            fit_freq = detune + ctx.cfg["qub_pulse"]["freq"]
 
-            return detune + ctx.cfg["qub_pulse"]["freq"]
+            # update frequency line
+            if self.plot_ax is not None:
+                if self.freq_line is None:
+                    self.freq_line = self.plot_ax.axvline(
+                        fit_freq, color="red", linestyle="--"
+                    )
+                else:
+                    self.freq_line.set_xdata(fit_freq)
 
-    def init(self, ctx: TaskContext, keep: bool = True) -> None:
-        self.task.init(ctx, keep=keep)
-
-    def run(self, ctx: TaskContext) -> None:
-        self.task.run(ctx)
+        return {"qubit_freq": fit_freq}
 
     def cleanup(self) -> None:
         self.task.cleanup()

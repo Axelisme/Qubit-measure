@@ -1,12 +1,12 @@
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from zcu_tools.program.v2 import ModularProgramV2
 
-from .runner import default_raw2signal_fn
+from .runner import ResultType, default_raw2signal_fn
 
 
 def calc_snr(real_signals: np.ndarray) -> float:
@@ -47,3 +47,11 @@ def wrap_earlystop_check(
             snr_hook(snr)
 
     return wrapped_update_hook
+
+
+def merge_result_list(results: List[ResultType]) -> ResultType:
+    if isinstance(results[0], dict):
+        return {
+            name: merge_result_list([r[name] for r in results]) for name in results[0]
+        }
+    return np.asarray(results)

@@ -2,13 +2,23 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.utils import set_pulse_freq
+from zcu_tools.experiment.v2.runner import (
+    AbsAutoTask,
+    AutoBatchTask,
+    HardTask,
+    ResultType,
+    Runner,
+    SoftTask,
+    TaskContext,
+)
+from zcu_tools.experiment.v2.runner.auto import MeasureDetuneTask, MeasureLenRabiTask
+from zcu_tools.experiment.v2.utils import merge_result_list, set_pulse_freq
 from zcu_tools.liveplot import LivePlotter2DwithLine, MultiLivePlotter, make_plot_frame
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -19,55 +29,10 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.process import rotate2real
 
-from ...runner import BatchTask, HardTask, Runner, SoftTask, TaskContext
-from .cell import FitLastFreqTask, FitLenRabiTask, MeasureDetuneTask, MeasureLenRabiTask
-from .util import check_gains
+from .util import check_gains, freq_signal2real, rabi_signal2real
 
 MistResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
-
-
-def freq_signal2real(signals: np.ndarray) -> np.ndarray:
-    real_signals = np.zeros_like(signals, dtype=np.float64)
-
-    flx_len = signals.shape[0]
-    for i in range(flx_len):
-        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
-
-        if np.any(np.isnan(real_signals[i, :])):
-            continue
-
-        # flip to peak up
-        max_val = np.max(real_signals[i, :])
-        min_val = np.min(real_signals[i, :])
-        avg_val = np.mean(real_signals[i, :])
-        if max_val + min_val < 2 * avg_val:
-            real_signals[i, :] = -real_signals[i, :]
-            max_val, min_val = -min_val, -max_val
-
-        # normalize
-        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
-
-    return real_signals
-
-
-def rabi_signal2real(signals: np.ndarray) -> np.ndarray:
-    real_signals = np.zeros_like(signals, dtype=np.float64)
-
-    flx_len = signals.shape[0]
-    for i in range(flx_len):
-        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
-
-        if np.any(np.isnan(real_signals[i, :])):
-            continue
-
-        # normalize
-        max_val = np.max(real_signals[i, :])
-        min_val = np.min(real_signals[i, :])
-        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
-
-    return real_signals
 
 
 def mist_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -81,6 +46,80 @@ def mist_signal2real(signals: np.ndarray) -> np.ndarray:
     )
 
     return np.abs(mist_signals)
+
+
+class MeasureMistTask(AbsAutoTask):
+    """need: ["qubit_freq", "pi_length"]"""
+
+    def __init__(
+        self, soccfg, soc, pdr_sweep: dict, pulse_name: str = "probe_pulse"
+    ) -> None:
+        self.soccfg = soccfg
+        self.soc = soc
+        self.pdr_sweep = pdr_sweep
+        self.pulse_name = pulse_name
+
+        self.task = HardTask(
+            measure_fn=self.measure_mist_fn, result_shape=(pdr_sweep["expts"], 2)
+        )
+
+        super().__init__(needed_tags=["qubit_freq", "pi_length"])
+
+    def measure_mist_fn(
+        self, ctx: TaskContext, update_hook: Callable
+    ) -> List[np.ndarray]:
+        cfg = deepcopy(ctx.cfg)
+
+        cfg["sweep"] = {
+            "gain": self.pdr_sweep,
+            "ge": {"start": 0, "stop": cfg["pi_pulse"]["gain"], "expts": 2},
+        }
+
+        pdr_params = sweep2param("gain", cfg["sweep"]["gain"])
+        ge_params = sweep2param("ge", cfg["sweep"]["ge"])
+        Pulse.set_param(cfg["pi_pulse"], "on/off", ge_params)
+        Pulse.set_param(cfg["probe_pulse"], "gain", pdr_params)
+
+        return ModularProgramV2(
+            self.soccfg,
+            cfg,
+            modules=[
+                make_reset("reset", reset_cfg=cfg.get("reset")),
+                Pulse(name="probe_pulse", cfg=cfg[self.pulse_name]),
+                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                make_readout("readout", readout_cfg=cfg["readout"]),
+            ],
+        ).acquire(self.soc, progress=False, callback=update_hook)
+
+    def init(self, ctx: TaskContext, keep: bool = True) -> None:
+        self.task.init(ctx, keep=keep)
+
+    def run(self, ctx: TaskContext, need_infos: Dict[str, np.ndarray]) -> None:
+        fallback_infos = {}
+
+        # set pulse freq to fitted freq
+        fit_freq = need_infos.get("qubit_freq", np.nan)
+        if np.isnan(fit_freq):
+            return fallback_infos
+        set_pulse_freq(ctx.cfg[self.pulse_name], fit_freq)
+        set_pulse_freq(ctx.cfg["pi_pulse"], fit_freq)
+
+        # optional: set pi pulse length to fitted value
+        fit_pi_len = need_infos.get("pi_length", np.nan)
+        if np.isnan(fit_pi_len):
+            return fallback_infos
+        Pulse.set_param(ctx.cfg["pi_pulse"], "length", fit_pi_len)
+
+        # measure mist
+        self.task.run(ctx)
+
+        return {}
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
+
+    def get_default_result(self) -> ResultType:
+        return self.task.get_default_result()
 
 
 class MistExperiment(AbsExperiment[MistResultType]):
@@ -100,16 +139,14 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
         flx_sweep = cfg["sweep"]["flux"]
         detune_sweep = cfg["sweep"]["detune"]
-        len_sweep = cfg["sweep"]["length"]
+        rabilen_sweep = cfg["sweep"]["length"]
         pdr_sweep = cfg["sweep"]["gain"]
-
-        # delete sweep dicts, it will be added back later
-        del cfg["sweep"]
+        del cfg["sweep"]  # delete sweep dicts, it will be added back later
 
         # predict sweep points
         values = sweep2array(flx_sweep)
         detunes = sweep2array(detune_sweep)
-        lens = sweep2array(len_sweep)
+        rabilens = sweep2array(rabilen_sweep)
         gains = sweep2array(pdr_sweep)
 
         # get reference matrix element
@@ -121,7 +158,9 @@ class MistExperiment(AbsExperiment[MistResultType]):
             set_flux_in_dev_cfg(ctx.cfg["dev"], value)
 
             if i > 0:
-                last_freq = ctx.get_data(addr_stack=[i - 1, "fit_freq"])
+                last_freq = ctx.get_data(
+                    addr_stack=[i - 1, "meta_infos", "detune", "fit_freq"]
+                )
                 if not np.isnan(last_freq):
                     bias = predictor.calculate_bias(values[i - 1], last_freq)
                     predictor.update_bias(bias)
@@ -137,13 +176,6 @@ class MistExperiment(AbsExperiment[MistResultType]):
             ctx.cfg["pi_pulse"]["gain"] = check_gains(
                 ref_pi_gain * ref_m / predict_m, "pi_pulse"
             )
-
-        # -- Define Measure Functions --
-
-        def upwrap_signal(
-            results: List[Dict[str, np.ndarray]],
-        ) -> Dict[str, np.ndarray]:
-            return {name: np.array([r[name] for r in results]) for name in results[0]}
 
         # -- Run Experiment --
         fig, axs, dh = make_plot_frame(n_row=2, n_col=3, figsize=(15, 7))
@@ -180,65 +212,34 @@ class MistExperiment(AbsExperiment[MistResultType]):
             rabi_ax = viewer.get_plotter("len_rabi").get_ax("1d")
 
             def plot_fn(ctx: TaskContext) -> None:
-                signals = upwrap_signal(ctx.get_data())
-                if not ctx.is_empty_stack():
-                    cur_task = ctx.addr_stack[-1]
-                else:
-                    cur_task = None
+                if ctx.is_empty_stack():
+                    return
 
-                plot_kwargs = {}
-                for key, xs, signal2real_fn in [
-                    ("detune", detunes, freq_signal2real),
-                    ("len_rabi", lens, rabi_signal2real),
-                    ("mist", gains, mist_signal2real),
-                ]:
-                    if cur_task == key or cur_task is None:
-                        plot_kwargs[key] = (values, xs, signal2real_fn(signals[key]))
-
-                viewer.update(plot_kwargs)
-
-            def measure_mist_fn(ctx: TaskContext, update_hook: callable) -> list:
-                cfg = deepcopy(ctx.cfg)
-
-                fit_freq = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], "fit_freq"])
-                fit_pi_len = ctx.get_data(
-                    addr_stack=[*ctx.addr_stack[:-1], "fit_pi_len"]
-                )
-
-                if np.isnan(fit_freq) or np.isnan(fit_pi_len):
-                    # shape: (ch, ro, lens, ge, iq)
-                    return [np.full((1, pdr_sweep["expts"], 2, 2), np.nan, dtype=float)]
-
-                cfg["sweep"] = {
-                    "gain": pdr_sweep,
-                    "ge": {"start": 0, "stop": cfg["pi_pulse"]["gain"], "expts": 2},
+                plot_map = {
+                    "detune": (detunes, freq_signal2real),
+                    "len_rabi": (rabilens, rabi_signal2real),
+                    "mist": (gains, mist_signal2real),
                 }
 
-                pdr_params = sweep2param("gain", cfg["sweep"]["gain"])
-                ge_params = sweep2param("ge", cfg["sweep"]["ge"])
-                set_pulse_freq(cfg["pi_pulse"], fit_freq)
-                Pulse.set_param(cfg["pi_pulse"], "length", fit_pi_len)
-                Pulse.set_param(cfg["pi_pulse"], "on/off", ge_params)
-                Pulse.set_param(cfg["probe_pulse"], "gain", pdr_params)
+                signals = merge_result_list(ctx.get_data())
+                cur_task = ctx.addr_stack[-1]
 
-                prog = ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        make_reset("reset", reset_cfg=cfg.get("reset")),
-                        Pulse(name="probe_pulse", cfg=cfg["probe_pulse"]),
-                        Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                        make_readout("readout", readout_cfg=cfg["readout"]),
-                    ],
+                viewer.update(
+                    {
+                        cur_task: (
+                            values,
+                            plot_map[cur_task][0],
+                            plot_map[cur_task][1](signals[cur_task]),
+                        )
+                    }
                 )
-                return prog.acquire(soc, progress=False, callback=update_hook)
 
             results = Runner(
                 task=SoftTask(
                     sweep_name="flux",
                     sweep_values=values,
                     update_cfg_fn=updateCfg,
-                    sub_task=BatchTask(
+                    sub_task=AutoBatchTask(
                         tasks=dict(
                             detune=MeasureDetuneTask(
                                 soccfg,
@@ -247,31 +248,24 @@ class MistExperiment(AbsExperiment[MistResultType]):
                                 earlystop_snr=earlystop_snr,
                                 snr_ax=detune_ax,
                             ),
-                            fit_freq=FitLastFreqTask(
-                                line_ax=detune_ax, detunes=detunes
-                            ),
                             len_rabi=MeasureLenRabiTask(
                                 soccfg,
                                 soc,
-                                len_sweep,
+                                rabilen_sweep,
                                 earlystop_snr=earlystop_snr,
                                 snr_ax=rabi_ax,
                             ),
-                            fit_pi_len=FitLenRabiTask(line_ax=rabi_ax, lens=lens),
-                            mist=HardTask(
-                                measure_fn=measure_mist_fn,
-                                result_shape=(len(gains), 2),
-                            ),
+                            mist=MeasureMistTask(soccfg, soc, pdr_sweep),
                         ),
                     ),
                 ),
                 update_hook=plot_fn,
             ).run(cfg)
-            signals_dict = upwrap_signal(results)
+            signals_dict = merge_result_list(results)
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (values, detunes, lens, gains, signals_dict)
+        self.last_result = (values, detunes, rabilens, gains, signals_dict)
 
         return values, detunes, gains, signals_dict, fig
 
@@ -302,9 +296,8 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
         values, detunes, lens, gains, signals_dict = result
         detune_signals = signals_dict["detune"]
-        fit_freqs = signals_dict["fit_freq"]
+        fit_freqs = signals_dict["meta_infos"]["detune"]["fit_freq"]
         rabilen_signals = signals_dict["len_rabi"]
-        fit_pi_lens = signals_dict["fit_pi_len"]
         mist_signals = signals_dict["mist"]
 
         filepath = Path(filepath)
@@ -335,15 +328,6 @@ class MistExperiment(AbsExperiment[MistResultType]):
             z_info={"name": "Signal", "unit": "a.u.", "values": rabilen_signals.T},
             comment=comment,
             tag=tag + "/len_rabi",
-            **kwargs,
-        )
-
-        save_data(
-            filepath=filepath.with_name(filepath.name + "_fit_pi_len"),
-            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
-            z_info={"name": "Length", "unit": "s", "values": fit_pi_lens * 1e-6},
-            comment=comment,
-            tag=tag + "/fit_pi_len",
             **kwargs,
         )
 
