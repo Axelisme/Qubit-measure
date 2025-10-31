@@ -55,10 +55,14 @@ def freq_signal2real(signals: np.ndarray) -> np.ndarray:
 def mist_signal2real(signals: np.ndarray) -> np.ndarray:
     g_signals, e_signals = signals[..., 0], signals[..., 1]  # (flxs, pdrs, ge)
 
-    sum_signals = e_signals + g_signals
-    mist_signals = np.abs(sum_signals - sum_signals[:, 0][:, None])
+    avg_len = max(int(0.05 * g_signals.shape[1]), 1)
 
-    return mist_signals
+    sum_signals = e_signals + g_signals
+    mist_signals = sum_signals - np.mean(
+        sum_signals[:, :avg_len], axis=1, keepdims=True
+    )
+
+    return np.abs(mist_signals)
 
 
 class MistExperiment(AbsExperiment[MistResultType]):
