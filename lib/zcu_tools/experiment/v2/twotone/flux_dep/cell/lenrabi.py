@@ -100,7 +100,7 @@ class MeasureLenRabiTask(AbsTask):
 
 class FitLenRabiTask(AbsTask):
     def __init__(
-        self, line_ax: plt.Axes, lens: np.ndarray, singal_key: str = "fit_pi_len"
+        self, line_ax: plt.Axes, lens: np.ndarray, singal_key: str = "len_rabi"
     ) -> None:
         self.line_ax = line_ax
         self.lens = lens

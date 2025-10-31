@@ -158,7 +158,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             return {name: np.array([r[name] for r in results]) for name in results[0]}
 
         # -- Run Experiment --
-        fig, axs, dh = make_plot_frame(n_row=3, n_col=2, figsize=(8, 10.5))
+        fig, axs, dh = make_plot_frame(n_row=2, n_col=3, figsize=(15, 7))
 
         with MultiLivePlotter(
             dict(
@@ -167,7 +167,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     "Detune (MHz)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [axs[0, 0], axs[1, 0]], dh),
+                    existed_frames=(fig, [[axs[1, 0], axs[0, 0]]], dh),
                     disable=not progress,
                 ),
                 len_rabi=LivePlotter2DwithLine(
@@ -175,7 +175,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     "Rabi length (us)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [axs[0, 1], axs[1, 1]], dh),
+                    existed_frames=(fig, [[axs[1, 1], axs[0, 1]]], dh),
                     disable=not progress,
                 ),
                 t1=LivePlotter2DwithLine(
@@ -183,7 +183,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     "Time (us)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [axs[0, 2], axs[1, 2]], dh),
+                    existed_frames=(fig, [[axs[1, 2], axs[0, 2]]], dh),
                     disable=not progress,
                 ),
             )
