@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -11,8 +11,8 @@ def fit_rabi(
     *,
     decay: bool = False,
     init_phase: Optional[float] = None,
-) -> Tuple[float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
-    """Return (pi_x, pi2_x, freq)"""
+) -> Tuple[float, float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
+    """Return (pi_x, pi2_x, freq, fit_signals, (pOpt, pCov))"""
 
     # choose fitting function
     if decay:

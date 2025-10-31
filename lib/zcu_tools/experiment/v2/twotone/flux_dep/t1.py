@@ -17,10 +17,58 @@ from zcu_tools.utils.process import rotate2real
 
 from ...runner import BatchTask, Runner, SoftTask, TaskContext
 from ...utils import set_pulse_freq
-from .cell import FitLastFreqTask, MeasureDetuneTask, MeasureT1Task
+from .cell import (
+    FitLastFreqTask,
+    FitLenRabiTask,
+    MeasureDetuneTask,
+    MeasureLenRabiTask,
+    MeasureT1Task,
+)
 from .util import check_gains
 
 T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
+
+
+def freq_signal2real(signals: np.ndarray) -> np.ndarray:
+    real_signals = np.zeros_like(signals, dtype=np.float64)
+
+    flx_len = signals.shape[0]
+    for i in range(flx_len):
+        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
+
+        if np.any(np.isnan(real_signals[i, :])):
+            continue
+
+        # flip to peak up
+        max_val = np.max(real_signals[i, :])
+        min_val = np.min(real_signals[i, :])
+        avg_val = np.mean(real_signals[i, :])
+        if max_val + min_val < 2 * avg_val:
+            real_signals[i, :] = -real_signals[i, :]
+            max_val, min_val = -min_val, -max_val
+
+        # normalize
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+
+    return real_signals
+
+
+def rabi_signal2real(signals: np.ndarray) -> np.ndarray:
+    real_signals = np.zeros_like(signals, dtype=np.float64)
+
+    flx_len = signals.shape[0]
+    for i in range(flx_len):
+        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
+
+        if np.any(np.isnan(real_signals[i, :])):
+            continue
+
+        # normalize
+        max_val = np.max(real_signals[i, :])
+        min_val = np.min(real_signals[i, :])
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+
+    return real_signals
 
 
 def t1_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -64,7 +112,8 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         flx_sweep = cfg["sweep"]["flux"]
         detune_sweep = cfg["sweep"]["detune"]
-        len_sweep = cfg["sweep"]["length"]
+        rabilen_sweep = cfg["sweep"]["rabi_length"]
+        t1len_sweep = cfg["sweep"]["t1_length"]
 
         # delete sweep dicts, it will be added back later
         del cfg["sweep"]
@@ -72,7 +121,8 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         # predict sweep points
         values = sweep2array(flx_sweep)
         detunes = sweep2array(detune_sweep)
-        lens = sweep2array(len_sweep)
+        rabilens = sweep2array(rabilen_sweep)
+        t1lens = sweep2array(t1len_sweep)
 
         # get reference matrix element
         ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
@@ -108,7 +158,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             return {name: np.array([r[name] for r in results]) for name in results[0]}
 
         # -- Run Experiment --
-        fig, axs, dh = make_plot_frame(n_row=2, n_col=2, figsize=(8, 7))
+        fig, axs, dh = make_plot_frame(n_row=3, n_col=2, figsize=(8, 10.5))
 
         with MultiLivePlotter(
             dict(
@@ -117,7 +167,15 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     "Detune (MHz)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [axs[0]], dh),
+                    existed_frames=(fig, [axs[0, 0], axs[1, 0]], dh),
+                    disable=not progress,
+                ),
+                len_rabi=LivePlotter2DwithLine(
+                    "Flux device value",
+                    "Rabi length (us)",
+                    line_axis=1,
+                    num_lines=5,
+                    existed_frames=(fig, [axs[0, 1], axs[1, 1]], dh),
                     disable=not progress,
                 ),
                 t1=LivePlotter2DwithLine(
@@ -125,7 +183,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     "Time (us)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [axs[1]], dh),
+                    existed_frames=(fig, [axs[0, 2], axs[1, 2]], dh),
                     disable=not progress,
                 ),
             )
@@ -133,21 +191,24 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
             def plot_fn(ctx: TaskContext) -> None:
                 signals = upwrap_signal(ctx.get_data())
-                plot_kwargs = dict(
-                    detune=(values, detunes, t1_signal2real(signals["detune"])),
-                    t1=(values, lens, t1_signal2real(signals["t1"])),
-                )
                 if not ctx.is_empty_stack():
                     cur_task = ctx.addr_stack[-1]
-                    # only update current liveplotter for speed
-                    if cur_task in ["detune", "t1"]:
-                        plot_kwargs = {cur_task: plot_kwargs[cur_task]}
-                    elif cur_task == "fit_freq":
-                        return  # do nothing
+                else:
+                    cur_task = None
+
+                plot_kwargs = {}
+                for key, xs, signal2real_fn in [
+                    ("detune", detunes, freq_signal2real),
+                    ("len_rabi", rabilens, rabi_signal2real),
+                    ("t1", t1lens, t1_signal2real),
+                ]:
+                    if cur_task == key or cur_task is None:
+                        plot_kwargs[key] = (values, xs, signal2real_fn(signals[key]))
 
                 viewer.update(plot_kwargs)
 
             detune_ax = viewer.get_plotter("detune").get_ax("1d")
+            rabi_ax = viewer.get_plotter("len_rabi").get_ax("1d")
             t1_ax = viewer.get_plotter("t1").get_ax("1d")
 
             results = Runner(
@@ -167,10 +228,18 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                             fit_freq=FitLastFreqTask(
                                 line_ax=detune_ax, detunes=detunes
                             ),
+                            len_rabi=MeasureLenRabiTask(
+                                soccfg,
+                                soc,
+                                rabilen_sweep,
+                                earlystop_snr=earlystop_snr,
+                                snr_ax=rabi_ax,
+                            ),
+                            fit_pi_len=FitLenRabiTask(line_ax=rabi_ax, lens=rabilens),
                             t1=MeasureT1Task(
                                 soccfg,
                                 soc,
-                                len_sweep,
+                                t1len_sweep,
                                 earlystop_snr=earlystop_snr,
                                 snr_ax=t1_ax,
                             ),
@@ -183,9 +252,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (values, detunes, lens, signals_dict)
+        self.last_result = (values, detunes, rabilens, t1lens, signals_dict)
 
-        return values, detunes, lens, signals_dict, fig
+        return values, detunes, t1lens, signals_dict, fig
 
     def analyze(
         self,
@@ -274,9 +343,11 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, detunes, ts, signals_dict = result
+        values, detunes, rabilens, ts, signals_dict = result
         detune_signals = signals_dict["detune"]
         fit_freqs = signals_dict["fit_freq"]
+        rabilen_signals = signals_dict["len_rabi"]
+        fit_pi_lens = signals_dict["fit_pi_len"]
         t1_signals = signals_dict["t1"]
 
         filepath = Path(filepath)
@@ -297,6 +368,25 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             z_info={"name": "Frequency", "unit": "Hz", "values": fit_freqs * 1e6},
             comment=comment,
             tag=tag + "/fit_freq",
+            **kwargs,
+        )
+
+        save_data(
+            filepath=filepath.with_name(filepath.name + "_len_rabi"),
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
+            y_info={"name": "Length", "unit": "s", "values": rabilens * 1e-6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": rabilen_signals.T},
+            comment=comment,
+            tag=tag + "/len_rabi",
+            **kwargs,
+        )
+
+        save_data(
+            filepath=filepath.with_name(filepath.name + "_fit_pi_len"),
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
+            z_info={"name": "Length", "unit": "s", "values": fit_pi_lens * 1e-6},
+            comment=comment,
+            tag=tag + "/fit_pi_len",
             **kwargs,
         )
 

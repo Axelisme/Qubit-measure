@@ -22,7 +22,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
 from ...runner import BatchTask, HardTask, Runner, SoftTask, TaskContext
-from .cell import FitLastFreqTask, MeasureDetuneTask
+from .cell import FitLastFreqTask, FitLenRabiTask, MeasureDetuneTask, MeasureLenRabiTask
 from .util import check_gains
 
 MistResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
@@ -47,6 +47,24 @@ def freq_signal2real(signals: np.ndarray) -> np.ndarray:
             max_val, min_val = -min_val, -max_val
 
         # normalize
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+
+    return real_signals
+
+
+def rabi_signal2real(signals: np.ndarray) -> np.ndarray:
+    real_signals = np.zeros_like(signals, dtype=np.float64)
+
+    flx_len = signals.shape[0]
+    for i in range(flx_len):
+        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
+
+        if np.any(np.isnan(real_signals[i, :])):
+            continue
+
+        # normalize
+        max_val = np.max(real_signals[i, :])
+        min_val = np.min(real_signals[i, :])
         real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
 
     return real_signals
@@ -82,6 +100,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
         flx_sweep = cfg["sweep"]["flux"]
         detune_sweep = cfg["sweep"]["detune"]
+        len_sweep = cfg["sweep"]["length"]
         pdr_sweep = cfg["sweep"]["gain"]
 
         # delete sweep dicts, it will be added back later
@@ -90,6 +109,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
         # predict sweep points
         values = sweep2array(flx_sweep)
         detunes = sweep2array(detune_sweep)
+        lens = sweep2array(len_sweep)
         gains = sweep2array(pdr_sweep)
 
         # get reference matrix element
@@ -126,7 +146,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
             return {name: np.array([r[name] for r in results]) for name in results[0]}
 
         # -- Run Experiment --
-        fig, axs, dh = make_plot_frame(n_row=2, n_col=2, figsize=(8, 7))
+        fig, axs, dh = make_plot_frame(n_row=3, n_col=2, figsize=(8, 10.5))
 
         with MultiLivePlotter(
             dict(
@@ -135,7 +155,15 @@ class MistExperiment(AbsExperiment[MistResultType]):
                     "Detune (MHz)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [axs[0]], dh),
+                    existed_frames=(fig, [axs[0, 0], axs[1, 0]], dh),
+                    disable=not progress,
+                ),
+                len_rabi=LivePlotter2DwithLine(
+                    "Flux device value",
+                    "Length (us)",
+                    line_axis=1,
+                    num_lines=5,
+                    existed_frames=(fig, [axs[0, 1], axs[1, 1]], dh),
                     disable=not progress,
                 ),
                 mist=LivePlotter2DwithLine(
@@ -143,26 +171,29 @@ class MistExperiment(AbsExperiment[MistResultType]):
                     "Readout power (a.u.)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [axs[1]], dh),
+                    existed_frames=(fig, [axs[0, 2], axs[1, 2]], dh),
                     disable=not progress,
                 ),
             )
         ) as viewer:
             detune_ax = viewer.get_plotter("detune").get_ax("1d")
+            rabi_ax = viewer.get_plotter("len_rabi").get_ax("1d")
 
             def plot_fn(ctx: TaskContext) -> None:
                 signals = upwrap_signal(ctx.get_data())
-                plot_kwargs = dict(
-                    detune=(values, detunes, freq_signal2real(signals["detune"])),
-                    mist=(values, gains, mist_signal2real(signals["mist"])),
-                )
                 if not ctx.is_empty_stack():
                     cur_task = ctx.addr_stack[-1]
-                    # only update current liveplotter for speed
-                    if cur_task in ["detune", "mist"]:
-                        plot_kwargs = {cur_task: plot_kwargs[cur_task]}
-                    elif cur_task == "fit_freq":
-                        return  # do nothing
+                else:
+                    cur_task = None
+
+                plot_kwargs = {}
+                for key, xs, signal2real_fn in [
+                    ("detune", detunes, freq_signal2real),
+                    ("len_rabi", lens, rabi_signal2real),
+                    ("mist", gains, mist_signal2real),
+                ]:
+                    if cur_task == key or cur_task is None:
+                        plot_kwargs[key] = (values, xs, signal2real_fn(signals[key]))
 
                 viewer.update(plot_kwargs)
 
@@ -170,8 +201,11 @@ class MistExperiment(AbsExperiment[MistResultType]):
                 cfg = deepcopy(ctx.cfg)
 
                 fit_freq = ctx.get_data(addr_stack=[*ctx.addr_stack[:-1], "fit_freq"])
+                fit_pi_len = ctx.get_data(
+                    addr_stack=[*ctx.addr_stack[:-1], "fit_pi_len"]
+                )
 
-                if np.isnan(fit_freq):  # skip if freq measurement failed
+                if np.isnan(fit_freq) or np.isnan(fit_pi_len):
                     # shape: (ch, ro, lens, ge, iq)
                     return [np.full((1, pdr_sweep["expts"], 2, 2), np.nan, dtype=float)]
 
@@ -183,6 +217,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
                 pdr_params = sweep2param("gain", cfg["sweep"]["gain"])
                 ge_params = sweep2param("ge", cfg["sweep"]["ge"])
                 set_pulse_freq(cfg["pi_pulse"], fit_freq)
+                Pulse.set_param(cfg["pi_pulse"], "length", fit_pi_len)
                 Pulse.set_param(cfg["pi_pulse"], "on/off", ge_params)
                 Pulse.set_param(cfg["probe_pulse"], "gain", pdr_params)
 
@@ -215,6 +250,14 @@ class MistExperiment(AbsExperiment[MistResultType]):
                             fit_freq=FitLastFreqTask(
                                 line_ax=detune_ax, detunes=detunes
                             ),
+                            len_rabi=MeasureLenRabiTask(
+                                soccfg,
+                                soc,
+                                len_sweep,
+                                earlystop_snr=earlystop_snr,
+                                snr_ax=rabi_ax,
+                            ),
+                            fit_pi_len=FitLenRabiTask(line_ax=rabi_ax, lens=lens),
                             mist=HardTask(
                                 measure_fn=measure_mist_fn,
                                 result_shape=(len(gains), 2),
@@ -228,7 +271,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (values, detunes, gains, signals_dict)
+        self.last_result = (values, detunes, lens, gains, signals_dict)
 
         return values, detunes, gains, signals_dict, fig
 
@@ -257,9 +300,11 @@ class MistExperiment(AbsExperiment[MistResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, detunes, gains, signals_dict = result
+        values, detunes, lens, gains, signals_dict = result
         detune_signals = signals_dict["detune"]
         fit_freqs = signals_dict["fit_freq"]
+        rabilen_signals = signals_dict["len_rabi"]
+        fit_pi_lens = signals_dict["fit_pi_len"]
         mist_signals = signals_dict["mist"]
 
         filepath = Path(filepath)
@@ -280,6 +325,25 @@ class MistExperiment(AbsExperiment[MistResultType]):
             z_info={"name": "Frequency", "unit": "Hz", "values": fit_freqs * 1e6},
             comment=comment,
             tag=tag + "/fit_freq",
+            **kwargs,
+        )
+
+        save_data(
+            filepath=filepath.with_name(filepath.name + "_len_rabi"),
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
+            y_info={"name": "Length", "unit": "s", "values": lens * 1e-6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": rabilen_signals.T},
+            comment=comment,
+            tag=tag + "/len_rabi",
+            **kwargs,
+        )
+
+        save_data(
+            filepath=filepath.with_name(filepath.name + "_fit_pi_len"),
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
+            z_info={"name": "Length", "unit": "s", "values": fit_pi_lens * 1e-6},
+            comment=comment,
+            tag=tag + "/fit_pi_len",
             **kwargs,
         )
 
