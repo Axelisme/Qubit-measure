@@ -62,11 +62,11 @@ class TaskContext:
         target = self.get_data(addr_stack)
 
         if isinstance(target, dict):
-            if isinstance(value, dict):
+            if not isinstance(value, dict):
                 raise ValueError(f"Expected dict, got {type(value)}")
             target.update(value)  # not deep update
         elif isinstance(target, list):
-            if isinstance(value, list):
+            if not isinstance(value, list):
                 raise ValueError(f"Expected list, got {type(value)}")
             target.clear()
             target.extend(value)
@@ -201,30 +201,33 @@ class HardTask(AbsTask):
         self.avg_pbar = None
 
     def init(self, ctx: TaskContext, keep=True) -> None:
-        self.avg_pbar = tqdm(
-            total=ctx.cfg["rounds"], smoothing=0, desc="rounds", leave=keep
-        )
+        if ctx.cfg["rounds"] > 1:
+            self.avg_pbar = tqdm(
+                total=ctx.cfg["rounds"], smoothing=0, desc="rounds", leave=keep
+            )
 
     def run(self, ctx: TaskContext) -> None:
-        assert self.avg_pbar is not None
-        self.avg_pbar.reset()
+        if self.avg_pbar is not None:
+            self.avg_pbar.reset()
 
         GlobalDeviceManager.setup_devices(ctx.cfg["dev"], progress=False)
 
         def update_hook(ir: int, raw: Any) -> None:
-            self.avg_pbar.update(ir - self.avg_pbar.n)
+            if self.avg_pbar is not None:
+                self.avg_pbar.update(ir - self.avg_pbar.n)
 
             ctx.set_data(self.raw2signal_fn(raw))
 
         signal = self.raw2signal_fn(self.measure_fn(ctx, update_hook))
 
-        self.avg_pbar.update(ctx.cfg["rounds"] - self.avg_pbar.n)
+        if self.avg_pbar is not None:
+            self.avg_pbar.update(ctx.cfg["rounds"] - self.avg_pbar.n)
 
         ctx.set_data(signal)
 
     def cleanup(self) -> None:
-        assert self.avg_pbar is not None
-        self.avg_pbar.close()
+        if self.avg_pbar is not None:
+            self.avg_pbar.close()
         self.avg_pbar = None
 
     def get_default_result(self) -> ResultType:

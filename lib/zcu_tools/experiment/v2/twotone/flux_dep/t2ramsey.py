@@ -10,47 +10,26 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.experiment.v2.runner import AutoBatchTask, Runner, SoftTask, TaskContext
-from zcu_tools.experiment.v2.runner.auto import (
-    MeasureDetuneTask,
-    MeasureLenRabiTask,
-    MeasureT2RamseyTask,
-)
+
 from zcu_tools.experiment.v2.utils import merge_result_list, set_pulse_freq
 from zcu_tools.liveplot import LivePlotter2DwithLine, MultiLivePlotter, make_plot_frame
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay_fringe
-from zcu_tools.utils.process import rotate2real
 
-from .util import check_gains, freq_signal2real, rabi_signal2real
+from .util import check_gains
+from .task import (
+    MeasureDetuneTask,
+    MeasureLenRabiTask,
+    MeasureT2RamseyTask,
+    detune_signal2real,
+    lenrabi_signal2real,
+    t2ramsey_signal2real,
+)
 
 T2RamseyResultType = Tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]
 ]
-
-
-def t2ramsey_signal2real(signals: np.ndarray) -> np.ndarray:
-    real_signals = np.zeros_like(signals, dtype=np.float64)
-
-    flx_len = signals.shape[0]
-    for i in range(flx_len):
-        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
-
-        if np.any(np.isnan(real_signals[i, :])):
-            continue
-
-        # flip to peak up
-        max_val = np.max(real_signals[i, :])
-        min_val = np.min(real_signals[i, :])
-        avg_val = np.mean(real_signals[i, :])
-        if max_val + min_val < 2 * avg_val:
-            real_signals[i, :] = -real_signals[i, :]
-            max_val, min_val = -min_val, -max_val
-
-        # normalize
-        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
-
-    return real_signals
 
 
 class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
@@ -92,7 +71,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             # calibrate bias by last fitted frequency
             if i > 0:
                 last_freq = ctx.get_data(
-                    addr_stack=[i - 1, "meta_infos", "detune", "fit_freq"]
+                    addr_stack=[i - 1, "meta_infos", "detune", "qubit_freq"]
                 )
                 if not np.isnan(last_freq):
                     bias = predictor.calculate_bias(values[i - 1], last_freq)
@@ -139,13 +118,16 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                     return
 
                 plot_map = {
-                    "detune": (detunes, freq_signal2real),
-                    "len_rabi": (rabilens, rabi_signal2real),
+                    "detune": (detunes, detune_signal2real),
+                    "len_rabi": (rabilens, lenrabi_signal2real),
                     "t2ramsey": (t2rlens, t2ramsey_signal2real),
                 }
 
                 signals = merge_result_list(ctx.get_data())
                 cur_task = ctx.addr_stack[-1]
+
+                if cur_task not in plot_map:
+                    return
 
                 viewer.update(
                     {
@@ -201,7 +183,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         self.last_cfg = cfg
         self.last_result = (values, detunes, rabilens, t2rlens, signals_dict)
 
-        return values, detunes, rabilens, t2rlens, signals_dict
+        return values, detunes, rabilens, t2rlens, signals_dict, fig
 
     def analyze(
         self,

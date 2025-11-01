@@ -50,6 +50,7 @@ def wrap_earlystop_check(
 
 
 def merge_result_list(results: List[ResultType]) -> ResultType:
+    assert isinstance(results, list) and len(results) > 0
     if isinstance(results[0], dict):
         return {
             name: merge_result_list([r[name] for r in results]) for name in results[0]

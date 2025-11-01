@@ -17,9 +17,30 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.experiment.v2.runner import (
+    HardTask,
+    ResultType,
+    TaskContext,
+    AbsAutoTask,
+)
 
-from ..base import HardTask, ResultType, TaskContext
-from .base import AbsAutoTask
+
+def lenrabi_signal2real(signals: np.ndarray) -> np.ndarray:
+    real_signals = np.zeros_like(signals, dtype=np.float64)
+
+    flx_len = signals.shape[0]
+    for i in range(flx_len):
+        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
+
+        if np.any(np.isnan(real_signals[i, :])):
+            continue
+
+        # normalize
+        max_val = np.max(real_signals[i, :])
+        min_val = np.min(real_signals[i, :])
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+
+    return real_signals
 
 
 class MeasureLenRabiTask(AbsAutoTask):
