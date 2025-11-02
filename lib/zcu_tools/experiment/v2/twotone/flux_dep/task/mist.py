@@ -31,7 +31,10 @@ def automist_signal2real(signals: np.ndarray) -> np.ndarray:
         sum_signals[:, :avg_len], axis=1, keepdims=True
     )
 
-    return np.abs(mist_signals)
+    norm_factor = np.std(np.diff(mist_signals, axis=1), axis=1)
+    norm_signals = mist_signals / norm_factor[:, None]
+
+    return np.abs(norm_signals)
 
 
 class MeasureMistTask(AbsAutoTask):

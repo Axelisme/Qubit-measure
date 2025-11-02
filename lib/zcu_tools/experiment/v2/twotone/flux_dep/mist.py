@@ -4,38 +4,39 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.experiment.v2.runner import (
     AutoBatchTask,
+    HardTask,
     Runner,
     SoftTask,
     TaskContext,
-    HardTask,
 )
 from zcu_tools.experiment.v2.utils import merge_result_list, set_pulse_freq
 from zcu_tools.liveplot import LivePlotter2DwithLine, MultiLivePlotter, make_plot_frame
-from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
-from zcu_tools.utils.datasaver import save_data
 from zcu_tools.program.v2 import (
     ModularProgramV2,
+    Pulse,
     make_readout,
     make_reset,
-    Pulse,
     sweep2param,
 )
+from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
+from zcu_tools.utils.datasaver import save_data
 
-from .util import check_gains
 from .task import (
     MeasureDetuneTask,
     MeasureLenRabiTask,
     MeasureMistTask,
+    automist_signal2real,
     detune_signal2real,
     lenrabi_signal2real,
-    automist_signal2real,
 )
+from .util import check_gains
 
 AutoMistResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
 
@@ -126,33 +127,25 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
                 ),
             )
         ) as viewer:
-            detune_ax = viewer.get_plotter("detune").get_ax("1d")
-            rabi_ax = viewer.get_plotter("len_rabi").get_ax("1d")
+            plot_map = {
+                "detune": (detunes, detune_signal2real),
+                "len_rabi": (rabilens, lenrabi_signal2real),
+                "mist": (gains, automist_signal2real),
+            }
 
             def plot_fn(ctx: TaskContext) -> None:
                 if ctx.is_empty_stack():
                     return
 
-                plot_map = {
-                    "detune": (detunes, detune_signal2real),
-                    "len_rabi": (rabilens, lenrabi_signal2real),
-                    "mist": (gains, automist_signal2real),
-                }
-
-                signals = merge_result_list(ctx.get_data())
                 cur_task = ctx.addr_stack[-1]
-
                 if cur_task not in plot_map:
                     return
 
+                signals = merge_result_list(ctx.get_data())
+
+                ys, signal2real_fn = plot_map[cur_task]
                 viewer.update(
-                    {
-                        cur_task: (
-                            values,
-                            plot_map[cur_task][0],
-                            plot_map[cur_task][1](signals[cur_task]),
-                        )
-                    }
+                    {cur_task: (values, ys, signal2real_fn(signals[cur_task]))}
                 )
 
             results = Runner(
@@ -163,18 +156,10 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
                     sub_task=AutoBatchTask(
                         tasks=dict(
                             detune=MeasureDetuneTask(
-                                soccfg,
-                                soc,
-                                detune_sweep,
-                                earlystop_snr=earlystop_snr,
-                                plot_ax=detune_ax,
+                                soccfg, soc, detune_sweep, earlystop_snr
                             ),
                             len_rabi=MeasureLenRabiTask(
-                                soccfg,
-                                soc,
-                                rabilen_sweep,
-                                earlystop_snr=earlystop_snr,
-                                plot_ax=rabi_ax,
+                                soccfg, soc, rabilen_sweep, earlystop_snr
                             ),
                             mist=MeasureMistTask(soccfg, soc, pdr_sweep),
                         ),
@@ -281,7 +266,10 @@ def mist_signal2real(signals: np.ndarray) -> np.ndarray:
 
     mist_signals = signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
 
-    return np.abs(mist_signals)
+    norm_factor = np.std(np.diff(mist_signals, axis=1), axis=1)
+    norm_signals = mist_signals / norm_factor[:, None]
+
+    return np.abs(norm_signals)
 
 
 class MistExperiment(AbsExperiment[MistResultType]):
@@ -345,12 +333,28 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
         return values, gains, signals
 
-    def analyze(self, result: Optional[MistResultType] = None) -> None:
+    def analyze(self, result: Optional[MistResultType] = None) -> plt.Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        raise NotImplementedError("Mist analysis not implemented")
+        values, gains, signals = result
+
+        real_signals = mist_signal2real(signals)
+
+        fig, ax = plt.subplots(figsize=config.figsize)
+        ax.imshow(
+            real_signals.T,
+            origin="lower",
+            interpolation="none",
+            aspect="auto",
+            extent=(values[0], values[-1], gains[0], gains[-1]),
+        )
+        ax.set_xlabel("Flux value (a.u.)")
+        ax.set_ylabel("Readout power (a.u.)")
+        ax.grid(True)
+
+        return fig
 
     def save(
         self,

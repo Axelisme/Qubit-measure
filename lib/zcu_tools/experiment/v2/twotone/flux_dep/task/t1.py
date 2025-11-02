@@ -7,6 +7,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.v2.runner import (
+    AbsAutoTask,
+    HardTask,
+    ResultType,
+    TaskContext,
+)
 from zcu_tools.experiment.v2.utils import set_pulse_freq, wrap_earlystop_check
 from zcu_tools.program.v2 import (
     Delay,
@@ -18,34 +24,21 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
-from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    ResultType,
-    TaskContext,
-    AbsAutoTask,
-)
 
 
 def t1_signal2real(signals: np.ndarray) -> np.ndarray:
     real_signals = np.zeros_like(signals, dtype=np.float64)
 
-    flx_len = signals.shape[0]
-    for i in range(flx_len):
-        real_signals[i, :] = rotate2real(signals[i, :]).real
-
-        if np.any(np.isnan(real_signals[i, :])):
+    for i in range(signals.shape[0]):
+        if np.any(np.isnan(signals[i])):
             continue
 
-        # flip to peak up
-        max_val = np.max(real_signals[i, :])
-        min_val = np.min(real_signals[i, :])
-        avg_val = np.mean(real_signals[i, :])
-        if max_val + min_val < 2 * avg_val:
-            real_signals[i, :] = -real_signals[i, :]
-            max_val, min_val = -min_val, -max_val
+        real_signals[i] = rotate2real(signals[i]).real
 
         # normalize
-        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
+        max_val = np.max(real_signals[i])
+        min_val = np.min(real_signals[i])
+        real_signals[i] = (real_signals[i] - min_val) / (max_val - min_val)
 
     return real_signals
 

@@ -54,16 +54,14 @@ class AutoBatchTask(BatchTask):
                 )
 
             task.init(ctx, keep=False)
-            with ctx(addr=name):
-                provided_infos = task.run(ctx, need_infos)
+            provided_infos = task.run(ctx(addr=name), need_infos)
             task.cleanup()
 
             meta_infos[name] = provided_infos
             self.task_pbar.update()
 
             # set meta information to context
-            with ctx(addr="meta_infos"):
-                ctx.set_data(meta_infos)
+            ctx(addr="meta_infos").set_current_data(meta_infos)
 
     def get_default_result(self) -> ResultType:
         default_result = {

@@ -10,14 +10,12 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.experiment.v2.runner import AutoBatchTask, Runner, SoftTask, TaskContext
-
 from zcu_tools.experiment.v2.utils import merge_result_list, set_pulse_freq
 from zcu_tools.liveplot import LivePlotter2DwithLine, MultiLivePlotter, make_plot_frame
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay_fringe
 
-from .util import check_gains
 from .task import (
     MeasureDetuneTask,
     MeasureLenRabiTask,
@@ -26,6 +24,7 @@ from .task import (
     lenrabi_signal2real,
     t2ramsey_signal2real,
 )
+from .util import check_gains
 
 T2RamseyResultType = Tuple[
     np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]
@@ -112,36 +111,26 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                 ),
             ),
         ) as viewer:
+            plot_map = {
+                "detune": (detunes, detune_signal2real),
+                "len_rabi": (rabilens, lenrabi_signal2real),
+                "t2ramsey": (t2rlens, t2ramsey_signal2real),
+            }
 
             def plot_fn(ctx: TaskContext) -> None:
                 if ctx.is_empty_stack():
                     return
 
-                plot_map = {
-                    "detune": (detunes, detune_signal2real),
-                    "len_rabi": (rabilens, lenrabi_signal2real),
-                    "t2ramsey": (t2rlens, t2ramsey_signal2real),
-                }
-
-                signals = merge_result_list(ctx.get_data())
                 cur_task = ctx.addr_stack[-1]
-
                 if cur_task not in plot_map:
                     return
 
-                viewer.update(
-                    {
-                        cur_task: (
-                            values,
-                            plot_map[cur_task][0],
-                            plot_map[cur_task][1](signals[cur_task]),
-                        )
-                    }
-                )
+                signals = merge_result_list(ctx.get_data())
 
-            detune_ax = viewer.get_plotter("detune").get_ax("1d")
-            rabi_ax = viewer.get_plotter("len_rabi").get_ax("1d")
-            t2ramsey_ax = viewer.get_plotter("t2ramsey").get_ax("1d")
+                ys, signal2real_fn = plot_map[cur_task]
+                viewer.update(
+                    {cur_task: (values, ys, signal2real_fn(signals[cur_task]))}
+                )
 
             results = Runner(
                 task=SoftTask(
@@ -151,18 +140,10 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                     sub_task=AutoBatchTask(
                         tasks=dict(
                             detune=MeasureDetuneTask(
-                                soccfg,
-                                soc,
-                                detune_sweep,
-                                earlystop_snr=earlystop_snr,
-                                plot_ax=detune_ax,
+                                soccfg, soc, detune_sweep, earlystop_snr
                             ),
                             len_rabi=MeasureLenRabiTask(
-                                soccfg,
-                                soc,
-                                rabilen_sweep,
-                                earlystop_snr=earlystop_snr,
-                                plot_ax=rabi_ax,
+                                soccfg, soc, rabilen_sweep, earlystop_snr
                             ),
                             t2ramsey=MeasureT2RamseyTask(
                                 soccfg,
@@ -170,7 +151,6 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                                 t2rlen_sweep,
                                 activate_detune=activate_detune,
                                 earlystop_snr=earlystop_snr,
-                                plot_ax=t2ramsey_ax,
                             ),
                         ),
                     ),
