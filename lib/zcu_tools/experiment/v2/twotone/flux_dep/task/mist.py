@@ -21,7 +21,7 @@ from zcu_tools.program.v2 import (
 )
 
 
-def mist_signal2real(signals: np.ndarray) -> np.ndarray:
+def automist_signal2real(signals: np.ndarray) -> np.ndarray:
     g_signals, e_signals = signals[..., 0], signals[..., 1]  # (flxs, pdrs, ge)
 
     avg_len = max(int(0.05 * g_signals.shape[1]), 1)

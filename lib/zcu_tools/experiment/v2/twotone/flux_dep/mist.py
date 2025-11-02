@@ -8,11 +8,24 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import AutoBatchTask, Runner, SoftTask, TaskContext
+from zcu_tools.experiment.v2.runner import (
+    AutoBatchTask,
+    Runner,
+    SoftTask,
+    TaskContext,
+    HardTask,
+)
 from zcu_tools.experiment.v2.utils import merge_result_list, set_pulse_freq
 from zcu_tools.liveplot import LivePlotter2DwithLine, MultiLivePlotter, make_plot_frame
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
+from zcu_tools.program.v2 import (
+    ModularProgramV2,
+    make_readout,
+    make_reset,
+    Pulse,
+    sweep2param,
+)
 
 from .util import check_gains
 from .task import (
@@ -21,13 +34,13 @@ from .task import (
     MeasureMistTask,
     detune_signal2real,
     lenrabi_signal2real,
-    mist_signal2real,
+    automist_signal2real,
 )
 
-MistResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
+AutoMistResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
 
 
-class MistExperiment(AbsExperiment[MistResultType]):
+class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
     def run(
         self,
         soc,
@@ -39,7 +52,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
         drive_oper: Literal["n", "phi"] = "n",
         progress: bool = True,
         earlystop_snr: Optional[float] = None,
-    ) -> MistResultType:
+    ) -> AutoMistResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         flx_sweep = cfg["sweep"]["flux"]
@@ -123,7 +136,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
                 plot_map = {
                     "detune": (detunes, detune_signal2real),
                     "len_rabi": (rabilens, lenrabi_signal2real),
-                    "mist": (gains, mist_signal2real),
+                    "mist": (gains, automist_signal2real),
                 }
 
                 signals = merge_result_list(ctx.get_data())
@@ -179,7 +192,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
     def analyze(
         self,
-        result: Optional[MistResultType] = None,
+        result: Optional[AutoMistResultType] = None,
         *,
         start_idx: int = 0,
         snr_threshold: float = 3.0,
@@ -193,7 +206,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
     def save(
         self,
         filepath: str,
-        result: Optional[MistResultType] = None,
+        result: Optional[AutoMistResultType] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/flux_dep/mist/batch",
         **kwargs,
@@ -204,7 +217,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
         values, detunes, lens, gains, signals_dict = result
         detune_signals = signals_dict["detune"]
-        fit_freqs = signals_dict["meta_infos"]["detune"]["fit_freq"]
+        fit_freqs = signals_dict["meta_infos"]["detune"]["qubit_freq"]
         rabilen_signals = signals_dict["len_rabi"]
         mist_signals = signals_dict["mist"]
 
@@ -242,7 +255,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
         save_data(
             filepath=filepath.with_name(filepath.name + "_mist_g"),
             x_info={"name": "Flux value", "unit": "a.u.", "values": values},
-            y_info={"name": "Time", "unit": "s", "values": gains * 1e-6},
+            y_info={"name": "Power", "unit": "a.u.", "values": gains},
             z_info={"name": "Signal", "unit": "a.u.", "values": mist_signals[..., 0].T},
             comment=comment,
             tag=tag + "/mist_g",
@@ -252,9 +265,113 @@ class MistExperiment(AbsExperiment[MistResultType]):
         save_data(
             filepath=filepath.with_name(filepath.name + "_mist_e"),
             x_info={"name": "Flux value", "unit": "a.u.", "values": values},
-            y_info={"name": "Time", "unit": "s", "values": gains * 1e-6},
+            y_info={"name": "Power", "unit": "a.u.", "values": gains},
             z_info={"name": "Signal", "unit": "a.u.", "values": mist_signals[..., 1].T},
             comment=comment,
             tag=tag + "/mist_e",
+            **kwargs,
+        )
+
+
+MistResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
+
+
+def mist_signal2real(signals: np.ndarray) -> np.ndarray:
+    avg_len = max(int(0.05 * signals.shape[1]), 1)
+
+    mist_signals = signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
+
+    return np.abs(mist_signals)
+
+
+class MistExperiment(AbsExperiment[MistResultType]):
+    def run(
+        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+    ) -> MistResultType:
+        cfg = deepcopy(cfg)  # prevent in-place modification
+
+        flx_sweep = cfg["sweep"]["flux"]
+        cfg["sweep"] = {"gain": cfg["sweep"]["gain"]}
+
+        # predict sweep points
+        values = sweep2array(flx_sweep)
+        gains = sweep2array(cfg["sweep"]["gain"])
+
+        def updateCfg(i: int, ctx: TaskContext, value: float) -> None:
+            set_flux_in_dev_cfg(ctx.cfg["dev"], value)
+
+        cfg["probe_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+
+        with LivePlotter2DwithLine(
+            "Flux device value",
+            "Readout power (a.u.)",
+            line_axis=1,
+            num_lines=5,
+            disable=not progress,
+        ) as viewer:
+            results = Runner(
+                task=SoftTask(
+                    sweep_name="flux",
+                    sweep_values=values,
+                    update_cfg_fn=updateCfg,
+                    sub_task=HardTask(
+                        measure_fn=lambda ctx, update_hook: (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    make_reset("reset", reset_cfg=ctx.cfg.get("reset")),
+                                    Pulse(
+                                        name="probe_pulse", cfg=ctx.cfg["probe_pulse"]
+                                    ),
+                                    make_readout(
+                                        "readout", readout_cfg=ctx.cfg["readout"]
+                                    ),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        ),
+                        result_shape=(len(gains),),
+                    ),
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    values, gains, mist_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(results)
+
+        # Cache results
+        self.last_cfg = cfg
+        self.last_result = (values, gains, signals)
+
+        return values, gains, signals
+
+    def analyze(self, result: Optional[MistResultType] = None) -> None:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        raise NotImplementedError("Mist analysis not implemented")
+
+    def save(
+        self,
+        filepath: str,
+        result: Optional[MistResultType] = None,
+        comment: Optional[str] = None,
+        tag: str = "twotone/flux_dep/mist",
+        **kwargs,
+    ) -> None:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        values, gains, signals = result
+
+        save_data(
+            filepath=filepath,
+            x_info={"name": "Flux value", "unit": "a.u.", "values": values},
+            y_info={"name": "Power", "unit": "a.u.", "values": gains},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
+            comment=comment,
+            tag=tag,
             **kwargs,
         )
