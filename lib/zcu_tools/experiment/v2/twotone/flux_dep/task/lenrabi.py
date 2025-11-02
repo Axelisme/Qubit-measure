@@ -30,7 +30,7 @@ def lenrabi_signal2real(signals: np.ndarray) -> np.ndarray:
 
     flx_len = signals.shape[0]
     for i in range(flx_len):
-        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
+        real_signals[i, :] = rotate2real(signals[i, :]).real
 
         if np.any(np.isnan(real_signals[i, :])):
             continue
@@ -139,7 +139,7 @@ class MeasureLenRabiTask(AbsAutoTask):
         )
 
         # if the fit is not good, set all results to NaN
-        if np.mean(np.abs(real_signals - fit_signals)) > 0.2 * np.ptp(real_signals):
+        if np.mean(np.abs(real_signals - fit_signals)) > 0.1 * np.ptp(real_signals):
             pi_len = np.nan
             pi2_len = np.nan
             rabi_freq = np.nan

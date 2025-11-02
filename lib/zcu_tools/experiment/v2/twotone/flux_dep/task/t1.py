@@ -31,7 +31,7 @@ def t1_signal2real(signals: np.ndarray) -> np.ndarray:
 
     flx_len = signals.shape[0]
     for i in range(flx_len):
-        real_signals[i, :] = rotate2real(signals[i : min(i + 1, flx_len), :]).real[0]
+        real_signals[i, :] = rotate2real(signals[i, :]).real
 
         if np.any(np.isnan(real_signals[i, :])):
             continue

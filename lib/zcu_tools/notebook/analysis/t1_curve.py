@@ -320,13 +320,14 @@ def plot_eff_t1_with_sample(
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     if title is not None:
         fig.suptitle(title)
-    ax.errorbar(s_mAs, s_T1s, yerr=s_T1errs, fmt=".-", label="T1")
+    ax.errorbar(s_mAs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
 
     t_mAs = flx2mA(t_flxs, mA_c=mA_c, period=period)
 
     ax.plot(t_mAs, t1_effs, label=label, linestyle="--")
 
-    ax.set_xlim(s_mAs.min() - 0.03, s_mAs.max() + 0.03)
+    range = np.ptp(s_mAs)
+    ax.set_xlim(s_mAs.min() - 0.01 * range, s_mAs.max() + 0.01 * range)
     ax.set_ylim(0.5 * s_T1s.min(), 3.0 * s_T1s.max())
     ax.set_xlabel(r"Current (mA)", fontsize=14)
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)

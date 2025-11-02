@@ -44,7 +44,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
         flx_sweep = cfg["sweep"]["flux"]
         detune_sweep = cfg["sweep"]["detune"]
-        rabilen_sweep = cfg["sweep"]["length"]
+        rabilen_sweep = cfg["sweep"]["rabi_length"]
         pdr_sweep = cfg["sweep"]["gain"]
         del cfg["sweep"]  # delete sweep dicts, it will be added back later
 

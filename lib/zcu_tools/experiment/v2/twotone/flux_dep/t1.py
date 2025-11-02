@@ -200,8 +200,8 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, _, t1lens, signals_dict = result
-        fit_freqs = signals_dict["meta_infos"]["detune"]["fit_freq"]
+        values, _, _, t1lens, signals_dict = result
+        fit_freqs = signals_dict["meta_infos"]["detune"]["qubit_freq"]
         t1_signals = signals_dict["t1"]
 
         t1lens = t1lens[start_idx:]
@@ -278,7 +278,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         values, detunes, rabilens, t1lens, signals_dict = result
         detune_signals = signals_dict["detune"]
-        fit_freqs = signals_dict["meta_infos"]["detune"]["fit_freq"]
+        fit_freqs = signals_dict["meta_infos"]["detune"]["qubit_freq"]
         rabilen_signals = signals_dict["len_rabi"]
         t1_signals = signals_dict["t1"]
 

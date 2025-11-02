@@ -10,13 +10,9 @@ from .base import AbsTask, BatchTask, ResultType, TaskContext
 
 class AbsAutoTask(AbsTask):
     def __init__(
-        self,
-        needed_tags: List[str] = [],
-        optional_tags: List[str] = [],
-        provided_tags: List[str] = [],
+        self, needed_tags: List[str] = [], provided_tags: List[str] = []
     ) -> None:
         self.needed_tags = needed_tags
-        self.optional_tags = optional_tags
         self.provided_tags = provided_tags
 
     @abstractmethod
@@ -48,7 +44,7 @@ class AutoBatchTask(BatchTask):
             need_infos: Dict[str, complex] = {}
             for _name, _task in self.tasks.items():
                 for tag in _task.provided_tags:
-                    if tag in task.needed_tags or tag in task.optional_tags:
+                    if tag in task.needed_tags:
                         # only last matching task's information is used
                         need_infos[tag] = meta_infos[_name][tag]
             missing_tags = [tag for tag in task.needed_tags if tag not in need_infos]
