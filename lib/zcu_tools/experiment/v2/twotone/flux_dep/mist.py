@@ -267,9 +267,11 @@ def mist_signal2real(signals: np.ndarray) -> np.ndarray:
     mist_signals = signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
 
     norm_factor = np.std(np.diff(mist_signals, axis=1), axis=1)
-    norm_signals = mist_signals / norm_factor[:, None]
 
-    return np.abs(norm_signals)
+    valid_mask = np.all(~np.isnan(mist_signals), axis=1)
+    mist_signals[valid_mask] /= norm_factor[valid_mask, None]
+
+    return np.abs(mist_signals)
 
 
 class MistExperiment(AbsExperiment[MistResultType]):
@@ -288,7 +290,9 @@ class MistExperiment(AbsExperiment[MistResultType]):
         def updateCfg(i: int, ctx: TaskContext, value: float) -> None:
             set_flux_in_dev_cfg(ctx.cfg["dev"], value)
 
-        cfg["probe_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+        Pulse.set_param(
+            cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+        )
 
         with LivePlotter2DwithLine(
             "Flux device value",
@@ -352,7 +356,6 @@ class MistExperiment(AbsExperiment[MistResultType]):
         )
         ax.set_xlabel("Flux value (a.u.)")
         ax.set_ylabel("Readout power (a.u.)")
-        ax.grid(True)
 
         return fig
 

@@ -10,7 +10,13 @@ from tqdm.auto import tqdm
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot.jupyter import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import (
+    sweep2param,
+    ModularProgramV2,
+    make_reset,
+    make_readout,
+    Pulse,
+)
 from zcu_tools.utils.datasaver import save_data
 
 from ...runner import HardTask, Runner
@@ -18,8 +24,15 @@ from ...runner import HardTask, Runner
 MISTPowerDepResultType = Tuple[np.ndarray, np.ndarray]
 
 
-def mist_signal2real(signal: np.ndarray) -> np.ndarray:
-    return np.abs(signal - signal[0])
+def mist_signal2real(signals: np.ndarray) -> np.ndarray:
+    avg_len = max(int(0.05 * len(signals)), 1)
+
+    mist_signals = signals - np.mean(signals[:avg_len])
+
+    norm_factor = np.std(np.diff(mist_signals))
+    norm_signals = mist_signals / norm_factor
+
+    return np.abs(norm_signals)
 
 
 class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
@@ -31,15 +44,21 @@ class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
-        cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+        cfg["probe_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
 
         with LivePlotter1D("Pulse gain", "MIST", disable=not progress) as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
-                        TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
-                        )
+                        ModularProgramV2(
+                            soccfg,
+                            cfg,
+                            modules=[
+                                make_reset("reset", reset_cfg=cfg.get("reset")),
+                                Pulse(name="probe_pulse", cfg=cfg["probe_pulse"]),
+                                make_readout("readout", readout_cfg=cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(pdrs),),
                 ),

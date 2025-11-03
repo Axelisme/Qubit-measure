@@ -8,7 +8,14 @@ from scipy.ndimage import gaussian_filter1d
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
+from zcu_tools.program.v2 import (
+    set_readout_cfg,
+    sweep2param,
+    ModularProgramV2,
+    Pulse,
+    make_readout,
+    make_reset,
+)
 from zcu_tools.utils.datasaver import save_data
 
 from ...runner import HardTask, Runner
@@ -29,17 +36,27 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
 
         # prepend ge sweep as outer loop
         cfg["sweep"] = {
-            "ge": {"start": 0, "stop": cfg["qub_pulse"]["gain"], "expts": 2},
+            "ge": {"start": 0, "stop": 1.0, "expts": 2},
             "power": cfg["sweep"]["power"],
         }
 
-        cfg["qub_pulse"]["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+        Pulse.set_param(
+            cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+        )
         set_readout_cfg(
             cfg["readout"], "gain", sweep2param("power", cfg["sweep"]["power"])
         )
 
         def measure_fn(ctx, update_hook):
-            prog = TwoToneProgram(soccfg, ctx.cfg)
+            prog = ModularProgramV2(
+                soccfg,
+                ctx.cfg,
+                modules=[
+                    make_reset("reset", ctx.cfg.get("reset")),
+                    Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
+                    make_readout("readout", ctx.cfg["readout"]),
+                ],
+            )
             avg_d = prog.acquire(
                 soc, progress=False, callback=update_hook, record_stderr=True
             )
