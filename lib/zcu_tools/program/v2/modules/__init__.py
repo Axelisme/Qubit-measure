@@ -1,10 +1,9 @@
 from .base import Delay, Module
 from .loop import Repeat
-from .pulse import PaddingPulse, Pulse, check_block_mode
+from .pulse import Pulse, check_block_mode
 from .readout import (
     AbsReadout,
     BaseReadout,
-    PaddingReadout,
     make_readout,
     set_readout_cfg,
 )

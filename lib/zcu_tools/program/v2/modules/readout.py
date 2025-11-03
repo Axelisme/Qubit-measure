@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Type, TypeVar
 
 from ..base import MyProgramV2
 from .base import Module
-from .pulse import PaddingPulse, Pulse, check_block_mode
+from .pulse import Pulse, check_block_mode
 
 T_Readout = TypeVar("T_Readout", bound="AbsReadout")
 
@@ -150,27 +150,3 @@ class BaseReadout(AbsReadout):
             return t + ro_time
         else:
             return t + pulse_time
-
-
-@register_readout("padding")
-class PaddingReadout(BaseReadout):
-    def __init__(self, name: str, cfg: Dict[str, Any]) -> None:
-        self.name = name
-        self.pulse_cfg = deepcopy(cfg["pulse_cfg"])
-        self.ro_cfg = deepcopy(cfg["ro_cfg"])
-
-        ro_ch: int = self.pulse_cfg.setdefault("ro_ch", self.ro_cfg["ro_ch"])
-        if ro_ch != self.ro_cfg["ro_ch"]:
-            warnings.warn(
-                f"{name} pulse_cfg.ro_ch is {ro_ch}, this may not be what you want"
-            )
-
-        self.pulse = PaddingPulse(name=f"{name}_pulse", cfg=self.pulse_cfg)
-        self.ro_trigger = TriggerReadout(
-            name=f"{name}_adc",
-            ro_cfg=self.ro_cfg,
-            gen_ch=self.pulse_cfg["ch"],
-            gen_freq=self.pulse_cfg["freq"],
-        )
-
-        check_block_mode(self.pulse.name, self.pulse_cfg, want_block=True)

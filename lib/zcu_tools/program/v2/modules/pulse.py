@@ -1,6 +1,6 @@
 import warnings
 from copy import deepcopy
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Type, Union
 
 from qick.asm_v2 import QickParam
 
@@ -16,7 +16,7 @@ def check_block_mode(name: str, cfg: Dict[str, Any], want_block: bool) -> None:
         )
 
 
-class Pulse(Module):
+class BasePulse(Module):
     def __init__(
         self,
         name: str,
@@ -132,44 +132,29 @@ class Pulse(Module):
 
 
 class PaddingPulse(Module):
-    def __init__(self, name: str, cfg: Optional[Dict[str, Any]]) -> None:
+    def __init__(self, name: str, cfg: Dict[str, Any]) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
 
-        if cfg["waveform"]["style"] != "const":
+        if cfg["waveform"]["style"] != "padding":
             raise ValueError("Padding pulse only supports const waveform")
 
     def init(self, prog: MyProgramV2) -> None:
-        if self.cfg is None:
-            return
-
-        waveform_cfg = self.cfg["waveform"]
-
-        self.pre_waveform = ConstWaveform(
-            f"{self.name}_pre_waveform",
-            {"style": "const", "length": waveform_cfg["pre_length"]},
-        )
-        self.waveform = ConstWaveform(
-            f"{self.name}_waveform",
-            {
-                "style": "const",
-                "length": waveform_cfg["length"]
-                - waveform_cfg["pre_length"]
-                - waveform_cfg["post_length"],
-            },
-        )
-        self.post_waveform = ConstWaveform(
-            f"{self.name}_post_waveform",
-            {
-                "style": "const",
-                "length": waveform_cfg["post_length"],
-            },
-        )
-
-    def init_pulse(self, prog: MyProgramV2, name: str) -> None:
         cfg = self.cfg
-        assert cfg is not None
 
+        pre_length = cfg["waveform"]["pre_length"]
+        post_length = cfg["waveform"]["post_length"]
+        mid_length = cfg["waveform"]["length"] - pre_length - post_length
+
+        # declare waveforms
+        self.waveforms = [
+            ConstWaveform(
+                f"{self.name}_waveform_{i}", {"style": "const", "length": length}
+            )
+            for i, length in enumerate([pre_length, mid_length, post_length])
+        ]
+
+        # declare channel
         ro_ch = cfg.get("ro_ch") if "mixer_freq" in cfg else None
         prog.declare_gen(
             cfg["ch"],
@@ -181,10 +166,6 @@ class PaddingPulse(Module):
             ro_ch=ro_ch,
         )
 
-        self.pre_waveform.create(prog, cfg["ch"])
-        self.waveform.create(prog, cfg["ch"])
-        self.post_waveform.create(prog, cfg["ch"])
-
         # derive pulse style
         wav_kwargs = dict(freq=cfg["freq"], phase=cfg["phase"], gain=cfg["gain"])
 
@@ -193,18 +174,18 @@ class PaddingPulse(Module):
         if "outsel" in cfg:
             wav_kwargs["outsel"] = cfg["outsel"]
 
-        for i, wav in enumerate([self.pre_waveform, self.waveform, self.post_waveform]):
+        # add pulses
+        for i, wav in enumerate(self.waveforms):
+            wav.create(prog, cfg["ch"])
             prog.add_pulse(
                 cfg["ch"],
-                f"{name}_{i}",
+                f"{self.name}_{i}",
                 ro_ch=cfg.get("ro_ch"),
                 **wav_kwargs,
                 **wav.to_wav_kwargs(),
             )
 
     def total_length(self) -> float:
-        if self.cfg is None:
-            return 0.0
         return (
             self.cfg["pre_delay"]
             + self.cfg["waveform"]["length"]
@@ -213,9 +194,6 @@ class PaddingPulse(Module):
 
     def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
         cfg = self.cfg
-
-        if cfg is None:
-            return t
 
         pre_delay: float = cfg["pre_delay"]
         post_delay: float = cfg["post_delay"]
@@ -248,8 +226,37 @@ class PaddingPulse(Module):
                 param_value * (pulse_cfg["waveform"]["length"] - 0.03) + 0.03
             )
         elif param_name == "length":
-            set_waveform_param(pulse_cfg["waveform"], param_name, param_value)
+            pulse_cfg["waveform"]["length"] = param_value
         elif param_name in ["gain", "freq", "phase"]:
             pulse_cfg[param_name] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
+
+
+class Pulse(Module):
+    @classmethod
+    def get_pulse_cls(
+        cls, cfg: Dict[str, Any]
+    ) -> Union[Type[BasePulse], Type[PaddingPulse]]:
+        if cfg is None or cfg["waveform"]["style"] != "padding":
+            return BasePulse
+        else:
+            return PaddingPulse
+
+    def __init__(self, name: str, cfg: Optional[Dict[str, Any]]) -> None:
+        self.pulse = self.get_pulse_cls(cfg)(name, cfg)
+
+    def init(self, prog: MyProgramV2) -> None:
+        self.pulse.init(prog)
+
+    def total_length(self) -> float:
+        return self.pulse.total_length()
+
+    def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
+        return self.pulse.run(prog, t)
+
+    @staticmethod
+    def set_param(
+        pulse_cfg: Dict[str, Any], param_name: str, param_value: QickParam
+    ) -> None:
+        Pulse.get_pulse_cls(pulse_cfg).set_param(pulse_cfg, param_name, param_value)
