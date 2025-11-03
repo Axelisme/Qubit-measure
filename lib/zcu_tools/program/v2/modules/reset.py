@@ -6,34 +6,46 @@ from ..base import MyProgramV2
 from .base import Module
 from .pulse import Pulse, check_block_mode
 
-RESET_REGISTRY: Dict[str, Type[AbsReset]] = {}
-
 T_Reset = TypeVar("T_Reset", bound="AbsReset")
 
-
-def register_reset(reset_type: str) -> Callable[[T_Reset], T_Reset]:
-    def decorator(cls: T_Reset) -> T_Reset:
-        RESET_REGISTRY[reset_type] = cls
-        return cls
-
-    return decorator
+support_reset_types: Dict[str, Type[AbsReset]] = {}
 
 
 class AbsReset(Module):
-    pass
+    @classmethod
+    def set_param(
+        cls, reset_cfg: Dict[str, Any], param_name: str, param_value: float
+    ) -> None:
+        raise NotImplementedError(
+            f"{cls.__name__} does not support set {param_name} params with {param_value}"
+        )
+
+
+def register_reset(reset_type: str) -> Callable[[T_Reset], T_Reset]:
+    global support_reset_types
+
+    if reset_type in support_reset_types:
+        raise ValueError(
+            f"Reset type {reset_type} already registered by {support_reset_types[reset_type].__name__}"
+        )
+
+    def decorator(cls: T_Reset) -> T_Reset:
+        support_reset_types[reset_type] = cls
+        return cls
+
+    return decorator
 
 
 def make_reset(name: str, reset_cfg: Optional[Dict[str, Any]]) -> AbsReset:
     if reset_cfg is None:
         return NoneReset(name, None)
 
-    reset_type = reset_cfg.get("type", "none")
-    reset_cls = RESET_REGISTRY.get(reset_type)
+    reset_type = reset_cfg["type"]
 
-    if reset_cls is None:
+    if reset_type not in support_reset_types:
         raise ValueError(f"Unknown reset type: {reset_type}")
 
-    return reset_cls(name, cfg=reset_cfg)
+    return support_reset_types[reset_type](name, cfg=reset_cfg)
 
 
 def set_reset_cfg(
@@ -43,12 +55,10 @@ def set_reset_cfg(
         return
 
     reset_type = reset_cfg["type"]
-    if reset_type not in RESET_REGISTRY:
+    if reset_type not in support_reset_types:
         raise ValueError(f"Unknown reset type: {reset_type}")
 
-    reset_cls = RESET_REGISTRY[reset_type]
-    if hasattr(reset_cls, "set_param"):
-        reset_cls.set_param(reset_cfg, param_name, param_value)
+    support_reset_types[reset_type].set_param(reset_cfg, param_name, param_value)
 
 
 @register_reset("none")

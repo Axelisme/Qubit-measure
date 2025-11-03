@@ -8,17 +8,7 @@ from ..base import MyProgramV2
 from .base import Module
 from .pulse import Pulse, check_block_mode
 
-READOUT_REGISTRY: Dict[str, Type[AbsReadout]] = {}
-
 T_Readout = TypeVar("T_Readout", bound="AbsReadout")
-
-
-def register_readout(ro_type: str) -> Callable[[T_Readout], T_Readout]:
-    def decorator(cls: T_Readout) -> T_Readout:
-        READOUT_REGISTRY[ro_type] = cls
-        return cls
-
-    return decorator
 
 
 class AbsReadout(Module):
@@ -26,17 +16,36 @@ class AbsReadout(Module):
     def set_param(
         cls, readout_cfg: Dict[str, Any], param_name: str, param_value: float
     ) -> None:
-        raise NotImplementedError
+        raise NotImplementedError(
+            f"{cls.__name__} does not support set {param_name} params with {param_value}"
+        )
+
+
+support_readout_types: Dict[str, Type[AbsReadout]] = {}
+
+
+def register_readout(ro_type: str) -> Callable[[T_Readout], T_Readout]:
+    global support_readout_types
+
+    if ro_type in support_readout_types:
+        raise ValueError(
+            f"Readout type {ro_type} already registered by {support_readout_types[ro_type].__name__}"
+        )
+
+    def decorator(cls: T_Readout) -> T_Readout:
+        support_readout_types[ro_type] = cls
+        return cls
+
+    return decorator
 
 
 def make_readout(name: str, readout_cfg: Dict[str, Any]) -> AbsReadout:
     ro_type = readout_cfg["type"]
 
-    if ro_type not in READOUT_REGISTRY:
+    if ro_type not in support_readout_types:
         raise ValueError(f"Unknown readout type: {ro_type}")
 
-    readout_cls = READOUT_REGISTRY[ro_type]
-    return readout_cls(name, cfg=readout_cfg)
+    return support_readout_types[ro_type](name, cfg=readout_cfg)
 
 
 def set_readout_cfg(
@@ -44,11 +53,10 @@ def set_readout_cfg(
 ) -> None:
     ro_type = readout_cfg["type"]
 
-    if ro_type not in READOUT_REGISTRY:
+    if ro_type not in support_readout_types:
         raise ValueError(f"Unknown readout type: {ro_type}")
 
-    readout_cls = READOUT_REGISTRY[ro_type]
-    readout_cls.set_param(readout_cfg, param_name, param_value)
+    support_readout_types[ro_type].set_param(readout_cfg, param_name, param_value)
 
 
 @register_readout("base")

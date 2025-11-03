@@ -3,6 +3,7 @@ from .base import MyProgramV2
 from .modular import ModularProgramV2
 from .modules import (
     Delay,
+    PaddingPulse,
     Pulse,
     Repeat,
     check_block_mode,
