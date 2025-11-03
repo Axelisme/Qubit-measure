@@ -3,6 +3,7 @@ from .base import (
     AbsTask,
     BatchTask,
     HardTask,
+    RepeatOverTime,
     ResultType,
     Runner,
     SoftTask,

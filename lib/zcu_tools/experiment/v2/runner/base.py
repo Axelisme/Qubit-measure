@@ -1,3 +1,4 @@
+import time
 import warnings
 from abc import ABC, abstractmethod
 from copy import deepcopy
@@ -211,6 +212,62 @@ class HardTask(AbsTask):
 
     def get_default_result(self) -> ResultType:
         return np.full(self.result_shape, np.nan, dtype=complex)
+
+
+class RepeatOverTime(AbsTask):
+    def __init__(
+        self,
+        name: str,
+        num_times: int,
+        interval: float,
+        task: AbsTask,
+        fail_retry: int = 0,
+    ) -> None:
+        self.name = name
+        self.num_times = num_times
+        self.interval = interval
+        self.task = task
+        self.fail_retry = fail_retry
+
+        self.pbar = None
+
+    def init(self, ctx: TaskContext, keep=True) -> None:
+        self.pbar = tqdm(total=self.num_times, smoothing=0, desc=self.name, leave=keep)
+        self.task.init(ctx, keep=keep)
+
+    def run(self, ctx: TaskContext) -> None:
+        assert self.pbar is not None
+        self.pbar.reset()
+
+        start_t = time.time()
+
+        for i in range(self.num_times):
+            while time.time() - start_t < self.interval:
+                time.sleep(self.interval / 10)
+            start_t = time.time()
+
+            for attempt in range(self.fail_retry):
+                try:
+                    self.task.run(ctx(addr=i))
+                except Exception:
+                    print(
+                        f"Failed to run task, retrying... ({attempt + 1}/{self.fail_retry})"
+                    )
+                    continue
+                break
+            else:
+                self.task.run(ctx(addr=i))
+
+            self.pbar.update()
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
+        assert self.pbar is not None
+        self.pbar.close()
+        self.pbar = None
+
+    def get_default_result(self) -> ResultType:
+        return [self.task.get_default_result() for _ in range(self.num_times)]
 
 
 class Runner:
