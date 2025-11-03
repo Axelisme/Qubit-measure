@@ -167,11 +167,15 @@ class SoftTask(AbsTask):
         ]
 
 
+def default_raw2signal_fn(raw: Any) -> np.ndarray:
+    return raw[0][0].dot([1, 1j])
+
+
 class HardTask(AbsTask):
     def __init__(
         self,
         measure_fn: Callable[[TaskContext, Callable[[int, Any], None]], Any],
-        raw2signal_fn: Callable[[Any], ndarray] = lambda raw: raw[0][0].dot([1, 1j]),
+        raw2signal_fn: Callable[[Any], ndarray] = default_raw2signal_fn,
         result_shape: Tuple[int, ...] = (),
     ) -> None:
         self.measure_fn = measure_fn

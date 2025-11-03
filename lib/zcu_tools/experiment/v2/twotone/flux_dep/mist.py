@@ -266,11 +266,6 @@ def mist_signal2real(signals: np.ndarray) -> np.ndarray:
 
     mist_signals = signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
 
-    norm_factor = np.std(np.diff(mist_signals, axis=1), axis=1)
-
-    valid_mask = np.all(~np.isnan(mist_signals), axis=1)
-    mist_signals[valid_mask] /= norm_factor[valid_mask, None]
-
     return np.abs(mist_signals)
 
 

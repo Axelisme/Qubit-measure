@@ -5,6 +5,7 @@ from .base import (
     HardTask,
     RepeatOverTime,
     ResultType,
+    default_raw2signal_fn,
     Runner,
     SoftTask,
     TaskContext,
