@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Any, Dict
+
+import matplotlib.pyplot as plt
 
 
 class AbsLivePlotter(ABC):
@@ -61,8 +63,10 @@ class MultiLivePlotter(AbsLivePlotter):
 
     def __init__(
         self,
+        fig: plt.Figure,
         plotters: Dict[str, AbsLivePlotter],
     ) -> None:
+        self.fig = fig
         self.plotters = plotters
 
     def clear(self) -> None:
@@ -71,11 +75,12 @@ class MultiLivePlotter(AbsLivePlotter):
 
     def update(self, plot_args: Dict[str, Any], refresh: bool = True) -> None:
         for name, args_i in plot_args.items():
-            self.plotters[name].update(*args_i, refresh=refresh)
+            self.plotters[name].update(*args_i, refresh=False)
+        if refresh:
+            self.refresh()
 
     def refresh(self) -> None:
-        for plotter in self.plotters.values():
-            plotter.refresh()
+        self.fig.canvas.draw()
 
     def __enter__(self) -> "MultiLivePlotter":
         for plotter in self.plotters.values():

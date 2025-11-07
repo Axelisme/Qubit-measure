@@ -26,9 +26,9 @@ from zcu_tools.program.v2 import (
     make_reset,
     sweep2param,
 )
+from zcu_tools.simulate import mA2flx
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.simulate import mA2flx
 
 from .task import (
     MeasureDetuneTask,
@@ -106,9 +106,10 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
             )
 
         # -- Run Experiment --
-        fig, axs, dh = make_plot_frame(n_row=2, n_col=4, figsize=(18, 7))
+        fig, axs = make_plot_frame(n_row=2, n_col=4, figsize=(18, 7))
 
         with MultiLivePlotter(
+            fig,
             dict(
                 detune=LivePlotter2DwithLine(
                     "Flux device value",
@@ -117,7 +118,7 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
                     num_lines=5,
                     title="Detune",
                     segment2d_kwargs=dict(flip=True),
-                    existed_frames=(fig, [[axs[0, 0], axs[1, 0]]], dh),
+                    existed_frames=(fig, [[axs[0, 0], axs[1, 0]]]),
                     disable=not progress,
                 ),
                 len_rabi=LivePlotter2DwithLine(
@@ -127,7 +128,7 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
                     num_lines=5,
                     title="Length Rabi",
                     segment2d_kwargs=dict(flip=True),
-                    existed_frames=(fig, [[axs[0, 1], axs[1, 1]]], dh),
+                    existed_frames=(fig, [[axs[0, 1], axs[1, 1]]]),
                     disable=not progress,
                 ),
                 mist_g=LivePlotter2DwithLine(
@@ -137,7 +138,7 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
                     num_lines=5,
                     title="MIST (Ground)",
                     segment2d_kwargs=dict(flip=True),
-                    existed_frames=(fig, [[axs[0, 2], axs[1, 2]]], dh),
+                    existed_frames=(fig, [[axs[0, 2], axs[1, 2]]]),
                     disable=not progress,
                 ),
                 mist_e=LivePlotter2DwithLine(
@@ -147,10 +148,10 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
                     num_lines=5,
                     title="MIST (Excited)",
                     segment2d_kwargs=dict(flip=True),
-                    existed_frames=(fig, [[axs[0, 3], axs[1, 3]]], dh),
+                    existed_frames=(fig, [[axs[0, 3], axs[1, 3]]]),
                     disable=not progress,
                 ),
-            )
+            ),
         ) as viewer:
             detune_line = axs[1, 0].axvline(0.0, color="red", linestyle="--")
             rabi_line = axs[1, 1].axvline(0.0, color="red", linestyle="--")

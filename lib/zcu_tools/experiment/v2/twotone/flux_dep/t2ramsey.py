@@ -89,16 +89,17 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             )
 
         # -- Run Experiment --
-        fig, axs, dh = make_plot_frame(n_row=2, n_col=3, figsize=(15, 7))
+        fig, axs = make_plot_frame(n_row=2, n_col=3, figsize=(15, 7))
 
         with MultiLivePlotter(
+            fig,
             dict(
                 detune=LivePlotter2DwithLine(
                     "Flux device value",
                     "Detune (MHz)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [[axs[1, 0], axs[0, 0]]], dh),
+                    existed_frames=(fig, [[axs[1, 0], axs[0, 0]]]),
                     disable=not progress,
                 ),
                 t2ramsey=LivePlotter2DwithLine(
@@ -106,7 +107,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                     "Time (us)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [[axs[1, 1], axs[0, 1]]], dh),
+                    existed_frames=(fig, [[axs[1, 1], axs[0, 1]]]),
                     disable=not progress,
                 ),
             ),
