@@ -243,11 +243,11 @@ class RepeatOverTime(AbsTask):
         assert self.pbar is not None
         self.pbar.reset()
 
-        start_t = time.time()
+        start_t = time.time() - 2 * self.interval
 
         for i in range(self.num_times):
             while time.time() - start_t < self.interval:
-                time.sleep(self.interval / 10)
+                time.sleep(0.1)
             start_t = time.time()
 
             for attempt in range(self.fail_retry):

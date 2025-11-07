@@ -22,16 +22,16 @@ from zcu_tools.program.v2 import (
 
 
 def automist_signal2real(signals: np.ndarray) -> np.ndarray:
-    g_signals, e_signals = signals[..., 0], signals[..., 1]  # (flxs, pdrs, ge)
+    avg_len = max(int(0.05 * signals.shape[1]), 1)
 
-    avg_len = max(int(0.05 * g_signals.shape[1]), 1)
-
-    sum_signals = e_signals + g_signals
-    mist_signals = sum_signals - np.mean(
-        sum_signals[:, :avg_len], axis=1, keepdims=True
+    mist_signals = np.abs(
+        signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
     )
+    if np.all(np.isnan(mist_signals)):
+        return mist_signals
+    mist_signals = np.clip(mist_signals, 0, 5 * np.nanstd(mist_signals))
 
-    return np.abs(mist_signals)
+    return mist_signals
 
 
 class MeasureMistTask(AbsAutoTask):
@@ -58,21 +58,21 @@ class MeasureMistTask(AbsAutoTask):
 
         cfg["sweep"] = {
             "gain": self.pdr_sweep,
-            "ge": {"start": 0, "stop": cfg["pi_pulse"]["gain"], "expts": 2},
+            "ge": {"start": 0, "stop": 1.0, "expts": 2},
         }
 
         pdr_params = sweep2param("gain", cfg["sweep"]["gain"])
         ge_params = sweep2param("ge", cfg["sweep"]["ge"])
-        Pulse.set_param(cfg["pi_pulse"], "on/off", ge_params)
         Pulse.set_param(cfg["probe_pulse"], "gain", pdr_params)
+        Pulse.set_param(cfg["pi_pulse"], "on/off", ge_params)
 
         return ModularProgramV2(
             self.soccfg,
             cfg,
             modules=[
                 make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse(name="probe_pulse", cfg=cfg[self.pulse_name]),
                 Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                Pulse(name="probe_pulse", cfg=cfg[self.pulse_name]),
                 make_readout("readout", readout_cfg=cfg["readout"]),
             ],
         ).acquire(self.soc, progress=False, callback=update_hook)

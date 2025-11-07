@@ -25,24 +25,24 @@ from zcu_tools.utils.process import rotate2real
 
 
 def detune_signal2real(signals: np.ndarray) -> np.ndarray:
-    real_signals = np.zeros_like(signals, dtype=np.float64)
+    real_signals = np.full_like(signals, np.nan, dtype=np.float64)
 
     for i in range(signals.shape[0]):
-        if np.any(np.isnan(signals[i])):
+        if np.any(np.isnan(signals[i, :])):
             continue
 
-        real_signals[i] = rotate2real(signals[i]).real
+        real_signals[i, :] = rotate2real(signals[i, :]).real
 
         # normalize
-        max_val = np.max(real_signals[i])
-        min_val = np.min(real_signals[i])
-        real_signals[i] = (real_signals[i] - min_val) / (max_val - min_val)
+        max_val = np.max(real_signals[i, :])
+        min_val = np.min(real_signals[i, :])
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (max_val - min_val)
 
     return real_signals
 
 
 class MeasureDetuneTask(AbsAutoTask):
-    """provide: ["qubit_freq"]"""
+    """provide: ["qubit_freq", "qubit_detune", "qubit_linewidth"]"""
 
     def __init__(
         self, soccfg, soc, detune_sweep: dict, earlystop_snr: Optional[float] = None
@@ -56,7 +56,9 @@ class MeasureDetuneTask(AbsAutoTask):
             measure_fn=self.measure_freq_fn, result_shape=(detune_sweep["expts"],)
         )
 
-        super().__init__(provided_tags=["qubit_freq"])
+        super().__init__(
+            provided_tags=["qubit_freq", "qubit_detune", "qubit_linewidth"]
+        )
 
     def measure_freq_fn(
         self, ctx: TaskContext, update_hook: Callable
@@ -112,7 +114,11 @@ class MeasureDetuneTask(AbsAutoTask):
         else:
             fit_freq = detune + ctx.cfg["qub_pulse"]["freq"]
 
-        return {"qubit_freq": fit_freq}
+        return {
+            "qubit_freq": fit_freq,
+            "qubit_detune": detune,
+            "qubit_linewidth": kappa,
+        }
 
     def cleanup(self) -> None:
         self.task.cleanup()

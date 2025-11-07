@@ -141,10 +141,11 @@ class PaddingPulse(Module):
 
     def init(self, prog: MyProgramV2) -> None:
         cfg = self.cfg
+        wav_cfg = cfg["waveform"]
 
-        pre_length = cfg["waveform"]["pre_length"]
-        post_length = cfg["waveform"]["post_length"]
-        mid_length = cfg["waveform"]["length"] - pre_length - post_length
+        pre_length = wav_cfg["pre_length"]
+        post_length = wav_cfg["post_length"]
+        mid_length = wav_cfg["length"] - pre_length - post_length
 
         # declare waveforms
         self.waveforms = [
@@ -167,7 +168,7 @@ class PaddingPulse(Module):
         )
 
         # derive pulse style
-        wav_kwargs = dict(freq=cfg["freq"], phase=cfg["phase"], gain=cfg["gain"])
+        wav_kwargs = dict(freq=cfg["freq"], phase=cfg["phase"])
 
         if "mask" in cfg:
             wav_kwargs["mask"] = cfg["mask"]
@@ -175,12 +176,14 @@ class PaddingPulse(Module):
             wav_kwargs["outsel"] = cfg["outsel"]
 
         # add pulses
+        gains = [wav_cfg["pre_gain"], cfg["gain"], wav_cfg["post_gain"]]
         for i, wav in enumerate(self.waveforms):
             wav.create(prog, cfg["ch"])
             prog.add_pulse(
                 cfg["ch"],
                 f"{self.name}_{i}",
                 ro_ch=cfg.get("ro_ch"),
+                gain=gains[i],
                 **wav_kwargs,
                 **wav.to_wav_kwargs(),
             )
@@ -198,15 +201,15 @@ class PaddingPulse(Module):
         pre_delay: float = cfg["pre_delay"]
         post_delay: float = cfg["post_delay"]
 
-        cur_t = t + pre_delay
-        for i, wav in enumerate([self.pre_waveform, self.waveform, self.post_waveform]):
-            prog.pulse(cfg["ch"], f"{self.name}_{i}", t=cur_t)
-            cur_t += wav.waveform_cfg["length"]
-        cur_t += post_delay
+        cur_t = prog.us2cycles(t + pre_delay)
+        for i, wav in enumerate(self.waveforms):
+            prog.pulse(cfg["ch"], f"{self.name}_{i}", t=prog.cycles2us(cur_t))
+            cur_t += prog.us2cycles(wav.waveform_cfg["length"]) + 1
+        cur_t += prog.us2cycles(post_delay)
 
         # block mode is True by default
         if cfg["block_mode"]:
-            return cur_t
+            return prog.cycles2us(cur_t)
         else:
             return t  # no block, return the start time as the end time
 
@@ -260,3 +263,11 @@ class Pulse(Module):
         pulse_cfg: Dict[str, Any], param_name: str, param_value: QickParam
     ) -> None:
         Pulse.get_pulse_cls(pulse_cfg).set_param(pulse_cfg, param_name, param_value)
+
+    @property
+    def cfg(self) -> Optional[Dict[str, Any]]:
+        return self.pulse.cfg
+
+    @property
+    def name(self) -> str:
+        return self.pulse.name

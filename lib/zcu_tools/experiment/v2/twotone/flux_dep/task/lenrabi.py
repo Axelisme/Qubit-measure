@@ -26,7 +26,7 @@ from zcu_tools.utils.process import rotate2real
 
 
 def lenrabi_signal2real(signals: np.ndarray) -> np.ndarray:
-    real_signals = np.zeros_like(signals, dtype=np.float64)
+    real_signals = np.full_like(signals, np.nan, dtype=np.float64)
 
     for i in range(signals.shape[0]):
         if np.any(np.isnan(signals[i])):
@@ -53,18 +53,14 @@ class MeasureLenRabiTask(AbsAutoTask):
         soccfg,
         soc,
         len_sweep: dict,
-        pulse_name: str = "qub_pulse",
+        pulse_name: str = "pi_pulse",
         earlystop_snr: Optional[float] = None,
-        plot_ax: Optional[plt.Axes] = None,
     ) -> None:
         self.soccfg = soccfg
         self.soc = soc
         self.len_sweep = len_sweep
         self.pulse_name = pulse_name
         self.earlystop_snr = earlystop_snr
-        self.plot_ax = plot_ax
-
-        self.pi_line = None
         self.task = HardTask(
             measure_fn=self.measure_lenrabi_fn, result_shape=(len_sweep["expts"],)
         )
@@ -78,12 +74,6 @@ class MeasureLenRabiTask(AbsAutoTask):
         cfg = deepcopy(ctx.cfg)
 
         cfg["sweep"] = {"length": self.len_sweep}
-
-        snr_hook = None
-        if self.plot_ax is not None:
-
-            def snr_hook(snr: float) -> None:
-                self.plot_ax.set_title(f"SNR: {snr:.2f}")
 
         len_params = sweep2param("length", cfg["sweep"]["length"])
         Pulse.set_param(cfg[self.pulse_name], "length", len_params)
@@ -105,7 +95,6 @@ class MeasureLenRabiTask(AbsAutoTask):
                 update_hook,
                 self.earlystop_snr,
                 signal2real_fn=lambda x: rotate2real(x).real,
-                snr_hook=snr_hook,
             ),
         )
 
@@ -142,14 +131,6 @@ class MeasureLenRabiTask(AbsAutoTask):
             pi_len = np.nan
             pi2_len = np.nan
             rabi_freq = np.nan
-        else:
-            if self.plot_ax is not None:
-                if self.pi_line is None:
-                    self.pi_line = self.plot_ax.axvline(
-                        pi_len, color="red", linestyle="--"
-                    )
-                else:
-                    self.pi_line.set_xdata(pi_len)
 
         return dict(
             pi_length=pi_len,

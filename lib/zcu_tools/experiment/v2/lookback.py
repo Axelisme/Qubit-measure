@@ -49,7 +49,7 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
                 update_hook=lambda ctx: viewer.update(
                     Ts, lookback_signal2real(np.asarray(ctx.get_data()))
                 ),
-                update_interval=10.0,
+                update_interval=3.0,
             ).run(cfg)
             signals = np.asarray(signals)
 

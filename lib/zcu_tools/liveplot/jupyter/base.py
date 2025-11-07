@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple, TypeVar
 
 import matplotlib.pyplot as plt
 from IPython.display import DisplayHandle, display
+from ipywidgets import HTML, Output
 
 from ..segments import AbsSegment
 
@@ -16,9 +17,9 @@ def make_plot_frame(
     n_row: int, n_col: int, **kwargs
 ) -> Tuple[plt.FigureBase, List[List[plt.Axes]], DisplayHandle]:
     kwargs.setdefault("squeeze", False)
-    kwargs.setdefault("figsize", (6 * n_col, 5 * n_row))
+    kwargs.setdefault("figsize", (6 * n_col, 3 * n_row))
     fig, axs = plt.subplots(n_row, n_col, **kwargs)
-    dh = display(fig, display_id=True)
+    dh = display(fig, display_id=True, clear=True)
 
     assert isinstance(fig, plt.FigureBase)
 
@@ -118,4 +119,5 @@ class JupyterPlotMixin:
             return
 
         if self.auto_close:
+            self.dh.update(HTML("Done."))
             plt.close(self.fig)

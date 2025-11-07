@@ -13,7 +13,7 @@ class Plot1DSegment(AbsSegment):
         ylabel: str,
         title: Optional[str] = None,
         num_lines: int = 1,
-        show_grid: bool = False,
+        show_grid: bool = True,
         line_kwargs: Optional[List[Optional[dict]]] = None,
     ) -> None:
         self.xlabel = xlabel

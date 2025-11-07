@@ -6,7 +6,7 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.liveplot.jupyter import LivePlotter1D
+from zcu_tools.liveplot.jupyter import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -49,6 +49,7 @@ class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
                             cfg,
                             modules=[
                                 make_reset("reset", reset_cfg=cfg.get("reset")),
+                                Pulse(name="init_pulse", cfg=cfg.get("init_pulse")),
                                 Pulse(name="probe_pulse", cfg=cfg["probe_pulse"]),
                                 make_readout("readout", readout_cfg=cfg["readout"]),
                             ],
@@ -146,8 +147,8 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
         cfg: Dict[str, Any],
         *,
         progress=True,
-        interval=300,
         num_times=50,
+        fail_retry=3,
     ) -> MISTPowerDepOvernightResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -155,31 +156,41 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
         iters = np.arange(num_times)
         pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
-        cfg["probe_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+        Pulse.set_param(
+            cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+        )
 
-        with LivePlotter1D("Pulse gain", "MIST", disable=not progress) as viewer:
+        with LivePlotter2DwithLine(
+            "Pulse gain",
+            "Iteration",
+            line_axis=1,
+            title="MIST Overnight",
+            disable=not progress,
+        ) as viewer:
             signals = Runner(
                 task=RepeatOverTime(
                     name="repeat_over_time",
                     num_times=num_times,
-                    interval=interval,
+                    interval=cfg["interval"],
                     task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
                             ModularProgramV2(
                                 soccfg,
-                                cfg,
+                                ctx.cfg,
                                 modules=[
-                                    make_reset("reset", reset_cfg=cfg.get("reset")),
-                                    Pulse(name="probe_pulse", cfg=cfg["probe_pulse"]),
-                                    make_readout("readout", readout_cfg=cfg["readout"]),
+                                    make_reset("reset", ctx.cfg.get("reset")),
+                                    Pulse("init_pulse", cfg=ctx.cfg.get("init_pulse")),
+                                    Pulse("probe_pulse", cfg=ctx.cfg["probe_pulse"]),
+                                    make_readout("readout", ctx.cfg["readout"]),
                                 ],
                             ).acquire(soc, progress=False, callback=update_hook)
                         ),
                         result_shape=(len(pdrs),),
                     ),
+                    fail_retry=fail_retry,
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    pdrs, mist_overnight_signal2real(np.asarray(ctx.get_data()))
+                    iters, pdrs, mist_overnight_signal2real(np.asarray(ctx.get_data()))
                 ),
             ).run(cfg)
             signals = np.asarray(signals)
