@@ -25,14 +25,10 @@ FreqResultType = Tuple[np.ndarray, np.ndarray]
 
 
 class FreqExperiment(AbsExperiment[FreqResultType]):
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> FreqResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D("Frequency (MHz)", "Amplitude")
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # canonicalise sweep section to single-axis form «{'freq': ...}»
@@ -44,9 +40,8 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         # bind sweep parameter as *QickParam* so it is executed by FPGA
         cfg["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
-        with LivePlotter1D(
-            "Frequency (MHz)", "Amplitude", disable=not progress
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

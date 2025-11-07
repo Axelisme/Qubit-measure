@@ -30,6 +30,38 @@ T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
 
 
 class T1Experiment(AbsExperiment[T1ResultType]):
+    def make_liveplotter(self) -> MultiLivePlotter:
+        fig, axs = make_plot_frame(n_row=2, n_col=3, figsize=(15, 7))
+
+        liveplotter = MultiLivePlotter(
+            fig,
+            dict(
+                detune=LivePlotter2DwithLine(
+                    "Flux device value",
+                    "Detune (MHz)",
+                    line_axis=1,
+                    num_lines=5,
+                    existed_frames=(fig, [[axs[1, 0], axs[0, 0]]]),
+                ),
+                len_rabi=LivePlotter2DwithLine(
+                    "Flux device value",
+                    "Rabi length (us)",
+                    line_axis=1,
+                    num_lines=5,
+                    existed_frames=(fig, [[axs[1, 1], axs[0, 1]]]),
+                ),
+                t1=LivePlotter2DwithLine(
+                    "Flux device value",
+                    "Time (us)",
+                    line_axis=1,
+                    num_lines=5,
+                    existed_frames=(fig, [[axs[1, 2], axs[0, 2]]]),
+                ),
+            ),
+        )
+
+        return liveplotter
+
     def run(
         self,
         soc,
@@ -38,8 +70,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         *,
         predictor: FluxoniumPredictor,
         ref_flux: float = 0.0,
-        drive_oper: Literal["n", "phi"] = "n",
-        progress: bool = True,
         earlystop_snr: Optional[float] = None,
     ) -> T1ResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
@@ -57,14 +87,15 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         t1lens = sweep2array(t1len_sweep)
 
         # get reference matrix element
-        ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
+        ref_m = predictor.predict_matrix_element(ref_flux)
         ref_qub_gain = cfg["qub_pulse"]["gain"]
         ref_pi_gain = cfg["pi_pulse"]["gain"]
+        ref_pilen = cfg["pi_pulse"]["waveform"]["length"]
 
         def updateCfg(i: int, ctx: TaskContext, value: float) -> None:
             set_flux_in_dev_cfg(ctx.cfg["dev"], value)
 
-            # calibrate bias by last fitted frequency
+            adjust_factor = 1.0
             if i > 0:
                 last_freq = ctx.get_data(
                     addr_stack=[i - 1, "meta_infos", "detune", "qubit_freq"]
@@ -72,70 +103,66 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                 if not np.isnan(last_freq):
                     bias = predictor.calculate_bias(values[i - 1], last_freq)
                     predictor.update_bias(bias)
+                last_pilen = ctx.get_data(
+                    addr_stack=[i - 1, "meta_infos", "len_rabi", "pi_length"]
+                )
+                if not np.isnan(last_pilen):
+                    adjust_factor = last_pilen / ref_pilen
 
             predict_freq = predictor.predict_freq(value)
-            predict_m = predictor.predict_matrix_element(value, operator=drive_oper)
+            predict_m = predictor.predict_matrix_element(value)
 
-            # set pulse freq to predicted frequency
             set_pulse_freq(ctx.cfg["qub_pulse"], predict_freq)
             set_pulse_freq(ctx.cfg["pi_pulse"], predict_freq)
             ctx.cfg["qub_pulse"]["gain"] = check_gains(
-                ref_qub_gain * ref_m / predict_m, "qub_pulse"
+                adjust_factor * ref_qub_gain * ref_m / predict_m, "qub_pulse"
             )
             ctx.cfg["pi_pulse"]["gain"] = check_gains(
-                ref_pi_gain * ref_m / predict_m, "pi_pulse"
+                adjust_factor * ref_pi_gain * ref_m / predict_m, "pi_pulse"
             )
 
-        # -- Run Experiment --
-        fig, axs, dh = make_plot_frame(n_row=2, n_col=3, figsize=(15, 7))
-
-        with MultiLivePlotter(
-            dict(
-                detune=LivePlotter2DwithLine(
-                    "Flux device value",
-                    "Detune (MHz)",
-                    line_axis=1,
-                    num_lines=5,
-                    existed_frames=(fig, [[axs[1, 0], axs[0, 0]]], dh),
-                    disable=not progress,
-                ),
-                len_rabi=LivePlotter2DwithLine(
-                    "Flux device value",
-                    "Rabi length (us)",
-                    line_axis=1,
-                    num_lines=5,
-                    existed_frames=(fig, [[axs[1, 1], axs[0, 1]]], dh),
-                    disable=not progress,
-                ),
-                t1=LivePlotter2DwithLine(
-                    "Flux device value",
-                    "Time (us)",
-                    line_axis=1,
-                    num_lines=5,
-                    existed_frames=(fig, [[axs[1, 2], axs[0, 2]]], dh),
-                    disable=not progress,
-                ),
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
+            detune_line = (
+                viewer.get_plotter("detune")
+                .get_ax("1d")
+                .axvline(0.0, color="red", linestyle="--")
             )
-        ) as viewer:
-            plot_map = {
-                "detune": (detunes, detune_signal2real),
-                "len_rabi": (rabilens, lenrabi_signal2real),
-                "t1": (t1lens, t1_signal2real),
-            }
+            rabi_line = (
+                viewer.get_plotter("len_rabi")
+                .get_ax("1d")
+                .axvline(0.0, color="red", linestyle="--")
+            )
 
             def plot_fn(ctx: TaskContext) -> None:
                 if ctx.is_empty_stack():
                     return
 
                 cur_task = ctx.addr_stack[-1]
+
+                meta_infos = ctx.get_data(
+                    addr_stack=[*ctx.addr_stack[:-1], "meta_infos"]
+                )
+                if "detune" in meta_infos:
+                    detune_line.set_xdata(meta_infos["detune"]["qubit_detune"].real)
+                if "len_rabi" in meta_infos:
+                    rabi_line.set_xdata(meta_infos["len_rabi"]["pi_length"].real)
+
+                plot_map = {
+                    "detune": {"detune": (detunes, detune_signal2real)},
+                    "len_rabi": {"len_rabi": (rabilens, lenrabi_signal2real)},
+                    "t1": {"t1": (t1lens, t1_signal2real)},
+                }
+
                 if cur_task not in plot_map:
                     return
 
-                signals = merge_result_list(ctx.get_data())
-
-                ys, signal2real_fn = plot_map[cur_task]
+                signals = merge_result_list(ctx.get_data())[cur_task]
                 viewer.update(
-                    {cur_task: (values, ys, signal2real_fn(signals[cur_task]))}
+                    {
+                        name: (values, ys, signal2real_fn(signals))
+                        for name, (ys, signal2real_fn) in plot_map[cur_task].items()
+                    }
                 )
 
             results = Runner(
@@ -163,7 +190,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         self.last_cfg = cfg
         self.last_result = (values, detunes, rabilens, t1lens, signals_dict)
 
-        return values, detunes, rabilens, t1lens, signals_dict, fig
+        return values, detunes, rabilens, t1lens, signals_dict, self.liveplotter.fig
 
     def analyze(
         self,

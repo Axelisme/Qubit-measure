@@ -94,9 +94,24 @@ def allxy_signal2real(signals_dict: Dict[Tuple[str, str], np.ndarray]) -> np.nda
 
 
 class AllXYExperiment(AbsExperiment[AllXYResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> AllXYResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        liveplotter = LivePlotter1D(
+            "Gate",
+            "Signal",
+            segment_kwargs=dict(
+                line_kwargs=[dict(marker="o", linestyle=None, markersize=5)],
+            ),
+        )
+        ax = liveplotter.get_ax()
+        ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
+        ax.set_xticklabels(
+            [f"({gate1}, {gate2})" for gate1, gate2 in ALLXY_SEQUENCE],
+            rotation=45,
+            ha="right",
+        )
+        return liveplotter
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> AllXYResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert cfg.get("sweep", dict()) == {}, (
@@ -118,27 +133,8 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             if gate_name != "I" and pulse_cfg is None:
                 raise ValueError(f"Gate '{gate_name}' pulse configuration is missing")
 
-        liveplotter = LivePlotter1D(
-            xlabel="Gate",
-            ylabel="Signal",
-            disable=not progress,
-            segment_kwargs=dict(
-                show_grid=True,
-                line_kwargs=[dict(marker="o", linestyle=None, markersize=5)],
-            ),
-        )
-
-        # Configure x-axis labels if plotter is available
-        if not liveplotter.disable:
-            ax = liveplotter.get_ax()
-            ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
-            ax.set_xticklabels(
-                [f"({gate1}, {gate2})" for gate1, gate2 in ALLXY_SEQUENCE],
-                rotation=45,
-                ha="right",
-            )
-
-        with liveplotter as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals_dict = Runner(
                 task=BatchTask(
                     tasks={
@@ -160,8 +156,8 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
                     }
                 ),
                 update_hook=lambda ctx: viewer.update(
-                        np.arange(len(ALLXY_SEQUENCE)),
-                        allxy_signal2real(ctx.get_data()),
+                    np.arange(len(ALLXY_SEQUENCE)),
+                    allxy_signal2real(ctx.get_data()),
                 ),
             ).run(cfg)
 

@@ -22,9 +22,12 @@ def dispersive_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> DispersiveResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D(
+            "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2)
+        )
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> DispersiveResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Canonicalise sweep section to single-axis form
@@ -44,12 +47,8 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
             cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
-        with LivePlotter1D(
-            "Frequency (MHz)",
-            "Amplitude",
-            segment_kwargs=dict(num_lines=2),
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

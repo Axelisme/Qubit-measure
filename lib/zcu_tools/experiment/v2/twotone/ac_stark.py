@@ -59,9 +59,16 @@ def get_resonance_freq(
 
 
 class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> AcStarkResultType:
+    def make_liveplotter(self) -> LivePlotter2DwithLine:
+        return LivePlotter2DwithLine(
+            "Stark Pulse Gain (a.u.)",
+            "Frequency (MHz)",
+            line_axis=1,
+            num_lines=2,
+            uniform=False,
+        )
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> AcStarkResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         gain_sweep = cfg["sweep"].pop("gain")
@@ -76,14 +83,8 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
 
         cfg["stark_pulse2"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
-        with LivePlotter2DwithLine(
-            "Stark Pulse Gain (a.u.)",
-            "Frequency (MHz)",
-            line_axis=1,
-            num_lines=2,
-            uniform=False,
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=SoftTask(
                     sweep_name="resonator gain",

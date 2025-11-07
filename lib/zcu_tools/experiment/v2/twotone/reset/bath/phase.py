@@ -32,9 +32,14 @@ def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class PhaseExperiment(AbsExperiment[PhaseResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> PhaseResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D(
+            "Phase (deg)",
+            "Signal (a.u.)",
+            segment_kwargs={"title": "Phase Optimization"},
+        )
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> PhaseResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -48,9 +53,8 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
         phase_param = sweep2param("phase", cfg["sweep"]["phase"])
         set_reset_cfg(cfg["tested_reset"], "pi2_phase", phase_param)
 
-        with LivePlotter1D(
-            "Phase (deg)", "Signal (a.u.)", disable=not progress
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

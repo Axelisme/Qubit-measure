@@ -32,14 +32,13 @@ T2RamseyResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
 
 
 class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D(
+            "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Ramsey"}
+        )
+
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        detune: float = 0.0,
-        progress: bool = True,
+        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
     ) -> T2RamseyResultType:
         cfg = deepcopy(cfg)
 
@@ -49,12 +48,8 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
 
         t2r_spans = sweep2param("length", cfg["sweep"]["length"])
 
-        with LivePlotter1D(
-            "Time (us)",
-            "Amplitude",
-            segment_kwargs={"title": "T2 Ramsey"},
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

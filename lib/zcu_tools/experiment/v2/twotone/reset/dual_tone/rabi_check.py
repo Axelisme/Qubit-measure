@@ -30,9 +30,12 @@ def reset_rabi_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> ResetRabiCheckResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D(
+            "Gain (a.u.)", "Amplitude", segment_kwargs={"title": "Rabi Check"}
+        )
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> ResetRabiCheckResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -58,7 +61,8 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
         )
         cfg["init_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
 
-        with LivePlotter1D("Gain (a.u.)", "Amplitude", disable=not progress) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

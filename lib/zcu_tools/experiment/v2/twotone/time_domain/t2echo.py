@@ -32,14 +32,13 @@ T2EchoResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
 
 
 class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D(
+            "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Echo"}
+        )
+
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        detune: float = 0.0,
-        progress: bool = True,
+        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
     ) -> T2EchoResultType:
         cfg = deepcopy(cfg)
 
@@ -49,12 +48,8 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
 
         t2e_spans = sweep2param("length", cfg["sweep"]["length"])
 
-        with LivePlotter1D(
-            "Time (us)",
-            "Amplitude",
-            segment_kwargs={"title": "T2 Echo"},
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

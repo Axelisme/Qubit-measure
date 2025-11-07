@@ -27,9 +27,10 @@ DualToneResetPowerResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> DualToneResetPowerResultType:
+    def make_liveplotter(self) -> LivePlotter2D:
+        return LivePlotter2D("Gain1 (a.u.)", "Gain2 (a.u.)")
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> DualToneResetPowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -58,9 +59,8 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
             ref_j = 0 if pdrs2[0] < pdrs2[-1] else -1
             return np.abs(signals - signals[ref_i, ref_j])
 
-        with LivePlotter2D(
-            "Gain1 (a.u.)", "Gain2 (a.u.)", disable=not progress
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

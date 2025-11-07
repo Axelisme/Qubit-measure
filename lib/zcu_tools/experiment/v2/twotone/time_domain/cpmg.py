@@ -36,9 +36,12 @@ CPMGResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
 
 
 class CPMGExperiment(AbsExperiment[CPMGResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> CPMGResultType:
+    def make_liveplotter(self) -> LivePlotter2DwithLine:
+        return LivePlotter2DwithLine(
+            "Number of Pi", "Time (us)", line_axis=1, num_lines=2, title="CPMG"
+        )
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> CPMGResultType:
         cfg = deepcopy(cfg)
 
         times_sweep = cfg["sweep"]["times"]
@@ -81,14 +84,8 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter2DwithLine(
-            "Number of Pi",
-            "Time (us)",
-            line_axis=1,
-            num_lines=2,
-            title="CPMG",
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=SoftTask(
                     sweep_name="times",

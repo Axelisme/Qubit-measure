@@ -7,6 +7,7 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -19,8 +20,6 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ....runner import HardTask, Runner
-
 # (pdrs, signals_2d)  # signals shape: (2, len(pdrs)) for [w/o reset, w/ reset]
 ResetRabiCheckResultType = Tuple[np.ndarray, np.ndarray]
 
@@ -30,9 +29,10 @@ def reset_rabi_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> ResetRabiCheckResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D("Pulse gain", "Amplitude")
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> ResetRabiCheckResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is single pulse type
@@ -61,7 +61,8 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
             sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"]),
         )
 
-        with LivePlotter1D("Pulse gain", "Amplitude", disable=not progress) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

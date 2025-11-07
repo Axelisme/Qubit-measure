@@ -7,6 +7,7 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -19,8 +20,6 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ....runner import HardTask, Runner
-
 # (pdrs, signals_2d)  # signals shape: (2, len(pdrs)) for [w/o reset, w/ reset]
 ResetRabiCheckResultType = Tuple[np.ndarray, np.ndarray]
 
@@ -30,35 +29,40 @@ def reset_rabi_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> ResetRabiCheckResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D("Pulse gain", "Signal")
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> ResetRabiCheckResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        # Check that reset pulse is dual pulse type
-        if cfg["tested_reset"]["type"] != "bath":
-            raise ValueError("This experiment only supports bath reset")
+        # Check that reset pulse is single pulse type
+        if cfg["tested_reset"]["type"] != "pulse":
+            raise ValueError("This experiment only supports single pulse reset")
 
         # Canonicalise sweep section to single-axis form
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
+        gain_sweep = cfg["sweep"]["gain"]
+
+        pdrs = sweep2array(gain_sweep)  # predicted amplitudes
 
         # Create 2D sweep: w/o_reset (outer) x gain (inner)
         cfg["sweep"] = {
             "w/o_reset": {"start": 0, "stop": 1.0, "expts": 2},
-            "gain": cfg["sweep"]["gain"],
+            "gain": gain_sweep,
         }
 
-        pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
-
         # Attach gain sweep to initialization pulse
-        cfg["init_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+        Pulse.set_param(cfg["rabi_pulse"], "gain", sweep2param("gain", gain_sweep))
+
+        # Attach reset factor to control reset on/off
         set_reset_cfg(
             cfg["tested_reset"],
             "on/off",
             sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"]),
         )
 
-        with LivePlotter1D("Pulse gain", "Amplitude", disable=not progress) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -67,7 +71,7 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
                             ctx.cfg,
                             modules=[
                                 make_reset("reset", ctx.cfg.get("reset")),
-                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
+                                Pulse("rabi_pulse", ctx.cfg.get("rabi_pulse")),
                                 make_reset("tested_reset", ctx.cfg["tested_reset"]),
                                 make_readout("readout", ctx.cfg["readout"]),
                             ],
@@ -87,14 +91,7 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
 
         return pdrs, signals
 
-    def analyze(
-        self,
-        result: Optional[ResetRabiCheckResultType] = None,
-        *,
-        plot: bool = True,
-    ) -> None:
-        """Analyze reset rabi check results. (No specific analysis implemented)"""
-        # No specific analysis needed for this experiment
+    def analyze(self, result: Optional[ResetRabiCheckResultType] = None) -> None:
         raise NotImplementedError("No specific analysis implemented")
 
     def save(
@@ -102,7 +99,7 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
         filepath: str,
         result: Optional[ResetRabiCheckResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/reset/bath/rabi_check",
+        tag: str = "twotone/reset/rabi_check",
         **kwargs,
     ) -> None:
         if result is None:

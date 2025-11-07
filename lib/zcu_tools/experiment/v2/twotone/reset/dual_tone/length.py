@@ -31,9 +31,12 @@ def reset_length_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class LengthExperiment(AbsExperiment[DualToneResetLengthResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> DualToneResetLengthResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D(
+            "Length (us)", "Amplitude", segment_kwargs={"title": "Length Optimization"}
+        )
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> DualToneResetLengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -50,7 +53,8 @@ class LengthExperiment(AbsExperiment[DualToneResetLengthResultType]):
             cfg["tested_reset"], "length", sweep2param("length", cfg["sweep"]["length"])
         )
 
-        with LivePlotter1D("Length (us)", "Amplitude", disable=not progress) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

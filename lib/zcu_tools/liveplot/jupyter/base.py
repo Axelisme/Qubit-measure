@@ -3,8 +3,6 @@ from threading import Lock
 from typing import List, Optional, Tuple, TypeVar
 
 import matplotlib.pyplot as plt
-from IPython.display import DisplayHandle, display
-from ipywidgets import HTML, Output
 
 from ..segments import AbsSegment
 
@@ -15,15 +13,14 @@ T_JupyterPlotMixin = TypeVar("T_JupyterPlotMixin", bound="JupyterPlotMixin")
 
 def make_plot_frame(
     n_row: int, n_col: int, **kwargs
-) -> Tuple[plt.FigureBase, List[List[plt.Axes]], DisplayHandle]:
+) -> Tuple[plt.FigureBase, List[List[plt.Axes]]]:
     kwargs.setdefault("squeeze", False)
     kwargs.setdefault("figsize", (6 * n_col, 3 * n_row))
     fig, axs = plt.subplots(n_row, n_col, **kwargs)
-    dh = display(fig, display_id=True, clear=True)
+    fig.tight_layout(pad=2.0)
+    plt.show(fig)
 
-    assert isinstance(fig, plt.FigureBase)
-
-    return fig, axs, dh
+    return fig, axs
 
 
 class JupyterPlotMixin:
@@ -32,9 +29,7 @@ class JupyterPlotMixin:
     def __init__(
         self,
         segments: List[List[AbsSegment]],
-        existed_frames: Optional[
-            Tuple[plt.FigureBase, List[List[plt.Axes]], DisplayHandle]
-        ] = None,
+        existed_frames: Optional[Tuple[plt.FigureBase, List[List[plt.Axes]]]] = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:
@@ -52,7 +47,6 @@ class JupyterPlotMixin:
 
         self.segments = segments
         self.update_lock = Lock()
-        self.auto_close = auto_close
         self.disable = disable
 
         if disable:
@@ -60,7 +54,7 @@ class JupyterPlotMixin:
 
         if existed_frames is not None:
             # if provided axes and display handle, use them
-            provided_fig, provided_axs, provided_dh = existed_frames
+            provided_fig, provided_axs = existed_frames
 
             # validate check
             valid = len(provided_axs) == n_row
@@ -74,10 +68,11 @@ class JupyterPlotMixin:
 
             self.fig = provided_fig
             self.axs = provided_axs
-            self.dh = provided_dh
+            self.auto_close = False  # force not to close the figure
         else:
             # if not provided axes, create figure and display handle
-            self.fig, self.axs, self.dh = make_plot_frame(n_row, n_col)
+            self.fig, self.axs = make_plot_frame(n_row, n_col)
+            self.auto_close = auto_close
 
     def clear(self) -> None:
         if self.disable:
@@ -95,7 +90,7 @@ class JupyterPlotMixin:
         if self.disable:
             return
 
-        self.dh.update(self.fig)
+        self.fig.canvas.draw()
 
     def refresh(self) -> None:
         if self.disable:
@@ -119,5 +114,4 @@ class JupyterPlotMixin:
             return
 
         if self.auto_close:
-            self.dh.update(HTML("Done."))
             plt.close(self.fig)

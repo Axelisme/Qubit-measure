@@ -23,9 +23,10 @@ def lookback_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class LookbackExperiment(AbsExperiment[LookbackResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> LookbackResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D("Time (us)", "Amplitude")
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> LookbackResultType:
         cfg = deepcopy(cfg)
 
         if cfg.setdefault("reps", 1) != 1:
@@ -35,7 +36,8 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
         prog = OneToneProgram(soccfg, cfg)
         Ts = prog.get_time_axis(ro_index=0) + cfg["readout"]["ro_cfg"]["trig_offset"]
 
-        with LivePlotter1D("Time (us)", "Amplitude", disable=not progress) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

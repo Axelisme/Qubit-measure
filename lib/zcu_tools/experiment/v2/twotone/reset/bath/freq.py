@@ -31,9 +31,14 @@ def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> FreqGainResultType:
+    def make_liveplotter(self) -> LivePlotter2D:
+        return LivePlotter2D(
+            "Qubit drive Gain (a.u.)",
+            "Cavity Frequency (MHz)",
+            segment_kwargs={"flip": True},
+        )
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqGainResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -55,12 +60,8 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
             cfg["tested_reset"], "res_freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
-        with LivePlotter2D(
-            "Qubit drive Gain (a.u.)",
-            "Cavity Frequency (MHz)",
-            segment_kwargs={"flip": True},
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

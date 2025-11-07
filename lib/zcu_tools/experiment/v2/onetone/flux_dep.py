@@ -23,14 +23,12 @@ def fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> FluxDepResultType:
+    def make_liveplotter(self) -> LivePlotter2DwithLine:
+        return LivePlotter2DwithLine(
+            "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2
+        )
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         fpt_sweep = cfg["sweep"]["freq"]
@@ -44,13 +42,8 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
 
         set_readout_cfg(cfg["readout"], "freq", sweep2param("freq", fpt_sweep))
 
-        with LivePlotter2DwithLine(
-            "Flux device value",
-            "Frequency (MHz)",
-            line_axis=1,
-            num_lines=2,
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=SoftTask(
                     sweep_name="flux",

@@ -9,12 +9,12 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
-    set_readout_cfg,
-    sweep2param,
     ModularProgramV2,
     Pulse,
     make_readout,
     make_reset,
+    set_readout_cfg,
+    sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
 
@@ -25,9 +25,12 @@ FreqResultType = Tuple[np.ndarray, np.ndarray]  # (fpts, snrs)
 
 
 class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> FreqResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D(
+            "Frequency (MHz)", "SNR", segment_kwargs={"title": "Frequency Optimization"}
+        )
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
@@ -63,7 +66,8 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
             std_d = prog.get_stderr()
             return avg_d, std_d
 
-        with LivePlotter1D("Frequency (MHz)", "SNR", disable=not progress) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=measure_fn,

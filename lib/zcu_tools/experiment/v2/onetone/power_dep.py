@@ -23,14 +23,13 @@ def pdrdep_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
+    def make_liveplotter(self) -> LivePlotter2DwithLine:
+        return LivePlotter2DwithLine(
+            "Power (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=10
+        )
+
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-        earlystop_snr: Optional[float] = None,
+        self, soc, soccfg, cfg: Dict[str, Any], *, earlystop_snr: Optional[float] = None
     ) -> PowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -44,13 +43,8 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
         )
 
         # run experiment
-        with LivePlotter2DwithLine(
-            "Power (a.u.)",
-            "Frequency (MHz)",
-            line_axis=1,
-            num_lines=10,
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
 
             def measure_fn(ctx, update_hook):
                 prog = OneToneProgram(soccfg, ctx.cfg)

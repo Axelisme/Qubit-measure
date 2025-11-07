@@ -26,9 +26,9 @@ from zcu_tools.program.v2 import (
     make_reset,
     sweep2param,
 )
+from zcu_tools.simulate import mA2flx
 from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.simulate import mA2flx
 
 from .task import (
     MeasureDetuneTask,
@@ -44,6 +44,53 @@ AutoMistResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndar
 
 
 class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
+    def make_liveplotter(self) -> MultiLivePlotter:
+        fig, axs = make_plot_frame(n_row=2, n_col=4, figsize=(18, 7))
+
+        liveplotter = MultiLivePlotter(
+            fig,
+            dict(
+                detune=LivePlotter2DwithLine(
+                    "Flux device value",
+                    "Detune (MHz)",
+                    line_axis=1,
+                    num_lines=5,
+                    title="Detune",
+                    segment2d_kwargs=dict(flip=True),
+                    existed_frames=(fig, [[axs[0, 0], axs[1, 0]]]),
+                ),
+                len_rabi=LivePlotter2DwithLine(
+                    "",
+                    "Length (us)",
+                    line_axis=1,
+                    num_lines=5,
+                    title="Length Rabi",
+                    segment2d_kwargs=dict(flip=True),
+                    existed_frames=(fig, [[axs[0, 1], axs[1, 1]]]),
+                ),
+                mist_g=LivePlotter2DwithLine(
+                    "",
+                    "Readout power (a.u.)",
+                    line_axis=1,
+                    num_lines=5,
+                    title="MIST (Ground)",
+                    segment2d_kwargs=dict(flip=True),
+                    existed_frames=(fig, [[axs[0, 2], axs[1, 2]]]),
+                ),
+                mist_e=LivePlotter2DwithLine(
+                    "",
+                    "Readout power (a.u.)",
+                    line_axis=1,
+                    num_lines=5,
+                    title="MIST (Excited)",
+                    segment2d_kwargs=dict(flip=True),
+                    existed_frames=(fig, [[axs[0, 3], axs[1, 3]]]),
+                ),
+            ),
+        )
+
+        return liveplotter
+
     def run(
         self,
         soc,
@@ -52,8 +99,6 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
         *,
         predictor: FluxoniumPredictor,
         ref_flux: float = 0.0,
-        drive_oper: Literal["n", "phi"] = "n",
-        progress: bool = True,
         earlystop_snr: Optional[float] = None,
     ) -> AutoMistResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
@@ -71,7 +116,7 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
         gains = sweep2array(pdr_sweep)
 
         # get reference matrix element
-        ref_m = predictor.predict_matrix_element(ref_flux, operator=drive_oper)
+        ref_m = predictor.predict_matrix_element(ref_flux)
         ref_qub_gain = cfg["qub_pulse"]["gain"]
         ref_pi_gain = cfg["pi_pulse"]["gain"]
         ref_pilen = cfg["pi_pulse"]["waveform"]["length"]
@@ -94,7 +139,7 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
                     adjust_factor = last_pilen / ref_pilen
 
             predict_freq = predictor.predict_freq(value)
-            predict_m = predictor.predict_matrix_element(value, operator=drive_oper)
+            predict_m = predictor.predict_matrix_element(value)
 
             set_pulse_freq(ctx.cfg["qub_pulse"], predict_freq)
             set_pulse_freq(ctx.cfg["pi_pulse"], predict_freq)
@@ -105,55 +150,18 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
                 adjust_factor * ref_pi_gain * ref_m / predict_m, "pi_pulse"
             )
 
-        # -- Run Experiment --
-        fig, axs, dh = make_plot_frame(n_row=2, n_col=4, figsize=(18, 7))
-
-        with MultiLivePlotter(
-            dict(
-                detune=LivePlotter2DwithLine(
-                    "Flux device value",
-                    "Detune (MHz)",
-                    line_axis=1,
-                    num_lines=5,
-                    title="Detune",
-                    segment2d_kwargs=dict(flip=True),
-                    existed_frames=(fig, [[axs[0, 0], axs[1, 0]]], dh),
-                    disable=not progress,
-                ),
-                len_rabi=LivePlotter2DwithLine(
-                    "",
-                    "Length (us)",
-                    line_axis=1,
-                    num_lines=5,
-                    title="Length Rabi",
-                    segment2d_kwargs=dict(flip=True),
-                    existed_frames=(fig, [[axs[0, 1], axs[1, 1]]], dh),
-                    disable=not progress,
-                ),
-                mist_g=LivePlotter2DwithLine(
-                    "",
-                    "Readout power (a.u.)",
-                    line_axis=1,
-                    num_lines=5,
-                    title="MIST (Ground)",
-                    segment2d_kwargs=dict(flip=True),
-                    existed_frames=(fig, [[axs[0, 2], axs[1, 2]]], dh),
-                    disable=not progress,
-                ),
-                mist_e=LivePlotter2DwithLine(
-                    "",
-                    "Readout power (a.u.)",
-                    line_axis=1,
-                    num_lines=5,
-                    title="MIST (Excited)",
-                    segment2d_kwargs=dict(flip=True),
-                    existed_frames=(fig, [[axs[0, 3], axs[1, 3]]], dh),
-                    disable=not progress,
-                ),
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
+            detune_line = (
+                viewer.get_plotter("detune")
+                .get_ax("1d")
+                .axvline(0.0, color="red", linestyle="--")
             )
-        ) as viewer:
-            detune_line = axs[1, 0].axvline(0.0, color="red", linestyle="--")
-            rabi_line = axs[1, 1].axvline(0.0, color="red", linestyle="--")
+            rabi_line = (
+                viewer.get_plotter("len_rabi")
+                .get_ax("1d")
+                .axvline(0.0, color="red", linestyle="--")
+            )
 
             def plot_fn(ctx: TaskContext) -> None:
                 if ctx.is_empty_stack():
@@ -169,22 +177,25 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
                 if "len_rabi" in meta_infos:
                     rabi_line.set_xdata(meta_infos["len_rabi"]["pi_length"].real)
 
+                if cur_task not in ["detune", "len_rabi", "mist"]:
+                    return
+
                 signals = merge_result_list(ctx.get_data())[cur_task]
                 if cur_task == "detune":
                     viewer.update(
-                        {"detune": (values, detunes, detune_signal2real(signals))}
+                        dict(detune=(values, detunes, detune_signal2real(signals)))
                     )
                 elif cur_task == "len_rabi":
                     viewer.update(
-                        {"len_rabi": (values, rabilens, lenrabi_signal2real(signals))}
+                        dict(len_rabi=(values, rabilens, lenrabi_signal2real(signals)))
                     )
                 elif cur_task == "mist":
                     mist_signals = automist_signal2real(signals)
                     viewer.update(
-                        {
-                            "mist_g": (values, gains, mist_signals[..., 0]),
-                            "mist_e": (values, gains, mist_signals[..., 1]),
-                        }
+                        dict(
+                            mist_g=(values, gains, mist_signals[..., 0]),
+                            mist_e=(values, gains, mist_signals[..., 1]),
+                        )
                     )
 
             results = Runner(
@@ -212,7 +223,7 @@ class AutoMistExperiment(AbsExperiment[AutoMistResultType]):
         self.last_cfg = cfg
         self.last_result = (values, detunes, rabilens, gains, signals_dict)
 
-        return values, detunes, gains, signals_dict, fig
+        return values, detunes, gains, signals_dict, self.liveplotter.fig
 
     def analyze(
         self,

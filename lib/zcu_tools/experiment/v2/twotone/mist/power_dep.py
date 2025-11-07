@@ -30,9 +30,10 @@ def mist_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress=True
-    ) -> MISTPowerDepResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D("Pulse gain", "MIST")
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> MISTPowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
@@ -40,7 +41,8 @@ class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
 
         cfg["probe_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
 
-        with LivePlotter1D("Pulse gain", "MIST", disable=not progress) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -140,15 +142,13 @@ def mist_overnight_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
+    def make_liveplotter(self) -> LivePlotter2DwithLine:
+        return LivePlotter2DwithLine(
+            "Pulse gain", "Iteration", line_axis=1, title="MIST Overnight"
+        )
+
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress=True,
-        num_times=50,
-        fail_retry=3,
+        self, soc, soccfg, cfg: Dict[str, Any], *, num_times=50, fail_retry=3
     ) -> MISTPowerDepOvernightResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -160,13 +160,8 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
             cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
         )
 
-        with LivePlotter2DwithLine(
-            "Pulse gain",
-            "Iteration",
-            line_axis=1,
-            title="MIST Overnight",
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=RepeatOverTime(
                     name="repeat_over_time",

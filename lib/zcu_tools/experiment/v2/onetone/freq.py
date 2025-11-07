@@ -6,7 +6,7 @@ from typing import Any, Dict, Literal, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, set_readout_cfg, sweep2param
@@ -23,9 +23,10 @@ def freq_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class FreqExperiment(AbsExperiment[FreqResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> FreqResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D("Frequency (MHz)", "Amplitude")
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResultType:
         cfg = deepcopy(cfg)
 
         # Ensure the sweep section is in canonical single-axis form.
@@ -40,9 +41,8 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         )
 
         # run experiment
-        with LivePlotter1D(
-            "Frequency (MHz)", "Amplitude", disable=not progress
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

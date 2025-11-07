@@ -8,6 +8,7 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -21,8 +22,6 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
-from ....runner import HardTask, Runner
-
 # (fpts, signals)
 SingleToneResetFreqResultType = Tuple[np.ndarray, np.ndarray]
 
@@ -32,9 +31,10 @@ def reset_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class FreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> SingleToneResetFreqResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D("Frequency (MHz)", "Amplitude")
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> SingleToneResetFreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Canonicalise sweep section to single-axis form
@@ -50,9 +50,8 @@ class FreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
             cfg["tested_reset"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
-        with LivePlotter1D(
-            "Frequency (MHz)", "Amplitude", disable=not progress
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

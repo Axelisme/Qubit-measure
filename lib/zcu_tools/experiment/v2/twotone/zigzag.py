@@ -34,6 +34,9 @@ ZigZagResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
 class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
     """ZigZag oscillation by varying pi-pulse times following a pi/2-pulse."""
 
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D("Times", "Signal")
+
     def run(
         self,
         soc,
@@ -80,7 +83,8 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter1D("Times", "Signal", segment_kwargs=dict(show_grid=True), disable=not progress) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=SoftTask(
                     sweep_name="times",

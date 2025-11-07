@@ -30,14 +30,15 @@ def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class LengthExperiment(AbsExperiment[LengthResultType]):
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D(
+            "Length (us)",
+            "Signal (a.u.)",
+            segment_kwargs={"title": "Length Optimization"},
+        )
+
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-        detune: float = 0.0,
+        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
     ) -> LengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -53,9 +54,8 @@ class LengthExperiment(AbsExperiment[LengthResultType]):
         set_reset_cfg(cfg["tested_reset"], "length", len_spans)
         set_reset_cfg(cfg["tested_reset"], "pi2_phase", 360 * detune * len_spans)
 
-        with LivePlotter1D(
-            "Length (us)", "Signal (a.u.)", disable=not progress
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

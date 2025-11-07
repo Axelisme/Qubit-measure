@@ -9,7 +9,7 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param, Pulse
+from zcu_tools.program.v2 import Pulse, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
@@ -25,9 +25,10 @@ LenRabiResultType = Tuple[np.ndarray, np.ndarray]  # (lens, signals)
 
 
 class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
-    def _run_for_flat(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> LenRabiResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D("Length (us)", "Signal")
+
+    def _run_for_flat(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         assert cfg["qub_pulse"]["waveform"]["style"] in ["const", "flat_top"], (
@@ -42,7 +43,8 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
             cfg["qub_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
         )
 
-        with LivePlotter1D("Length (us)", "Signal", disable=not progress) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -64,9 +66,7 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
 
         return lens, signals
 
-    def _run_for_arb(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> LenRabiResultType:
+    def _run_for_arb(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -74,7 +74,8 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
 
         lens = sweep2array(len_sweep)  # predicted
 
-        with LivePlotter1D("Length (us)", "Signal", disable=not progress) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=SoftTask(
                     sweep_name="length",
@@ -102,22 +103,15 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
 
         return lens, signals
 
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> LenRabiResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResultType:
         qub_waveform = cfg["qub_pulse"]["waveform"]
 
-        if qub_waveform["style"] in ["const", "flat_top"]:
+        if qub_waveform["style"] in ["const", "flat_top", "padding"]:
             # use hard sweep for flat top pulse
-            return self._run_for_flat(soc, soccfg, cfg, progress=progress)
+            return self._run_for_flat(soc, soccfg, cfg)
         else:
             # use soft sweep for arb pulse
-            return self._run_for_arb(soc, soccfg, cfg, progress=progress)
+            return self._run_for_arb(soc, soccfg, cfg)
 
     def analyze(
         self,

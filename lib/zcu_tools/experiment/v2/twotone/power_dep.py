@@ -22,14 +22,10 @@ def pdrdep_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> PowerDepResultType:
+    def make_liveplotter(self) -> LivePlotter2D:
+        return LivePlotter2D("Pulse Gain (a.u.)", "Frequency (MHz)")
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> PowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Ensure gain is the outer loop for better visualization
@@ -45,9 +41,8 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
         cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
         cfg["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
-        with LivePlotter2D(
-            "Pulse Gain (a.u.)", "Frequency (MHz)", disable=not progress
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (

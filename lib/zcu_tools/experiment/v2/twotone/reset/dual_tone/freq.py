@@ -33,9 +33,30 @@ DualToneResetFreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
-    def run_soft(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> DualToneResetFreqResultType:
+    def __init__(
+        self, *args, run_method: Literal["soft", "hard"] = "soft", **kwargs
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.run_method = run_method
+
+    def make_liveplotter(self) -> LivePlotter2DwithLine:
+        if self.run_method == "soft":
+            return LivePlotter2DwithLine(
+                "Frequency2 (MHz)",
+                "Frequency1 (MHz)",
+                line_axis=1,
+                segment2d_kwargs={"flip": True},
+            )
+        elif self.run_method == "hard":
+            return LivePlotter2D(
+                "Frequency1 (MHz)",
+                "Frequency2 (MHz)",
+                segment_kwargs={"flip": True},
+            )
+        else:
+            raise ValueError(f"Invalid run method: {self.run_method}")
+
+    def run_soft(self, soc, soccfg, cfg: Dict[str, Any]) -> DualToneResetFreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -51,13 +72,8 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
 
         set_reset_cfg(cfg["tested_reset"], "freq1", sweep2param("freq1", fpt1_sweep))
 
-        with LivePlotter2DwithLine(
-            "Frequency2 (MHz)",
-            "Frequency1 (MHz)",
-            line_axis=1,
-            segment2d_kwargs={"flip": True},
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=SoftTask(
                     sweep_name="freq2",
@@ -93,9 +109,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
 
         return fpts1, fpts2, signals
 
-    def run_hard(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> DualToneResetFreqResultType:
+    def run_hard(self, soc, soccfg, cfg: Dict[str, Any]) -> DualToneResetFreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -118,12 +132,8 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
             cfg["tested_reset"], "freq2", sweep2param("freq2", cfg["sweep"]["freq2"])
         )
 
-        with LivePlotter2D(
-            "Frequency2 (MHz)",
-            "Frequency1 (MHz)",
-            segment_kwargs={"flip": True},
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -152,19 +162,13 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
 
         return fpts1, fpts2, signals
 
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        method: Literal["soft", "hard"] = "soft",
-        progress: bool = True,
-    ) -> DualToneResetFreqResultType:
-        if method == "soft":
-            return self.run_soft(soc, soccfg, cfg, progress=progress)
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> DualToneResetFreqResultType:
+        if self.run_method == "soft":
+            return self.run_soft(soc, soccfg, cfg)
+        elif self.run_method == "hard":
+            return self.run_hard(soc, soccfg, cfg)
         else:
-            return self.run_hard(soc, soccfg, cfg, progress=progress)
+            raise ValueError(f"Invalid run method: {self.run_method}")
 
     def analyze(
         self,

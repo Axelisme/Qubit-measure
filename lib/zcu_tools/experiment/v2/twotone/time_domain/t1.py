@@ -40,26 +40,20 @@ class T1Experiment(AbsExperiment[T1ResultType]):
     to measure the qubit's energy relaxation.
     """
 
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> T1ResultType:
+    def make_liveplotter(self) -> LivePlotter1D:
+        return LivePlotter1D(
+            "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
+        )
+
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1ResultType:
         cfg = deepcopy(cfg)
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
         ts = sweep2array(cfg["sweep"]["length"])
 
-        with LivePlotter1D(
-            "Time (us)",
-            "Amplitude",
-            segment_kwargs={"title": "T1 relaxation"},
-            disable=not progress,
-        ) as viewer:
+        self.liveplotter.clear()
+        with self.liveplotter as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
