@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: Python 3
+    display_name: axelenv13
     language: python
     name: python3
 ---
@@ -39,6 +39,33 @@ signals = signals.T
 
 single_shot_exp = SingleShotExperiment()
 _ = single_shot_exp.analyze(result=(signals,), init_p0=None, length_ratio=None)
+```
+
+```python
+%matplotlib widget
+from matplotlib import pyplot as plt
+from time import sleep
+import numpy as np
+
+def display_immediately(fig):
+    canvas = fig.canvas
+    display(canvas)
+    canvas._handle_message(canvas, {'type': 'send_image_mode'}, [])
+    canvas._handle_message(canvas, {'type':'refresh'}, [])
+    canvas._handle_message(canvas,{'type': 'initialized'},[])
+    canvas._handle_message(canvas,{'type': 'draw'},[])
+
+with plt.ioff():
+    fig = plt.figure()
+
+display_immediately(fig)
+
+for i in range(10):
+    x, y = np.random.random(2)
+    plt.scatter(x, y)
+    fig.canvas.draw()
+    sleep(0.1)
+
 ```
 
 ```python

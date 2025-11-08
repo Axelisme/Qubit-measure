@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: Python 3
+    display_name: axelenv13
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.2
+    version: 3.13.4
 ---
 
 ```python
@@ -39,7 +39,7 @@ from zcu_tools.notebook.analysis.fluxdep import InteractiveLines
 ```
 
 ```python
-qub_name = "Q3_2D/Q2"
+qub_name = "Si001"
 ```
 
 ```python
@@ -61,23 +61,18 @@ mA_c, period
 # Plot with Onetone
 
 ```python
-period = 27.85
-mA_c = 1.15
-```
-
-```python
-onetone_path = r"../../Database/Q3_2D/Q2/s002_onetone_flux_Q2_2.hdf5"
+onetone_path = r"D:\Labber_Data\Axel\Si001\2025\10\Data_1028\R59_flux_2.hdf5"
 
 signals, sp_fpts, sp_As = load_data(onetone_path, server_ip="005-writeboard", port=4999)
-sp_mAs, sp_fpts, signals = zp.format_rawdata(1e-3 * sp_As, sp_fpts, signals)
+sp_As, sp_fpts, signals = zp.format_rawdata(sp_As, sp_fpts, signals)
 signals = signals.T  # (sp_mAs, sp_fpts)
 
-sp_flxs = mA2flx(sp_mAs, mA_c, period)
+sp_flxs = mA2flx(sp_As, mA_c, period)
 ```
 
 ```python
 %matplotlib widget
-actLine = InteractiveLines(signals.T, sp_mAs, sp_fpts)
+actLine = InteractiveLines(signals, sp_As, sp_fpts)
 ```
 
 ```python
@@ -88,8 +83,8 @@ mA_c, mA_e, period
 ```
 
 ```python
-r_f = 7.4471
-best_g = 0.05
+# r_f = 7.4471
+best_g = 0.1
 ```
 
 ```python
@@ -128,7 +123,7 @@ mAs = flx2mA(flxs, mA_c, period)
 ```python
 rf_list = calculate_dispersive_vs_flx(params, flxs, r_f=r_f, g=best_g, return_dim=2)
 fig = zd.plot_dispersive_with_onetone(
-    r_f, best_g, mAs, flxs, rf_list, sp_mAs, sp_flxs, sp_fpts, signals
+    r_f, best_g, mAs, flxs, rf_list, sp_As, sp_flxs, sp_fpts, signals
 )
 fig.show()
 ```

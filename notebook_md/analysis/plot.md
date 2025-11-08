@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: Python 3
+    display_name: axelenv13
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.2
+    version: 3.13.4
 ---
 
 ```python
@@ -39,7 +39,7 @@ from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 ```
 
 ```python
-qub_name = "Q3_2D/Q2"
+qub_name = "Si001"
 
 os.makedirs(f"../../result/{qub_name}/image/design", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/web/design", exist_ok=True)
@@ -119,14 +119,20 @@ fig = zp.plot_dispersive_shift(params, flxs, r_f=r_f, g=g, mAs=mAs, upto=1)
 ```
 
 ```python
-fig.update_yaxes(range=[-1e-3, 1e-3])
+fig.update_yaxes(range=[-1e-2, 1e-2])
 fig.show()
 ```
 
 # Flux dependence
 
 ```python
-_, energies = calculate_energy_vs_flx(params, flxs, spectrum_data=spectrum_data)
+_, energies = calculate_energy_vs_flx(params, flxs, spectrum_data=spectrum_data, evals_count=70, cutoff=120)
+```
+
+```python
+fig = zp.plot_mist_condition(flxs, energies, r_f, max_level=29)
+fig.update_layout(height=1200)
+fig.show()
 ```
 
 ```python
@@ -134,14 +140,14 @@ v_allows = {
     # **allows,
     "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
     # "transitions2": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
-    "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 4)],
+    # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 4)],
     # "blue side": [(i, j) for i in (0, 1) for j in range(i + 1, 4)],
     # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
     # "mirror": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 15)],
     # "mirror red": [(i, j) for i in (0, 1, 2, 3) for j in range(i + 1, 15)],
-    "r_f": 7.520,
+    # "r_f": 7.520,
     "sample_f": 9.58464 / 2,
-    # "r_f": r_f,
+    "r_f": r_f,
     # "sample_f": sample_f,
 }
 
