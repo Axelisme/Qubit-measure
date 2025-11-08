@@ -190,8 +190,8 @@ def plot_cn_with_mist(
     fig.update_xaxes(title_text="Flux", range=[mist_flxs.min(), mist_flxs.max()])
     fig.update_yaxes(
         title_text="Photon Number",
-        range=[0.0, np.log10(mist_photons.max())],
-        type="log",
+        # range=[0.0, np.log10(mist_photons.max())],
+        # type="log",
     )
 
     return fig

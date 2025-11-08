@@ -23,13 +23,14 @@ from zcu_tools.program.v2 import (
 
 def automist_signal2real(signals: np.ndarray) -> np.ndarray:
     avg_len = max(int(0.05 * signals.shape[1]), 1)
+    std_len = max(int(0.3 * signals.shape[1]), 5)
 
     mist_signals = np.abs(
         signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
     )
     if np.all(np.isnan(mist_signals)):
         return mist_signals
-    mist_signals = np.clip(mist_signals, 0, 5 * np.nanstd(mist_signals))
+    mist_signals = np.clip(mist_signals, 0, 5 * np.nanstd(mist_signals[:, :std_len]))
 
     return mist_signals
 

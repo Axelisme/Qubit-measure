@@ -9,8 +9,7 @@ from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_qubit_freq
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.fitting.resonance import get_proper_model, fit_edelay
 
 from ..runner import HardTask, Runner
 
@@ -72,53 +71,58 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
         return fpts, signals
 
     def analyze(
-        self,
-        result: Optional[DispersiveResultType] = None,
-        *,
-        plot: bool = True,
-        model_type: Literal["lor", "sinc"] = "lor",
-    ) -> Tuple[float, float]:
+        self, result: Optional[DispersiveResultType] = None
+    ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         fpts, signals = result
-        amps = dispersive_signal2real(signals)
-        g_amps, e_amps = amps[0, :], amps[1, :]
+        g_signals, e_signals = signals[0, :], signals[1, :]
+        g_amps, e_amps = np.abs(g_signals), np.abs(e_signals)
 
-        g_freq, _, g_kappa, _, g_fit, _ = fit_qubit_freq(fpts, g_amps, model_type)
-        e_freq, _, e_kappa, _, e_fit, _ = fit_qubit_freq(fpts, e_amps, model_type)
+        g_edelay = fit_edelay(fpts, g_signals)
+        e_edelay = fit_edelay(fpts, e_signals)
+        edelay = 0.5 * (g_edelay + e_edelay)
+
+        model = get_proper_model(fpts, g_signals)
+        g_params = model.fit(fpts, g_signals, edelay=edelay)
+        e_params = model.fit(fpts, e_signals, edelay=edelay)
+
+        g_freq, g_kappa = g_params["freq"], g_params["kappa"]
+        e_freq, e_kappa = e_params["freq"], e_params["kappa"]
+
+        g_fit = np.abs(model.calc_signals(fpts, **g_params))
+        e_fit = np.abs(model.calc_signals(fpts, **e_params))
 
         # Calculate dispersive shift and average linewidth
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
         avg_kappa = (g_kappa + e_kappa) / 2  # average linewidth κ/2π
 
-        if plot:
-            plt.figure(figsize=config.figsize)
-            plt.tight_layout()
+        fig, ax = plt.subplots(figsize=config.figsize)
+        fig.tight_layout()
 
-            # Plot data and fits
-            plt.plot(fpts, g_amps, marker=".", c="b", label="Ground state")
-            plt.plot(fpts, e_amps, marker=".", c="r", label="Excited state")
-            plt.plot(fpts, g_fit, "b-", alpha=0.7)
-            plt.plot(fpts, e_fit, "r-", alpha=0.7)
+        # Plot data and fits
+        ax.plot(fpts, g_amps, marker=".", c="b", label="Ground state")
+        ax.plot(fpts, e_amps, marker=".", c="r", label="Excited state")
+        ax.plot(fpts, g_fit, "b-", alpha=0.7)
+        ax.plot(fpts, e_fit, "r-", alpha=0.7)
 
-            # Mark resonance frequencies
-            label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_kappa:.1f} MHz"
-            label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_kappa:.1f} MHz"
-            plt.axvline(g_freq, color="b", ls="--", alpha=0.7, label=label_g)
-            plt.axvline(e_freq, color="r", ls="--", alpha=0.7, label=label_e)
+        # Mark resonance frequencies
+        label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_kappa:.1f} MHz"
+        label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_kappa:.1f} MHz"
+        ax.axvline(g_freq, color="b", ls="--", alpha=0.7, label=label_g)
+        ax.axvline(e_freq, color="r", ls="--", alpha=0.7, label=label_e)
 
-            plt.xlabel("Frequency (MHz)")
-            plt.ylabel("Amplitude (a.u.)")
-            plt.title(
-                f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {avg_kappa:.1f} MHz"
-            )
-            plt.legend()
-            plt.grid(True)
-            plt.show()
+        ax.set_xlabel("Frequency (MHz)")
+        ax.set_ylabel("Amplitude (a.u.)")
+        ax.set_title(
+            f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {avg_kappa:.1f} MHz"
+        )
+        ax.legend()
+        ax.grid(True)
 
-        return chi, avg_kappa
+        return chi, avg_kappa, fig
 
     def save(
         self,

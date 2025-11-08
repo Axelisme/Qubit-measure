@@ -24,7 +24,7 @@ def calc_peak_signals(
 
 class TransmissionModel:
     @classmethod
-    def calc_signals(cls, fpts, freq, Ql, a0, edelay) -> np.ndarray:
+    def calc_signals(cls, fpts, freq, Ql, a0, edelay, **kwargs) -> np.ndarray:
         return (
             a0
             * np.exp(-1j * 2 * np.pi * fpts * edelay)
@@ -41,7 +41,9 @@ class TransmissionModel:
 
         rot_signals = remove_edelay(fpts, signals, edelay)
         circle_params = fit_circle_params(rot_signals.real, rot_signals.imag)
-        freq, Ql, theta0 = fit_resonant_params(fpts, rot_signals, circle_params, fit_theta0=False)
+        freq, Ql, theta0 = fit_resonant_params(
+            fpts, rot_signals, circle_params, fit_theta0=False
+        )
         a0 = calc_peak_signals(circle_params, theta0)
 
         return dict(

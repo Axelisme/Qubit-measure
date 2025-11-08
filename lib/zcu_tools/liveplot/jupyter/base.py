@@ -1,9 +1,11 @@
 from itertools import chain
 from threading import Lock
+import warnings
 from typing import List, Optional, Tuple, TypeVar
 
 import matplotlib.pyplot as plt
 from IPython.display import display
+from ipywidgets import Output
 
 from ..segments import AbsSegment
 
@@ -16,17 +18,27 @@ def make_plot_frame(
     n_row: int, n_col: int, **kwargs
 ) -> Tuple[plt.FigureBase, List[List[plt.Axes]]]:
     kwargs.setdefault("squeeze", False)
-    kwargs.setdefault("figsize", (6 * n_col, 3 * n_row))
+    kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
     fig, axs = plt.subplots(n_row, n_col, **kwargs)
-    fig.tight_layout(pad=2.0)
 
     # this ensures the figure is rendered in Jupyter notebooks right now and can be updated later
     canvas = fig.canvas
-    display(canvas)
+
+    if not hasattr(canvas, "toolbar_visible"):
+        warnings.warn(
+            "Warning: The matplotlib backend should be set to 'widget' for live plotting."
+        )
+
+    canvas.toolbar_visible = False
+    canvas.header_visible = False
+    canvas.footer_visible = False
+    canvas.layout.height = f"{360 * n_row}px"
+
     canvas._handle_message(canvas, {"type": "send_image_mode"}, [])
     canvas._handle_message(canvas, {"type": "refresh"}, [])
     canvas._handle_message(canvas, {"type": "initialized"}, [])
     canvas._handle_message(canvas, {"type": "draw"}, [])
+    display(canvas)
 
     return fig, axs
 

@@ -69,7 +69,10 @@ class BasePulse(Module):
         prog.add_pulse(cfg["ch"], name, ro_ch=cfg.get("ro_ch"), **wav_kwargs)
 
         # register the pulse
-        self.register_module(prog, name)
+        self.register_module(prog, name, cfg)
+
+        if "mixer_freq" in cfg:
+            self.check_valid_mixer_freq(prog, name, cfg)
 
     def total_length(self) -> float:
         if self.cfg is None:
@@ -83,15 +86,39 @@ class BasePulse(Module):
     # -----------------------
     # TODO: better way to share pulse between modules?
 
-    def register_module(self, prog: MyProgramV2, name: str) -> None:
+    def register_module(
+        self, prog: MyProgramV2, name: str, cfg: Dict[str, Any]
+    ) -> None:
         if not hasattr(prog, "_module_pulse_list"):
-            prog._module_pulse_list = []
-        prog._module_pulse_list.append(name)
+            prog._module_pulse_list = dict()
+        prog._module_pulse_list[name] = cfg
 
     def has_registered(self, prog: MyProgramV2, name: str) -> bool:
         if not hasattr(prog, "_module_pulse_list"):
             return False
         return name in prog._module_pulse_list
+
+    @staticmethod
+    def check_valid_mixer_freq(
+        prog: MyProgramV2, name: str, cfg: Dict[str, Any]
+    ) -> None:
+        if not hasattr(prog, "_module_pulse_list"):
+            return
+
+        ch = cfg["ch"]
+        mixer_freq = cfg["mixer_freq"]
+
+        for pname, pcfg in prog._module_pulse_list.items():
+            if pcfg["ch"] != ch:
+                continue
+            p_mixer_freq = pcfg["mixer_freq"]
+            if p_mixer_freq != mixer_freq:
+                warnings.warn(
+                    f"Pulse {pname} and {name} use the same channel {ch} "
+                    f"but have different mixer frequencies: "
+                    f"({p_mixer_freq}) than the current pulse ({mixer_freq})"
+                    f"This may lead to unexpected behavior."
+                )
 
     # -----------------------
 

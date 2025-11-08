@@ -18,8 +18,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
-
-from ....runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 
 # (pdrs, signals_2d)  # signals shape: (2, len(pdrs)) for [w/o reset, w/ reset]
 ResetRabiCheckResultType = Tuple[np.ndarray, np.ndarray]
@@ -35,10 +34,6 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
     ) -> ResetRabiCheckResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        # Check that reset pulse is dual pulse type
-        if cfg["tested_reset"]["type"] != "bath":
-            raise ValueError("This experiment only supports bath reset")
-
         # Canonicalise sweep section to single-axis form
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
 
@@ -51,14 +46,18 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
         pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
         # Attach gain sweep to initialization pulse
-        cfg["init_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+        Pulse.set_param(
+            cfg["rabi_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+        )
         set_reset_cfg(
             cfg["tested_reset"],
             "on/off",
             sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"]),
         )
 
-        with LivePlotter1D("Pulse gain", "Amplitude", disable=not progress) as viewer:
+        with LivePlotter1D(
+            "Pulse gain", "Amplitude", segment_kwargs=dict(num_lines=2)
+        ) as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -67,13 +66,13 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
                             ctx.cfg,
                             modules=[
                                 make_reset("reset", ctx.cfg.get("reset")),
-                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
+                                Pulse("rabi_pulse", ctx.cfg["rabi_pulse"]),
                                 make_reset("tested_reset", ctx.cfg["tested_reset"]),
                                 make_readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
-                    result_shape=(len(pdrs),),
+                    result_shape=(2, len(pdrs)),
                 ),
                 update_hook=lambda ctx: viewer.update(
                     pdrs, reset_rabi_signal2real(np.asarray(ctx.get_data()))
@@ -102,7 +101,7 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
         filepath: str,
         result: Optional[ResetRabiCheckResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/reset/bath/rabi_check",
+        tag: str = "twotone/reset/rabi_check",
         **kwargs,
     ) -> None:
         if result is None:

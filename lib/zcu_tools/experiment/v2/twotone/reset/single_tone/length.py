@@ -19,8 +19,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
-
-from ....runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 
 # (lens, signals)
 SingleToneResetLengthResultType = Tuple[np.ndarray, np.ndarray]

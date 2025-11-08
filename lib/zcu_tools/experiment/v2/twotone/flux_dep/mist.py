@@ -343,10 +343,16 @@ MistResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]
 
 def mist_signal2real(signals: np.ndarray) -> np.ndarray:
     avg_len = max(int(0.05 * signals.shape[1]), 1)
+    std_len = max(int(0.3 * signals.shape[1]), 5)
 
-    mist_signals = signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
+    mist_signals = np.abs(
+        signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
+    )
+    if np.all(np.isnan(mist_signals)):
+        return mist_signals
+    mist_signals = np.clip(mist_signals, 0, 5 * np.nanstd(mist_signals[:, :std_len]))
 
-    return np.abs(mist_signals)
+    return mist_signals
 
 
 class MistExperiment(AbsExperiment[MistResultType]):
@@ -374,6 +380,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
             "Readout power (a.u.)",
             line_axis=1,
             num_lines=5,
+            title="MIST over FLux",
             disable=not progress,
         ) as viewer:
             results = Runner(
@@ -431,19 +438,17 @@ class MistExperiment(AbsExperiment[MistResultType]):
         else:
             xs = dev_values
 
-        amp_diff = np.abs(signals - np.mean(signals[:, :5], axis=1, keepdims=True))
+        amp_diff = mist_signal2real(signals)
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
         if ac_coeff is None:
             ys = pdrs
             ylabel = "probe gain (a.u.)"
-            # ax.set_ylim(0.01, 1)
         else:
             ys = ac_coeff * pdrs**2
             ylabel = r"$\bar n$"
-            ax.set_ylim(2, np.max(ys))
-            # ax.set_ylim(np.min(ys), np.max(ys))
+            ax.set_ylim(1, np.max(ys))
 
         dx = (pdrs[-1] - pdrs[0]) / (len(pdrs) - 1)
         dy = (xs[-1] - xs[0]) / (len(xs) - 1)
@@ -483,10 +488,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
     ) -> go.Figure:
         flxs = mA2flx(dev_values, mA_c, period)
 
-        amp_diff = np.abs(signals - np.mean(signals[:, :5], axis=1, keepdims=True))
-        max_value = 0.2 * np.max(amp_diff)
-        amp_diff = np.clip(amp_diff, 0, max_value) / max_value
-        # amp_diff = amp_diff / np.max(amp_diff, axis=1, keepdims=True)
+        amp_diff = mist_signal2real(signals)
         photons = ac_coeff * pdrs**2
 
         from zcu_tools.notebook.analysis.branch import plot_cn_with_mist
@@ -497,6 +499,8 @@ class MistExperiment(AbsExperiment[MistResultType]):
             mist_photons=photons,
             mist_amps=amp_diff,
         )
+
+        fig.update_yaxes(range=[photons[0], photons[-1]])
 
         if mA_c is not None and period is not None:
             # Add secondary x-axis for device values
