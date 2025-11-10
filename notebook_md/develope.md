@@ -129,7 +129,13 @@ fig = ze.twotone.flux_dep.MistExperiment().analyze(
     result=(As, pdrs, signals), mA_c=mA_c, period=period, ac_coeff=ac_coeff, fig=fig
 )
 
-fig.add_trace(go.Heatmap(z=overlay_0_over_flx.T, x=1 - flxs, y=ns, colorscale="Greys", showscale=False), row=2, col=1)
+fig.add_trace(
+    go.Heatmap(
+        z=overlay_0_over_flx.T, x=1 - flxs, y=ns, colorscale="Greys", showscale=False
+    ),
+    row=2,
+    col=1,
+)
 fig.add_trace(
     go.Scatter(
         x=1 - flxs,
@@ -139,10 +145,17 @@ fig.add_trace(
         name="Ground",
         showlegend=True,
     ),
-    row=2, col=1
+    row=2,
+    col=1,
 )
 fig.update_yaxes(range=[0, max_photon], row=2, col=1)
-fig.add_trace(go.Heatmap(z=overlay_1_over_flx.T, x=1 - flxs, y=ns, colorscale="Greys", showscale=False), row=3, col=1)
+fig.add_trace(
+    go.Heatmap(
+        z=overlay_1_over_flx.T, x=1 - flxs, y=ns, colorscale="Greys", showscale=False
+    ),
+    row=3,
+    col=1,
+)
 fig.add_trace(
     go.Scatter(
         x=1 - flxs,
@@ -152,7 +165,8 @@ fig.add_trace(
         name="Excited",
         showlegend=True,
     ),
-    row=3, col=1
+    row=3,
+    col=1,
 )
 fig.update_yaxes(range=[0, max_photon], row=3, col=1)
 fig.update_layout(height=600, margin=dict(t=10, b=20, l=20))
@@ -161,6 +175,16 @@ fig.write_image(f"../result/{qub_name}/image/mist_over_flux.png")
 fig.write_html(f"../result/{qub_name}/web/mist_over_flux.html")
 
 fig.show()
+```
+
+```python
+np.savez(
+    f"../result/{qub_name}/data/overlay_over_flx.npz",
+    flxs=flxs,
+    photons=ns,
+    overlay_0=overlay_0_over_flx,
+    overlay_1=overlay_1_over_flx,
+)
 ```
 
 # Try 2
@@ -544,9 +568,7 @@ fig = ze.twotone.flux_dep.MistExperiment().analyze(
 fig.add_trace(
     go.Scatter(x=1 - flxs, y=cirt_ns_0, mode="lines", line=dict(color="blue"))
 )
-fig.add_trace(
-    go.Scatter(x=1 - flxs, y=cirt_ns_1, mode="lines", line=dict(color="red"))
-)
+fig.add_trace(go.Scatter(x=1 - flxs, y=cirt_ns_1, mode="lines", line=dict(color="red")))
 
 fig.show()
 ```
