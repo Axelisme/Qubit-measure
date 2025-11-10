@@ -136,28 +136,13 @@ def plot_cn_over_flx(
 
 
 def plot_cn_with_mist(
+    fig,
     flxs: np.ndarray,
     photons: np.ndarray,
     populations_over_flx: np.ndarray,
     critical_levels: Dict[int, float],
     mist_flxs: np.ndarray,
-    mist_photons: np.ndarray,
-    mist_amps: np.ndarray,
-) -> go.Figure:
-    # plot the critical photon number as a function of flux
-    fig = go.Figure()
-
-    # plot the mist spectrum
-    fig.add_trace(
-        go.Heatmap(
-            z=mist_amps.T,
-            x=mist_flxs,
-            y=mist_photons,
-            colorscale="Viridis",
-            showscale=False,
-        )
-    )
-
+):
     flxs = np.concatenate([flxs, 1 - flxs[::-1]])
     populations_over_flx = np.concatenate(
         [populations_over_flx, populations_over_flx[::-1, ...]], axis=0
@@ -188,10 +173,4 @@ def plot_cn_with_mist(
             )
         )
     fig.update_xaxes(title_text="Flux", range=[mist_flxs.min(), mist_flxs.max()])
-    fig.update_yaxes(
-        title_text="Photon Number",
-        # range=[0.0, np.log10(mist_photons.max())],
-        # type="log",
-    )
-
-    return fig
+    fig.update_yaxes(title_text="Photon Number", range=[photons.min(), photons.max()])

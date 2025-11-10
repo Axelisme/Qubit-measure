@@ -216,16 +216,19 @@ fig = ze.twotone.flux_dep.MistExperiment().analyze(
     result=(As, pdrs, signals),
     mA_c=mA_c,
     period=period,
-    ac_coeff=ac_coeff,
-    with_simulation=True,
-    sim_kwargs=dict(
-        flxs=sim_flxs,
-        photons=sim_photons,
-        populations_over_flx=sim_populations,
-        critical_levels={0: 2.0, 1: 3.0},
-    ),
+    ac_coeff=ac_coeff
 )
 
+from zcu_tools.notebook.analysis.mist.branch import plot_cn_with_mist
+
+plot_cn_with_mist(
+    fig,
+    flxs=sim_flxs,
+    photons=sim_photons,
+    populations_over_flx=sim_populations,
+    critical_levels={0: 2.0, 1: 3.0},
+    mist_flxs=mA2flx(As, mA_c, period),
+)
 
 if isinstance(fig, plt.Figure):
     fig.savefig(f"../../../result/{qub_name}/image/mist_over_flux.png")

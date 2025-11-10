@@ -432,7 +432,7 @@ class MistExperiment(AbsExperiment[MistResultType]):
         period: Optional[float] = None,
         ac_coeff: Optional[float] = None,
         **kwargs,
-    ) -> plt.Figure:
+    ) -> go.Figure:
         if mA_c is not None and period is not None:
             xs = mA2flx(dev_values, mA_c, period)
         else:
@@ -440,7 +440,13 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
         amp_diff = mist_signal2real(signals)
 
-        fig, ax = plt.subplots(figsize=config.figsize)
+        fig = go.Figure()
+
+        if mA_c is not None and period is not None:
+            xlabel = r"$\phi$ (a.u.)"
+        else:
+            xlabel = r"$A$ (mA)"
+        fig.update_xaxes(title_text=xlabel, title_font_size=14)
 
         if ac_coeff is None:
             ys = pdrs
@@ -448,83 +454,11 @@ class MistExperiment(AbsExperiment[MistResultType]):
         else:
             ys = ac_coeff * pdrs**2
             ylabel = r"$\bar n$"
-            ax.set_ylim(1, np.max(ys))
+        fig.update_yaxes(title_text=ylabel, title_font_size=12, range=[ys[0], ys[-1]])
 
-        dx = (pdrs[-1] - pdrs[0]) / (len(pdrs) - 1)
-        dy = (xs[-1] - xs[0]) / (len(xs) - 1)
-        ax.imshow(
-            amp_diff.T,
-            origin="lower",
-            interpolation="none",
-            aspect="auto",
-            extent=[
-                xs[0] - 0.5 * dy,
-                xs[-1] + 0.5 * dy,
-                ys[0] - 0.5 * dx,
-                ys[-1] + 0.5 * dx,
-            ],
+        fig.add_trace(
+            go.Heatmap(x=xs, y=ys, z=amp_diff.T, showscale=False, colorscale="Greys")
         )
-        if mA_c is not None and period is not None:
-            ax.set_xlabel(r"$\phi$", fontsize=14)
-        else:
-            ax.set_xlabel(r"$A$ (mA)", fontsize=14)
-        ax.set_ylabel(ylabel, fontsize=14)
-        ax.set_yscale("log")
-        ax.tick_params(axis="both", which="major", labelsize=12)
-
-        return fig
-
-    def analyze_with_simulation(
-        self,
-        dev_values: np.ndarray,
-        pdrs: np.ndarray,
-        signals: np.ndarray,
-        *,
-        mA_c: Optional[float],
-        period: Optional[float],
-        ac_coeff: Optional[float],
-        sim_kwargs: Dict[str, Any],
-        **kwargs,
-    ) -> go.Figure:
-        flxs = mA2flx(dev_values, mA_c, period)
-
-        amp_diff = mist_signal2real(signals)
-        photons = ac_coeff * pdrs**2
-
-        from zcu_tools.notebook.analysis.branch import plot_cn_with_mist
-
-        fig = plot_cn_with_mist(
-            **sim_kwargs,
-            mist_flxs=flxs,
-            mist_photons=photons,
-            mist_amps=amp_diff,
-        )
-
-        fig.update_yaxes(range=[photons[0], photons[-1]])
-
-        if mA_c is not None and period is not None:
-            # Add secondary x-axis for device values
-            num_tick = min(100, len(flxs))
-            dev_ticks = np.linspace(dev_values[0], dev_values[-1], num_tick)
-            fig.update_layout(
-                xaxis2={
-                    "side": "top",
-                    "overlaying": "x",
-                    "tickmode": "array",
-                    "tickvals": mA2flx(dev_ticks, mA_c, period),
-                    "ticktext": [f"{v:.3e}" for v in dev_ticks],
-                },
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=flxs,
-                    y=[-1e-3] * len(flxs),
-                    mode="lines",
-                    line=dict(color="rgba(0,0,0,0)"),
-                    showlegend=False,
-                    xaxis="x2",
-                )
-            )
 
         return fig
 
@@ -535,34 +469,42 @@ class MistExperiment(AbsExperiment[MistResultType]):
         mA_c: Optional[float] = None,
         period: Optional[float] = None,
         ac_coeff: Optional[float] = None,
-        with_simulation: bool = False,
-        **kwargs,
-    ) -> plt.Figure:
+        fig: Optional[go.Figure] = None,
+    ) -> go.Figure:
         if result is None:
             result = self.last_result
 
-        values, pdrs, signals = result
+        dev_values, pdrs, signals = result
 
-        if with_simulation:
-            return self.analyze_with_simulation(
-                values,
-                pdrs,
-                signals,
-                mA_c=mA_c,
-                period=period,
-                ac_coeff=ac_coeff,
-                **kwargs,
-            )
+        if mA_c is not None and period is not None:
+            xs = mA2flx(dev_values, mA_c, period)
         else:
-            return self.analyze_only_mist(
-                values,
-                pdrs,
-                signals,
-                mA_c=mA_c,
-                period=period,
-                ac_coeff=ac_coeff,
-                **kwargs,
-            )
+            xs = dev_values
+
+        amp_diff = mist_signal2real(signals)
+
+        if fig is None:
+            fig = go.Figure()
+
+        if mA_c is not None and period is not None:
+            xlabel = r"$\phi$ (a.u.)"
+        else:
+            xlabel = r"$A$ (mA)"
+        fig.update_xaxes(title_text=xlabel, title_font_size=14, range=[xs[0], xs[-1]])
+
+        if ac_coeff is None:
+            ys = pdrs
+            ylabel = "probe gain (a.u.)"
+        else:
+            ys = ac_coeff * pdrs**2
+            ylabel = r"$\bar n$"
+        fig.update_yaxes(title_text=ylabel, title_font_size=12, range=[ys[0], ys[-1]])
+
+        fig.add_trace(
+            go.Heatmap(x=xs, y=ys, z=amp_diff.T, showscale=False, colorscale="Greys")
+        )
+
+        return fig
 
     def save(
         self,
