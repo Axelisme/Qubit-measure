@@ -9,14 +9,7 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    set_reset_cfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
@@ -31,9 +24,7 @@ def reset_length_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class LengthExperiment(AbsExperiment[DualToneResetLengthResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> DualToneResetLengthResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> DualToneResetLengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -46,11 +37,11 @@ class LengthExperiment(AbsExperiment[DualToneResetLengthResultType]):
         lens = sweep2array(cfg["sweep"]["length"])  # predicted pulse lengths
 
         # Attach length sweep parameter to both reset pulses
-        set_reset_cfg(
+        Reset.set_param(
             cfg["tested_reset"], "length", sweep2param("length", cfg["sweep"]["length"])
         )
 
-        with LivePlotter1D("Length (us)", "Amplitude", disable=not progress) as viewer:
+        with LivePlotter1D("Length (us)", "Amplitude") as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -58,10 +49,10 @@ class LengthExperiment(AbsExperiment[DualToneResetLengthResultType]):
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                make_reset("reset", ctx.cfg.get("reset")),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
-                                make_readout("readout", ctx.cfg["readout"]),
+                                Reset("tested_reset", ctx.cfg["tested_reset"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
@@ -80,12 +71,8 @@ class LengthExperiment(AbsExperiment[DualToneResetLengthResultType]):
         return lens, signals
 
     def analyze(
-        self,
-        result: Optional[DualToneResetLengthResultType] = None,
-        *,
-        plot: bool = True,
-        max_contrast: bool = True,
-    ) -> None:
+        self, result: Optional[DualToneResetLengthResultType] = None
+    ) -> plt.Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -97,16 +84,21 @@ class LengthExperiment(AbsExperiment[DualToneResetLengthResultType]):
         lens = lens[val_mask]
         signals = signals[val_mask]
 
-        real_signals = rotate2real(signals).real if max_contrast else np.abs(signals)
+        real_signals = reset_length_signal2real(signals)
 
-        if plot:
-            fig, ax = plt.subplots(figsize=config.figsize)
-            ax.plot(lens, real_signals, marker=".")
-            ax.set_xlabel("ProbeTime (us)", fontsize=14)
-            ax.set_ylabel("Signal (a.u.)", fontsize=14)
-            ax.grid(True)
-            ax.tick_params(axis="both", which="major", labelsize=12)
-            plt.show()
+        fig, ax = plt.subplots(figsize=config.figsize)
+        assert isinstance(fig, plt.Figure)
+
+        ax.plot(lens, real_signals, marker=".")
+        ax.set_xlabel("ProbeTime (us)", fontsize=14)
+        ax.set_ylabel("Signal (a.u.)", fontsize=14)
+        ax.grid(True)
+        ax.tick_params(axis="both", which="major", labelsize=12)
+        plt.show()
+
+        fig.tight_layout()
+
+        return fig
 
     def save(
         self,

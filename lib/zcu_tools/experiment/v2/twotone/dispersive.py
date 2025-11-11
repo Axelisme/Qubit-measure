@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,9 +7,9 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, set_readout_cfg, sweep2param
+from zcu_tools.program.v2 import Pulse, Readout, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting.resonance import get_proper_model, fit_edelay
+from zcu_tools.utils.fitting.resonance import fit_edelay, get_proper_model
 
 from ..runner import HardTask, Runner
 
@@ -28,18 +28,18 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
 
         # Canonicalise sweep section to single-axis form
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        cfg[
-            "sweep"
-        ] = {  # Prepend ge sweep to inner loop for measuring both ground and excited states
-            "ge": {"start": 0, "stop": cfg["qub_pulse"]["gain"], "expts": 2},
+        cfg["sweep"] = {
+            "ge": {"start": 0, "stop": 1.0, "expts": 2},
             "freq": cfg["sweep"]["freq"],
         }
 
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
         # Set with/without π gain for qubit pulse
-        cfg["qub_pulse"]["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
-        set_readout_cfg(
+        Pulse.set_param(
+            cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+        )
+        Readout.set_param(
             cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
@@ -100,7 +100,7 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
         avg_kappa = (g_kappa + e_kappa) / 2  # average linewidth κ/2π
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        fig.tight_layout()
+        assert isinstance(fig, plt.Figure)
 
         # Plot data and fits
         ax.plot(fpts, g_amps, marker=".", c="b", label="Ground state")
@@ -121,6 +121,8 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
         )
         ax.legend()
         ax.grid(True)
+
+        fig.tight_layout()
 
         return chi, avg_kappa, fig
 

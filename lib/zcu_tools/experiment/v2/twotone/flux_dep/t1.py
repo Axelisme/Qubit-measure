@@ -26,7 +26,9 @@ from .task import (
 )
 from .util import check_gains
 
-T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
+T1ResultType = Tuple[
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]
+]
 
 
 class T1Experiment(AbsExperiment[T1ResultType]):
@@ -88,6 +90,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         # -- Run Experiment --
         fig, axs = make_plot_frame(n_row=2, n_col=3, figsize=(15, 7))
+        assert isinstance(fig, plt.Figure)
 
         with MultiLivePlotter(
             fig,
@@ -98,7 +101,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     line_axis=1,
                     num_lines=5,
                     existed_frames=(fig, [[axs[1, 0], axs[0, 0]]]),
-                    disable=not progress,
                 ),
                 len_rabi=LivePlotter2DwithLine(
                     "Flux device value",
@@ -106,7 +108,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     line_axis=1,
                     num_lines=5,
                     existed_frames=(fig, [[axs[1, 1], axs[0, 1]]]),
-                    disable=not progress,
                 ),
                 t1=LivePlotter2DwithLine(
                     "Flux device value",
@@ -114,7 +115,6 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     line_axis=1,
                     num_lines=5,
                     existed_frames=(fig, [[axs[1, 2], axs[0, 2]]]),
-                    disable=not progress,
                 ),
             ),
         ) as viewer:
@@ -150,7 +150,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                                 soccfg, soc, detune_sweep, earlystop_snr
                             ),
                             len_rabi=MeasureLenRabiTask(
-                                soccfg, soc, rabilen_sweep, earlystop_snr
+                                soccfg, soc, rabilen_sweep, earlystop_snr=earlystop_snr
                             ),
                             t1=MeasureT1Task(soccfg, soc, t1len_sweep, earlystop_snr),
                         ),

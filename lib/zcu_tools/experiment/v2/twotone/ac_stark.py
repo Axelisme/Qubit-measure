@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,21 +9,14 @@ from matplotlib.image import NonUniformImage
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    check_block_mode,
-    make_readout,
-    make_reset,
-    sweep2param,
-)
+from zcu_tools.experiment.v2.utils import wrap_earlystop_check
+from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background, rotate2real
-from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 
-from ..runner import HardTask, Runner, SoftTask
+from ..runner import HardTask, Runner, SoftTask, TaskContext
 
 # (amps, freqs, signals2D)
 AcStarkResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
@@ -99,16 +92,19 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
             num_lines=2,
             uniform=False,
         ) as viewer:
+            ax1d = viewer.get_ax("1d")
 
-            def measure_fn(ctx, update_hook):
+            def measure_fn(
+                ctx: TaskContext, update_hook: Callable[[int, Any], None]
+            ) -> np.ndarray:
                 prog = ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        make_reset("reset", ctx.cfg.get("reset")),
+                        Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                         Pulse("stark_pulse1", ctx.cfg["stark_pulse1"]),
                         Pulse("stark_pulse2", ctx.cfg["stark_pulse2"]),
-                        make_readout("readout", ctx.cfg["readout"]),
+                        Readout("readout", ctx.cfg["readout"]),
                     ],
                 )
                 return prog.acquire(
@@ -119,9 +115,7 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
                         update_hook,
                         earlystop_snr,
                         signal2real_fn=np.abs,
-                        snr_hook=lambda snr: viewer.get_ax("1d").set_title(
-                            f"snr = {snr:.1f}"
-                        ),
+                        snr_hook=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),  # type: ignore
                     ),
                 )
 
@@ -195,6 +189,7 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
         avg_n = ac_coeff * pdrs2
 
         fig, ax1 = plt.subplots(figsize=config.figsize)
+        assert isinstance(fig, plt.Figure)
 
         # Use NonUniformImage for better visualization with pdr^2 as x-axis
         im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
@@ -258,121 +253,6 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
         save_data(
             filepath=filepath,
             x_info={"name": "Stark Pulse Gain", "unit": "a.u.", "values": pdrs},
-            y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
-            comment=comment,
-            tag=tag,
-            **kwargs,
-        )
-
-
-PhotonLookbackResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
-
-
-def photonlookback_signal2real(signals: np.ndarray) -> np.ndarray:
-    return rotate2real(signals).real
-
-
-class PhotonLookbackExperiment(AbsExperiment[PhotonLookbackResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> PhotonLookbackResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        qub_pulse = cfg["qub_pulse"]
-        check_block_mode("qub_pulse", qub_pulse, want_block=False)
-
-        # let length be outer loop
-        cfg["sweep"] = {
-            "offset": cfg["sweep"]["offset"],
-            "freq": cfg["sweep"]["freq"],
-        }
-
-        # predict point
-        offsets = sweep2array(cfg["sweep"]["offset"])
-        fpts = sweep2array(cfg["sweep"]["freq"])
-
-        # swept by FPGA (hard sweep)
-        qub_pulse["pre_delay"] = sweep2param("offset", cfg["sweep"]["offset"])
-        qub_pulse["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
-
-        signals = Runner(
-            task=HardTask(
-                measure_fn=lambda ctx, update_hook: (
-                    ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            make_reset("reset", reset_cfg=ctx.cfg.get("reset")),
-                            Pulse(name="qub_pulse", cfg=ctx.cfg["qub_pulse"]),
-                            Pulse(name="probe_pulse", cfg=ctx.cfg["probe_pulse"]),
-                            make_readout("readout", readout_cfg=ctx.cfg["readout"]),
-                        ],
-                    ).acquire(soc, progress=progress, callback=update_hook)
-                ),
-                result_shape=(len(offsets), len(fpts)),
-            ),
-            liveplotter=LivePlotter2D(
-                "Time (us)", "Frequency (MHz)", disable=not progress
-            ),
-            update_hook=lambda viewer, ctx: viewer.update(
-                offsets, fpts, photonlookback_signal2real(np.asarray(ctx.get_data()))
-            ),
-        ).run(cfg)
-        signals = np.asarray(signals)
-
-        # Cache results
-        self.last_cfg = cfg
-        self.last_result = (offsets, fpts, signals)
-
-        return offsets, fpts, signals
-
-    def analyze(self, result: Optional[PhotonLookbackResultType] = None) -> float:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "No result found"
-
-        offsets, fpts, signals = result
-
-        amps = rotate2real(minus_background(signals, axis=1)).real
-        amps /= np.std(amps, axis=1, keepdims=True)
-        s_offsets, s_fpts = get_resonance_freq(offsets, fpts, amps)
-
-        # plot the data and the fitted polynomial
-        fig, ax = plt.subplots(figsize=config.figsize)
-
-        ax.imshow(
-            amps.T,
-            origin="lower",
-            interpolation="none",
-            aspect="auto",
-            extent=[offsets[0], offsets[-1], fpts[0], fpts[-1]],
-        )
-        ax.plot(s_offsets, s_fpts, ".", c="k")
-
-        ax.set_xlabel("Time (us)", fontsize=14)
-        ax.set_ylabel("Qubit Frequency (MHz)", fontsize=14)
-
-        fig.tight_layout()
-        plt.show()
-
-    def save(
-        self,
-        filepath: str,
-        result: Optional[PhotonLookbackResultType] = None,
-        comment: Optional[str] = None,
-        tag: str = "twotone/photon_lookback",
-        **kwargs,
-    ) -> None:
-        if result is None:
-            result = self.last_result
-        assert result is not None, "no result found"
-
-        offsets, fpts, signals2D = result
-
-        save_data(
-            filepath=filepath,
-            x_info={"name": "Time", "unit": "s", "values": offsets * 1e-6},
             y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,

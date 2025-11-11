@@ -7,18 +7,11 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    set_reset_cfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
-from zcu_tools.experiment.v2.runner import HardTask, Runner
 
 # (pdrs, signals_2d)  # signals shape: (2, len(pdrs)) for [w/o reset, w/ reset]
 ResetRabiCheckResultType = Tuple[np.ndarray, np.ndarray]
@@ -49,7 +42,7 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
         Pulse.set_param(
             cfg["rabi_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
         )
-        set_reset_cfg(
+        Reset.set_param(
             cfg["tested_reset"],
             "on/off",
             sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"]),
@@ -65,10 +58,10 @@ class RabiCheckExperiment(AbsExperiment[ResetRabiCheckResultType]):
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                make_reset("reset", ctx.cfg.get("reset")),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("rabi_pulse", ctx.cfg["rabi_pulse"]),
-                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
-                                make_readout("readout", ctx.cfg["readout"]),
+                                Reset("tested_reset", ctx.cfg["tested_reset"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),

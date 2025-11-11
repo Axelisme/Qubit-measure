@@ -6,7 +6,6 @@ import numpy as np
 from qick.asm_v2 import QickParam
 
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.process import rotate2real
 
 
 def wrap_with_flux_pulse(
@@ -84,5 +83,3 @@ def check_gains(gains: float, name: str) -> np.ndarray:
         )
         gains = np.clip(gains, 0.0, 1.0)
     return gains
-
-

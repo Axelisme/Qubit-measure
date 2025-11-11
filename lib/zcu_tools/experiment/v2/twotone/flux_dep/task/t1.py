@@ -18,8 +18,8 @@ from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
     Pulse,
-    make_readout,
-    make_reset,
+    Readout,
+    Reset,
     sweep2param,
 )
 from zcu_tools.utils.fitting import fit_decay
@@ -89,12 +89,12 @@ class MeasureT1Task(AbsAutoTask):
             self.soccfg,
             cfg,
             modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
+                Reset("reset", cfg.get("reset", {"type": "none"})),
                 Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
                 Delay(
                     name="t1_delay", delay=sweep2param("length", cfg["sweep"]["length"])
                 ),
-                make_readout("readout", readout_cfg=cfg["readout"]),
+                Readout("readout", cfg["readout"]),
             ],
         )
         return prog.acquire(

@@ -10,13 +10,7 @@ import numpy as np
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    sweep2param,
-    Pulse,
-    make_readout,
-    make_reset,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 # (signals)
@@ -71,9 +65,9 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
             soccfg,
             cfg,
             modules=[
-                make_reset("reset", cfg.get("reset")),
+                Reset("reset", cfg.get("reset", {"type": "none"})),
                 Pulse("probe_pulse", cfg["probe_pulse"]),
-                make_readout("readout", cfg["readout"]),
+                Readout("readout", cfg["readout"]),
             ],
         )
         prog.acquire(soc, progress=progress)

@@ -13,13 +13,7 @@ from zcu_tools.experiment.v2.runner import (
     TaskContext,
 )
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
@@ -74,7 +68,7 @@ class MeasureDetuneTask(AbsAutoTask):
             self.soccfg,
             cfg,
             modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
+                Reset("reset", cfg.get("reset", {"type": "none"})),
                 Pulse(
                     name="qub_pulse",
                     cfg={
@@ -82,7 +76,7 @@ class MeasureDetuneTask(AbsAutoTask):
                         "freq": cfg["qub_pulse"]["freq"] + detune_params,
                     },
                 ),
-                make_readout("readout", readout_cfg=cfg["readout"]),
+                Readout("readout", cfg["readout"]),
             ],
         )
         return prog.acquire(

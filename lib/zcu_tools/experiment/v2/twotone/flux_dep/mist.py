@@ -422,46 +422,6 @@ class MistExperiment(AbsExperiment[MistResultType]):
 
         return values, gains, signals
 
-    def analyze_only_mist(
-        self,
-        dev_values: np.ndarray,
-        pdrs: np.ndarray,
-        signals: np.ndarray,
-        *,
-        mA_c: Optional[float] = None,
-        period: Optional[float] = None,
-        ac_coeff: Optional[float] = None,
-        **kwargs,
-    ) -> go.Figure:
-        if mA_c is not None and period is not None:
-            xs = mA2flx(dev_values, mA_c, period)
-        else:
-            xs = dev_values
-
-        amp_diff = mist_signal2real(signals)
-
-        fig = go.Figure()
-
-        if mA_c is not None and period is not None:
-            xlabel = r"$\phi$ (a.u.)"
-        else:
-            xlabel = r"$A$ (mA)"
-        fig.update_xaxes(title_text=xlabel, title_font_size=14)
-
-        if ac_coeff is None:
-            ys = pdrs
-            ylabel = "probe gain (a.u.)"
-        else:
-            ys = ac_coeff * pdrs**2
-            ylabel = r"$\bar n$"
-        fig.update_yaxes(title_text=ylabel, title_font_size=12, range=[ys[0], ys[-1]])
-
-        fig.add_trace(
-            go.Heatmap(x=xs, y=ys, z=amp_diff.T, showscale=False, colorscale="Greys")
-        )
-
-        return fig
-
     def analyze(
         self,
         result: Optional[MistResultType] = None,

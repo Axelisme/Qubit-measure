@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Callable, Dict, Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from zcu_tools.experiment.utils import sweep2array
@@ -14,13 +13,7 @@ from zcu_tools.experiment.v2.runner import (
     TaskContext,
 )
 from zcu_tools.experiment.v2.utils import set_pulse_freq, wrap_earlystop_check
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
@@ -82,9 +75,9 @@ class MeasureLenRabiTask(AbsAutoTask):
             self.soccfg,
             cfg,
             modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
+                Reset("reset", cfg.get("reset", {"type": "none"})),
                 Pulse(name=self.pulse_name, cfg=cfg[self.pulse_name]),
-                make_readout("readout", readout_cfg=cfg["readout"]),
+                Readout("readout", cfg["readout"]),
             ],
         )
         return prog.acquire(
@@ -101,7 +94,9 @@ class MeasureLenRabiTask(AbsAutoTask):
     def init(self, ctx: TaskContext, keep: bool = True) -> None:
         self.task.init(ctx, keep=keep)
 
-    def run(self, ctx: TaskContext, need_infos: Dict[str, np.ndarray]) -> None:
+    def run(
+        self, ctx: TaskContext, need_infos: Dict[str, np.ndarray]
+    ) -> Dict[str, float]:
         fallback_infos = {
             "pi_length": np.nan,
             "pi2_length": np.nan,

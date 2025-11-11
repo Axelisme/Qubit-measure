@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,15 +13,15 @@ from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
+    Readout,
     Repeat,
-    make_readout,
-    make_reset,
+    Reset,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..runner import HardTask, Runner, SoftTask
+from ..runner import HardTask, Runner, SoftTask, TaskContext
 
 
 def zigzag_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -52,10 +52,12 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
 
         del cfg["sweep"]
 
-        def updateCfg(_, ctx, time: int) -> None:
+        def updateCfg(_: int, ctx: TaskContext, time: float) -> None:
             ctx.cfg["zigzag_time"] = time
 
-        def measure_fn(ctx, update_hook) -> np.ndarray:
+        def measure_fn(
+            ctx: TaskContext, update_hook: Callable[[int, Any], None]
+        ) -> np.ndarray:
             zigzag_time = ctx.cfg["zigzag_time"]
 
             if repeat_on == "X90_pulse":
@@ -67,7 +69,7 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    make_reset("reset", ctx.cfg.get("reset")),
+                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                     Pulse(name="X90_pulse", cfg=X90_pulse),
                     Repeat(
                         name="zigzag_loop",
@@ -76,11 +78,13 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
                             name=f"loop_{repeat_on}", cfg=ctx.cfg[repeat_on]
                         ),
                     ),
-                    make_readout("readout", ctx.cfg["readout"]),
+                    Readout("readout", ctx.cfg["readout"]),
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter1D("Times", "Signal", segment_kwargs=dict(show_grid=True), disable=not progress) as viewer:
+        with LivePlotter1D(
+            "Times", "Signal", segment_kwargs=dict(show_grid=True), disable=not progress
+        ) as viewer:
             signals = Runner(
                 task=SoftTask(
                     sweep_name="times",
@@ -165,10 +169,12 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
             x_info["param_key"], cfg["sweep"][x_key]
         )
 
-        def updateCfg(_, ctx, time: int) -> None:
+        def updateCfg(_: int, ctx: TaskContext, time: float) -> None:
             ctx.cfg["zigzag_time"] = time
 
-        def measure_fn(ctx, update_hook) -> np.ndarray:
+        def measure_fn(
+            ctx: TaskContext, update_hook: Callable[[int, Any], None]
+        ) -> np.ndarray:
             zigzag_time = ctx.cfg["zigzag_time"]
 
             if repeat_on == "X90_pulse":
@@ -180,7 +186,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    make_reset("reset", ctx.cfg.get("reset")),
+                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                     Pulse(name="X90_pulse", cfg=X90_pulse),
                     Repeat(
                         name="zigzag_loop",
@@ -189,7 +195,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
                             name=f"loop_{repeat_on}", cfg=ctx.cfg[repeat_on]
                         ),
                     ),
-                    make_readout("readout", ctx.cfg["readout"]),
+                    Readout("readout", ctx.cfg["readout"]),
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 

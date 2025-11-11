@@ -15,8 +15,8 @@ from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
     Pulse,
-    make_readout,
-    make_reset,
+    Readout,
+    Reset,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
@@ -67,7 +67,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                make_reset("reset", ctx.cfg.get("reset")),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
                                 Delay(
                                     name="t1_delay",
@@ -75,7 +75,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                                         "length", ctx.cfg["sweep"]["length"]
                                     ),
                                 ),
-                                make_readout("readout", ctx.cfg["readout"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
@@ -117,6 +117,8 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
 
         fig, ax = plt.subplots(figsize=config.figsize)
+        assert isinstance(fig, plt.Figure)
+
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
@@ -176,33 +178,33 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
 
         ts = sweep2array(cfg["sweep"]["length"])
 
-        signals = Runner(
-            task=HardTask(
-                measure_fn=lambda ctx, update_hook: (
-                    ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            make_reset("reset", reset_cfg=cfg.get("reset")),
-                            Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                            Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
-                            make_readout("readout", readout_cfg=cfg["readout"]),
-                        ],
-                    ).acquire(soc, progress=progress, callback=update_hook)
+        with LivePlotter1D(
+            "Time (us)",
+            "Amplitude",
+            segment_kwargs={"title": "T1 relaxation"},
+            disable=not progress,
+        ) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                Reset("reset", cfg.get("reset", {"type": "none"})),
+                                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                                Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
+                                Readout("readout", cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=progress, callback=update_hook)
+                    ),
+                    result_shape=(len(ts),),
                 ),
-                result_shape=(len(ts),),
-            ),
-            liveplotter=LivePlotter1D(
-                "Time (us)",
-                "Amplitude",
-                segment_kwargs={"title": "T1 relaxation"},
-                disable=not progress,
-            ),
-            update_hook=lambda viewer, ctx: viewer.update(
-                ts, t1_signal2real(np.asarray(ctx.get_data()))
-            ),
-        ).run(cfg)
-        signals = np.asarray(signals)
+                update_hook=lambda ctx: viewer.update(
+                    ts, t1_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -211,49 +213,42 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
         return ts, signals
 
     def analyze(
-        self,
-        result: Optional[T1ResultType] = None,
-        *,
-        plot: bool = True,
-        max_contrast: bool = True,
-        dual_exp: bool = False,
-    ) -> Tuple[float, float]:
+        self, result: Optional[T1ResultType] = None, *, dual_exp: bool = False
+    ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         xs, signals = result
 
-        if max_contrast:
-            real_signals = rotate2real(signals).real
-        else:
-            real_signals = np.abs(signals)
+        real_signals = rotate2real(signals).real
 
         if dual_exp:
             t1, t1err, t1b, t1berr, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
         else:
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
 
-        if plot:
-            t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
-            if dual_exp:
-                t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
+        t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
+        if dual_exp:
+            t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
 
-            fig, ax = plt.subplots(figsize=config.figsize)
-            ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-            ax.plot(xs, y_fit, label="fit")
-            if dual_exp:
-                ax.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
-                ax.set_title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
-            else:
-                ax.set_title(f"T1 = {t1_str}", fontsize=15)
-            ax.set_xlabel("Time (us)")
-            ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
-            ax.legend()
-            fig.tight_layout()
-            plt.show()
+        fig, ax = plt.subplots(figsize=config.figsize)
+        assert isinstance(fig, plt.Figure)
 
-        return t1, t1err
+        ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(xs, y_fit, label="fit")
+        if dual_exp:
+            ax.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
+            ax.set_title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
+        else:
+            ax.set_title(f"T1 = {t1_str}", fontsize=15)
+        ax.set_xlabel("Time (us)")
+        ax.set_ylabel("Signal Real (a.u.)")
+        ax.legend()
+
+        fig.tight_layout()
+
+        return t1, t1err, fig
 
     def save(
         self,
@@ -319,32 +314,28 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
         values = sweep2array(cfg["sweep"][x_key])  # predicted
         ts = sweep2array(cfg["sweep"]["length"])  # predicted times
 
-        signals = Runner(
-            task=HardTask(
-                measure_fn=lambda ctx, update_hook: (
-                    ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            make_reset("reset", reset_cfg=cfg.get("reset")),
-                            Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                            Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
-                            make_readout("readout", readout_cfg=cfg["readout"]),
-                        ],
-                    ).acquire(soc, progress=progress, callback=update_hook)
+        with LivePlotter2D(x_info["name"], "Time (us)", disable=not progress) as viewer:
+            signals = Runner(
+                task=HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                Reset("reset", cfg.get("reset", {"type": "none"})),
+                                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
+                                Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
+                                Readout("readout", cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=progress, callback=update_hook)
+                    ),
+                    result_shape=(len(values), len(ts)),
                 ),
-                result_shape=(len(values), len(ts)),
-            ),
-            liveplotter=LivePlotter2D(
-                x_info["name"],
-                "Time (us)",
-                disable=not progress,
-            ),
-            update_hook=lambda viewer, ctx: viewer.update(
-                values, ts, t1_signal2real(np.asarray(ctx.get_data()))
-            ),
-        ).run(cfg)
-        signals = np.asarray(signals)
+                update_hook=lambda ctx: viewer.update(
+                    values, ts, t1_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -352,7 +343,9 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
 
         return values, ts, signals
 
-    def analyze(self, result: Optional[T1ResultType] = None) -> Tuple[float, float]:
+    def analyze(
+        self, result: Optional[T1SweepResultType] = None
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -388,9 +381,11 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
         t1s = t1s[valid_idxs]
         t1errs = t1errs[valid_idxs]
 
-        _, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        assert isinstance(fig, plt.Figure)
         assert isinstance(ax1, plt.Axes)
         assert isinstance(ax2, plt.Axes)
+
         ax1.set_ylabel("T1 over sweep value")
         ax1.imshow(
             real_signals.T,
@@ -406,14 +401,13 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
         ax2.set_ylim(bottom=0)
         ax2.set_xlim(values[0], values[-1])
         ax2.grid()
-        plt.plot()
 
-        return valid_values, t1s, t1errs
+        return valid_values, t1s, t1errs, fig
 
     def save(
         self,
         filepath: str,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1SweepResultType] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1_with_tone_sweep",
         **kwargs,

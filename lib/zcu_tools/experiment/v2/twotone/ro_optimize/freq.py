@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,17 +8,10 @@ from scipy.ndimage import gaussian_filter1d
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import (
-    set_readout_cfg,
-    sweep2param,
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
-from ...runner import HardTask, Runner
+from ...runner import HardTask, Runner, TaskContext
 from .base import snr_as_signal
 
 FreqResultType = Tuple[np.ndarray, np.ndarray]  # (fpts, snrs)
@@ -43,18 +36,20 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
         Pulse.set_param(
             cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
-        set_readout_cfg(
+        Readout.set_param(
             cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
-        def measure_fn(ctx, update_hook):
+        def measure_fn(
+            ctx: TaskContext, update_hook: Callable[[int, Any], None]
+        ) -> Tuple[np.ndarray, np.ndarray]:
             prog = ModularProgramV2(
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    make_reset("reset", ctx.cfg.get("reset")),
+                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                     Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                    make_readout("readout", ctx.cfg["readout"]),
+                    Readout("readout", ctx.cfg["readout"]),
                 ],
             )
             avg_d = prog.acquire(
@@ -91,6 +86,7 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
     ) -> float:
         if result is None:
             result = self.last_result
+        assert result is not None, "no result found"
 
         fpts, signals = result
 
@@ -126,6 +122,7 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
     ) -> None:
         if result is None:
             result = self.last_result
+        assert result is not None, "no result found"
 
         fpts, singals = result
 

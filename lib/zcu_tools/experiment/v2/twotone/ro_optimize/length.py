@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,17 +8,10 @@ from scipy.ndimage import gaussian_filter1d
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import (
-    set_readout_cfg,
-    sweep2param,
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
-from ...runner import HardTask, Runner, SoftTask
+from ...runner import HardTask, Runner, SoftTask, TaskContext
 from .base import snr_as_signal
 
 LengthResultType = Tuple[np.ndarray, np.ndarray]  # (lengths, snrs)
@@ -44,17 +37,23 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         lengths = sweep2array(length_sweep)  # predicted readout lengths
 
         # set initial readout length and adjust pulse length
-        set_readout_cfg(cfg["readout"], "ro_length", lengths[0])
-        set_readout_cfg(cfg["readout"], "length", lengths.max() + 0.1)
+        Readout.set_param(
+            cfg["readout"], "ro_length", sweep2param("length", lengths[0])
+        )
+        Readout.set_param(
+            cfg["readout"], "length", sweep2param("length", lengths.max() + 0.1)
+        )
 
-        def measure_fn(ctx, update_hook):
+        def measure_fn(
+            ctx: TaskContext, update_hook: Callable[[int, Any], None]
+        ) -> Tuple[np.ndarray, np.ndarray]:
             prog = ModularProgramV2(
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    make_reset("reset", ctx.cfg.get("reset")),
+                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                     Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                    make_readout("readout", ctx.cfg["readout"]),
+                    Readout("readout", ctx.cfg["readout"]),
                 ],
             )
             avg_d = prog.acquire(
@@ -70,7 +69,7 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
                 task=SoftTask(
                     sweep_name="length",
                     sweep_values=lengths,
-                    update_cfg_fn=lambda _, ctx, length: set_readout_cfg(
+                    update_cfg_fn=lambda _, ctx, length: Readout.set_param(
                         ctx.cfg["readout"], "ro_length", length
                     ),
                     sub_task=HardTask(
@@ -140,6 +139,7 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
     ) -> None:
         if result is None:
             result = self.last_result
+        assert result is not None, "no result found"
 
         lengths, signals = result
 

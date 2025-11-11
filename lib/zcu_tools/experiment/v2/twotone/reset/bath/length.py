@@ -7,22 +7,14 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    set_reset_cfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ....runner import HardTask, Runner
-
-# (fpts, phases, signals_2d)
-LengthResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+# (lens, signals)
+LengthResultType = Tuple[np.ndarray, np.ndarray]
 
 
 def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -31,13 +23,7 @@ def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
 
 class LengthExperiment(AbsExperiment[LengthResultType]):
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-        detune: float = 0.0,
+        self, soc, soccfg, cfg: Dict[str, Any], detune: float = 0.0
     ) -> LengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -50,12 +36,10 @@ class LengthExperiment(AbsExperiment[LengthResultType]):
         lens = sweep2array(cfg["sweep"]["length"])  # predicted frequency points
 
         len_spans = sweep2param("length", cfg["sweep"]["length"])
-        set_reset_cfg(cfg["tested_reset"], "length", len_spans)
-        set_reset_cfg(cfg["tested_reset"], "pi2_phase", 360 * detune * len_spans)
+        Reset.set_param(cfg["tested_reset"], "length", len_spans)
+        Reset.set_param(cfg["tested_reset"], "pi2_phase", 360 * detune * len_spans)
 
-        with LivePlotter1D(
-            "Length (us)", "Signal (a.u.)", disable=not progress
-        ) as viewer:
+        with LivePlotter1D("Length (us)", "Signal (a.u.)") as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -63,10 +47,10 @@ class LengthExperiment(AbsExperiment[LengthResultType]):
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                make_reset("reset", ctx.cfg.get("reset")),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
-                                make_readout("readout", ctx.cfg["readout"]),
+                                Reset("tested_reset", ctx.cfg["tested_reset"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),

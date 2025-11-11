@@ -12,13 +12,7 @@ from zcu_tools.experiment.v2.runner import (
     TaskContext,
 )
 from zcu_tools.experiment.v2.utils import set_pulse_freq
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 
 
 def automist_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -71,18 +65,20 @@ class MeasureMistTask(AbsAutoTask):
             self.soccfg,
             cfg,
             modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
+                Reset("reset", cfg.get("reset", {"type": "none"})),
                 Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
                 Pulse(name="probe_pulse", cfg=cfg[self.pulse_name]),
-                make_readout("readout", readout_cfg=cfg["readout"]),
+                Readout("readout", cfg["readout"]),
             ],
         ).acquire(self.soc, progress=False, callback=update_hook)
 
     def init(self, ctx: TaskContext, keep: bool = True) -> None:
         self.task.init(ctx, keep=keep)
 
-    def run(self, ctx: TaskContext, need_infos: Dict[str, np.ndarray]) -> None:
-        fallback_infos = {}
+    def run(
+        self, ctx: TaskContext, need_infos: Dict[str, np.ndarray]
+    ) -> Dict[str, float]:
+        fallback_infos: Dict[str, float] = {}
 
         # set pulse freq to fitted freq
         fit_freq = need_infos.get("qubit_freq", np.nan)

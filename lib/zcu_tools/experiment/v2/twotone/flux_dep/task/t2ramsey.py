@@ -18,8 +18,8 @@ from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
     Pulse,
-    make_readout,
-    make_reset,
+    Readout,
+    Reset,
     sweep2param,
 )
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
@@ -92,7 +92,7 @@ class MeasureT2RamseyTask(AbsAutoTask):
             self.soccfg,
             cfg,
             modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
+                Reset("reset", cfg.get("reset", {"type": "none"})),
                 Pulse(name="pi2_pulse1", cfg=cfg["pi2_pulse"]),
                 Delay(name="t2r_delay", delay=t2r_params),
                 Pulse(
@@ -103,7 +103,7 @@ class MeasureT2RamseyTask(AbsAutoTask):
                         + 360 * self.activate_detune * t2r_params,
                     },
                 ),
-                make_readout("readout", readout_cfg=cfg["readout"]),
+                Readout("readout", cfg["readout"]),
             ],
         )
         return prog.acquire(

@@ -35,7 +35,7 @@ class AutoBatchTask(BatchTask):
         assert self.task_pbar is not None
         self.task_pbar.reset()
 
-        meta_infos: Dict[str, complex] = {}
+        meta_infos: Dict[str, Dict[str, complex]] = {}
 
         for name, task in self.tasks.items():
             self.task_pbar.set_description(desc=f"Task [{str(name)}]")
@@ -61,7 +61,7 @@ class AutoBatchTask(BatchTask):
             self.task_pbar.update()
 
             # set meta information to context
-            ctx(addr="meta_infos").set_current_data(meta_infos)
+            ctx(addr="meta_infos").set_current_data(meta_infos)  # type: ignore
 
     def get_default_result(self) -> ResultType:
         default_result = {

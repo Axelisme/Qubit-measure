@@ -8,20 +8,12 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    set_reset_cfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting.base import cosfunc, fitcos
 from zcu_tools.utils.process import rotate2real
-
-from ....runner import HardTask, Runner
 
 # (phases, signals)
 PhaseResultType = Tuple[np.ndarray, np.ndarray]
@@ -32,9 +24,7 @@ def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class PhaseExperiment(AbsExperiment[PhaseResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> PhaseResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> PhaseResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -46,11 +36,9 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
         phases = sweep2array(cfg["sweep"]["phase"])  # predicted phase points
 
         phase_param = sweep2param("phase", cfg["sweep"]["phase"])
-        set_reset_cfg(cfg["tested_reset"], "pi2_phase", phase_param)
+        Reset.set_param(cfg["tested_reset"], "pi2_phase", phase_param)
 
-        with LivePlotter1D(
-            "Phase (deg)", "Signal (a.u.)", disable=not progress
-        ) as viewer:
+        with LivePlotter1D("Phase (deg)", "Signal (a.u.)") as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -58,10 +46,10 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                make_reset("reset", ctx.cfg.get("reset")),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
-                                make_readout("readout", ctx.cfg["readout"]),
+                                Reset("tested_reset", ctx.cfg["tested_reset"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
@@ -79,7 +67,9 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
 
         return phases, signals
 
-    def analyze(self, result: Optional[PhaseResultType] = None) -> None:
+    def analyze(
+        self, result: Optional[PhaseResultType] = None
+    ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -95,6 +85,8 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
         min_phase = phases[np.argmin(y_fit)]
 
         fig, ax = plt.subplots()
+        assert isinstance(fig, plt.Figure)
+
         ax.plot(phases, real_signals, ".-", label="data")
         ax.plot(phases, y_fit, "-", label="fit")
         ax.axvline(
@@ -107,7 +99,9 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
         ax.set_ylabel("Signal (a.u.)")
         ax.legend()
 
-        return max_phase, min_phase
+        fig.tight_layout()
+
+        return max_phase, min_phase, fig
 
     def save(
         self,

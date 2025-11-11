@@ -8,18 +8,11 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    set_reset_cfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
-from zcu_tools.experiment.v2.runner import HardTask, Runner
 
 # (lens, signals)
 SingleToneResetLengthResultType = Tuple[np.ndarray, np.ndarray]
@@ -44,7 +37,7 @@ class LengthExperiment(AbsExperiment[SingleToneResetLengthResultType]):
         if cfg["tested_reset"]["type"] != "pulse":
             raise ValueError("This experiment only supports single pulse reset")
 
-        set_reset_cfg(
+        Reset.set_param(
             cfg["tested_reset"], "length", sweep2param("length", cfg["sweep"]["length"])
         )
 
@@ -56,10 +49,10 @@ class LengthExperiment(AbsExperiment[SingleToneResetLengthResultType]):
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                make_reset("reset", ctx.cfg.get("reset")),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
-                                make_readout("readout", ctx.cfg["readout"]),
+                                Reset("tested_reset", ctx.cfg["tested_reset"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),

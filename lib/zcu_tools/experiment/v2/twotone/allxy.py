@@ -9,7 +9,7 @@ from scipy.optimize import curve_fit
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, make_readout, make_reset
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
@@ -148,10 +148,13 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
                                     soccfg,
                                     ctx.cfg,
                                     modules=[
-                                        make_reset("reset", ctx.cfg.get("reset")),
+                                        Reset(
+                                            "reset",
+                                            ctx.cfg.get("reset", {"type": "none"}),
+                                        ),
                                         Pulse("first_pulse", gate2pulse_map[gate1]),
                                         Pulse("second_pulse", gate2pulse_map[gate2]),
-                                        make_readout("readout", ctx.cfg["readout"]),
+                                        Readout("readout", ctx.cfg["readout"]),
                                     ],
                                 ).acquire(soc, progress=False, callback=update_hook)
                             )
@@ -160,8 +163,8 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
                     }
                 ),
                 update_hook=lambda ctx: viewer.update(
-                        np.arange(len(ALLXY_SEQUENCE)),
-                        allxy_signal2real(ctx.get_data()),
+                    np.arange(len(ALLXY_SEQUENCE)),
+                    allxy_signal2real(ctx.get_data()),
                 ),
             ).run(cfg)
 
@@ -201,7 +204,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             return center + 0.5 * contrast * predict_state_with_error(seq, ep, ed)
 
         if fit_ge:
-            params, _ = curve_fit(
+            params, *_ = curve_fit(
                 lambda _, *args: [calc_sim_signal(seq, *args) for seq in sequence],
                 np.arange(len(sequence)),
                 real_signals,
@@ -217,7 +220,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             center = init_center
             contrast = init_contrast
 
-            params, _ = curve_fit(
+            params, *_ = curve_fit(
                 lambda _, *args: [
                     calc_sim_signal(seq, center, contrast, *args) for seq in sequence
                 ],

@@ -1,5 +1,5 @@
 from . import flux_dep, mist, reset, ro_optimize, time_domain
-from .ac_stark import AcStarkExperiment, PhotonLookbackExperiment
+from .ac_stark import AcStarkExperiment
 from .allxy import AllXYExperiment
 from .dispersive import DispersiveExperiment
 from .freq import FreqExperiment
@@ -16,7 +16,6 @@ __all__ = [
     "time_domain",
     "AcStarkExperiment",
     "AllXYExperiment",
-    "PhotonLookbackExperiment",
     "DispersiveExperiment",
     "FreqExperiment",
     "PowerDepExperiment",

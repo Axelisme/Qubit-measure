@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Type
+from typing import Any, Callable, ClassVar, Dict, Type, TypedDict, Union
 
 from qick.asm_v2 import QickParam
 
 from ..base import MyProgramV2
 
 
+class WaveformCfg(TypedDict):
+    style: str
+    length: Union[float, QickParam]
+    sigma: float  # guassian sigma
+    delta: float  # drag delta
+    alpha: float  # drag alpha
+    raise_waveform: WaveformCfg  # flat top raise waveform
+
+
 class AbsWaveform(ABC):
-    def __init__(self, name: str, waveform_cfg: Dict[str, Any]) -> None:
+    def __init__(self, name: str, waveform_cfg: WaveformCfg) -> None:
         self.name = name
         self.waveform_cfg = waveform_cfg
 
@@ -17,7 +26,10 @@ class AbsWaveform(ABC):
 
     @classmethod
     def set_param(
-        cls, waveform_cfg: Dict[str, Any], param_name: str, param_value: QickParam
+        cls,
+        waveform_cfg: WaveformCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
     ) -> None:
         raise NotImplementedError(
             f"{cls.__name__} does not support set {param_name} params with {param_value}"
@@ -27,48 +39,59 @@ class AbsWaveform(ABC):
     def to_wav_kwargs(self) -> Dict[str, Any]: ...
 
 
-waveform_support_styles = {}
+class Waveform(AbsWaveform):
+    SUPPORTED_STYLES: ClassVar[Dict[str, Type[AbsWaveform]]] = {}
+
+    @classmethod
+    def register_waveform(
+        cls, style: str
+    ) -> Callable[[Type[AbsWaveform]], Type[AbsWaveform]]:
+        if style in cls.SUPPORTED_STYLES:
+            raise ValueError(
+                f"Waveform style {style} already registered by {cls.SUPPORTED_STYLES[style].__name__}"
+            )
+
+        def decorator(cls: Type[AbsWaveform]) -> Type[AbsWaveform]:
+            Waveform.SUPPORTED_STYLES[style] = cls
+            return cls
+
+        return decorator
+
+    @classmethod
+    def get_waveform_cls(cls, style: str) -> Type[AbsWaveform]:
+        if style not in cls.SUPPORTED_STYLES:
+            raise ValueError(f"Unknown waveform style: {style}")
+        return cls.SUPPORTED_STYLES[style]
+
+    @classmethod
+    def set_param(
+        cls,
+        waveform_cfg: WaveformCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
+    ) -> None:
+        waveform_cls = cls.get_waveform_cls(waveform_cfg["style"])
+        waveform_cls.set_param(waveform_cfg, param_name, param_value)
+
+    def __init__(self, name: str, waveform_cfg: WaveformCfg) -> None:
+        waveform_cls = Waveform.get_waveform_cls(waveform_cfg["style"])
+        self.waveform = waveform_cls(name, waveform_cfg)
+
+    def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
+        self.waveform.create(prog, ch, **kwargs)
+
+    def to_wav_kwargs(self) -> Dict[str, Any]:
+        return self.waveform.to_wav_kwargs()
 
 
-def register_waveform(style: str) -> Callable[[Type[AbsWaveform]], Type[AbsWaveform]]:
-    global waveform_support_styles
-
-    if style in waveform_support_styles:
-        raise ValueError(
-            f"Waveform style {style} already registered by {waveform_support_styles[style].__name__}"
-        )
-
-    def decorator(cls: Type[AbsWaveform]) -> Type[AbsWaveform]:
-        waveform_support_styles[style] = cls
-        return cls
-
-    return decorator
-
-
-def make_waveform(name: str, waveform_cfg: Dict[str, Any]) -> AbsWaveform:
-    style = waveform_cfg["style"]
-
-    if style not in waveform_support_styles:
-        raise ValueError(f"Unknown waveform style: {style}")
-
-    return waveform_support_styles[style](name, waveform_cfg)
-
-
-def set_waveform_param(
-    waveform_cfg: Dict[str, Any], param_name: str, param_value: QickParam
-) -> None:
-    style = waveform_cfg["style"]
-    if style not in waveform_support_styles:
-        raise ValueError(f"Unknown waveform style: {style}")
-
-    waveform_support_styles[style].set_param(waveform_cfg, param_name, param_value)
-
-
-@register_waveform("const")
+@Waveform.register_waveform("const")
 class ConstWaveform(AbsWaveform):
     @classmethod
     def set_param(
-        cls, waveform_cfg: Dict[str, Any], param_name: str, param_value: QickParam
+        cls,
+        waveform_cfg: WaveformCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
     ) -> None:
         if param_name == "on/off":
             waveform_cfg["length"] = (
@@ -86,7 +109,7 @@ class ConstWaveform(AbsWaveform):
         }
 
 
-@register_waveform("cosine")
+@Waveform.register_waveform("cosine")
 class CosineWaveform(AbsWaveform):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
         prog.add_cosine(ch, self.name, length=self.waveform_cfg["length"], **kwargs)
@@ -98,7 +121,7 @@ class CosineWaveform(AbsWaveform):
         }
 
 
-@register_waveform("gauss")
+@Waveform.register_waveform("gauss")
 class GaussWaveform(AbsWaveform):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
         prog.add_gauss(
@@ -116,7 +139,7 @@ class GaussWaveform(AbsWaveform):
         }
 
 
-@register_waveform("drag")
+@Waveform.register_waveform("drag")
 class DragWaveform(AbsWaveform):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
         prog.add_DRAG(
@@ -136,9 +159,9 @@ class DragWaveform(AbsWaveform):
         }
 
 
-@register_waveform("flat_top")
+@Waveform.register_waveform("flat_top")
 class FlatTopWaveform(AbsWaveform):
-    def __init__(self, name: str, waveform_cfg: Dict[str, Any]) -> None:
+    def __init__(self, name: str, waveform_cfg: WaveformCfg) -> None:
         super().__init__(name, waveform_cfg)
 
         raise_cfg = waveform_cfg["raise_waveform"]
@@ -148,7 +171,7 @@ class FlatTopWaveform(AbsWaveform):
         if raise_cfg["style"] == "const":
             raise ValueError("Flat top with constant raise style is not supported")
 
-        self.raise_waveform = make_waveform(name, raise_cfg)
+        self.raise_waveform = Waveform(name, raise_cfg)
 
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
         kwargs.setdefault("even_length", True)
@@ -157,7 +180,10 @@ class FlatTopWaveform(AbsWaveform):
 
     @classmethod
     def set_param(
-        cls, waveform_cfg: Dict[str, Any], param_name: str, param_value: QickParam
+        cls,
+        waveform_cfg: WaveformCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
     ) -> None:
         if param_name == "on/off":
             min_length = 0.01 + waveform_cfg["raise_waveform"]["length"]
@@ -170,9 +196,9 @@ class FlatTopWaveform(AbsWaveform):
             raise ValueError(f"Unknown parameter: {param_name}")
 
     def to_wav_kwargs(self) -> Dict[str, Any]:
-        return {
-            "style": "flat_top",
-            "envelope": self.name,
-            "length": self.waveform_cfg["length"]
+        return dict(
+            style="flat_top",
+            envelope=self.name,
+            length=self.waveform_cfg["length"]
             - self.waveform_cfg["raise_waveform"]["length"],
-        }
+        )

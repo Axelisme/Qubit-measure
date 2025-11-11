@@ -66,7 +66,7 @@ class TaskContext:
             assert isinstance(target, (dict, list)), (
                 f"target is not a dict or list: {target}"
             )
-            target = target[seg]
+            target = target[seg]  # type: ignore
 
         return target
 
@@ -140,7 +140,10 @@ class SoftTask(AbsTask):
 
     def init(self, ctx: TaskContext, keep=True) -> None:
         self.sweep_pbar = tqdm(
-            total=len(self.sweep_values), smoothing=0, desc=self.sweep_name, leave=keep
+            total=len(self.sweep_values),  # type: ignore
+            smoothing=0,
+            desc=self.sweep_name,
+            leave=keep,
         )
         self.sub_task.init(ctx, keep=keep)
 
@@ -148,7 +151,7 @@ class SoftTask(AbsTask):
         assert self.sweep_pbar is not None
         self.sweep_pbar.reset()
 
-        for i, v in enumerate(self.sweep_values):
+        for i, v in enumerate(self.sweep_values):  # type: ignore
             self.update_cfg_fn(i, ctx, v)
 
             self.sub_task.run(ctx(addr=i))
@@ -163,7 +166,8 @@ class SoftTask(AbsTask):
 
     def get_default_result(self) -> ResultType:
         return [
-            self.sub_task.get_default_result() for _ in range(len(self.sweep_values))
+            self.sub_task.get_default_result()
+            for _ in range(len(self.sweep_values))  # type: ignore
         ]
 
 

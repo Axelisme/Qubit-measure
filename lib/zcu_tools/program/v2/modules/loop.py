@@ -1,6 +1,7 @@
 from typing import List, Union
 
 import qick.asm_v2 as qasm
+from qick.asm_v2 import QickParam
 
 from ..base import MyProgramV2
 from .base import Module
@@ -29,7 +30,9 @@ class Repeat(Module):
         for mod in self.sub_module:
             mod.init(prog)
 
-    def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
+    def run(
+        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+    ) -> Union[float, QickParam]:
         if self.n == 0:
             return t
 
