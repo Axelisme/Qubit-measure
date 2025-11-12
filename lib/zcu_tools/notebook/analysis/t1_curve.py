@@ -46,7 +46,6 @@ def calc_Qcap_vs_omega(
             * (1 / np.tanh(0.5 * np.abs(therm_ratio)))
             / (1 + np.exp(-therm_ratio))
         )
-        s *= 2 * np.pi  # We assume that system energies are given in units of frequency
         return s
 
     # calculate Qcap vs omega
@@ -83,8 +82,6 @@ def calc_Qind_vs_omega(
             * (1 / np.tanh(0.5 * np.abs(therm_ratio)))
             / (1 + np.exp(-therm_ratio))
         )
-        # We assume that system energies are given in units of frequency
-        s *= 2 * np.pi
         return s
 
     # calculate Qcap vs omega
