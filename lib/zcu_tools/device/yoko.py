@@ -1,38 +1,56 @@
 import time
+import warnings
 from typing import Any, Dict, Literal, Optional
 
 import numpy as np
 from tqdm.auto import tqdm
 
-from .base import BaseDevice, ResourceManager, DeviceInfo
+from .base import BaseDevice, DeviceInfo, ResourceManager
 
-DEFAULT_RAMPSTEP = 1e-6  # increment step when setting voltage/current
-DEFAULT_RAMPINTERVAL = 0.01  # dwell time for each voltage step, CANNOT be lower than 0.001 otherwise fridge heats up
+STATUS_MAP = {"on": "1", "off": "0"}
+STATUS_MAP_INV = {"1": "on", "0": "off"}
+MODE_MAPS = {"voltage": "VOLT", "current": "CURR"}
+MODE_MAPS_INV = {"VOLT": "voltage", "CURR": "current"}
 
 
 class YOKOGS200(BaseDevice):
     # Initializes session for device.
-    # VISAaddress: address of device, rm: VISA resource manager
-    def __init__(self, VISAaddress: str, rm: ResourceManager) -> None:
-        super().__init__(VISAaddress, rm)
+    # address: address of device, rm: VISA resource manager
+    def __init__(self, address: str, rm: ResourceManager) -> None:
+        super().__init__(address, rm)
 
-        self._rampstep = DEFAULT_RAMPSTEP
-        self._rampinterval = DEFAULT_RAMPINTERVAL
+        mode = self.get_mode()
+
+        if mode == "voltage":
+            self._rampstep = 1e-4
+        elif mode == "current":
+            self._rampstep = 1e-8
+        else:
+            raise ValueError(f"Unknown mode {mode}")
+
+        self._rampinterval = 0.01
 
     # ==========================================================================#
 
+    def get_output(self) -> str:
+        result = self.query(":OUTPut?")
+        return STATUS_MAP_INV.get(result, f"unknown_{result}")
+
+    def set_output(self, status: Literal["on", "off"]) -> None:
+        self.write(f":OUTPut {STATUS_MAP[status]}")
+
     # Turn on output
     def output_on(self) -> None:
-        self.session.write(":OUTPut 1")
+        self.set_output("on")
 
     # Turn off output
     def output_off(self) -> None:
-        self.session.write(":OUTPut 0")
+        self.set_output("off")
 
     # ==========================================================================#
 
     def _set_voltage_direct(self, voltage: float) -> None:
-        self.session.write(":SOURce:LEVel:AUTO %.8f" % voltage)
+        self.write(f":SOURce:LEVel:AUTO {voltage:.8f}")
         time.sleep(self._rampinterval)
 
     def _set_voltage_smart(self, voltage: float, progress: bool = False) -> None:
@@ -58,8 +76,6 @@ class YOKOGS200(BaseDevice):
         if progress:
             pbar.close()
 
-    # Ramp up the voltage (volts) in increments of _rampstep, waiting _rampinterval
-    # between each increment.
     def set_voltage(self, voltage: float, progress: bool = True) -> float:
         mode = self.get_mode()
         if mode != "voltage":
@@ -73,7 +89,7 @@ class YOKOGS200(BaseDevice):
         return self.get_voltage()
 
     def _set_current_direct(self, current: float) -> None:
-        self.session.write(":SOURce:LEVel:AUTO %.8f" % current)
+        self.write(f":SOURce:LEVel:AUTO {current:.8f}")
         time.sleep(self._rampinterval)
 
     def _set_current_smart(self, current: float, progress: bool = False) -> None:
@@ -133,13 +149,16 @@ class YOKOGS200(BaseDevice):
                     "Or set force=True to override, make sure you know what you are doing"
                 )
 
-        self.session.write(":SOURce:FUNCtion %s" % mode)
+        self.write(f":SOURce:FUNCtion {MODE_MAPS[mode]}")
 
         # update rampstep
         if rampstep is not None:
             self._rampstep = rampstep
 
     # ==========================================================================#
+
+    def _get_level(self) -> float:
+        return float(self.query(":SOURce:LEVel?"))
 
     # Returns the voltage in volts as a float
     def get_voltage(self) -> float:
@@ -149,10 +168,7 @@ class YOKOGS200(BaseDevice):
                 f"One can only get voltage when the device is in voltage mode. but it is in {mode} mode."
             )
 
-        self.session.write(":SOURce:FUNCtion VOLTage")
-        self.session.write(":SOURce:LEVel?")
-        result = self.session.read()
-        return float(result.rstrip("\n"))
+        return self._get_level()
 
     # Returns the current in amps as a float
     def get_current(self) -> float:
@@ -162,29 +178,24 @@ class YOKOGS200(BaseDevice):
                 f"One can only get current when the device is in current mode. but it is in {mode} mode."
             )
 
-        self.session.write(":SOURce:FUNCtion CURRent")
-        self.session.write(":SOURce:LEVel?")
-        result = self.session.read()
-        return float(result.rstrip("\n"))
+        return self._get_level()
 
     # Returns the mode (voltage or current)
     def get_mode(self) -> Literal["voltage", "current"]:
-        self.session.write(":SOURce:FUNCtion?")
-        result = self.session.read()
-        result = result.rstrip("\n")
-        if result == "VOLT":
-            return "voltage"
-        else:
-            return "current"
+        result = self.query(":SOURce:FUNCtion?")
+        return MODE_MAPS_INV.get(result, "unknown")
 
     # ==========================================================================#
 
     def _setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
+        if self.get_output() != "on":
+            warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")
+
         cur_mode = self.get_mode()
 
         if cfg["mode"] != cur_mode:
             raise RuntimeError(
-                f"Current mode: {cur_mode} in device {self.VISAaddress}, but cfg requires: {cfg['mode']} mode, "
+                f"Current mode: {cur_mode} in device {self.address}, but cfg requires: {cfg['mode']} mode, "
                 "YOKOGS200 does not support implicit setup mode to prevent sudden current/voltage change, "
                 "Please change the device mode manually before calling setup, "
                 "Remember to turn value to zero before changing mode"
@@ -215,18 +226,12 @@ class YOKOGS200(BaseDevice):
 
             self.set_voltage(value, progress=progress)
         else:
-            raise RuntimeError(f"Unknown mode {cur_mode} in device {self.VISAaddress}")
+            raise RuntimeError(f"Unknown mode {cur_mode} in device {self.address}")
 
     def get_info(self) -> DeviceInfo:
-        mode = self.get_mode()
-        if mode == "voltage":
-            value = self.get_voltage()
-        else:
-            value = self.get_current()
-
         return {
             "type": self.__class__.__name__,
-            "VISAaddress": self.VISAaddress,
-            "mode": mode,
-            "value": value,
+            "address": self.address,
+            "mode": self.get_mode(),
+            "value": self._get_level(),
         }

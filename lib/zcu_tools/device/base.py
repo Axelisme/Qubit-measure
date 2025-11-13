@@ -1,6 +1,6 @@
 import sys
 from abc import ABC, abstractmethod
-from typing import Any, TypedDict, Dict
+from typing import Any, Dict, TypedDict
 
 try:
     from pyvisa import ResourceManager
@@ -12,7 +12,7 @@ except ImportError:
 
 class DeviceInfo(TypedDict):
     type: str
-    VISAaddress: str
+    address: str
 
 
 class BaseDevice(ABC):
@@ -20,15 +20,45 @@ class BaseDevice(ABC):
     Base class for all devices.
     """
 
-    def __init__(self, VISAaddress: str, rm: ResourceManager) -> None:
-        self.VISAaddress = VISAaddress
+    def __init__(self, address: str, rm: ResourceManager) -> None:
+        self.address = address
 
         import pyvisa as visa
 
         try:
-            self.session = rm.open_resource(VISAaddress)
+            self.session = rm.open_resource(address)
+            self.session.read_termination = "\n"
+            self.session.write_termination = "\n"
         except visa.Error:
-            sys.stderr.write("Couldn't connect to '%s', exiting now..." % VISAaddress)
+            sys.stderr.write(f"Couldn't connect to {address}")
+            raise
+
+        # Print IDN message on connection
+        self.connect_message()
+
+    # ----- helper methods -----
+
+    def connect_message(self) -> None:
+        """Queries and prints the IDN to confirm connection."""
+        import pyvisa
+
+        try:
+            idn = self.session.query("*IDN?")
+            print(f"Connected to: {idn.strip()}")
+        except pyvisa.Error as e:
+            print(f"Could not query IDN. Error: {e}")
+
+    def close(self) -> None:
+        print(f"Disconnecting from {self.session.resource_name}")
+        self.session.close()
+
+    def write(self, cmd: str) -> None:
+        self.session.write(cmd)
+
+    def query(self, cmd: str) -> str:
+        return self.session.query(cmd).strip()
+
+    # ----- abstract methods -----
 
     @abstractmethod
     def _setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
@@ -44,9 +74,9 @@ class BaseDevice(ABC):
                 f"Trying to setup device of type {self.__class__.__name__} with cfg of type {cfg['type']}"
             )
 
-        if cfg["VISAaddress"] != self.VISAaddress:
+        if cfg["address"] != self.address:
             raise RuntimeError(
-                f"Trying to setup device at address {self.VISAaddress} with cfg for address {cfg['VISAaddress']}"
+                f"Trying to setup device at address {self.address} with cfg for address {cfg['address']}"
             )
 
         # private method to setup
