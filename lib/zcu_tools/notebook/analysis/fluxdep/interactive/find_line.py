@@ -18,8 +18,8 @@ class InteractiveLines:
 
     def __init__(self, spectrum, mAs, fpts, mA_c=None, mA_e=None) -> None:
         plt.ioff()  # 避免立即顯示圖表
-        self.fig_main, self.ax_main = plt.subplots()
-        self.fig_zoom, self.ax_zoom = plt.subplots()
+        self.fig_main, self.ax_main = plt.subplots(figsize=(6, 4))
+        self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(3, 3))
         self.fig_main.tight_layout()
         self.fig_zoom.tight_layout()
         plt.ion()
@@ -70,7 +70,9 @@ class InteractiveLines:
         display(
             widgets.HBox(
                 [
-                    self.fig_main.canvas,
+                    widgets.Box(
+                        [self.fig_main.canvas], layout=widgets.Layout(width="60%")
+                    ),
                     widgets.VBox(
                         [
                             widgets.HBox(
@@ -95,7 +97,8 @@ class InteractiveLines:
                                 ]
                             ),
                             self.fig_zoom.canvas,
-                        ]
+                        ],
+                        layout=widgets.Layout(width="70%"),
                     ),
                 ]
             )
@@ -491,6 +494,8 @@ class InteractiveLines:
         # 停止動畫
         self.anim_main.event_source.stop()
         self.anim_zoom.event_source.stop()
+        plt.close(self.fig_main)
+        plt.close(self.fig_zoom)
 
     def get_positions(self, finish: bool = True) -> Tuple[float, float]:
         """運行交互式選擇器並返回兩條線的位置"""

@@ -92,7 +92,7 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
         values, fpts, signals2D = result
 
         actline = InteractiveLines(
-            signals2D.T,
+            signals2D,
             mAs=values,
             fpts=fpts,
             mA_c=mA_c,

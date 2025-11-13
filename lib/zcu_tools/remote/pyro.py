@@ -12,8 +12,8 @@ from zcu_tools.program.bitfiles import get_bitfile
 
 def setup_pyro4():
     # use dill instead of pickle
-    # Pyro4.config.SERIALIZER = "pickle"
-    Pyro4.config.SERIALIZER = "dill"
+    Pyro4.config.SERIALIZER = "pickle"
+    # Pyro4.config.SERIALIZER = "dill"
     Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill", "pickle"])
     Pyro4.config.DILL_PROTOCOL_VERSION = 5
     Pyro4.config.PICKLE_PROTOCOL_VERSION = 4

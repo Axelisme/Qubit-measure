@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
@@ -85,6 +86,7 @@ class ModuleLibrary:
     def __init__(self, cfg_path: Optional[str] = None) -> None:
         if cfg_path is not None:
             self.cfg_path = Path(cfg_path)
+            os.makedirs(self.cfg_path.parent, exist_ok=True)
         else:
             self.cfg_path = None
         self.modify_time = 0
