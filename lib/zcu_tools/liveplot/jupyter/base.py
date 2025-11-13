@@ -1,11 +1,10 @@
+import warnings
 from itertools import chain
 from threading import Lock
-import warnings
 from typing import List, Optional, Tuple, TypeVar
 
 import matplotlib.pyplot as plt
 from IPython.display import display
-from ipywidgets import Output
 
 from ..segments import AbsSegment
 
@@ -14,13 +13,7 @@ from ..segments import AbsSegment
 T_JupyterPlotMixin = TypeVar("T_JupyterPlotMixin", bound="JupyterPlotMixin")
 
 
-def make_plot_frame(
-    n_row: int, n_col: int, **kwargs
-) -> Tuple[plt.FigureBase, List[List[plt.Axes]]]:
-    kwargs.setdefault("squeeze", False)
-    kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
-    fig, axs = plt.subplots(n_row, n_col, **kwargs)
-
+def instant_plot(fig: plt.Figure, n_row: int) -> None:
     # this ensures the figure is rendered in Jupyter notebooks right now and can be updated later
     canvas = fig.canvas
 
@@ -40,6 +33,16 @@ def make_plot_frame(
     canvas._handle_message(canvas, {"type": "draw"}, [])
     display(canvas)
 
+
+def make_plot_frame(
+    n_row: int, n_col: int, **kwargs
+) -> Tuple[plt.Figure, List[List[plt.Axes]]]:
+    kwargs.setdefault("squeeze", False)
+    kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
+    fig, axs = plt.subplots(n_row, n_col, **kwargs)
+
+    instant_plot(fig, n_row)
+
     return fig, axs
 
 
@@ -49,7 +52,7 @@ class JupyterPlotMixin:
     def __init__(
         self,
         segments: List[List[AbsSegment]],
-        existed_frames: Optional[Tuple[plt.FigureBase, List[List[plt.Axes]]]] = None,
+        existed_axes: Optional[List[List[plt.Axes]]] = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:
@@ -68,17 +71,15 @@ class JupyterPlotMixin:
         self.segments = segments
         self.update_lock = Lock()
         self.disable = disable
+        self.auto_close = auto_close
 
         if disable:
             return  # early return
 
-        if existed_frames is not None:
-            # if provided axes and display handle, use them
-            provided_fig, provided_axs = existed_frames
-
+        if existed_axes is not None:
             # validate check
-            valid = len(provided_axs) == n_row
-            for a_row in provided_axs:
+            valid = len(existed_axes) == n_row
+            for a_row in existed_axes:
                 if len(a_row) != n_col:
                     valid = False
             if not valid:
@@ -86,13 +87,12 @@ class JupyterPlotMixin:
                     "The shape of provided axes must match the shape of segments."
                 )
 
-            self.fig = provided_fig
-            self.axs = provided_axs
-            self.auto_close = False  # force not to close the figure
+            # if provided axes and display handle, use them
+            self.fig = None
+            self.axs = existed_axes
         else:
             # if not provided axes, create figure and display handle
             self.fig, self.axs = make_plot_frame(n_row, n_col)
-            self.auto_close = auto_close
 
     def clear(self) -> None:
         if self.disable:
@@ -109,6 +109,11 @@ class JupyterPlotMixin:
 
         if self.disable:
             return
+
+        if self.fig is None:
+            raise RuntimeError(
+                "Try to refresh a plotter, but it have no own figure, this should happen when the figure is hosted outside of the plotter, you need to refresh the figure manually."
+            )
 
         self.fig.canvas.draw()
 
@@ -133,5 +138,5 @@ class JupyterPlotMixin:
         if self.disable:
             return
 
-        if self.auto_close:
+        if self.auto_close and self.fig is not None:
             plt.close(self.fig)

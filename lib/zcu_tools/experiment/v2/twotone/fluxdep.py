@@ -17,15 +17,15 @@ from zcu_tools.program.v2 import TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
-FreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+FreqFluxDepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 def freq_signal2real(signals: np.ndarray) -> np.ndarray:
     return np.abs(minus_background(signals, axis=1))
 
 
-class FreqExperiment(AbsExperiment[FreqResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResultType:
+class FreqFluxDepExperiment(AbsExperiment[FreqFluxDepResultType]):
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqFluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         flx_sweep = cfg["sweep"]["flux"]
@@ -73,7 +73,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
     def analyze(
         self,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqFluxDepResultType] = None,
         mA_c: Optional[float] = None,
         mA_e: Optional[float] = None,
     ) -> InteractiveLines:
@@ -93,7 +93,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
 
     def extract_points(
         self,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqFluxDepResultType] = None,
     ) -> InteractiveFindPoints:
         if result is None:
             result = self.last_result
@@ -108,7 +108,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqFluxDepResultType] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/flux_dep/freq",
         **kwargs,
