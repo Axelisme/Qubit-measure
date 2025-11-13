@@ -58,10 +58,10 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
                 ),
                 update_hook=lambda ctx: viewer.update(
                     fpts,
-                    qubfreq_signal2real(np.asarray(ctx.get_data())),
+                    qubfreq_signal2real(np.asarray(ctx.get_data())),  # type: ignore
                 ),
             ).run(cfg)
-            signals = np.asarray(signals)
+            signals = np.asarray(signals)  # type: ignore
 
         # cache
         self.last_cfg = cfg
@@ -84,16 +84,16 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         fpts, signals = result
 
         # discard NaNs (possible early abort)
-        val_mask = ~np.isnan(signals)
+        val_mask = ~np.isnan(signals)  # type: ignore
         fpts = fpts[val_mask]
         signals = signals[val_mask]
 
-        y = rotate2real(signals).real if max_contrast else np.abs(signals)
+        y = rotate2real(signals).real if max_contrast else np.abs(signals)  # type: ignore
 
         freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(fpts, y, model_type)
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        fig.tight_layout()
+        assert isinstance(fig, plt.Figure)
 
         ax.plot(fpts, y, label="signal", marker="o", markersize=3)
         if plot_fit:
@@ -103,6 +103,8 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         ax.set_xlabel("Frequency (MHz)")
         ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
         ax.legend()
+
+        fig.tight_layout()
 
         return freq, kappa, fig
 

@@ -53,6 +53,7 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
     def get_segment(self) -> Union[Plot2DSegment, PlotNonUniform2DSegment]:
         return self.segments[0][0]
 
+
 class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
     def __init__(
         self,
@@ -83,17 +84,12 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         line_kwargs[-1].update(label="current line", marker=".", alpha=1.0, color="C0")
 
         segment1d = Plot1DSegment(
-            xlabel1d, "", num_lines=num_lines, line_kwargs=line_kwargs
+            xlabel1d, "", title=title, num_lines=num_lines, line_kwargs=line_kwargs
         )
         super().__init__([[segment2d, segment1d]], **kwargs)
 
         self.num_lines = num_lines
         self.line_axis = line_axis
-
-        # set grid to 1d plot
-        ax1d = self.axs[0][1]
-        assert isinstance(ax1d, plt.Axes)
-        ax1d.grid()
 
     def update(
         self,
@@ -137,6 +133,8 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         ax_map = ["2d", "1d"]
         return self.axs[0][ax_map.index(name)]
 
-    def get_segment(self, name: Literal["2d", "1d"]) -> Union[Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment]:
+    def get_segment(
+        self, name: Literal["2d", "1d"]
+    ) -> Union[Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment]:
         segment_map = ["2d", "1d"]
         return self.segments[0][segment_map.index(name)]

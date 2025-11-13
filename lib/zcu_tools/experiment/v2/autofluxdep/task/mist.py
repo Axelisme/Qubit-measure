@@ -12,26 +12,21 @@ from zcu_tools.experiment.v2.runner import (
     TaskContext,
 )
 from zcu_tools.experiment.v2.utils import set_pulse_freq
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 
 
-def mist_signal2real(signals: np.ndarray) -> np.ndarray:
-    g_signals, e_signals = signals[..., 0], signals[..., 1]  # (flxs, pdrs, ge)
+def automist_signal2real(signals: np.ndarray) -> np.ndarray:
+    avg_len = max(int(0.05 * signals.shape[1]), 1)
+    std_len = max(int(0.3 * signals.shape[1]), 5)
 
-    avg_len = max(int(0.05 * g_signals.shape[1]), 1)
-
-    sum_signals = e_signals + g_signals
-    mist_signals = sum_signals - np.mean(
-        sum_signals[:, :avg_len], axis=1, keepdims=True
+    mist_signals = np.abs(
+        signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
     )
+    if np.all(np.isnan(mist_signals)):
+        return mist_signals
+    mist_signals = np.clip(mist_signals, 0, 5 * np.nanstd(mist_signals[:, :std_len]))
 
-    return np.abs(mist_signals)
+    return mist_signals
 
 
 class MeasureMistTask(AbsAutoTask):
@@ -58,30 +53,32 @@ class MeasureMistTask(AbsAutoTask):
 
         cfg["sweep"] = {
             "gain": self.pdr_sweep,
-            "ge": {"start": 0, "stop": cfg["pi_pulse"]["gain"], "expts": 2},
+            "ge": {"start": 0, "stop": 1.0, "expts": 2},
         }
 
         pdr_params = sweep2param("gain", cfg["sweep"]["gain"])
         ge_params = sweep2param("ge", cfg["sweep"]["ge"])
-        Pulse.set_param(cfg["pi_pulse"], "on/off", ge_params)
         Pulse.set_param(cfg["probe_pulse"], "gain", pdr_params)
+        Pulse.set_param(cfg["pi_pulse"], "on/off", ge_params)
 
         return ModularProgramV2(
             self.soccfg,
             cfg,
             modules=[
-                make_reset("reset", reset_cfg=cfg.get("reset")),
-                Pulse(name="probe_pulse", cfg=cfg[self.pulse_name]),
+                Reset("reset", cfg.get("reset", {"type": "none"})),
                 Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                make_readout("readout", readout_cfg=cfg["readout"]),
+                Pulse(name="probe_pulse", cfg=cfg[self.pulse_name]),
+                Readout("readout", cfg["readout"]),
             ],
         ).acquire(self.soc, progress=False, callback=update_hook)
 
     def init(self, ctx: TaskContext, keep: bool = True) -> None:
         self.task.init(ctx, keep=keep)
 
-    def run(self, ctx: TaskContext, need_infos: Dict[str, np.ndarray]) -> None:
-        fallback_infos = {}
+    def run(
+        self, ctx: TaskContext, need_infos: Dict[str, np.ndarray]
+    ) -> Dict[str, float]:
+        fallback_infos: Dict[str, float] = {}
 
         # set pulse freq to fitted freq
         fit_freq = need_infos.get("qubit_freq", np.nan)

@@ -9,7 +9,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
-from zcu_tools.program.v2 import OneToneProgram, set_readout_cfg, sweep2param
+from zcu_tools.program.v2 import OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
@@ -42,7 +42,7 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
         dev_values = sweep2array(flx_sweep, allow_array=True)
         fpts = sweep2array(fpt_sweep)  # predicted frequency points
 
-        set_readout_cfg(cfg["readout"], "freq", sweep2param("freq", fpt_sweep))
+        Readout.set_param(cfg["readout"], "freq", sweep2param("freq", fpt_sweep))
 
         with LivePlotter2DwithLine(
             "Flux device value",
@@ -68,10 +68,12 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
                     ),
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    dev_values, fpts, fluxdep_signal2real(np.asarray(ctx.get_data()))
+                    dev_values,
+                    fpts,
+                    fluxdep_signal2real(np.asarray(ctx.get_data())),  # type: ignore
                 ),
             ).run(cfg)
-            signals = np.asarray(signals)
+            signals = np.asarray(signals)  # type: ignore
 
         # record last cfg and result
         self.last_cfg = cfg

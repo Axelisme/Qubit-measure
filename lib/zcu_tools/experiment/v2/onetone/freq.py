@@ -9,7 +9,7 @@ import numpy as np
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram, set_readout_cfg, sweep2param
+from zcu_tools.program.v2 import OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 
@@ -35,7 +35,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         fpts = sweep2array(cfg["sweep"]["freq"])  # MHz
 
         # set readout frequency as sweep param
-        set_readout_cfg(
+        Readout.set_param(
             cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
@@ -53,10 +53,11 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
                     result_shape=(len(fpts),),
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    fpts, freq_signal2real(np.asarray(ctx.get_data()))
+                    fpts,
+                    freq_signal2real(np.asarray(ctx.get_data())),  # type: ignore
                 ),
             ).run(cfg)
-            signals = np.asarray(signals)
+            signals = np.asarray(signals)  # type: ignore
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -83,7 +84,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         signals = signals[1:-1]
 
         # discard NaNs (possible early abort)
-        val_mask = ~np.isnan(signals)
+        val_mask = ~np.isnan(signals)  # type: ignore
         fpts = fpts[val_mask]
         signals = signals[val_mask]
 

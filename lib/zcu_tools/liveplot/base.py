@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Generic, Hashable, TypeVar
+
+import matplotlib.pyplot as plt
 
 
 class AbsLivePlotter(ABC):
@@ -50,7 +52,10 @@ class NonePlotter(AbsLivePlotter):
         pass
 
 
-class MultiLivePlotter(AbsLivePlotter):
+PlotterKey_T = TypeVar("PlotterKey_T", bound=Hashable)
+
+
+class MultiLivePlotter(AbsLivePlotter, Generic[PlotterKey_T]):
     """
     A wrapper for multiple live plotters.
 
@@ -61,23 +66,28 @@ class MultiLivePlotter(AbsLivePlotter):
 
     def __init__(
         self,
-        plotters: Dict[str, AbsLivePlotter],
+        fig: plt.Figure,
+        plotters: Dict[PlotterKey_T, AbsLivePlotter],
     ) -> None:
+        self.fig = fig
         self.plotters = plotters
 
     def clear(self) -> None:
         for plotter in self.plotters.values():
             plotter.clear()
 
-    def update(self, plot_args: Dict[str, Any], refresh: bool = True) -> None:
-        for name, args_i in plot_args.items():
-            self.plotters[name].update(*args_i, refresh=refresh)
+    def update(
+        self, plot_args: Dict[PlotterKey_T, tuple], refresh: bool = True
+    ) -> None:
+        for key, args in plot_args.items():
+            self.plotters[key].update(*args, refresh=False)
+        if refresh:
+            self.refresh()
 
     def refresh(self) -> None:
-        for plotter in self.plotters.values():
-            plotter.refresh()
+        self.fig.canvas.draw()
 
-    def __enter__(self) -> "MultiLivePlotter":
+    def __enter__(self) -> "MultiLivePlotter[PlotterKey_T]":
         for plotter in self.plotters.values():
             plotter.__enter__()
         return self
@@ -86,5 +96,5 @@ class MultiLivePlotter(AbsLivePlotter):
         for plotter in self.plotters.values():
             plotter.__exit__(exc_type, exc_value, traceback)
 
-    def get_plotter(self, name: str) -> AbsLivePlotter:
-        return self.plotters[name]
+    def get_plotter(self, key: PlotterKey_T) -> AbsLivePlotter:
+        return self.plotters[key]

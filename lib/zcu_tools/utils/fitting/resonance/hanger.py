@@ -36,7 +36,7 @@ def calc_Qi(Ql: float, Qc: float) -> float:
 
 class HangerModel:
     @classmethod
-    def calc_signals(cls, fpts, freq, Ql, Qc, phi, a0, edelay) -> np.ndarray:
+    def calc_signals(cls, fpts, freq, Ql, Qc, phi, a0, edelay, **kwargs) -> np.ndarray:
         return (
             a0
             * np.exp(-1j * 2 * np.pi * fpts * edelay)

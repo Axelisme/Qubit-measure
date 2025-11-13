@@ -13,8 +13,8 @@ from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
     Pulse,
-    make_readout,
-    make_reset,
+    Readout,
+    Reset,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
@@ -33,13 +33,7 @@ T2RamseyResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
 
 class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        detune: float = 0.0,
-        progress: bool = True,
+        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
     ) -> T2RamseyResultType:
         cfg = deepcopy(cfg)
 
@@ -50,10 +44,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         t2r_spans = sweep2param("length", cfg["sweep"]["length"])
 
         with LivePlotter1D(
-            "Time (us)",
-            "Amplitude",
-            segment_kwargs={"title": "T2 Ramsey"},
-            disable=not progress,
+            "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Ramsey"}
         ) as viewer:
             signals = Runner(
                 task=HardTask(
@@ -62,7 +53,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                make_reset("reset", ctx.cfg.get("reset")),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
                                 Delay("t2_delay", delay=t2r_spans),
                                 Pulse(
@@ -73,7 +64,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                                         + 360 * detune * t2r_spans,
                                     },
                                 ),
-                                make_readout("readout", ctx.cfg["readout"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
@@ -92,11 +83,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         return ts, signals
 
     def analyze(
-        self,
-        result: Optional[T2RamseyResultType] = None,
-        *,
-        max_contrast: bool = True,
-        fit_fringe: bool = True,
+        self, result: Optional[T2RamseyResultType] = None, *, fit_fringe: bool = True
     ) -> Tuple[float, float, float, float, plt.Figure]:
         if result is None:
             result = self.last_result
@@ -104,10 +91,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
 
         xs, signals = result
 
-        if max_contrast:
-            real_signals = rotate2real(signals).real
-        else:
-            real_signals = np.abs(signals)
+        real_signals = rotate2real(signals).real
 
         if fit_fringe:
             t2r, t2rerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
@@ -119,6 +103,8 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             detune_err = 0.0
 
         fig, ax = plt.subplots(figsize=config.figsize)
+        assert isinstance(fig, plt.Figure)
+
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
         t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
@@ -128,7 +114,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         else:
             ax.set_title(f"T2 decay = {t2r_str}", fontsize=15)
         ax.set_xlabel("Time (us)")
-        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
 
         fig.tight_layout()

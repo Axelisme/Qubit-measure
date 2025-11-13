@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: Python 3
+    display_name: axelenv13
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.2
+    version: 3.13.4
 ---
 
 ```python
@@ -29,6 +29,7 @@ jupyter:
 import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 %autoreload 2
 from zcu_tools.utils.datasaver import load_data
@@ -38,11 +39,11 @@ from zcu_tools.simulate import mA2flx
 ```
 
 ```python
-qub_name = "Q12_2D[2]/Q4"
+qub_name = "Si001"
 ```
 
 ```python
-loadpath = f"../../result/{qub_name}/params.json"
+loadpath = f"../../../result/{qub_name}/params.json"
 _, params, mA_c, period, allows, _ = load_result(loadpath)
 EJ, EC, EL = params
 
@@ -111,45 +112,29 @@ ze.twotone.reset.dual_tone.LengthExperiment().analyze(result=(Ts, signals))
 # Dispersive shift
 
 ```python
-filepath = "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/R4_dispersive@-0.417mA_2.hdf5"
+filepath = r"D:\Labber_Data\Axel\Si001\2025\11\Data_1107\R59_dispersive@0.950mA_1.hdf5"
 signals, fpts, _ = load_data(filepath)
-signals = signals.T
-
 fpts /= 1e6
-```
 
-```python
-chi, kappa = ze.twotone.dispersive.DispersiveExperiment().analyze(
-    result=(fpts, signals), asym=True
+chi, kappa, fig = ze.twotone.dispersive.DispersiveExperiment().analyze(
+    result=(fpts, signals.T)
 )
+plt.show(fig)
+plt.close(fig)
 ```
 
 # AC stark shift
 
 ```python
-filepath = "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_ac_stark@-0.417mA_2.hdf5"
+filepath = r"D:\Labber_Data\Axel\Si001\2025\11\Data_1107\Si001_ac_stark@0.950mA_2.hdf5"
 signals, pdrs, fpts = load_data(filepath)
-signals = signals.T
 fpts /= 1e6
-```
 
-```python
-import matplotlib.pyplot as plt
-import numpy as np
-
-plt.imshow(
-    np.abs(signals.T),
-    origin="lower",
-    extent=[pdrs[0], pdrs[-1], fpts[0], fpts[-1]],
-    aspect="auto",
+ac_coeff, fig = ze.twotone.ac_stark.AcStarkExperiment().analyze(
+    result=(pdrs, fpts, signals), chi=chi, kappa=kappa, cutoff=0.35
 )
-plt.show()
-```
-
-```python
-ac_coeff = ze.twotone.ac_stark.AcStarkExperiment().analyze(
-    result=(pdrs, fpts, signals), chi=chi, kappa=kappa
-)
+plt.show(fig)
+plt.close(fig)
 ```
 
 # Power dep
@@ -208,19 +193,16 @@ ze.twotone.mist.MISTPowerDepOvernight().analyze(
 # Power dep over flux
 
 ```python
-filepath = (
-    "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_mist_flx_pdr@-0.417mA_2.hdf5"
-)
+filepath = r"D:\Labber_Data\Axel\Si001\2025\11\Data_1107\Si001_mist_flux@0.941mA_1.hdf5"
 signals, As, pdrs = load_data(filepath)
 ```
 
 ```python
-mA_c = 4.787
-```
-
-```python
-sim_filepath = r"../../result/Q12_2D[3]/Q4/branch_floquet_populations.npz"
+sim_filepath = (
+    f"../../../result/{qub_name}/data/branch_floquet/populations_over_flx.npz"
+)
 # sim_filepath = r"../../result/Q12_2D[3]/Q4/branch_populations.npz"
+
 
 with np.load(sim_filepath) as data:
     sim_flxs = data["flxs"]
@@ -230,31 +212,35 @@ with np.load(sim_filepath) as data:
 ```
 
 ```python
-fig = ze.twotone.mist.MISTFluxPowerDep().analyze(
+fig = ze.twotone.flux_dep.MistExperiment().analyze(
     result=(As, pdrs, signals),
     mA_c=mA_c,
     period=period,
-    ac_coeff=ac_coeff,
-    with_simulation=True,
-    sim_kwargs=dict(
-        flxs=sim_flxs,
-        photons=sim_photons,
-        populations_over_flx=sim_populations,
-        critical_levels={0: 1.0, 1: 2.0},
-    ),
+    ac_coeff=ac_coeff
 )
 
+from zcu_tools.notebook.analysis.mist.branch import plot_cn_with_mist
+
+plot_cn_with_mist(
+    fig,
+    flxs=sim_flxs,
+    photons=sim_photons,
+    populations_over_flx=sim_populations,
+    critical_levels={0: 2.0, 1: 3.0},
+    mist_flxs=mA2flx(As, mA_c, period),
+)
 
 if isinstance(fig, plt.Figure):
-    fig.savefig(f"../../result/{qub_name}/image/mist_over_flux.png")
+    fig.savefig(f"../../../result/{qub_name}/image/mist_over_flux.png")
 else:
-    prefix = f"../../result/{qub_name}/"
+    prefix = f"../../../result/{qub_name}/"
     # postfix = "branch/mist_over_flux_with_simulation.png"
     postfix = "branch_floquet/mist_over_flux_with_simulation.png"
 
     os.makedirs(os.path.dirname(os.path.join(prefix, "image", postfix)), exist_ok=True)
     os.makedirs(os.path.dirname(os.path.join(prefix, "web", postfix)), exist_ok=True)
 
+    fig.update_layout(height=800)
     fig.write_image(os.path.join(prefix, "image", postfix))
     fig.write_html(os.path.join(prefix, "web", postfix.replace(".png", ".html")))
     fig.show()

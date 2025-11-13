@@ -9,19 +9,11 @@ from scipy.ndimage import gaussian_filter
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter2D
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    set_reset_cfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
-
-from ....runner import HardTask, Runner
 
 FreqGainResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
@@ -31,9 +23,7 @@ def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> FreqGainResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqGainResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -48,10 +38,10 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
         gains = sweep2array(cfg["sweep"]["gain"])  # predicted gain points
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
-        set_reset_cfg(
+        Reset.set_param(
             cfg["tested_reset"], "qub_gain", sweep2param("gain", cfg["sweep"]["gain"])
         )
-        set_reset_cfg(
+        Reset.set_param(
             cfg["tested_reset"], "res_freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
@@ -59,7 +49,6 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
             "Qubit drive Gain (a.u.)",
             "Cavity Frequency (MHz)",
             segment_kwargs={"flip": True},
-            disable=not progress,
         ) as viewer:
             signals = Runner(
                 task=HardTask(
@@ -68,10 +57,10 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                make_reset("reset", ctx.cfg.get("reset")),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
-                                make_readout("readout", ctx.cfg["readout"]),
+                                Reset("tested_reset", ctx.cfg["tested_reset"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
@@ -94,7 +83,7 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
         result: Optional[FreqGainResultType] = None,
         smooth: float = 1.0,
         background: Literal["max", "min"] = "min",
-    ) -> None:
+    ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -115,7 +104,8 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
             freq_opt = fpts[np.argmin(np.min(real_signals, axis=0))]
 
         fig, ax = plt.subplots()
-        fig.tight_layout()
+        assert isinstance(fig, plt.Figure)
+
         ax.imshow(
             real_signals.T,
             aspect="auto",
@@ -127,9 +117,10 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
         ax.scatter(gain_opt, freq_opt, color="r", s=40, marker="*", label=peak_label)
         ax.legend(fontsize="x-large")
         ax.tick_params(axis="both", which="major", labelsize=12)
-        plt.show()
 
-        return gain_opt, freq_opt
+        fig.tight_layout()
+
+        return gain_opt, freq_opt, fig
 
     def save(
         self,

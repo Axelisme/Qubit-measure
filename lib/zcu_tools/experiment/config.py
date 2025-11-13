@@ -1,1 +1,1 @@
-figsize = (8, 6)
+figsize = (8, 4)

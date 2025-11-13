@@ -10,14 +10,7 @@ from scipy.ndimage import gaussian_filter
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
-from zcu_tools.program.v2 import (
-    ModularProgramV2,
-    Pulse,
-    make_readout,
-    make_reset,
-    set_reset_cfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 from ....runner import HardTask, Runner
@@ -27,9 +20,7 @@ DualToneResetPowerResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
 class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> DualToneResetPowerResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> DualToneResetPowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -45,10 +36,10 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
         pdrs1 = sweep2array(cfg["sweep"]["gain1"])  # predicted amplitudes
         pdrs2 = sweep2array(cfg["sweep"]["gain2"])  # predicted amplitudes
 
-        set_reset_cfg(
+        Reset.set_param(
             cfg["tested_reset"], "gain1", sweep2param("gain1", cfg["sweep"]["gain1"])
         )
-        set_reset_cfg(
+        Reset.set_param(
             cfg["tested_reset"], "gain2", sweep2param("gain2", cfg["sweep"]["gain2"])
         )
 
@@ -58,9 +49,7 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
             ref_j = 0 if pdrs2[0] < pdrs2[-1] else -1
             return np.abs(signals - signals[ref_i, ref_j])
 
-        with LivePlotter2D(
-            "Gain1 (a.u.)", "Gain2 (a.u.)", disable=not progress
-        ) as viewer:
+        with LivePlotter2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -68,10 +57,10 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                make_reset("reset", ctx.cfg.get("reset")),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                make_reset("tested_reset", ctx.cfg["tested_reset"]),
-                                make_readout("readout", ctx.cfg["readout"]),
+                                Reset("tested_reset", ctx.cfg["tested_reset"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
@@ -93,11 +82,10 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
         self,
         result: Optional[DualToneResetPowerResultType] = None,
         *,
-        plot: bool = True,
         smooth: float = 1.0,
         xname: Optional[str] = None,
         yname: Optional[str] = None,
-    ) -> Tuple[float, float]:
+    ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -120,29 +108,28 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
             gain2_opt = pdrs2[np.argmin(np.min(amp2D, axis=0))]
             amp2D = np.mean(amp2D) - amp2D
 
-        if plot:
-            fig, ax = plt.subplots(figsize=config.figsize)
-            fig.tight_layout()
-            ax.imshow(
-                amp2D.T,
-                aspect="auto",
-                origin="lower",
-                interpolation="none",
-                extent=(pdrs1[0], pdrs1[-1], pdrs2[0], pdrs2[-1]),
-            )
-            peak_label = f"({gain1_opt:.1f}, {gain2_opt:.1f}) a.u."
-            ax.scatter(
-                gain1_opt, gain2_opt, color="r", s=40, marker="*", label=peak_label
-            )
-            if xname is not None:
-                ax.set_xlabel(f"{xname} gain (a.u.)", fontsize=14)
-            if yname is not None:
-                ax.set_ylabel(f"{yname} gain (a.u.)", fontsize=14)
-            ax.legend(fontsize="x-large")
-            ax.tick_params(axis="both", which="major", labelsize=12)
-            plt.show()
+        fig, ax = plt.subplots(figsize=config.figsize)
+        assert isinstance(fig, plt.Figure)
 
-        return gain1_opt, gain2_opt
+        ax.imshow(
+            amp2D.T,
+            aspect="auto",
+            origin="lower",
+            interpolation="none",
+            extent=(pdrs1[0], pdrs1[-1], pdrs2[0], pdrs2[-1]),
+        )
+        peak_label = f"({gain1_opt:.1f}, {gain2_opt:.1f}) a.u."
+        ax.scatter(gain1_opt, gain2_opt, color="r", s=40, marker="*", label=peak_label)
+        if xname is not None:
+            ax.set_xlabel(f"{xname} gain (a.u.)", fontsize=14)
+        if yname is not None:
+            ax.set_ylabel(f"{yname} gain (a.u.)", fontsize=14)
+        ax.legend(fontsize="x-large")
+        ax.tick_params(axis="both", which="major", labelsize=12)
+
+        fig.tight_layout()
+
+        return gain1_opt, gain2_opt, fig
 
     def save(
         self,

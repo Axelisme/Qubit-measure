@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: Python 3
+    display_name: axelenv13
     language: python
     name: python3
 ---
@@ -24,6 +24,7 @@ import matplotlib.pyplot as plt
 from IPython.display import display
 
 %autoreload 2
+from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.notebook.analysis.branch import (
     plot_cn_over_flx,
@@ -41,15 +42,15 @@ from zcu_tools.notebook.analysis.design import calc_snr
 # Load Parameters
 
 ```python
-qub_name = "Q12_2D[3]/Q4"
+qub_name = "Si001"
 
-os.makedirs(f"../../result/{qub_name}/image/branch_floquet", exist_ok=True)
-os.makedirs(f"../../result/{qub_name}/web/branch_floquet", exist_ok=True)
-os.makedirs(f"../../result/{qub_name}/data/branch_floquet", exist_ok=True)
+os.makedirs(f"../../../result/{qub_name}/image/branch_floquet", exist_ok=True)
+os.makedirs(f"../../../result/{qub_name}/web/branch_floquet", exist_ok=True)
+os.makedirs(f"../../../result/{qub_name}/data/branch_floquet", exist_ok=True)
 ```
 
 ```python
-loadpath = f"../../result/{qub_name}/params.json"
+loadpath = f"../../../result/{qub_name}/params.json"
 _, params, mA_c, period, allows, data_dict = load_result(loadpath)
 
 print(f"EJ: {params[0]:.3f} GHz, EC: {params[1]:.3f} GHz, EL: {params[2]:.3f} GHz")
@@ -61,14 +62,18 @@ if dispersive_cfg := data_dict.get("dispersive"):
 elif "r_f" in allows:
     r_f = allows["r_f"]
     print(f"r_f: {r_f} GHz")
+
+rf_w = 4.2e-3  # GHz
+
+predictor = FluxoniumPredictor(loadpath)
 ```
 
 # SNR power dependence
 
 ```python
 # r_f = 5.927
-r_f = 7.5
-rf_w = 0.006
+# r_f = 7.5
+rf_w = 0.0041
 g = 0.1
 flx = 0.5
 
@@ -84,21 +89,26 @@ photons, chi_over_n, snrs = calc_snr(
 ```python
 fig, _ = plot_chi_and_snr_over_photon(photons, chi_over_n, snrs, qub_name, flx)
 
-fig.savefig(f"../../result/{qub_name}/image/branch_floquet/snr_over_n.png")
+fig.savefig(f"../../../result/{qub_name}/image/branch_floquet/snr_over_n_flx{flx}.png")
 plt.show()
 ```
 
 # Single
 
 ```python
+flx = predictor.A_to_flx(1.162e-3)
+flx
+```
+
+```python
 # r_f = 5.25
-rf_w = 0.006
-# g = 0.11
-flx = 0.5
+rf_w = 0.0041
+g = 0.1
+# flx = 0.5
 
 qub_dim = 40
 qub_cutoff = 80
-max_photon = 150
+max_photon = 20
 
 amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
 photons = (amps / (2 * g)) ** 2
@@ -138,10 +148,10 @@ branch_populations = calc_populations(branchs)
 fig = plot_populations_over_photon(branchs, photons, branch_populations)
 
 fig.write_html(
-    f"../../result/{qub_name}/web/branch_floquet/populations_phi{flx:0.2f}.html"
+    f"../../../result/{qub_name}/web/branch_floquet/populations_phi{flx:0.2f}.html"
 )
 fig.write_image(
-    f"../../result/{qub_name}/image/branch_floquet/populations_phi{flx:0.2f}.png"
+    f"../../../result/{qub_name}/image/branch_floquet/populations_phi{flx:0.2f}.png"
 )
 fig.show()
 ```
@@ -264,13 +274,13 @@ peak_Etls
 # Sweep flux
 
 ```python
-r_f = 5.7945
-rf_w = 0.006
-g = 0.11
+# r_f = 5.7945
+# rf_w = 0.006
+# g = 0.11
 
-qub_dim = 40
-qub_cutoff = 80
-max_photon = 150
+qub_dim = 30
+qub_cutoff = 60
+max_photon = 70
 
 amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
 photons = (amps / (2 * g)) ** 2
@@ -304,13 +314,13 @@ def calc_populations_with_flx(
 ```
 
 ```python
-flxs = np.linspace(0.0, 0.5, 5)
+flxs = np.linspace(0.0, 0.5, 1001)
 branchs = [0, 1]
 
 pop_over_flx = []
-for flx in tqdm(flxs, desc="Computing branch populations"):
+for f in tqdm(flxs, desc="Computing branch populations"):
     photons, branch_populations = calc_populations_with_flx(
-        branchs, flx=flx, progress=False
+        branchs, flx=f, progress=False
     )
 
     pop_over_flx.append(list(branch_populations.values()))
@@ -319,7 +329,7 @@ pop_over_flx = np.array(pop_over_flx)
 
 ```python
 np.savez_compressed(
-    f"../../result/{qub_name}/data/branch_floquet/populations_over_flx.npz",
+    f"../../../result/{qub_name}/data/branch_floquet/populations_over_flx.npz",
     flxs=flxs,
     branchs=branchs,
     photons=photons,
@@ -328,17 +338,19 @@ np.savez_compressed(
 ```
 
 ```python
-data = np.load(f"../../result/{qub_name}/data/branch_floquet/populations_over_flx.npz")
+data = np.load(f"../../../result/{qub_name}/data/branch_floquet/populations_over_flx.npz")
 flxs = data["flxs"]
 photons = data["photons"]
 pop_over_flx = data["populations_over_flx"]
 
-fig = plot_cn_over_flx(flxs, photons, pop_over_flx, {0: 2, 1: 3})
+fig = plot_cn_over_flx(flxs, photons, pop_over_flx, {0: 4, 1: 5})
 # fig.update_layout(height=600, width=800)
 
+# fig.add_vline(x=1-flx)
+
 # Save the figure
-fig.write_html(f"../../result/{qub_name}/web/branch_floquet/cn_over_flx.html")
-fig.write_image(f"../../result/{qub_name}/image/branch_floquet/cn_over_flx.png")
+fig.write_html(f"../../../result/{qub_name}/web/branch_floquet/cn_over_flx.html")
+fig.write_image(f"../../../result/{qub_name}/image/branch_floquet/cn_over_flx.png")
 
 fig.show()
 ```

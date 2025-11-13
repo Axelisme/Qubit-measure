@@ -1,6 +1,8 @@
+import time
 import warnings
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -14,57 +16,33 @@ from zcu_tools.utils.func_tools import min_interval
 ResultType = Union[Dict[Any, "ResultType"], List["ResultType"], ndarray]
 
 
-def default_raw2signal_fn(raw_signal: Any) -> ndarray:
-    return raw_signal[0][0].dot([1, 1j])
-
-
+@dataclass
 class TaskContext:
-    def __init__(
-        self,
-        cfg: Dict[str, Any],
-        data: ResultType,
-        update_hook: Optional[Callable[["TaskContext"], None]] = None,
-    ) -> None:
-        self.cfg = cfg
-        self.data = data
-        self.update_hook = update_hook
-
-        self.addr_stack: List[Union[int, Any]] = []
-        self.cfg_stack: List[Dict[str, Any]] = []
-        self.last_call_addr = None
+    cfg: Dict[str, Any]
+    data: ResultType
+    update_hook: Optional[Callable[["TaskContext"], None]] = None
+    addr_stack: List[Union[int, Any]] = field(default_factory=list)
 
     def __call__(self, addr: Union[int, Any]) -> "TaskContext":
-        self.last_call_addr = addr
-        return self
-
-    def __enter__(self) -> None:
-        assert self.last_call_addr is not None
-        self.addr_stack.append(self.last_call_addr)
-        self.cfg_stack.append(deepcopy(self.cfg))  # record cfg
-
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
-        self.addr_stack.pop()
-        self.cfg = self.cfg_stack.pop()  # restore cfg
-        self.last_call_addr = None
+        return TaskContext(
+            deepcopy(self.cfg),
+            self.data,
+            self.update_hook,
+            self.addr_stack + [addr],
+        )
 
     def is_empty_stack(self) -> bool:
         return len(self.addr_stack) == 0
 
     def set_data(
-        self, value: ResultType, addr_stack: Optional[List[Union[int, str]]] = None
+        self, value: ResultType, addr_stack: List[Union[int, Any]] = []
     ) -> None:
-        """Set data at the current address."""
-
-        # default to current address stack
-        if addr_stack is None:
-            addr_stack = self.addr_stack
-
         target = self.get_data(addr_stack)
 
         if isinstance(target, dict):
             if not isinstance(value, dict):
                 raise ValueError(f"Expected dict, got {type(value)}")
-            target.update(value)  # not deep update
+            target.update(value)  # not deep update, intentionally
         elif isinstance(target, list):
             if not isinstance(value, list):
                 raise ValueError(f"Expected list, got {type(value)}")
@@ -77,6 +55,9 @@ class TaskContext:
         if self.update_hook is not None:
             self.update_hook(self)
 
+    def set_current_data(self, value: ResultType) -> None:
+        self.set_data(value, self.addr_stack)
+
     def get_data(self, addr_stack: List[Union[int, str]] = []) -> ResultType:
         target = self.data
 
@@ -85,7 +66,7 @@ class TaskContext:
             assert isinstance(target, (dict, list)), (
                 f"target is not a dict or list: {target}"
             )
-            target = target[seg]
+            target = target[seg]  # type: ignore
 
         return target
 
@@ -95,10 +76,12 @@ class TaskContext:
 
 class AbsTask(ABC):
     def init(self, ctx: TaskContext, keep: bool = True) -> None:
+        """Initialize the task with the current context. Do not modify the context."""
         pass
 
     @abstractmethod
     def run(self, ctx: TaskContext) -> None:
+        """Run the task with the current context."""
         pass
 
     def cleanup(self) -> None:
@@ -126,8 +109,7 @@ class BatchTask(AbsTask):
             self.task_pbar.set_description(desc=f"Task [{str(name)}]")
 
             task.init(ctx, keep=False)
-            with ctx(addr=name):
-                task.run(ctx)
+            task.run(ctx(addr=name))
             task.cleanup()
 
             self.task_pbar.update()
@@ -158,20 +140,21 @@ class SoftTask(AbsTask):
 
     def init(self, ctx: TaskContext, keep=True) -> None:
         self.sweep_pbar = tqdm(
-            total=len(self.sweep_values), smoothing=0, desc=self.sweep_name, leave=keep
+            total=len(self.sweep_values),  # type: ignore
+            smoothing=0,
+            desc=self.sweep_name,
+            leave=keep,
         )
-        self.update_cfg_fn(0, ctx, self.sweep_values[0])  # initialize the cfg
         self.sub_task.init(ctx, keep=keep)
 
     def run(self, ctx: TaskContext) -> None:
         assert self.sweep_pbar is not None
         self.sweep_pbar.reset()
 
-        for i, v in enumerate(self.sweep_values):
+        for i, v in enumerate(self.sweep_values):  # type: ignore
             self.update_cfg_fn(i, ctx, v)
 
-            with ctx(addr=i):
-                self.sub_task.run(ctx)
+            self.sub_task.run(ctx(addr=i))
 
             self.sweep_pbar.update()
 
@@ -183,8 +166,13 @@ class SoftTask(AbsTask):
 
     def get_default_result(self) -> ResultType:
         return [
-            self.sub_task.get_default_result() for _ in range(len(self.sweep_values))
+            self.sub_task.get_default_result()
+            for _ in range(len(self.sweep_values))  # type: ignore
         ]
+
+
+def default_raw2signal_fn(raw: Any) -> np.ndarray:
+    return raw[0][0].dot([1, 1j])
 
 
 class HardTask(AbsTask):
@@ -216,14 +204,14 @@ class HardTask(AbsTask):
             if self.avg_pbar is not None:
                 self.avg_pbar.update(ir - self.avg_pbar.n)
 
-            ctx.set_data(self.raw2signal_fn(raw))
+            ctx.set_current_data(self.raw2signal_fn(raw))
 
         signal = self.raw2signal_fn(self.measure_fn(ctx, update_hook))
 
         if self.avg_pbar is not None:
             self.avg_pbar.update(ctx.cfg["rounds"] - self.avg_pbar.n)
 
-        ctx.set_data(signal)
+        ctx.set_current_data(signal)
 
     def cleanup(self) -> None:
         if self.avg_pbar is not None:
@@ -234,18 +222,60 @@ class HardTask(AbsTask):
         return np.full(self.result_shape, np.nan, dtype=complex)
 
 
-class AnalysisTask(AbsTask):
+class RepeatOverTime(AbsTask):
     def __init__(
-        self, analysis_fn: Callable[[TaskContext], ResultType], init_result: ResultType
+        self,
+        name: str,
+        num_times: int,
+        interval: float,
+        task: AbsTask,
+        fail_retry: int = 0,
     ) -> None:
-        self.analysis_fn = analysis_fn
-        self.init_result = init_result
+        self.name = name
+        self.num_times = num_times
+        self.interval = interval
+        self.task = task
+        self.fail_retry = fail_retry
+
+        self.pbar = None
+
+    def init(self, ctx: TaskContext, keep=True) -> None:
+        self.pbar = tqdm(total=self.num_times, smoothing=0, desc=self.name, leave=keep)
+        self.task.init(ctx, keep=keep)
 
     def run(self, ctx: TaskContext) -> None:
-        ctx.set_data(self.analysis_fn(ctx))
+        assert self.pbar is not None
+        self.pbar.reset()
+
+        start_t = time.time() - 2 * self.interval
+
+        for i in range(self.num_times):
+            while time.time() - start_t < self.interval:
+                time.sleep(0.1)
+            start_t = time.time()
+
+            for attempt in range(self.fail_retry):
+                try:
+                    self.task.run(ctx(addr=i))
+                except Exception:
+                    print(
+                        f"Failed to run task, retrying... ({attempt + 1}/{self.fail_retry})"
+                    )
+                    continue
+                break
+            else:
+                self.task.run(ctx(addr=i))
+
+            self.pbar.update()
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
+        assert self.pbar is not None
+        self.pbar.close()
+        self.pbar = None
 
     def get_default_result(self) -> ResultType:
-        return deepcopy(self.init_result)
+        return [self.task.get_default_result() for _ in range(self.num_times)]
 
 
 class Runner:
@@ -262,16 +292,14 @@ class Runner:
         cfg = deepcopy(init_cfg)
         init_result = self.task.get_default_result()
 
+        # initialize devices with progress bar
+        GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+
         ctx = TaskContext(cfg, init_result, self.update_hook)
 
         try:
             self.task.init(ctx)
-
-            # initialize devices with progress bar
-            GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
-
             self.task.run(ctx)
-
             self.task.cleanup()
         except KeyboardInterrupt:
             print("Received KeyboardInterrupt, early stopping the program")

@@ -152,3 +152,49 @@ def plot_transitions(
     )
 
     return fig
+
+
+def plot_mist_condition(flxs, energies, r_f, max_level=None) -> go.Figure:
+    def calc_mod_transition(transition):
+        return np.mod(transition + r_f / 2, r_f) - r_f / 2
+
+    def plot_without_discontinuities(fig, x, y, **kwargs):
+        discontinuities = np.where(np.abs(np.diff(y)) > r_f / 2)[0]
+        x_new = np.insert(x, discontinuities + 1, np.nan)
+        y_new = np.insert(y, discontinuities + 1, np.nan)
+        kwargs.setdefault("mode", "lines")
+        fig.add_trace(go.Scatter(x=x_new, y=y_new, **kwargs))
+
+    if max_level is None:
+        max_level = energies.shape[1] - 1
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=flxs,
+            y=np.zeros_like(flxs),
+            name="0",
+            line=dict(width=4, color="blue"),
+        )
+    )
+    plot_without_discontinuities(
+        fig,
+        flxs,
+        calc_mod_transition(energies[:, 1] - energies[:, 0]),
+        name="1",
+        line=dict(width=4, color="red"),
+    )
+    for j in range(2, max_level + 1):
+        transition = energies[:, j] - energies[:, 0]
+        plot_without_discontinuities(
+            fig,
+            flxs,
+            calc_mod_transition(transition),
+            line=dict(width=1, color="black", dash="dot"),
+            customdata=np.floor_divide(transition, r_f),
+            hovertemplate=f"state {j}, " + "n = %{customdata:.0f}<extra></extra>",
+        )
+
+    fig.update_yaxes(range=[-r_f / 2, r_f / 2])
+
+    return fig

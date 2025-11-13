@@ -13,12 +13,12 @@ from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
     Pulse,
-    make_readout,
-    make_reset,
+    Readout,
+    Reset,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe, fit_gauss_decay
+from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
 from ...runner import HardTask, Runner
@@ -62,7 +62,7 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                make_reset("reset", ctx.cfg.get("reset")),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
                                 Delay("t2e_delay1", delay=0.5 * t2e_spans),
                                 Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
@@ -75,7 +75,7 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
                                         + 360 * detune * t2e_spans,
                                     },
                                 ),
-                                make_readout("readout", ctx.cfg["readout"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
@@ -123,6 +123,8 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
             raise ValueError(f"Unknown fit_method: {fit_method}")
 
         fig, ax = plt.subplots(figsize=config.figsize)
+        assert isinstance(fig, plt.Figure)
+
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
 

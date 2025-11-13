@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: Python 3
+    display_name: axelenv13
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.2
+    version: 3.13.4
 ---
 
 ```python
@@ -53,7 +53,7 @@ from zcu_tools.simulate.fluxonium import (
 ```
 
 ```python
-qub_name = "2DQ9/Q5"
+qub_name = "Si001"
 ```
 
 # Load data
@@ -159,7 +159,7 @@ print(f"Temp_Qcap = {Temp_Qcap * 1e3:.2f} mK")
 ```
 
 ```python
-# Temp_Qcap = Temp
+Temp_Qcap = Temp
 Qcaps, Qcaps_err = calc_Qcap_vs_omega(
     params, s_fpts, s_T1s, s_n_elements, T1errs=s_T1errs, guess_Temp=Temp_Qcap
 )
@@ -169,9 +169,9 @@ ax.set_title(f"Temp = {Temp_Qcap * 1e3:.2f} mK")
 ax.set_ylim(1e3, 1e7)
 
 fit_Qcaps = []
-# fit_Qcaps.append(add_Q_fit(ax, s_fpts, Qcaps, fit_constant=True))
-fit_Qcaps.append(add_Q_fit(ax, s_fpts, Qcaps, w_range=(None, 12)))
-fit_Qcaps.append(add_Q_fit(ax, s_fpts, Qcaps, w_range=(15, None)))
+fit_Qcaps.append(add_Q_fit(ax, s_fpts, Qcaps, fit_constant=True))
+# fit_Qcaps.append(add_Q_fit(ax, s_fpts, Qcaps, w_range=(None, 12)))
+# fit_Qcaps.append(add_Q_fit(ax, s_fpts, Qcaps, w_range=(15, None)))
 
 
 fit_Qcaps = list(map(np.array, fit_Qcaps))
@@ -324,7 +324,7 @@ t1_effs = calculate_eff_t1_vs_flx_with(
 ## Percell Effect
 
 ```python
-rf_w = 5e-3  # GHz
+rf_w = 4.2e-3  # GHz
 g = 0.1
 
 percell_t1s = calculate_percell_t1_vs_flx(

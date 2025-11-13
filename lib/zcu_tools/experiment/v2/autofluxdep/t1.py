@@ -16,7 +16,6 @@ from zcu_tools.simulate.fluxonium.predict import FluxoniumPredictor
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay
 
-from .util import check_gains
 from .task import (
     MeasureDetuneTask,
     MeasureLenRabiTask,
@@ -25,8 +24,11 @@ from .task import (
     lenrabi_signal2real,
     t1_signal2real,
 )
+from .util import check_gains
 
-T1ResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
+T1ResultType = Tuple[
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]
+]
 
 
 class T1Experiment(AbsExperiment[T1ResultType]):
@@ -87,66 +89,55 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             )
 
         # -- Run Experiment --
-        fig, axs, dh = make_plot_frame(n_row=2, n_col=3, figsize=(15, 7))
+        fig, axs = make_plot_frame(n_row=2, n_col=3, figsize=(15, 7))
+        assert isinstance(fig, plt.Figure)
 
         with MultiLivePlotter(
+            fig,
             dict(
                 detune=LivePlotter2DwithLine(
                     "Flux device value",
                     "Detune (MHz)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [[axs[1, 0], axs[0, 0]]], dh),
-                    disable=not progress,
+                    existed_frames=(fig, [[axs[1, 0], axs[0, 0]]]),
                 ),
                 len_rabi=LivePlotter2DwithLine(
                     "Flux device value",
                     "Rabi length (us)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [[axs[1, 1], axs[0, 1]]], dh),
-                    disable=not progress,
+                    existed_frames=(fig, [[axs[1, 1], axs[0, 1]]]),
                 ),
                 t1=LivePlotter2DwithLine(
                     "Flux device value",
                     "Time (us)",
                     line_axis=1,
                     num_lines=5,
-                    existed_frames=(fig, [[axs[1, 2], axs[0, 2]]], dh),
-                    disable=not progress,
+                    existed_frames=(fig, [[axs[1, 2], axs[0, 2]]]),
                 ),
-            )
+            ),
         ) as viewer:
+            plot_map = {
+                "detune": (detunes, detune_signal2real),
+                "len_rabi": (rabilens, lenrabi_signal2real),
+                "t1": (t1lens, t1_signal2real),
+            }
 
             def plot_fn(ctx: TaskContext) -> None:
                 if ctx.is_empty_stack():
                     return
 
-                plot_map = {
-                    "detune": (detunes, detune_signal2real),
-                    "len_rabi": (rabilens, lenrabi_signal2real),
-                    "t1": (t1lens, t1_signal2real),
-                }
-
-                signals = merge_result_list(ctx.get_data())
                 cur_task = ctx.addr_stack[-1]
-
                 if cur_task not in plot_map:
                     return
 
-                viewer.update(
-                    {
-                        cur_task: (
-                            values,
-                            plot_map[cur_task][0],
-                            plot_map[cur_task][1](signals[cur_task]),
-                        )
-                    }
-                )
+                signals = merge_result_list(ctx.get_data())
 
-            detune_ax = viewer.get_plotter("detune").get_ax("1d")
-            rabi_ax = viewer.get_plotter("len_rabi").get_ax("1d")
-            t1_ax = viewer.get_plotter("t1").get_ax("1d")
+                ys, signal2real_fn = plot_map[cur_task]
+                viewer.update(
+                    {cur_task: (values, ys, signal2real_fn(signals[cur_task]))}
+                )
 
             results = Runner(
                 task=SoftTask(
@@ -156,26 +147,12 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     sub_task=AutoBatchTask(
                         tasks=dict(
                             detune=MeasureDetuneTask(
-                                soccfg,
-                                soc,
-                                detune_sweep,
-                                earlystop_snr=earlystop_snr,
-                                plot_ax=detune_ax,
+                                soccfg, soc, detune_sweep, earlystop_snr
                             ),
                             len_rabi=MeasureLenRabiTask(
-                                soccfg,
-                                soc,
-                                rabilen_sweep,
-                                earlystop_snr=earlystop_snr,
-                                plot_ax=rabi_ax,
+                                soccfg, soc, rabilen_sweep, earlystop_snr=earlystop_snr
                             ),
-                            t1=MeasureT1Task(
-                                soccfg,
-                                soc,
-                                t1len_sweep,
-                                earlystop_snr=earlystop_snr,
-                                plot_ax=t1_ax,
-                            ),
+                            t1=MeasureT1Task(soccfg, soc, t1len_sweep, earlystop_snr),
                         ),
                     ),
                 ),
@@ -200,8 +177,8 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, _, t1lens, signals_dict = result
-        fit_freqs = signals_dict["meta_infos"]["detune"]["fit_freq"]
+        values, _, _, t1lens, signals_dict = result
+        fit_freqs = signals_dict["meta_infos"]["detune"]["qubit_freq"]
         t1_signals = signals_dict["t1"]
 
         t1lens = t1lens[start_idx:]
@@ -278,7 +255,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         values, detunes, rabilens, t1lens, signals_dict = result
         detune_signals = signals_dict["detune"]
-        fit_freqs = signals_dict["meta_infos"]["detune"]["fit_freq"]
+        fit_freqs = signals_dict["meta_infos"]["detune"]["qubit_freq"]
         rabilen_signals = signals_dict["len_rabi"]
         t1_signals = signals_dict["t1"]
 

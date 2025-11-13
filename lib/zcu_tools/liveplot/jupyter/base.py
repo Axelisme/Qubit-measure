@@ -1,9 +1,10 @@
+import warnings
 from itertools import chain
 from threading import Lock
 from typing import List, Optional, Tuple, TypeVar
 
 import matplotlib.pyplot as plt
-from IPython.display import DisplayHandle, display
+from IPython.display import display
 
 from ..segments import AbsSegment
 
@@ -12,17 +13,37 @@ from ..segments import AbsSegment
 T_JupyterPlotMixin = TypeVar("T_JupyterPlotMixin", bound="JupyterPlotMixin")
 
 
+def instant_plot(fig: plt.Figure, n_row: int) -> None:
+    # this ensures the figure is rendered in Jupyter notebooks right now and can be updated later
+    canvas = fig.canvas
+
+    if not hasattr(canvas, "toolbar_visible"):
+        warnings.warn(
+            "Warning: The matplotlib backend should be set to 'widget' for live plotting."
+        )
+
+    canvas.toolbar_visible = False
+    canvas.header_visible = False
+    canvas.footer_visible = False
+    canvas.layout.height = f"{360 * n_row}px"
+
+    canvas._handle_message(canvas, {"type": "send_image_mode"}, [])
+    canvas._handle_message(canvas, {"type": "refresh"}, [])
+    canvas._handle_message(canvas, {"type": "initialized"}, [])
+    canvas._handle_message(canvas, {"type": "draw"}, [])
+    display(canvas)
+
+
 def make_plot_frame(
     n_row: int, n_col: int, **kwargs
-) -> Tuple[plt.FigureBase, List[List[plt.Axes]], DisplayHandle]:
+) -> Tuple[plt.Figure, List[List[plt.Axes]]]:
     kwargs.setdefault("squeeze", False)
-    kwargs.setdefault("figsize", (6 * n_col, 5 * n_row))
+    kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
     fig, axs = plt.subplots(n_row, n_col, **kwargs)
-    dh = display(fig, display_id=True)
 
-    assert isinstance(fig, plt.FigureBase)
+    instant_plot(fig, n_row)
 
-    return fig, axs, dh
+    return fig, axs
 
 
 class JupyterPlotMixin:
@@ -31,9 +52,7 @@ class JupyterPlotMixin:
     def __init__(
         self,
         segments: List[List[AbsSegment]],
-        existed_frames: Optional[
-            Tuple[plt.FigureBase, List[List[plt.Axes]], DisplayHandle]
-        ] = None,
+        existed_axes: Optional[List[List[plt.Axes]]] = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:
@@ -51,19 +70,16 @@ class JupyterPlotMixin:
 
         self.segments = segments
         self.update_lock = Lock()
-        self.auto_close = auto_close
         self.disable = disable
+        self.auto_close = auto_close
 
         if disable:
             return  # early return
 
-        if existed_frames is not None:
-            # if provided axes and display handle, use them
-            provided_fig, provided_axs, provided_dh = existed_frames
-
+        if existed_axes is not None:
             # validate check
-            valid = len(provided_axs) == n_row
-            for a_row in provided_axs:
+            valid = len(existed_axes) == n_row
+            for a_row in existed_axes:
                 if len(a_row) != n_col:
                     valid = False
             if not valid:
@@ -71,12 +87,12 @@ class JupyterPlotMixin:
                     "The shape of provided axes must match the shape of segments."
                 )
 
-            self.fig = provided_fig
-            self.axs = provided_axs
-            self.dh = provided_dh
+            # if provided axes and display handle, use them
+            self.fig = None
+            self.axs = existed_axes
         else:
             # if not provided axes, create figure and display handle
-            self.fig, self.axs, self.dh = make_plot_frame(n_row, n_col)
+            self.fig, self.axs = make_plot_frame(n_row, n_col)
 
     def clear(self) -> None:
         if self.disable:
@@ -94,7 +110,12 @@ class JupyterPlotMixin:
         if self.disable:
             return
 
-        self.dh.update(self.fig)
+        if self.fig is None:
+            raise RuntimeError(
+                "Try to refresh a plotter, but it have no own figure, this should happen when the figure is hosted outside of the plotter, you need to refresh the figure manually."
+            )
+
+        self.fig.canvas.draw()
 
     def refresh(self) -> None:
         if self.disable:
@@ -117,5 +138,5 @@ class JupyterPlotMixin:
         if self.disable:
             return
 
-        if self.auto_close:
+        if self.auto_close and self.fig is not None:
             plt.close(self.fig)

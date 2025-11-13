@@ -8,13 +8,12 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner, SoftTask
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param, Pulse
+from zcu_tools.program.v2 import Pulse, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
-
-from ...runner import HardTask, Runner, SoftTask
 
 
 def rabi_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -25,9 +24,7 @@ LenRabiResultType = Tuple[np.ndarray, np.ndarray]  # (lens, signals)
 
 
 class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
-    def _run_for_flat(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> LenRabiResultType:
+    def _run_for_flat(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         assert cfg["qub_pulse"]["waveform"]["style"] in ["const", "flat_top"], (
@@ -42,7 +39,7 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
             cfg["qub_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
         )
 
-        with LivePlotter1D("Length (us)", "Signal", disable=not progress) as viewer:
+        with LivePlotter1D("Length (us)", "Signal") as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -64,9 +61,7 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
 
         return lens, signals
 
-    def _run_for_arb(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> LenRabiResultType:
+    def _run_for_arb(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -74,7 +69,7 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
 
         lens = sweep2array(len_sweep)  # predicted
 
-        with LivePlotter1D("Length (us)", "Signal", disable=not progress) as viewer:
+        with LivePlotter1D("Length (us)", "Signal") as viewer:
             signals = Runner(
                 task=SoftTask(
                     sweep_name="length",
@@ -102,40 +97,26 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
 
         return lens, signals
 
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> LenRabiResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResultType:
         qub_waveform = cfg["qub_pulse"]["waveform"]
 
         if qub_waveform["style"] in ["const", "flat_top"]:
             # use hard sweep for flat top pulse
-            return self._run_for_flat(soc, soccfg, cfg, progress=progress)
+            return self._run_for_flat(soc, soccfg, cfg)
         else:
             # use soft sweep for arb pulse
-            return self._run_for_arb(soc, soccfg, cfg, progress=progress)
+            return self._run_for_arb(soc, soccfg, cfg)
 
     def analyze(
-        self,
-        result: Optional[LenRabiResultType] = None,
-        *,
-        decay: bool = True,
-        max_contrast: bool = True,
-    ) -> Tuple[float, float, plt.Figure]:
+        self, result: Optional[LenRabiResultType] = None, *, decay: bool = True
+    ) -> Tuple[float, float, float, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         lens, signals = result
 
-        if max_contrast:
-            real_signals = rotate2real(signals).real
-        else:
-            real_signals = np.abs(signals)
+        real_signals = rabi_signal2real(signals)
 
         nan_mask = np.isnan(real_signals)
         if np.all(nan_mask):
@@ -149,15 +130,18 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        fig.tight_layout()
+        assert isinstance(fig, plt.Figure)
+
         ax.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(lens, y_fit, label="fit")
         ax.axvline(pi_len, ls="--", c="red", label=f"pi = {pi_len:.3g} μs")
         ax.axvline(pi2_len, ls="--", c="red", label=f"pi/2 = {pi2_len:.3g} μs")
         ax.set_xlabel("Pulse length (μs)")
-        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.set_ylabel("Signal Real (a.u.)")
         ax.set_title(f"Rabi Oscillation (f={freq:.3f} MHz)")
         ax.legend(loc=4)
+
+        fig.tight_layout()
 
         return pi_len, pi2_len, freq, fig
 

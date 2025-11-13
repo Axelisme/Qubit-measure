@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,16 +13,16 @@ from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
     Pulse,
+    Readout,
     Repeat,
-    make_readout,
-    make_reset,
+    Reset,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
-from ...runner import HardTask, Runner, SoftTask
+from ...runner import HardTask, Runner, SoftTask, TaskContext
 
 
 def cpmg_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -32,7 +32,7 @@ def cpmg_signal2real(signals: np.ndarray) -> np.ndarray:
     return (real_signals - min_vals) / (max_vals - min_vals)
 
 
-CPMGResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
+CPMGResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]  # (times, Ts, signals)
 
 
 class CPMGExperiment(AbsExperiment[CPMGResultType]):
@@ -54,16 +54,18 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
 
-        def updateCfg(_, ctx, time: int) -> None:
+        def updateCfg(_: int, ctx: TaskContext, time: float) -> None:
             ctx.cfg["time"] = time
 
-        def measure_fn(ctx, update_hook) -> np.ndarray:
+        def measure_fn(
+            ctx: TaskContext, update_hook: Callable[[int, Any], None]
+        ) -> np.ndarray:
             interval = cpmg_spans / ctx.cfg["time"]
             return ModularProgramV2(
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    make_reset("reset", ctx.cfg.get("reset")),
+                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                     Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"], pulse_name="pi2_pulse"),
                     Delay("initial_cpmg_delay", delay=0.5 * interval),
                     Repeat(
@@ -77,7 +79,7 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
                     Pulse("last_pi_pulse", ctx.cfg["pi_pulse"], pulse_name="pi_pulse"),
                     Delay("final_cpmg_delay", delay=0.5 * interval),
                     Pulse("pi2_pulse2", ctx.cfg["pi2_pulse"], pulse_name="pi2_pulse"),
-                    make_readout("readout", ctx.cfg["readout"]),
+                    Readout("readout", ctx.cfg["readout"]),
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 
@@ -111,7 +113,9 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
 
         return times, ts, signals
 
-    def analyze(self, result: Optional[CPMGResultType] = None) -> Tuple[float, float]:
+    def analyze(
+        self, result: Optional[CPMGResultType] = None
+    ) -> Tuple[np.ndarray, np.ndarray, plt.Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -147,7 +151,10 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
 
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        assert isinstance(fig, plt.Figure)
         assert isinstance(ax1, plt.Axes)
+        assert isinstance(ax2, plt.Axes)
+
         ax1.errorbar(times, t2s, yerr=t2errs, label="Fitting T2")
         ax1.set_ylabel("T2 (us)")
         ax1.set_ylim(bottom=0)
@@ -161,7 +168,8 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
         )
         ax2.set_ylabel("Time (us)")
         ax2.set_xlabel("Number of Pi")
-        plt.plot()
+
+        fig.tight_layout()
 
         return t2s, t2errs, fig
 

@@ -1,45 +1,50 @@
-import time
 from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import clear_output, display
-from tqdm.auto import tqdm
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.liveplot.jupyter import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.experiment.v2.runner import HardTask, RepeatOverTime, Runner
+from zcu_tools.liveplot.jupyter import LivePlotter1D, LivePlotter2DwithLine
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
-
-from ...runner import HardTask, Runner
 
 MISTPowerDepResultType = Tuple[np.ndarray, np.ndarray]
 
 
-def mist_signal2real(signal: np.ndarray) -> np.ndarray:
-    return np.abs(signal - signal[0])
+def mist_signal2real(signals: np.ndarray) -> np.ndarray:
+    avg_len = max(int(0.05 * len(signals)), 1)
+
+    mist_signals = signals - np.mean(signals[:avg_len])
+
+    return np.abs(mist_signals)
 
 
 class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress=True
-    ) -> MISTPowerDepResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> MISTPowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
-        cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+        cfg["probe_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
 
-        with LivePlotter1D("Pulse gain", "MIST", disable=not progress) as viewer:
+        with LivePlotter1D("Pulse gain", "MIST") as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
-                        TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
-                        )
+                        ModularProgramV2(
+                            soccfg,
+                            cfg,
+                            modules=[
+                                Reset("reset", cfg.get("reset", {"type": "none"})),
+                                Pulse(name="init_pulse", cfg=cfg.get("init_pulse")),
+                                Pulse(name="probe_pulse", cfg=cfg["probe_pulse"]),
+                                Readout("readout", cfg["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(pdrs),),
                 ),
@@ -65,6 +70,7 @@ class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
     ) -> None:
         if result is None:
             result = self.last_result
+        assert result is not None, "no result found"
 
         pdrs, signals = result
 
@@ -117,71 +123,66 @@ class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
 MISTPowerDepOvernightResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
+def mist_overnight_signal2real(signals: np.ndarray) -> np.ndarray:
+    avg_len = max(int(0.05 * signals.shape[1]), 1)
+
+    mist_signals = signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
+
+    return np.abs(mist_signals)
+
+
 class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress=True
+        self, soc, soccfg, cfg: Dict[str, Any], *, num_times=50, fail_retry=3
     ) -> MISTPowerDepOvernightResultType:
-        fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(16, 6))
+        cfg = deepcopy(cfg)  # prevent in-place modification
 
-        dh = display(fig, display_id=True)
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
+        iters = np.arange(num_times)
+        pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
-        total_time = 1 * 60 * 60  # 1 hours in seconds
-        interval = 5 * 60  # 5 minutes in seconds
+        Pulse.set_param(
+            cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+        )
 
-        mist_pdr_exp = MISTPowerDep()
+        with LivePlotter2DwithLine(
+            "Pulse gain", "Iteration", line_axis=1, title="MIST Overnight"
+        ) as viewer:
+            signals = Runner(
+                task=RepeatOverTime(
+                    name="repeat_over_time",
+                    num_times=num_times,
+                    interval=cfg["interval"],
+                    task=HardTask(
+                        measure_fn=lambda ctx, update_hook: (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset(
+                                        "reset", ctx.cfg.get("reset", {"type": "none"})
+                                    ),
+                                    Pulse("init_pulse", cfg=ctx.cfg.get("init_pulse")),
+                                    Pulse("probe_pulse", cfg=ctx.cfg["probe_pulse"]),
+                                    Readout("readout", ctx.cfg["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        ),
+                        result_shape=(len(pdrs),),
+                    ),
+                    fail_retry=fail_retry,
+                ),
+                update_hook=lambda ctx: viewer.update(
+                    iters, pdrs, mist_overnight_signal2real(np.asarray(ctx.get_data()))
+                ),
+            ).run(cfg)
+            signals = np.asarray(signals)
 
-        iters = list(range(total_time // interval))
-        overnight_signals = []
-        try:
-            for i in tqdm(iters, desc="Overnight Scans", unit="iteration"):
-                start_t = time.time()
+        # record the last result
+        self.last_cfg = cfg
+        self.last_result = (iters, pdrs, signals)
 
-                pdrs, signals = mist_pdr_exp.run(soc, soccfg, cfg, progress=False)
-                overnight_signals.append(signals)
-
-                signals_array = np.array(overnight_signals)
-                g0 = np.mean(signals_array[:, 0])
-
-                # Left plot: Current scan
-                ax_left.clear()
-                ax_left.plot(pdrs, np.abs(signals - g0), linestyle="-", marker=".")
-                ax_left.set_xlabel("Drive Power (a.u.)")
-                ax_left.set_ylabel("Signal (a.u.)")
-                ax_left.set_title(f"Current Scan (Iteration {i + 1})")
-
-                # Right plot: Historical scans
-                ax_right.clear()
-                ax_right.plot(pdrs, np.abs(signals_array - g0).T, linestyle="--")
-                ax_right.set_xlabel("Drive Power (a.u.)")
-                ax_right.set_ylabel("Signal (a.u.)")
-                ax_right.set_title("Historical Scans")
-
-                dh.update(fig)
-
-                while time.time() - start_t < interval:
-                    plt.pause(0.5)  # Pause to allow the plot to update
-            plt.close(fig)
-            clear_output(wait=True)
-
-            overnight_signals = np.array(overnight_signals)
-
-            g0 = np.mean(overnight_signals[:, 0])
-
-            # plot overnight_signals in one plot
-            fig, ax = plt.subplots(figsize=(8, 4))
-            ax.plot(pdrs, np.abs(overnight_signals - g0).T, linestyle="--")
-            ax.set_xlabel(r"$\bar n$")
-            ax.set_ylabel("Signal difference")
-            plt.tight_layout()
-            plt.show()
-        except KeyboardInterrupt:
-            print("Overnight scans interrupted by user.")
-        except Exception as e:
-            print(f"An error occurred: {e}")
-        finally:
-            iters = iters[: len(overnight_signals)]
-
-        return iters, pdrs, overnight_signals
+        return iters, pdrs, signals
 
     def analyze(
         self,
@@ -190,9 +191,10 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
         g0=None,
         e0=None,
         ac_coeff=None,
-    ) -> None:
+    ) -> plt.Figure:
         if result is None:
             result = self.last_result
+        assert result is not None, "no result found"
 
         _, pdrs, signals = result
 
@@ -209,6 +211,8 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
             xlabel = r"$\bar n$"
 
         fig, ax = plt.subplots(figsize=config.figsize)
+        assert isinstance(fig, plt.Figure)
+
         ax.plot(xs, abs_diff.T)
         ax.set_xscale("log")
         ax.set_xlabel(xlabel, fontsize=14)
@@ -218,8 +222,9 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
         if e0 is not None:
             ax.set_ylim(0, 1.1 * np.abs(g0 - e0))
 
-        plt.tight_layout()
-        plt.show()
+        fig.tight_layout()
+
+        return fig
 
     def save(
         self,

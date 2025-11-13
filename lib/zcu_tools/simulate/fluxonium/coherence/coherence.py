@@ -19,10 +19,14 @@ def calculate_eff_t1_with(
 
     scq.settings.T1_DEFAULT_WARNING = False
     fluxonium.flux = flx
-    return fluxonium.t1_effective(
-        noise_channels=noise_channels,
-        common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
-        esys=esys,
+    return (
+        2
+        * np.pi
+        * fluxonium.t1_effective(
+            noise_channels=noise_channels,
+            common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
+            esys=esys,
+        )
     )
 
 
@@ -41,9 +45,13 @@ def calculate_eff_t1(
     fluxonium = scq.Fluxonium(
         *params, flux=flx, cutoff=cutoff, truncated_dim=evals_count
     )
-    return fluxonium.t1_effective(
-        noise_channels=noise_channels,
-        common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
+    return (
+        2
+        * np.pi
+        * fluxonium.t1_effective(
+            noise_channels=noise_channels,
+            common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
+        )
     )
 
 
@@ -60,7 +68,9 @@ def calculate_eff_t1_vs_flx_with(
     scq.settings.T1_DEFAULT_WARNING = False
     return np.asarray(
         [
-            fluxonium.set_and_return("flux", flx).t1_effective(
+            2
+            * np.pi
+            * fluxonium.set_and_return("flux", flx).t1_effective(
                 noise_channels=noise_channels,
                 common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
                 esys=(spectrum_data.energy_table[i, :], spectrum_data.state_table[i]),

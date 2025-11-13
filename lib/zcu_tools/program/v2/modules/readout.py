@@ -2,190 +2,193 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Any, Callable, Dict, Type, TypeVar
+from typing import Callable, ClassVar, Dict, Type, TypedDict, Union
+
+from qick.asm_v2 import QickParam
 
 from ..base import MyProgramV2
 from .base import Module
-from .pulse import Pulse, check_block_mode
-
-READOUT_REGISTRY: Dict[str, Type[AbsReadout]] = {}
-
-T_Readout = TypeVar("T_Readout", bound="AbsReadout")
+from .pulse import Pulse, PulseCfg, check_block_mode
 
 
-def register_readout(ro_type: str) -> Callable[[T_Readout], T_Readout]:
-    def decorator(cls: T_Readout) -> T_Readout:
-        READOUT_REGISTRY[ro_type] = cls
-        return cls
+class TriggerCfg(TypedDict):
+    ro_ch: int
+    ro_length: float
+    ro_freq: Union[float, QickParam]
+    trig_offset: float
 
-    return decorator
+
+class TriggerReadout(Module):
+    def __init__(
+        self,
+        name: str,
+        ro_cfg: TriggerCfg,
+        gen_ch: int,
+        gen_freq: Union[float, QickParam],
+    ) -> None:
+        self.name = name
+        self.ro_cfg = ro_cfg
+        self.gen_ch = gen_ch
+        self.gen_freq = gen_freq
+
+    def init(self, prog: MyProgramV2) -> None:
+        prog.declare_readout(ch=self.ro_cfg["ro_ch"], length=self.ro_cfg["ro_length"])
+        prog.add_readoutconfig(
+            ch=self.ro_cfg["ro_ch"],
+            name=self.name,
+            freq=self.ro_cfg.get("ro_freq", self.gen_freq),
+            gen_ch=self.gen_ch,
+        )
+
+    def total_length(self) -> Union[float, QickParam]:
+        return self.ro_cfg["trig_offset"] + self.ro_cfg["ro_length"]
+
+    def run(
+        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+    ) -> Union[float, QickParam]:
+        ro_ch = self.ro_cfg["ro_ch"]
+        trig_offset = self.ro_cfg["trig_offset"]
+
+        prog.send_readoutconfig(ro_ch, self.name, t=t)  # type: ignore
+        prog.trigger([ro_ch], t=t + trig_offset)
+
+        return t + self.total_length()
+
+
+class BaseReadoutCfg(TypedDict):
+    type: str
+    pulse_cfg: PulseCfg
+    ro_cfg: TriggerCfg
+
+
+ReadoutCfg = Union[BaseReadoutCfg]
 
 
 class AbsReadout(Module):
+    def __init__(self, name: str, cfg: ReadoutCfg) -> None: ...
+
     @classmethod
     def set_param(
-        cls, readout_cfg: Dict[str, Any], param_name: str, param_value: float
+        cls,
+        readout_cfg: ReadoutCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
     ) -> None:
-        raise NotImplementedError
+        raise NotImplementedError(
+            f"{cls.__name__} does not support set {param_name} params with {param_value}"
+        )
+
+    def total_length(self) -> Union[float, QickParam]:
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support total_length"
+        )
 
 
-def make_readout(name: str, readout_cfg: Dict[str, Any]) -> AbsReadout:
-    ro_type = readout_cfg["type"]
+class Readout(AbsReadout):
+    SUPPORTED_TYPES: ClassVar[Dict[str, Type[AbsReadout]]] = {}
 
-    if ro_type not in READOUT_REGISTRY:
-        raise ValueError(f"Unknown readout type: {ro_type}")
+    @classmethod
+    def register_readout(
+        cls, ro_type: str
+    ) -> Callable[[Type[AbsReadout]], Type[AbsReadout]]:
+        if ro_type in cls.SUPPORTED_TYPES:
+            raise ValueError(
+                f"Readout type {ro_type} already registered by {cls.SUPPORTED_TYPES[ro_type].__name__}"
+            )
 
-    readout_cls = READOUT_REGISTRY[ro_type]
-    return readout_cls(name, cfg=readout_cfg)
+        def decorator(cls: Type[AbsReadout]) -> Type[AbsReadout]:
+            Readout.SUPPORTED_TYPES[ro_type] = cls
+            return cls
+
+        return decorator
+
+    @classmethod
+    def get_readout_cls(cls, readout_cfg: ReadoutCfg) -> Type[AbsReadout]:
+        if readout_cfg["type"] not in cls.SUPPORTED_TYPES:
+            raise ValueError(f"Unknown readout type: {readout_cfg['type']}")
+        return cls.SUPPORTED_TYPES[readout_cfg["type"]]
+
+    @classmethod
+    def set_param(
+        cls,
+        readout_cfg: ReadoutCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
+    ) -> None:
+        readout_cls = cls.get_readout_cls(readout_cfg)
+        readout_cls.set_param(readout_cfg, param_name, param_value)
+
+    def __init__(self, name: str, cfg: ReadoutCfg) -> None:
+        self.name = name
+        self.cfg = deepcopy(cfg)
+        readout_cls = self.get_readout_cls(cfg)
+        self.readout = readout_cls(name, cfg)
+
+    def init(self, prog: MyProgramV2) -> None:
+        self.readout.init(prog)
+
+    def run(
+        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+    ) -> Union[float, QickParam]:
+        return self.readout.run(prog, t)
+
+    def total_length(self) -> Union[float, QickParam]:
+        return self.readout.total_length()
 
 
-def set_readout_cfg(
-    readout_cfg: Dict[str, Any], param_name: str, param_value: float
-) -> None:
-    ro_type = readout_cfg["type"]
-
-    if ro_type not in READOUT_REGISTRY:
-        raise ValueError(f"Unknown readout type: {ro_type}")
-
-    readout_cls = READOUT_REGISTRY[ro_type]
-    readout_cls.set_param(readout_cfg, param_name, param_value)
-
-
-@register_readout("base")
+@Readout.register_readout("base")
 class BaseReadout(AbsReadout):
-    def __init__(self, name: str, cfg: Dict[str, Any]) -> None:
+    def __init__(self, name: str, cfg: BaseReadoutCfg) -> None:
         self.name = name
         self.pulse_cfg = deepcopy(cfg["pulse_cfg"])
         self.ro_cfg = deepcopy(cfg["ro_cfg"])
 
-        ro_ch: int = self.pulse_cfg.setdefault("ro_ch", self.ro_cfg["ro_ch"])
+        ro_ch = self.pulse_cfg.setdefault("ro_ch", self.ro_cfg["ro_ch"])
         if ro_ch != self.ro_cfg["ro_ch"]:
             warnings.warn(
                 f"{name} pulse_cfg.ro_ch is {ro_ch}, this may not be what you want"
             )
 
         self.pulse = Pulse(name=f"{name}_pulse", cfg=self.pulse_cfg)
+        self.ro_trigger = TriggerReadout(
+            name=f"{name}_adc",
+            ro_cfg=self.ro_cfg,
+            gen_ch=self.pulse_cfg["ch"],
+            gen_freq=self.pulse_cfg["freq"],
+        )
 
         check_block_mode(self.pulse.name, self.pulse_cfg, want_block=True)
 
     @classmethod
     def set_param(
-        cls, readout_cfg: Dict[str, Any], param_name: str, param_value: float
+        cls,
+        readout_cfg: BaseReadoutCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
     ) -> None:
         if param_name == "gain":
             readout_cfg["pulse_cfg"]["gain"] = param_value
         elif param_name == "freq":
             readout_cfg["pulse_cfg"]["freq"] = param_value
-            # readout_cfg["ro_cfg"]["ro_freq"] = param_value
+            readout_cfg["ro_cfg"]["ro_freq"] = param_value
         elif param_name == "length":
             readout_cfg["pulse_cfg"]["waveform"]["length"] = param_value
-        elif param_name == "ro_length":
-            readout_cfg["ro_cfg"]["ro_length"] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse.init(prog)
+        self.ro_trigger.init(prog)
 
-        prog.declare_readout(ch=self.ro_cfg["ro_ch"], length=self.ro_cfg["ro_length"])
-        prog.add_readoutconfig(
-            ch=self.ro_cfg["ro_ch"],
-            name=f"{self.name}_adc",
-            freq=self.ro_cfg.get("ro_freq", self.pulse_cfg["freq"]),
-            gen_ch=self.pulse_cfg["ch"],
-        )
-
-    def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
-        ro_ch: int = self.ro_cfg["ro_ch"]
-        trig_offset: float = self.ro_cfg["trig_offset"]
-
-        prog.send_readoutconfig(ro_ch, f"{self.name}_adc", t=0)
-        prog.trigger([ro_ch], t=t + trig_offset)
-
+    def run(
+        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+    ) -> Union[float, QickParam]:
+        self.ro_trigger.run(prog, t)
         self.pulse.run(prog, t)
 
         # use readout end as the new time
-        ro_time = trig_offset + self.ro_cfg["ro_length"]
+        ro_time = self.ro_trigger.total_length()
         pulse_time = self.pulse.total_length()
-
-        if not (ro_time > pulse_time or ro_time < pulse_time):
-            warnings.warn(
-                f"Cannot determine the end time of {self.name}, this may cause unexpected behavior"
-            )
-
-        if ro_time > pulse_time:
-            return t + ro_time
-        else:
-            return t + pulse_time
-
-
-@register_readout("two_pulse")
-class TwoPulseReadout(AbsReadout):
-    def __init__(self, name: str, cfg: Dict[str, Any]) -> None:
-        self.name = name
-        self.ro_cfg = cfg["ro_cfg"]
-        self.pulse1_cfg = deepcopy(cfg["pulse1_cfg"])
-        self.pulse2_cfg = deepcopy(cfg["pulse2_cfg"])
-
-        ro_ch: int = self.pulse1_cfg.setdefault("ro_ch", self.ro_cfg["ro_ch"])
-        if ro_ch != self.ro_cfg["ro_ch"]:
-            warnings.warn(
-                f"{name} pulse1_cfg.ro_ch is {ro_ch}, this may not be what you want"
-            )
-
-        ro_ch: int = self.pulse2_cfg.setdefault("ro_ch", self.ro_cfg["ro_ch"])
-        if ro_ch != self.ro_cfg["ro_ch"]:
-            warnings.warn(
-                f"{name} pulse2_cfg.ro_ch is {ro_ch}, this may not be what you want"
-            )
-
-        self.pulse1 = Pulse(name=f"{name}_pulse1", cfg=self.pulse1_cfg)
-        self.pulse2 = Pulse(name=f"{name}_pulse2", cfg=self.pulse2_cfg)
-
-        check_block_mode(self.pulse1.name, self.pulse1_cfg, want_block=True)
-        check_block_mode(self.pulse2.name, self.pulse2_cfg, want_block=True)
-
-    @classmethod
-    def set_param(
-        cls, readout_cfg: Dict[str, Any], param_name: str, param_value: float
-    ) -> None:
-        if param_name == "gain":
-            readout_cfg["pulse2_cfg"]["gain"] = param_value
-        elif param_name == "freq":
-            readout_cfg["pulse1_cfg"]["freq"] = param_value
-            readout_cfg["pulse2_cfg"]["freq"] = param_value
-        elif param_name == "length":
-            readout_cfg["pulse2_cfg"]["waveform"]["length"] = param_value
-        elif param_name == "ro_length":
-            readout_cfg["ro_cfg"]["ro_length"] = param_value
-        else:
-            raise ValueError(f"Unknown parameter: {param_name}")
-
-    def init(self, prog: MyProgramV2) -> None:
-        self.pulse1.init(prog)
-        self.pulse2.init(prog)
-
-        prog.declare_readout(ch=self.ro_cfg["ro_ch"], length=self.ro_cfg["ro_length"])
-        prog.add_readoutconfig(
-            ch=self.ro_cfg["ro_ch"],
-            name=f"{self.name}_adc",
-            freq=self.ro_cfg.get("ro_freq", self.pulse2_cfg["freq"]),
-            gen_ch=self.pulse2_cfg["ch"],
-        )
-
-    def run(self, prog: MyProgramV2, t: float = 0.0) -> float:
-        ro_ch: int = self.ro_cfg["ro_ch"]
-        trig_offset: float = self.ro_cfg["trig_offset"]
-
-        prog.send_readoutconfig(ro_ch, f"{self.name}_adc", t=0)
-        prog.trigger([ro_ch], t=t + trig_offset)
-
-        cur_t = self.pulse1.run(prog, t)
-        self.pulse2.run(prog, cur_t)
-
-        # use readout end as the new time
-        ro_time = trig_offset + self.ro_cfg["ro_length"]
-        pulse_time = self.pulse1.total_length() + self.pulse2.total_length()
 
         if not (ro_time > pulse_time or ro_time < pulse_time):
             warnings.warn(

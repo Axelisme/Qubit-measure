@@ -10,7 +10,7 @@ import numpy as np
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 # (signals)
@@ -50,18 +50,26 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
             warnings.warn("sweep will be overwritten by singleshot measurement")
 
         # Create ge sweep: 0 (ground) and full gain (excited)
-        cfg["sweep"] = {
-            "ge": {"start": 0, "stop": cfg["qub_pulse"]["gain"], "expts": 2}
-        }
+        cfg["sweep"] = {"ge": {"start": 0.0, "stop": 1.0, "expts": 2}}
 
         # Set qubit pulse gain from sweep parameter
-        cfg["qub_pulse"]["gain"] = sweep2param("ge", cfg["sweep"]["ge"])
+        Pulse.set_param(
+            cfg["probe_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+        )
 
         # Set flux device
         GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
         # Create program and acquire data
-        prog = TwoToneProgram(soccfg, deepcopy(cfg))
+        prog = ModularProgramV2(
+            soccfg,
+            cfg,
+            modules=[
+                Reset("reset", cfg.get("reset", {"type": "none"})),
+                Pulse("probe_pulse", cfg["probe_pulse"]),
+                Readout("readout", cfg["readout"]),
+            ],
+        )
         prog.acquire(soc, progress=progress)
 
         # Get raw IQ data

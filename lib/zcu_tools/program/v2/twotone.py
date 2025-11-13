@@ -1,14 +1,14 @@
 from typing import Any, Dict, List
 
 from .modular import BaseCustomProgramV2
-from .modules import Module, Pulse, make_readout, make_reset
+from .modules import Module, Pulse, Readout, Reset
 
 
 class TwoToneProgram(BaseCustomProgramV2):
     def make_modules(self, cfg: Dict[str, Any]) -> List[Module]:
         return [
-            make_reset("reset", reset_cfg=cfg.get("reset")),
-            Pulse(name="init_pulse", cfg=cfg.get("init_pulse")),
-            Pulse(name="qubit_pulse", cfg=cfg["qub_pulse"]),
-            make_readout("readout", readout_cfg=cfg["readout"]),
+            Reset("reset", cfg=cfg.get("reset", {"type": "none"})),
+            Pulse("init_pulse", cfg=cfg.get("init_pulse")),
+            Pulse("qubit_pulse", cfg=cfg["qub_pulse"]),
+            Readout("readout", cfg=cfg["readout"]),
         ]
