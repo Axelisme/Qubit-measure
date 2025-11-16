@@ -78,11 +78,7 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
         return fpts, signals  # fpts
 
     def analyze(
-        self,
-        result: Optional[FreqResultType] = None,
-        *,
-        plot: bool = True,
-        smooth: float = 1.0,
+        self, result: Optional[FreqResultType] = None, *, smooth: float = 1.0
     ) -> float:
         if result is None:
             result = self.last_result
@@ -101,14 +97,14 @@ class OptimizeFreqExperiment(AbsExperiment[FreqResultType]):
         max_fpt = float(fpts[max_id])
         max_snr = float(snrs[max_id])
 
-        if plot:
-            plt.figure(figsize=config.figsize)
-            plt.plot(fpts, snrs)
-            plt.axvline(max_fpt, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
-            plt.xlabel("Frequency (MHz)")
-            plt.ylabel("SNR (a.u.)")
-            plt.legend()
-            plt.show()
+        plt.figure(figsize=config.figsize)
+        plt.plot(fpts, snrs)
+        plt.axvline(max_fpt, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
+        plt.xlabel("Frequency (MHz)")
+        plt.ylabel("SNR (a.u.)")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
         return max_fpt
 

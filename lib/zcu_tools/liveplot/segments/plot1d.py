@@ -23,12 +23,19 @@ class Plot1DSegment(AbsSegment):
         self.show_grid = show_grid
 
         if line_kwargs is None:
-            line_kwargs = [None] * num_lines
+            line_kwargs = [None] * self.num_line
         assert line_kwargs is not None
 
         assert len(line_kwargs) == self.num_line, (
             f"Expected {self.num_line} line_kwargs, got {len(line_kwargs)}."
         )
+
+        default_line_kwargs = {"marker": ".", "linestyle": "-", "markersize": 5}
+        for i in range(self.num_line):
+            if line_kwargs[i] is None:
+                line_kwargs[i] = dict()
+            for k, v in default_line_kwargs.items():
+                line_kwargs[i].setdefault(k, v)
 
         self.lines: Optional[List[plt.Line2D]] = None
         self.line_kwargs = line_kwargs
@@ -43,9 +50,6 @@ class Plot1DSegment(AbsSegment):
 
         lines = []
         for kwargs in self.line_kwargs:
-            if kwargs is None:
-                kwargs = {"marker": ".", "linestyle": "-", "markersize": 5}
-
             (line,) = ax.plot([], [], **kwargs)
             lines.append(line)
         self.lines = lines

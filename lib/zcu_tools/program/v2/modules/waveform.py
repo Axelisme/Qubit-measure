@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any, Callable, ClassVar, Dict, Type, TypedDict, Union
+from copy import deepcopy
 
 from qick.asm_v2 import QickParam
 
@@ -82,6 +83,14 @@ class Waveform(AbsWaveform):
 
     def to_wav_kwargs(self) -> Dict[str, Any]:
         return self.waveform.to_wav_kwargs()
+
+    @property
+    def name(self) -> str:
+        return self.waveform.name
+
+    @property
+    def waveform_cfg(self) -> WaveformCfg:
+        return self.waveform.waveform_cfg
 
 
 @Waveform.register_waveform("const")

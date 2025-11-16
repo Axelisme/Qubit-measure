@@ -32,9 +32,7 @@ def mist_signal2real(signals: np.ndarray) -> np.ndarray:
 
 
 class MistFluxDepExperiment(AbsExperiment[MistFluxDepResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> MistFluxDepResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> MistFluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         flx_sweep = cfg["sweep"]["flux"]
@@ -57,7 +55,6 @@ class MistFluxDepExperiment(AbsExperiment[MistFluxDepResultType]):
             line_axis=1,
             num_lines=5,
             title="MIST over FLux",
-            disable=not progress,
         ) as viewer:
             results = Runner(
                 task=SoftTask(

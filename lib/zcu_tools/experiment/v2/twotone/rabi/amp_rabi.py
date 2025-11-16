@@ -55,7 +55,7 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
         return amps, signals
 
     def analyze(
-        self, result: Optional[AmpRabiResultType] = None, *, decay: bool = False
+        self, result: Optional[AmpRabiResultType] = None
     ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
@@ -65,7 +65,7 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
         real_signals = rabi_signal2real(signals)
 
         pi_amp, pi2_amp, _, y_fit, _ = fit_rabi(
-            pdrs, real_signals, decay=decay, init_phase=0.0
+            pdrs, real_signals, decay=False, init_phase=0.0
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)

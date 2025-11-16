@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, Literal
 
 
 from zcu_tools.device import DeviceInfo
@@ -33,13 +33,39 @@ def set_flux_in_dev_cfg(
 
 
 def set_freq_in_dev_cfg(
-    devs_cfg: Dict[str, DeviceInfo], value: float, label: str = "rf_dev"
+    devs_cfg: Dict[str, DeviceInfo], freq_Hz: float, label: str = "rf_dev"
 ) -> None:
     """Set the rf frequency value in the device configuration with the given label."""
 
     rf_cfg = get_labeled_device_cfg(devs_cfg, label)
 
-    if rf_cfg["type"] == "RFSource":
-        rf_cfg["freq"] = value
+    if rf_cfg["type"] == "RohdeSchwarzSGS100A":
+        rf_cfg["freq_Hz"] = freq_Hz
+    else:
+        raise NotImplementedError(f"RF device type {rf_cfg['type']} not supported yet")
+
+
+def set_power_in_dev_cfg(
+    devs_cfg: Dict[str, DeviceInfo], power_dBm: float, label: str = "rf_dev"
+) -> None:
+    """Set the rf power value in the device configuration with the given label."""
+
+    rf_cfg = get_labeled_device_cfg(devs_cfg, label)
+
+    if rf_cfg["type"] == "RohdeSchwarzSGS100A":
+        rf_cfg["power_dBm"] = power_dBm
+    else:
+        raise NotImplementedError(f"RF device type {rf_cfg['type']} not supported yet")
+
+
+def set_output_in_dev_cfg(
+    devs_cfg: Dict[str, DeviceInfo], output: Literal["on", "off"], label: str = "rf_dev"
+) -> None:
+    """Set the rf power value in the device configuration with the given label."""
+
+    rf_cfg = get_labeled_device_cfg(devs_cfg, label)
+
+    if rf_cfg["type"] == "RohdeSchwarzSGS100A":
+        rf_cfg["output"] = output
     else:
         raise NotImplementedError(f"RF device type {rf_cfg['type']} not supported yet")

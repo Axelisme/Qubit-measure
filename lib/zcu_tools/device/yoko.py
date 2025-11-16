@@ -168,6 +168,7 @@ class YOKOGS200(BaseDevice):
                 f"One can only get voltage when the device is in voltage mode. but it is in {mode} mode."
             )
 
+        self.write(f"SOURce:FUNCtion {MODE_MAPS['voltage']}")
         return self._get_level()
 
     # Returns the current in amps as a float
@@ -178,6 +179,7 @@ class YOKOGS200(BaseDevice):
                 f"One can only get current when the device is in current mode. but it is in {mode} mode."
             )
 
+        self.write(f"SOURce:FUNCtion {MODE_MAPS['current']}")
         return self._get_level()
 
     # Returns the mode (voltage or current)
@@ -188,7 +190,7 @@ class YOKOGS200(BaseDevice):
     # ==========================================================================#
 
     def _setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
-        if self.get_output() != "on":
+        if self.get_output() != "on" and cfg["output"] == "on":
             warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")
 
         cur_mode = self.get_mode()
@@ -232,6 +234,7 @@ class YOKOGS200(BaseDevice):
         return {
             "type": self.__class__.__name__,
             "address": self.address,
+            "output": self.get_output(),
             "mode": self.get_mode(),
             "value": self._get_level(),
         }

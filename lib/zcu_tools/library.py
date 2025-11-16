@@ -156,17 +156,7 @@ class ModuleLibrary:
 
         # filter out non-waveform attributes
         for name, wav_cfg in wav_kwargs.items():
-            waveform = dict(style=wav_cfg["style"], length=wav_cfg["length"])
-            if waveform["style"] == "flat_top":
-                waveform["raise_waveform"] = wav_cfg["raise_waveform"]
-            elif waveform["style"] in ["gauss", "drag"]:
-                waveform["sigma"] = wav_cfg["sigma"]
-
-            if waveform["style"] == "drag":
-                waveform["delta"] = wav_cfg["delta"]
-                waveform["alpha"] = wav_cfg["alpha"]
-
-            self.waveforms[name] = waveform  # directly overwrite
+            self.waveforms[name] = wav_cfg  # directly overwrite
 
     @_sync("after")
     def register_module(self, **mod_kwargs) -> None:

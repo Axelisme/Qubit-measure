@@ -173,6 +173,8 @@ class BaseReadout(AbsReadout):
             readout_cfg["ro_cfg"]["ro_freq"] = param_value
         elif param_name == "length":
             readout_cfg["pulse_cfg"]["waveform"]["length"] = param_value
+        elif param_name == "ro_length":
+            readout_cfg["ro_cfg"]["ro_length"] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
 

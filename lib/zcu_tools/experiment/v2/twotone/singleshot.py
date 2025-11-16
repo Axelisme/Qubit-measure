@@ -66,6 +66,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
             cfg,
             modules=[
                 Reset("reset", cfg.get("reset", {"type": "none"})),
+                Pulse("init_pulse", cfg.get("init_pulse")),
                 Pulse("probe_pulse", cfg["probe_pulse"]),
                 Readout("readout", cfg["readout"]),
             ],

@@ -192,7 +192,6 @@ class PaddingPulse(Module):
 
         pre_length: float = wav_cfg["pre_length"]  # type: ignore
         post_length: float = wav_cfg["post_length"]  # type: ignore
-        assert isinstance(pre_length, float) and isinstance(post_length, float)
         mid_length = wav_cfg["length"] - pre_length - post_length
 
         # declare waveforms
@@ -281,7 +280,7 @@ class PaddingPulse(Module):
             )
         elif param_name == "length":
             pulse_cfg["waveform"]["length"] = param_value
-        elif param_name in ["gain", "freq", "phase"]:
+        elif param_name in ["freq", "phase"]:
             pulse_cfg[param_name] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")

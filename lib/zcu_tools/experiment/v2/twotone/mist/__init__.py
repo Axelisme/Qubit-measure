@@ -1,4 +1,9 @@
 from .flux_dep import MistFluxDepExperiment
-from .power_dep import MISTPowerDep, MISTPowerDepOvernight
+from .power_dep import MISTPowerDep, MISTPowerDepOvernight, MISTPowerDepGE
 
-__all__ = ["MISTPowerDep", "MISTPowerDepOvernight", "MistFluxDepExperiment"]
+__all__ = [
+    "MISTPowerDep",
+    "MISTPowerDepOvernight",
+    "MistFluxDepExperiment",
+    "MISTPowerDepGE",
+]

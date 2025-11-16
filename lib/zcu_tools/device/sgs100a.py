@@ -58,8 +58,6 @@ class RohdeSchwarzSGS100A(BaseDevice):
         return float(self.query("SOUR:FREQ?"))
 
     def set_frequency(self, freq_Hz: float) -> float:
-        if not isinstance(freq_Hz, float):
-            raise TypeError(f"Frequency must be a float, got {type(freq_Hz)}")
         if not (1e6 <= freq_Hz <= 20e9):
             raise ValueError(
                 f"Frequency {freq_Hz} Hz is outside expected range (1e6, 20e9)"
@@ -73,8 +71,6 @@ class RohdeSchwarzSGS100A(BaseDevice):
         return float(self.query("SOUR:POW:POW?"))
 
     def set_power(self, power_dBm: float) -> float:
-        if not isinstance(power_dBm, float):
-            raise TypeError(f"Power must be a float, got {type(power_dBm)}")
         if not (-120 <= power_dBm <= 25):
             raise ValueError(
                 f"Power {power_dBm} dBm is outside expected range (-120, 25)"
@@ -85,18 +81,17 @@ class RohdeSchwarzSGS100A(BaseDevice):
     # ==========================================================================#
 
     def _setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
-        if self.get_output() != "on":
-            warnings.warn("RF output is off, did you forget to turn it on?")
-
+        self.set_output(cfg["output"])
         self.set_IQ_state(cfg["IQ"])
-        self.set_frequency(cfg["freq"])
-        self.set_power(cfg["power"])
+        self.set_frequency(cfg["freq_Hz"])
+        self.set_power(cfg["power_dBm"])
 
     def get_info(self) -> DeviceInfo:
         return {
             "type": self.__class__.__name__,
             "address": self.address,
+            "output": self.get_output(),
             "IQ": self.get_IQ_state(),
-            "freq": self.get_frequency(),
-            "power": self.get_power(),
+            "freq_Hz": self.get_frequency(),
+            "power_dBm": self.get_power(),
         }

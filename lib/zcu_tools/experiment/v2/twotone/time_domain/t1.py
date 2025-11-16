@@ -94,11 +94,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         return ts, signals
 
     def analyze(
-        self,
-        result: Optional[T1ResultType] = None,
-        *,
-        max_contrast: bool = True,
-        dual_exp: bool = False,
+        self, result: Optional[T1ResultType] = None, *, dual_exp: bool = False
     ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
@@ -106,10 +102,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
         xs, signals = result
 
-        if max_contrast:
-            real_signals = rotate2real(signals).real
-        else:
-            real_signals = np.abs(signals)
+        real_signals = rotate2real(signals).real
 
         if dual_exp:
             t1, t1err, t1b, t1berr, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
@@ -129,8 +122,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         else:
             ax.set_title(f"T1 = {t1_str}", fontsize=15)
         ax.set_xlabel("Time (us)")
-        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
+        ax.grid(True)
 
         fig.tight_layout()
 
@@ -171,9 +165,8 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
         cfg = deepcopy(cfg)
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-
-        cfg["test_pulse"]["waveform"]["length"] = sweep2param(
-            "length", cfg["sweep"]["length"]
+        Pulse.set_param(
+            cfg["test_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
         )
 
         ts = sweep2array(cfg["sweep"]["length"])
@@ -245,6 +238,7 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
         ax.set_xlabel("Time (us)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
+        ax.grid(True)
 
         fig.tight_layout()
 
@@ -277,20 +271,22 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
 T1SweepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
 
 
+def t1_sweep_tone_signal2real(signals: np.ndarray) -> np.ndarray:
+    real_signals = np.full_like(signals, np.nan, dtype=np.float64)
+    for i in range(signals.shape[0]):
+        real_signals[i, :] = rotate2real(signals[i, :]).real
+    min_vals = np.min(real_signals, axis=1, keepdims=True)
+    max_vals = np.max(real_signals, axis=1, keepdims=True)
+    return (real_signals - min_vals) / (max_vals - min_vals)
+
+
 class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
     SWEEP_MAP = {
         "gain": {"name": "Gain (a.u.)", "param_key": "gain"},
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},
     }
 
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> T1SweepResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1SweepResultType:
         cfg = deepcopy(cfg)
 
         len_sweep = cfg["sweep"].pop("length")
@@ -306,15 +302,17 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
             "length": len_sweep,
         }
 
-        cfg["test_pulse"]["waveform"]["length"] = sweep2param("length", len_sweep)
-        cfg["test_pulse"][x_info["param_key"]] = sweep2param(
-            x_info["param_key"], cfg["sweep"][x_key]
+        Pulse.set_param(cfg["test_pulse"], "length", sweep2param("length", len_sweep))
+        Pulse.set_param(
+            cfg["test_pulse"],
+            x_info["param_key"],
+            sweep2param(x_info["param_key"], cfg["sweep"][x_key]),
         )
 
         values = sweep2array(cfg["sweep"][x_key])  # predicted
         ts = sweep2array(cfg["sweep"]["length"])  # predicted times
 
-        with LivePlotter2D(x_info["name"], "Time (us)", disable=not progress) as viewer:
+        with LivePlotter2D(x_info["name"], "Time (us)") as viewer:
             signals = Runner(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -327,12 +325,12 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
                                 Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
                                 Readout("readout", cfg["readout"]),
                             ],
-                        ).acquire(soc, progress=progress, callback=update_hook)
+                        ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(values), len(ts)),
                 ),
                 update_hook=lambda ctx: viewer.update(
-                    values, ts, t1_signal2real(np.asarray(ctx.get_data()))
+                    values, ts, t1_sweep_tone_signal2real(np.asarray(ctx.get_data()))
                 ),
             ).run(cfg)
             signals = np.asarray(signals)
@@ -353,7 +351,7 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
         values, ts, signals = result
 
         signals = gaussian_filter(signals, sigma=1)
-        real_signals = rotate2real(signals).real
+        real_signals = t1_sweep_tone_signal2real(signals)
 
         t1s = np.full(len(values), np.nan, dtype=np.float64)
         t1errs = np.zeros_like(t1s)
@@ -386,6 +384,8 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
         assert isinstance(ax1, plt.Axes)
         assert isinstance(ax2, plt.Axes)
 
+        fig.suptitle("T1 while readout")
+
         ax1.set_ylabel("T1 over sweep value")
         ax1.imshow(
             real_signals.T,
@@ -396,7 +396,7 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
         ax2.errorbar(
             valid_values, t1s, yerr=t1errs, label="Fitting T1", elinewidth=1, capsize=1
         )
-        ax2.set_xlabel("Flux value (a.u.)")
+        ax2.set_xlabel("Readout Gain (a.u.)")
         ax2.set_ylabel("T1 (us)")
         ax2.set_ylim(bottom=0)
         ax2.set_xlim(values[0], values[-1])

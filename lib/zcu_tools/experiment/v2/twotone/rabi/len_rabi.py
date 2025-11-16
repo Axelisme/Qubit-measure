@@ -140,6 +140,7 @@ class LenRabiExperiment(AbsExperiment[LenRabiResultType]):
         ax.set_ylabel("Signal Real (a.u.)")
         ax.set_title(f"Rabi Oscillation (f={freq:.3f} MHz)")
         ax.legend(loc=4)
+        ax.grid(True)
 
         fig.tight_layout()
 

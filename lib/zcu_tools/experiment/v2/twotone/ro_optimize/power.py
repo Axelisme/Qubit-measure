@@ -77,9 +77,7 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
 
         return gains, signals
 
-    def analyze(
-        self, result: Optional[PowerResultType] = None, *, plot: bool = True
-    ) -> float:
+    def analyze(self, result: Optional[PowerResultType] = None) -> float:
         if result is None:
             result = self.last_result
 
@@ -96,14 +94,14 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
         max_power = float(powers[max_id])
         max_snr = float(snrs[max_id])
 
-        if plot:
-            plt.figure(figsize=config.figsize)
-            plt.plot(powers, snrs)
-            plt.axvline(max_power, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
-            plt.xlabel("Readout Power")
-            plt.ylabel("SNR (a.u.)")
-            plt.legend()
-            plt.show()
+        plt.figure(figsize=config.figsize)
+        plt.plot(powers, snrs)
+        plt.axvline(max_power, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
+        plt.xlabel("Readout Power")
+        plt.ylabel("SNR (a.u.)")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
         return max_power
 

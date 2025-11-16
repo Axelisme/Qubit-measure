@@ -78,7 +78,7 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
 
         real_signals = bathreset_signal2real(signals)
 
-        pOpt, _ = fitcos(phases, real_signals)
+        pOpt, _ = fitcos(phases, real_signals, fixedparams=[None, None, 1 / 360, None])
         y_fit = cosfunc(phases, *pOpt)
 
         max_phase = phases[np.argmax(y_fit)]
@@ -98,6 +98,7 @@ class PhaseExperiment(AbsExperiment[PhaseResultType]):
         ax.set_xlabel("Phase (deg)")
         ax.set_ylabel("Signal (a.u.)")
         ax.legend()
+        ax.grid(True)
 
         fig.tight_layout()
 

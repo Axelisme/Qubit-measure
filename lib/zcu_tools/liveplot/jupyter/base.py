@@ -13,7 +13,7 @@ from ..segments import AbsSegment
 T_JupyterPlotMixin = TypeVar("T_JupyterPlotMixin", bound="JupyterPlotMixin")
 
 
-def instant_plot(fig: plt.Figure, n_row: int) -> None:
+def instant_plot(fig: plt.Figure, figsize) -> None:
     # this ensures the figure is rendered in Jupyter notebooks right now and can be updated later
     canvas = fig.canvas
 
@@ -25,7 +25,8 @@ def instant_plot(fig: plt.Figure, n_row: int) -> None:
     canvas.toolbar_visible = False
     canvas.header_visible = False
     canvas.footer_visible = False
-    canvas.layout.height = f"{360 * n_row}px"
+    canvas.layout.width = f"{int(figsize[0] * 75)}px"
+    canvas.layout.height = f"{int(figsize[1] * 75)}px"
 
     canvas._handle_message(canvas, {"type": "send_image_mode"}, [])
     canvas._handle_message(canvas, {"type": "refresh"}, [])
@@ -41,7 +42,7 @@ def make_plot_frame(
     kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
     fig, axs = plt.subplots(n_row, n_col, **kwargs)
 
-    instant_plot(fig, n_row)
+    instant_plot(fig, kwargs["figsize"])
 
     return fig, axs
 

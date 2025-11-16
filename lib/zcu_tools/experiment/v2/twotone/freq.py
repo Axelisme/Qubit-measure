@@ -75,7 +75,6 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         *,
         model_type: Literal["lor", "sinc"] = "lor",
         plot_fit: bool = True,
-        max_contrast: bool = True,
     ) -> Tuple[float, float, plt.Figure]:
         if result is None:
             result = self.last_result
@@ -88,7 +87,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         fpts = fpts[val_mask]
         signals = signals[val_mask]
 
-        y = rotate2real(signals).real if max_contrast else np.abs(signals)  # type: ignore
+        y = rotate2real(signals).real  # type: ignore
 
         freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(fpts, y, model_type)
 
@@ -101,8 +100,9 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
             label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"
             ax.axvline(freq, color="r", ls="--", label=label)
         ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
+        ax.grid(True)
 
         fig.tight_layout()
 

@@ -116,6 +116,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         ax.set_xlabel("Time (us)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
+        ax.grid(True)
 
         fig.tight_layout()
 

@@ -38,11 +38,9 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
 
         # set initial readout length and adjust pulse length
         Readout.set_param(
-            cfg["readout"], "ro_length", sweep2param("length", lengths[0])
+            cfg["readout"], "ro_length", sweep2param("length", length_sweep)
         )
-        Readout.set_param(
-            cfg["readout"], "length", sweep2param("length", lengths.max() + 0.1)
-        )
+        Readout.set_param(cfg["readout"], "length", lengths.max() + 0.1)
 
         def measure_fn(
             ctx: TaskContext, update_hook: Callable[[int, Any], None]
@@ -90,11 +88,7 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         return lengths, signals
 
     def analyze(
-        self,
-        result: Optional[LengthResultType] = None,
-        *,
-        plot: bool = True,
-        t0: Optional[float] = None,
+        self, result: Optional[LengthResultType] = None, *, t0: Optional[float] = None
     ) -> float:
         if result is None:
             result = self.last_result
@@ -116,16 +110,14 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         max_length = float(lengths[max_id])
         max_snr = float(snrs[max_id])
 
-        if plot:
-            plt.figure(figsize=config.figsize)
-            plt.plot(lengths, snrs)
-            plt.axvline(
-                max_length, color="r", ls="--", label=f"max SNR = {max_snr:.2f}"
-            )
-            plt.xlabel("Readout Length (us)")
-            plt.ylabel("SNR (a.u.)")
-            plt.legend()
-            plt.show()
+        plt.figure(figsize=config.figsize)
+        plt.plot(lengths, snrs)
+        plt.axvline(max_length, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
+        plt.xlabel("Readout Length (us)")
+        plt.ylabel("SNR (a.u.)")
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
         return max_length
 

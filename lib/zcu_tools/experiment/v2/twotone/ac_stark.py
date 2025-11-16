@@ -48,18 +48,16 @@ def get_resonance_freq(
     s_fpts = []
 
     prev_freq = np.nan
-    fitparams = [None, None, None, None, None]
     for x, amp in zip(xs, amps):
         if np.any(np.isnan(amp)):
             continue
 
-        curr_freq = fitlor(fpts, amp, fitparams=fitparams)[0][3]
+        curr_freq = fitlor(fpts, amp)[0][3]
 
         if abs(curr_freq - prev_freq) > 0.1 * (fpts[-1] - fpts[0]):
             continue
 
         prev_freq = curr_freq
-        fitparams[3] = curr_freq
 
         s_xs.append(x)
         s_fpts.append(curr_freq)
