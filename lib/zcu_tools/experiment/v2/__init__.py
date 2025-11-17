@@ -1,2 +1,2 @@
-from . import autofluxdep, onetone, twotone
+from . import autofluxdep, jpa, onetone, twotone
 from .lookback import LookbackExperiment

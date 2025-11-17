@@ -13,9 +13,9 @@ from zcu_tools.liveplot import (
     MultiLivePlotter,
     make_plot_frame,
 )
+from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.notebook.utils import make_sweep
 
 MISTPowerDepResultType = Tuple[np.ndarray, np.ndarray]
 

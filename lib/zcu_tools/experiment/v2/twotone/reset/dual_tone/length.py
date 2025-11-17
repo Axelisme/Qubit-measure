@@ -8,12 +8,11 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
-
-from ....runner import HardTask, Runner
 
 # (lens, signals)
 DualToneResetLengthResultType = Tuple[np.ndarray, np.ndarray]

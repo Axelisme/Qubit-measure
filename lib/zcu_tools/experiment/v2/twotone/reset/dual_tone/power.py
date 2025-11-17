@@ -9,11 +9,10 @@ from scipy.ndimage import gaussian_filter
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
-
-from ....runner import HardTask, Runner
 
 # (pdrs1, pdrs2, signals_2d)
 DualToneResetPowerResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]

@@ -165,8 +165,10 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         x_info = self.SWEEP_MAP[x_key]
         values = sweep2array(cfg["sweep"][x_key])  # predicted
 
-        cfg[repeat_on][x_info["param_key"]] = sweep2param(
-            x_info["param_key"], cfg["sweep"][x_key]
+        Pulse.set_param(
+            cfg[repeat_on],
+            x_info["param_key"],
+            sweep2param(x_info["param_key"], cfg["sweep"][x_key]),
         )
 
         def updateCfg(_: int, ctx: TaskContext, time: float) -> None:

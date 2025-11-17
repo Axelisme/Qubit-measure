@@ -6,12 +6,12 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner, SoftTask, TaskContext
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
-from ...runner import HardTask, Runner, SoftTask, TaskContext
 from .base import snr_as_signal
 
 LengthResultType = Tuple[np.ndarray, np.ndarray]  # (lengths, snrs)
@@ -27,7 +27,7 @@ class OptimizeLengthExperiment(AbsExperiment[LengthResultType]):
         length_sweep = cfg["sweep"]["length"]
 
         # replace length sweep with ge sweep, and use soft loop for length
-        cfg["sweep"] = {"ge": {"start": 0, "stop": 1, "expts": 2}}
+        cfg["sweep"] = {"ge": make_ge_sweep()}
 
         # set with / without pi gain for qubit pulse
         Pulse.set_param(

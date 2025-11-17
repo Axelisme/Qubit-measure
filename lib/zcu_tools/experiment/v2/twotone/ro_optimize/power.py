@@ -6,12 +6,12 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner, TaskContext
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
-from ...runner import HardTask, Runner, TaskContext
 from .base import snr_as_signal
 
 PowerResultType = Tuple[np.ndarray, np.ndarray]  # (powers, snrs)
@@ -29,7 +29,7 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
 
         # prepend ge sweep as outer loop
         cfg["sweep"] = {
-            "ge": {"start": 0, "stop": 1.0, "expts": 2},
+            "ge": make_ge_sweep(),
             "power": cfg["sweep"]["power"],
         }
 

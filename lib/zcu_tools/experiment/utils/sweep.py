@@ -88,3 +88,7 @@ def sweep2array(sweep, allow_array=False) -> np.ndarray:
         return np.array(sweep)
     else:
         raise ValueError("Invalid sweep format")
+
+
+def make_ge_sweep() -> Dict[str, float]:
+    return {"start": 0.0, "stop": 1.0, "expts": 2, "step": 0.5}
