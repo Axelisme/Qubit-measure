@@ -16,6 +16,7 @@ def fitexp(
     ydata: np.ndarray,
     fitparams: Optional[Tuple[float, float, float]] = None,
 ) -> Tuple[Tuple[float, float, float], np.ndarray]:
+    """return (y0, yscale, decay), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 3
 

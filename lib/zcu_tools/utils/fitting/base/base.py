@@ -90,15 +90,15 @@ def fit_func(
 
 
 def batch_fit_func(
-    list_xdata,
-    list_ydata,
-    fitfunc,
-    list_init_p,
-    shared_idxs,
-    list_bounds=None,
-    fixedparams=None,
+    list_xdata: List[np.ndarray],
+    list_ydata: List[np.ndarray],
+    fitfunc: Callable[..., np.ndarray],
+    list_init_p: List[List[float]],
+    shared_idxs: List[int],
+    list_bounds: Optional[List[Tuple[List[float], List[float]]]] = None,
+    fixedparams: Optional[List[Optional[float]]] = None,
     **kwargs,
-):
+) -> Tuple[List[List[float]], List[np.ndarray]]:
     n_groups = len(list_xdata)
     n_params_total = len(list_init_p[0])  # 總參數個數（以第一組為準）
 
@@ -146,7 +146,9 @@ def batch_fit_func(
 
         return batch_p0, batch_bounds, fixedparams
 
-    def build_total_params(batch_params):
+    def build_total_params(
+        batch_params: Tuple[float, ...],
+    ) -> Tuple[List[List[float]], List[List[int]]]:
         total_indices = []
         total_params = []
         for i in range(n_groups):

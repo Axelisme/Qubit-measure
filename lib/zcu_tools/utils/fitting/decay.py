@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 import numpy as np
 
 from .base import (
+    batch_fit_func,
     decaycos,
     dual_expfunc,
     expfunc,
@@ -60,6 +61,41 @@ def fit_dual_decay(
     t1berr: float = np.sqrt(pCov[4, 4])
 
     return t1, t1err, t1b, t1berr, fit_signals, (pOpt, pCov)
+
+
+def fit_ge_decay(
+    times: np.ndarray,
+    g_signals: np.ndarray,
+    e_signals: np.ndarray,
+    share_t1: bool = True,
+) -> Tuple[Tuple[float, float, np.ndarray], Tuple[float, float, np.ndarray]]:
+    """return [(g_t1, g_t1err, g_fit_signals), (e_t1, e_t1err, e_fit_signals)]"""
+    g_init_p, _ = fitexp(times, g_signals)  # (y0, yscale, decay)
+    e_init_p, _ = fitexp(times, e_signals)  # (y0, yscale, decay)
+
+    shared_idxs = [0]
+    if share_t1:
+        shared_idxs.append(2)
+
+    ge_params, ge_pcov = batch_fit_func(
+        [times, times],
+        [g_signals, e_signals],
+        expfunc,
+        [g_init_p, e_init_p],
+        shared_idxs,
+    )
+    g_params, e_params = ge_params
+    g_pCov, e_pCov = ge_pcov
+
+    g_t1 = g_params[2]
+    g_t1err = np.sqrt(g_pCov[2, 2])
+    e_t1 = e_params[2]
+    e_t1err = np.sqrt(e_pCov[2, 2])
+
+    g_fit_signals = expfunc(times, *g_params)
+    e_fit_signals = expfunc(times, *e_params)
+
+    return (g_t1, g_t1err, g_fit_signals), (e_t1, e_t1err, e_fit_signals)
 
 
 def fit_decay_fringe(

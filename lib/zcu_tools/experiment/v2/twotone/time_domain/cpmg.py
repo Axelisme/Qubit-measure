@@ -8,6 +8,7 @@ import numpy as np
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner, SoftTask, TaskContext
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     Delay,
@@ -21,8 +22,6 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
-
-from ...runner import HardTask, Runner, SoftTask, TaskContext
 
 
 def cpmg_signal2real(signals: np.ndarray) -> np.ndarray:

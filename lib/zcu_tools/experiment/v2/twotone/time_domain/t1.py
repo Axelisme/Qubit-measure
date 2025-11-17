@@ -10,6 +10,7 @@ from scipy.ndimage import gaussian_filter
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, Runner
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.program.v2 import (
     Delay,
@@ -22,8 +23,6 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
-
-from ...runner import HardTask, Runner
 
 
 def t1_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -40,14 +39,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
     to measure the qubit's energy relaxation.
     """
 
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> T1ResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1ResultType:
         cfg = deepcopy(cfg)
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -55,10 +47,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         ts = sweep2array(cfg["sweep"]["length"])
 
         with LivePlotter1D(
-            "Time (us)",
-            "Amplitude",
-            segment_kwargs={"title": "T1 relaxation"},
-            disable=not progress,
+            "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = Runner(
                 task=HardTask(
@@ -154,14 +143,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
 
 class T1WithToneExperiment(AbsExperiment[T1ResultType]):
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> T1ResultType:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1ResultType:
         cfg = deepcopy(cfg)
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -172,10 +154,7 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
         ts = sweep2array(cfg["sweep"]["length"])
 
         with LivePlotter1D(
-            "Time (us)",
-            "Amplitude",
-            segment_kwargs={"title": "T1 relaxation"},
-            disable=not progress,
+            "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = Runner(
                 task=HardTask(
@@ -189,7 +168,7 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
                                 Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
                                 Readout("readout", cfg["readout"]),
                             ],
-                        ).acquire(soc, progress=progress, callback=update_hook)
+                        ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(ts),),
                 ),
