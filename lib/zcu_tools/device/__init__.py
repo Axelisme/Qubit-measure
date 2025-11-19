@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 from .base import BaseDevice, DeviceInfo
 
@@ -28,7 +28,7 @@ class GlobalDeviceManager:
 
     @classmethod
     def setup_devices(
-        cls, dev_cfg: Dict[str, Dict[str, Any]], *, progress: bool = True
+        cls, dev_cfg: Mapping[str, DeviceInfo], *, progress: bool = True
     ) -> None:
         for name, cfg in dev_cfg.items():
             cls.get_device(name).setup(cfg, progress=progress)

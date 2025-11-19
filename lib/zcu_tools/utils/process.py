@@ -1,40 +1,13 @@
 import warnings
-from typing import Literal, Tuple, Union
+from typing import Literal, Tuple
 
 import numpy as np
-from numpy import ndarray
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
 
-def rotate2real(
-    signals: ndarray, ret_angle: bool = False
-) -> Union[ndarray, Tuple[ndarray, float]]:
-    """
-    Rotate the signals to maximize the contrast on real axis by performing
-    principal component analysis (PCA) on complex data
-
-    Parameters
-    ----------
-    signals : ndarray
-        The complex signals to be rotated. Must be a array of complex values.
-    ret_angle : bool, default=False
-        If True, return the rotation angle in radians.
-
-    Returns
-    -------
-    Tuple[ndarray, float]
-        The rotated signals with maximum variance aligned along the real axis
-        and the rotation angle in radians.
-
-    Notes
-    -----
-    This function:
-    1. Calculates the covariance matrix between real and imaginary parts
-    2. Finds the eigenvector corresponding to the largest eigenvalue
-    3. Rotates the signal to align this principal component with the real axis
-    """
-
-    if signals.dtype != complex:
+def find_rotate_angle(signals: NDArray[np.complex128]) -> float:
+    if signals.dtype != np.complex128:
         raise ValueError(f"Expect complex signals, but get dtype {signals.dtype}")
 
     orig_shape = signals.shape
@@ -44,7 +17,9 @@ def rotate2real(
     val_signals = signals[~np.isnan(signals)]
 
     if len(val_signals) < 2:
-        return signals.reshape(orig_shape)
+        raise ValueError(
+            f"At least 2 non-NaN values are required, but get {len(val_signals)}"
+        )
 
     # calculate the covariance matrix
     cov = np.cov(val_signals.real, val_signals.imag)  # (2, 2)
@@ -58,18 +33,19 @@ def rotate2real(
     if eigenvectors[0] < 0:
         eigenvectors = -eigenvectors  # make rotation angle from -90 to 90 deg
 
-    # rotate the signals to maximize the contrast on real axis
-    rot_signals = signals * eigenvectors.dot([1, -1j])
-
-    if len(orig_shape) != 1:
-        rot_signals = rot_signals.reshape(orig_shape)
-
-    if ret_angle:
-        return rot_signals, np.arctan2(eigenvectors[1], eigenvectors[0])
-    return rot_signals
+    return np.arctan2(eigenvectors[1], eigenvectors[0])
 
 
-def minus_background(signals: ndarray, axis=None, method="median") -> ndarray:
+def rotate2real(signals: NDArray[np.complex128]) -> NDArray[np.complex128]:
+    try:
+        angle = find_rotate_angle(signals)
+    except ValueError:
+        return signals
+
+    return signals * np.exp(-1j * angle)
+
+
+def minus_background(signals: NDArray, axis=None, method="median") -> NDArray:
     """
     Subtract the background from the signals
 
@@ -96,7 +72,7 @@ def minus_background(signals: ndarray, axis=None, method="median") -> ndarray:
         raise ValueError(f"Invalid method: {method}")
 
 
-def minus_median(signals: ndarray, axis=None) -> ndarray:
+def minus_median(signals: NDArray, axis=None) -> NDArray:
     """
     Subtract the median from signals, useful for background removal
 
@@ -152,7 +128,7 @@ def minus_median(signals: ndarray, axis=None) -> ndarray:
     return signals
 
 
-def minus_mean(signals: ndarray, axis=None) -> ndarray:
+def minus_mean(signals: NDArray, axis=None) -> NDArray:
     """
     Subtract the mean from signals, useful for baseline correction
 
@@ -197,7 +173,7 @@ def minus_mean(signals: ndarray, axis=None) -> ndarray:
     return signals
 
 
-def rescale(signals: ndarray, axis=None) -> ndarray:
+def rescale(signals: NDArray, axis=None) -> NDArray:
     """
     Rescale signals by dividing by the standard deviation
 
@@ -248,7 +224,7 @@ def rescale(signals: ndarray, axis=None) -> ndarray:
     return signals
 
 
-def calculate_noise(signals: ndarray) -> Tuple[float, ndarray]:
+def calculate_noise(signals: NDArray) -> Tuple[float, NDArray]:
     """
     Calculate the noise level of the signals
     by comparing the signals with a smoothed version of themselves
@@ -272,7 +248,7 @@ def calculate_noise(signals: ndarray) -> Tuple[float, ndarray]:
     return np.abs(signals - m_signals).mean(), m_signals
 
 
-def peak_n_avg(data: ndarray, n: int, mode: Literal["max", "min"] = "max") -> float:
+def peak_n_avg(data: NDArray, n: int, mode: Literal["max", "min"] = "max") -> float:
     """
     Find the first n max/min points in the data, and return their average
     Parameters
@@ -309,7 +285,7 @@ def peak_n_avg(data: ndarray, n: int, mode: Literal["max", "min"] = "max") -> fl
     return np.mean(peaks)  # type: ignore
 
 
-def rotate_phase(fpts: ndarray, signals: ndarray, phase_slope: float) -> ndarray:
+def rotate_phase(fpts: NDArray, signals: NDArray, phase_slope: float) -> NDArray:
     """
     Rotate the phase of complex signals based on frequency points
 

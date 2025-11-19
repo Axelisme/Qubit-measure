@@ -4,13 +4,17 @@ import time
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
+from numbers import Number
 from typing import (
     Any,
     Callable,
     Dict,
     Generic,
+    Hashable,
     List,
+    Mapping,
     Optional,
+    Sequence,
     Tuple,
     TypedDict,
     TypeVar,
@@ -18,32 +22,41 @@ from typing import (
 )
 
 import numpy as np
-from numpy import ndarray
+from numpy.typing import NDArray
 from tqdm.auto import tqdm
+from typing_extensions import NotRequired
 
 from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import min_interval
 
-ResultType = Union[Dict[Any, "ResultType"], List["ResultType"], ndarray]
-T_ResultType = TypeVar("T_ResultType")
+T_KeyType = TypeVar("T_KeyType", bound=Hashable)
+
+ResultType = Union[Mapping[T_KeyType, "ResultType"], Sequence["ResultType"], NDArray]
+T_ResultType = TypeVar("T_ResultType", bound=ResultType)
 
 
 class TaskConfig(TypedDict):
     dev: Dict[str, DeviceInfo]
+    sweep: NotRequired[Dict[str, float]]
+    relax_delay: NotRequired[float]
+    reps: NotRequired[int]
+    rounds: NotRequired[int]
 
 
-@dataclass
-class TaskContext:
-    cfg: TaskConfig
-    data: ResultType
+T_TaskConfigType = TypeVar("T_TaskConfigType", bound=TaskConfig)
+
+
+@dataclass(frozen=True)
+class TaskContext(Generic[T_TaskConfigType, T_ResultType, T_KeyType]):
+    cfg: T_TaskConfigType
+    data: T_ResultType
     update_hook: Optional[Callable[[TaskContext], None]] = None
     env_dict: Dict[str, Any] = field(default_factory=dict)
-
-    addr_stack: List[Union[int, str]] = field(default_factory=list)
+    addr_stack: List[T_KeyType] = field(default_factory=list)
 
     def __call__(
-        self, addr: Union[int, str], new_cfg: Optional[TaskConfig] = None
+        self, addr: T_KeyType, new_cfg: Optional[T_TaskConfigType] = None
     ) -> TaskContext:
         new_cfg = self.cfg if new_cfg is None else new_cfg
 
@@ -58,14 +71,12 @@ class TaskContext:
     def is_empty_stack(self) -> bool:
         return len(self.addr_stack) == 0
 
-    def current_task(self) -> Any:
+    def current_task(self) -> Optional[T_KeyType]:
         if self.is_empty_stack():
             return None
         return self.addr_stack[-1]
 
-    def set_data(
-        self, value: ResultType, addr_stack: List[Union[int, str]] = []
-    ) -> None:
+    def set_data(self, value: ResultType, addr_stack: List[T_KeyType] = []) -> None:
         target = self.get_data(addr_stack)
 
         if isinstance(target, dict):
@@ -77,7 +88,9 @@ class TaskContext:
                 raise ValueError(f"Expected list, got {type(value)}")
             target.clear()
             target.extend(value)
-        elif isinstance(target, ndarray):
+        elif isinstance(target, np.ndarray):
+            if not isinstance(value, (np.ndarray, Number)):
+                raise ValueError(f"Expected NDArray or number, got {type(value)}")
             np.copyto(target, value)
 
         # update viewer
@@ -85,23 +98,26 @@ class TaskContext:
             self.update_hook(self)
 
     def set_current_data(
-        self, value: ResultType, append_addr: List[Union[int, str]] = []
+        self, value: ResultType, append_addr: List[T_KeyType] = []
     ) -> None:
         self.set_data(value, self.addr_stack + append_addr)
 
-    def get_data(self, addr_stack: List[Union[int, str]] = []) -> ResultType:
+    def get_data(self, addr_stack: List[T_KeyType] = []) -> ResultType:
         target = self.data
 
         # Navigate dict keys from address
         for seg in addr_stack:
-            assert isinstance(target, (dict, list)), (
-                f"target is not a dict or list: {target}"
-            )
-            target = target[seg]  # type: ignore
+            if isinstance(target, list):
+                assert isinstance(seg, int)
+                target = target[seg]
+            elif isinstance(target, dict):
+                target = target[seg]
+            else:
+                raise ValueError(f"Expected dict or list, got {type(target)}")
 
         return target
 
-    def get_current_data(self, append_addr: List[Union[int, str]] = []) -> ResultType:
+    def get_current_data(self, append_addr: List[T_KeyType] = []) -> ResultType:
         return self.get_data(self.addr_stack + append_addr)
 
 
@@ -121,11 +137,8 @@ class AbsTask(ABC, Generic[T_ResultType]):
     def get_default_result(self) -> T_ResultType: ...
 
 
-T_BatchKeyType = TypeVar("T_BatchKeyType")
-
-
-class BatchTask(AbsTask[Dict[T_BatchKeyType, ResultType]]):
-    def __init__(self, tasks: Dict[T_BatchKeyType, AbsTask[ResultType]]) -> None:
+class BatchTask(AbsTask[Mapping[T_KeyType, ResultType]]):
+    def __init__(self, tasks: Dict[T_KeyType, AbsTask[ResultType]]) -> None:
         self.tasks = tasks
 
     def make_pbar(self, leave: bool) -> tqdm:
@@ -168,16 +181,19 @@ class BatchTask(AbsTask[Dict[T_BatchKeyType, ResultType]]):
             self.task_pbar.close()
             self.task_pbar = None
 
-    def get_default_result(self) -> Dict[T_BatchKeyType, ResultType]:
+    def get_default_result(self) -> Dict[T_KeyType, ResultType]:
         return {name: task.get_default_result() for name, task in self.tasks.items()}
 
 
-class SoftTask(AbsTask[List[T_ResultType]]):
+T_ValueType = TypeVar("T_ValueType", bound=Number)
+
+
+class SoftTask(AbsTask[List[T_ResultType]], Generic[T_ResultType]):
     def __init__(
         self,
         sweep_name: str,
-        sweep_values: ndarray,
-        update_cfg_fn: Callable[[int, TaskContext, float], None],
+        sweep_values: Sequence[T_ValueType],
+        update_cfg_fn: Callable[[int, TaskContext, T_ValueType], None],
         sub_task: AbsTask[T_ResultType],
     ) -> None:
         self.sweep_values = sweep_values
@@ -210,7 +226,7 @@ class SoftTask(AbsTask[List[T_ResultType]]):
             assert self.sweep_pbar is not None
             self.sweep_pbar.reset()
 
-        for i, v in enumerate(self.sweep_values):  # type: ignore
+        for i, v in enumerate(self.sweep_values):
             self.update_cfg_fn(i, ctx, v)
 
             self.sub_task.run(ctx(addr=i))
@@ -231,25 +247,26 @@ class SoftTask(AbsTask[List[T_ResultType]]):
 
     def get_default_result(self) -> List[T_ResultType]:
         return [
-            self.sub_task.get_default_result()
-            for _ in range(len(self.sweep_values))  # type: ignore
+            self.sub_task.get_default_result() for _ in range(len(self.sweep_values))
         ]
 
 
-def default_raw2signal_fn(raw: List[ndarray]) -> ndarray:
+def default_raw2signal_fn(raw: Sequence[NDArray]) -> NDArray:
     return raw[0][0].dot([1, 1j])
 
 
 T_RawType = TypeVar("T_RawType")
 
 
-class HardTask(AbsTask[ndarray], Generic[T_RawType]):
+class HardTask(AbsTask[NDArray[np.complex128]], Generic[T_RawType]):
     def __init__(
         self,
         measure_fn: Callable[
             [TaskContext, Callable[[int, T_RawType], None]], T_RawType
         ],
-        raw2signal_fn: Callable[[T_RawType], ndarray] = default_raw2signal_fn,
+        raw2signal_fn: Callable[
+            [T_RawType], NDArray[np.complex128]
+        ] = default_raw2signal_fn,
         result_shape: Tuple[int, ...] = (),
     ) -> None:
         self.measure_fn = measure_fn
@@ -274,6 +291,8 @@ class HardTask(AbsTask[ndarray], Generic[T_RawType]):
             self.avg_pbar = self.make_pbar(ctx, leave=True)
 
     def run(self, ctx: TaskContext) -> None:
+        assert "rounds" in ctx.cfg
+
         if self.dynamic_pbar:
             self.avg_pbar = self.make_pbar(ctx, leave=False)
         else:
@@ -282,7 +301,8 @@ class HardTask(AbsTask[ndarray], Generic[T_RawType]):
 
         GlobalDeviceManager.setup_devices(ctx.cfg["dev"], progress=False)
 
-        def update_hook(ir: int, raw: Any) -> None:
+        def update_hook(ir: int, raw: T_RawType) -> None:
+            assert self.avg_pbar is not None
             self.avg_pbar.update(ir - self.avg_pbar.n)
 
             ctx.set_current_data(self.raw2signal_fn(raw))
@@ -304,8 +324,8 @@ class HardTask(AbsTask[ndarray], Generic[T_RawType]):
             self.avg_pbar.close()
             self.avg_pbar = None
 
-    def get_default_result(self) -> ndarray:
-        return np.full(self.result_shape, np.nan, dtype=complex)
+    def get_default_result(self) -> NDArray[np.complex128]:
+        return np.full(self.result_shape, np.nan, dtype=np.complex128)
 
 
 class RepeatOverTime(AbsTask[List[T_ResultType]]):
@@ -411,4 +431,4 @@ class Runner(Generic[T_ResultType]):
             print("Error during measurement:")
             print_traceback()
 
-        return ctx.get_data()  # return all data
+        return ctx.data

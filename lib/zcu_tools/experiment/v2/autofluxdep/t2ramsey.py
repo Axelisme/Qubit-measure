@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, TypedDict
+from typing import Callable, Dict, Optional
 
 import numpy as np
-from typing_extensions import NotRequired
+from numpy.typing import NDArray
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContext
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
@@ -30,33 +31,32 @@ from zcu_tools.utils.process import rotate2real
 from .executor import MeasurementTask
 
 
-def t2ramsey_signal2real(signals: np.ndarray) -> np.ndarray:
+def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-def t2ramsey_fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
+def t2ramsey_fluxdep_signal2real(
+    signals: NDArray[np.complex128],
+) -> NDArray[np.float64]:
     return np.array(list(map(t2ramsey_signal2real, signals)), dtype=np.float64)
 
 
-class T2RamseyCfg(TypedDict, total=False):
+class T2RamseyCfg(TaskConfig):
     reset: NotRequired[ResetCfg]
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
-    relax_delay: float
-    reps: int
-    rounds: int
 
 
-class T2RamseyResult(TypedDict):
-    raw_signals: np.ndarray
-    t2r: float
-    t2r_err: float
-    t2r_detune: float
-    t2r_detune_err: float
-    success: bool
+class T2RamseyResult(TypedDict, closed=True):
+    raw_signals: NDArray[np.complex128]
+    t2r: NDArray[np.float64]
+    t2r_err: NDArray[np.float64]
+    t2r_detune: NDArray[np.float64]
+    t2r_detune_err: NDArray[np.float64]
+    success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict):
+class PlotterDictType(TypedDict, closed=True):
     t2r: LivePlotter1D
     t2r_curve: LivePlotter2DwithLine
 
@@ -82,26 +82,29 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
             lengths = sweep2array(self.length_sweep)
             for i in range(ctx.cfg["rounds"]):
                 raw_signals = [
-                    [
-                        np.stack(
-                            [
-                                decaycos(
-                                    lengths,
-                                    0,
-                                    1,
-                                    self.activate_detune
-                                    + 0.1 * ctx.env_dict["flx_value"],
-                                    0,
-                                    2 * (ctx.env_dict["flx_value"] ** 2 + 1.0),
-                                )
-                                + 0.01
-                                * (ctx.cfg["rounds"] - i)
-                                * np.random.randn(len(lengths)),
-                                np.zeros_like(lengths),
-                            ],
-                            axis=1,
-                        )
-                    ]
+                    np.array(
+                        [
+                            np.stack(
+                                [
+                                    decaycos(
+                                        lengths,
+                                        0,
+                                        1,
+                                        self.activate_detune
+                                        + 0.1 * ctx.env_dict["flx_value"],
+                                        0,
+                                        2 * (ctx.env_dict["flx_value"] ** 2 + 1.0),
+                                    )
+                                    + 0.01
+                                    * (ctx.cfg["rounds"] - i)
+                                    * np.random.randn(len(lengths)),
+                                    np.zeros_like(lengths),
+                                ],
+                                axis=1,
+                            )
+                        ],
+                        dtype=np.complex128,
+                    )
                 ]
                 update_hook(i, raw_signals)
                 time.sleep(0.01)
@@ -187,7 +190,7 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
 
         # signals
         save_data(
-            filepath=filepath.with_name(filepath.name + "_signals"),
+            filepath=str(filepath.with_name(filepath.name + "_signals")),
             x_info=x_info,
             y_info={"name": "Length", "unit": "s", "values": lengths * 1e-6},
             z_info={
@@ -201,7 +204,7 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
 
         # t2r
         save_data(
-            filepath=filepath.with_name(filepath.name + "_t2r"),
+            filepath=str(filepath.with_name(filepath.name + "_t2r")),
             x_info=x_info,
             z_info={"name": "T2 Ramsey", "unit": "s", "values": result["t2r"] * 1e-6},
             comment=comment,
@@ -210,7 +213,7 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
 
         # success
         save_data(
-            filepath=filepath.with_name(filepath.name + "_success"),
+            filepath=str(filepath.with_name(filepath.name + "_success")),
             x_info=x_info,
             z_info={"name": "Success", "unit": "bool", "values": result["success"]},
             comment=comment,
@@ -227,17 +230,19 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
 
         cfg = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,
+            cfg,  # type: ignore
             {
                 "dev": ctx.cfg["dev"],
                 "sweep": {"length": self.length_sweep},
             },
         )
-        cfg = ml.make_cfg(cfg)
+        cfg = ml.make_cfg(dict(cfg))
 
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
+        assert isinstance(raw_signals, np.ndarray)
+
         real_signals = t2ramsey_signal2real(raw_signals)
 
         t2r, t2r_err, t2r_detune, t2r_detune_err, fit_signals, _ = fit_decay_fringe(
@@ -247,15 +252,15 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
 
         result = T2RamseyResult(
             raw_signals=raw_signals,
-            t2r=t2r,
-            t2r_err=t2r_err,
-            t2r_detune=t2r_detune,
-            t2r_detune_err=t2r_detune_err,
-            success=True,
+            t2r=np.array(t2r),
+            t2r_err=np.array(t2r_err),
+            t2r_detune=np.array(t2r_detune),
+            t2r_detune_err=np.array(t2r_detune_err),
+            success=np.array(True),
         )
 
         if np.mean(np.abs(real_signals - fit_signals)) > 0.1 * np.ptp(real_signals):
-            result["success"] = False
+            result["success"] = np.array(False)
 
         if result["success"]:
             ctx.env_dict["t2r"] = t2r

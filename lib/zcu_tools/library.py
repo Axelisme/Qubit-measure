@@ -4,7 +4,16 @@ import os
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Dict, Literal, Optional, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Literal,
+    MutableMapping,
+    Optional,
+    TypeVar,
+    Union,
+)
 
 import yaml
 from typing_extensions import ParamSpec
@@ -56,20 +65,26 @@ def auto_derive_module(
     return module_cfg
 
 
-def _sync(time: Literal["after", "before"]) -> Callable:
-    P = ParamSpec("P")
-    T = TypeVar("T")
+P = ParamSpec("P")
+T = TypeVar("T")
 
+
+def auto_sync(
+    time: Literal["after", "before"],
+) -> Callable[[Callable[P, T]], Callable[P, T]]:
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         @wraps(func)
-        def wrapper(self: ModuleLibrary, *args, **kwargs) -> T:
-            if time == "before":
-                self.sync()
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            assert isinstance(args[0], ModuleLibrary)
 
-            result = func(self, *args, **kwargs)
+            if time == "before":
+                args[0].sync()
+
+            result = func(*args, **kwargs)
 
             if time == "after":
-                self.sync()
+                args[0].sync()
+
             return result
 
         return wrapper
@@ -105,7 +120,9 @@ class ModuleLibrary:
         ml.modules = deepcopy(modules)
         return ml
 
-    def make_cfg(self, exp_cfg: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    def make_cfg(
+        self, exp_cfg: MutableMapping[str, Any], **kwargs
+    ) -> MutableMapping[str, Any]:
         """
         Create a deep copy of the experiment configuration, update it with additional parameters,
         and automatically derive missing configuration values.
@@ -133,7 +150,9 @@ class ModuleLibrary:
         return numpy2number(exp_cfg)
 
     def load(self) -> None:
-        with open(self.cfg_path, "r") as f:
+        assert self.cfg_path is not None
+
+        with open(str(self.cfg_path), "r") as f:
             cfg = yaml.safe_load(f)
         self.modify_time = self.cfg_path.stat().st_mtime_ns
 
@@ -141,10 +160,12 @@ class ModuleLibrary:
         deepupdate(self.modules, cfg["modules"], behavior="force")
 
     def dump(self) -> None:
+        assert self.cfg_path is not None
+
         dump_cfg = dict(waveforms=self.waveforms, modules=self.modules)
         dump_cfg = numpy2number(deepcopy(dump_cfg))
 
-        with open(self.cfg_path, "w") as f:
+        with open(str(self.cfg_path), "w") as f:
             yaml.dump(dump_cfg, f)
         self.modify_time = self.cfg_path.stat().st_mtime_ns
 
@@ -159,7 +180,7 @@ class ModuleLibrary:
 
         self.dump()
 
-    @_sync("after")
+    @auto_sync("after")
     def register_waveform(self, **wav_kwargs) -> None:
         wav_kwargs = deepcopy(wav_kwargs)
 
@@ -167,11 +188,11 @@ class ModuleLibrary:
         for name, wav_cfg in wav_kwargs.items():
             self.waveforms[name] = wav_cfg  # directly overwrite
 
-    @_sync("after")
+    @auto_sync("after")
     def register_module(self, **mod_kwargs) -> None:
         self.modules.update(deepcopy(mod_kwargs))
 
-    @_sync("before")
+    @auto_sync("before")
     def get_waveform(
         self, name: str, override_cfg: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -180,7 +201,7 @@ class ModuleLibrary:
             deepupdate(waveform, override_cfg, behavior="force")
         return waveform
 
-    @_sync("before")
+    @auto_sync("before")
     def get_module(
         self, name: str, override_cfg: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -189,6 +210,6 @@ class ModuleLibrary:
             deepupdate(module, override_cfg, behavior="force")
         return module
 
-    @_sync("after")
+    @auto_sync("after")
     def update_module(self, name: str, override_cfg: Dict[str, Any]) -> None:
         deepupdate(self.modules[name], deepcopy(override_cfg), behavior="force")

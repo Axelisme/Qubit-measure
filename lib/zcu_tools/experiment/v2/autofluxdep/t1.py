@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, TypedDict
+from typing import Callable, Dict, Optional
 
 import numpy as np
-from typing_extensions import NotRequired
+from numpy.typing import NDArray
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContext
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
@@ -30,31 +31,28 @@ from zcu_tools.utils.process import rotate2real
 from .executor import MeasurementTask
 
 
-def t1_signal2real(signals: np.ndarray) -> np.ndarray:
+def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-def t1_fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
+def t1_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.array(list(map(t1_signal2real, signals)), dtype=np.float64)
 
 
-class T1Cfg(TypedDict, total=False):
+class T1Cfg(TaskConfig):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
-    relax_delay: float
-    reps: int
-    rounds: int
 
 
-class T1Result(TypedDict):
-    raw_signals: np.ndarray
-    t1: float
-    t1_err: float
-    success: bool
+class T1Result(TypedDict, closed=True):
+    raw_signals: NDArray[np.complex128]
+    t1: NDArray[np.float64]
+    t1_err: NDArray[np.float64]
+    success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict):
+class PlotterDictType(TypedDict, closed=True):
     t1: LivePlotter1D
     t1_curve: LivePlotter2DwithLine
 
@@ -78,23 +76,26 @@ class T1MeasurementTask(MeasurementTask[T1Result, PlotterDictType]):
             lengths = sweep2array(self.length_sweep)
             for i in range(ctx.cfg["rounds"]):
                 raw_signals = [
-                    [
-                        np.stack(
-                            [
-                                expfunc(
-                                    lengths,
-                                    0,
-                                    1,
-                                    2 * (ctx.env_dict["flx_value"] ** 2 + 1.0),
-                                )
-                                + 0.01
-                                * (ctx.cfg["rounds"] - i)
-                                * np.random.randn(len(lengths)),
-                                np.zeros_like(lengths),
-                            ],
-                            axis=1,
-                        )
-                    ]
+                    np.array(
+                        [
+                            np.stack(
+                                [
+                                    expfunc(
+                                        lengths,
+                                        0,
+                                        1,
+                                        2 * (ctx.env_dict["flx_value"] ** 2 + 1.0),
+                                    )
+                                    + 0.01
+                                    * (ctx.cfg["rounds"] - i)
+                                    * np.random.randn(len(lengths)),
+                                    np.zeros_like(lengths),
+                                ],
+                                axis=1,
+                            )
+                        ],
+                        dtype=np.complex128,
+                    )
                 ]
                 update_hook(i, raw_signals)
                 time.sleep(0.01)
@@ -172,7 +173,7 @@ class T1MeasurementTask(MeasurementTask[T1Result, PlotterDictType]):
 
         # signals
         save_data(
-            filepath=filepath.with_name(filepath.name + "_signals"),
+            filepath=str(filepath.with_name(filepath.name + "_signals")),
             x_info=x_info,
             y_info={"name": "Length", "unit": "s", "values": lengths * 1e-6},
             z_info={
@@ -186,7 +187,7 @@ class T1MeasurementTask(MeasurementTask[T1Result, PlotterDictType]):
 
         # t1
         save_data(
-            filepath=filepath.with_name(filepath.name + "_t1"),
+            filepath=str(filepath.with_name(filepath.name + "_t1")),
             x_info=x_info,
             z_info={"name": "T1", "unit": "s", "values": result["t1"] * 1e-6},
             comment=comment,
@@ -195,7 +196,7 @@ class T1MeasurementTask(MeasurementTask[T1Result, PlotterDictType]):
 
         # success
         save_data(
-            filepath=filepath.with_name(filepath.name + "_success"),
+            filepath=str(filepath.with_name(filepath.name + "_success")),
             x_info=x_info,
             z_info={"name": "Success", "unit": "bool", "values": result["success"]},
             comment=comment,
@@ -212,17 +213,19 @@ class T1MeasurementTask(MeasurementTask[T1Result, PlotterDictType]):
 
         cfg = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,
+            cfg,  # type: ignore
             {
                 "dev": ctx.cfg["dev"],
                 "sweep": {"length": self.length_sweep},
             },
         )
-        cfg = ml.make_cfg(cfg)
+        cfg = ml.make_cfg(dict(cfg))
 
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
+        assert isinstance(raw_signals, np.ndarray)
+
         real_signals = t1_signal2real(raw_signals)
 
         t1, t1err, fit_signals, _ = fit_decay(
@@ -231,13 +234,13 @@ class T1MeasurementTask(MeasurementTask[T1Result, PlotterDictType]):
 
         result = T1Result(
             raw_signals=raw_signals,
-            t1=t1,
-            t1_err=t1err,
-            success=True,
+            t1=np.array(t1),
+            t1_err=np.array(t1err),
+            success=np.array(True),
         )
 
         if np.mean(np.abs(real_signals - fit_signals)) > 0.1 * np.ptp(real_signals):
-            result["success"] = False
+            result["success"] = np.array(False)
 
         if result["success"]:
             ctx.env_dict["t1"] = t1

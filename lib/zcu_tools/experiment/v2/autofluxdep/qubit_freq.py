@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, TypedDict
+from typing import Callable, Dict, Optional
 
 import numpy as np
-from typing_extensions import NotRequired
+from numpy.typing import NDArray
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContext
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
@@ -42,27 +43,24 @@ def qubitfreq_fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
     return np.array(list(map(qubitfreq_signal2real, signals)), dtype=np.float64)
 
 
-class QubitFreqCfg(TypedDict, total=False):
+class QubitFreqCfg(TaskConfig):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
-    relax_delay: float
-    reps: int
-    rounds: int
 
 
-class QubitFreqResult(TypedDict):
-    raw_signals: np.ndarray
-    predict_freq: float
-    fit_detune: float
-    fit_freq: float
-    fit_freq_err: float
-    fit_kappa: float
-    fit_kappa_err: float
-    success: bool
+class QubitFreqResult(TypedDict, closed=True):
+    raw_signals: NDArray[np.complex128]
+    predict_freq: NDArray[np.float64]
+    fit_detune: NDArray[np.float64]
+    fit_freq: NDArray[np.float64]
+    fit_freq_err: NDArray[np.float64]
+    fit_kappa: NDArray[np.float64]
+    fit_kappa_err: NDArray[np.float64]
+    success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict):
+class PlotterDictType(TypedDict, closed=True):
     fit_freq: LivePlotter1D
     detune: LivePlotter2DwithLine
 
@@ -83,35 +81,43 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
 
             from zcu_tools.utils.fitting.base import lorfunc
 
+            assert "rounds" in ctx.cfg
+
+            raw_signals = None
             detunes = sweep2array(self.detune_sweep)
             for i in range(ctx.cfg["rounds"]):
                 raw_signals = [
-                    [
-                        np.stack(
-                            [
-                                lorfunc(
-                                    detunes,
-                                    0,
-                                    0,
-                                    1,
-                                    4 * ctx.env_dict["flx_value"] ** 2
-                                    - self.predict_bias
-                                    - 4,
-                                    0.5
-                                    * (ctx.env_dict["flx_value"] ** 2 + 3.0)
-                                    * ctx.cfg["qub_pulse"]["gain"],
-                                )
-                                + 0.01
-                                * (ctx.cfg["rounds"] - i)
-                                * np.random.randn(len(detunes)),
-                                np.zeros_like(detunes),
-                            ],
-                            axis=1,
-                        )
-                    ]
+                    np.array(
+                        [
+                            np.stack(
+                                [
+                                    lorfunc(
+                                        detunes,
+                                        0,
+                                        0,
+                                        1,
+                                        4 * ctx.env_dict["flx_value"] ** 2
+                                        - self.predict_bias
+                                        - 4,
+                                        0.5
+                                        * (ctx.env_dict["flx_value"] ** 2 + 3.0)
+                                        * ctx.cfg["qub_pulse"]["gain"],
+                                    )
+                                    + 0.01
+                                    * (ctx.cfg["rounds"] - i)
+                                    * np.random.randn(len(detunes)),
+                                    np.zeros_like(detunes),
+                                ],
+                                axis=1,
+                            )
+                        ],
+                        dtype=np.complex128,
+                    )
                 ]
                 update_hook(i, raw_signals)
                 time.sleep(0.01)
+
+            assert raw_signals is not None
 
             return raw_signals
 
@@ -177,7 +183,7 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
 
         # signals
         save_data(
-            filepath=filepath.with_name(filepath.name + "_signals"),
+            filepath=str(filepath.with_name(filepath.name + "_signals")),
             x_info=x_info,
             y_info={"name": "Detune", "unit": "Hz", "values": 1e6 * detunes},
             z_info={
@@ -191,7 +197,7 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
 
         # predict frequency
         save_data(
-            filepath=filepath.with_name(filepath.name + "_predict_freq"),
+            filepath=str(filepath.with_name(filepath.name + "_predict_freq")),
             x_info=x_info,
             z_info={
                 "name": "Predict frequency",
@@ -204,7 +210,7 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
 
         # fit frequency
         save_data(
-            filepath=filepath.with_name(filepath.name + "_fit_freq"),
+            filepath=str(filepath.with_name(filepath.name + "_fit_freq")),
             x_info=x_info,
             z_info={
                 "name": "Fit frequency",
@@ -217,7 +223,7 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
 
         # success
         save_data(
-            filepath=filepath.with_name(filepath.name + "_success"),
+            filepath=str(filepath.with_name(filepath.name + "_success")),
             x_info=x_info,
             z_info={"name": "Success", "unit": "bool", "values": result["success"]},
             comment=comment,
@@ -239,13 +245,13 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
 
         cfg = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,
+            cfg,  # type: ignore
             {
                 "dev": ctx.cfg["dev"],
                 "sweep": {"detune": self.detune_sweep},
             },
         )
-        cfg = ml.make_cfg(cfg)
+        cfg = ml.make_cfg(dict(cfg))
 
         predict_freq = predictor.predict_freq(flx) + self.predict_bias
         Pulse.set_param(
@@ -257,6 +263,7 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
+        assert isinstance(raw_signals, np.ndarray)
         real_signals = qubitfreq_signal2real(raw_signals)
 
         detune, freq_err, kappa, kappa_err, fit_signals, _ = fit_qubit_freq(
@@ -266,17 +273,17 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
         fit_freq = predict_freq + detune
         result = QubitFreqResult(
             raw_signals=raw_signals,
-            predict_freq=predict_freq,
-            fit_detune=detune,
-            fit_freq=fit_freq,
-            fit_freq_err=freq_err,
-            fit_kappa=kappa,
-            fit_kappa_err=kappa_err,
-            success=True,
+            predict_freq=np.array(predict_freq),
+            fit_detune=np.array(detune),
+            fit_freq=np.array(fit_freq),
+            fit_freq_err=np.array(freq_err),
+            fit_kappa=np.array(kappa),
+            fit_kappa_err=np.array(kappa_err),
+            success=np.array(True),
         )
 
         if np.mean(np.abs(real_signals - fit_signals)) > 0.2 * np.ptp(real_signals):
-            result["success"] = False
+            result["success"] = np.array(False)
 
         if result["success"]:
             self.predict_bias += 0.5 * detune

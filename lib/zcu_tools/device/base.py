@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Dict, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from typing_extensions import NotRequired
 
@@ -29,8 +29,8 @@ class BaseDevice(ABC):
 
         try:
             self.session = rm.open_resource(address)
-            self.session.read_termination = "\n"
-            self.session.write_termination = "\n"
+            self.session.read_termination = "\n"  # type: ignore
+            self.session.write_termination = "\n"  # type: ignore
         except visa.Error:
             sys.stderr.write(f"Couldn't connect to {address}")
             raise
@@ -45,8 +45,8 @@ class BaseDevice(ABC):
         import pyvisa
 
         try:
-            idn = self.session.query("*IDN?")
-            print(f"Connected to: {idn.strip()}")
+            idn = self.query("*IDN?")
+            print(f"Connected to: {idn}")
         except pyvisa.Error as e:
             print(f"Could not query IDN. Error: {e}")
 
@@ -55,18 +55,18 @@ class BaseDevice(ABC):
         self.session.close()
 
     def write(self, cmd: str) -> None:
-        self.session.write(cmd)
+        self.session.write(cmd)  # type: ignore
 
     def query(self, cmd: str) -> str:
-        return self.session.query(cmd).strip()
+        return self.session.query(cmd).strip()  # type: ignore
 
     # ----- abstract methods -----
 
     @abstractmethod
-    def _setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
+    def _setup(self, cfg: DeviceInfo, *, progress: bool = True) -> None:
         pass
 
-    def setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
+    def setup(self, cfg: DeviceInfo, *, progress: bool = True) -> None:
         """
         Setup the device with the given configuration.
         """

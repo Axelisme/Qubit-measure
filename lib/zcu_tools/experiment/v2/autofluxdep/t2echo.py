@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, TypedDict
+from typing import Callable, Dict, Optional
 
 import numpy as np
-from typing_extensions import NotRequired
+from numpy.typing import NDArray
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContext
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
@@ -30,32 +31,29 @@ from zcu_tools.utils.process import rotate2real
 from .executor import MeasurementTask
 
 
-def t2echo_signal2real(signals: np.ndarray) -> np.ndarray:
+def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-def t2echo_fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
+def t2echo_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.array(list(map(t2echo_signal2real, signals)), dtype=np.float64)
 
 
-class T2EchoCfg(TypedDict, total=False):
+class T2EchoCfg(TaskConfig):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
-    relax_delay: float
-    reps: int
-    rounds: int
 
 
-class T2EchoResult(TypedDict):
-    raw_signals: np.ndarray
-    t2e: float
-    t2e_err: float
-    success: bool
+class T2EchoResult(TypedDict, closed=True):
+    raw_signals: NDArray[np.complex128]
+    t2e: NDArray[np.float64]
+    t2e_err: NDArray[np.float64]
+    success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict):
+class PlotterDictType(TypedDict, closed=True):
     t2e: LivePlotter1D
     t2e_curve: LivePlotter2DwithLine
 
@@ -81,26 +79,29 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, PlotterDictType]):
             lengths = sweep2array(self.length_sweep)
             for i in range(ctx.cfg["rounds"]):
                 raw_signals = [
-                    [
-                        np.stack(
-                            [
-                                decaycos(
-                                    lengths,
-                                    0,
-                                    1,
-                                    self.activate_detune
-                                    + 0.1 * ctx.env_dict["flx_value"],
-                                    0,
-                                    4 * (ctx.env_dict["flx_value"] ** 2 + 1.0),
-                                )
-                                + 0.01
-                                * (ctx.cfg["rounds"] - i)
-                                * np.random.randn(len(lengths)),
-                                np.zeros_like(lengths),
-                            ],
-                            axis=1,
-                        )
-                    ]
+                    np.array(
+                        [
+                            np.stack(
+                                [
+                                    decaycos(
+                                        lengths,
+                                        0,
+                                        1,
+                                        self.activate_detune
+                                        + 0.1 * ctx.env_dict["flx_value"],
+                                        0,
+                                        4 * (ctx.env_dict["flx_value"] ** 2 + 1.0),
+                                    )
+                                    + 0.01
+                                    * (ctx.cfg["rounds"] - i)
+                                    * np.random.randn(len(lengths)),
+                                    np.zeros_like(lengths),
+                                ],
+                                axis=1,
+                            )
+                        ],
+                        dtype=np.complex128,
+                    )
                 ]
                 update_hook(i, raw_signals)
                 time.sleep(0.01)
@@ -188,7 +189,7 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, PlotterDictType]):
 
         # signals
         save_data(
-            filepath=filepath.with_name(filepath.name + "_signals"),
+            filepath=str(filepath.with_name(filepath.name + "_signals")),
             x_info=x_info,
             y_info={"name": "Length", "unit": "s", "values": lengths * 1e-6},
             z_info={
@@ -202,7 +203,7 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, PlotterDictType]):
 
         # t2e
         save_data(
-            filepath=filepath.with_name(filepath.name + "_t2e"),
+            filepath=str(filepath.with_name(filepath.name + "_t2e")),
             x_info=x_info,
             z_info={"name": "T2 Echo", "unit": "s", "values": result["t2e"] * 1e-6},
             comment=comment,
@@ -211,7 +212,7 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, PlotterDictType]):
 
         # success
         save_data(
-            filepath=filepath.with_name(filepath.name + "_success"),
+            filepath=str(filepath.with_name(filepath.name + "_success")),
             x_info=x_info,
             z_info={"name": "Success", "unit": "bool", "values": result["success"]},
             comment=comment,
@@ -228,17 +229,19 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, PlotterDictType]):
 
         cfg = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,
+            cfg,  # type: ignore
             {
                 "dev": ctx.cfg["dev"],
                 "sweep": {"length": self.length_sweep},
             },
         )
-        cfg = ml.make_cfg(cfg)
+        cfg = ml.make_cfg(dict(cfg))
 
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
+        assert isinstance(raw_signals, np.ndarray)
+
         real_signals = t2echo_signal2real(raw_signals)
 
         lengths = sweep2array(self.length_sweep)
@@ -249,13 +252,13 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, PlotterDictType]):
 
         result = T2EchoResult(
             raw_signals=raw_signals,
-            t2e=t2e,
-            t2e_err=t2e_err,
-            success=True,
+            t2e=np.array(t2e),
+            t2e_err=np.array(t2e_err),
+            success=np.array(True),
         )
 
         if np.mean(np.abs(real_signals - fit_signals)) > 0.1 * np.ptp(real_signals):
-            result["success"] = False
+            result["success"] = np.array(False)
 
         if result["success"]:
             ctx.env_dict["t2e"] = t2e

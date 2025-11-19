@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Callable, Dict, TypedDict
+from typing import Callable, Dict
 
 import numpy as np
-from typing_extensions import NotRequired
+from numpy.typing import NDArray
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContext
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
@@ -28,7 +29,7 @@ from zcu_tools.utils.datasaver import save_data
 from .executor import MeasurementTask
 
 
-def mist_signal2real(signals: np.ndarray) -> np.ndarray:
+def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     # shape: (gains, ge, ge)
     avg_len = max(int(0.05 * signals.shape[0]), 1)
 
@@ -40,26 +41,23 @@ def mist_signal2real(signals: np.ndarray) -> np.ndarray:
     return np.stack([mist_signals, decay_signals], axis=-1)
 
 
-def mist_fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
+def mist_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.array(list(map(mist_signal2real, signals)), dtype=np.float64)
 
 
-class MistCfg(TypedDict, total=False):
+class MistCfg(TaskConfig):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     mist_pulse: PulseCfg
     readout: ReadoutCfg
-    relax_delay: float
-    reps: int
-    rounds: int
 
 
-class MistResult(TypedDict):
-    raw_signals: np.ndarray
-    success: bool
+class MistResult(TypedDict, closed=True):
+    raw_signals: NDArray[np.complex128]
+    success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict):
+class PlotterDictType(TypedDict, closed=True):
     g_mist: LivePlotter2D
     e_mist: LivePlotter2D
     g_decay: LivePlotter2D
@@ -108,7 +106,10 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
                     axis=1,
                 )
                 raw_signals = [
-                    [np.stack([raw_signals, np.zeros_like(raw_signals)], axis=-1)]
+                    np.array(
+                        [np.stack([raw_signals, np.zeros_like(raw_signals)], axis=-1)],
+                        dtype=np.complex128,
+                    )
                 ]
 
                 update_hook(i, raw_signals)
@@ -197,9 +198,9 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
         )
 
     def update_plotter(self, plotters, ctx, signals) -> None:
-        flx_idx = ctx.env_dict["flx_idx"]
-        flx_values = ctx.env_dict["flx_values"]
-        gains = sweep2array(self.gain_sweep)
+        flx_idx: int = ctx.env_dict["flx_idx"]
+        flx_values: np.ndarray = ctx.env_dict["flx_values"]
+        gains: np.ndarray = sweep2array(self.gain_sweep)
 
         # shape: (flx, gains, ge, md)
         real_signals = mist_fluxdep_signal2real(signals["raw_signals"])
@@ -240,7 +241,7 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
         g_signals = result["raw_signals"][:, :, 0, :]
         e_signals = result["raw_signals"][:, :, 1, :]
         save_data(
-            filepath=filepath.with_name(filepath.name + "_signals_gg"),
+            filepath=str(filepath.with_name(filepath.name + "_signals_gg")),
             x_info=x_info,
             y_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
             z_info={"name": "Signal", "unit": "a.u.", "values": g_signals[..., 0].T},
@@ -248,7 +249,7 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
             tag=prefix_tag + "/signals_gg",
         )
         save_data(
-            filepath=filepath.with_name(filepath.name + "_signals_ge"),
+            filepath=str(filepath.with_name(filepath.name + "_signals_ge")),
             x_info=x_info,
             y_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
             z_info={"name": "Signal", "unit": "a.u.", "values": g_signals[..., 1].T},
@@ -256,7 +257,7 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
             tag=prefix_tag + "/signals_ge",
         )
         save_data(
-            filepath=filepath.with_name(filepath.name + "_signals_eg"),
+            filepath=str(filepath.with_name(filepath.name + "_signals_eg")),
             x_info=x_info,
             y_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
             z_info={"name": "Signal", "unit": "a.u.", "values": e_signals[..., 0].T},
@@ -264,7 +265,7 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
             tag=prefix_tag + "/signals_eg",
         )
         save_data(
-            filepath=filepath.with_name(filepath.name + "_signals_ee"),
+            filepath=str(filepath.with_name(filepath.name + "_signals_ee")),
             x_info=x_info,
             y_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
             z_info={"name": "Signal", "unit": "a.u.", "values": e_signals[..., 1].T},
@@ -280,7 +281,7 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
 
         cfg = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,
+            cfg,  # type: ignore
             {
                 "pre_pi_pulse": deepcopy(cfg["pi_pulse"]),
                 "post_pi_pulse": deepcopy(cfg["pi_pulse"]),
@@ -292,7 +293,7 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
                 },
             },
         )
-        cfg = ml.make_cfg(cfg)
+        cfg = ml.make_cfg(dict(cfg))
         del cfg["pi_pulse"]
 
         Pulse.set_param(
@@ -310,8 +311,9 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
+        assert isinstance(raw_signals, np.ndarray)
 
-        result = MistResult(raw_signals=raw_signals, success=True)
+        result = MistResult(raw_signals=raw_signals, success=np.array(True))
 
         ctx.set_current_data(result)
 

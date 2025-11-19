@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
 from pathlib import Path
-from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Tuple, TypeVar
 
 import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
@@ -23,14 +25,14 @@ from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import AbsLivePlotter, MultiLivePlotter, make_plot_frame
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Dict[str, AbsLivePlotter])
+T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlotter])
 
 
 class MeasurementTask(AbsTask, Generic[T_ResultType, T_PlotterDictType]):
     def num_axes(self) -> Dict[str, int]: ...
 
     def make_plotter(
-        self, name: str, axs: Dict[str, List[plt.Axes]]
+        self, name: str, axs: Dict[str, List[Axes]]
     ) -> T_PlotterDictType: ...
 
     def update_plotter(
@@ -43,16 +45,16 @@ class MeasurementTask(AbsTask, Generic[T_ResultType, T_PlotterDictType]):
     def save(
         self,
         filepath: str,
-        flx_values: np.ndarray,
+        flx_values: NDArray[np.float64],
         result: T_ResultType,
         comment: Optional[str],
         prefix_tag: str,
     ) -> None: ...
 
 
-class SmartBatchTask(BatchTask[str]):
-    def __init__(self, tasks: Dict[str, MeasurementTask]) -> None:
-        super().__init__(tasks)
+class SmartBatchTask(BatchTask):
+    def __init__(self, tasks: Mapping[str, MeasurementTask]) -> None:
+        super().__init__(dict(tasks))
 
     def run(self, ctx: TaskContext) -> None:
         if self.dynamic_pbar:
@@ -68,8 +70,10 @@ class SmartBatchTask(BatchTask[str]):
 
             task.run(cur_ctx)
             self.task_pbar.update()
-            with MinIntervalFunc.force_execute():
-                cur_ctx.update_hook(cur_ctx)  # force refresh current task data
+            if cur_ctx.update_hook is not None:
+                # force refresh current task data
+                with MinIntervalFunc.force_execute():
+                    cur_ctx.update_hook(cur_ctx)
 
             cur_result = cur_ctx.get_current_data()
             assert isinstance(cur_result, dict)
@@ -86,7 +90,7 @@ class SmartBatchTask(BatchTask[str]):
 class FluxDepExecutor:
     def __init__(
         self,
-        flx_values: np.ndarray,
+        flx_values: NDArray[np.float64],
         flux_dev_name: str,
         flux_dev_cfg: DeviceInfo,
         env_dict: Optional[Dict[str, Any]] = None,
@@ -109,7 +113,7 @@ class FluxDepExecutor:
 
         return self
 
-    def make_ax_layout(self) -> Tuple[plt.Figure, Dict[str, Dict[str, List[plt.Axes]]]]:
+    def make_ax_layout(self) -> Tuple[Figure, Dict[str, Dict[str, List[Axes]]]]:
         assert len(self.measurements) > 0
 
         num_axes_map = {
@@ -128,12 +132,12 @@ class FluxDepExecutor:
         )
 
         # collect axes into dict
-        axs_map: Dict[str, Dict[str, List[plt.Axes]]] = defaultdict(dict)
+        axs_map: Dict[str, Dict[str, List[Axes]]] = defaultdict(dict)
         i, j = 0, 0
         for ms_name, num_axes in num_axes_map.items():
             for ax_name, ax_num in num_axes.items():
                 for _ in range(ax_num):
-                    axs_map[ms_name].setdefault(ax_name, []).append(axs[i, j])
+                    axs_map[ms_name].setdefault(ax_name, []).append(axs[i][j])
                     j += 1
                     if j == n_col:
                         j = 0
@@ -143,7 +147,9 @@ class FluxDepExecutor:
 
     def make_plotter(
         self,
-    ) -> Tuple[plt.Figure, MultiLivePlotter[str], Callable[[TaskContext], None]]:
+    ) -> Tuple[
+        Figure, MultiLivePlotter[Tuple[str, str]], Callable[[TaskContext], None]
+    ]:
         fig, axs_map = self.make_ax_layout()
 
         plotters_map = {
@@ -153,7 +159,7 @@ class FluxDepExecutor:
 
         T = TypeVar("T")
 
-        def flatten_dict(d: Dict[str, Dict[str, T]]) -> Dict[Tuple[str, str], T]:
+        def flatten_dict(d: Mapping[str, Mapping[str, T]]) -> Dict[Tuple[str, str], T]:
             return {(n1, n2): v for n1, d2 in d.items() for n2, v in d2.items()}
 
         plotter = MultiLivePlotter(fig, flatten_dict(plotters_map))
@@ -162,10 +168,14 @@ class FluxDepExecutor:
             if len(ctx.addr_stack) < 2:
                 cur_tasks = list(self.measurements.keys())
             else:
+                assert isinstance(ctx.addr_stack[1], str)
                 cur_tasks = [ctx.addr_stack[1]]
 
-            results = merge_result_list(ctx.get_data())
+            results = ctx.get_data()
+            assert isinstance(results, list)
+            results = merge_result_list(results)
 
+            assert isinstance(results, dict)
             for cur_task in cur_tasks:
                 self.measurements[cur_task].update_plotter(
                     plotters_map[cur_task], ctx, results[cur_task]
@@ -175,7 +185,7 @@ class FluxDepExecutor:
 
         return fig, plotter, plot_fn
 
-    def run(self) -> Tuple[Dict[str, ResultType], plt.Figure]:
+    def run(self) -> Tuple[Mapping[str, ResultType], Figure]:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
 
@@ -194,7 +204,7 @@ class FluxDepExecutor:
                 results = Runner(
                     task=SoftTask(
                         sweep_name="flux",
-                        sweep_values=self.flx_values,
+                        sweep_values=list(self.flx_values),
                         update_cfg_fn=update_fn,
                         sub_task=SmartBatchTask(self.measurements),
                     ),
@@ -216,7 +226,7 @@ class FluxDepExecutor:
     def save(
         self,
         filepath: str,
-        results: Dict[str, ResultType] = None,
+        results: Optional[Mapping[str, ResultType]] = None,
         comment: Optional[str] = None,
         prefix_tag: str = "autoflux_dep",
     ) -> None:
@@ -224,10 +234,10 @@ class FluxDepExecutor:
             results = self.last_result
         assert results is not None, "no result found"
 
-        filepath = Path(filepath)
+        _filepath = Path(filepath)
         for ms_name, ms in self.measurements.items():
             ms.save(
-                filepath.with_name(filepath.name + f"_{ms_name}"),
+                str(_filepath.with_name(_filepath.name + f"_{ms_name}")),
                 self.flx_values,
                 results[ms_name],
                 comment,

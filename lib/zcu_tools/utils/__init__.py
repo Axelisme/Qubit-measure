@@ -1,11 +1,11 @@
-from typing import Any, Dict, Literal
+from typing import Any, Literal, Mapping, MutableMapping
 
 from . import datasaver, fitting, process, tomography
 
 
 def deepupdate(
-    d: Dict[str, Any],
-    u: Dict[str, Any],
+    d: MutableMapping[str, Any],
+    u: Mapping[str, Any],
     behavior: Literal["error", "force", "ignore"] = "error",
 ) -> None:
     """
@@ -28,7 +28,9 @@ def deepupdate(
         None: 此函數直接修改輸入的字典 `d`。
     """
 
-    def conflict_handler(d: Dict[str, Any], u: Dict[str, Any], k: Any) -> None:
+    def conflict_handler(
+        d: MutableMapping[str, Any], u: Mapping[str, Any], k: Any
+    ) -> None:
         if behavior == "error":
             raise KeyError(f"Key {k} already exists in {d}.")
         elif behavior == "force":
@@ -67,7 +69,6 @@ def numpy2number(obj: Any) -> Any:
 __all__ = [
     "deepupdate",
     "numpy2number",
-    "AsyncFunc",
     "datasaver",
     "fitting",
     "process",

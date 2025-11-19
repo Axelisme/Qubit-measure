@@ -1,22 +1,36 @@
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple, Union, cast
 
 import numpy as np
+from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
+from typing_extensions import TypeAlias
 
 
-class StdErrorMixin(AcquireMixin):
+class TypedAcquireMixin(AcquireMixin):
+    """
+    Add type checking to the AcquireMixin class
+    """
+
+    def acquire(self, *args, **kwargs) -> List[NDArray]:
+        return super().acquire(*args, **kwargs)  # type: ignore
+
+    def acquire_decimated(self, *args, **kwargs) -> List[NDArray]:
+        return super().acquire_decimated(*args, **kwargs)  # type: ignore
+
+
+class StdErrorMixin(TypedAcquireMixin):
     """
     Add standard error information for acquired method to the AcquireMixin class
     """
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.stderr_buf: Optional[List[List[np.ndarray]]] = None
+        self.stderr_buf: Optional[List[List[NDArray]]] = None
 
-    def get_stderr_raw(self) -> Optional[List[List[np.ndarray]]]:
+    def get_stderr_raw(self) -> Optional[List[List[NDArray]]]:
         return self.stderr_buf
 
-    def get_stderr(self) -> Optional[List[np.ndarray]]:
+    def get_stderr(self) -> Optional[List[NDArray]]:
         rounds_buf = self.get_rounds()
         stderr_buf = self.get_stderr_raw()
         if stderr_buf is None:
@@ -26,8 +40,8 @@ class StdErrorMixin(AcquireMixin):
         return self._summarize_accumulated_std(rounds_buf, stderr_buf)
 
     def _summarize_accumulated_std(
-        self, rounds_buf: List[List[np.ndarray]], std_buf: List[List[np.ndarray]]
-    ) -> List[np.ndarray]:
+        self, rounds_buf: List[List[NDArray]], std_buf: List[List[NDArray]]
+    ) -> List[NDArray]:
         return [
             np.sqrt(
                 np.mean(
@@ -38,7 +52,7 @@ class StdErrorMixin(AcquireMixin):
             for i in range(len(self.ro_chs))  # type: ignore
         ]
 
-    def acquire(self, *args, record_stderr: bool = False, **kwargs) -> List[np.ndarray]:
+    def acquire(self, *args, record_stderr: bool = False, **kwargs) -> List[NDArray]:
         if record_stderr:
             self.stderr_buf = []
         extra_args = kwargs.pop("extra_args", dict())
@@ -46,8 +60,8 @@ class StdErrorMixin(AcquireMixin):
         return super().acquire(*args, extra_args=extra_args, **kwargs)  # type: ignore
 
     def _stderr_buf(
-        self, d_reps: List[np.ndarray], length_norm: bool = True
-    ) -> List[np.ndarray]:
+        self, d_reps: List[NDArray], length_norm: bool = True
+    ) -> List[NDArray]:
         std_d = []
         for i_ch, (_, ro) in enumerate(self.ro_chs.items()):  # type: ignore
             # std over the avg_level
@@ -59,7 +73,7 @@ class StdErrorMixin(AcquireMixin):
 
         return std_d
 
-    def _process_accumulated_for_stderr(self, acc_buf) -> List[np.ndarray]:
+    def _process_accumulated_for_stderr(self, acc_buf) -> List[NDArray]:
         assert self.acquire_params is not None
 
         if self.acquire_params["threshold"] is None:
@@ -98,22 +112,27 @@ class StdErrorMixin(AcquireMixin):
         return not_finish
 
 
+BaseCallbackType: TypeAlias = Callable[[int, List[NDArray]], None]
+StdCallbackType: TypeAlias = Callable[[int, Tuple[List[NDArray], List[NDArray]]], None]
+CallbackType: TypeAlias = Union[BaseCallbackType, StdCallbackType]
+
+
 class CallbackMixin(StdErrorMixin):
     """
     Add callback functionality to the AcquireMixin class
     """
 
     def acquire(
-        self, *args, callback: Optional[Callable[..., None]] = None, **kwargs
-    ) -> List[np.ndarray]:
+        self, *args, callback: Optional[CallbackType] = None, **kwargs
+    ) -> List[NDArray]:
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(callback=callback)
 
         return super().acquire(*args, extra_args=extra_args, **kwargs)
 
     def acquire_decimated(
-        self, *args, callback: Optional[Callable[..., None]] = None, **kwargs
-    ) -> List[np.ndarray]:
+        self, *args, callback: Optional[CallbackType] = None, **kwargs
+    ) -> List[NDArray]:
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(callback=callback)
 
@@ -124,7 +143,7 @@ class CallbackMixin(StdErrorMixin):
 
         # trigger the callback function after each round
         assert self.acquire_params is not None
-        callback = self.acquire_params["callback"]
+        callback: Optional[CallbackType] = self.acquire_params["callback"]
         if callback is not None:
             assert callable(callback), "callback must be a callable function"
             assert self.rounds_buf is not None
@@ -133,11 +152,19 @@ class CallbackMixin(StdErrorMixin):
             if self.acquire_params["type"] == "accumulated":
                 avg_d = self._summarize_accumulated(self.rounds_buf)
                 if self.acquire_params.get("record_stderr", False):
+                    callback = cast(StdCallbackType, callback)
+
                     std_d = self.get_stderr()
+                    assert std_d is not None
+
                     callback(round_n, (avg_d, std_d))
                 else:
+                    callback = cast(BaseCallbackType, callback)
+
                     callback(round_n, avg_d)
             elif self.acquire_params["type"] == "decimated":
+                callback = cast(BaseCallbackType, callback)
+
                 dec_d = self._summarize_decimated(self.rounds_buf)
                 callback(round_n, dec_d)
             else:
@@ -148,12 +175,12 @@ class CallbackMixin(StdErrorMixin):
         return not_finish
 
 
-class EarlyStopMixin(AcquireMixin):
+class EarlyStopMixin(TypedAcquireMixin):
     """
     Add early stopping functionality to the AcquireMixin class
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.early_stop = False
 
@@ -163,11 +190,11 @@ class EarlyStopMixin(AcquireMixin):
             print("Program received early stop signal")
         self.early_stop = True
 
-    def acquire(self, *args, **kwargs) -> List[np.ndarray]:
+    def acquire(self, *args, **kwargs) -> List[NDArray]:
         self.early_stop = False
         return super().acquire(*args, **kwargs)  # type: ignore
 
-    def acquire_decimated(self, *args, **kwargs) -> List[np.ndarray]:
+    def acquire_decimated(self, *args, **kwargs) -> List[NDArray]:
         self.early_stop = False
         return super().acquire_decimated(*args, **kwargs)  # type: ignore
 

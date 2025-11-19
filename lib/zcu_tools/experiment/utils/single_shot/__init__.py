@@ -11,7 +11,7 @@ from .ge import fidelity_func, singleshot_ge_analysis, singleshot_visualize
 def fit_singleshot2d(
     signals: np.ndarray,
     num_gauss: int = 3,
-    method: Literal["standard", "bayesian"] = "baayesian",
+    method: Literal["standard", "bayesian"] = "bayesian",
 ) -> np.ndarray:
     """
     使用二維高斯混合模型擬合單次測量數據並視覺化結果。
