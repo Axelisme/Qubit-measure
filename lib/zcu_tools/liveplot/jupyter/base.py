@@ -25,8 +25,8 @@ def instant_plot(fig: plt.Figure, figsize) -> None:
     canvas.toolbar_visible = False
     canvas.header_visible = False
     canvas.footer_visible = False
-    canvas.layout.width = f"{int(figsize[0] * 75)}px"
-    canvas.layout.height = f"{int(figsize[1] * 75)}px"
+    canvas.layout.width = f"{int(figsize[0] * 100)}px"
+    canvas.layout.height = f"{int(figsize[1] * 100)}px"
 
     canvas._handle_message(canvas, {"type": "send_image_mode"}, [])
     canvas._handle_message(canvas, {"type": "refresh"}, [])

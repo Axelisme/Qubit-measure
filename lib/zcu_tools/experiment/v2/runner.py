@@ -1,41 +1,70 @@
+from __future__ import annotations
+
 import time
-import warnings
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    Optional,
+    Tuple,
+    TypedDict,
+    TypeVar,
+    Union,
+)
 
 import numpy as np
 from numpy import ndarray
 from tqdm.auto import tqdm
 
-from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import min_interval
 
 ResultType = Union[Dict[Any, "ResultType"], List["ResultType"], ndarray]
+T_ResultType = TypeVar("T_ResultType")
+
+
+class TaskConfig(TypedDict):
+    dev: Dict[str, DeviceInfo]
 
 
 @dataclass
 class TaskContext:
-    cfg: Dict[str, Any]
+    cfg: TaskConfig
     data: ResultType
-    update_hook: Optional[Callable[["TaskContext"], None]] = None
-    addr_stack: List[Union[int, Any]] = field(default_factory=list)
+    update_hook: Optional[Callable[[TaskContext], None]] = None
+    env_dict: Dict[str, Any] = field(default_factory=dict)
 
-    def __call__(self, addr: Union[int, Any]) -> "TaskContext":
+    addr_stack: List[Union[int, str]] = field(default_factory=list)
+
+    def __call__(
+        self, addr: Union[int, str], new_cfg: Optional[TaskConfig] = None
+    ) -> TaskContext:
+        new_cfg = self.cfg if new_cfg is None else new_cfg
+
         return TaskContext(
-            deepcopy(self.cfg),
+            deepcopy(new_cfg),
             self.data,
             self.update_hook,
+            self.env_dict,
             self.addr_stack + [addr],
         )
 
     def is_empty_stack(self) -> bool:
         return len(self.addr_stack) == 0
 
+    def current_task(self) -> Any:
+        if self.is_empty_stack():
+            return None
+        return self.addr_stack[-1]
+
     def set_data(
-        self, value: ResultType, addr_stack: List[Union[int, Any]] = []
+        self, value: ResultType, addr_stack: List[Union[int, str]] = []
     ) -> None:
         target = self.get_data(addr_stack)
 
@@ -55,8 +84,10 @@ class TaskContext:
         if self.update_hook is not None:
             self.update_hook(self)
 
-    def set_current_data(self, value: ResultType) -> None:
-        self.set_data(value, self.addr_stack)
+    def set_current_data(
+        self, value: ResultType, append_addr: List[Union[int, str]] = []
+    ) -> None:
+        self.set_data(value, self.addr_stack + append_addr)
 
     def get_data(self, addr_stack: List[Union[int, str]] = []) -> ResultType:
         target = self.data
@@ -70,13 +101,13 @@ class TaskContext:
 
         return target
 
-    def get_current_data(self) -> ResultType:
-        return self.get_data(self.addr_stack)
+    def get_current_data(self, append_addr: List[Union[int, str]] = []) -> ResultType:
+        return self.get_data(self.addr_stack + append_addr)
 
 
-class AbsTask(ABC):
-    def init(self, ctx: TaskContext, keep: bool = True) -> None:
-        """Initialize the task with the current context. Do not modify the context."""
+class AbsTask(ABC, Generic[T_ResultType]):
+    def init(self, ctx: TaskContext, dynamic_pbar: bool = False) -> None:
+        """Initialize the task with the current context. If dynamic_pbar is True, the pbar will only show up in the run() method."""
         pass
 
     @abstractmethod
@@ -84,72 +115,100 @@ class AbsTask(ABC):
         """Run the task with the current context."""
         pass
 
-    def cleanup(self) -> None:
-        pass
+    def cleanup(self) -> None: ...
 
     @abstractmethod
-    def get_default_result(self) -> ResultType:
-        pass
+    def get_default_result(self) -> T_ResultType: ...
 
 
-class BatchTask(AbsTask):
-    def __init__(self, tasks: Dict[Any, AbsTask]) -> None:
+T_BatchKeyType = TypeVar("T_BatchKeyType")
+
+
+class BatchTask(AbsTask[Dict[T_BatchKeyType, ResultType]]):
+    def __init__(self, tasks: Dict[T_BatchKeyType, AbsTask[ResultType]]) -> None:
         self.tasks = tasks
 
-        self.task_pbar = None
+    def make_pbar(self, leave: bool) -> tqdm:
+        return tqdm(total=len(self.tasks), smoothing=0, leave=leave)
 
-    def init(self, ctx: TaskContext, keep=True) -> None:
-        self.task_pbar = tqdm(total=len(self.tasks), smoothing=0, leave=keep)
+    def init(self, ctx: TaskContext, dynamic_pbar=False) -> None:
+        self.dynamic_pbar = dynamic_pbar
+        if dynamic_pbar:
+            self.task_pbar = None
+        else:
+            self.task_pbar = self.make_pbar(leave=True)
+
+        for task in self.tasks.values():
+            task.init(ctx, dynamic_pbar=True)  # force dynamic pbar for each task
 
     def run(self, ctx: TaskContext) -> None:
-        assert self.task_pbar is not None
-        self.task_pbar.reset()
+        if self.dynamic_pbar:
+            self.task_pbar = self.make_pbar(leave=False)
+        else:
+            assert self.task_pbar is not None
+            self.task_pbar.reset()
 
         for name, task in self.tasks.items():
             self.task_pbar.set_description(desc=f"Task [{str(name)}]")
 
-            task.init(ctx, keep=False)
             task.run(ctx(addr=name))
-            task.cleanup()
 
             self.task_pbar.update()
 
-    def cleanup(self) -> None:
-        assert self.task_pbar is not None
-        self.task_pbar.close()
-        self.task_pbar = None
+        if self.dynamic_pbar:
+            self.task_pbar.close()
+            self.task_pbar = None
 
-    def get_default_result(self) -> ResultType:
+    def cleanup(self) -> None:
+        for task in self.tasks.values():
+            task.cleanup()
+
+        if not self.dynamic_pbar:
+            assert self.task_pbar is not None
+            self.task_pbar.close()
+            self.task_pbar = None
+
+    def get_default_result(self) -> Dict[T_BatchKeyType, ResultType]:
         return {name: task.get_default_result() for name, task in self.tasks.items()}
 
 
-class SoftTask(AbsTask):
+class SoftTask(AbsTask[List[T_ResultType]]):
     def __init__(
         self,
         sweep_name: str,
         sweep_values: ndarray,
         update_cfg_fn: Callable[[int, TaskContext, float], None],
-        sub_task: AbsTask,
+        sub_task: AbsTask[T_ResultType],
     ) -> None:
         self.sweep_values = sweep_values
         self.sweep_name = sweep_name
         self.update_cfg_fn = update_cfg_fn
         self.sub_task = sub_task
 
-        self.sweep_pbar = None
-
-    def init(self, ctx: TaskContext, keep=True) -> None:
-        self.sweep_pbar = tqdm(
-            total=len(self.sweep_values),  # type: ignore
+    def make_pbar(self, leave: bool) -> tqdm:
+        return tqdm(
+            total=len(self.sweep_values),
             smoothing=0,
             desc=self.sweep_name,
-            leave=keep,
+            leave=leave,
         )
-        self.sub_task.init(ctx, keep=keep)
+
+    def init(self, ctx: TaskContext, dynamic_pbar=False) -> None:
+        self.dynamic_pbar = dynamic_pbar
+        if dynamic_pbar:
+            self.sweep_pbar = None  # initialize in run()
+        else:
+            self.sweep_pbar = self.make_pbar(leave=True)
+
+        self.update_cfg_fn(0, ctx, self.sweep_values[0])  # initialize the first value
+        self.sub_task.init(ctx, dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx: TaskContext) -> None:
-        assert self.sweep_pbar is not None
-        self.sweep_pbar.reset()
+        if self.dynamic_pbar:
+            self.sweep_pbar = self.make_pbar(leave=False)
+        else:
+            assert self.sweep_pbar is not None
+            self.sweep_pbar.reset()
 
         for i, v in enumerate(self.sweep_values):  # type: ignore
             self.update_cfg_fn(i, ctx, v)
@@ -158,77 +217,104 @@ class SoftTask(AbsTask):
 
             self.sweep_pbar.update()
 
+        if self.dynamic_pbar:
+            self.sweep_pbar.close()
+            self.sweep_pbar = None
+
     def cleanup(self) -> None:
         self.sub_task.cleanup()
-        assert self.sweep_pbar is not None
-        self.sweep_pbar.close()
-        self.sweep_pbar = None
 
-    def get_default_result(self) -> ResultType:
+        if not self.dynamic_pbar:
+            assert self.sweep_pbar is not None
+            self.sweep_pbar.close()
+            self.sweep_pbar = None
+
+    def get_default_result(self) -> List[T_ResultType]:
         return [
             self.sub_task.get_default_result()
             for _ in range(len(self.sweep_values))  # type: ignore
         ]
 
 
-def default_raw2signal_fn(raw: Any) -> np.ndarray:
+def default_raw2signal_fn(raw: List[ndarray]) -> ndarray:
     return raw[0][0].dot([1, 1j])
 
 
-class HardTask(AbsTask):
+T_RawType = TypeVar("T_RawType")
+
+
+class HardTask(AbsTask[ndarray], Generic[T_RawType]):
     def __init__(
         self,
-        measure_fn: Callable[[TaskContext, Callable[[int, Any], None]], Any],
-        raw2signal_fn: Callable[[Any], ndarray] = default_raw2signal_fn,
+        measure_fn: Callable[
+            [TaskContext, Callable[[int, T_RawType], None]], T_RawType
+        ],
+        raw2signal_fn: Callable[[T_RawType], ndarray] = default_raw2signal_fn,
         result_shape: Tuple[int, ...] = (),
     ) -> None:
         self.measure_fn = measure_fn
         self.raw2signal_fn = raw2signal_fn
         self.result_shape = result_shape
 
-        self.avg_pbar = None
+    def make_pbar(self, ctx: TaskContext, leave: bool) -> tqdm:
+        total = ctx.cfg.get("rounds")
+        return tqdm(
+            total=total,
+            smoothing=0,
+            desc="rounds",
+            leave=leave,
+            disable=total == 1,
+        )
 
-    def init(self, ctx: TaskContext, keep=True) -> None:
-        if ctx.cfg["rounds"] > 1:
-            self.avg_pbar = tqdm(
-                total=ctx.cfg["rounds"], smoothing=0, desc="rounds", leave=keep
-            )
+    def init(self, ctx: TaskContext, dynamic_pbar=False) -> None:
+        self.dynamic_pbar = dynamic_pbar
+        if dynamic_pbar:
+            self.avg_pbar = None  # initialize in run()
+        else:
+            self.avg_pbar = self.make_pbar(ctx, leave=True)
 
     def run(self, ctx: TaskContext) -> None:
-        if self.avg_pbar is not None:
+        if self.dynamic_pbar:
+            self.avg_pbar = self.make_pbar(ctx, leave=False)
+        else:
+            assert self.avg_pbar is not None
             self.avg_pbar.reset()
 
         GlobalDeviceManager.setup_devices(ctx.cfg["dev"], progress=False)
 
         def update_hook(ir: int, raw: Any) -> None:
-            if self.avg_pbar is not None:
-                self.avg_pbar.update(ir - self.avg_pbar.n)
+            self.avg_pbar.update(ir - self.avg_pbar.n)
 
             ctx.set_current_data(self.raw2signal_fn(raw))
 
         signal = self.raw2signal_fn(self.measure_fn(ctx, update_hook))
 
-        if self.avg_pbar is not None:
-            self.avg_pbar.update(ctx.cfg["rounds"] - self.avg_pbar.n)
+        self.avg_pbar.update(ctx.cfg["rounds"] - self.avg_pbar.n)
 
         ctx.set_current_data(signal)
 
-    def cleanup(self) -> None:
-        if self.avg_pbar is not None:
+        if self.dynamic_pbar:
+            assert self.avg_pbar is not None
             self.avg_pbar.close()
-        self.avg_pbar = None
+            self.avg_pbar = None
 
-    def get_default_result(self) -> ResultType:
+    def cleanup(self) -> None:
+        if not self.dynamic_pbar:
+            assert self.avg_pbar is not None
+            self.avg_pbar.close()
+            self.avg_pbar = None
+
+    def get_default_result(self) -> ndarray:
         return np.full(self.result_shape, np.nan, dtype=complex)
 
 
-class RepeatOverTime(AbsTask):
+class RepeatOverTime(AbsTask[List[T_ResultType]]):
     def __init__(
         self,
         name: str,
         num_times: int,
         interval: float,
-        task: AbsTask,
+        task: AbsTask[T_ResultType],
         fail_retry: int = 0,
     ) -> None:
         self.name = name
@@ -237,15 +323,24 @@ class RepeatOverTime(AbsTask):
         self.task = task
         self.fail_retry = fail_retry
 
-        self.pbar = None
+    def make_pbar(self, leave: bool) -> tqdm:
+        return tqdm(total=self.num_times, smoothing=0, desc=self.name, leave=leave)
 
-    def init(self, ctx: TaskContext, keep=True) -> None:
-        self.pbar = tqdm(total=self.num_times, smoothing=0, desc=self.name, leave=keep)
-        self.task.init(ctx, keep=keep)
+    def init(self, ctx: TaskContext, dynamic_pbar=False) -> None:
+        self.dynamic_pbar = dynamic_pbar
+        if dynamic_pbar:
+            self.time_pbar = None  # initialize in run()
+        else:
+            self.time_pbar = self.make_pbar(leave=True)
+
+        self.task.init(ctx, dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx: TaskContext) -> None:
-        assert self.pbar is not None
-        self.pbar.reset()
+        if self.dynamic_pbar:
+            self.time_pbar = self.make_pbar(leave=False)
+        else:
+            assert self.time_pbar is not None
+            self.time_pbar.reset()
 
         start_t = time.time() - 2 * self.interval
 
@@ -266,39 +361,48 @@ class RepeatOverTime(AbsTask):
             else:
                 self.task.run(ctx(addr=i))
 
-            self.pbar.update()
+            self.time_pbar.update()
+
+        if self.dynamic_pbar:
+            assert self.time_pbar is not None
+            self.time_pbar.close()
+            self.time_pbar = None
 
     def cleanup(self) -> None:
         self.task.cleanup()
-        assert self.pbar is not None
-        self.pbar.close()
-        self.pbar = None
 
-    def get_default_result(self) -> ResultType:
+        if not self.dynamic_pbar:
+            assert self.time_pbar is not None
+            self.time_pbar.close()
+            self.time_pbar = None
+
+    def get_default_result(self) -> List[T_ResultType]:
         return [self.task.get_default_result() for _ in range(self.num_times)]
 
 
-class Runner:
+class Runner(Generic[T_ResultType]):
     def __init__(
         self,
-        task: AbsTask,
+        task: AbsTask[T_ResultType],
         update_hook: Optional[Callable[[TaskContext], None]] = None,
-        update_interval: float = 1.0,
+        update_interval: Optional[float] = 0.1,
     ) -> None:
         self.task = task
         self.update_hook = min_interval(update_hook, update_interval)
 
-    def run(self, init_cfg: Dict[str, Any]) -> ResultType:
+    def run(
+        self, init_cfg: TaskConfig, env_dict: Dict[str, Any] = dict()
+    ) -> T_ResultType:
         cfg = deepcopy(init_cfg)
         init_result = self.task.get_default_result()
 
         # initialize devices with progress bar
         GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
-        ctx = TaskContext(cfg, init_result, self.update_hook)
+        ctx = TaskContext(cfg, init_result, self.update_hook, env_dict)
 
         try:
-            self.task.init(ctx)
+            self.task.init(ctx, dynamic_pbar=False)
             self.task.run(ctx)
             self.task.cleanup()
         except KeyboardInterrupt:
@@ -307,7 +411,4 @@ class Runner:
             print("Error during measurement:")
             print_traceback()
 
-        if not ctx.is_empty_stack():
-            warnings.warn("TaskContext is not empty, some data may be corrupted")
-
-        return ctx.get_data()  # force return all data
+        return ctx.get_data()  # return all data

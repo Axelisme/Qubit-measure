@@ -12,7 +12,6 @@ from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
-    Delay,
     ModularProgramV2,
     Pulse,
     PulseCfg,
@@ -24,60 +23,59 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_decay_fringe
+from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
 from .executor import MeasurementTask
 
 
-def t2ramsey_signal2real(signals: np.ndarray) -> np.ndarray:
+def lenrabi_signal2real(signals: np.ndarray) -> np.ndarray:
     return rotate2real(signals).real
 
 
-def t2ramsey_fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
-    return np.array(list(map(t2ramsey_signal2real, signals)), dtype=np.float64)
+def lenrabi_fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
+    return np.array(list(map(lenrabi_signal2real, signals)), dtype=np.float64)
 
 
-class T2RamseyCfg(TypedDict, total=False):
+class LenRabiCfg(TypedDict, total=False):
     reset: NotRequired[ResetCfg]
-    pi2_pulse: PulseCfg
+    rabi_pulse: PulseCfg
     readout: ReadoutCfg
     relax_delay: float
     reps: int
     rounds: int
 
 
-class T2RamseyResult(TypedDict):
+class LenRabiResult(TypedDict):
     raw_signals: np.ndarray
-    t2r: float
-    t2r_err: float
-    t2r_detune: float
-    t2r_detune_err: float
+    pi_length: float
+    pi2_length: float
+    rabi_freq: float
     success: bool
 
 
 class PlotterDictType(TypedDict):
-    t2r: LivePlotter1D
-    t2r_curve: LivePlotter2DwithLine
+    pi_length: LivePlotter1D
+    rabi_curve: LivePlotter2DwithLine
 
 
-class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
+class LenRabiMeasurementTask(MeasurementTask[LenRabiResult, PlotterDictType]):
     def __init__(
         self,
         length_sweep: dict,
-        activate_detune: float,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], T2RamseyCfg],
+        ref_pi_product: float,
+        cfg_maker: Callable[[TaskContext, ModuleLibrary], LenRabiCfg],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.length_sweep = length_sweep
-        self.activate_detune = activate_detune
+        self.ref_pi_product = ref_pi_product
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_t2ramsey_fn(ctx: TaskContext, update_hook: Callable):
+        def measure_lenrabi_fn(ctx: TaskContext, update_hook: Callable):
             import time
 
-            from zcu_tools.utils.fitting.base import decaycos
+            from zcu_tools.utils.fitting.base import cosfunc
 
             lengths = sweep2array(self.length_sweep)
             for i in range(ctx.cfg["rounds"]):
@@ -85,14 +83,14 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
                     [
                         np.stack(
                             [
-                                decaycos(
+                                cosfunc(
                                     lengths,
                                     0,
                                     1,
-                                    self.activate_detune
-                                    + 0.1 * ctx.env_dict["flx_value"],
+                                    0.5
+                                    * (ctx.env_dict["flx_value"] ** 2 + 3.0)
+                                    * ctx.cfg["rabi_pulse"]["gain"],
                                     0,
-                                    2 * (ctx.env_dict["flx_value"] ** 2 + 1.0),
                                 )
                                 + 0.01
                                 * (ctx.cfg["rounds"] - i)
@@ -109,25 +107,20 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
             return raw_signals
 
         self.task = HardTask(
-            measure_fn=measure_t2ramsey_fn,
+            measure_fn=measure_lenrabi_fn,
             # measure_fn=lambda ctx, update_hook: (
-            #     t2r_params := sweep2param("length", ctx.cfg["sweep"]["length"])
-            # )
-            # and (
             #     prog := ModularProgramV2(
             #         ctx.env_dict["soccfg"],
             #         ctx.cfg,
             #         modules=[
             #             Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-            #             Pulse(name="pi2_pulse1", cfg=ctx.cfg["pi2_pulse"]),
-            #             Delay(name="t2r_delay", delay=t2r_params),
             #             Pulse(
-            #                 name="pi2_pulse2",
-            #                 cfg={
-            #                     **ctx.cfg["pi2_pulse"],
-            #                     "phase": ctx.cfg["pi2_pulse"]["phase"]
-            #                     + 360 * self.activate_detune * t2r_params,
-            #                 },
+            #                 "rabi_pulse",
+            #                 Pulse.set_param(
+            #                     ctx.cfg["rabi_pulse"],
+            #                     "length",
+            #                     sweep2param("length", self.length_sweep),
+            #                 ),
             #             ),
             #             Readout("readout", ctx.cfg["readout"]),
             #         ],
@@ -139,41 +132,36 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
             #         prog,
             #         update_hook,
             #         self.earlystop_snr,
-            #         signal2real_fn=t2ramsey_signal2real,
+            #         signal2real_fn=lenrabi_signal2real,
             #     ),
             # ),
             result_shape=(self.length_sweep["expts"],),
         )
 
     def num_axes(self) -> Dict[str, int]:
-        return dict(t2r=1, t2r_curve=2)
+        return dict(rabi_curve=2)
 
     def make_plotter(self, name, axs) -> PlotterDictType:
+        self.pi_line = axs["rabi_curve"][1].axvline(np.nan, color="red", linestyle="--")
         return PlotterDictType(
-            t2r=LivePlotter1D(
-                "Flux device value",
-                "T2 Ramsey (us)",
-                existed_axes=[axs["t2r"]],
-                segment_kwargs=dict(title=name + "(t2r)"),
-            ),
-            t2r_curve=LivePlotter2DwithLine(
+            rabi_curve=LivePlotter2DwithLine(
                 "Flux device value",
                 "Signal",
                 line_axis=1,
                 num_lines=5,
-                title=name + "(t2r_curve)",
-                existed_axes=[axs["t2r_curve"]],
+                title=name + "(rabi_curve)",
+                existed_axes=[axs["rabi_curve"]],
             ),
         )
 
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
 
-        plotters["t2r"].update(flx_values, signals["t2r"], refresh=False)
-        plotters["t2r_curve"].update(
+        self.pi_line.set_xdata(ctx.env_dict["pi_length"])
+        plotters["rabi_curve"].update(
             flx_values,
             sweep2array(self.length_sweep),
-            t2ramsey_fluxdep_signal2real(signals["raw_signals"]),
+            lenrabi_fluxdep_signal2real(signals["raw_signals"]),
             refresh=False,
         )
 
@@ -199,13 +187,17 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
             tag=prefix_tag + "/signals",
         )
 
-        # t2r
+        # pi length
         save_data(
-            filepath=filepath.with_name(filepath.name + "_t2r"),
+            filepath=filepath.with_name(filepath.name + "_pi_length"),
             x_info=x_info,
-            z_info={"name": "T2 Ramsey", "unit": "s", "values": result["t2r"] * 1e-6},
+            z_info={
+                "name": "Pi length",
+                "unit": "s",
+                "values": result["pi_length"] * 1e-6,
+            },
             comment=comment,
-            tag=prefix_tag + "/t2r",
+            tag=prefix_tag + "/pi_length",
         )
 
         # success
@@ -220,7 +212,9 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.task.init(ctx, dynamic_pbar=dynamic_pbar)
 
-        ctx.env_dict["t2r"] = np.nan
+        ctx.env_dict["pi_length"] = np.nan
+        ctx.env_dict["pi2_length"] = np.nan
+        ctx.env_dict["gain_factor"] = 1.0
 
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
@@ -235,22 +229,22 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
         )
         cfg = ml.make_cfg(cfg)
 
+        cur_gain = cfg["rabi_pulse"]["gain"]
+
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
-        real_signals = t2ramsey_signal2real(raw_signals)
+        real_signals = lenrabi_signal2real(raw_signals)
 
-        t2r, t2r_err, t2r_detune, t2r_detune_err, fit_signals, _ = fit_decay_fringe(
-            sweep2array(self.length_sweep), real_signals
+        pi_len, pi2_len, rabi_freq, fit_signals, _ = fit_rabi(
+            sweep2array(self.length_sweep), real_signals, decay=True
         )
-        t2r_detune = t2r_detune - self.activate_detune
 
-        result = T2RamseyResult(
+        result = LenRabiResult(
             raw_signals=raw_signals,
-            t2r=t2r,
-            t2r_err=t2r_err,
-            t2r_detune=t2r_detune,
-            t2r_detune_err=t2r_detune_err,
+            pi_length=pi_len,
+            pi2_length=pi2_len,
+            rabi_freq=rabi_freq,
             success=True,
         )
 
@@ -258,18 +252,22 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
             result["success"] = False
 
         if result["success"]:
-            ctx.env_dict["t2r"] = t2r
-            ctx.env_dict["t2r_detune"] = t2r_detune
+            new_gain_factor = cur_gain * pi_len / self.ref_pi_product
+
+            ctx.env_dict["pi_length"] = pi_len
+            ctx.env_dict["pi2_length"] = pi2_len
+            ctx.env_dict["gain_factor"] = (
+                ctx.env_dict["gain_factor"] * new_gain_factor
+            ) ** 0.5
 
         ctx.set_current_data(result)
 
-    def get_default_result(self) -> T2RamseyResult:
-        return T2RamseyResult(
+    def get_default_result(self) -> LenRabiResult:
+        return LenRabiResult(
             raw_signals=self.task.get_default_result(),
-            t2r=np.array(np.nan),
-            t2r_err=np.array(np.nan),
-            t2r_detune=np.array(np.nan),
-            t2r_detune_err=np.array(np.nan),
+            pi_length=np.array(np.nan),
+            pi2_length=np.array(np.nan),
+            rabi_freq=np.array(np.nan),
             success=np.array(False),
         )
 

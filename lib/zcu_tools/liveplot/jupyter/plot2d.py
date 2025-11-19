@@ -78,8 +78,7 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
 
         xlabel1d = xlabel if line_axis == 0 else ylabel
         line_kwargs = [
-            dict(linestyle="-", markersize=5, alpha=0.3, color="red")
-            for _ in range(num_lines)
+            dict(marker="None", alpha=0.3, color="red") for _ in range(num_lines)
         ]
         line_kwargs[-1].update(label="current line", marker=".", alpha=1.0, color="C0")
 

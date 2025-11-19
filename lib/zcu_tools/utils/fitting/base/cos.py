@@ -53,21 +53,21 @@ def fitcos(xdata, ydata, fitparams=None, fixedparams=None):
 
 # damped sinusoidal function
 def decaycos(x, *p):
-    """p = [y0, yscale, freq, phase, decay]"""
-    y0, yscale, freq, phase, decay = p
+    """p = [y0, yscale, freq, phase, decay_time]"""
+    y0, yscale, freq, phase, decay_time = p
     return y0 + yscale * np.cos(2 * np.pi * (freq * x + phase / 360)) * np.exp(
-        -x / decay
+        -x / decay_time
     )
 
 
 def fitdecaycos(xdata, ydata, fitparams=None, fixedparams=None):
-    """fitparams = [y0, yscale, freq, phase, decay]"""
+    """return (y0, yscale, freq, phase, decay_time), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 5
 
     if fixedparams is not None and len(fixedparams) != 5:
         raise ValueError(
-            "Fixed parameters must be a list of five elements: [y0, yscale, freq, phase, decay]"
+            "Fixed parameters must be a list of five elements: [y0, yscale, freq, phase, decay_time]"
         )
 
     # guess initial parameters
@@ -82,14 +82,14 @@ def fitdecaycos(xdata, ydata, fitparams=None, fixedparams=None):
         max_id = np.argmax(np.abs(fft))
         freq = fft_freqs[max_id]
         phase = np.angle(fft[max_id], deg=True) % 360
-        decay = xdata[-1] - xdata[0]
+        decay_time = xdata[-1] - xdata[0]
 
-        assign_init_p(fitparams, [y0, yscale, freq, phase, decay])
+        assign_init_p(fitparams, [y0, yscale, freq, phase, decay_time])
 
     # bounds
     yscale = fitparams[1]
     freq = fitparams[2]
-    decay = fitparams[4]
+    decay_time = fitparams[4]
     bounds = (
         [-np.inf, -1.1 * np.abs(yscale), 0.2 * freq, -360, 0],
         [np.inf, 1.1 * np.abs(yscale), 5 * freq, 360, np.inf],

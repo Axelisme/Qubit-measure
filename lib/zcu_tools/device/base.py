@@ -1,18 +1,20 @@
+from __future__ import annotations
+
 import sys
 from abc import ABC, abstractmethod
-from typing import Any, Dict, TypedDict
+from typing import TYPE_CHECKING, Any, Dict, TypedDict
 
-try:
+from typing_extensions import NotRequired
+
+if TYPE_CHECKING:
     from pyvisa import ResourceManager
-except ImportError:
-    # sometimes pyvisa is not installed, e.g. in pure analysis use cases
-    # we just define a dummy ResourceManager type
-    ResourceManager = object
 
 
 class DeviceInfo(TypedDict):
     type: str
     address: str
+
+    label: NotRequired[str]
 
 
 class BaseDevice(ABC):

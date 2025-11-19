@@ -1,9 +1,9 @@
 from typing import Optional
 
 import matplotlib.pyplot as plt
-from matplotlib.image import NonUniformImage, AxesImage
-from matplotlib.ticker import ScalarFormatter
 import numpy as np
+from matplotlib.image import AxesImage, NonUniformImage
+from matplotlib.ticker import ScalarFormatter
 
 from .base import AbsSegment
 
@@ -55,10 +55,10 @@ class Plot2DSegment(AbsSegment):
         dy = 0.5 * (ys[-1] - ys[0]) / (len(ys) - 1)
         if self.flip:
             self.im.set_extent([ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx])
-            self.im.set_data(signals)
+            self.im.set_data(signals.astype(np.float64))
         else:
             self.im.set_extent([xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy])
-            self.im.set_data(signals.T)
+            self.im.set_data(signals.T.astype(np.float64))
 
         self.im.autoscale()
 

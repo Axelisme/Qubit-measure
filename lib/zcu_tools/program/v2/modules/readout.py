@@ -73,7 +73,7 @@ class AbsReadout(Module):
         readout_cfg: ReadoutCfg,
         param_name: str,
         param_value: Union[float, QickParam],
-    ) -> None:
+    ) -> ReadoutCfg:
         raise NotImplementedError(
             f"{cls.__name__} does not support set {param_name} params with {param_value}"
         )
@@ -114,9 +114,10 @@ class Readout(AbsReadout):
         readout_cfg: ReadoutCfg,
         param_name: str,
         param_value: Union[float, QickParam],
-    ) -> None:
-        readout_cls = cls.get_readout_cls(readout_cfg)
-        readout_cls.set_param(readout_cfg, param_name, param_value)
+    ) -> ReadoutCfg:
+        return cls.get_readout_cls(readout_cfg).set_param(
+            readout_cfg, param_name, param_value
+        )
 
     def __init__(self, name: str, cfg: ReadoutCfg) -> None:
         self.name = name
@@ -165,7 +166,7 @@ class BaseReadout(AbsReadout):
         readout_cfg: BaseReadoutCfg,
         param_name: str,
         param_value: Union[float, QickParam],
-    ) -> None:
+    ) -> BaseReadoutCfg:
         if param_name == "gain":
             readout_cfg["pulse_cfg"]["gain"] = param_value
         elif param_name == "freq":
@@ -177,6 +178,8 @@ class BaseReadout(AbsReadout):
             readout_cfg["ro_cfg"]["ro_length"] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
+
+        return readout_cfg
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse.init(prog)

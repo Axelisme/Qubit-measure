@@ -7,8 +7,9 @@ from .base import assign_init_p, fit_func
 
 # exponential decay function
 def expfunc(x: np.ndarray, *p: float) -> np.ndarray:
-    y0, yscale, decay = p
-    return y0 + yscale * np.exp(-x / decay)
+    """p = [y0, yscale, decay_time]"""
+    y0, yscale, decay_time = p
+    return y0 + yscale * np.exp(-x / decay_time)
 
 
 def fitexp(
@@ -16,7 +17,7 @@ def fitexp(
     ydata: np.ndarray,
     fitparams: Optional[Tuple[float, float, float]] = None,
 ) -> Tuple[Tuple[float, float, float], np.ndarray]:
-    """return (y0, yscale, decay), (pOpt, pCov)"""
+    """return (y0, yscale, decay_time), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 3
 
@@ -26,9 +27,9 @@ def fitexp(
         yscale = ydata[0] - y0
         x_2 = xdata[np.argmin(np.abs(ydata - (y0 + yscale / 2)))]
         x_4 = xdata[np.argmin(np.abs(ydata - (y0 + yscale / 4)))]
-        decay = (x_2 / np.log(2) + x_4 / np.log(4)) / 2
+        decay_time = (x_2 / np.log(2) + x_4 / np.log(4)) / 2
 
-        assign_init_p(fitparams, [y0, yscale, decay])
+        assign_init_p(fitparams, [y0, yscale, decay_time])
 
     # bounds
     bounds = (
@@ -40,8 +41,9 @@ def fitexp(
 
 
 def dual_expfunc(x: np.ndarray, *p: float) -> np.ndarray:
-    y0, yscale1, decay1, yscale2, decay2 = p
-    return y0 + yscale1 * np.exp(-x / decay1) + yscale2 * np.exp(-x / decay2)
+    """p = [y0, yscale1, decay_time1, yscale2, decay_time2]"""
+    y0, yscale1, decay_time1, yscale2, decay_time2 = p
+    return y0 + yscale1 * np.exp(-x / decay_time1) + yscale2 * np.exp(-x / decay_time2)
 
 
 def fit_dualexp(
@@ -49,6 +51,7 @@ def fit_dualexp(
     ydata: np.ndarray,
     fitparams: Optional[Tuple[float, float, float, float, float]] = None,
 ) -> Tuple[Tuple[float, float, float, float, float], np.ndarray]:
+    """return (y0, yscale1, decay_time1, yscale2, decay_time2), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 5
 

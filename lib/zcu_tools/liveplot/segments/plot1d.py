@@ -73,7 +73,7 @@ class Plot1DSegment(AbsSegment):
             signals = signals.reshape(-1, signals.shape[-1])
 
         for i, line in enumerate(self.lines):
-            line.set_data(xs, signals[i, :])
+            line.set_data(xs, signals[i, :].astype(np.float64))
 
         if title is not None:
             ax.set_title(title)

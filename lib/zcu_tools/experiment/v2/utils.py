@@ -5,8 +5,9 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.utils.func_tools import min_interval
 
-from .runner import ResultType, default_raw2signal_fn
+from .runner import default_raw2signal_fn
 
 
 def calc_snr(real_signals: np.ndarray) -> float:
@@ -32,13 +33,12 @@ def wrap_earlystop_check(
     signal2real_fn: Callable[[np.ndarray], np.ndarray],
     raw2signal_fn: Callable[[T_RawResult], np.ndarray] = default_raw2signal_fn,
     snr_hook: Optional[Callable[[float], None]] = None,
+    update_interval: Optional[float] = 0.1,
 ) -> Callable[[int, T_RawResult], None]:
     if snr_threshold is None:
         return update_hook
 
-    @wraps(update_hook)
-    def wrapped_update_hook(i: int, raw: T_RawResult) -> None:
-        update_hook(i, raw)
+    def check_snr(raw: T_RawResult) -> None:
         signals = raw2signal_fn(raw)
         snr = calc_snr(signal2real_fn(signals))
         if snr >= snr_threshold:
@@ -46,10 +46,20 @@ def wrap_earlystop_check(
         if snr_hook is not None:
             snr_hook(snr)
 
+    check_snr = min_interval(check_snr, update_interval)
+
+    @wraps(update_hook)
+    def wrapped_update_hook(i: int, raw: T_RawResult) -> None:
+        update_hook(i, raw)
+        check_snr(raw)
+
     return wrapped_update_hook
 
 
-def merge_result_list(results: List[ResultType]) -> ResultType:
+T_ResultType = TypeVar("T_ResultType")
+
+
+def merge_result_list(results: List[T_ResultType]) -> T_ResultType:
     assert isinstance(results, list) and len(results) > 0
     if isinstance(results[0], dict):
         return {

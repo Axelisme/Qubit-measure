@@ -44,7 +44,7 @@ class AbsReset(Module):
         reset_cfg: ResetCfg,
         param_name: str,
         param_value: Union[float, QickParam],
-    ) -> None:
+    ) -> ResetCfg:
         raise NotImplementedError(
             f"{cls.__name__} does not support set {param_name} params with {param_value}"
         )
@@ -86,8 +86,9 @@ class Reset(Module):
         param_name: str,
         param_value: Union[float, QickParam],
     ) -> None:
-        reset_cls = cls.get_reset_cls(reset_cfg)
-        reset_cls.set_param(reset_cfg, param_name, param_value)
+        return cls.get_reset_cls(reset_cfg).set_param(
+            reset_cfg, param_name, param_value
+        )
 
     def __init__(self, name: str, cfg: ResetCfg) -> None:
         self.name = name
@@ -139,8 +140,8 @@ class PulseReset(AbsReset):
     @staticmethod
     def set_param(
         reset_cfg: Dict[str, Any], param_name: str, param_value: Union[float, QickParam]
-    ) -> None:
-        Pulse.set_param(reset_cfg["pulse_cfg"], param_name, param_value)
+    ) -> PulseResetCfg:
+        return Pulse.set_param(reset_cfg["pulse_cfg"], param_name, param_value)
 
 
 @Reset.register_reset("two_pulse")
@@ -170,7 +171,7 @@ class TwoPulseReset(AbsReset):
     @staticmethod
     def set_param(
         reset_cfg: Dict[str, Any], param_name: str, param_value: Union[float, QickParam]
-    ) -> None:
+    ) -> TwoPulseResetCfg:
         if param_name == "on/off":
             Pulse.set_param(reset_cfg["pulse1_cfg"], "on/off", param_value)
             Pulse.set_param(reset_cfg["pulse2_cfg"], "on/off", param_value)
@@ -187,6 +188,8 @@ class TwoPulseReset(AbsReset):
             Pulse.set_param(reset_cfg["pulse2_cfg"], "length", param_value)
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
+
+        return reset_cfg
 
 
 @Reset.register_reset("bath")
@@ -221,7 +224,7 @@ class BathReset(AbsReset):
     @staticmethod
     def set_param(
         reset_cfg: Dict[str, Any], param_name: str, param_value: Union[float, QickParam]
-    ) -> None:
+    ) -> BathResetCfg:
         if param_name == "on/off":
             Pulse.set_param(reset_cfg["qubit_tone_cfg"], "on/off", param_value)
             Pulse.set_param(reset_cfg["cavity_tone_cfg"], "on/off", param_value)
@@ -243,3 +246,5 @@ class BathReset(AbsReset):
             Pulse.set_param(reset_cfg["pi2_cfg"], "phase", param_value)
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
+
+        return reset_cfg

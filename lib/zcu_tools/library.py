@@ -96,6 +96,15 @@ class ModuleLibrary:
 
         self.sync()
 
+    @classmethod
+    def from_dict(
+        cls, waveforms: Dict[str, Dict[str, Any]], modules: Dict[str, Dict[str, Any]]
+    ) -> ModuleLibrary:
+        ml = cls()
+        ml.waveforms = deepcopy(waveforms)
+        ml.modules = deepcopy(modules)
+        return ml
+
     def make_cfg(self, exp_cfg: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """
         Create a deep copy of the experiment configuration, update it with additional parameters,

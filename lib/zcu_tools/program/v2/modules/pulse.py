@@ -3,6 +3,7 @@ from copy import deepcopy
 from typing import List, Optional, Type, TypedDict, Union
 
 from qick.asm_v2 import QickParam
+from typing_extensions import NotRequired
 
 from ..base import MyProgramV2
 from .base import Module
@@ -16,20 +17,20 @@ class PulseCfg(TypedDict):
     freq: Union[float, QickParam]
     phase: Union[float, QickParam]
     gain: Union[float, QickParam]
-    mixer_freq: float
-    mux_freqs: List[float]
-    mux_gains: List[float]
-    mux_phases: List[float]
-    ro_ch: int
     pre_delay: Union[float, QickParam]
     post_delay: Union[float, QickParam]
     block_mode: bool
+    mixer_freq: NotRequired[float]
+    mux_freqs: NotRequired[List[float]]
+    mux_gains: NotRequired[List[float]]
+    mux_phases: NotRequired[List[float]]
+    ro_ch: NotRequired[int]
 
 
 def check_block_mode(name: str, cfg: PulseCfg, want_block: bool) -> None:
-    if cfg.get("block_mode") != want_block:
+    if cfg["block_mode"] != want_block:
         warnings.warn(
-            f"{name} block_mode is {cfg.get('block_mode')}, this may not be what you want"
+            f"{name} block_mode is {cfg['block_mode']}, this may not be what you want"
         )
 
 
@@ -118,6 +119,9 @@ class BasePulse(Module):
             return None
         assert isinstance(prog._module_pulse_list, dict)
 
+        if "mixer_freq" not in cfg:
+            return
+
         ch = cfg["ch"]
         mixer_freq = cfg["mixer_freq"]
 
@@ -163,7 +167,7 @@ class BasePulse(Module):
     @staticmethod
     def set_param(
         pulse_cfg: PulseCfg, param_name: str, param_value: Union[float, QickParam]
-    ) -> None:
+    ) -> PulseCfg:
         if param_name == "on/off":
             pulse_cfg["gain"] = param_value * pulse_cfg["gain"]
 
@@ -176,6 +180,8 @@ class BasePulse(Module):
             pulse_cfg[param_name] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
+
+        return pulse_cfg
 
 
 class PaddingPulse(Module):
@@ -266,7 +272,7 @@ class PaddingPulse(Module):
     @staticmethod
     def set_param(
         pulse_cfg: PulseCfg, param_name: str, param_value: Union[float, QickParam]
-    ) -> None:
+    ) -> PulseCfg:
         if param_name == "on/off":
             pulse_cfg["gain"] = param_value * pulse_cfg["gain"]
             pulse_cfg["waveform"]["pre_length"] = (  # type: ignore
@@ -284,6 +290,8 @@ class PaddingPulse(Module):
             pulse_cfg[param_name] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
+
+        return pulse_cfg
 
 
 class Pulse(Module):
@@ -314,8 +322,10 @@ class Pulse(Module):
     @staticmethod
     def set_param(
         pulse_cfg: PulseCfg, param_name: str, param_value: Union[float, QickParam]
-    ) -> None:
-        Pulse.get_pulse_cls(pulse_cfg).set_param(pulse_cfg, param_name, param_value)
+    ) -> PulseCfg:
+        return Pulse.get_pulse_cls(pulse_cfg).set_param(
+            pulse_cfg, param_name, param_value
+        )
 
     @property
     def cfg(self) -> Optional[PulseCfg]:

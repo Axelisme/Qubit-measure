@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Dict, Generic, Hashable, TypeVar
 
@@ -27,7 +29,7 @@ class AbsLivePlotter(ABC):
         """Refresh the plot to reflect the latest data."""
         pass
 
-    def __enter__(self) -> "AbsLivePlotter":
+    def __enter__(self) -> AbsLivePlotter:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
@@ -87,9 +89,12 @@ class MultiLivePlotter(AbsLivePlotter, Generic[PlotterKey_T]):
     def refresh(self) -> None:
         self.fig.canvas.draw()
 
-    def __enter__(self) -> "MultiLivePlotter[PlotterKey_T]":
+    def __enter__(self) -> MultiLivePlotter[PlotterKey_T]:
         for plotter in self.plotters.values():
             plotter.__enter__()
+
+        self.fig.tight_layout()
+
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:

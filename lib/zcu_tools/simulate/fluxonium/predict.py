@@ -66,7 +66,7 @@ class FluxoniumPredictor:
             fit_A = cur_A
 
         bias = fit_A - cur_A + self.bias
-        return round(bias, 6)  # 1e-3mA/mV precision
+        return bias
 
     def update_bias(self, bias: float) -> None:
         self.bias = bias

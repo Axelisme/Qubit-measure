@@ -41,7 +41,7 @@ class HistogramSegment(AbsSegment):
             ax.set_title(self.title)
 
         # Create histogram from signals data
-        ax.hist(signals, bins=self.bins, alpha=0.7)
+        ax.hist(signals.astype(np.float64), bins=self.bins, alpha=0.7)
 
     def clear(self, ax: plt.Axes) -> None:
         ax.clear()
