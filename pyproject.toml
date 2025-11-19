@@ -3,12 +3,12 @@ name = "zcu-tools"
 version = "0.1.0"
 description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
-requires-python = ">=3.8"
-dependencies = ["numpy", "tqdm", "matplotlib", "typing-extensions"]
+requires-python = ">=3.9"
+dependencies = ["numpy==1.23.5", "tqdm", "matplotlib==3.9", "typing-extensions"]
 
 [project.optional-dependencies]
 server = ["qick", "dill"]
-client = ["qick", "numpy<=1.19.5", "pyyaml", "dill", "pyvisa", "jupytext"]
+client = ["qick", "numpy", "pyyaml", "dill", "pyvisa", "jupytext"]
 fit = [
   "h5py",
   "ipykernel",

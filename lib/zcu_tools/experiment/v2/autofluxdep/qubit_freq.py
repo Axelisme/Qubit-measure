@@ -158,7 +158,7 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
 
-        self.freq_line.set_xdata(ctx.env_dict["fit_detune"])
+        self.freq_line.set_xdata([ctx.env_dict["fit_detune"]])
         plotters["fit_freq"].update(flx_values, signals["fit_freq"], refresh=False)
         plotters["detune"].update(
             flx_values,

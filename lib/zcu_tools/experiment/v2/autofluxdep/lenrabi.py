@@ -157,7 +157,7 @@ class LenRabiMeasurementTask(MeasurementTask[LenRabiResult, PlotterDictType]):
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
 
-        self.pi_line.set_xdata(ctx.env_dict["pi_length"])
+        self.pi_line.set_xdata([ctx.env_dict["pi_length"]])
         plotters["rabi_curve"].update(
             flx_values,
             sweep2array(self.length_sweep),
