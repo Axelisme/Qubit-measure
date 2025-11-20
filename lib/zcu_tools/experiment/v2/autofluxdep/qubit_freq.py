@@ -12,6 +12,7 @@ from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
+from zcu_tools.program.base import SweepCfg
 from zcu_tools.program.v2 import (
     Pulse,
     PulseCfg,
@@ -68,7 +69,7 @@ class PlotterDictType(TypedDict, closed=True):
 class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]):
     def __init__(
         self,
-        detune_sweep: dict,
+        detune_sweep: SweepCfg,
         cfg_maker: Callable[[TaskContext, ModuleLibrary], QubitFreqCfg],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -84,7 +85,7 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
             assert "rounds" in ctx.cfg
 
             raw_signals = None
-            detunes = sweep2array(self.detune_sweep)
+            detunes: NDArray[np.float64] = sweep2array(self.detune_sweep)
             for i in range(ctx.cfg["rounds"]):
                 raw_signals = [
                     np.array(

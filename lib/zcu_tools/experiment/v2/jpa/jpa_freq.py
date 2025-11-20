@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, set_freq_in_dev_cfg, sweep2array
@@ -12,10 +13,10 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram
 from zcu_tools.utils.datasaver import save_data
 
-JPAFreqResultType = Tuple[np.ndarray, np.ndarray]
+JPAFreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-def jpa_freq_signal2real(signals: np.ndarray) -> np.ndarray:
+def jpa_freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 

@@ -13,6 +13,7 @@ from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -69,7 +70,7 @@ class PlotterDictType(TypedDict, closed=True):
 class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
     def __init__(
         self,
-        gain_sweep: dict,
+        gain_sweep: SweepCfg,
         cfg_maker: Callable[[TaskContext, ModuleLibrary], MistCfg],
     ) -> None:
         self.gain_sweep = gain_sweep

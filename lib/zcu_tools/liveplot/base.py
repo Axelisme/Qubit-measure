@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Dict, Generic, Hashable, TypeVar
 
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 
 
 class AbsLivePlotter(ABC):
@@ -68,7 +68,7 @@ class MultiLivePlotter(AbsLivePlotter, Generic[PlotterKey_T]):
 
     def __init__(
         self,
-        fig: plt.Figure,
+        fig: Figure,
         plotters: Dict[PlotterKey_T, AbsLivePlotter],
     ) -> None:
         self.fig = fig

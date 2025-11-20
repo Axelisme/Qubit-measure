@@ -13,9 +13,9 @@ from .pulse import Pulse, PulseCfg, check_block_mode
 
 class TriggerCfg(TypedDict):
     ro_ch: int
-    ro_length: float
+    ro_length: Union[float, QickParam]
     ro_freq: Union[float, QickParam]
-    trig_offset: float
+    trig_offset: Union[float, QickParam]
 
 
 class TriggerReadout(Module):

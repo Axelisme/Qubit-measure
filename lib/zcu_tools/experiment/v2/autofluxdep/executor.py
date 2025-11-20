@@ -16,10 +16,11 @@ from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
     ResultType,
-    Runner,
     SoftTask,
     T_ResultType,
+    TaskConfig,
     TaskContext,
+    run_task,
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import AbsLivePlotter, MultiLivePlotter, make_plot_frame
@@ -201,21 +202,20 @@ class FluxDepExecutor:
             fig, plotter, plot_fn = self.make_plotter()
 
             with plotter:
-                results = Runner(
+                results = run_task(
                     task=SoftTask(
                         sweep_name="flux",
-                        sweep_values=list(self.flx_values),
+                        sweep_values=self.flx_values.tolist(),
                         update_cfg_fn=update_fn,
                         sub_task=SmartBatchTask(self.measurements),
                     ),
-                    update_hook=plot_fn,
-                ).run(
-                    init_cfg={
-                        "dev": {
+                    init_cfg=TaskConfig(
+                        dev={
                             self.flux_dev_name: self.flux_dev_cfg,
-                        },
-                    },
+                        }
+                    ),
                     env_dict=self.env_dict,
+                    update_hook=plot_fn,
                 )
                 signals_dict = merge_result_list(results)
 

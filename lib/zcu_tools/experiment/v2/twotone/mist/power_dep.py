@@ -1,12 +1,20 @@
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, RepeatOverTime, Runner
+from zcu_tools.experiment.v2.runner import (
+    HardTask,
+    RepeatOverTime,
+    TaskConfig,
+    run_task,
+)
 from zcu_tools.liveplot import (
     LivePlotter1D,
     LivePlotter2DwithLine,
@@ -14,13 +22,23 @@ from zcu_tools.liveplot import (
     make_plot_frame,
 )
 from zcu_tools.notebook.utils import make_sweep
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 
-MISTPowerDepResultType = Tuple[np.ndarray, np.ndarray]
+MISTPowerDepResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-def mist_signal2real(signals: np.ndarray) -> np.ndarray:
+def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     avg_len = max(int(0.05 * len(signals)), 1)
 
     mist_signals = signals - np.mean(signals[:avg_len])
@@ -28,10 +46,18 @@ def mist_signal2real(signals: np.ndarray) -> np.ndarray:
     return np.abs(mist_signals)
 
 
-class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> MISTPowerDepResultType:
+class MISTPowerDepTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    init_pulse: PulseCfg
+    probe_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class MISTPowerDepExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: MISTPowerDepTaskConfig) -> MISTPowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
@@ -40,27 +66,25 @@ class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
         )
 
         with LivePlotter1D("Pulse gain", "MIST") as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
                             soccfg,
-                            cfg,
+                            ctx.cfg,
                             modules=[
-                                Reset("reset", cfg.get("reset", {"type": "none"})),
-                                Pulse(name="init_pulse", cfg=cfg.get("init_pulse")),
-                                Pulse(name="probe_pulse", cfg=cfg["probe_pulse"]),
-                                Readout("readout", cfg["readout"]),
+                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                                Pulse(name="init_pulse", cfg=ctx.cfg.get("init_pulse")),
+                                Pulse(name="probe_pulse", cfg=ctx.cfg["probe_pulse"]),
+                                Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(pdrs),),
                 ),
-                update_hook=lambda ctx: viewer.update(
-                    pdrs, mist_signal2real(np.asarray(ctx.get_data()))
-                ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+                init_cfg=cfg,
+                update_hook=lambda ctx: viewer.update(pdrs, mist_signal2real(ctx.data)),
+            )
 
         # record the last result
         self.last_cfg = cfg
@@ -128,10 +152,12 @@ class MISTPowerDep(AbsExperiment[MISTPowerDepResultType]):
         )
 
 
-MISTPowerDepOvernightResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+MISTPowerDepOvernightResultType = Tuple[
+    NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def mist_overnight_signal2real(signals: np.ndarray) -> np.ndarray:
+def mist_overnight_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     avg_len = max(int(0.05 * signals.shape[1]), 1)
 
     mist_signals = signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
@@ -139,14 +165,30 @@ def mist_overnight_signal2real(signals: np.ndarray) -> np.ndarray:
     return np.abs(mist_signals)
 
 
-class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
+class MISTPowerDepOvernightTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    init_pulse: PulseCfg
+    probe_pulse: PulseCfg
+    readout: ReadoutCfg
+    interval: float
+
+
+class MISTPowerDepOvernightExperiment(AbsExperiment):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, num_times=50, fail_retry=3
+        self,
+        soc,
+        soccfg,
+        cfg: MISTPowerDepOvernightTaskConfig,
+        *,
+        num_times=50,
+        fail_retry=3,
     ) -> MISTPowerDepOvernightResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        iters = np.arange(num_times)
+
+        iters = np.arange(num_times, dtype=np.int64)
         pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
         Pulse.set_param(
@@ -156,7 +198,7 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
         with LivePlotter2DwithLine(
             "Pulse gain", "Iteration", line_axis=1, title="MIST Overnight"
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=RepeatOverTime(
                     name="repeat_over_time",
                     num_times=num_times,
@@ -180,10 +222,11 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
                     ),
                     fail_retry=fail_retry,
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    iters, pdrs, mist_overnight_signal2real(np.asarray(ctx.get_data()))
+                    iters, pdrs, mist_overnight_signal2real(np.asarray(ctx.data))
                 ),
-            ).run(cfg)
+            )
             signals = np.asarray(signals)
 
         # record the last result
@@ -199,7 +242,7 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
         g0=None,
         e0=None,
         ac_coeff=None,
-    ) -> plt.Figure:
+    ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -219,7 +262,7 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
             xlabel = r"$\bar n$"
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax.plot(xs, abs_diff.T)
         ax.set_xscale("log")
@@ -259,7 +302,16 @@ class MISTPowerDepOvernight(AbsExperiment[MISTPowerDepOvernightResultType]):
         )
 
 
-MISTPowerDepGEResultType = Tuple[np.ndarray, np.ndarray]
+MISTPowerDepGEResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+
+
+class MISTPowerDepGETaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi_pulse: PulseCfg
+    pre_pi_pulse: PulseCfg
+    probe_pulse: PulseCfg
+    post_pi_pulse: PulseCfg
+    readout: ReadoutCfg
 
 
 def mist_ge_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -273,13 +325,16 @@ def mist_ge_signal2real(signals: np.ndarray) -> np.ndarray:
     return np.concatenate([mist_signals, decay_signals], axis=1)  # (pdrs, gege)
 
 
-class MISTPowerDepGE(AbsExperiment[MISTPowerDepGEResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> MISTPowerDepGEResultType:
+class MISTPowerDepGE(AbsExperiment):
+    def run(
+        self, soc, soccfg, cfg: MISTPowerDepGETaskConfig
+    ) -> MISTPowerDepGEResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
+
+        assert "sweep" in cfg
 
         cfg["pre_pi_pulse"] = deepcopy(cfg["pi_pulse"])
         cfg["post_pi_pulse"] = deepcopy(cfg["pi_pulse"])
-        del cfg["pi_pulse"]
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         cfg["sweep"] = {
@@ -336,7 +391,7 @@ class MISTPowerDepGE(AbsExperiment[MISTPowerDepGEResultType]):
         ) as viewer:
 
             def plot_fn(ctx):
-                real_signals = mist_ge_signal2real(np.asarray(ctx.get_data())).T
+                real_signals = mist_ge_signal2real(ctx.data).T
 
                 viewer.update(
                     dict(
@@ -345,7 +400,7 @@ class MISTPowerDepGE(AbsExperiment[MISTPowerDepGEResultType]):
                     )
                 )
 
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -364,9 +419,9 @@ class MISTPowerDepGE(AbsExperiment[MISTPowerDepGEResultType]):
                     ),
                     result_shape=(len(pdrs), 2, 2),
                 ),
+                init_cfg=cfg,
                 update_hook=plot_fn,
-            ).run(cfg)
-            signals = np.asarray(signals)
+            )
 
         # record the last result
         self.last_cfg = cfg
@@ -378,7 +433,7 @@ class MISTPowerDepGE(AbsExperiment[MISTPowerDepGEResultType]):
 
     def analyze(
         self, result: Optional[MISTPowerDepGEResultType] = None, *, ac_coeff=None
-    ) -> plt.Figure:
+    ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -396,7 +451,7 @@ class MISTPowerDepGE(AbsExperiment[MISTPowerDepGEResultType]):
 
         # fig, ax1 = plt.subplots(figsize=config.figsize)
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=config.figsize, sharex=True)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax1.plot(xs, real_signals[:, 0], label="Ground", color="blue")
         ax1.plot(xs, real_signals[:, 1], label="Excited", color="red")

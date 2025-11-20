@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
@@ -16,10 +17,12 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
-JPACheckResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+JPACheckResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def jpa_check_signal2real(signals: np.ndarray) -> np.ndarray:
+def jpa_check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 

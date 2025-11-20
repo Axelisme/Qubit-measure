@@ -5,6 +5,8 @@ from typing import List, Optional, Tuple, TypeVar
 
 import matplotlib.pyplot as plt
 from IPython.display import display
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 from ..segments import AbsSegment
 
@@ -13,7 +15,7 @@ from ..segments import AbsSegment
 T_JupyterPlotMixin = TypeVar("T_JupyterPlotMixin", bound="JupyterPlotMixin")
 
 
-def instant_plot(fig: plt.Figure, figsize) -> None:
+def instant_plot(fig: Figure, figsize) -> None:
     # this ensures the figure is rendered in Jupyter notebooks right now and can be updated later
     canvas = fig.canvas
 
@@ -32,12 +34,13 @@ def instant_plot(fig: plt.Figure, figsize) -> None:
     canvas._handle_message(canvas, {"type": "refresh"}, [])
     canvas._handle_message(canvas, {"type": "initialized"}, [])
     canvas._handle_message(canvas, {"type": "draw"}, [])
+
     display(canvas)
 
 
 def make_plot_frame(
     n_row: int, n_col: int, **kwargs
-) -> Tuple[plt.Figure, List[List[plt.Axes]]]:
+) -> Tuple[Figure, List[List[Axes]]]:
     kwargs.setdefault("squeeze", False)
     kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
     fig, axs = plt.subplots(n_row, n_col, **kwargs)
@@ -53,7 +56,7 @@ class JupyterPlotMixin:
     def __init__(
         self,
         segments: List[List[AbsSegment]],
-        existed_axes: Optional[List[List[plt.Axes]]] = None,
+        existed_axes: Optional[List[List[Axes]]] = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:

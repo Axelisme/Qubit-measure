@@ -1,51 +1,56 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 # (fpts, signals)
-SingleToneResetFreqResultType = Tuple[np.ndarray, np.ndarray]
+SingleToneResetFreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-def reset_signal2real(signals: np.ndarray) -> np.ndarray:
+def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class FreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> SingleToneResetFreqResultType:
+class FreqTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    init_pulse: PulseCfg
+    tested_reset: ResetCfg
+    readout: ReadoutCfg
+
+
+class FreqExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: FreqTaskConfig) -> SingleToneResetFreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        # Canonicalise sweep section to single-axis form
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
-        # Check that reset pulse is single pulse type
-        if cfg["tested_reset"]["type"] != "pulse":
-            raise ValueError("This experiment only supports single pulse reset")
-
-        Reset.set_param(
-            cfg["tested_reset"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
-        )
-
-        with LivePlotter1D(
-            "Frequency (MHz)", "Amplitude", disable=not progress
-        ) as viewer:
-            signals = Runner(
+        with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -61,11 +66,11 @@ class FreqExperiment(AbsExperiment[SingleToneResetFreqResultType]):
                     ),
                     result_shape=(len(fpts),),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    fpts, reset_signal2real(np.asarray(ctx.get_data()))
+                    fpts, reset_signal2real(ctx.data)
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+            )
 
         # Cache results
         self.last_cfg = cfg

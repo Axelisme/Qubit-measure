@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
@@ -17,10 +18,10 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
-JPAFreqGEResultType = Tuple[np.ndarray, np.ndarray]
+JPAFreqGEResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-def jpa_freq_ge_signal2real(signals: np.ndarray) -> np.ndarray:
+def jpa_freq_ge_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     # signals: (freq, ge)
     return np.abs(signals[..., 0] - signals[..., 1])  # (freq, )
 
@@ -58,7 +59,7 @@ class JPAFreqGEExperiment(AbsExperiment[JPAFreqGEResultType]):
                                     Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
                                     Readout("readout", ctx.cfg["readout"]),
                                 ],
-                            )
+                            ).acquire(soc, progress=False, callback=update_hook)
                         ),
                         result_shape=(2,),
                     ),

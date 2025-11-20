@@ -1,15 +1,26 @@
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner, TaskContext
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 
 from .base import snr_as_signal
@@ -17,21 +28,21 @@ from .base import snr_as_signal
 PowerResultType = Tuple[np.ndarray, np.ndarray]  # (powers, snrs)
 
 
-class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> PowerResultType:
+class OptimizePowerTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    qub_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class OptimizePowerExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: OptimizePowerTaskConfig) -> PowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "power")
+        cfg["sweep"] = {"ge": make_ge_sweep(), "power": cfg["sweep"]["power"]}
 
         gains = sweep2array(cfg["sweep"]["power"])  # predicted power points
-
-        # prepend ge sweep as outer loop
-        cfg["sweep"] = {
-            "ge": make_ge_sweep(),
-            "power": cfg["sweep"]["power"],
-        }
 
         Pulse.set_param(
             cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
@@ -40,36 +51,40 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
             cfg["readout"], "gain", sweep2param("power", cfg["sweep"]["power"])
         )
 
-        def measure_fn(
-            ctx: TaskContext, update_hook: Callable[[int, Any], None]
-        ) -> Tuple[np.ndarray, np.ndarray]:
-            prog = ModularProgramV2(
-                soccfg,
-                ctx.cfg,
-                modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                    Readout("readout", ctx.cfg["readout"]),
-                ],
-            )
-            avg_d = prog.acquire(
-                soc, progress=False, callback=update_hook, record_stderr=True
-            )
-            std_d = prog.get_stderr()
-            return avg_d, std_d
-
-        with LivePlotter1D("Readout Power", "SNR", disable=not progress) as viewer:
-            signals = Runner(
+        with LivePlotter1D("Readout Power", "SNR") as viewer:
+            signals = run_task(
                 task=HardTask(
-                    measure_fn=measure_fn,
+                    measure_fn=lambda ctx, update_hook: (
+                        (
+                            prog := ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset(
+                                        "reset",
+                                        ctx.cfg.get("reset", {"type": "none"}),
+                                    ),
+                                    Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
+                                    Readout("readout", ctx.cfg["readout"]),
+                                ],
+                            )
+                        )
+                        and (
+                            prog.acquire(
+                                soc,
+                                progress=False,
+                                callback=update_hook,
+                                record_stderr=True,
+                            ),
+                            prog.get_stderr(),
+                        )
+                    ),
                     raw2signal_fn=lambda raw: snr_as_signal(raw, axis=0),
                     result_shape=(len(gains),),
                 ),
-                update_hook=lambda ctx: viewer.update(
-                    gains, np.abs(np.asarray(ctx.get_data()))
-                ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+                init_cfg=cfg,
+                update_hook=lambda ctx: viewer.update(gains, np.abs(ctx.data)),
+            )
 
         # record the last cfg and result
         self.last_cfg = cfg
@@ -80,6 +95,7 @@ class OptimizePowerExperiment(AbsExperiment[PowerResultType]):
     def analyze(self, result: Optional[PowerResultType] = None) -> float:
         if result is None:
             result = self.last_result
+        assert result is not None, "no result found"
 
         powers, signals = result
 

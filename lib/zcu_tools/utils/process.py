@@ -1,9 +1,11 @@
 import warnings
-from typing import Literal, Tuple
+from typing import Literal, Optional, Tuple, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
+
+T_dtype = TypeVar("T_dtype", bound=np.number)
 
 
 def find_rotate_angle(signals: NDArray[np.complex128]) -> float:
@@ -45,7 +47,9 @@ def rotate2real(signals: NDArray[np.complex128]) -> NDArray[np.complex128]:
     return signals * np.exp(-1j * angle)
 
 
-def minus_background(signals: NDArray, axis=None, method="median") -> NDArray:
+def minus_background(
+    signals: NDArray[T_dtype], axis=None, method="median"
+) -> NDArray[T_dtype]:
     """
     Subtract the background from the signals
 
@@ -72,7 +76,7 @@ def minus_background(signals: NDArray, axis=None, method="median") -> NDArray:
         raise ValueError(f"Invalid method: {method}")
 
 
-def minus_median(signals: NDArray, axis=None) -> NDArray:
+def minus_median(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
     """
     Subtract the median from signals, useful for background removal
 
@@ -102,10 +106,10 @@ def minus_median(signals: NDArray, axis=None) -> NDArray:
 
     if axis is None:
         if signals.dtype == complex:  # perform on real & imag part
-            signals.real -= np.nanmedian(signals.real)
-            signals.imag -= np.nanmedian(signals.imag)
+            signals.real -= np.nanmedian(signals.real)  # type: ignore
+            signals.imag -= np.nanmedian(signals.imag)  # type: ignore
         else:
-            signals -= np.nanmedian(signals)
+            signals -= np.nanmedian(signals)  # type: ignore
 
     elif isinstance(axis, int):
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
@@ -114,10 +118,10 @@ def minus_median(signals: NDArray, axis=None) -> NDArray:
         val_mask = ~np.all(np.isnan(signals), axis=0)
         val_signals = signals[:, val_mask]
         if val_signals.dtype == complex:
-            val_signals.real -= np.nanmedian(val_signals.real, axis=0, keepdims=True)
-            val_signals.imag -= np.nanmedian(val_signals.imag, axis=0, keepdims=True)
+            val_signals.real -= np.nanmedian(val_signals.real, axis=0, keepdims=True)  # type: ignore
+            val_signals.imag -= np.nanmedian(val_signals.imag, axis=0, keepdims=True)  # type: ignore
         else:
-            val_signals -= np.nanmedian(val_signals, axis=0, keepdims=True)
+            val_signals -= np.nanmedian(val_signals, axis=0, keepdims=True)  # type: ignore
         signals[:, val_mask] = val_signals
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
@@ -128,7 +132,7 @@ def minus_median(signals: NDArray, axis=None) -> NDArray:
     return signals
 
 
-def minus_mean(signals: NDArray, axis=None) -> NDArray:
+def minus_mean(signals: NDArray[T_dtype], axis=None) -> NDArray[T_dtype]:
     """
     Subtract the mean from signals, useful for baseline correction
 
@@ -156,14 +160,14 @@ def minus_mean(signals: NDArray, axis=None) -> NDArray:
         return signals
 
     if axis is None:
-        signals -= np.nanmean(signals)
+        signals -= np.nanmean(signals)  # type: ignore
 
     elif isinstance(axis, int):
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         # minus the mean
         val_mask = ~np.all(np.isnan(signals), axis=0)
-        signals[:, val_mask] -= np.nanmean(signals[:, val_mask], axis=0, keepdims=True)
+        signals[:, val_mask] -= np.nanmean(signals[:, val_mask], axis=0, keepdims=True)  # type: ignore
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
 
@@ -173,7 +177,7 @@ def minus_mean(signals: NDArray, axis=None) -> NDArray:
     return signals
 
 
-def rescale(signals: NDArray, axis=None) -> NDArray:
+def rescale(signals: NDArray[T_dtype], axis: Optional[int] = None) -> NDArray[T_dtype]:
     """
     Rescale signals by dividing by the standard deviation
 
@@ -209,13 +213,13 @@ def rescale(signals: NDArray, axis=None) -> NDArray:
 
     if axis is None:
         if np.sum(~np.isnan(signals)) > 1:  # at least 2 non-nan values
-            signals /= np.nanstd(signals)
+            signals /= np.nanstd(signals)  # type: ignore
 
     elif isinstance(axis, int):
         signals = np.swapaxes(signals, axis, 0)  # move the axis to the first dimension
 
         val_mask = np.sum(~np.isnan(signals), axis=0) > 1
-        signals[:, val_mask] /= np.nanstd(signals[:, val_mask], axis=0, keepdims=True)
+        signals[:, val_mask] /= np.nanstd(signals[:, val_mask], axis=0, keepdims=True)  # type: ignore
 
         signals = np.swapaxes(signals, 0, axis)  # move the axis back
     else:
@@ -224,7 +228,7 @@ def rescale(signals: NDArray, axis=None) -> NDArray:
     return signals
 
 
-def calculate_noise(signals: NDArray) -> Tuple[float, NDArray]:
+def calculate_noise(signals: NDArray[T_dtype]) -> Tuple[float, NDArray[T_dtype]]:
     """
     Calculate the noise level of the signals
     by comparing the signals with a smoothed version of themselves
@@ -244,11 +248,14 @@ def calculate_noise(signals: NDArray) -> Tuple[float, NDArray]:
         The smoothed signals obtained by applying Gaussian filtering.
     """
     m_signals = gaussian_filter1d(signals, sigma=1)
+    m_signals = cast(NDArray[T_dtype], m_signals)
 
     return np.abs(signals - m_signals).mean(), m_signals
 
 
-def peak_n_avg(data: NDArray, n: int, mode: Literal["max", "min"] = "max") -> float:
+def peak_n_avg(
+    data: NDArray[np.float64], n: int, mode: Literal["max", "min"] = "max"
+) -> float:
     """
     Find the first n max/min points in the data, and return their average
     Parameters
@@ -285,7 +292,9 @@ def peak_n_avg(data: NDArray, n: int, mode: Literal["max", "min"] = "max") -> fl
     return np.mean(peaks)  # type: ignore
 
 
-def rotate_phase(fpts: NDArray, signals: NDArray, phase_slope: float) -> NDArray:
+def rotate_phase(
+    fpts: NDArray[np.float64], signals: NDArray[np.complex128], phase_slope: float
+) -> NDArray[np.complex128]:
     """
     Rotate the phase of complex signals based on frequency points
 

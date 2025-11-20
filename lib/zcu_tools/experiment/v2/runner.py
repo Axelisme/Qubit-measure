@@ -5,7 +5,11 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass, field
 from numbers import Number
-from typing import (
+
+import numpy as np
+from numpy.typing import NDArray
+from tqdm.auto import tqdm
+from typing_extensions import (
     Any,
     Callable,
     Dict,
@@ -13,6 +17,7 @@ from typing import (
     Hashable,
     List,
     Mapping,
+    MutableMapping,
     Optional,
     Sequence,
     Tuple,
@@ -20,11 +25,6 @@ from typing import (
     TypeVar,
     Union,
 )
-
-import numpy as np
-from numpy.typing import NDArray
-from tqdm.auto import tqdm
-from typing_extensions import NotRequired
 
 from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.utils.debug import print_traceback
@@ -37,11 +37,7 @@ T_ResultType = TypeVar("T_ResultType", bound=ResultType)
 
 
 class TaskConfig(TypedDict):
-    dev: Dict[str, DeviceInfo]
-    sweep: NotRequired[Dict[str, float]]
-    relax_delay: NotRequired[float]
-    reps: NotRequired[int]
-    rounds: NotRequired[int]
+    dev: Mapping[str, DeviceInfo]
 
 
 T_TaskConfigType = TypeVar("T_TaskConfigType", bound=TaskConfig)
@@ -52,7 +48,7 @@ class TaskContext(Generic[T_TaskConfigType, T_ResultType, T_KeyType]):
     cfg: T_TaskConfigType
     data: T_ResultType
     update_hook: Optional[Callable[[TaskContext], None]] = None
-    env_dict: Dict[str, Any] = field(default_factory=dict)
+    env_dict: MutableMapping[str, Any] = field(default_factory=dict)
     addr_stack: List[T_KeyType] = field(default_factory=list)
 
     def __call__(
@@ -121,7 +117,7 @@ class TaskContext(Generic[T_TaskConfigType, T_ResultType, T_KeyType]):
         return self.get_data(self.addr_stack + append_addr)
 
 
-class AbsTask(ABC, Generic[T_ResultType]):
+class AbsTask(ABC, Generic[T_ResultType, T_TaskConfigType]):
     def init(self, ctx: TaskContext, dynamic_pbar: bool = False) -> None:
         """Initialize the task with the current context. If dynamic_pbar is True, the pbar will only show up in the run() method."""
         pass
@@ -137,8 +133,13 @@ class AbsTask(ABC, Generic[T_ResultType]):
     def get_default_result(self) -> T_ResultType: ...
 
 
-class BatchTask(AbsTask[Mapping[T_KeyType, ResultType]]):
-    def __init__(self, tasks: Dict[T_KeyType, AbsTask[ResultType]]) -> None:
+class BatchTask(
+    AbsTask[Dict[T_KeyType, T_ResultType], T_TaskConfigType],
+    Generic[T_KeyType, T_ResultType, T_TaskConfigType],
+):
+    def __init__(
+        self, tasks: Mapping[T_KeyType, AbsTask[T_ResultType, T_TaskConfigType]]
+    ) -> None:
         self.tasks = tasks
 
     def make_pbar(self, leave: bool) -> tqdm:
@@ -181,20 +182,23 @@ class BatchTask(AbsTask[Mapping[T_KeyType, ResultType]]):
             self.task_pbar.close()
             self.task_pbar = None
 
-    def get_default_result(self) -> Dict[T_KeyType, ResultType]:
+    def get_default_result(self) -> Dict[T_KeyType, T_ResultType]:
         return {name: task.get_default_result() for name, task in self.tasks.items()}
 
 
 T_ValueType = TypeVar("T_ValueType", bound=Number)
 
 
-class SoftTask(AbsTask[List[T_ResultType]], Generic[T_ResultType]):
+class SoftTask(
+    AbsTask[Sequence[T_ResultType], T_TaskConfigType],
+    Generic[T_ResultType, T_ValueType, T_TaskConfigType],
+):
     def __init__(
         self,
         sweep_name: str,
         sweep_values: Sequence[T_ValueType],
-        update_cfg_fn: Callable[[int, TaskContext, T_ValueType], None],
-        sub_task: AbsTask[T_ResultType],
+        update_cfg_fn: Callable[[int, TaskContext, T_ValueType], Any],
+        sub_task: AbsTask[T_ResultType, T_TaskConfigType],
     ) -> None:
         self.sweep_values = sweep_values
         self.sweep_name = sweep_name
@@ -258,11 +262,18 @@ def default_raw2signal_fn(raw: Sequence[NDArray]) -> NDArray:
 T_RawType = TypeVar("T_RawType")
 
 
-class HardTask(AbsTask[NDArray[np.complex128]], Generic[T_RawType]):
+class HardTask(
+    AbsTask[NDArray[np.complex128], T_TaskConfigType],
+    Generic[T_RawType, T_TaskConfigType],
+):
     def __init__(
         self,
         measure_fn: Callable[
-            [TaskContext, Callable[[int, T_RawType], None]], T_RawType
+            [
+                TaskContext[T_TaskConfigType, NDArray[np.complex128], Any],
+                Callable[[int, T_RawType], Any],
+            ],
+            T_RawType,
         ],
         raw2signal_fn: Callable[
             [T_RawType], NDArray[np.complex128]
@@ -328,13 +339,13 @@ class HardTask(AbsTask[NDArray[np.complex128]], Generic[T_RawType]):
         return np.full(self.result_shape, np.nan, dtype=np.complex128)
 
 
-class RepeatOverTime(AbsTask[List[T_ResultType]]):
+class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskConfigType]):
     def __init__(
         self,
         name: str,
         num_times: int,
         interval: float,
-        task: AbsTask[T_ResultType],
+        task: AbsTask[T_ResultType, T_TaskConfigType],
         fail_retry: int = 0,
     ) -> None:
         self.name = name
@@ -400,35 +411,36 @@ class RepeatOverTime(AbsTask[List[T_ResultType]]):
         return [self.task.get_default_result() for _ in range(self.num_times)]
 
 
-class Runner(Generic[T_ResultType]):
-    def __init__(
-        self,
-        task: AbsTask[T_ResultType],
-        update_hook: Optional[Callable[[TaskContext], None]] = None,
-        update_interval: Optional[float] = 0.1,
-    ) -> None:
-        self.task = task
-        self.update_hook = min_interval(update_hook, update_interval)
+def run_task(
+    task: AbsTask[T_ResultType, T_TaskConfigType],
+    init_cfg: T_TaskConfigType,
+    env_dict: Optional[MutableMapping[str, Any]] = None,
+    update_hook: Optional[
+        Callable[[TaskContext[T_TaskConfigType, T_ResultType, Any]], Any]
+    ] = None,
+    update_interval: Optional[float] = 0.1,
+) -> T_ResultType:
+    cfg = deepcopy(init_cfg)
+    init_result = task.get_default_result()
 
-    def run(
-        self, init_cfg: TaskConfig, env_dict: Dict[str, Any] = dict()
-    ) -> T_ResultType:
-        cfg = deepcopy(init_cfg)
-        init_result = self.task.get_default_result()
+    if env_dict is None:
+        env_dict = dict()
 
-        # initialize devices with progress bar
-        GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+    update_hook = min_interval(update_hook, update_interval)
 
-        ctx = TaskContext(cfg, init_result, self.update_hook, env_dict)
+    # initialize devices with progress bar
+    GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
-        try:
-            self.task.init(ctx, dynamic_pbar=False)
-            self.task.run(ctx)
-            self.task.cleanup()
-        except KeyboardInterrupt:
-            print("Received KeyboardInterrupt, early stopping the program")
-        except Exception:
-            print("Error during measurement:")
-            print_traceback()
+    ctx = TaskContext(cfg, init_result, update_hook, env_dict)
 
-        return ctx.data
+    try:
+        task.init(ctx, dynamic_pbar=False)
+        task.run(ctx)
+        task.cleanup()
+    except KeyboardInterrupt:
+        print("Received KeyboardInterrupt, early stopping the program")
+    except Exception:
+        print("Error during measurement:")
+        print_traceback()
+
+    return ctx.data

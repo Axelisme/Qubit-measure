@@ -1,7 +1,8 @@
 from typing import Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from numpy.typing import NDArray
 
 from ..base import AbsLivePlotter
 from ..segments import HistogramSegment
@@ -24,7 +25,7 @@ class LivePlotterHistogram(JupyterPlotMixin, AbsLivePlotter):
 
     def update(
         self,
-        signals: np.ndarray,
+        signals: NDArray[np.float64],
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:
@@ -33,7 +34,7 @@ class LivePlotterHistogram(JupyterPlotMixin, AbsLivePlotter):
 
         ax = self.axs[0][0]
         segment = self.segments[0][0]
-        assert isinstance(ax, plt.Axes)
+        assert isinstance(ax, Axes)
         assert isinstance(segment, HistogramSegment)
 
         with self.update_lock:
@@ -41,8 +42,8 @@ class LivePlotterHistogram(JupyterPlotMixin, AbsLivePlotter):
             if refresh:
                 self._refresh_while_lock()
 
-    def get_ax(self) -> plt.Axes:
+    def get_ax(self) -> Axes:
         return self.axs[0][0]
 
     def get_segment(self) -> HistogramSegment:
-        return self.segments[0][0]
+        return self.segments[0][0]  # type: ignore

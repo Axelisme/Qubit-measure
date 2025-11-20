@@ -1,8 +1,12 @@
+from typing import Optional, Sequence, Tuple
+
 import numpy as np
-from numpy import ndarray
+from numpy.typing import NDArray
 
 
-def calc_snr(avg_d: ndarray, std_d: ndarray, axis: int = 0) -> ndarray:
+def calc_snr(
+    avg_d: NDArray[np.complex128], std_d: NDArray[np.complex128], axis: int = 0
+) -> NDArray[np.complex128]:
     contrast = np.take(avg_d, 1, axis=axis) - np.take(avg_d, 0, axis=axis)  # (*sweep)
     noise2_i = np.sum(std_d.real**2, axis=axis)  # (*sweep)
     noise2_q = np.sum(std_d.imag**2, axis=axis)  # (*sweep)
@@ -13,8 +17,13 @@ def calc_snr(avg_d: ndarray, std_d: ndarray, axis: int = 0) -> ndarray:
     return contrast / noise
 
 
-def snr_as_signal(raw, axis: int = 0) -> np.ndarray:
+def snr_as_signal(
+    raw: Tuple[Sequence[NDArray[np.float64]], Optional[Sequence[NDArray[np.float64]]]],
+    axis: int = 0,
+) -> NDArray[np.complex128]:
     avg_d, std_d = raw
+
+    assert std_d is not None
 
     avg_s = avg_d[0][0].dot([1, 1j])  # (ge, *sweep)
     std_s = std_d[0][0].dot([1, 1j])  # (ge, *sweep)

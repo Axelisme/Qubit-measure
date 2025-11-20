@@ -1,23 +1,37 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import plotly.graph_objects as go
+from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner, SoftTask, TaskContext
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.simulate import mA2flx
 from zcu_tools.utils.datasaver import save_data
 
-MistFluxDepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray, Dict[str, np.ndarray]]
+MistFluxDepResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def mist_signal2real(signals: np.ndarray) -> np.ndarray:
+def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     avg_len = max(int(0.05 * signals.shape[1]), 1)
     std_len = max(int(0.3 * signals.shape[1]), 5)
 
@@ -31,19 +45,24 @@ def mist_signal2real(signals: np.ndarray) -> np.ndarray:
     return mist_signals
 
 
-class MistFluxDepExperiment(AbsExperiment[MistFluxDepResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> MistFluxDepResultType:
+class MistFluxDepTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    init_pulse: PulseCfg
+    probe_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class MistFluxDepExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: MistFluxDepTaskConfig) -> MistFluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
         flx_sweep = cfg["sweep"]["flux"]
         cfg["sweep"] = {"gain": cfg["sweep"]["gain"]}
 
         # predict sweep points
         values = sweep2array(flx_sweep)
         gains = sweep2array(cfg["sweep"]["gain"])
-
-        def updateCfg(i: int, ctx: TaskContext, value: float) -> None:
-            set_flux_in_dev_cfg(ctx.cfg["dev"], value)
 
         Pulse.set_param(
             cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
@@ -56,11 +75,13 @@ class MistFluxDepExperiment(AbsExperiment[MistFluxDepResultType]):
             num_lines=5,
             title="MIST over FLux",
         ) as viewer:
-            results = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="flux",
-                    sweep_values=values,
-                    update_cfg_fn=updateCfg,
+                    sweep_values=values.tolist(),
+                    update_cfg_fn=lambda _, ctx, value: set_flux_in_dev_cfg(
+                        ctx.cfg["dev"], value
+                    ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
                             ModularProgramV2(
@@ -79,11 +100,12 @@ class MistFluxDepExperiment(AbsExperiment[MistFluxDepResultType]):
                         result_shape=(len(gains),),
                     ),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    values, gains, mist_signal2real(np.asarray(ctx.get_data()))
+                    values, gains, mist_signal2real(np.asarray(ctx.data))
                 ),
-            ).run(cfg)
-            signals = np.asarray(results)
+            )
+            signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg
@@ -102,6 +124,7 @@ class MistFluxDepExperiment(AbsExperiment[MistFluxDepResultType]):
     ) -> go.Figure:
         if result is None:
             result = self.last_result
+        assert result is not None, "no result found"
 
         dev_values, pdrs, signals = result
 

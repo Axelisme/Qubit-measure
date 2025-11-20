@@ -3,36 +3,46 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Literal, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram, Readout, sweep2param
+from zcu_tools.program.v2 import (
+    OneToneProgram,
+    OneToneProgramCfg,
+    Readout,
+    ReadoutCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 
-from ..runner import HardTask, Runner
+from ..runner import HardTask, TaskConfig, run_task
 
-FreqResultType = Tuple[np.ndarray, np.ndarray]
+# (fpts, signals)
+FreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-def freq_signal2real(signals: np.ndarray) -> np.ndarray:
+class FreqTaskConfig(TaskConfig, OneToneProgramCfg): ...
+
+
+def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class FreqExperiment(AbsExperiment[FreqResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> FreqResultType:
+class FreqExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: FreqTaskConfig) -> FreqResultType:
         cfg = deepcopy(cfg)
 
         # Ensure the sweep section is in canonical single-axis form.
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
 
         # Predicted frequency points (before mapping to ADC domain)
-        fpts = sweep2array(cfg["sweep"]["freq"])  # MHz
+        fpts: NDArray[np.float64] = sweep2array(cfg["sweep"]["freq"])  # MHz
 
         # set readout frequency as sweep param
         Readout.set_param(
@@ -40,10 +50,8 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         )
 
         # run experiment
-        with LivePlotter1D(
-            "Frequency (MHz)", "Amplitude", disable=not progress
-        ) as viewer:
-            signals = Runner(
+        with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         OneToneProgram(soccfg, ctx.cfg).acquire(
@@ -52,15 +60,12 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
                     ),
                     result_shape=(len(fpts),),
                 ),
-                update_hook=lambda ctx: viewer.update(
-                    fpts,
-                    freq_signal2real(np.asarray(ctx.get_data())),  # type: ignore
-                ),
-            ).run(cfg)
-            signals = np.asarray(signals)  # type: ignore
+                init_cfg=cfg,
+                update_hook=lambda ctx: viewer.update(fpts, freq_signal2real(ctx.data)),
+            )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = dict(cfg)
         self.last_result = (fpts, signals)
 
         return fpts, signals
@@ -71,8 +76,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
         *,
         model_type: Literal["hm", "t", "auto"] = "auto",
         edelay: Optional[float] = None,
-        plot: bool = True,
-    ) -> Tuple[float, float, Dict[str, Any], Optional[plt.Figure]]:
+    ) -> Tuple[float, float, Dict[str, Any], Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -98,10 +102,7 @@ class FreqExperiment(AbsExperiment[FreqResultType]):
             raise ValueError(f"Invalid model type: {model_type}")
 
         param_dict = model.fit(fpts, signals, edelay)
-        if plot:
-            fig = model.visualize_fit(fpts, signals, param_dict)
-        else:
-            fig = None
+        fig = model.visualize_fit(fpts, signals, param_dict)
 
         return float(param_dict["freq"]), float(param_dict["kappa"]), param_dict, fig
 

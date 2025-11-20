@@ -4,36 +4,49 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import OneToneProgram, Readout, sweep2param
+from zcu_tools.program.v2 import (
+    OneToneProgram,
+    OneToneProgramCfg,
+    Readout,
+    ReadoutCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background, rescale
 
-from ..runner import HardTask, Runner, SoftTask
+from ..runner import HardTask, SoftTask, TaskConfig, run_task
 from ..utils import wrap_earlystop_check
 
-PowerDepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+PowerDepResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def pdrdep_signal2real(signals: np.ndarray) -> np.ndarray:
+def pdrdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rescale(minus_background(np.abs(signals), axis=1), axis=1)
 
 
-class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
+class PowerDepTaskConfig(TaskConfig, OneToneProgramCfg): ...
+
+
+class PowerDepExperiment(AbsExperiment):
     def run(
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: PowerDepTaskConfig,
         *,
-        progress: bool = True,
         earlystop_snr: Optional[float] = None,
     ) -> PowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
+        assert isinstance(cfg["sweep"], dict)
         pdr_sweep = cfg["sweep"].pop("gain")
 
         pdrs = sweep2array(pdr_sweep, allow_array=True)
@@ -45,47 +58,40 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
 
         # run experiment
         with LivePlotter2DwithLine(
-            "Power (a.u.)",
-            "Frequency (MHz)",
-            line_axis=1,
-            num_lines=10,
-            disable=not progress,
+            "Power (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
             ax1d = viewer.get_ax("1d")
 
-            def measure_fn(ctx, update_hook):
-                prog = OneToneProgram(soccfg, ctx.cfg)
-                return prog.acquire(
-                    soc,
-                    progress=False,
-                    callback=wrap_earlystop_check(
-                        prog,
-                        update_hook,
-                        earlystop_snr,
-                        signal2real_fn=np.abs,
-                        snr_hook=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),  # type: ignore
-                    ),
-                )
-
-            signals = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="gain",
-                    sweep_values=pdrs,
+                    sweep_values=pdrs.tolist(),
                     update_cfg_fn=lambda _, ctx, pdr: (
                         Readout.set_param(ctx.cfg["readout"], "gain", pdr)
                     ),
                     sub_task=HardTask(
-                        measure_fn=measure_fn,
+                        measure_fn=lambda ctx, update_hook: (
+                            prog := OneToneProgram(soccfg, ctx.cfg)
+                        ).acquire(
+                            soc,
+                            progress=False,
+                            callback=wrap_earlystop_check(
+                                prog,
+                                update_hook,
+                                earlystop_snr,
+                                signal2real_fn=np.abs,
+                                snr_hook=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
+                            ),
+                        ),
                         result_shape=(len(fpts),),
                     ),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    pdrs,
-                    fpts,
-                    pdrdep_signal2real(np.asarray(ctx.get_data())),  # type: ignore
+                    pdrs, fpts, pdrdep_signal2real(np.asarray(ctx.data))
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)  # type: ignore
+            )
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg

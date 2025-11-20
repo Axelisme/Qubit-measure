@@ -7,21 +7,26 @@ from typing import Callable, Literal, Optional, TypeVar
 import pandas as pd
 from typing_extensions import ParamSpec
 
+P = ParamSpec("P")
+T = TypeVar("T")
 
-def _sync(time: Literal["after", "before", "both"]) -> Callable:
-    P = ParamSpec("P")
-    T = TypeVar("T")
 
+def auto_sync(
+    time: Literal["after", "before"],
+) -> Callable[[Callable[P, T]], Callable[P, T]]:
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         @wraps(func)
-        def wrapper(self: SampleTable, *args, **kwargs) -> T:
-            if time in ["before", "both"]:
-                self.sync()
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
+            assert isinstance(args[0], SampleTable)
 
-            result = func(self, *args, **kwargs)
+            if time == "before":
+                args[0].sync()
 
-            if time in ["after", "both"]:
-                self.sync()
+            result = func(*args, **kwargs)
+
+            if time == "after":
+                args[0].sync()
+
             return result
 
         return wrapper
@@ -67,14 +72,14 @@ class SampleTable:
 
         self.dump()
 
-    @_sync("both")
+    @auto_sync("after")
     def add_sample(self, **kwargs) -> None:
         if not kwargs:
             return
         new_df = pd.DataFrame([kwargs])
         self.samples = pd.concat([self.samples, new_df], ignore_index=True, sort=False)
 
-    @_sync("both")
+    @auto_sync("after")
     def extend_samples(self, **kwargs) -> None:
         if not kwargs:
             return
@@ -82,13 +87,13 @@ class SampleTable:
         new_df = pd.DataFrame(kwargs)
         self.samples = pd.concat([self.samples, new_df], ignore_index=True, sort=False)
 
-    @_sync("both")
+    @auto_sync("after")
     def update_sample(self, idx: int, **kwargs) -> None:
         if not (0 <= idx < len(self.samples)):
             raise IndexError("sample index out of range")
         for key, value in kwargs.items():
             self.samples.loc[idx, key] = value
 
-    @_sync("before")
+    @auto_sync("before")
     def get_samples(self) -> pd.DataFrame:
         return self.samples

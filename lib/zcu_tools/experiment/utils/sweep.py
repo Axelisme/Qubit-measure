@@ -1,12 +1,18 @@
 import warnings
-from typing import Any, Dict, Union
+from typing import Mapping, MutableMapping, Optional, Union, cast
 
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import TypeVar
+
+from zcu_tools.program import SweepCfg
+
+T = TypeVar("T", bound=Union[SweepCfg, NDArray])
 
 
 def format_sweep1D(
-    sweep: Union[Dict[str, Any], np.ndarray], name: str
-) -> Dict[str, Any]:
+    sweep: Union[Mapping[str, T], T], name: str
+) -> MutableMapping[str, T]:
     """
     Convert abbreviated single sweep to regular format.
 
@@ -23,13 +29,13 @@ def format_sweep1D(
     """
 
     if isinstance(sweep, np.ndarray) or isinstance(sweep, list):
-        return {name: sweep}
+        return {name: cast(T, np.asarray(sweep))}
 
     elif isinstance(sweep, dict):
         # conclude by key "start" and "stop"
         if "start" in sweep and "stop" in sweep:
             # it is in abbreviated format
-            return {name: sweep}
+            return {name: cast(T, sweep)}
 
         # check if only one sweep is provided
         assert len(sweep) == 1, "Only one sweep is allowed"
@@ -41,7 +47,9 @@ def format_sweep1D(
         raise ValueError(sweep)
 
 
-def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):
+def check_time_sweep(
+    soccfg, ts, gen_ch: Optional[int] = None, ro_ch: Optional[int] = None
+) -> None:
     """
     Check if time points are duplicated when converted to machine cycles.
 
@@ -65,7 +73,7 @@ def check_time_sweep(soccfg, ts, gen_ch=None, ro_ch=None):
         )
 
 
-def sweep2array(sweep, allow_array=False) -> np.ndarray:
+def sweep2array(sweep: Union[SweepCfg, NDArray], allow_array: bool = False) -> NDArray:
     """
     Convert sweep parameter to a numpy array.
 
@@ -90,5 +98,5 @@ def sweep2array(sweep, allow_array=False) -> np.ndarray:
         raise ValueError("Invalid sweep format")
 
 
-def make_ge_sweep() -> Dict[str, float]:
+def make_ge_sweep() -> SweepCfg:
     return {"start": 0.0, "stop": 1.0, "expts": 2, "step": 0.5}

@@ -1,6 +1,6 @@
 import time
 import warnings
-from typing import Any, Dict, Literal, Optional
+from typing import Literal, Optional
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -13,7 +13,13 @@ MODE_MAPS = {"voltage": "VOLT", "current": "CURR"}
 MODE_MAPS_INV = {"VOLT": "voltage", "CURR": "current"}
 
 
-class YOKOGS200(BaseDevice):
+class YOKOGS200Info(DeviceInfo):
+    output: Literal["on", "off"]
+    mode: Literal["voltage", "current"]
+    value: float
+
+
+class YOKOGS200(BaseDevice[YOKOGS200Info]):
     # Initializes session for device.
     # address: address of device, rm: VISA resource manager
     def __init__(self, address: str, rm: ResourceManager) -> None:
@@ -32,9 +38,8 @@ class YOKOGS200(BaseDevice):
 
     # ==========================================================================#
 
-    def get_output(self) -> str:
-        result = self.query(":OUTPut?")
-        return STATUS_MAP_INV.get(result, f"unknown_{result}")
+    def get_output(self) -> Literal["on", "off"]:
+        return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
 
     def set_output(self, status: Literal["on", "off"]) -> None:
         self.write(f":OUTPut {STATUS_MAP[status]}")
@@ -184,12 +189,11 @@ class YOKOGS200(BaseDevice):
 
     # Returns the mode (voltage or current)
     def get_mode(self) -> Literal["voltage", "current"]:
-        result = self.query(":SOURce:FUNCtion?")
-        return MODE_MAPS_INV.get(result, "unknown")
+        return MODE_MAPS_INV[self.query(":SOURce:FUNCtion?")]  # type: ignore
 
     # ==========================================================================#
 
-    def _setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
+    def _setup(self, cfg: YOKOGS200Info, *, progress: bool = True) -> None:
         if self.get_output() != "on" and cfg["output"] == "on":
             warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")
 
@@ -230,11 +234,13 @@ class YOKOGS200(BaseDevice):
         else:
             raise RuntimeError(f"Unknown mode {cur_mode} in device {self.address}")
 
-    def get_info(self) -> DeviceInfo:
-        return {
-            "type": self.__class__.__name__,
-            "address": self.address,
-            "output": self.get_output(),
-            "mode": self.get_mode(),
-            "value": self._get_level(),
-        }
+    def get_info(self) -> YOKOGS200Info:
+        return YOKOGS200Info(
+            {
+                "type": self.__class__.__name__,
+                "address": self.address,
+                "output": self.get_output(),
+                "mode": self.get_mode(),
+                "value": self._get_level(),
+            }
+        )

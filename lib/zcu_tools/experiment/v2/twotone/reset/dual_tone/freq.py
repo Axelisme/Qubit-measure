@@ -1,37 +1,60 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner, SoftTask
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background, rotate2real
 
 
-def dual_reset_signal2real(signals: np.ndarray) -> np.ndarray:
+def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals))
 
 
 # (fpts1, fpts2, signals_2d)
-DualToneResetFreqResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+DualToneResetFreqResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
-    def run_soft(self, soc, soccfg, cfg: Dict[str, Any]) -> DualToneResetFreqResultType:
+class FreqTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    init_pulse: PulseCfg
+    tested_reset: ResetCfg
+    readout: ReadoutCfg
+
+
+class FreqExperiment(AbsExperiment):
+    def run_soft(self, soc, soccfg, cfg: FreqTaskConfig) -> DualToneResetFreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
         if cfg["tested_reset"]["type"] != "two_pulse":
             raise ValueError("This experiment only supports dual-tone reset")
 
+        assert "sweep" in cfg
         fpt1_sweep = cfg["sweep"]["freq1"]
         fpt2_sweep = cfg["sweep"]["freq2"]
         cfg["sweep"] = {"freq1": fpt1_sweep}
@@ -42,15 +65,14 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
         Reset.set_param(cfg["tested_reset"], "freq1", sweep2param("freq1", fpt1_sweep))
 
         with LivePlotter2DwithLine(
-            "Frequency2 (MHz)",
             "Frequency1 (MHz)",
+            "Frequency2 (MHz)",
             line_axis=1,
-            segment2d_kwargs={"flip": True},
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="freq2",
-                    sweep_values=fpts2,
+                    sweep_values=fpts2.tolist(),
                     update_cfg_fn=lambda _, ctx, fpt2: Reset.set_param(
                         ctx.cfg["tested_reset"], "freq2", fpt2
                     ),
@@ -72,10 +94,11 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
                         result_shape=(len(fpts1),),
                     ),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    fpts2, fpts1, dual_reset_signal2real(np.asarray(ctx.get_data()))
+                    fpts1, fpts2, dual_reset_signal2real(np.asarray(ctx.data).T)
                 ),
-            ).run(cfg)
+            )
             signals = np.asarray(signals).T
 
         # Cache results
@@ -84,7 +107,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
 
         return fpts1, fpts2, signals
 
-    def run_hard(self, soc, soccfg, cfg: Dict[str, Any]) -> DualToneResetFreqResultType:
+    def run_hard(self, soc, soccfg, cfg: FreqTaskConfig) -> DualToneResetFreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -92,6 +115,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
             raise ValueError("This experiment only supports dual-tone reset")
 
         # Ensure freq1 is the outer loop for better visualization
+        assert "sweep" in cfg
         cfg["sweep"] = {
             "freq1": cfg["sweep"]["freq1"],
             "freq2": cfg["sweep"]["freq2"],
@@ -107,10 +131,8 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
             cfg["tested_reset"], "freq2", sweep2param("freq2", cfg["sweep"]["freq2"])
         )
 
-        with LivePlotter2D(
-            "Frequency2 (MHz)", "Frequency1 (MHz)", segment_kwargs={"flip": True}
-        ) as viewer:
-            signals = Runner(
+        with LivePlotter2D("Frequency1 (MHz)", "Frequency2 (MHz)") as viewer:
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -126,10 +148,11 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
                     ),
                     result_shape=(len(fpts1), len(fpts2)),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    fpts1, fpts2, dual_reset_signal2real(np.asarray(ctx.get_data()))
+                    fpts1, fpts2, dual_reset_signal2real(ctx.data)
                 ),
-            ).run(cfg)
+            )
             signals = np.asarray(signals)
 
         # Cache results
@@ -142,7 +165,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: FreqTaskConfig,
         *,
         method: Literal["soft", "hard"] = "soft",
     ) -> DualToneResetFreqResultType:
@@ -159,7 +182,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
         xname: Optional[str] = None,
         yname: Optional[str] = None,
         corner_as_background: bool = False,
-    ) -> Tuple[float, float, plt.Figure]:
+    ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -179,7 +202,7 @@ class FreqExperiment(AbsExperiment[DualToneResetFreqResultType]):
         freq2_opt = fpts2[np.argmax(np.max(amps, axis=0))]
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax.imshow(
             rotate2real(signals.T).real,

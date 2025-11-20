@@ -1,9 +1,16 @@
-from typing import Any, Dict, List
+from typing import Mapping, Sequence
+
+from typing_extensions import NotRequired, ReadOnly
 
 from qick import QickConfig
 
-from .base import MyProgramV2
+from ..base import SweepCfg
+from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module
+
+
+class ModularProgramCfg(ProgramV2Cfg):
+    sweep: NotRequired[Mapping[str, SweepCfg]]
 
 
 class ModularProgramV2(MyProgramV2):
@@ -12,12 +19,16 @@ class ModularProgramV2(MyProgramV2):
     """
 
     def __init__(
-        self, soccfg: QickConfig, cfg: Dict[str, Any], modules: List[Module], **kwargs
+        self,
+        soccfg: QickConfig,
+        cfg: ModularProgramCfg,
+        modules: Sequence[Module],
+        **kwargs,
     ) -> None:
         self.modules = modules
         super().__init__(soccfg, cfg, **kwargs)
 
-    def _initialize(self, cfg: Dict[str, Any]) -> None:
+    def _initialize(self, cfg: ModularProgramCfg) -> None:
         super()._initialize(cfg)
 
         # add v2 sweep loops
@@ -28,7 +39,7 @@ class ModularProgramV2(MyProgramV2):
         for module in self.modules:
             module.init(self)
 
-    def _body(self, cfg: Dict[str, Any]) -> None:
+    def _body(self, cfg: ModularProgramCfg) -> None:
         t = 0.0
         for module in self.modules:
             t = module.run(self, t)
@@ -42,8 +53,8 @@ class BaseCustomProgramV2(ModularProgramV2):
     A base class for custom programs to inherit.
     """
 
-    def __init__(self, soccfg: QickConfig, cfg: Dict[str, Any], **kwargs) -> None:
+    def __init__(self, soccfg: QickConfig, cfg: ModularProgramCfg, **kwargs) -> None:
         super().__init__(soccfg, cfg, modules=self.make_modules(cfg), **kwargs)
 
-    def make_modules(self, cfg: Dict[str, Any]) -> List[Module]:
+    def make_modules(self, cfg: ModularProgramCfg) -> Sequence[Module]:
         return []

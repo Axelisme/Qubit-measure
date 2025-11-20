@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     Delay,
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
+    PulseCfg,
     Readout,
+    ReadoutCfg,
     Reset,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
@@ -23,19 +30,26 @@ from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
 
-def t2ramsey_signal2real(signals: np.ndarray) -> np.ndarray:
-    return rotate2real(signals).real  # type: ignore
+def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    return rotate2real(signals).real
 
 
-T2RamseyResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
+T2RamseyResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
+class T2RamseyTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi2_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T2RamseyExperiment(AbsExperiment):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
+        self, soc, soccfg, cfg: T2RamseyTaskConfig, *, detune: float = 0.0
     ) -> T2RamseyResultType:
         cfg = deepcopy(cfg)
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
         ts = sweep2array(cfg["sweep"]["length"])
@@ -45,7 +59,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Ramsey"}
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -69,11 +83,11 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
                     ),
                     result_shape=(len(ts),),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    ts, t2ramsey_signal2real(np.asarray(ctx.get_data()))
+                    ts, t2ramsey_signal2real(ctx.data)
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+            )
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -83,14 +97,14 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
 
     def analyze(
         self, result: Optional[T2RamseyResultType] = None, *, fit_fringe: bool = True
-    ) -> Tuple[float, float, float, float, plt.Figure]:
+    ) -> Tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         xs, signals = result
 
-        real_signals = rotate2real(signals).real
+        real_signals = t2ramsey_signal2real(signals)
 
         if fit_fringe:
             t2r, t2rerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
@@ -102,7 +116,7 @@ class T2RamseyExperiment(AbsExperiment[T2RamseyResultType]):
             detune_err = 0.0
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")

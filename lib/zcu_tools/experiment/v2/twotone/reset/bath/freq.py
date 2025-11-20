@@ -1,35 +1,58 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2D
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-FreqGainResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+FreqGainResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
+class FreqGainTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    init_pulse: PulseCfg
+    tested_reset: ResetCfg
+    readout: ReadoutCfg
+
+
+def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqGainResultType:
+class FreqGainExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: FreqGainTaskConfig) -> FreqGainResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
         if cfg["tested_reset"]["type"] != "bath":
             raise ValueError("This experiment only supports bath reset")
 
+        assert "sweep" in cfg
         cfg["sweep"] = {
             "gain": cfg["sweep"]["gain"],
             "freq": cfg["sweep"]["freq"],
@@ -46,11 +69,9 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
         )
 
         with LivePlotter2D(
-            "Qubit drive Gain (a.u.)",
-            "Cavity Frequency (MHz)",
-            segment_kwargs={"flip": True},
+            "Cavity Frequency (MHz)", "Qubit drive Gain (a.u.)"
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -66,11 +87,11 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
                     ),
                     result_shape=(len(gains), len(fpts)),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    gains, fpts, bathreset_signal2real(np.asarray(ctx.get_data()))
+                    fpts, gains, bathreset_signal2real(ctx.data).T
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+            )
 
         # Cache results
         self.last_cfg = cfg
@@ -83,7 +104,7 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
         result: Optional[FreqGainResultType] = None,
         smooth: float = 1.0,
         find: Literal["min", "max"] = "min",
-    ) -> Tuple[float, float, plt.Figure]:
+    ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -91,7 +112,7 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
         gains, fpts, signals = result
 
         # Apply smoothing for peak finding
-        signals_smooth = gaussian_filter(signals, smooth)
+        signals_smooth: NDArray[np.complex128] = gaussian_filter(signals, smooth)  # type: ignore
 
         # Find peak in amplitude
         real_signals = bathreset_signal2real(signals_smooth)
@@ -104,7 +125,7 @@ class FreqGainExperiment(AbsExperiment[FreqGainResultType]):
             freq_opt = fpts[np.argmin(np.min(real_signals, axis=0))]
 
         fig, ax = plt.subplots()
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax.imshow(
             real_signals,

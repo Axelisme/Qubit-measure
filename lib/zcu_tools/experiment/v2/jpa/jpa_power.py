@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_power_in_dev_cfg, sweep2array
@@ -12,10 +13,12 @@ from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
-JPAPowerResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+JPAPowerResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def jpa_power_signal2real(signals: np.ndarray) -> np.ndarray:
+def jpa_power_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 

@@ -3,35 +3,42 @@ from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import Pulse, Readout, TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import (
+    Pulse,
+    Readout,
+    TwoToneProgram,
+    TwoToneProgramCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting.resonance import fit_edelay, get_proper_model
 
-from ..runner import HardTask, Runner
+from ..runner import HardTask, TaskConfig, run_task
 
-DispersiveResultType = Tuple[np.ndarray, np.ndarray]
+DispersiveResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-def dispersive_signal2real(signals: np.ndarray) -> np.ndarray:
+def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> DispersiveResultType:
+class DispersiveTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+
+
+class DispersiveExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: DispersiveTaskConfig) -> DispersiveResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Canonicalise sweep section to single-axis form
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        cfg["sweep"] = {
-            "ge": {"start": 0, "stop": 1.0, "expts": 2},
-            "freq": cfg["sweep"]["freq"],
-        }
+        cfg["sweep"] = {"ge": make_ge_sweep(), "freq": cfg["sweep"]["freq"]}
 
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
@@ -44,12 +51,9 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
         )
 
         with LivePlotter1D(
-            "Frequency (MHz)",
-            "Amplitude",
-            segment_kwargs=dict(num_lines=2),
-            disable=not progress,
+            "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         TwoToneProgram(soccfg, ctx.cfg).acquire(
@@ -58,11 +62,11 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
                     ),
                     result_shape=(2, len(fpts)),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    fpts, dispersive_signal2real(np.asarray(ctx.get_data()))
+                    fpts, dispersive_signal2real(ctx.data)
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+            )
 
         # Cache results
         self.last_cfg = cfg
@@ -72,7 +76,7 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
 
     def analyze(
         self, result: Optional[DispersiveResultType] = None
-    ) -> Tuple[float, float, plt.Figure]:
+    ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -100,7 +104,7 @@ class DispersiveExperiment(AbsExperiment[DispersiveResultType]):
         avg_kappa = (g_kappa + e_kappa) / 2  # average linewidth κ/2π
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         # Plot data and fits
         ax.plot(fpts, g_amps, marker=".", c="b", label="Ground state")

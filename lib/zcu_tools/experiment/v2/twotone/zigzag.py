@@ -5,15 +5,19 @@ from typing import Any, Callable, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
+    PulseCfg,
     Readout,
+    ReadoutCfg,
     Repeat,
     Reset,
     sweep2param,
@@ -21,81 +25,89 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..runner import HardTask, Runner, SoftTask, TaskContext
+from ..runner import HardTask, SoftTask, TaskConfig, TaskContext, run_task
+
+# (times, signals)
+ZigZagResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-def zigzag_signal2real(signals: np.ndarray) -> np.ndarray:
+def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # type: ignore
 
 
-ZigZagResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
+class ZigZagTaskConfig(TaskConfig, ModularProgramCfg):
+    X90_pulse: PulseCfg
+    X180_pulse: PulseCfg
+    readout: ReadoutCfg
 
 
-class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
-    """ZigZag oscillation by varying pi-pulse times following a pi/2-pulse."""
-
+class ZigZagExperiment(AbsExperiment):
     def run(
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: ZigZagTaskConfig,
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
-        progress: bool = True,
     ) -> ZigZagResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         X90_pulse = deepcopy(cfg["X90_pulse"])
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "times")
         times = sweep2array(cfg["sweep"]["times"], allow_array=True)  # predicted
 
         del cfg["sweep"]
 
-        def updateCfg(_: int, ctx: TaskContext, time: float) -> None:
-            ctx.cfg["zigzag_time"] = time
-
-        def measure_fn(
-            ctx: TaskContext, update_hook: Callable[[int, Any], None]
-        ) -> np.ndarray:
-            zigzag_time = ctx.cfg["zigzag_time"]
-
-            if repeat_on == "X90_pulse":
-                repeat_time = 2 * zigzag_time
-            elif repeat_on == "X180_pulse":
-                repeat_time = zigzag_time
-
-            return ModularProgramV2(
-                soccfg,
-                ctx.cfg,
-                modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse(name="X90_pulse", cfg=X90_pulse),
-                    Repeat(
-                        name="zigzag_loop",
-                        n=repeat_time,
-                        sub_module=Pulse(
-                            name=f"loop_{repeat_on}", cfg=ctx.cfg[repeat_on]
-                        ),
-                    ),
-                    Readout("readout", ctx.cfg["readout"]),
-                ],
-            ).acquire(soc, progress=False, callback=update_hook)
-
         with LivePlotter1D(
-            "Times", "Signal", segment_kwargs=dict(show_grid=True), disable=not progress
+            "Times", "Signal", segment_kwargs=dict(show_grid=True)
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="times",
-                    sweep_values=times,
-                    update_cfg_fn=updateCfg,
-                    sub_task=HardTask(measure_fn=measure_fn),
+                    sweep_values=times.tolist(),
+                    update_cfg_fn=lambda _, ctx, time: (
+                        ctx.env_dict.update(zigzag_time=time)
+                    ),
+                    sub_task=HardTask(
+                        measure_fn=lambda ctx, update_hook: (
+                            (zigzag_time := ctx.env_dict["zigzag_time"])
+                            and (
+                                repeat_time := 2 * zigzag_time
+                                if repeat_on == "X90_pulse"
+                                else zigzag_time
+                            )
+                            and (
+                                ModularProgramV2(
+                                    soccfg,
+                                    ctx.cfg,
+                                    modules=[
+                                        Reset(
+                                            "reset",
+                                            ctx.cfg.get("reset", {"type": "none"}),
+                                        ),
+                                        Pulse(name="X90_pulse", cfg=X90_pulse),
+                                        Repeat(
+                                            name="zigzag_loop",
+                                            n=repeat_time,
+                                            sub_module=Pulse(
+                                                name=f"loop_{repeat_on}",
+                                                cfg=ctx.cfg[repeat_on],
+                                            ),
+                                        ),
+                                        Readout("readout", ctx.cfg["readout"]),
+                                    ],
+                                ).acquire(soc, progress=False, callback=update_hook)
+                            )
+                        )
+                    ),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    times, zigzag_signal2real(np.asarray(ctx.get_data()))
+                    times, zigzag_signal2real(np.asarray(ctx.data))
                 ),
-            ).run(cfg)
+            )
             signals = np.asarray(signals)
 
         # record last cfg and result
@@ -133,10 +145,13 @@ class ZigZagExperiment(AbsExperiment[ZigZagResultType]):
         )
 
 
-ZigZagSweepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]  # (xs,times, signals)
+# (times, values, signals)
+ZigZagSweepResultType = Tuple[
+    NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
+class ZigZagSweepExperiment(AbsExperiment):
     SWEEP_MAP = {
         "gain": {"name": "Gain (a.u.)", "param_key": "gain"},
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},
@@ -146,24 +161,25 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: ZigZagTaskConfig,
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
-        progress: bool = True,
     ) -> ZigZagSweepResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         X90_pulse = deepcopy(cfg["X90_pulse"])
 
+        assert "sweep" in cfg
+        assert isinstance(cfg["sweep"], dict)
         time_sweep = cfg["sweep"].pop("times")
-        times = sweep2array(time_sweep, allow_array=True)  # predicted
+        times = sweep2array(time_sweep, allow_array=True).astype(np.int64)
 
         # extract sweep parameters
         x_key = list(cfg["sweep"].keys())[0]
         if x_key not in self.SWEEP_MAP:
             raise ValueError(f"Unsupported sweep key: {x_key}")
         x_info = self.SWEEP_MAP[x_key]
-        values = sweep2array(cfg["sweep"][x_key])  # predicted
+        values: NDArray[np.float64] = sweep2array(cfg["sweep"][x_key])  # predicted
 
         Pulse.set_param(
             cfg[repeat_on],
@@ -171,58 +187,56 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
             sweep2param(x_info["param_key"], cfg["sweep"][x_key]),
         )
 
-        def updateCfg(_: int, ctx: TaskContext, time: float) -> None:
-            ctx.cfg["zigzag_time"] = time
-
-        def measure_fn(
-            ctx: TaskContext, update_hook: Callable[[int, Any], None]
-        ) -> np.ndarray:
-            zigzag_time = ctx.cfg["zigzag_time"]
-
-            if repeat_on == "X90_pulse":
-                repeat_time = 2 * zigzag_time
-            elif repeat_on == "X180_pulse":
-                repeat_time = zigzag_time
-
-            return ModularProgramV2(
-                soccfg,
-                ctx.cfg,
-                modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse(name="X90_pulse", cfg=X90_pulse),
-                    Repeat(
-                        name="zigzag_loop",
-                        n=repeat_time,
-                        sub_module=Pulse(
-                            name=f"loop_{repeat_on}", cfg=ctx.cfg[repeat_on]
-                        ),
+        with LivePlotter2DwithLine(
+            "Times", x_info["name"], line_axis=1, num_lines=3
+        ) as viewer:
+            signals = run_task(
+                task=SoftTask(
+                    sweep_name="times",
+                    sweep_values=times.tolist(),
+                    update_cfg_fn=lambda _, ctx, time: ctx.env_dict.update(
+                        zigzag_time=time
                     ),
-                    Readout("readout", ctx.cfg["readout"]),
-                ],
-            ).acquire(soc, progress=False, callback=update_hook)
-
-        signals = Runner(
-            task=SoftTask(
-                sweep_name="times",
-                sweep_values=times,
-                update_cfg_fn=updateCfg,
-                sub_task=HardTask(
-                    measure_fn=measure_fn,
-                    result_shape=(len(values),),
+                    sub_task=HardTask(
+                        measure_fn=lambda ctx, update_hook: (
+                            (repeat_time := ctx.env_dict["zigzag_time"])
+                            and (
+                                repeat_time := 2 * repeat_time
+                                if repeat_on == "X90_pulse"
+                                else repeat_time
+                            )
+                            and (
+                                ModularProgramV2(
+                                    soccfg,
+                                    ctx.cfg,
+                                    modules=[
+                                        Reset(
+                                            "reset",
+                                            ctx.cfg.get("reset", {"type": "none"}),
+                                        ),
+                                        Pulse(name="X90_pulse", cfg=X90_pulse),
+                                        Repeat(
+                                            name="zigzag_loop",
+                                            n=repeat_time,
+                                            sub_module=Pulse(
+                                                name=f"loop_{repeat_on}",
+                                                cfg=ctx.cfg[repeat_on],
+                                            ),
+                                        ),
+                                        Readout("readout", ctx.cfg["readout"]),
+                                    ],
+                                ).acquire(soc, progress=False, callback=update_hook)
+                            )
+                        ),
+                        result_shape=(len(values),),
+                    ),
                 ),
-            ),
-            liveplotter=LivePlotter2DwithLine(
-                "Times",
-                x_info["name"],
-                line_axis=1,
-                num_lines=3,
-                disable=not progress,
-            ),
-            update_hook=lambda viewer, ctx: viewer.update(
-                times, values, zigzag_signal2real(np.asarray(ctx.get_data()))
-            ),
-        ).run(cfg)
-        signals = np.asarray(signals)
+                init_cfg=cfg,
+                update_hook=lambda ctx: viewer.update(
+                    times, values, zigzag_signal2real(np.asarray(ctx.data))
+                ),
+            )
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -232,10 +246,11 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
 
     def analyze(
         self,
-        result: Optional[ZigZagResultType] = None,
+        result: Optional[ZigZagSweepResultType] = None,
     ) -> Tuple[float, float]:
         if result is None:
             result = self.last_result
+        assert result is not None, "no result found"
 
         times, values, signals = result
 
@@ -277,7 +292,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
     def save(
         self,
         filepath: str,
-        result: Optional[ZigZagResultType] = None,
+        result: Optional[ZigZagSweepResultType] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/zigzag_sweep",
         **kwargs,
@@ -287,6 +302,7 @@ class ZigZagSweepExperiment(AbsExperiment[ZigZagSweepResultType]):
         assert result is not None, "no result found"
 
         times, values, signals = result
+
         save_data(
             filepath=filepath,
             x_info={"name": "Times", "unit": "a.u.", "values": times},

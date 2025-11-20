@@ -1,47 +1,56 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     Delay,
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
+    PulseCfg,
     Readout,
+    ReadoutCfg,
     Reset,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
-
-def t2echo_signal2real(signals: np.ndarray) -> np.ndarray:
-    return rotate2real(signals).real  # type: ignore
-
-
-T2EchoResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
+# (times, signals)
+T2EchoResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
+def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    return rotate2real(signals).real
+
+
+class T2EchoTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi2_pulse: PulseCfg
+    pi_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T2EchoExperiment(AbsExperiment):
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        detune: float = 0.0,
-        progress: bool = True,
+        self, soc, soccfg, cfg: T2EchoTaskConfig, *, detune: float = 0.0
     ) -> T2EchoResultType:
         cfg = deepcopy(cfg)
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
         ts = sweep2array(cfg["sweep"]["length"])
@@ -49,12 +58,9 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
         t2e_spans = sweep2param("length", cfg["sweep"]["length"])
 
         with LivePlotter1D(
-            "Time (us)",
-            "Amplitude",
-            segment_kwargs={"title": "T2 Echo"},
-            disable=not progress,
+            "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Echo"}
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -80,14 +86,12 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
                     ),
                     result_shape=(len(ts),),
                 ),
-                update_hook=lambda ctx: viewer.update(
-                    ts, t2echo_signal2real(np.asarray(ctx.get_data()))
-                ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+                init_cfg=cfg,
+                update_hook=lambda ctx: viewer.update(ts, t2echo_signal2real(ctx.data)),
+            )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = dict(cfg)
         self.last_result = (ts, signals)
 
         return ts, signals
@@ -96,19 +100,15 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
         self,
         result: Optional[T2EchoResultType] = None,
         *,
-        max_contrast: bool = True,
         fit_method: Literal["fringe", "decay"] = "decay",
-    ) -> Tuple[float, float, float, float, plt.Figure]:
+    ) -> Tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         xs, signals = result
 
-        if max_contrast:
-            real_signals = rotate2real(signals).real
-        else:
-            real_signals = np.abs(signals)
+        real_signals = rotate2real(signals).real
 
         if fit_method == "fringe":
             t2e, t2eerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
@@ -122,7 +122,7 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
             raise ValueError(f"Unknown fit_method: {fit_method}")
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
@@ -137,7 +137,7 @@ class T2EchoExperiment(AbsExperiment[T2EchoResultType]):
             raise ValueError(f"Unknown fit_method: {fit_method}")
 
         ax.set_xlabel("Time (us)")
-        ax.set_ylabel("Signal Real (a.u.)" if max_contrast else "Magnitude (a.u.)")
+        ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
 
         fig.tight_layout()

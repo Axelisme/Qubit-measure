@@ -1,9 +1,11 @@
-from typing import Any, Dict, List, Union
+from typing import List, Union
 
 from qick.asm_v2 import AsmInst, Macro, QickParam, QickSweep1D
 
+from zcu_tools.program import SweepCfg
 
-def sweep2param(name: str, sweep: Dict[str, Any]) -> QickParam:
+
+def sweep2param(name: str, sweep: SweepCfg) -> QickParam:
     """
     Convert formatted sweep dictionary to a QickSweep1D parameter.
 
@@ -17,8 +19,6 @@ def sweep2param(name: str, sweep: Dict[str, Any]) -> QickParam:
     Returns:
         QickSweep1D: Qick v2 sweep parameter object
     """
-    if not isinstance(sweep, dict):
-        raise ValueError("To convert sweep to QickParam, sweep must be a dict")
 
     # convert formatted sweep to qick v2 sweep param
     return QickSweep1D(name, sweep["start"], sweep["stop"])

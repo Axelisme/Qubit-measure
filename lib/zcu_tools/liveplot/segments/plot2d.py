@@ -1,11 +1,11 @@
 from typing import Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.image import AxesImage, NonUniformImage
 from matplotlib.ticker import ScalarFormatter
+from numpy.typing import NDArray
 
-from .base import AbsSegment
+from .base import AbsSegment, Axes
 
 
 class Plot2DSegment(AbsSegment):
@@ -19,7 +19,7 @@ class Plot2DSegment(AbsSegment):
 
         self.im: Optional[AxesImage] = None
 
-    def init_ax(self, ax: plt.Axes) -> None:
+    def init_ax(self, ax: Axes) -> None:
         if self.flip:
             ax.set_xlabel(self.ylabel)
             ax.set_ylabel(self.xlabel)
@@ -42,10 +42,10 @@ class Plot2DSegment(AbsSegment):
 
     def update(
         self,
-        ax: plt.Axes,
-        xs: np.ndarray,
-        ys: np.ndarray,
-        signals: np.ndarray,
+        ax: Axes,
+        xs: NDArray[np.float64],
+        ys: NDArray[np.float64],
+        signals: NDArray[np.float64],
         title: Optional[str] = None,
     ) -> None:
         if self.im is None:
@@ -54,18 +54,18 @@ class Plot2DSegment(AbsSegment):
         dx = 0.5 * (xs[-1] - xs[0]) / (len(xs) - 1)
         dy = 0.5 * (ys[-1] - ys[0]) / (len(ys) - 1)
         if self.flip:
-            self.im.set_extent([ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx])
-            self.im.set_data(signals.astype(np.float64))
+            self.im.set_extent((ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx))
+            self.im.set_data(signals)
         else:
-            self.im.set_extent([xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy])
-            self.im.set_data(signals.T.astype(np.float64))
+            self.im.set_extent((xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy))
+            self.im.set_data(signals.T)
 
         self.im.autoscale()
 
         if title is not None:
             ax.set_title(title)
 
-    def clear(self, ax: plt.Axes) -> None:
+    def clear(self, ax: Axes) -> None:
         ax.clear()
         self.im = None
 
@@ -79,9 +79,9 @@ class PlotNonUniform2DSegment(AbsSegment):
         self.title = title
         self.flip = flip
 
-        self.im: Optional[AxesImage] = None
+        self.im: Optional[NonUniformImage] = None
 
-    def init_ax(self, ax: plt.Axes) -> None:
+    def init_ax(self, ax: Axes) -> None:
         if self.flip:
             ax.set_xlabel(self.ylabel)
             ax.set_ylabel(self.xlabel)
@@ -97,10 +97,10 @@ class PlotNonUniform2DSegment(AbsSegment):
 
     def update(
         self,
-        ax: plt.Axes,
-        xs: np.ndarray,
-        ys: np.ndarray,
-        signals: np.ndarray,
+        ax: Axes,
+        xs: NDArray[np.float64],
+        ys: NDArray[np.float64],
+        signals: NDArray[np.float64],
         title: Optional[str] = None,
     ) -> None:
         if self.im is None:
@@ -109,10 +109,10 @@ class PlotNonUniform2DSegment(AbsSegment):
         dx = 0.5 * (xs[-1] - xs[0]) / (len(xs) - 1)
         dy = 0.5 * (ys[-1] - ys[0]) / (len(ys) - 1)
         if self.flip:
-            self.im.set_extent([ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx])
+            self.im.set_extent((ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx))
             self.im.set_data(ys, xs, signals)
         else:
-            self.im.set_extent([xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy])
+            self.im.set_extent((xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy))
             self.im.set_data(xs, ys, signals.T)
 
         self.im.autoscale()
@@ -120,6 +120,6 @@ class PlotNonUniform2DSegment(AbsSegment):
         if title is not None:
             ax.set_title(title)
 
-    def clear(self, ax: plt.Axes) -> None:
+    def clear(self, ax: Axes) -> None:
         ax.clear()
         self.im = None

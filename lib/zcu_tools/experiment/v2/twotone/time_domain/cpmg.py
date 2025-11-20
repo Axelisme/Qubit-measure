@@ -1,22 +1,36 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner, SoftTask, TaskContext
+from zcu_tools.experiment.v2.runner import (
+    HardTask,
+    SoftTask,
+    TaskConfig,
+    TaskContext,
+    run_task,
+)
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     Delay,
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
+    PulseCfg,
     Readout,
+    ReadoutCfg,
     Repeat,
     Reset,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
@@ -24,25 +38,33 @@ from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
 
-def cpmg_signal2real(signals: np.ndarray) -> np.ndarray:
+def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     real_signals = rotate2real(signals).real
     max_vals = np.max(real_signals, axis=1, keepdims=True)
     min_vals = np.min(real_signals, axis=1, keepdims=True)
     return (real_signals - min_vals) / (max_vals - min_vals)
 
 
-CPMGResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]  # (times, Ts, signals)
+CPMGResultType = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
-class CPMGExperiment(AbsExperiment[CPMGResultType]):
+class CPMGTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi2_pulse: PulseCfg
+    pi_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class CPMGExperiment(AbsExperiment):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
+        self, soc, soccfg, cfg: CPMGTaskConfig, *, progress: bool = True
     ) -> CPMGResultType:
         cfg = deepcopy(cfg)
 
+        assert "sweep" in cfg
+        assert isinstance(cfg["sweep"], dict)
         times_sweep = cfg["sweep"]["times"]
         len_sweep = cfg["sweep"]["length"]
-
         cfg["sweep"].pop("times")
 
         times = sweep2array(times_sweep, allow_array=True)
@@ -53,12 +75,7 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
 
-        def updateCfg(_: int, ctx: TaskContext, time: float) -> None:
-            ctx.cfg["time"] = time
-
-        def measure_fn(
-            ctx: TaskContext, update_hook: Callable[[int, Any], None]
-        ) -> np.ndarray:
+        def measure_fn(ctx: TaskContext, update_hook: Callable[[int, Any], None]):
             interval = cpmg_spans / ctx.cfg["time"]
             return ModularProgramV2(
                 soccfg,
@@ -83,27 +100,20 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
             ).acquire(soc, progress=False, callback=update_hook)
 
         with LivePlotter2DwithLine(
-            "Number of Pi",
-            "Time (us)",
-            line_axis=1,
-            num_lines=2,
-            title="CPMG",
-            disable=not progress,
+            "Number of Pi", "Time (us)", line_axis=1, num_lines=2, title="CPMG"
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="times",
-                    sweep_values=times,
-                    update_cfg_fn=updateCfg,
-                    sub_task=HardTask(
-                        measure_fn=measure_fn,
-                        result_shape=(len(ts),),
-                    ),
+                    sweep_values=times.tolist(),
+                    update_cfg_fn=lambda _, ctx, time: ctx.env_dict.update(time=time),
+                    sub_task=HardTask(measure_fn=measure_fn, result_shape=(len(ts),)),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    times, ts, cpmg_signal2real(np.asarray(ctx.get_data()))
+                    times, ts, cpmg_signal2real(np.asarray(ctx.data))
                 ),
-            ).run(cfg)
+            )
             signals = np.asarray(signals)
 
         # record last cfg and result
@@ -114,7 +124,7 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
 
     def analyze(
         self, result: Optional[CPMGResultType] = None
-    ) -> Tuple[np.ndarray, np.ndarray, plt.Figure]:
+    ) -> Tuple[np.ndarray, np.ndarray, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -150,9 +160,9 @@ class CPMGExperiment(AbsExperiment[CPMGResultType]):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
 
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-        assert isinstance(fig, plt.Figure)
-        assert isinstance(ax1, plt.Axes)
-        assert isinstance(ax2, plt.Axes)
+        assert isinstance(fig, Figure)
+        assert isinstance(ax1, Axes)
+        assert isinstance(ax2, Axes)
 
         ax1.errorbar(times, t2s, yerr=t2errs, label="Fitting T2")
         ax1.set_ylabel("T2 (us)")

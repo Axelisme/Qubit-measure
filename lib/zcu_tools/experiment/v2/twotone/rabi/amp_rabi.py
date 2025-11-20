@@ -1,32 +1,38 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneProgram, TwoToneProgramCfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
-
-def rabi_signal2real(signals: np.ndarray) -> np.ndarray:
-    return rotate2real(signals).real  # type: ignore
-
-
-AmpRabiResultType = Tuple[np.ndarray, np.ndarray]  # (amps, signals)
+# (amps, signals)
+AmpRabiResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> AmpRabiResultType:
+def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    return rotate2real(signals).real
+
+
+class AmpRabiTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+
+
+class AmpRabiExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: AmpRabiTaskConfig) -> AmpRabiResultType:
         cfg = deepcopy(cfg)
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
 
         amps = sweep2array(cfg["sweep"]["gain"])  # predicted
@@ -34,7 +40,7 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
         cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
 
         with LivePlotter1D("Pulse gain", "Amplitude") as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         TwoToneProgram(soccfg, ctx.cfg).acquire(
@@ -43,11 +49,9 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
                     ),
                     result_shape=(len(amps),),
                 ),
-                update_hook=lambda ctx: viewer.update(
-                    amps, rabi_signal2real(np.asarray(ctx.get_data()))
-                ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+                init_cfg=cfg,
+                update_hook=lambda ctx: viewer.update(amps, rabi_signal2real(ctx.data)),
+            )
 
         self.last_cfg = cfg
         self.last_result = (amps, signals)
@@ -56,7 +60,7 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
 
     def analyze(
         self, result: Optional[AmpRabiResultType] = None
-    ) -> Tuple[float, float, plt.Figure]:
+    ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -69,7 +73,7 @@ class AmpRabiExperiment(AbsExperiment[AmpRabiResultType]):
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax.plot(pdrs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(pdrs, y_fit, label="fit")

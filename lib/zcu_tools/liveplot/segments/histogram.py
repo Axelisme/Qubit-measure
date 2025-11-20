@@ -1,9 +1,9 @@
 from typing import Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 
-from .base import AbsSegment
+from .base import AbsSegment, Axes
 
 
 class HistogramSegment(AbsSegment):
@@ -17,7 +17,7 @@ class HistogramSegment(AbsSegment):
 
         self.hist = None
 
-    def init_ax(self, ax: plt.Axes) -> None:
+    def init_ax(self, ax: Axes) -> None:
         ax.set_xlabel(self.xlabel)
         ax.set_ylabel(self.ylabel)
         if self.title is not None:
@@ -25,8 +25,8 @@ class HistogramSegment(AbsSegment):
 
     def update(
         self,
-        ax: plt.Axes,
-        signals: np.ndarray,
+        ax: Axes,
+        signals: NDArray[np.float64],
         title: Optional[str] = None,
     ) -> None:
         if title is not None:
@@ -41,7 +41,7 @@ class HistogramSegment(AbsSegment):
             ax.set_title(self.title)
 
         # Create histogram from signals data
-        ax.hist(signals.astype(np.float64), bins=self.bins, alpha=0.7)
+        ax.hist(signals, bins=self.bins, alpha=0.7)
 
-    def clear(self, ax: plt.Axes) -> None:
+    def clear(self, ax: Axes) -> None:
         ax.clear()

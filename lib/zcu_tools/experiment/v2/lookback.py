@@ -2,28 +2,32 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram
+from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg
 from zcu_tools.utils.datasaver import save_data
 
-from .runner import HardTask, Runner
+from .runner import HardTask, TaskConfig, run_task
 
-LookbackResultType = Tuple[np.ndarray, np.ndarray]
+LookbackResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-def lookback_signal2real(signals: np.ndarray) -> np.ndarray:
+class LookbackTaskConfig(TaskConfig, OneToneProgramCfg): ...
+
+
+def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class LookbackExperiment(AbsExperiment[LookbackResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> LookbackResultType:
+class LookbackExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: LookbackTaskConfig) -> LookbackResultType:
         cfg = deepcopy(cfg)
 
         if cfg.setdefault("reps", 1) != 1:
@@ -32,27 +36,25 @@ class LookbackExperiment(AbsExperiment[LookbackResultType]):
 
         prog = OneToneProgram(soccfg, cfg)
         Ts = prog.get_time_axis(ro_index=0) + cfg["readout"]["ro_cfg"]["trig_offset"]
+        assert isinstance(Ts, np.ndarray)
 
         with LivePlotter1D("Time (us)", "Amplitude") as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         OneToneProgram(soccfg, ctx.cfg).acquire_decimated(
                             soc, progress=False, callback=update_hook
                         )
                     ),
-                    raw2signal_fn=lambda x: x[0].dot([1, 1j]),
-                    result_shape=(len(Ts),),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    Ts,
-                    lookback_signal2real(np.asarray(ctx.get_data())),  # type: ignore
+                    Ts, lookback_signal2real(ctx.data)
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)  # type: ignore
+            )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = dict(cfg)
         self.last_result = (Ts, signals)
 
         return Ts, signals

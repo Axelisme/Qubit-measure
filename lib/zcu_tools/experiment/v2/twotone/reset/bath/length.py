@@ -1,29 +1,48 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
 # (lens, signals)
-LengthResultType = Tuple[np.ndarray, np.ndarray]
+LengthResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-def bathreset_signal2real(signals: np.ndarray) -> np.ndarray:
+def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class LengthExperiment(AbsExperiment[LengthResultType]):
+class LengthTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    init_pulse: PulseCfg
+    tested_reset: ResetCfg
+    readout: ReadoutCfg
+
+
+class LengthExperiment(AbsExperiment):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], detune: float = 0.0
+        self, soc, soccfg, cfg: LengthTaskConfig, detune: float = 0.0
     ) -> LengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -31,6 +50,7 @@ class LengthExperiment(AbsExperiment[LengthResultType]):
         if cfg["tested_reset"]["type"] != "bath":
             raise ValueError("This experiment only supports bath reset")
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
         lens = sweep2array(cfg["sweep"]["length"])  # predicted frequency points
@@ -40,7 +60,7 @@ class LengthExperiment(AbsExperiment[LengthResultType]):
         Reset.set_param(cfg["tested_reset"], "pi2_phase", 360 * detune * len_spans)
 
         with LivePlotter1D("Length (us)", "Signal (a.u.)") as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -56,11 +76,11 @@ class LengthExperiment(AbsExperiment[LengthResultType]):
                     ),
                     result_shape=(len(lens),),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    lens, bathreset_signal2real(np.asarray(ctx.get_data()))
+                    lens, bathreset_signal2real(ctx.data)
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+            )
 
         # Cache results
         self.last_cfg = cfg

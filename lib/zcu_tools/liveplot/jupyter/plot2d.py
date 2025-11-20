@@ -1,7 +1,8 @@
 from typing import Literal, Optional, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from numpy.typing import NDArray
 
 from ..base import AbsLivePlotter
 from ..segments import Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment
@@ -30,9 +31,9 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
 
     def update(
         self,
-        xs: np.ndarray,
-        ys: np.ndarray,
-        signals: np.ndarray,
+        xs: NDArray[np.float64],
+        ys: NDArray[np.float64],
+        signals: NDArray[np.float64],
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:
@@ -47,11 +48,11 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
             if refresh:
                 self._refresh_while_lock()
 
-    def get_ax(self) -> plt.Axes:
+    def get_ax(self) -> Axes:
         return self.axs[0][0]
 
     def get_segment(self) -> Union[Plot2DSegment, PlotNonUniform2DSegment]:
-        return self.segments[0][0]
+        return self.segments[0][0]  # type: ignore
 
 
 class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
@@ -92,9 +93,9 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
 
     def update(
         self,
-        xs: np.ndarray,
-        ys: np.ndarray,
-        signals: np.ndarray,
+        xs: NDArray[np.float64],
+        ys: NDArray[np.float64],
+        signals: NDArray[np.float64],
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:
@@ -103,6 +104,8 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
 
         ax2d, ax1d = self.get_ax("2d"), self.get_ax("1d")
         segment2d, segment1d = self.get_segment("2d"), self.get_segment("1d")
+        assert isinstance(segment2d, Plot2DSegment)
+        assert isinstance(segment1d, Plot1DSegment)
 
         # use the last non-nan line as current line
         if np.all(np.isnan(signals)):
@@ -128,7 +131,7 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
             if refresh:
                 self._refresh_while_lock()
 
-    def get_ax(self, name: Literal["2d", "1d"]) -> plt.Axes:
+    def get_ax(self, name: Literal["2d", "1d"]) -> Axes:
         ax_map = ["2d", "1d"]
         return self.axs[0][ax_map.index(name)]
 
@@ -136,4 +139,4 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         self, name: Literal["2d", "1d"]
     ) -> Union[Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment]:
         segment_map = ["2d", "1d"]
-        return self.segments[0][segment_map.index(name)]
+        return self.segments[0][segment_map.index(name)]  # type: ignore

@@ -2,22 +2,37 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple, Union
+from typing import Any, Dict, Literal, Optional, Tuple, cast
 
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 
-from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import make_ge_sweep
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext, run_task
+from zcu_tools.program.v2 import (
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    Reset,
+    TwoToneProgramCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 
 # (signals)
-SingleShotResultType = Tuple[np.ndarray]
+SingleShotResultType = NDArray[np.complex128]
 
 
-class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
+class SingleShotTaskConfig(TaskConfig, TwoToneProgramCfg):
+    probe_pulse: PulseCfg
+    shots: int
+
+
+class SingleShotExperiment(AbsExperiment):
     """Single-shot measurement experiment.
 
     Performs single-shot readout measurements to characterize the fidelity of
@@ -32,9 +47,7 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
     The measurement produces raw IQ data for statistical analysis of state discrimination.
     """
 
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> SingleShotResultType:
+    def run(self, soc, soccfg, cfg: SingleShotTaskConfig) -> SingleShotResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         # Validate and setup configuration
@@ -50,45 +63,55 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
             warnings.warn("sweep will be overwritten by singleshot measurement")
 
         # Create ge sweep: 0 (ground) and full gain (excited)
-        cfg["sweep"] = {"ge": {"start": 0.0, "stop": 1.0, "expts": 2}}
+        cfg["sweep"] = {"ge": make_ge_sweep()}
 
         # Set qubit pulse gain from sweep parameter
         Pulse.set_param(
             cfg["probe_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
 
-        # Set flux device
-        GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+        def measure_fn(ctx: TaskContext, _):
+            prog = ModularProgramV2(
+                soccfg,
+                ctx.cfg,
+                modules=[
+                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                    Pulse("init_pulse", ctx.cfg.get("init_pulse")),
+                    Pulse("probe_pulse", ctx.cfg["probe_pulse"]),
+                    Readout("readout", ctx.cfg["readout"]),
+                ],
+            )
+            prog.acquire(soc, progress=True)
 
-        # Create program and acquire data
-        prog = ModularProgramV2(
-            soccfg,
-            cfg,
-            modules=[
-                Reset("reset", cfg.get("reset", {"type": "none"})),
-                Pulse("init_pulse", cfg.get("init_pulse")),
-                Pulse("probe_pulse", cfg["probe_pulse"]),
-                Readout("readout", cfg["readout"]),
-            ],
+            acc_buf = prog.get_raw()
+            assert acc_buf is not None
+
+            length = cast(int, list(prog.ro_chs.values())[0]["length"])
+            avgiq = acc_buf[0] / length  # (reps, *sweep, 1, 2)
+
+            return avgiq
+
+        def raw2signal_fn(avgiq: NDArray[np.float64]) -> NDArray[np.complex128]:
+            i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, *sweep)
+            signals = np.array(i0 + 1j * q0)  # (reps, *sweep)
+
+            # Swap axes to (*sweep, reps) format: (ge, shots)
+            signals = np.swapaxes(signals, 0, -1)
+
+            return signals
+
+        signals = run_task(
+            task=HardTask(
+                measure_fn=measure_fn,
+                raw2signal_fn=raw2signal_fn,
+                result_shape=(2, cfg["shots"]),
+            ),
+            init_cfg=cfg,
         )
-        prog.acquire(soc, progress=progress)
-
-        # Get raw IQ data
-        acc_buf = prog.get_raw()
-        assert acc_buf is not None, "acc_buf should not be None"
-
-        avgiq = (
-            acc_buf[0] / list(prog.ro_chs.values())[0]["length"]
-        )  # (reps, *sweep, 1, 2)
-        i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, *sweep)
-        signals = np.array(i0 + 1j * q0)  # (reps, *sweep)
-
-        # Swap axes to (*sweep, reps) format: (ge, shots)
-        signals = np.swapaxes(signals, 0, -1)
 
         # Cache results
         self.last_cfg = cfg
-        self.last_result = (signals,)
+        self.last_result = signals
 
         return signals
 
@@ -97,14 +120,12 @@ class SingleShotExperiment(AbsExperiment[SingleShotResultType]):
         result: Optional[SingleShotResultType] = None,
         backend: Literal["center", "regression", "pca"] = "pca",
         **kwargs,
-    ) -> Tuple[float, float, float, np.ndarray, dict, plt.Figure]:
+    ) -> Tuple[float, float, float, np.ndarray, dict, Figure]:
         if result is None:
             result = self.last_result
-        assert result is not None, (
-            "No measurement data available. Run experiment first."
-        )
+        assert result is not None, "no result found"
 
-        (signals,) = result
+        signals = result
 
         return singleshot_ge_analysis(signals, backend=backend, **kwargs)
 

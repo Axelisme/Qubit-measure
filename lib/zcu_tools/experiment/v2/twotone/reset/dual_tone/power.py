@@ -1,25 +1,47 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2D
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 
 # (pdrs1, pdrs2, signals_2d)
-DualToneResetPowerResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+DualToneResetPowerResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> DualToneResetPowerResultType:
+class PowerTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    init_pulse: PulseCfg
+    tested_reset: ResetCfg
+    readout: ReadoutCfg
+
+
+class PowerExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: PowerTaskConfig) -> DualToneResetPowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -27,6 +49,7 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
             raise ValueError("This experiment only supports dual-tone reset")
 
         # Ensure gain1 is the outer loop for better visualization
+        assert "sweep" in cfg
         cfg["sweep"] = {
             "gain1": cfg["sweep"]["gain1"],
             "gain2": cfg["sweep"]["gain2"],
@@ -49,7 +72,7 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
             return np.abs(signals - signals[ref_i, ref_j])
 
         with LivePlotter2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -65,11 +88,11 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
                     ),
                     result_shape=(len(pdrs1), len(pdrs2)),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    pdrs1, pdrs2, dual_reset_pdr_signal2real(np.asarray(ctx.get_data()))
+                    pdrs1, pdrs2, dual_reset_pdr_signal2real(ctx.data)
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+            )
 
         # Cache results
         self.last_cfg = cfg
@@ -84,7 +107,7 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
         smooth: float = 1.0,
         xname: Optional[str] = None,
         yname: Optional[str] = None,
-    ) -> Tuple[float, float, plt.Figure]:
+    ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -108,7 +131,7 @@ class PowerExperiment(AbsExperiment[DualToneResetPowerResultType]):
             amp2D = np.mean(amp2D) - amp2D
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax.imshow(
             amp2D.T,

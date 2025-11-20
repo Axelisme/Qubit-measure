@@ -12,6 +12,7 @@ from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramV2,
@@ -60,7 +61,7 @@ class PlotterDictType(TypedDict, closed=True):
 class T1MeasurementTask(MeasurementTask[T1Result, PlotterDictType]):
     def __init__(
         self,
-        length_sweep: dict,
+        length_sweep: SweepCfg,
         cfg_maker: Callable[[TaskContext, ModuleLibrary], T1Cfg],
         earlystop_snr: Optional[float] = None,
     ) -> None:

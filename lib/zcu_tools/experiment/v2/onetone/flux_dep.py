@@ -4,57 +4,53 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
-from zcu_tools.program.v2 import OneToneProgram, Readout, sweep2param
+from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
-from ..runner import HardTask, Runner, SoftTask
+from ..runner import HardTask, SoftTask, TaskConfig, run_task
 
-FluxDepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+FluxDepResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
+def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return minus_background(np.abs(signals), axis=1)
 
 
-class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> FluxDepResultType:
+class FluxDepTaskConfig(TaskConfig, OneToneProgramCfg): ...
+
+
+class FluxDepExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: FluxDepTaskConfig) -> FluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
         fpt_sweep = cfg["sweep"]["freq"]
         flx_sweep = cfg["sweep"]["flux"]
 
         # remove flux from sweep dict, will be handled by soft loop
         cfg["sweep"] = {"freq": fpt_sweep}
 
-        dev_values = sweep2array(flx_sweep, allow_array=True)
+        dev_values: NDArray[np.float64] = sweep2array(flx_sweep, allow_array=True)
         fpts = sweep2array(fpt_sweep)  # predicted frequency points
 
         Readout.set_param(cfg["readout"], "freq", sweep2param("freq", fpt_sweep))
 
         with LivePlotter2DwithLine(
-            "Flux device value",
-            "Frequency (MHz)",
-            line_axis=1,
-            num_lines=5,
-            disable=not progress,
+            "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=5
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="flux",
-                    sweep_values=dev_values,
+                    sweep_values=dev_values.tolist(),
                     update_cfg_fn=lambda i, ctx, flx: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], flx
                     ),
@@ -67,13 +63,14 @@ class FluxDepExperiment(AbsExperiment[FluxDepResultType]):
                         result_shape=(len(fpts),),
                     ),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
                     dev_values,
                     fpts,
-                    fluxdep_signal2real(np.asarray(ctx.get_data())),  # type: ignore
+                    fluxdep_signal2real(np.asarray(ctx.data)),
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)  # type: ignore
+            )
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg

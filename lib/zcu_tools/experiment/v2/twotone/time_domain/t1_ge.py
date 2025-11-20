@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     Delay,
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
+    PulseCfg,
     Readout,
+    ReadoutCfg,
     Reset,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
@@ -23,22 +30,27 @@ from zcu_tools.utils.fitting import fit_ge_decay
 from zcu_tools.utils.process import rotate2real
 
 
-def t1_signal2real(signals: np.ndarray) -> np.ndarray:
+def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # (ge, times)
 
 
-T1GEResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
+# (times, signals)
+T1GEResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class T1GEExperiment(AbsExperiment[T1GEResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1GEResultType:
+class T1GETaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T1GEExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: T1GETaskConfig) -> T1GEResultType:
         cfg = deepcopy(cfg)
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        cfg["sweep"] = {
-            "ge": make_ge_sweep(),
-            "length": cfg["sweep"]["length"],
-        }
+        cfg["sweep"] = {"ge": make_ge_sweep(), "length": cfg["sweep"]["length"]}
 
         ts = sweep2array(cfg["sweep"]["length"])
 
@@ -51,7 +63,7 @@ class T1GEExperiment(AbsExperiment[T1GEResultType]):
             "Amplitude",
             segment_kwargs={"title": "T1 relaxation", "num_lines": 2},
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -72,11 +84,9 @@ class T1GEExperiment(AbsExperiment[T1GEResultType]):
                     ),
                     result_shape=(2, len(ts)),
                 ),
-                update_hook=lambda ctx: viewer.update(
-                    ts, t1_signal2real(np.asarray(ctx.get_data()))
-                ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+                init_cfg=cfg,
+                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+            )
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -86,7 +96,7 @@ class T1GEExperiment(AbsExperiment[T1GEResultType]):
 
     def analyze(
         self, result: Optional[T1GEResultType] = None, *, share_t1: bool = True
-    ) -> Tuple[float, float, plt.Figure]:
+    ) -> Tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -101,7 +111,7 @@ class T1GEExperiment(AbsExperiment[T1GEResultType]):
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax.plot(times, g_signals, label="Ground", color="blue")
         ax.plot(times, e_signals, label="Excited", color="red")

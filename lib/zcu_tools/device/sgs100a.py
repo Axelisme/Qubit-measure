@@ -1,5 +1,4 @@
-import warnings
-from typing import Any, Dict, Literal
+from typing import Literal
 
 from .base import BaseDevice, DeviceInfo
 
@@ -7,10 +6,16 @@ STATUS_MAP = {"on": "1", "off": "0"}
 STATUS_MAP_INV = {"1": "on", "0": "off"}
 
 
-class RohdeSchwarzSGS100A(BaseDevice):
-    def get_output(self) -> str:
-        result = self.query(":OUTPut?")
-        return STATUS_MAP_INV.get(result, f"unknown_{result}")
+class RohdeSchwarzSGS100AInfo(DeviceInfo):
+    output: Literal["on", "off"]
+    IQ: Literal["on", "off"]
+    freq_Hz: float
+    power_dBm: float
+
+
+class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
+    def get_output(self) -> Literal["on", "off"]:
+        return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
 
     def set_output(self, status: Literal["on", "off"]) -> None:
         self.write(f":OUTPut {STATUS_MAP[status]}")
@@ -25,9 +30,8 @@ class RohdeSchwarzSGS100A(BaseDevice):
 
     # ==========================================================================#
 
-    def get_IQ_state(self) -> str:
-        result = self.query(":IQ:STAT?")
-        return STATUS_MAP_INV.get(result, f"unknown_{result}")
+    def get_IQ_state(self) -> Literal["on", "off"]:
+        return STATUS_MAP_INV[self.query(":IQ:STAT?")]  # type: ignore
 
     def set_IQ_state(self, state: Literal["on", "off"]) -> None:
         self.write(f":IQ:STAT {STATUS_MAP[state]}")
@@ -37,20 +41,6 @@ class RohdeSchwarzSGS100A(BaseDevice):
 
     def IQ_off(self) -> None:
         self.set_IQ_state("off")
-
-    # ==========================================================================#
-
-    def reset(self) -> None:
-        """Resets the instrument (SCPI: *RST)"""
-        print("Resetting instrument...")
-        self.write("*RST")
-
-    def run_self_tests(self) -> str:
-        """Runs the instrument self-tests (SCPI: *TST?)"""
-        print("Running self-tests...")
-        result = self.query("*TST?")
-        print(f"Self-test result: {result}")
-        return result
 
     # ==========================================================================#
 
@@ -80,18 +70,20 @@ class RohdeSchwarzSGS100A(BaseDevice):
 
     # ==========================================================================#
 
-    def _setup(self, cfg: Dict[str, Any], *, progress: bool = True) -> None:
+    def _setup(self, cfg: RohdeSchwarzSGS100AInfo, *, progress: bool = True) -> None:
         self.set_output(cfg["output"])
         self.set_IQ_state(cfg["IQ"])
         self.set_frequency(cfg["freq_Hz"])
         self.set_power(cfg["power_dBm"])
 
-    def get_info(self) -> DeviceInfo:
-        return {
-            "type": self.__class__.__name__,
-            "address": self.address,
-            "output": self.get_output(),
-            "IQ": self.get_IQ_state(),
-            "freq_Hz": self.get_frequency(),
-            "power_dBm": self.get_power(),
-        }
+    def get_info(self) -> RohdeSchwarzSGS100AInfo:
+        return RohdeSchwarzSGS100AInfo(
+            {
+                "type": self.__class__.__name__,
+                "address": self.address,
+                "output": self.get_output(),
+                "IQ": self.get_IQ_state(),
+                "freq_Hz": self.get_frequency(),
+                "power_dBm": self.get_power(),
+            }
+        )

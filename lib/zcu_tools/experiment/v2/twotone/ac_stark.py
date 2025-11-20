@@ -5,45 +5,58 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ..runner import HardTask, Runner, SoftTask, TaskContext
+from ..runner import HardTask, SoftTask, TaskConfig, TaskContext, run_task
 
 # (amps, freqs, signals2D)
-AcStarkResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+AcStarkResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def acstark_signal2real(signals: np.ndarray) -> np.ndarray:
-    signals = rotate2real(minus_background(signals, axis=1)).real
+def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    real_signals = rotate2real(minus_background(signals, axis=1)).real
 
-    valid_mask = np.any(~np.isnan(signals), axis=1)
+    valid_mask = np.any(~np.isnan(real_signals), axis=1)
 
     if not np.any(valid_mask):
-        return signals
+        return real_signals
 
-    valid_signals = signals[valid_mask, :]
+    valid_signals = real_signals[valid_mask, :]
 
     min_vals = np.nanmin(valid_signals, axis=1, keepdims=True)
     max_vals = np.nanmax(valid_signals, axis=1, keepdims=True)
     valid_signals = (valid_signals - min_vals) / (max_vals - min_vals)
 
-    signals[valid_mask, :] = valid_signals
+    real_signals[valid_mask, :] = valid_signals
 
-    return signals
+    return real_signals
 
 
 def get_resonance_freq(
-    xs: np.ndarray, fpts: np.ndarray, amps: np.ndarray
-) -> np.ndarray:
+    xs: NDArray[np.float64], fpts: NDArray[np.float64], amps: NDArray[np.float64]
+) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
     s_xs = []
     s_fpts = []
 
@@ -65,12 +78,25 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_fpts)
 
 
-class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
+class AcStarkTaskConfig(TaskConfig, ModularProgramCfg):
+    stark_pulse1: PulseCfg
+    stark_pulse2: PulseCfg
+    readout: ReadoutCfg
+
+
+class AcStarkExperiment(AbsExperiment):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, earlystop_snr: Optional[float] = None
+        self,
+        soc,
+        soccfg,
+        cfg: AcStarkTaskConfig,
+        *,
+        earlystop_snr: Optional[float] = None,
     ) -> AcStarkResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
+        assert isinstance(cfg["sweep"], dict)
         gain_sweep = cfg["sweep"].pop("gain")
 
         # uniform in square space
@@ -81,7 +107,9 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
             )
         )
 
-        cfg["stark_pulse2"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
+        Pulse.set_param(
+            cfg["stark_pulse2"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+        )
 
         with LivePlotter2DwithLine(
             "Stark Pulse Gain (a.u.)",
@@ -92,47 +120,51 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
         ) as viewer:
             ax1d = viewer.get_ax("1d")
 
-            def measure_fn(
-                ctx: TaskContext, update_hook: Callable[[int, Any], None]
-            ) -> np.ndarray:
-                prog = ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                        Pulse("stark_pulse1", ctx.cfg["stark_pulse1"]),
-                        Pulse("stark_pulse2", ctx.cfg["stark_pulse2"]),
-                        Readout("readout", ctx.cfg["readout"]),
-                    ],
-                )
-                return prog.acquire(
-                    soc,
-                    progress=False,
-                    callback=wrap_earlystop_check(
-                        prog,
-                        update_hook,
-                        earlystop_snr,
-                        signal2real_fn=np.abs,
-                        snr_hook=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),  # type: ignore
-                    ),
-                )
-
-            signals = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="resonator gain",
-                    sweep_values=pdrs,
+                    sweep_values=pdrs.tolist(),
                     update_cfg_fn=lambda _, ctx, pdr: Pulse.set_param(
                         ctx.cfg["stark_pulse1"], "gain", pdr
                     ),
                     sub_task=HardTask(
-                        measure_fn=measure_fn,
+                        measure_fn=lambda ctx, update_hook: (
+                            (
+                                prog := ModularProgramV2(
+                                    soccfg,
+                                    ctx.cfg,
+                                    modules=[
+                                        Reset(
+                                            "reset",
+                                            ctx.cfg.get("reset", {"type": "none"}),
+                                        ),
+                                        Pulse("stark_pulse1", ctx.cfg["stark_pulse1"]),
+                                        Pulse("stark_pulse2", ctx.cfg["stark_pulse2"]),
+                                        Readout("readout", ctx.cfg["readout"]),
+                                    ],
+                                )
+                            ).acquire(
+                                soc,
+                                progress=False,
+                                callback=wrap_earlystop_check(
+                                    prog,
+                                    update_hook,
+                                    earlystop_snr,
+                                    signal2real_fn=np.abs,
+                                    snr_hook=lambda snr: ax1d.set_title(
+                                        f"snr = {snr:.1f}"
+                                    ),
+                                ),
+                            )
+                        ),
                         result_shape=(len(fpts),),
                     ),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    pdrs, fpts, acstark_signal2real(np.asarray(ctx.get_data()))
+                    pdrs, fpts, acstark_signal2real(np.asarray(ctx.data))
                 ),
-            ).run(cfg)
+            )
             signals = np.asarray(signals)
 
         # Cache results
@@ -149,7 +181,7 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
         kappa: float,
         deg: int = 1,
         cutoff: Optional[float] = None,
-    ) -> tuple[float, plt.Figure]:
+    ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
@@ -187,12 +219,12 @@ class AcStarkExperiment(AbsExperiment[AcStarkResultType]):
         avg_n = ac_coeff * pdrs2
 
         fig, ax1 = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         # Use NonUniformImage for better visualization with pdr^2 as x-axis
         im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
         im.set_data(avg_n, fpts, amps.T)
-        im.set_extent([avg_n[0], avg_n[-1], fpts[0], fpts[-1]])
+        im.set_extent((avg_n[0], avg_n[-1], fpts[0], fpts[-1]))
         ax1.add_image(im)
 
         # Set proper limits for the plot

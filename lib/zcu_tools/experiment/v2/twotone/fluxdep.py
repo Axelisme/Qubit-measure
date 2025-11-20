@@ -4,30 +4,37 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner, SoftTask
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveFindPoints,
     InteractiveLines,
 )
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneProgram, TwoToneProgramCfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
-FreqFluxDepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+FreqFluxDepResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def freq_signal2real(signals: np.ndarray) -> np.ndarray:
+def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class FreqFluxDepExperiment(AbsExperiment[FreqFluxDepResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqFluxDepResultType:
+class FreqFluxDepTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+
+
+class FreqFluxDepExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: FreqFluxDepTaskConfig) -> FreqFluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
         flx_sweep = cfg["sweep"]["flux"]
         fpt_sweep = cfg["sweep"]["freq"]
 
@@ -43,10 +50,10 @@ class FreqFluxDepExperiment(AbsExperiment[FreqFluxDepResultType]):
         with LivePlotter2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="flux",
-                    sweep_values=dev_values,
+                    sweep_values=dev_values.tolist(),
                     update_cfg_fn=lambda _, ctx, flx: (
                         set_flux_in_dev_cfg(ctx.cfg["dev"], flx)
                     ),
@@ -59,10 +66,11 @@ class FreqFluxDepExperiment(AbsExperiment[FreqFluxDepResultType]):
                         result_shape=(len(fpts),),
                     ),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    dev_values, fpts, freq_signal2real(np.asarray(ctx.get_data()))
+                    dev_values, fpts, freq_signal2real(np.asarray(ctx.data))
                 ),
-            ).run(cfg)
+            )
             signals = np.asarray(signals)
 
         # Cache results

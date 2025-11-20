@@ -1,47 +1,62 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+from typing_extensions import NotRequired
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.program.v2 import (
     Delay,
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
+    PulseCfg,
     Readout,
+    ReadoutCfg,
     Reset,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
-
-def t1_signal2real(signals: np.ndarray) -> np.ndarray:
-    return rotate2real(signals).real  # type: ignore
-
-
-T1ResultType = Tuple[np.ndarray, np.ndarray]  # (times, signals)
+# (times, signals)
+T1ResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class T1Experiment(AbsExperiment[T1ResultType]):
+def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    return rotate2real(signals).real  # (times, signals)
+
+
+class T1TaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T1Experiment(AbsExperiment):
     """T1 relaxation time measurement.
 
     Applies a π pulse and then waits for a variable time before readout
     to measure the qubit's energy relaxation.
     """
 
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1ResultType:
+    def run(self, soc, soccfg, cfg: T1TaskConfig) -> T1ResultType:
         cfg = deepcopy(cfg)
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
         ts = sweep2array(cfg["sweep"]["length"])
@@ -49,7 +64,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -70,11 +85,9 @@ class T1Experiment(AbsExperiment[T1ResultType]):
                     ),
                     result_shape=(len(ts),),
                 ),
-                update_hook=lambda ctx: viewer.update(
-                    ts, t1_signal2real(np.asarray(ctx.get_data()))
-                ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+                init_cfg=cfg,
+                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+            )
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -84,7 +97,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
 
     def analyze(
         self, result: Optional[T1ResultType] = None, *, dual_exp: bool = False
-    ) -> Tuple[float, float, plt.Figure]:
+    ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -99,7 +112,7 @@ class T1Experiment(AbsExperiment[T1ResultType]):
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
@@ -142,11 +155,20 @@ class T1Experiment(AbsExperiment[T1ResultType]):
         )
 
 
-class T1WithToneExperiment(AbsExperiment[T1ResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1ResultType:
+class T1WithToneTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi_pulse: PulseCfg
+    test_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T1WithToneExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: T1WithToneTaskConfig) -> T1ResultType:
         cfg = deepcopy(cfg)
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+
         Pulse.set_param(
             cfg["test_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
         )
@@ -156,7 +178,7 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -172,11 +194,9 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
                     ),
                     result_shape=(len(ts),),
                 ),
-                update_hook=lambda ctx: viewer.update(
-                    ts, t1_signal2real(np.asarray(ctx.get_data()))
-                ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+                init_cfg=cfg,
+                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+            )
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -186,14 +206,14 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
 
     def analyze(
         self, result: Optional[T1ResultType] = None, *, dual_exp: bool = False
-    ) -> Tuple[float, float, plt.Figure]:
+    ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         xs, signals = result
 
-        real_signals = rotate2real(signals).real
+        real_signals = t1_signal2real(signals)
 
         if dual_exp:
             t1, t1err, t1b, t1berr, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
@@ -205,7 +225,7 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
             t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, plt.Figure)
+        assert isinstance(fig, Figure)
 
         ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(xs, y_fit, label="fit")
@@ -247,27 +267,45 @@ class T1WithToneExperiment(AbsExperiment[T1ResultType]):
 
 
 # (values, times, signals)
-T1SweepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+T1SweepResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def t1_sweep_tone_signal2real(signals: np.ndarray) -> np.ndarray:
+def t1_sweep_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     real_signals = np.full_like(signals, np.nan, dtype=np.float64)
     for i in range(signals.shape[0]):
+        if np.all(np.isnan(signals[i, :])):
+            continue
         real_signals[i, :] = rotate2real(signals[i, :]).real
-    min_vals = np.min(real_signals, axis=1, keepdims=True)
-    max_vals = np.max(real_signals, axis=1, keepdims=True)
-    return (real_signals - min_vals) / (max_vals - min_vals)
+
+        min_val = np.nanmin(real_signals[i, :])
+        max_val = np.nanmax(real_signals[i, :])
+        real_signals[i, :] = (real_signals[i, :] - min_val) / (
+            max_val - min_val + 1e-12
+        )
+
+    return real_signals
 
 
-class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
+class T1WithToneSweepTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi_pulse: PulseCfg
+    test_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T1WithToneSweepExperiment(AbsExperiment):
     SWEEP_MAP = {
         "gain": {"name": "Gain (a.u.)", "param_key": "gain"},
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},
     }
 
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1SweepResultType:
+    def run(self, soc, soccfg, cfg: T1WithToneSweepTaskConfig) -> T1SweepResultType:
         cfg = deepcopy(cfg)
 
+        assert "sweep" in cfg
+        assert isinstance(cfg["sweep"], dict)
         len_sweep = cfg["sweep"].pop("length")
 
         # extract sweep parameters
@@ -292,7 +330,7 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
         ts = sweep2array(cfg["sweep"]["length"])  # predicted times
 
         with LivePlotter2D(x_info["name"], "Time (us)") as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -308,11 +346,11 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
                     ),
                     result_shape=(len(values), len(ts)),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    values, ts, t1_sweep_tone_signal2real(np.asarray(ctx.get_data()))
+                    values, ts, t1_sweep_tone_signal2real(ctx.data)
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+            )
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -322,14 +360,14 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
 
     def analyze(
         self, result: Optional[T1SweepResultType] = None
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, plt.Figure]:
+    ) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         values, ts, signals = result
 
-        signals = gaussian_filter(signals, sigma=1)
+        signals: NDArray[np.complex128] = gaussian_filter(signals, sigma=1)  # type: ignore
         real_signals = t1_sweep_tone_signal2real(signals)
 
         t1s = np.full(len(values), np.nan, dtype=np.float64)
@@ -359,9 +397,9 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
         t1errs = t1errs[valid_idxs]
 
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
-        assert isinstance(fig, plt.Figure)
-        assert isinstance(ax1, plt.Axes)
-        assert isinstance(ax2, plt.Axes)
+        assert isinstance(fig, Figure)
+        assert isinstance(ax1, Axes)
+        assert isinstance(ax2, Axes)
 
         fig.suptitle("T1 while readout")
 
@@ -369,7 +407,7 @@ class T1WithToneSweepExperiment(AbsExperiment[T1SweepResultType]):
         ax1.imshow(
             real_signals.T,
             aspect="auto",
-            extent=[values[0], values[-1], t1s[0], t1s[-1]],
+            extent=(values[0], values[-1], t1s[0], t1s[-1]),
             origin="lower",
         )
         ax2.errorbar(

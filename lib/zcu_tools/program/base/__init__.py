@@ -1,8 +1,15 @@
 from typing import Any, Dict
 
-
+from typing_extensions import TypedDict
 
 from .improve_acquire import ImproveAcquireMixin
+
+
+class SweepCfg(TypedDict):
+    start: float
+    stop: float
+    expts: int
+    step: float
 
 
 class MyProgram(ImproveAcquireMixin):
@@ -21,4 +28,4 @@ class MyProgram(ImproveAcquireMixin):
         self.cfg = cfg
 
 
-__all__ = ["MyProgram", "AbsProxy", "ProxyAcquireMixin"]
+__all__ = ["MyProgram", "SweepCfg"]

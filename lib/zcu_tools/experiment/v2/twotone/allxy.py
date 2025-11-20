@@ -5,18 +5,29 @@ from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 from scipy.optimize import curve_fit
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import ModularProgramV2, Pulse, Readout, Reset
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+)
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..runner import BatchTask, HardTask, Runner
+from ..runner import BatchTask, HardTask, TaskConfig, run_task
 
 # (sequence, signals)
-AllXYResultType = Dict[Tuple[str, str], np.ndarray]
+AllXYResultType = Dict[Tuple[str, str], NDArray[np.complex128]]
 
 # Standard AllXY sequence of 21 gate pairs
 ALLXY_SEQUENCE = [
@@ -83,7 +94,9 @@ def predict_state_with_error(
         raise ValueError(f"Invalid gate pair: {gates}")
 
 
-def allxy_signal2real(signals_dict: Dict[Tuple[str, str], np.ndarray]) -> np.ndarray:
+def allxy_signal2real(
+    signals_dict: Dict[Tuple[str, str], NDArray[np.complex128]],
+) -> NDArray[np.float64]:
     all_signals = np.array(list(signals_dict.values()))
     return rotate2real(all_signals).real  # type: ignore
 
@@ -93,10 +106,17 @@ def allxy_signal2real(signals_dict: Dict[Tuple[str, str], np.ndarray]) -> np.nda
 # ------------------------------------------------------------------------------
 
 
-class AllXYExperiment(AbsExperiment[AllXYResultType]):
-    def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, progress: bool = True
-    ) -> AllXYResultType:
+class AllXYTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    X180_pulse: PulseCfg
+    Y180_pulse: PulseCfg
+    X90_pulse: PulseCfg
+    Y90_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class AllXYExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: AllXYTaskConfig) -> AllXYResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert cfg.get("sweep", dict()) == {}, (
@@ -121,7 +141,6 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
         liveplotter = LivePlotter1D(
             xlabel="Gate",
             ylabel="Signal",
-            disable=not progress,
             segment_kwargs=dict(
                 show_grid=True,
                 line_kwargs=[dict(marker="o", linestyle=None, markersize=5)],
@@ -139,7 +158,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
             )
 
         with liveplotter as viewer:
-            signals_dict = Runner(
+            signals_dict = run_task(
                 task=BatchTask(
                     tasks={
                         (gate1, gate2): HardTask(
@@ -162,11 +181,11 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
                         for gate1, gate2 in ALLXY_SEQUENCE
                     }
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    np.arange(len(ALLXY_SEQUENCE)),
-                    allxy_signal2real(ctx.get_data()),
+                    np.arange(len(ALLXY_SEQUENCE)), allxy_signal2real(ctx.data)
                 ),
-            ).run(cfg)
+            )
 
         # Cache results
         self.last_cfg = cfg
@@ -194,7 +213,7 @@ class AllXYExperiment(AbsExperiment[AllXYResultType]):
         # fitting the signal with error
         # ------------------------------------------------------------------
 
-        g_signal = real_signals[signals_dict[("I", "I")]]
+        g_signal = real_signals[sequence.index(("I", "I"))]
         init_center = 0.5 * (np.max(real_signals) + np.min(real_signals))
         init_contrast = np.ptp(real_signals)
         if g_signal < init_center:

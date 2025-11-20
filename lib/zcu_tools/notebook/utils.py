@@ -1,9 +1,11 @@
 import json
-from copy import deepcopy
-from typing import Dict, Optional, Union
 import os
+from copy import deepcopy
+from typing import Optional, Union
 
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+
+from zcu_tools.program import SweepCfg
 
 
 def make_sweep(
@@ -12,7 +14,7 @@ def make_sweep(
     expts: Optional[int] = None,
     step: Optional[Union[int, float]] = None,
     force_int: bool = False,
-) -> Dict[str, Union[int, float]]:
+) -> SweepCfg:
     """
     建立一個掃描參數的字典，包含起始值、結束值、步長與實驗次數。
 
@@ -50,7 +52,7 @@ def make_sweep(
     assert expts > 0, f"expts must be greater than 0, but got {expts}"
     assert step != 0, f"step must not be zero, but got {step}"
 
-    return {"start": start, "stop": stop, "expts": expts, "step": step}
+    return SweepCfg({"start": start, "stop": stop, "expts": expts, "step": step})
 
 
 def get_ip_address(iface: str) -> str:
@@ -115,6 +117,6 @@ def make_comment(cfg: dict, comment: str = "") -> str:
     return json.dumps(cfg, indent=2)
 
 
-def savefig(fig: plt.Figure, filepath: str) -> None:
+def savefig(fig: Figure, filepath: str) -> None:
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     fig.savefig(filepath)

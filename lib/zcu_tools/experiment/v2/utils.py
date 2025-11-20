@@ -1,22 +1,23 @@
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Optional, Sequence, TypeVar
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 
-from zcu_tools.program.v2 import ModularProgramV2
+from zcu_tools.program.v2 import ModularProgramV2, PulseCfg
 from zcu_tools.utils.func_tools import min_interval
 
-from .runner import default_raw2signal_fn
+from .runner import T_ResultType, default_raw2signal_fn
 
 
-def calc_snr(real_signals: np.ndarray) -> float:
+def calc_snr(real_signals: NDArray[np.float64]) -> float:
     smooth_signals = gaussian_filter(real_signals, sigma=1)
     noise = np.mean(np.abs(real_signals - smooth_signals))
-    return (np.max(smooth_signals) - np.min(smooth_signals)) / noise
+    return float((np.max(smooth_signals) - np.min(smooth_signals)) / noise)
 
 
-def set_pulse_freq(pulse_cfg: Dict[str, Any], freq: float) -> None:
+def set_pulse_freq(pulse_cfg: PulseCfg, freq: float) -> PulseCfg:
     pulse_cfg["freq"] = freq
     if "mixer_freq" in pulse_cfg:
         pulse_cfg["mixer_freq"] = freq
@@ -28,13 +29,13 @@ T_RawResult = TypeVar("T_RawResult")
 
 def wrap_earlystop_check(
     prog: ModularProgramV2,
-    update_hook: Callable[[int, T_RawResult], None],
+    update_hook: Callable[[int, T_RawResult], Any],
     snr_threshold: Optional[float],
     signal2real_fn: Callable[[np.ndarray], np.ndarray],
     raw2signal_fn: Callable[[T_RawResult], np.ndarray] = default_raw2signal_fn,
-    snr_hook: Optional[Callable[[float], None]] = None,
+    snr_hook: Optional[Callable[[float], Any]] = None,
     update_interval: Optional[float] = 0.1,
-) -> Callable[[int, T_RawResult], None]:
+) -> Callable[[int, T_RawResult], Any]:
     if snr_threshold is None:
         return update_hook
 
@@ -56,13 +57,11 @@ def wrap_earlystop_check(
     return wrapped_update_hook
 
 
-T_ResultType = TypeVar("T_ResultType")
-
-
-def merge_result_list(results: List[T_ResultType]) -> T_ResultType:
+def merge_result_list(results: Sequence[T_ResultType]) -> T_ResultType:
     assert isinstance(results, list) and len(results) > 0
     if isinstance(results[0], dict):
         return {
-            name: merge_result_list([r[name] for r in results]) for name in results[0]
+            name: merge_result_list([r[name] for r in results])  # type: ignore
+            for name in results[0]
         }
-    return np.asarray(results)
+    return np.asarray(results)  # type: ignore

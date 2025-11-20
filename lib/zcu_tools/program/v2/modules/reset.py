@@ -85,7 +85,7 @@ class Reset(Module):
         reset_cfg: ResetCfg,
         param_name: str,
         param_value: Union[float, QickParam],
-    ) -> None:
+    ) -> ResetCfg:
         return cls.get_reset_cls(reset_cfg).set_param(
             reset_cfg, param_name, param_value
         )
@@ -139,9 +139,11 @@ class PulseReset(AbsReset):
 
     @staticmethod
     def set_param(
-        reset_cfg: Dict[str, Any], param_name: str, param_value: Union[float, QickParam]
+        reset_cfg: PulseResetCfg, param_name: str, param_value: Union[float, QickParam]
     ) -> PulseResetCfg:
-        return Pulse.set_param(reset_cfg["pulse_cfg"], param_name, param_value)
+        Pulse.set_param(reset_cfg["pulse_cfg"], param_name, param_value)
+
+        return reset_cfg
 
 
 @Reset.register_reset("two_pulse")
@@ -170,7 +172,9 @@ class TwoPulseReset(AbsReset):
 
     @staticmethod
     def set_param(
-        reset_cfg: Dict[str, Any], param_name: str, param_value: Union[float, QickParam]
+        reset_cfg: TwoPulseResetCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
     ) -> TwoPulseResetCfg:
         if param_name == "on/off":
             Pulse.set_param(reset_cfg["pulse1_cfg"], "on/off", param_value)
@@ -223,7 +227,9 @@ class BathReset(AbsReset):
 
     @staticmethod
     def set_param(
-        reset_cfg: Dict[str, Any], param_name: str, param_value: Union[float, QickParam]
+        reset_cfg: BathResetCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
     ) -> BathResetCfg:
         if param_name == "on/off":
             Pulse.set_param(reset_cfg["qubit_tone_cfg"], "on/off", param_value)

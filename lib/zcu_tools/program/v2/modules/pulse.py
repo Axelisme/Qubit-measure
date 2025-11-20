@@ -78,10 +78,14 @@ class BasePulse(Module):
         if "outsel" in cfg:
             wav_kwargs["outsel"] = cfg["outsel"]
 
-        wav_kwargs.update(self.waveform.to_wav_kwargs())
-
         # add the pulse
-        prog.add_pulse(cfg["ch"], name, ro_ch=cfg.get("ro_ch"), **wav_kwargs)
+        prog.add_pulse(
+            cfg["ch"],
+            name,
+            ro_ch=cfg.get("ro_ch"),
+            **wav_kwargs,
+            **self.waveform.to_wav_kwargs(),
+        )
 
         # register the pulse
         self.register_module(prog, name, cfg)
@@ -185,7 +189,9 @@ class BasePulse(Module):
 
 
 class PaddingPulse(Module):
-    def __init__(self, name: str, cfg: PulseCfg) -> None:
+    def __init__(
+        self, name: str, cfg: PulseCfg, pulse_name: Optional[str] = None
+    ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
 
@@ -304,9 +310,11 @@ class Pulse(Module):
         else:
             return PaddingPulse
 
-    def __init__(self, name: str, cfg: Optional[PulseCfg]) -> None:
+    def __init__(
+        self, name: str, cfg: Optional[PulseCfg], pulse_name: Optional[str] = None
+    ) -> None:
         pulse_cls = self.get_pulse_cls(cfg)
-        self.pulse = pulse_cls(name, cfg)  # type: ignore
+        self.pulse = pulse_cls(name, cfg, pulse_name)  # type: ignore
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse.init(prog)

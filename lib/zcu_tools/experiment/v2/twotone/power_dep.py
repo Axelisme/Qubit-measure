@@ -4,35 +4,35 @@ from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
-from zcu_tools.program.v2 import TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneProgram, TwoToneProgramCfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import minus_background
 
-from ..runner import HardTask, Runner
+from ..runner import HardTask, TaskConfig, run_task
 
-PowerDepResultType = Tuple[np.ndarray, np.ndarray, np.ndarray]
+PowerDepResultType = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-def pdrdep_signal2real(signals: np.ndarray) -> np.ndarray:
+def pdrdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: Dict[str, Any],
-        *,
-        progress: bool = True,
-    ) -> PowerDepResultType:
+class PowerDepTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+
+
+class PowerDepExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: PowerDepTaskConfig) -> PowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Ensure gain is the outer loop for better visualization
+        assert "sweep" in cfg
         cfg["sweep"] = {
             "gain": cfg["sweep"]["gain"],
             "freq": cfg["sweep"]["freq"],
@@ -45,10 +45,8 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
         cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
         cfg["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
-        with LivePlotter2D(
-            "Pulse Gain (a.u.)", "Frequency (MHz)", disable=not progress
-        ) as viewer:
-            signals = Runner(
+        with LivePlotter2D("Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
+            signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         TwoToneProgram(soccfg, ctx.cfg).acquire(
@@ -57,11 +55,11 @@ class PowerDepExperiment(AbsExperiment[PowerDepResultType]):
                     ),
                     result_shape=(len(pdrs), len(fpts)),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    pdrs, fpts, pdrdep_signal2real(np.asarray(ctx.get_data()))
+                    pdrs, fpts, pdrdep_signal2real(ctx.data)
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)
+            )
 
         # Cache results
         self.last_cfg = cfg
