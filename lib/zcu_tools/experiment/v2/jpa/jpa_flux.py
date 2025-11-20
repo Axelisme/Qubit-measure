@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner, SoftTask
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import OneToneProgram, Readout, sweep2param
+from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 JPAFluxResultType = Tuple[
@@ -22,10 +22,14 @@ def jpa_flux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return np.abs(signals)
 
 
-class JPAFluxExperiment(AbsExperiment[JPAFluxResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPAFluxResultType:
+class JPAFluxTaskConfig(TaskConfig, OneToneProgramCfg): ...
+
+
+class JPAFluxExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: JPAFluxTaskConfig) -> JPAFluxResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
         fpt_sweep = cfg["sweep"]["freq"]
         flx_sweep = cfg["sweep"]["flux"]
 
@@ -40,10 +44,10 @@ class JPAFluxExperiment(AbsExperiment[JPAFluxResultType]):
         with LivePlotter2DwithLine(
             "JPA Flux value", "Probe Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="JPA Flux value",
-                    sweep_values=flxs,
+                    sweep_values=flxs.tolist(),
                     update_cfg_fn=lambda i, ctx, flx: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], flx, label="jpa_flux_dev"
                     ),
@@ -56,13 +60,12 @@ class JPAFluxExperiment(AbsExperiment[JPAFluxResultType]):
                         result_shape=(len(freqs),),
                     ),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    flxs,
-                    freqs,
-                    jpa_flux_signal2real(np.asarray(ctx.get_data())),  # type: ignore
+                    flxs, freqs, jpa_flux_signal2real(np.asarray(ctx.data))
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)  # type: ignore
+            )
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg

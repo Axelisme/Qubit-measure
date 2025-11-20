@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Sequence, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,6 +15,7 @@ from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
     PulseCfg,
@@ -40,7 +41,14 @@ def t2echo_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
     return np.array(list(map(t2echo_signal2real, signals)), dtype=np.float64)
 
 
-class T2EchoCfg(TaskConfig):
+class T2EchoCfgTemplate(TypedDict):
+    reset: NotRequired[ResetCfg]
+    pi_pulse: PulseCfg
+    pi2_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T2EchoCfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     pi2_pulse: PulseCfg
@@ -59,12 +67,12 @@ class PlotterDictType(TypedDict, closed=True):
     t2e_curve: LivePlotter2DwithLine
 
 
-class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, PlotterDictType]):
+class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, T2EchoCfg, PlotterDictType]):
     def __init__(
         self,
         length_sweep: SweepCfg,
         activate_detune: float,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], T2EchoCfg],
+        cfg_maker: Callable[[TaskContext, ModuleLibrary], T2EchoCfgTemplate],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.length_sweep = length_sweep
@@ -107,12 +115,12 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, PlotterDictType]):
                 update_hook(i, raw_signals)
                 time.sleep(0.01)
 
-            return raw_signals
+            return cast(Sequence[NDArray[np.float64]], raw_signals)
 
-        self.task = HardTask(
+        self.task = HardTask[Sequence[NDArray[np.float64]], T2EchoCfg](
             measure_fn=measure_t2echo_fn,
             # measure_fn=lambda ctx, update_hook: (
-            #     t2e_params := sweep2param("length", ctx.cfg["sweep"]["length"])
+            #     t2e_params := sweep2param("length", ctx.cfg["sweep"]["length"])  # type: ignore
             # )
             # and (
             #     prog := ModularProgramV2(
@@ -228,16 +236,17 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, PlotterDictType]):
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
 
-        cfg = self.cfg_maker(ctx, ml)
+        cfg_temp = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,  # type: ignore
+            cfg_temp,  # type: ignore
             {
                 "dev": ctx.cfg["dev"],
                 "sweep": {"length": self.length_sweep},
             },
         )
-        cfg = ml.make_cfg(dict(cfg))
+        cfg_temp = ml.make_cfg(dict(cfg_temp))
 
+        cfg = cast(T2EchoCfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])

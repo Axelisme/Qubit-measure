@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Sequence, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,6 +15,7 @@ from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
     PulseCfg,
@@ -42,7 +43,13 @@ def t2ramsey_fluxdep_signal2real(
     return np.array(list(map(t2ramsey_signal2real, signals)), dtype=np.float64)
 
 
-class T2RamseyCfg(TaskConfig):
+class T2RamseyCfgTemplate(TypedDict):
+    reset: NotRequired[ResetCfg]
+    pi2_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T2RamseyCfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
@@ -62,12 +69,14 @@ class PlotterDictType(TypedDict, closed=True):
     t2r_curve: LivePlotter2DwithLine
 
 
-class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
+class T2RamseyMeasurementTask(
+    MeasurementTask[T2RamseyResult, T2RamseyCfg, PlotterDictType]
+):
     def __init__(
         self,
         length_sweep: SweepCfg,
         activate_detune: float,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], T2RamseyCfg],
+        cfg_maker: Callable[[TaskContext, ModuleLibrary], T2RamseyCfgTemplate],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.length_sweep = length_sweep
@@ -110,12 +119,12 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
                 update_hook(i, raw_signals)
                 time.sleep(0.01)
 
-            return raw_signals
+            return cast(Sequence[NDArray[np.float64]], raw_signals)
 
-        self.task = HardTask(
+        self.task = HardTask[Sequence[NDArray[np.float64]], T2RamseyCfg](
             measure_fn=measure_t2ramsey_fn,
             # measure_fn=lambda ctx, update_hook: (
-            #     t2r_params := sweep2param("length", ctx.cfg["sweep"]["length"])
+            #     t2r_params := sweep2param("length", ctx.cfg["sweep"]["length"])  # type: ignore
             # )
             # and (
             #     prog := ModularProgramV2(
@@ -229,16 +238,17 @@ class T2RamseyMeasurementTask(MeasurementTask[T2RamseyResult, PlotterDictType]):
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
 
-        cfg = self.cfg_maker(ctx, ml)
+        cfg_temp = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,  # type: ignore
+            cfg_temp,  # type: ignore
             {
                 "dev": ctx.cfg["dev"],
                 "sweep": {"length": self.length_sweep},
             },
         )
-        cfg = ml.make_cfg(dict(cfg))
+        cfg_temp = ml.make_cfg(dict(cfg_temp))
 
+        cfg = cast(T2RamseyCfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])

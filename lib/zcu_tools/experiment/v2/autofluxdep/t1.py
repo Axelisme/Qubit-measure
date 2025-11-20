@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Sequence, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,6 +15,7 @@ from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
     PulseCfg,
@@ -40,7 +41,13 @@ def t1_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
     return np.array(list(map(t1_signal2real, signals)), dtype=np.float64)
 
 
-class T1Cfg(TaskConfig):
+class T1CfgTemplate(TypedDict):
+    reset: NotRequired[ResetCfg]
+    pi_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class T1Cfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
@@ -58,11 +65,11 @@ class PlotterDictType(TypedDict, closed=True):
     t1_curve: LivePlotter2DwithLine
 
 
-class T1MeasurementTask(MeasurementTask[T1Result, PlotterDictType]):
+class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
     def __init__(
         self,
         length_sweep: SweepCfg,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], T1Cfg],
+        cfg_maker: Callable[[TaskContext, ModuleLibrary], T1CfgTemplate],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.length_sweep = length_sweep
@@ -101,9 +108,9 @@ class T1MeasurementTask(MeasurementTask[T1Result, PlotterDictType]):
                 update_hook(i, raw_signals)
                 time.sleep(0.01)
 
-            return raw_signals
+            return cast(Sequence[NDArray[np.float64]], raw_signals)
 
-        self.task = HardTask(
+        self.task = HardTask[Sequence[NDArray[np.float64]], T1Cfg](
             measure_fn=measure_t1_fn,
             # measure_fn=lambda ctx, update_hook: (
             #     prog := ModularProgramV2(
@@ -212,16 +219,17 @@ class T1MeasurementTask(MeasurementTask[T1Result, PlotterDictType]):
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
 
-        cfg = self.cfg_maker(ctx, ml)
+        cfg_temp = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,  # type: ignore
+            cfg_temp,  # type: ignore
             {
                 "dev": ctx.cfg["dev"],
                 "sweep": {"length": self.length_sweep},
             },
         )
-        cfg = ml.make_cfg(dict(cfg))
+        cfg_temp = ml.make_cfg(dict(cfg_temp))
 
+        cfg = cast(T1Cfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])

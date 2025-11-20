@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_power_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, Runner, SoftTask
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import OneToneProgram, Readout, sweep2param
+from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 JPAPowerResultType = Tuple[
@@ -22,10 +22,14 @@ def jpa_power_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     return np.abs(signals)
 
 
-class JPAPowerExperiment(AbsExperiment[JPAPowerResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPAPowerResultType:
+class JPAPowerTaskConfig(TaskConfig, OneToneProgramCfg): ...
+
+
+class JPAPowerExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: JPAPowerTaskConfig) -> JPAPowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
         fpt_sweep = cfg["sweep"]["freq"]
         pdr_sweep = cfg["sweep"]["power_dBm"]
 
@@ -40,10 +44,10 @@ class JPAPowerExperiment(AbsExperiment[JPAPowerResultType]):
         with LivePlotter2DwithLine(
             "Power (dBm)", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="power (dBm)",
-                    sweep_values=powers,
+                    sweep_values=powers.tolist(),
                     update_cfg_fn=lambda i, ctx, pdr: set_power_in_dev_cfg(
                         ctx.cfg["dev"], pdr, label="jpa_rf_dev"
                     ),
@@ -56,13 +60,14 @@ class JPAPowerExperiment(AbsExperiment[JPAPowerResultType]):
                         result_shape=(len(fpts),),
                     ),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
                     powers,
                     fpts,
-                    jpa_power_signal2real(np.asarray(ctx.get_data())),  # type: ignore
+                    jpa_power_signal2real(np.asarray(ctx.data)),
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)  # type: ignore
+            )
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Sequence, cast
 
 import numpy as np
+from numpy import float64
 from numpy.typing import NDArray
 from typing_extensions import NotRequired, TypedDict
 
@@ -19,6 +20,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     ResetCfg,
     TwoToneProgram,
+    TwoToneProgramCfg,
     sweep2param,
 )
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
@@ -44,10 +46,13 @@ def qubitfreq_fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
     return np.array(list(map(qubitfreq_signal2real, signals)), dtype=np.float64)
 
 
-class QubitFreqCfg(TaskConfig):
+class QubitFreqCfgTemplate(TypedDict):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
+
+
+class QubitFreqCfg(TaskConfig, TwoToneProgramCfg): ...
 
 
 class QubitFreqResult(TypedDict, closed=True):
@@ -66,11 +71,13 @@ class PlotterDictType(TypedDict, closed=True):
     detune: LivePlotter2DwithLine
 
 
-class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]):
+class QubitFreqMeasurementTask(
+    MeasurementTask[QubitFreqResult, QubitFreqCfg, PlotterDictType]
+):
     def __init__(
         self,
         detune_sweep: SweepCfg,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], QubitFreqCfg],
+        cfg_maker: Callable[[TaskContext, ModuleLibrary], QubitFreqCfgTemplate],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.detune_sweep = detune_sweep
@@ -120,10 +127,10 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
 
             assert raw_signals is not None
 
-            return raw_signals
+            return cast(Sequence[NDArray[float64]], raw_signals)
 
         self.detune_bias = 0.0
-        self.task = HardTask(
+        self.task = HardTask[Sequence[NDArray[float64]], QubitFreqCfg](
             measure_fn=measure_freq_fn,
             # measure_fn=lambda ctx, update_hook: (
             #     prog := TwoToneProgram(ctx.env_dict["soccfg"], ctx.cfg)
@@ -244,23 +251,24 @@ class QubitFreqMeasurementTask(MeasurementTask[QubitFreqResult, PlotterDictType]
         predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
         flx: float = ctx.env_dict["flx_value"]
 
-        cfg = self.cfg_maker(ctx, ml)
+        cfg_temp = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,  # type: ignore
+            cfg_temp,  # type: ignore
             {
                 "dev": ctx.cfg["dev"],
                 "sweep": {"detune": self.detune_sweep},
             },
         )
-        cfg = ml.make_cfg(dict(cfg))
+        cfg_temp = ml.make_cfg(dict(cfg_temp))
 
         predict_freq = predictor.predict_freq(flx) + self.predict_bias
         Pulse.set_param(
-            cfg["qub_pulse"],
+            cfg_temp["qub_pulse"],
             "freq",
             predict_freq + sweep2param("detune", self.detune_sweep),
         )
 
+        cfg = cast(QubitFreqCfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])

@@ -53,7 +53,7 @@ class MISTPowerDepTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class MISTPowerDepExperiment(AbsExperiment):
+class MISTPowerDep(AbsExperiment):
     def run(self, soc, soccfg, cfg: MISTPowerDepTaskConfig) -> MISTPowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -173,7 +173,7 @@ class MISTPowerDepOvernightTaskConfig(TaskConfig, ModularProgramCfg):
     interval: float
 
 
-class MISTPowerDepOvernightExperiment(AbsExperiment):
+class MISTPowerDepOvernight(AbsExperiment):
     def run(
         self,
         soc,
@@ -224,7 +224,9 @@ class MISTPowerDepOvernightExperiment(AbsExperiment):
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    iters, pdrs, mist_overnight_signal2real(np.asarray(ctx.data))
+                    iters.astype(np.float64),
+                    pdrs,
+                    mist_overnight_signal2real(np.asarray(ctx.data)),
                 ),
             )
             signals = np.asarray(signals)

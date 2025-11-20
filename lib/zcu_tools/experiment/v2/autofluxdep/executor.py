@@ -18,6 +18,7 @@ from zcu_tools.experiment.v2.runner import (
     ResultType,
     SoftTask,
     T_ResultType,
+    T_TaskConfigType,
     TaskConfig,
     TaskContext,
     run_task,
@@ -29,7 +30,10 @@ from zcu_tools.utils.func_tools import MinIntervalFunc
 T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlotter])
 
 
-class MeasurementTask(AbsTask, Generic[T_ResultType, T_PlotterDictType]):
+class MeasurementTask(
+    AbsTask[T_ResultType, T_TaskConfigType],
+    Generic[T_ResultType, T_TaskConfigType, T_PlotterDictType],
+):
     def num_axes(self) -> Dict[str, int]: ...
 
     def make_plotter(

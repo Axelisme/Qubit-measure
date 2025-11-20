@@ -118,12 +118,16 @@ class TaskContext(Generic[T_TaskConfigType, T_ResultType, T_KeyType]):
 
 
 class AbsTask(ABC, Generic[T_ResultType, T_TaskConfigType]):
-    def init(self, ctx: TaskContext, dynamic_pbar: bool = False) -> None:
+    def init(
+        self,
+        ctx: TaskContext[T_TaskConfigType, T_ResultType, Any],
+        dynamic_pbar: bool = False,
+    ) -> None:
         """Initialize the task with the current context. If dynamic_pbar is True, the pbar will only show up in the run() method."""
         pass
 
     @abstractmethod
-    def run(self, ctx: TaskContext) -> None:
+    def run(self, ctx: TaskContext[T_TaskConfigType, T_ResultType, Any]) -> None:
         """Run the task with the current context."""
         pass
 

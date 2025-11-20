@@ -233,7 +233,9 @@ class ZigZagSweepExperiment(AbsExperiment):
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    times, values, zigzag_signal2real(np.asarray(ctx.data))
+                    times.astype(np.float64),
+                    values,
+                    zigzag_signal2real(np.asarray(ctx.data)),
                 ),
             )
             signals = np.asarray(signals)

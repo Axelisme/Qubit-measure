@@ -183,7 +183,8 @@ class AllXYExperiment(AbsExperiment):
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    np.arange(len(ALLXY_SEQUENCE)), allxy_signal2real(ctx.data)
+                    np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
+                    allxy_signal2real(ctx.data),
                 ),
             )
 

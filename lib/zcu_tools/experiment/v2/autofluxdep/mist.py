@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Callable, Dict
+from typing import Callable, Dict, Sequence, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,6 +15,7 @@ from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
     PulseCfg,
@@ -46,10 +47,18 @@ def mist_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
     return np.array(list(map(mist_signal2real, signals)), dtype=np.float64)
 
 
-class MistCfg(TaskConfig):
+class MistCfgTemplate(TypedDict):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     mist_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class MistCfg(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pre_pi_pulse: PulseCfg
+    mist_pulse: PulseCfg
+    post_pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
@@ -67,11 +76,11 @@ class PlotterDictType(TypedDict, closed=True):
     decay_signal: LivePlotter1D
 
 
-class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
+class MistMeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictType]):
     def __init__(
         self,
         gain_sweep: SweepCfg,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], MistCfg],
+        cfg_maker: Callable[[TaskContext, ModuleLibrary], MistCfgTemplate],
     ) -> None:
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
@@ -116,9 +125,10 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
                 update_hook(i, raw_signals)
                 time.sleep(0.01)
 
-            return raw_signals  # [[(gains, ge, ge, iq)]]
+            # [[(gains, ge, ge, iq)]]
+            return cast(Sequence[NDArray[np.float64]], raw_signals)
 
-        self.task = HardTask(
+        self.task = HardTask[Sequence[NDArray[np.float64]], MistCfg](
             measure_fn=measure_mist_fn,
             # measure_fn=lambda ctx, update_hook: ModularProgramV2(
             #     ctx.env_dict["soccfg"],
@@ -126,7 +136,7 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
             #     modules=[
             #         Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
             #         Pulse(name="pre_pi_pulse", cfg=ctx.cfg["pre_pi_pulse"]),
-            #         Pulse(name="probe_pulse", cfg=ctx.cfg["probe_pulse"]),
+            #         Pulse(name="mist_pulse", cfg=ctx.cfg["mist_pulse"]),
             #         Pulse(name="post_pi_pulse", cfg=ctx.cfg["post_pi_pulse"]),
             #         Readout("readout", ctx.cfg["readout"]),
             #     ],
@@ -280,12 +290,12 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
 
-        cfg = self.cfg_maker(ctx, ml)
+        cfg_temp = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,  # type: ignore
+            cfg_temp,  # type: ignore
             {
-                "pre_pi_pulse": deepcopy(cfg["pi_pulse"]),
-                "post_pi_pulse": deepcopy(cfg["pi_pulse"]),
+                "pre_pi_pulse": deepcopy(cfg_temp["pi_pulse"]),
+                "post_pi_pulse": deepcopy(cfg_temp["pi_pulse"]),
                 "dev": ctx.cfg["dev"],
                 "sweep": {
                     "gain": self.gain_sweep,
@@ -294,21 +304,26 @@ class MistMeasurementTask(MeasurementTask[MistResult, PlotterDictType]):
                 },
             },
         )
-        cfg = ml.make_cfg(dict(cfg))
-        del cfg["pi_pulse"]
+        cfg_temp = ml.make_cfg(dict(cfg_temp))
+        del cfg_temp["pi_pulse"]
 
         Pulse.set_param(
-            cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+            cfg_temp["mist_pulse"],
+            "gain",
+            sweep2param("gain", cfg_temp["sweep"]["gain"]),
         )
         Pulse.set_param(
-            cfg["pre_pi_pulse"], "on/off", sweep2param("pre_ge", cfg["sweep"]["pre_ge"])
-        )
-        Pulse.set_param(
-            cfg["post_pi_pulse"],
+            cfg_temp["pre_pi_pulse"],
             "on/off",
-            sweep2param("post_ge", cfg["sweep"]["post_ge"]),
+            sweep2param("pre_ge", cfg_temp["sweep"]["pre_ge"]),
+        )
+        Pulse.set_param(
+            cfg_temp["post_pi_pulse"],
+            "on/off",
+            sweep2param("post_ge", cfg_temp["sweep"]["post_ge"]),
         )
 
+        cfg = cast(MistCfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])

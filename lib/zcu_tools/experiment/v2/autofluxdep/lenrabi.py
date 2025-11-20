@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Sequence, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -14,6 +14,7 @@ from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
     PulseCfg,
@@ -39,7 +40,13 @@ def lenrabi_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.f
     return np.array(list(map(lenrabi_signal2real, signals)), dtype=np.float64)
 
 
-class LenRabiCfg(TaskConfig):
+class LenRabiCfgTemplate(TypedDict):
+    reset: NotRequired[ResetCfg]
+    rabi_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class LenRabiCfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     rabi_pulse: PulseCfg
     readout: ReadoutCfg
@@ -57,12 +64,14 @@ class PlotterDictType(TypedDict, closed=True):
     rabi_curve: LivePlotter2DwithLine
 
 
-class LenRabiMeasurementTask(MeasurementTask[LenRabiResult, PlotterDictType]):
+class LenRabiMeasurementTask(
+    MeasurementTask[LenRabiResult, LenRabiCfg, PlotterDictType]
+):
     def __init__(
         self,
         length_sweep: SweepCfg,
         ref_pi_product: float,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], LenRabiCfg],
+        cfg_maker: Callable[[TaskContext, ModuleLibrary], LenRabiCfgTemplate],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.length_sweep = length_sweep
@@ -105,9 +114,9 @@ class LenRabiMeasurementTask(MeasurementTask[LenRabiResult, PlotterDictType]):
                 update_hook(i, raw_signals)
                 time.sleep(0.01)
 
-            return raw_signals
+            return cast(Sequence[NDArray[np.float64]], raw_signals)
 
-        self.task = HardTask(
+        self.task = HardTask[Sequence[NDArray[np.float64]], LenRabiCfg](
             measure_fn=measure_lenrabi_fn,
             # measure_fn=lambda ctx, update_hook: (
             #     prog := ModularProgramV2(
@@ -220,19 +229,20 @@ class LenRabiMeasurementTask(MeasurementTask[LenRabiResult, PlotterDictType]):
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
 
-        cfg = self.cfg_maker(ctx, ml)
+        cfg_temp = self.cfg_maker(ctx, ml)
         deepupdate(
-            cfg,  # type: ignore
+            cfg_temp,  # type: ignore
             {
                 "dev": ctx.cfg["dev"],
                 "sweep": {"length": self.length_sweep},
             },
         )
-        cfg = ml.make_cfg(dict(cfg))
+        cfg_temp = ml.make_cfg(dict(cfg_temp))
+
+        cfg = cast(LenRabiCfg, cfg_temp)
+        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         cur_gain = cfg["rabi_pulse"]["gain"]
-
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
         assert isinstance(raw_signals, np.ndarray)

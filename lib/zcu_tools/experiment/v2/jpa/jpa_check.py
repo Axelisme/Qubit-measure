@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,9 +12,9 @@ from zcu_tools.experiment.utils import (
     set_output_in_dev_cfg,
     sweep2array,
 )
-from zcu_tools.experiment.v2.runner import HardTask, Runner, SoftTask
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram, Readout, sweep2param
+from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 JPACheckResultType = Tuple[
@@ -26,10 +26,14 @@ def jpa_check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     return np.abs(signals)
 
 
-class JPACheckExperiment(AbsExperiment[JPACheckResultType]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPACheckResultType:
+class JPACheckTaskConfig(TaskConfig, OneToneProgramCfg): ...
+
+
+class JPACheckExperiment(AbsExperiment):
+    def run(self, soc, soccfg, cfg: JPACheckTaskConfig) -> JPACheckResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
 
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
@@ -44,12 +48,14 @@ class JPACheckExperiment(AbsExperiment[JPACheckResultType]):
         with LivePlotter1D(
             "Frequency (MHz)", "Magnitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
-            signals = Runner(
+            signals = run_task(
                 task=SoftTask(
                     sweep_name="JPA on/off",
-                    sweep_values=outputs,
+                    sweep_values=outputs.tolist(),
                     update_cfg_fn=lambda i, ctx, output: set_output_in_dev_cfg(
-                        ctx.cfg["dev"], OUTPUT_MAP[output], label="jpa_rf_dev"
+                        ctx.cfg["dev"],
+                        OUTPUT_MAP[output],  # type: ignore
+                        label="jpa_rf_dev",
                     ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
@@ -60,12 +66,12 @@ class JPACheckExperiment(AbsExperiment[JPACheckResultType]):
                         result_shape=(len(fpts),),
                     ),
                 ),
+                init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    fpts,
-                    jpa_check_signal2real(np.asarray(ctx.get_data())),  # type: ignore
+                    fpts, jpa_check_signal2real(np.asarray(ctx.data))
                 ),
-            ).run(cfg)
-            signals = np.asarray(signals)  # type: ignore
+            )
+            signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
