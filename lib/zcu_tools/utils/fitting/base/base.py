@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import scipy as sp
@@ -8,11 +8,11 @@ import scipy as sp
 def with_fixed_params(
     fitfunc: Callable[..., np.ndarray],
     init_p: List[float],
-    bounds: Tuple[List[float], List[float]],
+    bounds: Optional[Tuple[List[float], List[float]]],
     fixedparams: List[Optional[float]],
-) -> Tuple[Callable[..., np.ndarray], np.ndarray, np.ndarray]:
-    fixedparams = np.array(fixedparams, dtype=float)  # convert None to nan
-    non_fixed_idxs = np.isnan(fixedparams)
+) -> Tuple[Callable[..., np.ndarray], np.ndarray, Optional[np.ndarray]]:
+    fixedparams_array = np.array(fixedparams, dtype=np.float64)  # convert None to nan
+    non_fixed_idxs = np.isnan(fixedparams_array)
 
     @wraps(fitfunc)
     def wrapped_func(xs: np.ndarray, *args) -> np.ndarray:
@@ -21,17 +21,19 @@ def with_fixed_params(
                 f"Expected {np.sum(non_fixed_idxs)} arguments, got {len(args)}."
             )
         # assign the arguments to the parameters
-        params = fixedparams.copy()
+        params = fixedparams_array.copy()
         params[non_fixed_idxs] = args
 
         return fitfunc(xs, *params)
 
-    init_p = np.array(init_p)[non_fixed_idxs]
+    init_p_array = np.array(init_p)[non_fixed_idxs]
 
     if bounds is not None:
-        bounds = np.array(bounds)[:, non_fixed_idxs]
+        bounds_array = np.array(bounds)[:, non_fixed_idxs]
+    else:
+        bounds_array = None
 
-    return wrapped_func, init_p, bounds
+    return wrapped_func, init_p_array, bounds_array
 
 
 def add_fixed_params_back(
@@ -93,7 +95,7 @@ def batch_fit_func(
     list_xdata: List[np.ndarray],
     list_ydata: List[np.ndarray],
     fitfunc: Callable[..., np.ndarray],
-    list_init_p: List[List[float]],
+    list_init_p: List[Sequence[float]],
     shared_idxs: List[int],
     list_bounds: Optional[List[Tuple[List[float], List[float]]]] = None,
     fixedparams: Optional[List[Optional[float]]] = None,

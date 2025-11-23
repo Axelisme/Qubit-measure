@@ -7,11 +7,11 @@ from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Tuple,
 
 import matplotlib
 import numpy as np
+from IPython.display import display
+from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
-from matplotlib.animation import FFMpegWriter
 from numpy.typing import NDArray
-from IPython.display import display
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
@@ -28,8 +28,8 @@ from zcu_tools.experiment.v2.runner import (
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import AbsLivePlotter, MultiLivePlotter, make_plot_frame
-from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlotter])
 
@@ -92,18 +92,12 @@ class FluxDepBatchTask(BatchTask):
             cur_ctx = ctx(addr=name)
 
             task.run(cur_ctx)
+
             self.task_pbar.update()
-            if cur_ctx.update_hook is not None:
-                # force refresh current task data
-                with MinIntervalFunc.force_execute():
-                    cur_ctx.update_hook(cur_ctx)
 
-            cur_result = cur_ctx.get_current_data()
-            assert isinstance(cur_result, dict)
-
-            if not cur_result["success"]:
-                self.task_pbar.set_description(desc=f"Task [{str(name)}] failed")
-                break
+            # force refresh current task data
+            with MinIntervalFunc.force_execute():
+                cur_ctx.trigger_hook()
 
         if self.dynamic_pbar:
             self.task_pbar.close()
@@ -209,6 +203,7 @@ class FluxDepExecutor:
         plotter = MultiLivePlotter(fig, flatten_dict(plotters_map))
 
         dh = display(fig, display_id=True)
+        assert dh is not None
 
         def plot_fn(ctx: TaskContext) -> None:
             if len(ctx.addr_stack) < 2:
@@ -249,8 +244,8 @@ class FluxDepExecutor:
         ):
             fig, plotter, plot_fn = self.make_plotter()
 
-            try:
-                with plotter:
+            with plotter:
+                try:
                     results = run_task(
                         task=SoftTask(
                             sweep_name="flux",
@@ -267,10 +262,10 @@ class FluxDepExecutor:
                         update_hook=plot_fn,
                     )
                     signals_dict = merge_result_list(results)
-            finally:
-                if self.writer is not None:
-                    self.writer.finish()
-                    self.writer = None
+                finally:
+                    if self.writer is not None:
+                        self.writer.finish()
+                        self.writer = None
 
         self.last_result = signals_dict
 

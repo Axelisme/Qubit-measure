@@ -81,7 +81,9 @@ class QubitFreqMeasurementTask(
     def __init__(
         self,
         detune_sweep: SweepCfg,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], QubitFreqCfgTemplate],
+        cfg_maker: Callable[
+            [TaskContext, ModuleLibrary], Optional[QubitFreqCfgTemplate]
+        ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.detune_sweep = detune_sweep
@@ -196,7 +198,7 @@ class QubitFreqMeasurementTask(
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
-        self.task.init(ctx, dynamic_pbar=dynamic_pbar)
+        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
@@ -204,14 +206,15 @@ class QubitFreqMeasurementTask(
         flx: float = ctx.env_dict["flx_value"]
 
         cfg_temp = self.cfg_maker(ctx, ml)
+
+        if cfg_temp is None:
+            return  # skip this task
+
+        cfg_temp = dict(cfg_temp)
         deepupdate(
-            cfg_temp,  # type: ignore
-            {
-                "dev": ctx.cfg["dev"],
-                "sweep": {"detune": self.detune_sweep},
-            },
+            cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"detune": self.detune_sweep}}
         )
-        cfg_temp = ml.make_cfg(dict(cfg_temp))
+        cfg_temp = ml.make_cfg(cfg_temp)
 
         predict_freq = predictor.predict_freq(flx)
         Pulse.set_param(
@@ -225,13 +228,20 @@ class QubitFreqMeasurementTask(
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
         assert isinstance(raw_signals, np.ndarray)
+
         real_signals = qubitfreq_signal2real(raw_signals)
 
         detune, freq_err, kappa, kappa_err, fit_signals, _ = fit_qubit_freq(
             sweep2array(self.detune_sweep), real_signals
         )
-
         fit_freq = predict_freq + detune
+
+        mean_err = np.mean(np.abs(real_signals - fit_signals))
+
+        success = True
+        if mean_err > 0.05 * np.ptp(fit_signals):
+            success = False
+
         result = QubitFreqResult(
             raw_signals=raw_signals,
             predict_freq=np.array(predict_freq),
@@ -240,13 +250,10 @@ class QubitFreqMeasurementTask(
             fit_freq_err=np.array(freq_err),
             fit_kappa=np.array(kappa),
             fit_kappa_err=np.array(kappa_err),
-            success=np.array(True),
+            success=np.array(success),
         )
 
-        mean_err = np.mean(np.abs(real_signals - fit_signals))
-        if mean_err > 0.05 * np.ptp(fit_signals):
-            result["success"] = np.array(False)
-        if mean_err < 0.3 * np.ptp(fit_signals):
+        if success:
             bias = predictor.calculate_bias(flx, fit_freq)
             predictor.update_bias(bias)
 

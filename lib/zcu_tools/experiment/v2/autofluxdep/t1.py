@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, cast, Union, Tuple
+from typing import Callable, Dict, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -12,6 +12,7 @@ from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
+from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -28,7 +29,6 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
-from zcu_tools.notebook.utils import make_sweep
 
 from .executor import MeasurementTask
 
@@ -37,14 +37,14 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     if np.any(np.isnan(signals)):
         return signals.real
 
-    signals = rotate2real(signals).real
-    max_val = np.max(signals)
-    min_val = np.min(signals)
-    init_val = signals[0]
-    signals = (signals - min_val) / (max_val - min_val + 1e-12)
+    real_signals = rotate2real(signals).real
+    max_val = np.max(real_signals)
+    min_val = np.min(real_signals)
+    init_val = real_signals[0]
+    real_signals = (real_signals - min_val) / (max_val - min_val + 1e-12)
     if init_val < 0.5 * (max_val + min_val):
-        signals = 1.0 - signals
-    return signals
+        real_signals = 1.0 - real_signals
+    return real_signals
 
 
 def t1_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -83,7 +83,7 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
     def __init__(
         self,
         num_expts: int,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], T1CfgTemplate],
+        cfg_maker: Callable[[TaskContext, ModuleLibrary], Optional[T1CfgTemplate]],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.num_expts = num_expts
@@ -152,11 +152,12 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
         flx_values = ctx.env_dict["flx_values"]
         flx_idx = ctx.env_dict["flx_idx"]
 
+        len_idxs = np.arange(self.num_expts).astype(np.float64)
         real_signals = t1_fluxdep_signal2real(signals["raw_signals"])
 
         plotters["t1"].update(flx_values, signals["t1"], refresh=False)
         plotters["t1_over_flx"].update(
-            flx_values, np.arange(self.num_expts), real_signals, refresh=False
+            flx_values, len_idxs, real_signals, refresh=False
         )
         plotters["t1_curve"].update(self.lengths, real_signals[flx_idx], refresh=False)
 
@@ -213,21 +214,22 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
-        self.task.init(ctx, dynamic_pbar=dynamic_pbar)
+        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
 
         cfg_temp = self.cfg_maker(ctx, ml)
 
+        if cfg_temp is None:
+            return  # skip this task
+
         len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
         self.lengths = sweep2array(len_sweep)
 
-        deepupdate(
-            cfg_temp,  # type: ignore
-            {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}},
-        )
-        cfg_temp = ml.make_cfg(dict(cfg_temp))
+        cfg_temp = dict(cfg_temp)
+        deepupdate(cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}})
+        cfg_temp = ml.make_cfg(cfg_temp)
 
         cfg = cast(T1Cfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
@@ -239,16 +241,24 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
 
         t1, t1err, fit_signals, _ = fit_decay(self.lengths, real_signals)
 
+        success = True
+        if t1 > 2 * np.max(self.lengths):
+            t1 = np.nan
+            t1err = np.nan
+            success = False
+
         result = T1Result(
             raw_signals=raw_signals,
             length=self.lengths.copy(),
             t1=np.array(t1),
             t1_err=np.array(t1err),
-            success=np.array(True),
+            success=np.array(success),
         )
 
-        if np.mean(np.abs(real_signals - fit_signals)) < 0.1 * np.ptp(fit_signals):
+        mean_err = np.mean(np.abs(real_signals - fit_signals))
+        if success and mean_err < 0.1 * np.ptp(fit_signals):
             ctx.env_dict["t1"] = t1
+            ctx.env_dict["smooth_t1"] = 0.5 * (ctx.env_dict.get("smooth_t1", t1) + t1)
 
         ctx.set_current_data(result)
 

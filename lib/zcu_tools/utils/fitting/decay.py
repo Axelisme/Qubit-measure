@@ -18,7 +18,7 @@ from .base import (
 def fit_decay(
     xs: np.ndarray,
     real_signals: np.ndarray,
-    fit_params: Optional[Tuple[float, ...]] = None,
+    fit_params: Optional[Tuple[float, float, float]] = None,
 ) -> Tuple[float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
     """return [t1, t1err, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fitexp(xs, real_signals, fitparams=fit_params)
@@ -45,7 +45,7 @@ def fit_dual_decay(
 
     # make sure t1 is the longer one
     if pOpt[4] > pOpt[2]:
-        pOpt = [pOpt[0], pOpt[3], pOpt[4], pOpt[1], pOpt[2]]
+        pOpt = (pOpt[0], pOpt[3], pOpt[4], pOpt[1], pOpt[2])
         new_pCov = pCov.copy()
         new_pCov[[1, 3], :] = new_pCov[[3, 1], :]
         new_pCov[[2, 4], :] = new_pCov[[4, 2], :]

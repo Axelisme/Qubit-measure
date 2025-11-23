@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, cast
+from typing import Callable, Dict, Optional, Sequence, Tuple, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -36,18 +36,39 @@ def lenrabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     if np.any(np.isnan(signals)):
         return signals.real
 
-    signals = rotate2real(signals).real
-    max_val = np.max(signals)
-    min_val = np.min(signals)
-    init_val = signals[0]
-    signals = (signals - min_val) / (max_val - min_val + 1e-12)
+    real_signals = rotate2real(signals).real
+    max_val = np.max(real_signals)
+    min_val = np.min(real_signals)
+    init_val = real_signals[0]
+    real_signals = (real_signals - min_val) / (max_val - min_val + 1e-12)
     if init_val < 0.5 * (max_val + min_val):
-        signals = 1.0 - signals
-    return signals
+        real_signals = 1.0 - real_signals
+    return real_signals
 
 
 def lenrabi_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.array(list(map(lenrabi_signal2real, signals)), dtype=np.float64)
+
+
+def auto_fit_lenrabi(
+    lengths: NDArray[np.float64], real_signals: NDArray[np.float64]
+) -> Tuple[float, float, float, float, NDArray[np.float64]]:
+    *decay_args, decay_signals, _ = fit_rabi(lengths, real_signals, decay=True)
+    *normal_args, normal_signals, _ = fit_rabi(lengths, real_signals, decay=False)
+
+    decay_loss = np.mean(np.abs(real_signals - decay_signals))
+    normal_loss = np.mean(np.abs(real_signals - normal_signals))
+    if decay_loss < normal_loss:
+        fit_loss = float(decay_loss)
+        fit_signals = decay_signals
+        fit_params = decay_args
+    else:
+        fit_loss = float(normal_loss)
+        fit_signals = normal_signals
+        fit_params = normal_args
+    pi_len, pi2_len, rabi_freq = fit_params
+
+    return pi_len, pi2_len, rabi_freq, fit_loss, fit_signals
 
 
 class LenRabiCfgTemplate(TypedDict):
@@ -81,7 +102,7 @@ class LenRabiMeasurementTask(
         self,
         length_sweep: SweepCfg,
         ref_pi_product: float,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], LenRabiCfgTemplate],
+        cfg_maker: Callable[[TaskContext, ModuleLibrary], Optional[LenRabiCfgTemplate]],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.length_sweep = length_sweep
@@ -192,20 +213,21 @@ class LenRabiMeasurementTask(
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
-        self.task.init(ctx, dynamic_pbar=dynamic_pbar)
+        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
 
         cfg_temp = self.cfg_maker(ctx, ml)
+
+        if cfg_temp is None:
+            return  # skip this task
+
+        cfg_temp = dict(cfg_temp)
         deepupdate(
-            cfg_temp,  # type: ignore
-            {
-                "dev": ctx.cfg["dev"],
-                "sweep": {"length": self.length_sweep},
-            },
+            cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"length": self.length_sweep}}
         )
-        cfg_temp = ml.make_cfg(dict(cfg_temp))
+        cfg_temp = ml.make_cfg(cfg_temp)
 
         cfg = cast(LenRabiCfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
@@ -218,20 +240,9 @@ class LenRabiMeasurementTask(
         real_signals = lenrabi_signal2real(raw_signals)
 
         lengths = sweep2array(self.length_sweep)
-        *decay_args, decay_signals, _ = fit_rabi(lengths, real_signals, decay=True)
-        *normal_args, normal_signals, _ = fit_rabi(lengths, real_signals, decay=False)
-
-        decay_loss = np.mean(np.abs(real_signals - decay_signals))
-        normal_loss = np.mean(np.abs(real_signals - normal_signals))
-        if decay_loss < normal_loss:
-            fit_loss = decay_loss
-            fit_signals = decay_signals
-            fit_params = decay_args
-        else:
-            fit_loss = normal_loss
-            fit_signals = normal_signals
-            fit_params = normal_args
-        pi_len, pi2_len, rabi_freq = fit_params
+        pi_len, pi2_len, rabi_freq, fit_loss, fit_signals = auto_fit_lenrabi(
+            lengths, real_signals
+        )
 
         result = LenRabiResult(
             raw_signals=raw_signals,

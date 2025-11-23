@@ -72,6 +72,10 @@ class TaskContext(Generic[T_TaskConfigType, T_ResultType, T_KeyType]):
             return None
         return self.addr_stack[-1]
 
+    def trigger_hook(self) -> None:
+        if self.update_hook is not None:
+            self.update_hook(self)
+
     def set_data(self, value: ResultType, addr_stack: List[T_KeyType] = []) -> None:
         target = self.get_data(addr_stack)
 
@@ -89,9 +93,7 @@ class TaskContext(Generic[T_TaskConfigType, T_ResultType, T_KeyType]):
                 raise ValueError(f"Expected NDArray or number, got {type(value)}")
             np.copyto(target, value)
 
-        # update viewer
-        if self.update_hook is not None:
-            self.update_hook(self)
+        self.trigger_hook()
 
     def set_current_data(
         self, value: ResultType, append_addr: List[T_KeyType] = []
@@ -288,7 +290,11 @@ class HardTask(
         self.raw2signal_fn = raw2signal_fn
         self.result_shape = result_shape
 
-    def make_pbar(self, ctx: TaskContext, leave: bool) -> tqdm:
+    def make_pbar(
+        self,
+        ctx: TaskContext[T_TaskConfigType, NDArray[np.complex128], Any],
+        leave: bool,
+    ) -> tqdm:
         total = ctx.cfg.get("rounds")
         return tqdm(
             total=total,
@@ -298,14 +304,20 @@ class HardTask(
             disable=total == 1,
         )
 
-    def init(self, ctx: TaskContext, dynamic_pbar=False) -> None:
+    def init(
+        self,
+        ctx: TaskContext[T_TaskConfigType, NDArray[np.complex128], Any],
+        dynamic_pbar=False,
+    ) -> None:
         self.dynamic_pbar = dynamic_pbar
         if dynamic_pbar:
             self.avg_pbar = None  # initialize in run()
         else:
             self.avg_pbar = self.make_pbar(ctx, leave=True)
 
-    def run(self, ctx: TaskContext) -> None:
+    def run(
+        self, ctx: TaskContext[T_TaskConfigType, NDArray[np.complex128], Any]
+    ) -> None:
         assert "rounds" in ctx.cfg
 
         if self.dynamic_pbar:

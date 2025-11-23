@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Callable, Dict, Sequence, cast
+from typing import Callable, Dict, Optional, Sequence, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -10,7 +10,6 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
-from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.program import SweepCfg
@@ -80,7 +79,7 @@ class MistMeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictType])
     def __init__(
         self,
         gain_sweep: SweepCfg,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], MistCfgTemplate],
+        cfg_maker: Callable[[TaskContext, ModuleLibrary], Optional[MistCfgTemplate]],
     ) -> None:
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
@@ -173,27 +172,31 @@ class MistMeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictType])
         real_signals = mist_fluxdep_signal2real(signals["raw_signals"])
 
         std_len = max(int(0.3 * real_signals.shape[1]), 5)
-        real_signals = np.clip(
-            real_signals, 0, 5 * np.nanstd(real_signals[:, :std_len])
+        mist_signals, decay_signals = real_signals[..., 0], real_signals[..., 1]
+        mist_signals = np.clip(
+            mist_signals, 0, 5 * np.nanstd(mist_signals[:, :std_len])
+        )
+        decay_signals = np.clip(
+            decay_signals, 0, 5 * np.nanstd(decay_signals[:, :std_len])
         )
 
         plotters["g_mist"].update(
-            flx_values, gains, real_signals[..., 0, 0], refresh=False
+            flx_values, gains, mist_signals[..., 0], refresh=False
         )
         plotters["e_mist"].update(
-            flx_values, gains, real_signals[..., 1, 0], refresh=False
+            flx_values, gains, mist_signals[..., 1], refresh=False
         )
         plotters["g_decay"].update(
-            flx_values, gains, real_signals[..., 0, 1], refresh=False
+            flx_values, gains, decay_signals[..., 0], refresh=False
         )
         plotters["e_decay"].update(
-            flx_values, gains, real_signals[..., 1, 1], refresh=False
+            flx_values, gains, decay_signals[..., 1], refresh=False
         )
         plotters["mist_signal"].update(
-            gains, real_signals[flx_idx, ..., 0].T, refresh=False
+            gains, mist_signals[flx_idx, ..., 0].T, refresh=False
         )
         plotters["decay_signal"].update(
-            gains, real_signals[flx_idx, ..., 1].T, refresh=False
+            gains, decay_signals[flx_idx, ..., 1].T, refresh=False
         )
 
     def save(self, filepath, flx_values, result, comment, prefix_tag) -> None:
@@ -241,14 +244,19 @@ class MistMeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictType])
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
-        self.task.init(ctx, dynamic_pbar=dynamic_pbar)
+        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
 
         cfg_temp = self.cfg_maker(ctx, ml)
+
+        if cfg_temp is None:
+            return  # skip this task
+
+        cfg_temp = dict(cfg_temp)
         deepupdate(
-            cfg_temp,  # type: ignore
+            cfg_temp,
             {
                 "pre_pi_pulse": deepcopy(cfg_temp["pi_pulse"]),
                 "post_pi_pulse": deepcopy(cfg_temp["pi_pulse"]),
@@ -260,8 +268,8 @@ class MistMeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictType])
                 },
             },
         )
-        cfg_temp = ml.make_cfg(dict(cfg_temp))
         del cfg_temp["pi_pulse"]
+        cfg_temp = ml.make_cfg(cfg_temp)
 
         Pulse.set_param(
             cfg_temp["mist_pulse"],
