@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, cast
+from typing import Any, Callable, Dict, Optional, Sequence, cast
 
 import numpy as np
 from numpy import float64
@@ -131,7 +131,7 @@ class QubitFreqMeasurementTask(
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
 
-        self.freq_line.set_xdata([ctx.env_dict.get("fit_detune", np.nan)])
+        self.freq_line.set_xdata([ctx.env_dict["cur_info"].get("fit_detune", np.nan)])
         plotters["fit_freq"].update(flx_values, signals["fit_freq"], refresh=False)
         plotters["detune"].update(
             flx_values,
@@ -236,31 +236,36 @@ class QubitFreqMeasurementTask(
         )
         fit_freq = predict_freq + detune
 
-        mean_err = np.mean(np.abs(real_signals - fit_signals))
-
         success = True
+        mean_err = np.mean(np.abs(real_signals - fit_signals))
         if mean_err > 0.05 * np.ptp(fit_signals):
+            detune = np.nan
+            fit_freq = np.nan
+            freq_err = np.nan
+            kappa = np.nan
+            kappa_err = np.nan
             success = False
 
-        result = QubitFreqResult(
-            raw_signals=raw_signals,
-            predict_freq=np.array(predict_freq),
-            fit_detune=np.array(detune),
-            fit_freq=np.array(fit_freq),
-            fit_freq_err=np.array(freq_err),
-            fit_kappa=np.array(kappa),
-            fit_kappa_err=np.array(kappa_err),
-            success=np.array(success),
-        )
-
+        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
         if success:
+            cur_info["qubit_freq"] = fit_freq
+            cur_info["fit_detune"] = detune
+
             bias = predictor.calculate_bias(flx, fit_freq)
             predictor.update_bias(bias)
 
-        ctx.env_dict["qubit_freq"] = fit_freq
-        ctx.env_dict["fit_detune"] = detune
-
-        ctx.set_current_data(result)
+        ctx.set_current_data(
+            QubitFreqResult(
+                raw_signals=raw_signals,
+                predict_freq=np.array(predict_freq),
+                fit_detune=np.array(detune),
+                fit_freq=np.array(fit_freq),
+                fit_freq_err=np.array(freq_err),
+                fit_kappa=np.array(kappa),
+                fit_kappa_err=np.array(kappa_err),
+                success=np.array(success),
+            )
+        )
 
     def get_default_result(self) -> QubitFreqResult:
         return QubitFreqResult(

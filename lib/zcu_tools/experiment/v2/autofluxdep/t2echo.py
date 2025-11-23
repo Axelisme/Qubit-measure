@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -263,27 +262,26 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, T2EchoCfg, PlotterDict
             )
 
         success = True
-        if t2e > 2 * np.max(self.lengths):
-            t2e = np.nan
-            t2e_err = np.nan
+        mean_err = np.mean(np.abs(real_signals - fit_signals))
+        if t2e > 2 * np.max(self.lengths) or mean_err > 0.1 * np.ptp(fit_signals):
+            t2e, t2e_err = np.nan, np.nan
             success = False
 
-        result = T2EchoResult(
-            raw_signals=raw_signals,
-            length=self.lengths.copy(),
-            t2e=np.array(t2e),
-            t2e_err=np.array(t2e_err),
-            success=np.array(success),
-        )
+        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
+        last_info: Dict[str, Any] = ctx.env_dict["last_info"]
+        if success:
+            cur_info["t2e"] = t2e
+            cur_info["smooth_t2e"] = 0.5 * (last_info.get("smooth_t2e", t2e) + t2e)
 
-        mean_err = np.mean(np.abs(real_signals - fit_signals))
-        if success and mean_err < 0.1 * np.ptp(fit_signals):
-            ctx.env_dict["t2e"] = t2e
-            ctx.env_dict["smooth_t2e"] = 0.5 * (
-                ctx.env_dict.get("smooth_t2e", t2e) + t2e
+        ctx.set_current_data(
+            T2EchoResult(
+                raw_signals=raw_signals,
+                length=self.lengths.copy(),
+                t2e=np.array(t2e),
+                t2e_err=np.array(t2e_err),
+                success=np.array(success),
             )
-
-        ctx.set_current_data(result)
+        )
 
     def get_default_result(self) -> T2EchoResult:
         return T2EchoResult(

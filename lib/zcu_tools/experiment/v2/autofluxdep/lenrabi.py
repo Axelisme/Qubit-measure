@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, Tuple, cast
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -160,7 +160,7 @@ class LenRabiMeasurementTask(
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
 
-        self.pi_line.set_xdata([ctx.env_dict.get("pi_length", np.nan)])
+        self.pi_line.set_xdata([ctx.env_dict["cur_info"].get("pi_length", np.nan)])
         plotters["rabi_curve"].update(
             flx_values,
             sweep2array(self.length_sweep),
@@ -233,6 +233,7 @@ class LenRabiMeasurementTask(
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         cur_gain = cfg["rabi_pulse"]["gain"]
+        assert isinstance(cur_gain, float)
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
         assert isinstance(raw_signals, np.ndarray)
@@ -240,36 +241,38 @@ class LenRabiMeasurementTask(
         real_signals = lenrabi_signal2real(raw_signals)
 
         lengths = sweep2array(self.length_sweep)
-        pi_len, pi2_len, rabi_freq, fit_loss, fit_signals = auto_fit_lenrabi(
+        pi_len, pi2_len, rabi_freq, mean_err, fit_signals = auto_fit_lenrabi(
             lengths, real_signals
         )
 
-        result = LenRabiResult(
-            raw_signals=raw_signals,
-            pi_length=np.array(pi_len),
-            pi2_length=np.array(pi2_len),
-            rabi_freq=np.array(rabi_freq),
-            success=np.array(True),
-        )
+        success = True
+        if pi2_len < 0.03 or mean_err > 0.1 * np.ptp(fit_signals):
+            pi_len, pi2_len, rabi_freq = np.nan, np.nan, np.nan
+            success = False
 
-        if fit_loss > 0.1 * np.ptp(fit_signals) or pi2_len < 0.03:
-            result["success"] = np.array(False)
-
-        if result["success"]:
+        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
+        last_info: Dict[str, Any] = ctx.env_dict["last_info"]
+        if success:
             cur_product = pi_len * cur_gain
-            new_gain_factor = (cur_product * ctx.env_dict["cur_m"]) / (
-                self.ref_product * ctx.env_dict["ref_m"]
-            )
+            new_gain_factor = cur_info["m_ratio"] * cur_product / self.ref_product
 
-            ctx.env_dict["pi_length"] = pi_len
-            ctx.env_dict["pi2_length"] = pi2_len
-            ctx.env_dict["pi_gain"] = cur_gain
-            ctx.env_dict["pi2_gain"] = cur_gain
-            ctx.env_dict["gain_factor"] = (
-                ctx.env_dict.get("gain_factor", 1.0) * new_gain_factor
+            cur_info["pi_length"] = pi_len
+            cur_info["pi2_length"] = pi2_len
+            cur_info["pi_gain"] = cur_gain
+            cur_info["pi2_gain"] = cur_gain
+            cur_info["gain_factor"] = (
+                last_info.get("gain_factor", 1.0) * new_gain_factor
             ) ** 0.5
 
-        ctx.set_current_data(result)
+        ctx.set_current_data(
+            LenRabiResult(
+                raw_signals=raw_signals,
+                pi_length=np.array(pi_len),
+                pi2_length=np.array(pi2_len),
+                rabi_freq=np.array(rabi_freq),
+                success=np.array(success),
+            )
+        )
 
     def get_default_result(self) -> LenRabiResult:
         return LenRabiResult(

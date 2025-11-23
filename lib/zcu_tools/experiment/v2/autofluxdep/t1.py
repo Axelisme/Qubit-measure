@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -242,25 +242,26 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
         t1, t1err, fit_signals, _ = fit_decay(self.lengths, real_signals)
 
         success = True
-        if t1 > 2 * np.max(self.lengths):
-            t1 = np.nan
-            t1err = np.nan
+        mean_err = np.mean(np.abs(real_signals - fit_signals))
+        if t1 > 2 * np.max(self.lengths) or mean_err > 0.1 * np.ptp(fit_signals):
+            t1, t1err = np.nan, np.nan
             success = False
 
-        result = T1Result(
-            raw_signals=raw_signals,
-            length=self.lengths.copy(),
-            t1=np.array(t1),
-            t1_err=np.array(t1err),
-            success=np.array(success),
+        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
+        last_info: Dict[str, Any] = ctx.env_dict["last_info"]
+        if success:
+            cur_info["t1"] = t1
+            cur_info["smooth_t1"] = 0.5 * (last_info.get("smooth_t1", t1) + t1)
+
+        ctx.set_current_data(
+            T1Result(
+                raw_signals=raw_signals,
+                length=self.lengths.copy(),
+                t1=np.array(t1),
+                t1_err=np.array(t1err),
+                success=np.array(success),
+            )
         )
-
-        mean_err = np.mean(np.abs(real_signals - fit_signals))
-        if success and mean_err < 0.1 * np.ptp(fit_signals):
-            ctx.env_dict["t1"] = t1
-            ctx.env_dict["smooth_t1"] = 0.5 * (ctx.env_dict.get("smooth_t1", t1) + t1)
-
-        ctx.set_current_data(result)
 
     def get_default_result(self) -> T1Result:
         return T1Result(

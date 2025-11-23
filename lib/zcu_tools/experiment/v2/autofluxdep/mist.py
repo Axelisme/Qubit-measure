@@ -289,9 +289,12 @@ class MistMeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictType])
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
         assert isinstance(raw_signals, np.ndarray)
 
-        result = MistResult(raw_signals=raw_signals, success=np.array(True))
-
-        ctx.set_current_data(result)
+        ctx.set_current_data(
+            MistResult(
+                raw_signals=raw_signals,
+                success=np.array(True),
+            )
+        )
 
     def get_default_result(self) -> MistResult:
         return MistResult(

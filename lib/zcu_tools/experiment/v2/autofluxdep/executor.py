@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 from collections import OrderedDict, defaultdict
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Tuple, TypeVar
 
@@ -71,6 +72,9 @@ class FluxDepBatchTask(BatchTask):
 
         ctx.env_dict["ref_m"] = predictor.predict_matrix_element(flx)
 
+        ctx.env_dict["last_info"] = {}
+        ctx.env_dict["cur_info"] = {}
+
         super().init(ctx, dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx: TaskContext) -> None:
@@ -82,9 +86,13 @@ class FluxDepBatchTask(BatchTask):
 
         predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
         flx: float = ctx.env_dict["flx_value"]
+        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
+        last_info: Dict[str, Any] = ctx.env_dict["last_info"]
 
-        ctx.env_dict["cur_m"] = predictor.predict_matrix_element(flx)
-        ctx.env_dict["m_ratio"] = ctx.env_dict["cur_m"] / ctx.env_dict["ref_m"]
+        cur_info.clear()  # clear current info
+
+        cur_info["cur_m"] = predictor.predict_matrix_element(flx)
+        cur_info["m_ratio"] = cur_info["cur_m"] / ctx.env_dict["ref_m"]
 
         for name, task in self.tasks.items():
             self.task_pbar.set_description(desc=f"Task [{str(name)}]")
@@ -93,11 +101,15 @@ class FluxDepBatchTask(BatchTask):
 
             task.run(cur_ctx)
 
-            self.task_pbar.update()
-
             # force refresh current task data
             with MinIntervalFunc.force_execute():
                 cur_ctx.trigger_hook()
+
+            # update current info to last info
+            last_info.update(deepcopy(cur_info))
+
+            # update progress bar
+            self.task_pbar.update()
 
         if self.dynamic_pbar:
             self.task_pbar.close()

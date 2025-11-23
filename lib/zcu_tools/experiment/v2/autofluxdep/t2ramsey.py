@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, Sequence, Tuple, Union, cast
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -269,32 +269,32 @@ class T2RamseyMeasurementTask(
         t2r_detune = t2r_detune - cfg["activate_detune"]
 
         success = True
-        if t2r > 2 * np.max(self.lengths):
+        mean_err = np.mean(np.abs(real_signals - fit_signals))
+        if t2r > 2 * np.max(self.lengths) or mean_err > 0.1 * np.ptp(fit_signals):
             t2r = np.nan
             t2r_err = np.nan
             t2r_detune = np.nan
             t2r_detune_err = np.nan
             success = False
 
-        result = T2RamseyResult(
-            raw_signals=raw_signals,
-            length=self.lengths.copy(),
-            t2r=np.array(t2r),
-            t2r_err=np.array(t2r_err),
-            t2r_detune=np.array(t2r_detune),
-            t2r_detune_err=np.array(t2r_detune_err),
-            success=np.array(success),
-        )
+        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
+        last_info: Dict[str, Any] = ctx.env_dict["last_info"]
+        if success:
+            cur_info["t2r"] = t2r
+            cur_info["t2r_detune"] = t2r_detune
+            cur_info["smooth_t2r"] = 0.5 * (last_info.get("smooth_t2r", t2r) + t2r)
 
-        mean_err = np.mean(np.abs(real_signals - fit_signals))
-        if success and mean_err < 0.1 * np.ptp(fit_signals):
-            ctx.env_dict["t2r"] = t2r
-            ctx.env_dict["t2r_detune"] = t2r_detune
-            ctx.env_dict["smooth_t2r"] = 0.5 * (
-                ctx.env_dict.get("smooth_t2r", t2r) + t2r
+        ctx.set_current_data(
+            T2RamseyResult(
+                raw_signals=raw_signals,
+                length=self.lengths.copy(),
+                t2r=np.array(t2r),
+                t2r_err=np.array(t2r_err),
+                t2r_detune=np.array(t2r_detune),
+                t2r_detune_err=np.array(t2r_detune_err),
+                success=np.array(success),
             )
-
-        ctx.set_current_data(result)
+        )
 
     def get_default_result(self) -> T2RamseyResult:
         return T2RamseyResult(
