@@ -139,6 +139,7 @@ class T2EchoExperiment(AbsExperiment):
         ax.set_xlabel("Time (us)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
+        ax.grid(True)
 
         fig.tight_layout()
 

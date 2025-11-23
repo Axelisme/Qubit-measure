@@ -68,8 +68,13 @@ class AmpRabiExperiment(AbsExperiment):
         pdrs, signals = result
         real_signals = rabi_signal2real(signals)
 
+        if real_signals[0] > 0.5 * (np.max(real_signals) + np.min(real_signals)):
+            init_phase = 0.0
+        else:
+            init_phase = 180
+
         pi_amp, pi2_amp, _, y_fit, _ = fit_rabi(
-            pdrs, real_signals, decay=False, init_phase=0.0
+            pdrs, real_signals, decay=False, init_phase=init_phase
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)
@@ -82,6 +87,7 @@ class AmpRabiExperiment(AbsExperiment):
         ax.set_xlabel("Pulse gain (a.u.)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.legend(loc=4)
+        ax.grid(True)
 
         fig.tight_layout()
 

@@ -8,7 +8,7 @@ dependencies = ["numpy==1.23.5", "tqdm", "matplotlib==3.9", "typing-extensions"]
 
 [project.optional-dependencies]
 server = ["qick", "dill"]
-client = ["qick", "numpy", "pyyaml", "dill", "pyvisa", "jupytext"]
+client = ["qick", "numpy", "pyyaml", "dill", "pyvisa", "jupytext", "pyro4"]
 fit = [
   "h5py",
   "ipykernel",

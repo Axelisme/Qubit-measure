@@ -85,62 +85,18 @@ class MistMeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictType])
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
 
-        def measure_mist_fn(ctx: TaskContext, update_hook: Callable):
-            import time
-
-            def make_ge_signals(i, g_threshold: float, e_threshold: float):
-                noise_level = 0.01 * (ctx.cfg["rounds"] - i)
-                mist_signals = np.where(
-                    gains > g_threshold, gains, 0
-                ) + noise_level * np.random.randn(len(gains))
-                decay_signals = np.where(
-                    gains > e_threshold, gains, 0
-                ) + noise_level * np.random.randn(len(gains))
-                g_signals = mist_signals + decay_signals
-                e_signals = mist_signals - decay_signals
-                return np.stack([g_signals, e_signals], axis=-1)  # (gains, post_ge)
-
-            gains = sweep2array(self.gain_sweep)
-            for i in range(ctx.cfg["rounds"]):
-                raw_signals = np.stack(
-                    [
-                        make_ge_signals(
-                            i, ctx.env_dict["flx_value"], ctx.env_dict["flx_value"] ** 2
-                        ),
-                        make_ge_signals(
-                            i,
-                            2 * ctx.env_dict["flx_value"] - 1,
-                            2 * ctx.env_dict["flx_value"] + 1,
-                        ),
-                    ],
-                    axis=1,
-                )
-                raw_signals = [
-                    np.array(
-                        [np.stack([raw_signals, np.zeros_like(raw_signals)], axis=-1)],
-                        dtype=np.complex128,
-                    )
-                ]
-
-                update_hook(i, raw_signals)
-                time.sleep(0.01)
-
-            # [[(gains, ge, ge, iq)]]
-            return cast(Sequence[NDArray[np.float64]], raw_signals)
-
         self.task = HardTask[Sequence[NDArray[np.float64]], MistCfg](
-            measure_fn=measure_mist_fn,
-            # measure_fn=lambda ctx, update_hook: ModularProgramV2(
-            #     ctx.env_dict["soccfg"],
-            #     ctx.cfg,
-            #     modules=[
-            #         Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-            #         Pulse(name="pre_pi_pulse", cfg=ctx.cfg["pre_pi_pulse"]),
-            #         Pulse(name="mist_pulse", cfg=ctx.cfg["mist_pulse"]),
-            #         Pulse(name="post_pi_pulse", cfg=ctx.cfg["post_pi_pulse"]),
-            #         Readout("readout", ctx.cfg["readout"]),
-            #     ],
-            # ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook),
+            measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                ctx.env_dict["soccfg"],
+                ctx.cfg,
+                modules=[
+                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                    Pulse(name="pre_pi_pulse", cfg=ctx.cfg["pre_pi_pulse"]),
+                    Pulse(name="mist_pulse", cfg=ctx.cfg["mist_pulse"]),
+                    Pulse(name="post_pi_pulse", cfg=ctx.cfg["post_pi_pulse"]),
+                    Readout("readout", ctx.cfg["readout"]),
+                ],
+            ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook),
             result_shape=(self.gain_sweep["expts"], 2, 2),
         )
 

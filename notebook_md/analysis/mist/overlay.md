@@ -1,17 +1,3 @@
----
-jupyter:
-  jupytext:
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.17.2
-  kernelspec:
-    display_name: Python 3
-    language: python
-    name: python3
----
-
 ```python
 %load_ext autoreload
 import numpy as np
@@ -30,7 +16,7 @@ from zcu_tools.notebook.analysis.mist.branch.overlay import calc_overlay, plot_o
 ```
 
 ```python
-qub_name = "Q12_2D[2]/Q4"
+qub_name = "Q12_2D[4]/Q4"
 
 result_dir = Path(f"../../../result/{qub_name}")
 result_dir.mkdir(parents=True, exist_ok=True)
@@ -56,7 +42,7 @@ if "sample_f" in allows:
     sample_f = allows["sample_f"]
 
 # r_f = 7.520
-rf_w = 4e-3
+rf_w = 11.2e-3
 g = 0.130
 
 sim_flxs = np.linspace(-0.05, 0.55, 200)
@@ -65,7 +51,9 @@ sim_flxs = np.linspace(-0.05, 0.55, 200)
 # Process data
 
 ```python
-filepath = r"D:\Labber_Data\Axel\Si001\2025\11\Data_1107\R59_dispersive@0.950mA_1.hdf5"
+filepath = (
+    r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\R4_dispersive@4.000mA_1.hdf5"
+)
 signals, fpts, _ = load_data(filepath)
 fpts /= 1e6
 
@@ -77,12 +65,14 @@ plt.close(fig)
 ```
 
 ```python
-filepath = r"D:\Labber_Data\Axel\Si001\2025\11\Data_1107\Si001_ac_stark@0.950mA_2.hdf5"
+filepath = (
+    r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_ac_stark@4.000mA_1.hdf5"
+)
 signals, pdrs, fpts = load_data(filepath)
 fpts /= 1e6
 
 ac_coeff, fig = ze.twotone.ac_stark.AcStarkExperiment().analyze(
-    result=(pdrs, fpts, signals), chi=chi, kappa=kappa, cutoff=0.35
+    result=(pdrs, fpts, signals), chi=chi, kappa=kappa, cutoff=0.04
 )
 plt.show(fig)
 plt.close(fig)
@@ -90,11 +80,11 @@ plt.close(fig)
 
 ```python
 filepaths = [
-    r"../../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_mist_flx_pdr@-0.417mA_2.hdf5",
+    r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_mist_flux_bare@4.000mA_1.hdf5",
     # r"../../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_mist_flx_pdr@-0.417mA_1.hdf5",
 ]
 
-ac_coeff = 67
+# ac_coeff = 67
 
 fig = go.Figure()
 
@@ -161,7 +151,7 @@ fig.update_layout(height=600, margin=dict(t=10, b=20, l=20))
 
 for filepath in filepaths:
     signals, As, pdrs = load_data(filepath)
-    flxs = mA2flx(As * 1e3, mA_c, period)
+    flxs = mA2flx(As, mA_c, period)
     photons = ac_coeff * pdrs**2
 
     real_signals = mist_signal2real(signals)

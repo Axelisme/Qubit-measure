@@ -34,12 +34,16 @@ from .executor import MeasurementTask
 
 def qubitfreq_signal2real(signals: np.ndarray) -> np.ndarray:
     if np.any(np.isnan(signals)):
-        return np.full_like(signals, np.nan, dtype=np.float64)
-    signals = rotate2real(signals).real
+        return signals.real
 
+    signals = rotate2real(signals).real
     max_val = np.max(signals)
     min_val = np.min(signals)
-    return (signals - min_val) / (max_val - min_val + 1e-12)
+    mid_val = np.median(signals)
+    signals = (signals - min_val) / (max_val - min_val + 1e-12)
+    if mid_val > 0.5 * (max_val + min_val):
+        signals = 1.0 - signals
+    return signals
 
 
 def qubitfreq_fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -84,66 +88,19 @@ class QubitFreqMeasurementTask(
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_freq_fn(ctx: TaskContext, update_hook: Callable):
-            import time
-
-            from zcu_tools.utils.fitting.base import lorfunc
-
-            assert "rounds" in ctx.cfg
-
-            raw_signals = None
-            detunes: NDArray[np.float64] = sweep2array(self.detune_sweep)
-            for i in range(ctx.cfg["rounds"]):
-                raw_signals = [
-                    np.array(
-                        [
-                            np.stack(
-                                [
-                                    lorfunc(
-                                        detunes,
-                                        0,
-                                        0,
-                                        1,
-                                        4 * ctx.env_dict["flx_value"] ** 2
-                                        - self.predict_bias
-                                        - 4,
-                                        0.5
-                                        * (ctx.env_dict["flx_value"] ** 2 + 3.0)
-                                        * ctx.cfg["qub_pulse"]["gain"],
-                                    )
-                                    + 0.01
-                                    * (ctx.cfg["rounds"] - i)
-                                    * np.random.randn(len(detunes)),
-                                    np.zeros_like(detunes),
-                                ],
-                                axis=1,
-                            )
-                        ],
-                        dtype=np.complex128,
-                    )
-                ]
-                update_hook(i, raw_signals)
-                time.sleep(0.01)
-
-            assert raw_signals is not None
-
-            return cast(Sequence[NDArray[float64]], raw_signals)
-
-        self.detune_bias = 0.0
         self.task = HardTask[Sequence[NDArray[float64]], QubitFreqCfg](
-            measure_fn=measure_freq_fn,
-            # measure_fn=lambda ctx, update_hook: (
-            #     prog := TwoToneProgram(ctx.env_dict["soccfg"], ctx.cfg)
-            # ).acquire(
-            #     ctx.env_dict["soc"],
-            #     progress=False,
-            #     callback=wrap_earlystop_check(
-            #         prog,
-            #         update_hook,
-            #         self.earlystop_snr,
-            #         signal2real_fn=qubitfreq_signal2real,
-            #     ),
-            # ),
+            measure_fn=lambda ctx, update_hook: (
+                prog := TwoToneProgram(ctx.env_dict["soccfg"], ctx.cfg)
+            ).acquire(
+                ctx.env_dict["soc"],
+                progress=False,
+                callback=wrap_earlystop_check(
+                    prog,
+                    update_hook,
+                    self.earlystop_snr,
+                    signal2real_fn=qubitfreq_signal2real,
+                ),
+            ),
             result_shape=(self.detune_sweep["expts"],),
         )
 
@@ -172,7 +129,7 @@ class QubitFreqMeasurementTask(
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
 
-        self.freq_line.set_xdata([ctx.env_dict["fit_detune"]])
+        self.freq_line.set_xdata([ctx.env_dict.get("fit_detune", np.nan)])
         plotters["fit_freq"].update(flx_values, signals["fit_freq"], refresh=False)
         plotters["detune"].update(
             flx_values,
@@ -241,11 +198,6 @@ class QubitFreqMeasurementTask(
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.task.init(ctx, dynamic_pbar=dynamic_pbar)
 
-        self.predict_bias = 0.0
-
-        ctx.env_dict["qubit_freq"] = np.nan
-        ctx.env_dict["fit_detune"] = np.nan
-
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
         predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
@@ -261,7 +213,7 @@ class QubitFreqMeasurementTask(
         )
         cfg_temp = ml.make_cfg(dict(cfg_temp))
 
-        predict_freq = predictor.predict_freq(flx) + self.predict_bias
+        predict_freq = predictor.predict_freq(flx)
         Pulse.set_param(
             cfg_temp["qub_pulse"],
             "freq",
@@ -291,14 +243,15 @@ class QubitFreqMeasurementTask(
             success=np.array(True),
         )
 
-        if np.mean(np.abs(real_signals - fit_signals)) > 0.2 * np.ptp(real_signals):
+        mean_err = np.mean(np.abs(real_signals - fit_signals))
+        if mean_err > 0.05 * np.ptp(fit_signals):
             result["success"] = np.array(False)
+        if mean_err < 0.3 * np.ptp(fit_signals):
+            bias = predictor.calculate_bias(flx, fit_freq)
+            predictor.update_bias(bias)
 
-        if result["success"]:
-            self.predict_bias += 0.5 * detune
-
-            ctx.env_dict["qubit_freq"] = fit_freq
-            ctx.env_dict["fit_detune"] = detune
+        ctx.env_dict["qubit_freq"] = fit_freq
+        ctx.env_dict["fit_detune"] = detune
 
         ctx.set_current_data(result)
 

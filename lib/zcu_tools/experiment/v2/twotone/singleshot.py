@@ -143,7 +143,7 @@ class SingleShotExperiment(AbsExperiment):
             "No measurement data available. Run experiment first."
         )
 
-        (signals,) = result
+        signals = result
 
         save_data(
             filepath=filepath,

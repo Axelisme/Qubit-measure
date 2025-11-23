@@ -39,13 +39,14 @@ def instant_plot(fig: Figure, figsize) -> None:
 
 
 def make_plot_frame(
-    n_row: int, n_col: int, **kwargs
+    n_row: int, n_col: int, plot_instant=True, **kwargs
 ) -> Tuple[Figure, List[List[Axes]]]:
     kwargs.setdefault("squeeze", False)
     kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
     fig, axs = plt.subplots(n_row, n_col, **kwargs)
 
-    instant_plot(fig, kwargs["figsize"])
+    if plot_instant:
+        instant_plot(fig, kwargs["figsize"])
 
     return fig, axs
 

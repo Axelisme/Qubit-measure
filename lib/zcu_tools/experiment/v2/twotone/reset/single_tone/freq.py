@@ -21,6 +21,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
@@ -48,6 +49,10 @@ class FreqExperiment(AbsExperiment):
         assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+
+        Reset.set_param(
+            cfg["tested_reset"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+        )
 
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(

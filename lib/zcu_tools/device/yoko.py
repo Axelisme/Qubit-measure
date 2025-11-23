@@ -207,8 +207,8 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
                 "Remember to turn value to zero before changing mode"
             )
 
-        CHECK_CURRENT_LIMIT = 20e-3
-        CHECK_VOLTAGE_LIMIT = 20
+        CHECK_CURRENT_LIMIT = 10e-3
+        CHECK_VOLTAGE_LIMIT = 10
 
         value = cfg["value"]
         if cur_mode == "current":

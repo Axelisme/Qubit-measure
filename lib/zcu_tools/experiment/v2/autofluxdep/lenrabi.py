@@ -33,7 +33,17 @@ from .executor import MeasurementTask
 
 
 def lenrabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real
+    if np.any(np.isnan(signals)):
+        return signals.real
+
+    signals = rotate2real(signals).real
+    max_val = np.max(signals)
+    min_val = np.min(signals)
+    init_val = signals[0]
+    signals = (signals - min_val) / (max_val - min_val + 1e-12)
+    if init_val < 0.5 * (max_val + min_val):
+        signals = 1.0 - signals
+    return signals
 
 
 def lenrabi_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -75,76 +85,38 @@ class LenRabiMeasurementTask(
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.length_sweep = length_sweep
-        self.ref_pi_product = ref_pi_product
+        self.ref_product = ref_pi_product
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_lenrabi_fn(ctx: TaskContext, update_hook: Callable):
-            import time
-
-            from zcu_tools.utils.fitting.base import cosfunc
-
-            lengths = sweep2array(self.length_sweep)
-            for i in range(ctx.cfg["rounds"]):
-                raw_signals = [
-                    np.array(
-                        [
-                            np.stack(
-                                [
-                                    cosfunc(
-                                        lengths,
-                                        0,
-                                        1,
-                                        0.5
-                                        * (ctx.env_dict["flx_value"] ** 2 + 3.0)
-                                        * ctx.cfg["rabi_pulse"]["gain"],
-                                        0,
-                                    )
-                                    + 0.01
-                                    * (ctx.cfg["rounds"] - i)
-                                    * np.random.randn(len(lengths)),
-                                    np.zeros_like(lengths),
-                                ],
-                                axis=1,
-                            )
-                        ],
-                        dtype=np.complex128,
-                    )
-                ]
-                update_hook(i, raw_signals)
-                time.sleep(0.01)
-
-            return cast(Sequence[NDArray[np.float64]], raw_signals)
-
         self.task = HardTask[Sequence[NDArray[np.float64]], LenRabiCfg](
-            measure_fn=measure_lenrabi_fn,
-            # measure_fn=lambda ctx, update_hook: (
-            #     prog := ModularProgramV2(
-            #         ctx.env_dict["soccfg"],
-            #         ctx.cfg,
-            #         modules=[
-            #             Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-            #             Pulse(
-            #                 "rabi_pulse",
-            #                 Pulse.set_param(
-            #                     ctx.cfg["rabi_pulse"],
-            #                     "length",
-            #                     sweep2param("length", self.length_sweep),
-            #                 ),
-            #             ),
-            #             Readout("readout", ctx.cfg["readout"]),
-            #         ],
-            #     )
-            # ).acquire(
-            #     ctx.env_dict["soc"],
-            #     progress=False,
-            #     callback=wrap_earlystop_check(
-            #         prog,
-            #         update_hook,
-            #         self.earlystop_snr,
-            #         signal2real_fn=lenrabi_signal2real,
-            #     ),
-            # ),
+            measure_fn=lambda ctx, update_hook: (
+                prog := ModularProgramV2(
+                    ctx.env_dict["soccfg"],
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                        Pulse(
+                            "rabi_pulse",
+                            Pulse.set_param(
+                                ctx.cfg["rabi_pulse"],
+                                "length",
+                                sweep2param("length", self.length_sweep),
+                            ),
+                        ),
+                        Readout("readout", ctx.cfg["readout"]),
+                    ],
+                )
+            ).acquire(
+                ctx.env_dict["soc"],
+                progress=False,
+                callback=wrap_earlystop_check(
+                    prog,
+                    update_hook,
+                    self.earlystop_snr,
+                    signal2real_fn=lenrabi_signal2real,
+                ),
+            ),
             result_shape=(self.length_sweep["expts"],),
         )
 
@@ -167,7 +139,7 @@ class LenRabiMeasurementTask(
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
 
-        self.pi_line.set_xdata([ctx.env_dict["pi_length"]])
+        self.pi_line.set_xdata([ctx.env_dict.get("pi_length", np.nan)])
         plotters["rabi_curve"].update(
             flx_values,
             sweep2array(self.length_sweep),
@@ -222,10 +194,6 @@ class LenRabiMeasurementTask(
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.task.init(ctx, dynamic_pbar=dynamic_pbar)
 
-        ctx.env_dict["pi_length"] = np.nan
-        ctx.env_dict["pi2_length"] = np.nan
-        ctx.env_dict["gain_factor"] = 1.0
-
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
 
@@ -249,9 +217,21 @@ class LenRabiMeasurementTask(
 
         real_signals = lenrabi_signal2real(raw_signals)
 
-        pi_len, pi2_len, rabi_freq, fit_signals, _ = fit_rabi(
-            sweep2array(self.length_sweep), real_signals, decay=True
-        )
+        lengths = sweep2array(self.length_sweep)
+        *decay_args, decay_signals, _ = fit_rabi(lengths, real_signals, decay=True)
+        *normal_args, normal_signals, _ = fit_rabi(lengths, real_signals, decay=False)
+
+        decay_loss = np.mean(np.abs(real_signals - decay_signals))
+        normal_loss = np.mean(np.abs(real_signals - normal_signals))
+        if decay_loss < normal_loss:
+            fit_loss = decay_loss
+            fit_signals = decay_signals
+            fit_params = decay_args
+        else:
+            fit_loss = normal_loss
+            fit_signals = normal_signals
+            fit_params = normal_args
+        pi_len, pi2_len, rabi_freq = fit_params
 
         result = LenRabiResult(
             raw_signals=raw_signals,
@@ -261,16 +241,21 @@ class LenRabiMeasurementTask(
             success=np.array(True),
         )
 
-        if np.mean(np.abs(real_signals - fit_signals)) > 0.1 * np.ptp(real_signals):
+        if fit_loss > 0.1 * np.ptp(fit_signals) or pi2_len < 0.03:
             result["success"] = np.array(False)
 
         if result["success"]:
-            new_gain_factor = cur_gain * pi_len / self.ref_pi_product
+            cur_product = pi_len * cur_gain
+            new_gain_factor = (cur_product * ctx.env_dict["cur_m"]) / (
+                self.ref_product * ctx.env_dict["ref_m"]
+            )
 
             ctx.env_dict["pi_length"] = pi_len
             ctx.env_dict["pi2_length"] = pi2_len
+            ctx.env_dict["pi_gain"] = cur_gain
+            ctx.env_dict["pi2_gain"] = cur_gain
             ctx.env_dict["gain_factor"] = (
-                ctx.env_dict["gain_factor"] * new_gain_factor
+                ctx.env_dict.get("gain_factor", 1.0) * new_gain_factor
             ) ** 0.5
 
         ctx.set_current_data(result)

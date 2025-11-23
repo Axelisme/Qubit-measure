@@ -46,6 +46,8 @@ class LookbackExperiment(AbsExperiment):
                             soc, progress=False, callback=update_hook
                         )
                     ),
+                    raw2signal_fn=lambda raw: raw[0].dot([1, 1j]),
+                    result_shape=(len(Ts),),
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(

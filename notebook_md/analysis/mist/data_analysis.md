@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.4
+    version: 3.13.5
 ---
 
 ```python
@@ -39,7 +39,7 @@ from zcu_tools.simulate import mA2flx
 ```
 
 ```python
-qub_name = "Si001"
+qub_name = "Q12_2D[4]/Q4"
 ```
 
 ```python
@@ -112,7 +112,7 @@ ze.twotone.reset.dual_tone.LengthExperiment().analyze(result=(Ts, signals))
 # Dispersive shift
 
 ```python
-filepath = r"D:\Labber_Data\Axel\Si001\2025\11\Data_1107\R59_dispersive@0.950mA_1.hdf5"
+filepath = r"C:\Users\QEL\Desktop\MeasureScriptX\QuantumMeasurementProcedures\Members\axel\Qubit-measure\Database\Q12_2D[4]\Q4\2025\11\Data_1114\R4_dispersive@4.000mA_1.hdf5"
 signals, fpts, _ = load_data(filepath)
 fpts /= 1e6
 
@@ -126,12 +126,12 @@ plt.close(fig)
 # AC stark shift
 
 ```python
-filepath = r"D:\Labber_Data\Axel\Si001\2025\11\Data_1107\Si001_ac_stark@0.950mA_2.hdf5"
+filepath = r"C:\Users\QEL\Desktop\MeasureScriptX\QuantumMeasurementProcedures\Members\axel\Qubit-measure\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_ac_stark@4.000mA_1.hdf5"
 signals, pdrs, fpts = load_data(filepath)
 fpts /= 1e6
 
 ac_coeff, fig = ze.twotone.ac_stark.AcStarkExperiment().analyze(
-    result=(pdrs, fpts, signals), chi=chi, kappa=kappa, cutoff=0.35
+    result=(pdrs, fpts, signals), chi=chi, kappa=kappa, cutoff=0.04
 )
 plt.show(fig)
 plt.close(fig)
@@ -193,7 +193,7 @@ ze.twotone.mist.MISTPowerDepOvernight().analyze(
 # Power dep over flux
 
 ```python
-filepath = r"D:\Labber_Data\Axel\Si001\2025\11\Data_1107\Si001_mist_flux@0.941mA_1.hdf5"
+filepath = r"C:\Users\QEL\Desktop\MeasureScriptX\QuantumMeasurementProcedures\Members\axel\Qubit-measure\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_mist_flux_bare@4.000mA_1.hdf5"
 signals, As, pdrs = load_data(filepath)
 ```
 
@@ -213,10 +213,7 @@ with np.load(sim_filepath) as data:
 
 ```python
 fig = ze.twotone.flux_dep.MistExperiment().analyze(
-    result=(As, pdrs, signals),
-    mA_c=mA_c,
-    period=period,
-    ac_coeff=ac_coeff
+    result=(As, pdrs, signals), mA_c=mA_c, period=period, ac_coeff=ac_coeff
 )
 
 from zcu_tools.notebook.analysis.mist.branch import plot_cn_with_mist

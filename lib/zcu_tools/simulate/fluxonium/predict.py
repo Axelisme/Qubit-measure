@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from collections.abc import Iterable
 from typing import Literal, Tuple
@@ -14,6 +16,8 @@ class FluxoniumPredictor:
     def __init__(self, result_path: str, bias: float = 0.0) -> None:
         with open(result_path, "r") as f:
             data = json.load(f)
+
+        self.result_path = result_path
         self.params = np.array(
             [data["params"]["EJ"], data["params"]["EC"], data["params"]["EL"]]
         )
@@ -25,6 +29,9 @@ class FluxoniumPredictor:
         from scqubits import Fluxonium  # lazy import
 
         self.fluxonium = Fluxonium(*self.params, flux=0.5, cutoff=40, truncated_dim=2)
+
+    def clone(self) -> FluxoniumPredictor:
+        return FluxoniumPredictor(self.result_path, bias=self.bias)
 
     def A_to_flx(self, cur_A: float) -> float:
         return (cur_A + self.bias - self.A_c) / self.period + 0.5
@@ -75,7 +82,7 @@ class FluxoniumPredictor:
         flx = self.A_to_flx(cur_A)
 
         self.fluxonium.flux = flx
-        energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 1)
+        energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 5)
 
         return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
 
