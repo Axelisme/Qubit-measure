@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.17.2
   kernelspec:
-    display_name: axelenv
+    display_name: axelenv9
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.8.20
+    version: 3.9.25
 ---
 
 # Import Module
@@ -65,7 +65,7 @@ print(soccfg)
 ```python
 res_ch = 0
 # qub_0_1_ch = 11
-qub_1_4_ch = 2
+qub_1_4_ch = 7
 # qub_5_6_ch = 5
 # lo_flux_ch = 14
 
@@ -107,7 +107,7 @@ cur_A * 1e3
 ```
 
 ```python
-# cur_A = 0.5e-3
+cur_A = 0.0e-3
 flux_yoko.set_current(current=cur_A)
 # cur_V = 0.0
 # flux_yoko.set_voltage(voltage=cur_V)
@@ -152,7 +152,7 @@ GlobalDeviceManager.register_device("jpa_sgs", jpa_sgs)
 ```
 
 ```python
-jpa_sgs.set_power(-20)  # dBm
+# jpa_sgs.set_power(-20)  # dBm
 jpa_sgs.set_IQ_state("off")
 # jpa_sgs.output_on()
 jpa_sgs.output_off()
@@ -315,12 +315,12 @@ exp_cfg = {
         },
     },
     "sweep": {
-        "gain": make_sweep(0.01, 1.0, 101),
+        "gain": make_sweep(0.001, 1.0, 101),
         "freq": make_sweep(r_f - 20, r_f + 20, 201),
     },
     "relax_delay": 0.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
 
 res_pdr_exp = ze.onetone.PowerDepExperiment()
 pdrs, fpts, signals2D = res_pdr_exp.run(soc, soccfg, cfg, earlystop_snr=20.0)
@@ -344,6 +344,7 @@ res_pdr_exp.save(
 ```
 
 ```python
+%matplotlib widget
 exp_cfg = {
     "readout": {
         "type": "base",
@@ -367,13 +368,13 @@ exp_cfg = {
         }
     },
     "sweep": {
-        "flux": make_sweep(-5.0e-3, 5.0e-3, 201),
+        "flux": make_sweep(-7.0e-3, 7.0e-3, 301),
         # "flux": make_sweep(5.0, -5.0, 101),
         "freq": make_sweep(r_f - 20, r_f + 20, 101),
     },
     "relax_delay": 0.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=5)
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=10)
 
 res_flux_exp = ze.onetone.FluxDepExperiment()
 As, fpts, signals2D = res_flux_exp.run(soc, soccfg, cfg)
@@ -395,12 +396,12 @@ actline = res_flux_exp.analyze(
 
 ```python
 mA_c, mA_e = actline.get_positions()
-mA_c, mA_e
+mA_c, mA_e, 2 * abs(mA_e - mA_c)
 ```
 
 ```python
 # cur_A = mA_e
-cur_A = 4e-3
+cur_A = 2e-3
 1e3 * flux_yoko.set_current(cur_A)
 # cur_V = mA_c
 # flux_yoko.set_voltage(cur_V)
@@ -409,7 +410,7 @@ cur_A = 4e-3
 ## Set readout pulse
 
 ```python
-ro_pulse_len = 0.52  # us
+ro_pulse_len = 1.0  # us
 ml.register_module(
     readout_rf={
         "type": "base",
@@ -419,7 +420,7 @@ ml.register_module(
             "nqz": 2,
             "freq": r_f,
             # "freq": 5927,
-            "gain": 0.05,
+            "gain": 0.1,
         },
         "ro_cfg": {
             "ro_ch": ro_ch,
@@ -436,7 +437,7 @@ ml.register_module(
 ```python
 jpa_sgs.IQ_off()
 jpa_sgs.set_power(-1)  # dBm
-jpa_sgs.set_frequency(r_f * 2 * 1e6)  # Hz
+jpa_sgs.set_frequency(r_f * 2 * 1e6 + 100)  # Hz
 jpa_sgs.output_on()
 jpa_sgs.get_info()
 ```
@@ -446,20 +447,7 @@ jpa_sgs.get_info()
 ```python
 %matplotlib widget
 exp_cfg = {
-    "readout": {
-        "type": "base",
-        "pulse_cfg": {
-            "waveform": ml.get_waveform("ro_waveform"),
-            "ch": res_ch,
-            "nqz": 2,
-            "gain": 0.05,
-        },
-        "ro_cfg": {
-            "ro_ch": ro_ch,
-            "ro_length": res_probe_len - 0.1,  # us
-            "trig_offset": timeFly + 0.05,  # us
-        },
-    },
+    "readout": "readout_rf",
     "dev": {
         "jpa_yoko": {
             "label": "jpa_flux_dev",
@@ -471,11 +459,11 @@ exp_cfg = {
         # "freq": make_sweep(5300, 6000, 301),
         "freq": make_sweep(r_f - 20, r_f + 20, 101),
     },
-    "relax_delay": 0.0,  # us
+    "relax_delay": 1.0,  # us
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
-jpa_flux_exp = ze.onetone.JPAFluxExperiment()
+jpa_flux_exp = ze.jpa.JPAFluxExperiment()
 flxs, fpts, signals2D = jpa_flux_exp.run(soc, soccfg, cfg)
 ```
 
@@ -487,7 +475,7 @@ jpa_flux_exp.save(
 ```
 
 ```python
-jpa_best_flux = 1.06e-3
+jpa_best_flux = 1.37e-3
 jpa_yoko.set_current(jpa_best_flux)
 ```
 
@@ -496,35 +484,22 @@ jpa_yoko.set_current(jpa_best_flux)
 ```python
 %matplotlib widget
 exp_cfg = {
-    "readout": {
-        "type": "base",
-        "pulse_cfg": {
-            "waveform": ml.get_waveform("ro_waveform"),
-            "ch": res_ch,
-            "nqz": 2,
-            "gain": 0.05,
-        },
-        "ro_cfg": {
-            "ro_ch": ro_ch,
-            "ro_length": res_probe_len - 0.1,  # us
-            "trig_offset": timeFly + 0.05,  # us
-        },
-    },
+    "readout": "readout_rf",
     "dev": {
         "jpa_sgs": {
             "label": "jpa_rf_dev",
         }
     },
     "sweep": {
-        "power_dBm": make_sweep(-1.5, -0.5, 51),
+        "power_dBm": make_sweep(-5, 0, 51),
         # "freq": make_sweep(5300, 6000, 301),
         "freq": make_sweep(r_f - 20, r_f + 20, 101),
     },
-    "relax_delay": 0.0,  # us
+    "relax_delay": 1.0,  # us
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=5)
 
-jpa_pdr_exp = ze.onetone.JPAPowerExperiment()
+jpa_pdr_exp = ze.jpa.JPAPowerExperiment()
 pdrs, fpts, signals2D = jpa_pdr_exp.run(soc, soccfg, cfg)
 ```
 
@@ -536,7 +511,7 @@ jpa_pdr_exp.save(
 ```
 
 ```python
-jpa_best_power = -0.7391
+jpa_best_power = -0.900
 jpa_sgs.set_power(jpa_best_power)  # dBm
 ```
 
@@ -545,28 +520,16 @@ jpa_sgs.set_power(jpa_best_power)  # dBm
 ```python
 %matplotlib widget
 exp_cfg = {
-    "readout": {
-        "type": "base",
-        "pulse_cfg": {
-            "waveform": ml.get_waveform("ro_waveform"),
-            "ch": res_ch,
-            "nqz": 2,
-            "gain": 0.05,
-            "freq": r_f + 2 * rf_w,
-        },
-        "ro_cfg": {
-            "ro_ch": ro_ch,
-            "ro_length": res_probe_len - 0.1,  # us
-            "trig_offset": timeFly + 0.05,  # us
-        },
-    },
+    "pi_pulse": "pi_amp",
+    "readout": "readout_dpm",
     "dev": {"jpa_sgs": {"label": "jpa_rf_dev"}},
-    "sweep": make_sweep(2 * (r_f - 150), 2 * (r_f + 150), step=0.05),
-    "relax_delay": 0.0,  # us
+    # "sweep": make_sweep(2 * (r_f - 150), 2 * (r_f + 150), step=0.1),
+    "sweep": make_sweep(11700, 11800, step=0.1),
+    "relax_delay": 10.0,  # us
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1)
 
-jpa_freq_exp = ze.onetone.JPAFreqExperiment()
+jpa_freq_exp = ze.jpa.JPAFreqGEExperiment()
 jpa_freqs, signals2D = jpa_freq_exp.run(soc, soccfg, cfg)
 ```
 
@@ -578,7 +541,7 @@ jpa_freq_exp.save(
 ```
 
 ```python
-jpa_best_freq = 11.808e9  # Hz
+jpa_best_freq = 11.754e9  # Hz
 jpa_sgs.set_frequency(jpa_best_freq)  # Hz
 ```
 
@@ -587,28 +550,14 @@ jpa_sgs.set_frequency(jpa_best_freq)  # Hz
 ```python
 %matplotlib widget
 exp_cfg = {
-    "readout": {
-        "type": "base",
-        "pulse_cfg": {
-            "waveform": ml.get_waveform("ro_waveform"),
-            "ch": res_ch,
-            "nqz": 2,
-            "gain": 0.05,
-            "freq": r_f + 2 * rf_w,
-        },
-        "ro_cfg": {
-            "ro_ch": ro_ch,
-            "ro_length": res_probe_len - 0.1,  # us
-            "trig_offset": timeFly + 0.05,  # us
-        },
-    },
+    "readout": "readout_dpm",
     "dev": {"jpa_sgs": {"label": "jpa_rf_dev"}},
     "sweep": make_sweep(r_f - 20, r_f + 20, 101),
     "relax_delay": 0.0,  # us
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=5)
 
-jpa_check_exp = ze.onetone.JPACheckExperiment()
+jpa_check_exp = ze.jpa.JPACheckExperiment()
 outputs, jpa_freqs, signals2D = jpa_check_exp.run(soc, soccfg, cfg)
 ```
 
@@ -620,17 +569,17 @@ jpa_check_exp.save(
 ```
 
 ```python
-jpa_sgs.output_on()
+# jpa_sgs.output_on()
 jpa_sgs.get_info()
 ```
 
 # TwoTone
 
 ```python
-# preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
-preditor = FluxoniumPredictor("../result/Q12_2D[3]/Q4/params.json")
-preditor.A_c = mA_c
-preditor.period = 2 * abs(mA_e - mA_c)
+preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
+# preditor = FluxoniumPredictor("../result/Q12_2D[3]/Q4/params.json")
+# preditor.A_c = mA_c
+# preditor.period = 2 * abs(mA_e - mA_c)
 ```
 
 ```python
@@ -658,10 +607,10 @@ sample_table = SampleTable(f"../result/{chip_name}/samples.csv")
 
 ```python
 # print(preditor.predict_freq(preditor.flx_to_A(0.53)))
-# cur_A = 0.95e-3
+cur_A = -1.5e-3
 # cur_A = preditor.flx_to_A(0.6)
-cur_A = flux_yoko.get_current()
-# 1e3 * flux_yoko.set_current(cur_A)
+# cur_A = flux_yoko.get_current()
+1e3 * flux_yoko.set_current(cur_A)
 # cur_V = 0.0
 # flux_yoko.set_voltage(cur_V)
 ```
@@ -673,28 +622,24 @@ q_f
 ```
 
 ```python
-jpa_sgs.output_off()
-```
-
-```python
 %matplotlib widget
 exp_cfg = {
     # "reset": "reset_120",
     # "init_pulse": "pi_len",
     "qub_pulse": {
-        "waveform": ml.get_waveform("qub_flat", override_cfg={"length": 4.0}),
+        "waveform": ml.get_waveform("qub_flat", override_cfg={"length": 3.0}),
         "ch": qub_1_4_ch,
         "nqz": 2,
-        "gain": 0.1,
-        # "mixer_freq": q_f,
+        "gain": 0.2,
+        "mixer_freq": q_f,
     },
     "readout": "readout_rf",
     # "readout": "readout_dpm",
-    "sweep": make_sweep(q_f - 50, q_f + 50, step=0.1),
-    # "sweep": make_sweep(4000, 5000, step=1.0),
-    "relax_delay": 0.0,  # us
+    "sweep": make_sweep(q_f - 20, q_f + 20, step=0.1),
+    # "sweep": make_sweep(3500, 4500, step=1.0),
+    "relax_delay": 1.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
 
 qub_freq_exp = ze.twotone.FreqExperiment()
 fpts, signals = qub_freq_exp.run(soc, soccfg, cfg)
@@ -752,14 +697,13 @@ reset_f
 ```python
 %matplotlib widget
 exp_cfg = {
-    # "init_pulse": {
-    #     **ml.get_waveform("qub_waveform"),
-    #     "ch": qub_ch,
-    #     "nqz": 2,
-    #     "gain": 0.01,
-    #     "mixer_freq": q_f,
-    # },
-    "init_pulse": "pi_amp",
+    # "init_pulse": "pi_amp",
+    "init_pulse": ml.get_module(
+        "pi_amp",
+        {
+            # "mixer_freq": 0.5 * (reset_f + q_f),
+        },
+    ),
     "tested_reset": {
         "type": "pulse",
         "pulse_cfg": {
@@ -1199,7 +1143,7 @@ plt.close(fig)
 
 ```python
 %matplotlib widget
-probe_len = 1.0
+probe_len = 2.0
 exp_cfg = {
     # "reset": "reset_10",
     "init_pulse": "pi_amp",
@@ -1314,7 +1258,7 @@ bathreset_len_exp.save(
 #### Set Bath reset pulse
 
 ```python
-bath_reset_len = 1.0  # us
+bath_reset_len = 1.5  # us
 cfg["tested_reset"]["qubit_tone_cfg"]["waveform"].update(length=bath_reset_len)
 cfg["tested_reset"]["cavity_tone_cfg"]["waveform"].update(length=bath_reset_len)
 ml.register_module(
@@ -1368,8 +1312,8 @@ ml.update_module(
     name="reset_bath",
     override_cfg={
         "pi2_cfg": {
-            # "phase": max_phase,
-            "phase": min_phase,
+            "phase": max_phase,
+            # "phase": min_phase,
         }
     },
 )
@@ -1469,95 +1413,6 @@ actline = qub_flux_exp.analyze()
 ```python
 mA_c, mA_e = actline.get_positions()
 mA_c, mA_e
-```
-
-```python
-%matplotlib widget
-point_finder = qub_flux_exp.extract_points()
-```
-
-```python
-freq_map = point_finder.get_positions()
-```
-
-### Auto Measure
-
-
-#### T1
-
-```python
-exp_cfg = {
-    # "reset": "reset_120",
-    "qub_pulse": {
-        "waveform": ml.get_waveform("qub_flat", override_cfg={"length": 3.0}),
-        "ch": qub_1_4_ch,
-        "nqz": 1,
-        "gain": 0.03,
-        "mixer_freq": q_f,
-    },
-    "pi_pulse": "pi_amp",
-    "readout": "readout_dpm",
-    "dev": {
-        "flux_yoko": {
-            "label": "flux_dev",
-            # "mode": "voltage",
-            "mode": "current",
-        },
-    },
-    "sweep": {
-        # "flux": make_sweep(-1.0e-3, 1.0e-3, 51),
-        "flux": make_sweep(preditor.flx_to_A(0.6), preditor.flx_to_A(0.53), 51),
-        "detune": make_sweep(-12.0, 12.0, step=0.2),
-        "rabi_length": make_sweep(0.03, 1.6, 31),
-        "t1_length": make_sweep(0.1, 100.0, 51),
-    },
-    "relax_delay": 80.0,  # us
-}
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=50)
-
-t1_flux_exp = ze.twotone.flux_dep.T1Experiment()
-values, detunes, rabilens, t1lens, signals_dict, fig = t1_flux_exp.run(
-    soc,
-    soccfg,
-    cfg,
-    predictor=preditor,
-    # ref_flux=cur_V,
-    ref_flux=cur_A,
-    earlystop_snr=20,
-)
-
-savefig(
-    fig,
-    f"../result/{chip_name}/exp_image/{cur_A * 1e3:.3f}mA/{qub_name}_t1_over_flux.png",
-)
-plt.close(fig)
-```
-
-```python
-%matplotlib inline
-values, t1s, t1errs, freqs = t1_flux_exp.analyze(start_idx=0, snr_threshold=5)
-```
-
-```python
-t1_flux_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_t1_flux@{cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{qub_name}_t1_flux@{cur_V:.3f}V"),
-    comment=make_comment(cfg),
-)
-```
-
-```python
-from datetime import datetime
-
-sample_table.extend_samples(
-    **{
-        "calibrated mA": values,
-        "Freq (MHz)": freqs,
-        "T1 (us)": t1s,
-        "T1err (us)": t1errs,
-        "comment": f"Auto measured on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-    }
-)
 ```
 
 #### T2Ramsey
@@ -1962,7 +1817,7 @@ ml.update_module(
 ## Length Rabi
 
 ```python
-jpa_sgs.output_on()
+jpa_sgs.output_off()
 ```
 
 ```python
@@ -1974,15 +1829,15 @@ exp_cfg = {
         "ch": qub_1_4_ch,
         "nqz": 2,
         "freq": q_f,
-        "gain": 0.6,
+        "gain": 0.2,
         # "gain": pi_gain,
-        # "mixer_freq": q_f,
+        "mixer_freq": q_f,
     },
-    "readout": "readout_rf",
-    # "readout": "readout_dpm",
+    # "readout": "readout_rf",
+    "readout": "readout_dpm",
     "relax_delay": 20.0,  # us
     # "relax_delay": 5 * t1,  # us
-    "sweep": make_sweep(0.03, 1.0, 51),
+    "sweep": make_sweep(0.03, 1.5, 51),
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
@@ -2041,16 +1896,16 @@ exp_cfg = {
     "qub_pulse": {
         "waveform": ml.get_waveform(
             "qub_flat",
-            override_cfg={"length": 2.0 * pi_len},
+            override_cfg={"length": 1.0 * pi_len},
         ),
         "ch": qub_1_4_ch,
         "nqz": 2,
         "freq": q_f,
-        # "mixer_freq": q_f,
+        "mixer_freq": q_f,
         # "mixer_freq": 0.5 * (reset_f + q_f),
     },
-    "readout": "readout_rf",
-    # "readout": "readout_dpm",
+    # "readout": "readout_rf",
+    "readout": "readout_dpm",
     "relax_delay": 20.0,  # us
     # "relax_delay": 5 * t1,
     "sweep": make_sweep(0.01, 1.0, 51),
@@ -2270,9 +2125,9 @@ ml.register_module(
 %matplotlib widget
 exp_cfg = {
     # "reset": "reset_10",
-    "pi2_pulse": "pi2_amp",
+    "pi2_pulse": "pi2_len",
     "readout": "readout_dpm",
-    "relax_delay": 10.1,  # us
+    "relax_delay": 20.1,  # us
     # "relax_delay": 5 * t1,  # us
     "sweep": make_sweep(0, 2.0, 101),  # us
 }
@@ -2326,9 +2181,9 @@ exp_cfg = {
     # },
     # "readout": "readout_rf",
     "readout": "readout_dpm",
-    "relax_delay": 50.0,  # us
+    "relax_delay": 30.0,  # us
     # "relax_delay": 5 * t1,  # us
-    "sweep": make_sweep(0.0, 25.1, 51),
+    "sweep": make_sweep(0.1, 30.1, 51),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
@@ -2354,6 +2209,8 @@ t1_exp.save(
 ```
 
 ```python
+from datetime import datetime
+
 sample_table.add_sample(
     **{
         "calibrated mA": cur_A,
@@ -2361,6 +2218,7 @@ sample_table.add_sample(
         "T1 (us)": t1,
         "T1err (us)": t1err,
         "comment": "Manual Added",
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 )
 ```
@@ -2383,7 +2241,7 @@ exp_cfg = {
     "readout": "readout_dpm",
     "relax_delay": 30.0,  # us
     # "relax_delay": 5 * t1,  # us
-    "sweep": make_sweep(1.0, 10, 101),
+    "sweep": make_sweep(1.0, 30, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
@@ -2465,16 +2323,17 @@ t1_with_tone_sweep_exp.save(
 ## T2Echo
 
 ```python
+%matplotlib widget
 exp_cfg = {
     # "reset": "reset_120",
-    "pi_pulse": "pi_amp",
-    "pi2_pulse": "pi2_amp",
+    "pi_pulse": "pi_len",
+    "pi2_pulse": "pi2_len",
     "readout": "readout_dpm",
-    "relax_delay": 5.0,  # us
+    "relax_delay": 20.0,  # us
     # "relax_delay": 5 * t1,  # us
     # "sweep": make_sweep(0.0, 5 * t2r, 51),
     # "sweep": make_sweep(0.0, 1.5 * t2e, 101),
-    "sweep": make_sweep(0.01, 3.0, 101),
+    "sweep": make_sweep(0.01, 4.0, 101),
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
@@ -2487,7 +2346,7 @@ Ts, signals = t2echo_exp.run(soc, soccfg, cfg, detune=activate_detune)
 
 ```python
 %matplotlib inline
-t2e, _, detune, _, fig = t2echo_exp.analyze(max_contrast=True, fit_method="fringe")
+t2e, _, detune, _, fig = t2echo_exp.analyze(fit_method="fringe")
 ```
 
 ```python
@@ -2556,7 +2415,7 @@ cpmg_exp.save(
 
 ```python
 exp_cfg = {
-    # "reset": "reset_bath",
+    "reset": "reset_bath",
     "probe_pulse": "pi_amp",
     # "probe_pulse": {
     #     "waveform": ml.get_waveform("mist_waveform"),
@@ -2747,11 +2606,11 @@ exp_cfg = {
     },
     "readout": "readout_dpm",
     "sweep": {
-        "gain": make_sweep(0.0, 0.3, 101),
+        "gain": make_sweep(0.0, 0.1, 101),
     },
-    "relax_delay": 30.0,  # us
+    "relax_delay": 10.0,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
 
 mist_exp = ze.twotone.mist.MISTPowerDep()
 gains, signals = mist_exp.run(soc, soccfg, cfg)
@@ -2841,6 +2700,256 @@ plt.close(fig)
 mist_ge_exp.save(
     filepath=os.path.join(database_path, f"{qub_name}_mist_ge@{cur_A * 1e3:.3f}mA.png"),
     comment=make_comment(cfg),
+)
+```
+
+# Auto Flux Dependence
+
+```python
+# cur_A = 0.0e-3
+# cur_A = preditor.flx_to_A(0.6)
+cur_A = flux_yoko.get_current()
+1e3 * flux_yoko.set_current(cur_A)
+# cur_V = 0.0
+# flux_yoko.set_voltage(cur_V)
+```
+
+```python
+preditor.predict_freq(-5e-3)
+```
+
+```python
+jpa_sgs.output_off()
+```
+
+```python
+from zcu_tools.experiment.v2.autofluxdep import (
+    FluxDepExecutor,
+    QubitFreqMeasurementTask,
+    LenRabiMeasurementTask,
+    T1MeasurementTask,
+    T2RamseyMeasurementTask,
+    T2EchoMeasurementTask,
+    MistMeasurementTask,
+)
+
+%matplotlib widget
+flx_values = np.linspace(-1.5e-3, -5e-3, 201)
+
+executor = (
+    FluxDepExecutor(
+        flx_values=flx_values,
+        flux_dev_name="flux_yoko",
+        flux_dev_cfg={
+            "label": "flux_dev",
+            **flux_yoko.get_info(),
+        },
+        env_dict={
+            "soccfg": soccfg,
+            "soc": soc,
+            "ml": ml,
+            "predictor": preditor.clone(),
+        },
+    )
+    .add_measurement(
+        "qubit_freq",
+        QubitFreqMeasurementTask(
+            detune_sweep=make_sweep(-15, 15, 201),
+            cfg_maker=lambda ctx, ml: (cur_qf := ctx.env_dict.get("qubit_freq", q_f))
+            and (
+                {
+                    "qub_pulse": {
+                        "waveform": ml.get_waveform(
+                            "qub_flat", override_cfg={"length": 3.0}
+                        ),
+                        "ch": qub_1_4_ch,
+                        "nqz": 2 if cur_qf > 2000 else 1,
+                        "gain": min(
+                            1.0,
+                            0.05
+                            * ctx.env_dict.get("gain_factor", 1.0)
+                            / ctx.env_dict["m_ratio"],
+                        ),
+                        "mixer_freq": cur_qf,
+                    },
+                    "readout": "readout_rf",
+                    "relax_delay": 1.0,
+                    "reps": 1000,
+                    "rounds": 10,
+                }
+            ),
+            earlystop_snr=50,
+        ),
+    )
+    .add_measurement(
+        "lenrabi",
+        LenRabiMeasurementTask(
+            length_sweep=make_sweep(0.03, 1.0, 101),
+            ref_pi_product=pi_len * pi_gain,
+            cfg_maker=lambda ctx, ml: (pi_pulse := ml.get_module("pi_len"))
+            and (cur_qf := ctx.env_dict.get("qubit_freq"))
+            and (cur_t1 := ctx.env_dict.get("t1", t1))
+            and {
+                "rabi_pulse": {
+                    **pi_pulse,
+                    "nqz": 2 if cur_qf > 2000 else 1,
+                    "freq": cur_qf,
+                    "gain": min(
+                        1.0,
+                        pi_pulse["gain"]
+                        * ctx.env_dict.get("gain_factor", 1.0)
+                        / ctx.env_dict["m_ratio"],
+                    ),
+                    "mixer_freq": cur_qf,
+                },
+                "readout": "readout_rf",
+                "relax_delay": 3 * cur_t1,
+                "reps": 1000,
+                "rounds": 10,
+            },
+            earlystop_snr=30,
+        ),
+    )
+    .add_measurement(
+        "t1",
+        T1MeasurementTask(
+            num_expts=101,
+            cfg_maker=lambda ctx, ml: (pi_pulse := ml.get_module("pi_len"))
+            and (cur_qf := ctx.env_dict.get("qubit_freq"))
+            and (cur_pi_len := ctx.env_dict["pi_length"])
+            and (cur_pi_gain := ctx.env_dict["pi_gain"])
+            and (cur_t1 := ctx.env_dict.get("t1", t1))
+            and {
+                "pi_pulse": {
+                    **pi_pulse,
+                    "waveform": {**pi_pulse["waveform"], "length": cur_pi_len},
+                    "nqz": 2 if cur_qf > 2000 else 1,
+                    "freq": cur_qf,
+                    "gain": cur_pi_gain,
+                    "mixer_freq": cur_qf,
+                },
+                "readout": "readout_rf",
+                "relax_delay": 3 * cur_t1,
+                "reps": 1000,
+                "rounds": 10,
+                "sweep_range": (0.1, 3 * cur_t1),
+            },
+            earlystop_snr=20,
+        ),
+    )
+    .add_measurement(
+        "t2ramsey",
+        T2RamseyMeasurementTask(
+            num_expts=151,
+            detune_ratio=0.05,
+            cfg_maker=lambda ctx, ml: (pi2_pulse := ml.get_module("pi2_len"))
+            and (cur_qf := ctx.env_dict.get("qubit_freq"))
+            and (cur_pi2_len := ctx.env_dict["pi2_length"])
+            and (cur_pi2_gain := ctx.env_dict["pi2_gain"])
+            and (cur_t1 := ctx.env_dict.get("t1", t1))
+            and (cur_t2r := ctx.env_dict.get("t2r", t2r))
+            and {
+                "pi2_pulse": {
+                    **pi2_pulse,
+                    "waveform": {**pi2_pulse["waveform"], "length": cur_pi2_len},
+                    "nqz": 2 if cur_qf > 2000 else 1,
+                    "freq": cur_qf,
+                    "gain": cur_pi2_gain,
+                    "mixer_freq": cur_qf,
+                },
+                "readout": "readout_rf",
+                "relax_delay": 3 * cur_t1,
+                "reps": 1000,
+                "rounds": 10,
+                "sweep_range": (0, 2 * cur_t2r),
+            },
+            earlystop_snr=20,
+        ),
+    )
+    .add_measurement(
+        "t2echo",
+        T2EchoMeasurementTask(
+            num_expts=151,
+            detune_ratio=0.05,
+            cfg_maker=lambda ctx, ml: (pi_pulse := ml.get_module("pi_len"))
+            and (pi2_pulse := ml.get_module("pi2_len"))
+            and (cur_qf := ctx.env_dict.get("qubit_freq"))
+            and (cur_pi_len := ctx.env_dict["pi_length"])
+            and (cur_pi_gain := ctx.env_dict["pi_gain"])
+            and (cur_pi2_len := ctx.env_dict["pi2_length"])
+            and (cur_pi2_gain := ctx.env_dict["pi2_gain"])
+            and (cur_t1 := ctx.env_dict.get("t1", t1))
+            and (cur_t2e := ctx.env_dict.get("t2e", t2e))
+            and {
+                "pi_pulse": {
+                    **pi_pulse,
+                    "waveform": {**pi_pulse["waveform"], "length": cur_pi_len},
+                    "nqz": 2 if cur_qf > 2000 else 1,
+                    "freq": cur_qf,
+                    "gain": cur_pi_gain,
+                    "mixer_freq": cur_qf,
+                },
+                "pi2_pulse": {
+                    **pi2_pulse,
+                    "waveform": {**pi2_pulse["waveform"], "length": cur_pi2_len},
+                    "nqz": 2 if cur_qf > 2000 else 1,
+                    "freq": cur_qf,
+                    "gain": cur_pi2_gain,
+                    "mixer_freq": cur_qf,
+                },
+                "readout": "readout_rf",
+                "relax_delay": 3 * cur_t1,
+                "reps": 1000,
+                "rounds": 10,
+                "sweep_range": (0, 2 * cur_t2e),
+            },
+            earlystop_snr=20,
+        ),
+    )
+    .add_measurement(
+        "mist",
+        MistMeasurementTask(
+            gain_sweep=make_sweep(0.0, 0.1, 71),
+            cfg_maker=lambda ctx, ml: (pi_pulse := ml.get_module("pi_len"))
+            and (cur_qf := ctx.env_dict.get("qubit_freq"))
+            and (cur_pi_len := ctx.env_dict["pi_length"])
+            and (cur_pi_gain := ctx.env_dict["pi_gain"])
+            and (cur_t1 := ctx.env_dict.get("t1", t1))
+            and {
+                "mist_pulse": {
+                    "waveform": ml.get_waveform("mist_waveform"),
+                    "ch": res_ch,
+                    "nqz": 2,
+                    "freq": r_f,
+                    "post_delay": 10 / (2 * np.pi * rf_w),
+                },
+                "pi_pulse": {
+                    **pi_pulse,
+                    "waveform": {**pi_pulse["waveform"], "length": cur_pi_len},
+                    "nqz": 2 if cur_qf > 2000 else 1,
+                    "freq": cur_qf,
+                    "gain": cur_pi_gain,
+                    "mixer_freq": cur_qf,
+                },
+                "readout": "readout_rf",
+                "relax_delay": 3 * cur_t1,
+                "reps": 1000,
+                "rounds": 5,
+            },
+        ),
+    )
+    .record_animation(
+        f"../result/{chip_name}/exp_image/{cur_A * 1e3:.3f}mA/autofluxdep_animation.mp4"
+    )
+)
+_, fig = executor.run()
+plt.close(fig)
+```
+
+```python
+executor.save(
+    filepath=os.path.join(database_path, f"{qub_name}_autofluxdep@{cur_A * 1e3:.3f}mA"),
+    comment=datetime.now().strftime("Autofluxdep run at %Y-%m-%d %H:%M:%S"),
 )
 ```
 
