@@ -204,6 +204,10 @@ class QubitFreqMeasurementTask(
         ml: ModuleLibrary = ctx.env_dict["ml"]
         predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
         flx: float = ctx.env_dict["flx_value"]
+        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
+
+        predict_freq = predictor.predict_freq(flx)
+        cur_info["predict_freq"] = predict_freq
 
         cfg_temp = self.cfg_maker(ctx, ml)
 
@@ -216,11 +220,11 @@ class QubitFreqMeasurementTask(
         )
         cfg_temp = ml.make_cfg(cfg_temp)
 
-        predict_freq = predictor.predict_freq(flx)
+        center_freq = cfg_temp["qub_pulse"]["freq"]
         Pulse.set_param(
             cfg_temp["qub_pulse"],
             "freq",
-            predict_freq + sweep2param("detune", self.detune_sweep),
+            center_freq + sweep2param("detune", self.detune_sweep),
         )
 
         cfg = cast(QubitFreqCfg, cfg_temp)
@@ -231,10 +235,11 @@ class QubitFreqMeasurementTask(
 
         real_signals = qubitfreq_signal2real(raw_signals)
 
+        detunes = sweep2array(self.detune_sweep)
         detune, freq_err, kappa, kappa_err, fit_signals, _ = fit_qubit_freq(
-            sweep2array(self.detune_sweep), real_signals
+            detunes, real_signals
         )
-        fit_freq = predict_freq + detune
+        fit_freq = center_freq + detune
 
         success = True
         mean_err = np.mean(np.abs(real_signals - fit_signals))
@@ -246,7 +251,6 @@ class QubitFreqMeasurementTask(
             kappa_err = np.nan
             success = False
 
-        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
         if success:
             cur_info["qubit_freq"] = fit_freq
             cur_info["fit_detune"] = detune
@@ -257,7 +261,7 @@ class QubitFreqMeasurementTask(
         ctx.set_current_data(
             QubitFreqResult(
                 raw_signals=raw_signals,
-                predict_freq=np.array(predict_freq),
+                predict_freq=np.array(center_freq),
                 fit_detune=np.array(detune),
                 fit_freq=np.array(fit_freq),
                 fit_freq_err=np.array(freq_err),
