@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
@@ -8,9 +9,11 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Iterator,
     Literal,
     MutableMapping,
     Optional,
+    TextIO,
     TypeVar,
     Union,
 )
@@ -20,6 +23,45 @@ from typing_extensions import ParamSpec
 
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.utils import deepupdate, numpy2number
+
+try:  # pragma: no cover - platform specific
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None  # type: ignore[attr-defined]
+
+try:  # pragma: no cover - platform specific
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX fallback
+    msvcrt = None  # type: ignore[attr-defined]
+
+
+def _acquire_file_lock(handle: TextIO) -> None:
+    if fcntl is not None:  # POSIX
+        fcntl.flock(handle, fcntl.LOCK_EX)  # type: ignore[attr-defined]
+        return
+
+    if msvcrt is not None:  # Windows
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write("\0")
+            handle.flush()
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+        return
+
+    raise RuntimeError("File locking not supported on this platform.")
+
+
+def _release_file_lock(handle: TextIO) -> None:
+    if fcntl is not None:  # POSIX
+        fcntl.flock(handle, fcntl.LOCK_UN)  # type: ignore[attr-defined]
+        return
+
+    if msvcrt is not None:  # Windows
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+        return
+
+    raise RuntimeError("File locking not supported on this platform.")
 
 
 def is_module_cfg(name: str, module_cfg: Any) -> bool:
@@ -102,12 +144,15 @@ class ModuleLibrary:
         if cfg_path is not None:
             self.cfg_path = Path(cfg_path)
             os.makedirs(self.cfg_path.parent, exist_ok=True)
+            self._lock_path = Path(str(self.cfg_path) + ".lock")
         else:
             self.cfg_path = None
+            self._lock_path = None
         self.modify_time = 0
 
         self.waveforms: Dict[str, Dict[str, Any]] = {}
         self.modules: Dict[str, Dict[str, Any]] = {}
+        self._dirty = False
 
         self.sync()
 
@@ -158,6 +203,7 @@ class ModuleLibrary:
 
         deepupdate(self.waveforms, cfg["waveforms"], behavior="force")
         deepupdate(self.modules, cfg["modules"], behavior="force")
+        self._dirty = False
 
     def dump(self) -> None:
         assert self.cfg_path is not None
@@ -168,29 +214,60 @@ class ModuleLibrary:
         with open(str(self.cfg_path), "w") as f:
             yaml.dump(dump_cfg, f)
         self.modify_time = self.cfg_path.stat().st_mtime_ns
+        self._dirty = False
 
     def sync(self) -> None:
         if self.cfg_path is None:
             return  # do nothing
 
-        if self.cfg_path.exists():
-            mtime = self.cfg_path.stat().st_mtime_ns
-            if mtime > self.modify_time:
-                self.load()
+        with self._file_lock():
+            if self.cfg_path.exists():
+                mtime = self.cfg_path.stat().st_mtime_ns
+                if mtime > self.modify_time:
+                    self.load()
 
-        self.dump()
+            if self._dirty:
+                self.dump()
+
+    @contextmanager
+    def _file_lock(self) -> Iterator[None]:
+        if self._lock_path is None:
+            yield
+            return
+
+        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._lock_path, "a+") as handle:
+            _acquire_file_lock(handle)
+            try:
+                yield
+            finally:
+                _release_file_lock(handle)
 
     @auto_sync("after")
     def register_waveform(self, **wav_kwargs) -> None:
         wav_kwargs = deepcopy(wav_kwargs)
 
         # filter out non-waveform attributes
+        changed = False
         for name, wav_cfg in wav_kwargs.items():
+            if self.waveforms.get(name) != wav_cfg:
+                changed = True
             self.waveforms[name] = wav_cfg  # directly overwrite
+        if changed:
+            self._dirty = True
 
     @auto_sync("after")
     def register_module(self, **mod_kwargs) -> None:
-        self.modules.update(deepcopy(mod_kwargs))
+        mod_kwargs = deepcopy(mod_kwargs)
+
+        changed = False
+        for name, cfg in mod_kwargs.items():
+            if self.modules.get(name) != cfg:
+                changed = True
+            self.modules[name] = cfg
+
+        if changed:
+            self._dirty = True
 
     @auto_sync("before")
     def get_waveform(
@@ -213,3 +290,4 @@ class ModuleLibrary:
     @auto_sync("after")
     def update_module(self, name: str, override_cfg: Dict[str, Any]) -> None:
         deepupdate(self.modules[name], deepcopy(override_cfg), behavior="force")
+        self._dirty = True
