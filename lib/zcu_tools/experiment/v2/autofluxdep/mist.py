@@ -192,12 +192,8 @@ class MistMeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictType])
         plotters["e_decay"].update(
             flx_values, gains, decay_signals[..., 1], refresh=False
         )
-        plotters["mist_signal"].update(
-            gains, mist_signals[flx_idx, ..., 0].T, refresh=False
-        )
-        plotters["decay_signal"].update(
-            gains, decay_signals[flx_idx, ..., 1].T, refresh=False
-        )
+        plotters["mist_signal"].update(gains, mist_signals[flx_idx].T, refresh=False)
+        plotters["decay_signal"].update(gains, decay_signals[flx_idx].T, refresh=False)
 
     def save(self, filepath, flx_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
