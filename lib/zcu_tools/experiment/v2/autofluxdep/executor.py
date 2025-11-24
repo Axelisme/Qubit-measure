@@ -64,7 +64,7 @@ class MeasurementTask(
 
 class FluxDepBatchTask(BatchTask):
     def __init__(self, tasks: Mapping[str, MeasurementTask]) -> None:
-        super().__init__(dict(tasks))
+        self.tasks = tasks
 
     def init(self, ctx: TaskContext, dynamic_pbar=False) -> None:
         predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
