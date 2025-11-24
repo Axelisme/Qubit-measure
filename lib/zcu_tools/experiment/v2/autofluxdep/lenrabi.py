@@ -154,7 +154,7 @@ class LenRabiMeasurementTask(
                 "Flux device value",
                 "Signal",
                 line_axis=1,
-                num_lines=5,
+                num_lines=3,
                 title=name + "(rabi_curve)",
                 existed_axes=[axs["rabi_curve"]],
             ),
@@ -168,7 +168,6 @@ class LenRabiMeasurementTask(
             flx_values,
             sweep2array(self.length_sweep),
             lenrabi_fluxdep_signal2real(signals["raw_signals"]),
-            title=f"{ctx.env_dict['last_info'].get('gain_factor', 1.0):.3f}/{ctx.env_dict['cur_info']['m_ratio']:3f}",
             refresh=False,
         )
 

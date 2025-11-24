@@ -124,7 +124,7 @@ class QubitFreqMeasurementTask(
                 "Flux device value",
                 "Detune (MHz)",
                 line_axis=1,
-                num_lines=5,
+                num_lines=3,
                 title=name + "(detune)",
                 existed_axes=[axs["detune"]],
             ),
@@ -275,6 +275,7 @@ class QubitFreqMeasurementTask(
         if success:
             cur_info["qubit_freq"] = fit_freq
             cur_info["fit_detune"] = detune
+            cur_info["fit_kappa"] = kappa
 
         with MinIntervalFunc.force_execute():
             ctx.set_current_data(
