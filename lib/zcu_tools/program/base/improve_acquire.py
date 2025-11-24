@@ -125,6 +125,37 @@ class StdErrorMixin(TypedAcquireMixin):
         return super().acquire(*args, extra_args=extra_args, **kwargs)  # type: ignore
 
 
+class EarlyStopMixin(TypedAcquireMixin):
+    """
+    Add early stopping functionality to the AcquireMixin class
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.early_stop = False
+
+    def set_early_stop(self, silent: bool = False) -> None:
+        # tell program to return as soon as this round is finished
+        if not silent:
+            print("Program received early stop signal")
+        self.early_stop = True
+
+    def acquire(self, *args, **kwargs):
+        self.early_stop = False
+        return super().acquire(*args, **kwargs)  # type: ignore
+
+    def acquire_decimated(self, *args, **kwargs):
+        self.early_stop = False
+        return super().acquire_decimated(*args, **kwargs)  # type: ignore
+
+    def finish_round(self) -> bool:
+        not_finish = super().finish_round()
+        if not_finish and self.early_stop:
+            assert self.rounds_pbar is not None
+            self.rounds_pbar.close()
+        return not_finish and not self.early_stop
+
+
 BaseCallbackType: TypeAlias = Callable[[int, List[NDArray]], None]
 StdCallbackType: TypeAlias = Callable[[int, Tuple[List[NDArray], List[NDArray]]], None]
 CallbackType: TypeAlias = Union[BaseCallbackType, StdCallbackType]
@@ -186,36 +217,62 @@ class CallbackMixin(StdErrorMixin):
         return not_finish
 
 
-class EarlyStopMixin(TypedAcquireMixin):
-    """
-    Add early stopping functionality to the AcquireMixin class
-    """
+class SingleShotMixin(TypedAcquireMixin):
+    def _process_accumulated(self, acc_buf):
+        assert self.acquire_params is not None
+        if self.acquire_params["threshold"] is not None:
+            d_reps = [np.zeros_like(d) for d in acc_buf]
+            self.shots = self._apply_threshold(
+                acc_buf,
+                self.acquire_params["threshold"],
+                self.acquire_params["angle"],
+                self.acquire_params["remove_offset"],
+            )
+            for i, ch_shot in enumerate(self.shots):
+                d_reps[i][..., 0] = ch_shot
+            return self._average_buf(d_reps, length_norm=False)  # type: ignore
+        elif self.acquire_params["population_radius"] is not None:
+            d_reps = [np.zeros_like(d) for d in acc_buf]
+            self.shots = self._apply_classification(
+                acc_buf,
+                self.acquire_params["g_center"],
+                self.acquire_params["e_center"],
+                self.acquire_params["population_radius"],
+                self.acquire_params["remove_offset"],
+            )
+            for i, ch_shot in enumerate(self.shots):
+                d_reps[i] = ch_shot
+            return self._average_buf(d_reps, length_norm=False)  # type: ignore
+        else:
+            d_reps = acc_buf
+            return self._average_buf(
+                d_reps,
+                length_norm=True,
+                remove_offset=self.acquire_params["remove_offset"],
+            )
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self.early_stop = False
-
-    def set_early_stop(self, silent: bool = False) -> None:
-        # tell program to return as soon as this round is finished
-        if not silent:
-            print("Program received early stop signal")
-        self.early_stop = True
-
-    def acquire(self, *args, **kwargs):
-        self.early_stop = False
-        return super().acquire(*args, **kwargs)  # type: ignore
-
-    def acquire_decimated(self, *args, **kwargs):
-        self.early_stop = False
-        return super().acquire_decimated(*args, **kwargs)  # type: ignore
-
-    def finish_round(self) -> bool:
-        not_finish = super().finish_round()
-        if not_finish and self.early_stop:
-            assert self.rounds_pbar is not None
-            self.rounds_pbar.close()
-        return not_finish and not self.early_stop
+    def _apply_classification(
+        self,
+        acc_buf,
+        g_center: complex,
+        e_center: complex,
+        population_radius: float,
+        remove_offset: bool,
+    ):
+        shots = []
+        for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):  # type: ignore
+            avg = acc_buf[i_ch] / ro["length"]
+            if remove_offset:
+                offset = self.soccfg["readouts"][ro_ch]["iq_offset"]  # type: ignore
+                avg -= offset
+            g_dist = np.linalg.norm(avg.dot([1, 1j]) - g_center)
+            e_dist = np.linalg.norm(avg.dot([1, 1j]) - e_center)
+            g_shot = np.heaviside(population_radius - g_dist, 0)
+            e_shot = np.heaviside(population_radius - e_dist, 0)
+            shots.append(np.stack([g_shot, e_shot], axis=-1))
+        return shots
 
 
-class ImproveAcquireMixin(EarlyStopMixin, CallbackMixin, StdErrorMixin):
-    pass
+class ImproveAcquireMixin(
+    SingleShotMixin, CallbackMixin, EarlyStopMixin, StdErrorMixin
+): ...
