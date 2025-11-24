@@ -95,7 +95,7 @@ class Mist_G_MeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictTyp
                 "Flux device value",
                 "Readout Gain (a.u.)",
                 line_axis=1,
-                title=name + "(g_mist)",
+                title=name,
                 existed_axes=[axs["g_mist"]],
             ),
         )

@@ -249,7 +249,11 @@ class LenRabiMeasurementTask(
         )
 
         success = True
-        if pi2_len < 0.03 or mean_err > 0.1 * np.ptp(fit_signals):
+        if (
+            pi2_len < 0.03
+            or mean_err > 0.1 * np.ptp(fit_signals)
+            or pi_len > 0.6 * np.max(lengths)
+        ):
             pi_len, pi2_len, rabi_freq = np.nan, np.nan, np.nan
             success = False
 

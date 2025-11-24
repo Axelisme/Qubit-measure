@@ -98,7 +98,7 @@ class Mist_E_MeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictTyp
                 "Flux device value",
                 "Readout Gain (a.u.)",
                 line_axis=1,
-                title=name + "(e_mist)",
+                title=name,
                 existed_axes=[axs["e_mist"]],
             ),
         )
