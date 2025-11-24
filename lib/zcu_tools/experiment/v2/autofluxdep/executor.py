@@ -30,7 +30,6 @@ from zcu_tools.experiment.v2.runner import (
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import AbsLivePlotter, MultiLivePlotter, make_plot_frame
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.utils.func_tools import MinIntervalFunc
 
 T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlotter])
 
@@ -100,10 +99,6 @@ class FluxDepBatchTask(BatchTask):
             cur_ctx = ctx(addr=name)
 
             task.run(cur_ctx)
-
-            # force refresh current task data
-            with MinIntervalFunc.force_execute():
-                cur_ctx.trigger_hook()
 
             # update current info to last info
             last_info.update(deepcopy(cur_info))
