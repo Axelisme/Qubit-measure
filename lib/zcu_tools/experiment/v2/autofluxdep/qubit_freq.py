@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Sequence, cast
 
 import numpy as np
-from numpy import float64
 from numpy.typing import NDArray
 from typing_extensions import NotRequired, TypedDict
 
@@ -32,21 +31,23 @@ from zcu_tools.utils.process import rotate2real
 from .executor import MeasurementTask
 
 
-def qubitfreq_signal2real(signals: np.ndarray) -> np.ndarray:
+def qubitfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     if np.any(np.isnan(signals)):
         return signals.real
 
-    signals = rotate2real(signals).real
-    max_val = np.max(signals)
-    min_val = np.min(signals)
-    mid_val = np.median(signals)
-    signals = (signals - min_val) / (max_val - min_val + 1e-12)
+    real_signals = rotate2real(signals).real
+    max_val = np.max(real_signals)
+    min_val = np.min(real_signals)
+    mid_val = np.median(real_signals)
+    real_signals = (real_signals - min_val) / (max_val - min_val + 1e-12)
     if mid_val > 0.5 * (max_val + min_val):
-        signals = 1.0 - signals
-    return signals
+        real_signals = 1.0 - real_signals
+    return real_signals
 
 
-def qubitfreq_fluxdep_signal2real(signals: np.ndarray) -> np.ndarray:
+def qubitfreq_fluxdep_signal2real(
+    signals: NDArray[np.complex128],
+) -> NDArray[np.float64]:
     return np.array(list(map(qubitfreq_signal2real, signals)), dtype=np.float64)
 
 
@@ -90,7 +91,7 @@ class QubitFreqMeasurementTask(
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        self.task = HardTask[Sequence[NDArray[float64]], QubitFreqCfg](
+        self.task = HardTask(
             measure_fn=lambda ctx, update_hook: (
                 prog := TwoToneProgram(ctx.env_dict["soccfg"], ctx.cfg)
             ).acquire(
@@ -243,7 +244,12 @@ class QubitFreqMeasurementTask(
 
         success = True
         mean_err = np.mean(np.abs(real_signals - fit_signals))
-        if mean_err > 0.05 * np.ptp(fit_signals):
+
+        if mean_err < 0.4 * np.ptp(fit_signals):
+            bias = predictor.calculate_bias(flx, fit_freq)
+            predictor.update_bias(bias)
+
+        if mean_err > 0.1 * np.ptp(fit_signals):
             detune = np.nan
             fit_freq = np.nan
             freq_err = np.nan
@@ -254,9 +260,6 @@ class QubitFreqMeasurementTask(
         if success:
             cur_info["qubit_freq"] = fit_freq
             cur_info["fit_detune"] = detune
-
-            bias = predictor.calculate_bias(flx, fit_freq)
-            predictor.update_bias(bias)
 
         ctx.set_current_data(
             QubitFreqResult(

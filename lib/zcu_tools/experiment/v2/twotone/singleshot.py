@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple, cast
+from typing import Literal, Optional, Tuple, cast
 
 import numpy as np
 from matplotlib.figure import Figure

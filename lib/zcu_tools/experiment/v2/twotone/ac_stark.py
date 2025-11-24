@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,7 +27,7 @@ from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ..runner import HardTask, SoftTask, TaskConfig, TaskContext, run_task
+from ..runner import HardTask, SoftTask, TaskConfig, run_task
 
 # (amps, freqs, signals2D)
 AcStarkResultType = Tuple[

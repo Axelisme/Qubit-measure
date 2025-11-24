@@ -116,7 +116,7 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
             )
 
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = HardTask[Sequence[NDArray[np.float64]], T1Cfg](
+        self.task = HardTask(
             measure_fn=measure_t1_fn,
             result_shape=(num_expts,),
         )

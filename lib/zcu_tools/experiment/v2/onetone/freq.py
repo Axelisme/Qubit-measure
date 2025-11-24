@@ -10,13 +10,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import (
-    OneToneProgram,
-    OneToneProgramCfg,
-    Readout,
-    ReadoutCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 

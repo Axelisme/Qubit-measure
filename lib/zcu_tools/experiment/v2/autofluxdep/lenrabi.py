@@ -110,7 +110,7 @@ class LenRabiMeasurementTask(
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        self.task = HardTask[Sequence[NDArray[np.float64]], LenRabiCfg](
+        self.task = HardTask(
             measure_fn=lambda ctx, update_hook: (
                 prog := ModularProgramV2(
                     ctx.env_dict["soccfg"],

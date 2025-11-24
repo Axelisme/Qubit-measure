@@ -130,7 +130,7 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, T2EchoCfg, PlotterDict
             )
 
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = HardTask[Sequence[NDArray[np.float64]], T2EchoCfg](
+        self.task = HardTask(
             measure_fn=measure_t2echo_fn,
             result_shape=(num_expts,),
         )

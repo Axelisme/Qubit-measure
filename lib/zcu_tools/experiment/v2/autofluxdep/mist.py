@@ -10,7 +10,7 @@ from typing_extensions import NotRequired, TypedDict
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
 from zcu_tools.library import ModuleLibrary
-from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -75,7 +75,7 @@ class MistMeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictType])
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
 
-        self.task = HardTask[Sequence[NDArray[np.float64]], MistCfg](
+        self.task = HardTask(
             measure_fn=lambda ctx, update_hook: ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 ctx.cfg,

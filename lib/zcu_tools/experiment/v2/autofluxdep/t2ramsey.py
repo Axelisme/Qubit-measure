@@ -139,7 +139,7 @@ class T2RamseyMeasurementTask(
             )
 
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = HardTask[Sequence[NDArray[np.float64]], T2RamseyCfg](
+        self.task = HardTask(
             measure_fn=measure_ramsey_fn,
             result_shape=(num_expts,),
         )
