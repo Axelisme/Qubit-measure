@@ -3,86 +3,128 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Optional, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
-from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import set_power_in_dev_cfg, sweep2array
+from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.utils import (
+    format_sweep1D,
+    make_ge_sweep,
+    set_power_in_dev_cfg,
+    sweep2array,
+)
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
-from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
+from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 
-JPAPowerResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+JPAPowerResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def jpa_power_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(signals)
+    return np.abs(signals[..., 0] - signals[..., 1])  # (power, )
 
 
-class JPAPowerTaskConfig(TaskConfig, OneToneProgramCfg): ...
+class JPAFreqTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi_pulse: PulseCfg
+    readout: ReadoutCfg
 
 
 class JPAPowerExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: JPAPowerTaskConfig) -> JPAPowerResultType:
+    def run(self, soc, soccfg, cfg: JPAFreqTaskConfig) -> JPAPowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
-        fpt_sweep = cfg["sweep"]["freq"]
-        pdr_sweep = cfg["sweep"]["power_dBm"]
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_power")
 
-        # remove flux from sweep dict, will be handled by soft loop
-        cfg["sweep"] = {"freq": fpt_sweep}
+        jpa_powers = sweep2array(cfg["sweep"]["jpa_power"], allow_array=True)
 
-        powers = sweep2array(pdr_sweep, allow_array=True)
-        fpts = sweep2array(fpt_sweep)  # predicted frequency points
+        cfg["sweep"] = {"ge": make_ge_sweep()}
+        Pulse.set_param(
+            cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+        )
 
-        Readout.set_param(cfg["readout"], "freq", sweep2param("freq", fpt_sweep))
-
-        with LivePlotter2DwithLine(
-            "Power (dBm)", "Frequency (MHz)", line_axis=1, num_lines=10
-        ) as viewer:
+        with LivePlotter1D("Power (dBm)", "Signal Difference") as viewer:
             signals = run_task(
                 task=SoftTask(
                     sweep_name="power (dBm)",
-                    sweep_values=powers.tolist(),
+                    sweep_values=jpa_powers.tolist(),
                     update_cfg_fn=lambda i, ctx, pdr: set_power_in_dev_cfg(
                         ctx.cfg["dev"], pdr, label="jpa_rf_dev"
                     ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
-                            OneToneProgram(soccfg, ctx.cfg).acquire(
-                                soc, progress=False, callback=update_hook
-                            )
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset(
+                                        "reset", ctx.cfg.get("reset", {"type": "none"})
+                                    ),
+                                    Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                                    Readout("readout", ctx.cfg["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
                         ),
-                        result_shape=(len(fpts),),
+                        result_shape=(2,),
                     ),
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    powers,
-                    fpts,
-                    jpa_power_signal2real(np.asarray(ctx.data)),
+                    jpa_powers, jpa_power_signal2real(np.asarray(ctx.data))
                 ),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (powers, fpts, signals)
+        self.last_result = (jpa_powers, signals)
 
-        return powers, fpts, signals
+        return jpa_powers, signals
 
-    def analyze(self, result: Optional[JPAPowerResultType] = None) -> None:
+    def analyze(
+        self, result: Optional[JPAPowerResultType] = None
+    ) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, fpts, signals2D = result
+        jpa_powers, signals = result
 
-        raise NotImplementedError("analysis not yet implemented")
+        real_signals = jpa_power_signal2real(signals)
+
+        max_idx = np.argmax(real_signals)
+        best_jpa_power = jpa_powers[max_idx]
+
+        fig, ax = plt.subplots(figsize=config.figsize)
+        ax.plot(jpa_powers, real_signals, label="signal difference")
+        ax.axvline(
+            best_jpa_power,
+            color="r",
+            ls="--",
+            label=f"best JPA power = {best_jpa_power:.2g} dBm",
+        )
+        ax.set_xlabel("JPA Frequency (MHz)")
+        ax.set_ylabel("Signal Difference (a.u.)")
+        ax.legend()
+        ax.grid(True)
+        fig.tight_layout()
+
+        return float(best_jpa_power), fig
 
     def save(
         self,
@@ -96,13 +138,13 @@ class JPAPowerExperiment(AbsExperiment):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, fpts, signals2D = result
+        jpa_powers, signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-            y_info={"name": "JPA Power", "unit": "dBm", "values": values},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+            x_info={"name": "JPA Power", "unit": "dBm", "values": jpa_powers},
+            y_info={"name": "GE", "unit": "None", "values": np.array([0, 1])},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,
             **kwargs,

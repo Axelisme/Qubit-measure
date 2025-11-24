@@ -3,26 +3,45 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Optional, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
-from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
+from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.utils import (
+    format_sweep1D,
+    make_ge_sweep,
+    set_flux_in_dev_cfg,
+    sweep2array,
+)
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
-from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
+from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 
-JPAFluxResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+JPAFluxResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def jpa_flux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(signals)
+    return np.abs(signals[..., 0] - signals[..., 1])  # (flux, )
 
 
-class JPAFluxTaskConfig(TaskConfig, OneToneProgramCfg): ...
+class JPAFluxTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi_pulse: PulseCfg
+    readout: ReadoutCfg
 
 
 class JPAFluxExperiment(AbsExperiment):
@@ -30,57 +49,81 @@ class JPAFluxExperiment(AbsExperiment):
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
-        fpt_sweep = cfg["sweep"]["freq"]
-        flx_sweep = cfg["sweep"]["flux"]
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_flux")
 
-        # remove flux from sweep dict, will be handled by soft loop
-        cfg["sweep"] = {"freq": fpt_sweep}
+        jpa_flxs = sweep2array(cfg["sweep"]["jpa_flux"], allow_array=True)
 
-        flxs = sweep2array(flx_sweep, allow_array=True)
-        freqs = sweep2array(fpt_sweep)  # predicted frequency points
+        cfg["sweep"] = {"ge": make_ge_sweep()}
+        Pulse.set_param(
+            cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+        )
 
-        Readout.set_param(cfg["readout"], "freq", sweep2param("freq", fpt_sweep))
-
-        with LivePlotter2DwithLine(
-            "JPA Flux value", "Probe Frequency (MHz)", line_axis=1, num_lines=10
-        ) as viewer:
+        with LivePlotter1D("JPA Flux value (a.u.)", "Signal Difference") as viewer:
             signals = run_task(
                 task=SoftTask(
                     sweep_name="JPA Flux value",
-                    sweep_values=flxs.tolist(),
+                    sweep_values=jpa_flxs.tolist(),
                     update_cfg_fn=lambda i, ctx, flx: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], flx, label="jpa_flux_dev"
                     ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
-                            OneToneProgram(soccfg, ctx.cfg).acquire(
-                                soc, progress=False, callback=update_hook
-                            )
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset(
+                                        "reset", ctx.cfg.get("reset", {"type": "none"})
+                                    ),
+                                    Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                                    Readout("readout", ctx.cfg["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
                         ),
-                        result_shape=(len(freqs),),
+                        result_shape=(2,),
                     ),
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    flxs, freqs, jpa_flux_signal2real(np.asarray(ctx.data))
+                    jpa_flxs, jpa_flux_signal2real(np.asarray(ctx.data))
                 ),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (flxs, freqs, signals)
+        self.last_result = (jpa_flxs, signals)
 
-        return flxs, freqs, signals
+        return jpa_flxs, signals
 
-    def analyze(self, result: Optional[JPAFluxResultType] = None) -> None:
+    def analyze(
+        self, result: Optional[JPAFluxResultType] = None
+    ) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, fpts, signals2D = result
+        jpa_flxs, signals = result
+        real_signals = jpa_flux_signal2real(signals)
 
-        raise NotImplementedError("analysis not yet implemented")
+        max_idx = np.argmax(real_signals)
+        best_jpa_flux = jpa_flxs[max_idx]
+
+        fig, ax = plt.subplots(figsize=config.figsize)
+        ax.plot(jpa_flxs, real_signals, label="signal difference")
+        ax.axvline(
+            best_jpa_flux,
+            color="r",
+            ls="--",
+            label=f"best JPA flux = {best_jpa_flux:.2g} a.u.",
+        )
+        ax.set_xlabel("JPA Flux value (a.u.)")
+        ax.set_ylabel("Signal Difference (a.u.)")
+        ax.legend()
+        ax.grid(True)
+        fig.tight_layout()
+
+        return float(best_jpa_flux), fig
 
     def save(
         self,
@@ -94,13 +137,13 @@ class JPAFluxExperiment(AbsExperiment):
             result = self.last_result
         assert result is not None, "no result found"
 
-        flxs, freqs, signals2D = result
+        jpa_flxs, signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Probe Frequency", "unit": "Hz", "values": freqs * 1e6},
-            y_info={"name": "JPA Flux value", "unit": "a.u.", "values": flxs},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+            x_info={"name": "JPA Flux value", "unit": "a.u.", "values": jpa_flxs},
+            y_info={"name": "GE", "unit": "None", "values": np.array([0, 1])},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,
             **kwargs,

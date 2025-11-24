@@ -3,24 +3,45 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Optional, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typing_extensions import NotRequired
 
-from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D, set_freq_in_dev_cfg, sweep2array
+from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.utils import (
+    format_sweep1D,
+    make_ge_sweep,
+    set_freq_in_dev_cfg,
+    sweep2array,
+)
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import save_data
 
 JPAFreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def jpa_freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(signals)
+    return np.abs(signals[..., 0] - signals[..., 1])  # (freq, )
 
 
-class JPAFreqTaskConfig(TaskConfig, OneToneProgramCfg): ...
+class JPAFreqTaskConfig(TaskConfig, ModularProgramCfg):
+    reset: NotRequired[ResetCfg]
+    pi_pulse: PulseCfg
+    readout: ReadoutCfg
 
 
 class JPAFreqExperiment(AbsExperiment):
@@ -29,14 +50,15 @@ class JPAFreqExperiment(AbsExperiment):
 
         assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_freq")
-        jpa_freq_sweep = cfg["sweep"]["jpa_freq"]
 
-        # remove sweep dict
-        del cfg["sweep"]
+        jpa_freqs = sweep2array(cfg["sweep"]["jpa_freq"], allow_array=True)
 
-        jpa_freqs = sweep2array(jpa_freq_sweep, allow_array=True)
+        cfg["sweep"] = {"ge": make_ge_sweep()}
+        Pulse.set_param(
+            cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+        )
 
-        with LivePlotter1D("JPA Frequency (MHz)", "Magnitude") as viewer:
+        with LivePlotter1D("JPA Frequency (MHz)", "Signal Difference") as viewer:
             signals = run_task(
                 task=SoftTask(
                     sweep_name="JPA Frequency",
@@ -46,10 +68,19 @@ class JPAFreqExperiment(AbsExperiment):
                     ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
-                            OneToneProgram(soccfg, ctx.cfg).acquire(
-                                soc, progress=False, callback=update_hook
-                            )
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset(
+                                        "reset", ctx.cfg.get("reset", {"type": "none"})
+                                    ),
+                                    Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                                    Readout("readout", ctx.cfg["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
                         ),
+                        result_shape=(2,),
                     ),
                 ),
                 init_cfg=cfg,
@@ -65,14 +96,35 @@ class JPAFreqExperiment(AbsExperiment):
 
         return jpa_freqs, signals
 
-    def analyze(self, result: Optional[JPAFreqResultType] = None) -> None:
+    def analyze(
+        self, result: Optional[JPAFreqResultType] = None
+    ) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         jpa_freqs, signals = result
 
-        raise NotImplementedError("analysis not yet implemented")
+        real_signals = jpa_freq_signal2real(signals)
+
+        max_idx = np.argmax(real_signals)
+        best_jpa_freq = jpa_freqs[max_idx]
+
+        fig, ax = plt.subplots(figsize=config.figsize)
+        ax.plot(jpa_freqs, real_signals, label="signal difference")
+        ax.axvline(
+            best_jpa_freq,
+            color="r",
+            ls="--",
+            label=f"best JPA frequency = {best_jpa_freq:.2g} MHz",
+        )
+        ax.set_xlabel("JPA Frequency (MHz)")
+        ax.set_ylabel("Signal Difference (a.u.)")
+        ax.legend()
+        ax.grid(True)
+        fig.tight_layout()
+
+        return float(best_jpa_freq), fig
 
     def save(
         self,
@@ -91,7 +143,8 @@ class JPAFreqExperiment(AbsExperiment):
         save_data(
             filepath=filepath,
             x_info={"name": "JPA Frequency", "unit": "Hz", "values": jpa_freqs * 1e6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+            y_info={"name": "GE", "unit": "None", "values": np.array([0, 1])},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,
             **kwargs,
