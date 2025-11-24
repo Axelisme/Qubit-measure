@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, cast
+from typing import Any, Callable, Dict, Optional, Tuple, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,6 +28,7 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .executor import MeasurementTask
 
@@ -167,6 +168,7 @@ class LenRabiMeasurementTask(
             flx_values,
             sweep2array(self.length_sweep),
             lenrabi_fluxdep_signal2real(signals["raw_signals"]),
+            title=f"{ctx.env_dict['last_info'].get('gain_factor', 1.0):.3f}/{ctx.env_dict['cur_info']['m_ratio']:3f}",
             refresh=False,
         )
 
@@ -269,15 +271,16 @@ class LenRabiMeasurementTask(
             if self.succes_hook is not None:
                 self.succes_hook(ctx, ml)
 
-        ctx.set_current_data(
-            LenRabiResult(
-                raw_signals=raw_signals,
-                pi_length=np.array(pi_len),
-                pi2_length=np.array(pi2_len),
-                rabi_freq=np.array(rabi_freq),
-                success=np.array(success),
+        with MinIntervalFunc.force_execute():
+            ctx.set_current_data(
+                LenRabiResult(
+                    raw_signals=raw_signals,
+                    pi_length=np.array(pi_len),
+                    pi2_length=np.array(pi2_len),
+                    rabi_freq=np.array(rabi_freq),
+                    success=np.array(success),
+                )
             )
-        )
 
     def get_default_result(self) -> LenRabiResult:
         return LenRabiResult(
