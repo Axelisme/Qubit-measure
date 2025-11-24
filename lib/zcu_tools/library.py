@@ -156,13 +156,11 @@ class ModuleLibrary:
 
         self.sync()
 
-    @classmethod
-    def from_dict(
-        cls, waveforms: Dict[str, Dict[str, Any]], modules: Dict[str, Dict[str, Any]]
-    ) -> ModuleLibrary:
-        ml = cls()
-        ml.waveforms = deepcopy(waveforms)
-        ml.modules = deepcopy(modules)
+    def clone(self) -> ModuleLibrary:
+        ml = ModuleLibrary()
+        ml.waveforms = deepcopy(self.waveforms)
+        ml.modules = deepcopy(self.modules)
+
         return ml
 
     def make_cfg(

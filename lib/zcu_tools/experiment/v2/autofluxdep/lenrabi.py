@@ -104,13 +104,13 @@ class LenRabiMeasurementTask(
         ref_pi_product: float,
         cfg_maker: Callable[[TaskContext, ModuleLibrary], Optional[LenRabiCfgTemplate]],
         earlystop_snr: Optional[float] = None,
-        post_hook: Optional[Callable[[TaskContext], Any]] = None,
+        succes_hook: Optional[Callable[[TaskContext, ModuleLibrary], Any]] = None,
     ) -> None:
         self.length_sweep = length_sweep
         self.ref_product = ref_pi_product
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
-        self.post_hook = post_hook
+        self.succes_hook = succes_hook
 
         self.task = HardTask(
             measure_fn=lambda ctx, update_hook: (
@@ -266,6 +266,9 @@ class LenRabiMeasurementTask(
                 last_info.get("gain_factor", 1.0) * new_gain_factor
             ) ** 0.5
 
+            if self.succes_hook is not None:
+                self.succes_hook(ctx, ml)
+
         ctx.set_current_data(
             LenRabiResult(
                 raw_signals=raw_signals,
@@ -275,9 +278,6 @@ class LenRabiMeasurementTask(
                 success=np.array(success),
             )
         )
-
-        if self.post_hook is not None:
-            self.post_hook(ctx)
 
     def get_default_result(self) -> LenRabiResult:
         return LenRabiResult(

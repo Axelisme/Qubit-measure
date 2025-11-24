@@ -33,7 +33,7 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     # shape: (gains,)
     avg_len = max(int(0.05 * signals.shape[0]), 1)
 
-    real_signals = signals - np.mean(signals[:avg_len], axis=0, keepdims=True)
+    real_signals = np.abs(signals - np.mean(signals[:avg_len], axis=0, keepdims=True))
 
     return real_signals
 

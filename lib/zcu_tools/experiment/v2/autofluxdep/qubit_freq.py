@@ -249,7 +249,7 @@ class QubitFreqMeasurementTask(
             bias = predictor.calculate_bias(flx, fit_freq)
             predictor.update_bias(bias)
 
-        if mean_err > 0.1 * np.ptp(fit_signals):
+        if mean_err > 0.2 * np.ptp(fit_signals):
             detune = np.nan
             fit_freq = np.nan
             freq_err = np.nan
