@@ -29,6 +29,7 @@ qiskit-metal
 *.png
 *.csv
 *.log
+*.json
 
 # Jupytext generated files
 /notebook/
