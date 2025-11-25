@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -46,12 +46,11 @@ from zcu_tools.utils.datasaver import save_data
 class JPAOptimizer:
     """
     Optimizer for JPA parameters using a two-phase approach:
-    1. Grid search phase: Uniform 3D grid search with flux as the outer loop
-    2. Fine optimization phase: scipy.optimize on top 10% flux values
+    1. Flux-sliced 2D optimization: each flux grid point runs a dedicated freq/power search
+    2. Fine 3D optimization: refine around the best flux slice with scipy-like sampling
 
-    The optimization is designed to minimize flux switching overhead by:
-    - Grouping measurements by flux value
-    - Using slice-based nested optimization
+    The schedule still minimizes flux switching overhead by grouping evaluations per flux
+    and only changing flux when the 2D search for the current slice completes.
     """
 
     def __init__(
@@ -75,8 +74,8 @@ class JPAOptimizer:
         self.fpt_bounds = (self.fpt_arr.min(), self.fpt_arr.max())
         self.pdr_bounds = (self.pdr_arr.min(), self.pdr_arr.max())
 
-        # Calculate grid dimensions for phase 1
-        self._setup_grid_search()
+        # Calculate phase-1 schedule (flux slices + local 2D searches)
+        self._setup_stage1_optimization()
 
         # State tracking
         self.phase = 1  # 1 = grid search, 2 = fine optimization
@@ -91,56 +90,40 @@ class JPAOptimizer:
         self.best_grid_point: Optional[Tuple[float, float, float]] = None
         self.best_grid_snr: Optional[float] = None
 
-    def _setup_grid_search(self) -> None:
+    def _setup_stage1_optimization(self) -> None:
         """
-        Setup grid search parameters for phase 1.
-        Use Latin Hypercube Sampling for freq/power within each flux slice.
-
-        This ensures:
-        - Flux values are on a regular grid (outer loop to minimize switching)
-        - Within each flux slice, freq and power values are unique
-        - Overall coverage is uniform across the freq-power plane
+        Setup phase-1 parameters.
+        Each flux slice gets a queue of 2D (freq, power) optimization points so that the
+        outer loop maintains a low flux-switching rate while still refining rf settings.
         """
         n_total = self.grid_phase_points
 
-        # Calculate grid dimensions: n_flx * n_points_per_flux ≈ n_total
-        # Use cube root as base, then adjust
-        base = int(np.cbrt(n_total))
+        self.stage1_points: List[Tuple[float, float, float]] = []
+        if n_total <= 0:
+            self.n_flx_grid = 0
+            self.n_points_per_flux = 0
+            self.flx_grid_spacing = 0.0
+            fpt_range = self.fpt_bounds[1] - self.fpt_bounds[0]
+            pdr_range = self.pdr_bounds[1] - self.pdr_bounds[0]
+            self.fpt_grid_spacing = fpt_range * 0.1
+            self.pdr_grid_spacing = pdr_range * 0.1
+            return
 
-        # Number of flux points (keep as regular grid)
+        base = max(1, int(np.cbrt(n_total)))
         n_flx = max(2, min(len(self.flx_arr), base))
-        # Number of points per flux slice
-        n_points_per_flux = n_total // n_flx
+        n_points_per_flux = max(1, int(np.ceil(n_total / n_flx)))
 
-        # Generate flux grid (regular spacing)
         flx_grid = np.linspace(self.flx_bounds[0], self.flx_bounds[1], n_flx)
 
-        # Create grid points using Latin Hypercube Sampling for freq/power
-        self.grid_points: List[Tuple[float, float, float]] = []
-
-        for flx in flx_grid:
-            # Generate LHS samples for this flux slice
-            fpt_pdr_points = self._generate_lhs_2d(
-                n_points_per_flux,
-                self.fpt_bounds,
-                self.pdr_bounds,
-            )
-            for fpt, pdr in fpt_pdr_points:
-                self.grid_points.append((float(flx), float(fpt), float(pdr)))
-
-        # Truncate to exactly grid_phase_points
-        self.grid_points = self.grid_points[: self.grid_phase_points]
-
-        # Store dimensions for reference
         self.n_flx_grid = n_flx
         self.n_points_per_flux = n_points_per_flux
 
-        # Store grid spacing for phase 2 (to cover at least adjacent grid points)
-        # For flux, use actual grid spacing
         self.flx_grid_spacing = (
-            (self.flx_bounds[1] - self.flx_bounds[0]) / (n_flx - 1) if n_flx > 1 else 0
+            (self.flx_bounds[1] - self.flx_bounds[0]) / (n_flx - 1)
+            if n_flx > 1
+            else 0.0
         )
-        # For freq/power, estimate effective spacing based on LHS distribution
+
         n_per_dim = int(np.sqrt(n_points_per_flux))
         self.fpt_grid_spacing = (
             (self.fpt_bounds[1] - self.fpt_bounds[0]) / n_per_dim
@@ -153,67 +136,107 @@ class JPAOptimizer:
             else (self.pdr_bounds[1] - self.pdr_bounds[0]) * 0.1
         )
 
-    def _generate_lhs_2d(
+        fpt_scale = max(
+            (self.fpt_bounds[1] - self.fpt_bounds[0]) * 0.1,
+            self.fpt_grid_spacing * 1.5,
+        )
+        pdr_scale = max(
+            (self.pdr_bounds[1] - self.pdr_bounds[0]) * 0.1,
+            self.pdr_grid_spacing * 1.5,
+        )
+
+        fpt_center = float((self.fpt_bounds[0] + self.fpt_bounds[1]) / 2)
+        pdr_center = float((self.pdr_bounds[0] + self.pdr_bounds[1]) / 2)
+        golden = (np.sqrt(5) - 1) / 2
+
+        for idx, flx in enumerate(flx_grid):
+            # Use deterministic offsets so each flux slice explores slightly different seeds
+            offset = ((idx * golden) % 1.0) - 0.5
+            init_fpt = float(
+                np.clip(fpt_center + offset * self.fpt_grid_spacing, *self.fpt_bounds)
+            )
+            init_pdr = float(
+                np.clip(pdr_center - offset * self.pdr_grid_spacing, *self.pdr_bounds)
+            )
+
+            fpt_pdr_seq = self._generate_2d_optimization_points(
+                init_fpt=init_fpt,
+                init_pdr=init_pdr,
+                n_points=n_points_per_flux,
+                fpt_scale=fpt_scale,
+                pdr_scale=pdr_scale,
+            )
+
+            for fpt, pdr in fpt_pdr_seq:
+                self.stage1_points.append((float(flx), fpt, pdr))
+                if len(self.stage1_points) >= n_total:
+                    break
+
+            if len(self.stage1_points) >= n_total:
+                break
+
+        # Truncate/extend to exactly grid_phase_points
+        if len(self.stage1_points) >= n_total:
+            self.stage1_points = self.stage1_points[:n_total]
+        elif self.stage1_points:
+            deficit = n_total - len(self.stage1_points)
+            self.stage1_points.extend(self.stage1_points[-1:] * deficit)
+        else:
+            # Fallback: repeat the center point to keep scheduling logic simple
+            default_point = (
+                float(flx_grid[0]) if len(flx_grid) else float(self.flx_bounds[0]),
+                fpt_center,
+                pdr_center,
+            )
+            self.stage1_points = [default_point for _ in range(max(1, n_total))]
+
+    def _generate_2d_optimization_points(
         self,
+        init_fpt: float,
+        init_pdr: float,
         n_points: int,
-        bounds_x: Tuple[float, float],
-        bounds_y: Tuple[float, float],
+        fpt_scale: float,
+        pdr_scale: float,
     ) -> List[Tuple[float, float]]:
         """
-        Generate 2D Latin Hypercube Sampling points.
-
-        Ensures that no two points share the same x or y coordinate bin,
-        while uniformly covering the 2D space.
-
-        Args:
-            n_points: Number of points to generate
-            bounds_x: (min, max) bounds for x dimension
-            bounds_y: (min, max) bounds for y dimension
-
-        Returns:
-            List of (x, y) tuples
+        Generate 2D local-search points (freq/power) around a seed using a simplex-like
+        stencil followed by a shrinking golden-spiral pattern for exploration.
         """
+        points: List[Tuple[float, float]] = []
         if n_points <= 0:
-            return []
+            return points
 
-        # Divide each dimension into n_points intervals
-        x_edges = np.linspace(bounds_x[0], bounds_x[1], n_points + 1)
-        y_edges = np.linspace(bounds_y[0], bounds_y[1], n_points + 1)
+        # Initial stencil covers ±directions to quickly probe gradients
+        stencil = [
+            (init_fpt, init_pdr),
+            (init_fpt + fpt_scale, init_pdr),
+            (init_fpt - fpt_scale, init_pdr),
+            (init_fpt, init_pdr + pdr_scale),
+            (init_fpt, init_pdr - pdr_scale),
+        ]
 
-        # Generate one point per interval (at the center with small random jitter)
-        # Use deterministic jitter based on index for reproducibility
-        x_centers = (x_edges[:-1] + x_edges[1:]) / 2
-        y_centers = (y_edges[:-1] + y_edges[1:]) / 2
+        for fpt, pdr in stencil:
+            fpt_clamped = float(np.clip(fpt, *self.fpt_bounds))
+            pdr_clamped = float(np.clip(pdr, *self.pdr_bounds))
+            points.append((fpt_clamped, pdr_clamped))
+            if len(points) >= n_points:
+                return points
 
-        # Add small jitter (within the interval) for better space-filling
-        x_interval = (bounds_x[1] - bounds_x[0]) / n_points
-        y_interval = (bounds_y[1] - bounds_y[0]) / n_points
-        jitter_scale = 0.3  # Jitter within 30% of interval
-
-        # Use golden ratio based quasi-random jitter for reproducibility
         golden = (np.sqrt(5) - 1) / 2
-        x_jitter = np.array(
-            [
-                (((i * golden) % 1) - 0.5) * jitter_scale * x_interval
-                for i in range(n_points)
-            ]
-        )
-        y_jitter = np.array(
-            [
-                (((i * golden * 2) % 1) - 0.5) * jitter_scale * y_interval
-                for i in range(n_points)
-            ]
-        )
+        remaining = n_points - len(points)
 
-        x_values = np.clip(x_centers + x_jitter, bounds_x[0], bounds_x[1])
-        y_values = np.clip(y_centers + y_jitter, bounds_y[0], bounds_y[1])
+        for i in range(remaining):
+            shrink = golden ** (i // 5)
+            angle = 2 * np.pi * (i + 1) * golden
 
-        # Shuffle y values to break the diagonal correlation
-        # Use a deterministic shuffle based on golden ratio permutation
-        y_permutation = np.argsort([((i * golden) % 1) for i in range(n_points)])
-        y_values_shuffled = y_values[y_permutation]
+            fpt_offset = fpt_scale * shrink * np.cos(angle)
+            pdr_offset = pdr_scale * shrink * np.sin(angle)
 
-        return [(float(x), float(y)) for x, y in zip(x_values, y_values_shuffled)]
+            fpt_new = float(np.clip(init_fpt + fpt_offset, *self.fpt_bounds))
+            pdr_new = float(np.clip(init_pdr + pdr_offset, *self.pdr_bounds))
+            points.append((fpt_new, pdr_new))
+
+        return points[:n_points]
 
     def _setup_fine_optimization(self) -> None:
         """
@@ -319,50 +342,6 @@ class JPAOptimizer:
 
         return points[:n_points]
 
-    def _generate_local_search_points_3d(
-        self,
-        center_flx: float,
-        center_fpt: float,
-        center_pdr: float,
-        n_points: int,
-    ) -> List[Tuple[float, float, float]]:
-        """
-        Generate 3D local search points around a center point using quasi-random sampling.
-        """
-        points: List[Tuple[float, float, float]] = []
-
-        # Small search region (5% of total range)
-        flx_scale = (self.flx_bounds[1] - self.flx_bounds[0]) * 0.05
-        fpt_scale = (self.fpt_bounds[1] - self.fpt_bounds[0]) * 0.05
-        pdr_scale = (self.pdr_bounds[1] - self.pdr_bounds[0]) * 0.05
-
-        # Halton sequence bases for 3D quasi-random sampling
-        bases = [2, 3, 5]  # Prime bases for each dimension
-
-        def halton(index: int, base: int) -> float:
-            """Generate Halton sequence value."""
-            result = 0.0
-            f = 1.0
-            i = index + 1  # Start from 1 to avoid 0
-            while i > 0:
-                f = f / base
-                result = result + f * (i % base)
-                i = i // base
-            return result
-
-        for i in range(n_points):
-            # Halton sequence gives quasi-random distribution
-            flx_offset = flx_scale * (2 * halton(i, bases[0]) - 1)
-            fpt_offset = fpt_scale * (2 * halton(i, bases[1]) - 1)
-            pdr_offset = pdr_scale * (2 * halton(i, bases[2]) - 1)
-
-            flx_new = float(np.clip(center_flx + flx_offset, *self.flx_bounds))
-            fpt_new = float(np.clip(center_fpt + fpt_offset, *self.fpt_bounds))
-            pdr_new = float(np.clip(center_pdr + pdr_offset, *self.pdr_bounds))
-            points.append((flx_new, fpt_new, pdr_new))
-
-        return points
-
     def next_params(
         self, i: int, last_snr: Optional[float]
     ) -> Optional[Tuple[float, float, float]]:
@@ -388,11 +367,11 @@ class JPAOptimizer:
 
         # Phase 1: Grid search
         if i < self.grid_phase_points:
-            if i < len(self.grid_points):
-                return self.grid_points[i]
+            if i < len(self.stage1_points):
+                return self.stage1_points[i]
             else:
-                # Fallback: repeat last point if grid is smaller
-                return self.grid_points[-1] if self.grid_points else None
+                # Fallback: repeat last point if schedule is shorter
+                return self.stage1_points[-1] if self.stage1_points else None
 
         # Transition to phase 2
         if self.phase == 1:
@@ -417,8 +396,8 @@ class JPAOptimizer:
 
     def _get_previous_params(self, idx: int) -> Optional[Tuple[float, float, float]]:
         """Get parameters that were used at the given index."""
-        if idx < len(self.grid_points):
-            return self.grid_points[idx]
+        if idx < len(self.stage1_points):
+            return self.stage1_points[idx]
         fine_idx = idx - self.grid_phase_points
         if 0 <= fine_idx < len(self.fine_opt_queue):
             return self.fine_opt_queue[fine_idx]
@@ -888,9 +867,9 @@ if __name__ == "__main__":
     print(f"Grid phase points: {optimizer.grid_phase_points}")
     print(f"Fine phase points: {optimizer.fine_phase_points}")
     print(
-        f"Grid structure: {optimizer.n_flx_grid} flux slices x {optimizer.n_points_per_flux} LHS points each"
+        f"Phase-1 structure: {optimizer.n_flx_grid} flux slices x {optimizer.n_points_per_flux} 2D-opt samples each"
     )
-    print(f"Actual grid points: {len(optimizer.grid_points)}")
+    print(f"Actual stage-1 points: {len(optimizer.stage1_points)}")
     print()
 
     # Run optimization
