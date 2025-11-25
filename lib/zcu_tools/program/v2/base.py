@@ -4,6 +4,8 @@ from zcu_tools.program.base import MyProgram
 
 from qick import QickConfig
 
+from .modules.registry import PulseRegistry
+
 
 class ProgramV2Cfg(TypedDict):
     reps: int
@@ -22,6 +24,7 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             final_delay=cfg["relax_delay"],
             **kwargs,
         )
+        self.pulse_registry = PulseRegistry()
 
     def acquire(self, soc, **kwargs):
         # v2 program need to pass rounds to acquire

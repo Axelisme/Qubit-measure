@@ -50,7 +50,7 @@ class BasePulse(Module):
         self.waveform = Waveform(f"{self.name}_waveform", self.cfg["waveform"])
 
         # if this is the first time to init the pulse, init it
-        if not self.has_registered(prog, self.pulse_name):
+        if not prog.pulse_registry.has(self.pulse_name):
             self.init_pulse(prog, self.pulse_name)
 
     def init_pulse(self, prog: MyProgramV2, name: str) -> None:
@@ -88,10 +88,10 @@ class BasePulse(Module):
         )
 
         # register the pulse
-        self.register_module(prog, name, cfg)
+        prog.pulse_registry.register(name, cfg)
 
         if "mixer_freq" in cfg:
-            self.check_valid_mixer_freq(prog, name, cfg)
+            prog.pulse_registry.check_valid_mixer_freq(name, cfg)
 
     def total_length(self) -> float:
         if self.cfg is None:
@@ -101,50 +101,6 @@ class BasePulse(Module):
             + self.cfg["waveform"]["length"]
             + self.cfg["post_delay"]
         )
-
-    # -----------------------
-    # TODO: better way to share pulse between modules?
-
-    def register_module(self, prog: MyProgramV2, name: str, cfg: PulseCfg) -> None:
-        if not hasattr(prog, "_module_pulse_list"):
-            prog._module_pulse_list = {}  # type: ignore
-        assert isinstance(prog._module_pulse_list, dict)
-        prog._module_pulse_list[name] = cfg
-
-    def has_registered(self, prog: MyProgramV2, name: str) -> bool:
-        if not hasattr(prog, "_module_pulse_list"):
-            return False
-        assert isinstance(prog._module_pulse_list, dict)
-        return name in prog._module_pulse_list
-
-    @staticmethod
-    def check_valid_mixer_freq(prog: MyProgramV2, name: str, cfg: PulseCfg) -> None:
-        if not hasattr(prog, "_module_pulse_list"):
-            return None
-        assert isinstance(prog._module_pulse_list, dict)
-
-        if "mixer_freq" not in cfg:
-            return
-
-        ch = cfg["ch"]
-        mixer_freq = cfg["mixer_freq"]
-
-        for pname, pcfg in prog._module_pulse_list.items():
-            assert isinstance(pcfg, dict)
-
-            if pcfg["ch"] != ch:
-                continue
-            if "mixer_freq" not in pcfg:
-                raise ValueError(f"Pulse {pname} does not set mixer_freq")
-
-            p_mixer_freq = pcfg["mixer_freq"]
-            if p_mixer_freq != mixer_freq:
-                warnings.warn(
-                    f"Pulse {pname} and {name} use the same channel {ch} "
-                    f"but have different mixer frequencies: "
-                    f"({p_mixer_freq}) than the current pulse ({mixer_freq})"
-                    f"This may lead to unexpected behavior."
-                )
 
     # -----------------------
 
