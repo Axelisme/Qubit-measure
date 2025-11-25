@@ -2,6 +2,7 @@ from typing import Callable, Dict, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.special import erfc
 
 # from zcu_tools.utils.fitting import fit_dual_gauss, gauss_func
 from zcu_tools.utils.fitting.singleshot import (
@@ -24,24 +25,41 @@ def scatter_ge_plot(
     Ige: Tuple[np.ndarray, np.ndarray],
     Qge: Tuple[np.ndarray, np.ndarray],
     title: Optional[str] = None,
+    max_points: int = 10000,
 ) -> None:
     Ig, Ie = Ige
     Qg, Qe = Qge
-    xg, yg = np.median(Ig), np.median(Qg)
-    xe, ye = np.median(Ie), np.median(Qe)
 
     rand_gen = np.random.default_rng(42)
     downsample_idx = rand_gen.choice(
-        np.arange(len(Ig)), size=min(10000, len(Ig)), replace=False
+        len(Ig), size=min(max_points, len(Ig)), replace=False
     )
-    Ig, Qg = Ig[downsample_idx], Qg[downsample_idx]
-    Ie, Qe = Ie[downsample_idx], Qe[downsample_idx]
+    Ig, Qg = np.take(Ig, downsample_idx), np.take(Qg, downsample_idx)
+    Ie, Qe = np.take(Ie, downsample_idx), np.take(Qe, downsample_idx)
 
-    ax.scatter(Ig, Qg, label="g", color="b", marker=".", edgecolor="None", alpha=0.5)
-    ax.scatter(Ie, Qe, label="e", color="r", marker=".", edgecolor="None", alpha=0.5)
-    plt_params = dict(color="k", linestyle=":", marker="o", markersize=5)
-    ax.plot(xg, yg, markerfacecolor="b", **plt_params)
-    ax.plot(xe, ye, markerfacecolor="r", **plt_params)
+    # sort Ig, Qg by Ig from high to low
+    sort_g_idx = np.argsort(Ig)
+    sort_e_idx = np.argsort(Ie)[::-1]
+    Ig, Qg = Ig.take(sort_g_idx), Qg.take(sort_g_idx)
+    Ie, Qe = Ie.take(sort_e_idx), Qe.take(sort_e_idx)
+
+    # Mix the data to avoid one color covering the other
+    I_all = np.concatenate((Ig, Ie))
+    Q_all = np.concatenate((Qg, Qe))
+    c_all = np.array(["b"] * len(Ig) + ["r"] * len(Ie))
+
+    p = np.arange(len(I_all)).reshape(2, -1).T.flatten()
+    ax.scatter(
+        I_all.take(p),
+        Q_all.take(p),
+        c=c_all.take(p),
+        marker=".",
+        edgecolor="None",
+        alpha=0.25,
+    )
+    # Plot empty data for legend
+    ax.scatter([], [], label="g", color="b")
+    ax.scatter([], [], label="e", color="r")
     ax.set_xlabel("I [ADC levels]")
     ax.set_ylabel("Q [ADC levels]")
     ax.legend(loc="upper right")
@@ -87,7 +105,7 @@ def fidelity_func(tp: float, tn: float, fp: float, fn: float) -> float:
         return (tn + fp) / (tp + tn + fp + fn)
 
 
-def calculate_fidelity(
+def calc_fidelity(
     ng: np.ndarray, ne: np.ndarray, bins: np.ndarray
 ) -> Tuple[float, float]:
     cum_ng, cum_ne = np.cumsum(ng), np.cumsum(ne)
@@ -99,6 +117,23 @@ def calculate_fidelity(
     fid = fidelity_func(tp, tn, fp, fn)
 
     return fid, 0.5 * (bins[tind] + bins[tind + 1])
+
+
+def calc_ideal_fidelity(sg: float, se: float, s: float) -> float:
+    # The distance between the centers of the two Gaussians
+    distance = np.abs(sg - se)
+
+    if np.isclose(s, 0):
+        return 1.0 if not np.isclose(distance, 0) else 0.5
+
+    p_error = 0.5 * erfc(distance / (2 * np.sqrt(2) * s))
+
+    tp = p_error
+    fn = p_error
+    tn = 1 - p_error
+    fp = 1 - p_error
+
+    return fidelity_func(tp=tp, tn=tn, fp=fp, fn=fn)
 
 
 def fitting_ge_and_plot(
@@ -148,6 +183,10 @@ def fitting_ge_and_plot(
     eg_fit = n_eg * gauss_func(xs, sg, s)
     ee_fit = n_ee * gauss_func(xs, se, s)
 
+    plt_params = dict(linestyle=":", marker="o", markersize=5)
+    axs[0, 0].plot(sg, np.median(Qg), markerfacecolor="b", color="r", **plt_params)
+    axs[0, 0].plot(se, np.median(Qe), markerfacecolor="r", color="b", **plt_params)
+
     axs[0, 1].plot(xs, fit_g_pdfs, "k-", label="total")
     if length_ratio != 0.0:
         axs[0, 1].plot(xs, gg_fit + ge_fit, "k--", alpha=0.3, label="ideal total")
@@ -166,9 +205,10 @@ def fitting_ge_and_plot(
     axs[1, 0].plot(xs, fit_g_pdfs, "b-", label="g")
     axs[1, 0].plot(xs, fit_e_pdfs, "r-", label="e")
 
-    fid, threshold = calculate_fidelity(g_pdfs, e_pdfs, bins)
+    fid, threshold = calc_fidelity(g_pdfs, e_pdfs, bins)
+    ideal_fid = calc_ideal_fidelity(sg, se, s)
 
-    axs[1, 0].set_title(r"${F}_{ge}: $" + f"{fid:.3%}", fontsize=14)
+    axs[1, 0].set_title(r"${F}_{ge}: $" + f"{fid:.1%} / {ideal_fid:.1%}", fontsize=14)
 
     for ax in axs.flat:
         ax.axvline(threshold, color="0.2", linestyle="--")

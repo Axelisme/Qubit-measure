@@ -3,6 +3,6 @@ from .jupyter import (
     LivePlotter1D,
     LivePlotter2D,
     LivePlotter2DwithLine,
-    LivePlotterHistogram,
+    LivePlotterScatter,
     make_plot_frame,
 )
