@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
+from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
@@ -113,13 +114,14 @@ class JPAFluxExperiment(AbsExperiment):
         assert result is not None, "no result found"
 
         jpa_flxs, signals = result
-        real_signals = np.abs(signals)
+        signals = gaussian_filter1d(signals, sigma=1)
+        snrs = np.abs(signals)
 
-        max_idx = np.argmax(signals)
+        max_idx = np.argmax(snrs)
         best_jpa_flux = jpa_flxs[max_idx]
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        ax.plot(jpa_flxs, real_signals, label="signal difference")
+        ax.plot(jpa_flxs, snrs, label="signal difference")
         ax.axvline(
             best_jpa_flux,
             color="r",

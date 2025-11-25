@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
+from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
@@ -113,10 +114,11 @@ class JPAFreqExperiment(AbsExperiment):
         assert result is not None, "no result found"
 
         jpa_freqs, signals = result
+        signals = gaussian_filter1d(signals, sigma=3)
 
         real_signals = np.abs(signals)
 
-        max_idx = np.argmax(real_signals)
+        max_idx = np.nanargmax(real_signals)
         best_jpa_freq = jpa_freqs[max_idx]
 
         fig, ax = plt.subplots(figsize=config.figsize)

@@ -62,10 +62,10 @@ class ScatterSegment(AbsSegment):
         if title is not None:
             ax.set_title(title)
 
-        ax.relim(visible_only=True)
+        ax.ignore_existing_data_limits = True
+        ax.update_datalim(self.scatter.get_datalim(ax.transData))
         ax.autoscale_view()
 
     def clear(self, ax: Axes) -> None:
         ax.clear()
         self.scatter = None
-

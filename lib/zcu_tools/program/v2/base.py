@@ -16,6 +16,7 @@ class ProgramV2Cfg(TypedDict):
 class MyProgramV2(MyProgram, AveragerProgramV2):
     def __init__(self, soccfg: QickConfig, cfg: ProgramV2Cfg, **kwargs) -> None:
         # v2 program need to pass reps and final_delay to init
+        self.pulse_registry = PulseRegistry()
         super().__init__(
             soccfg,
             cfg=dict(cfg),
@@ -24,7 +25,6 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             final_delay=cfg["relax_delay"],
             **kwargs,
         )
-        self.pulse_registry = PulseRegistry()
 
     def acquire(self, soc, **kwargs):
         # v2 program need to pass rounds to acquire

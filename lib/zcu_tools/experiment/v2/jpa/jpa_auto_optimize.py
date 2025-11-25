@@ -433,38 +433,35 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             )
 
             avg_d = prog.acquire(
-                soc, progress=False, update_hook=update_hook, record_stderr=True
+                soc, progress=False, callback=update_hook, record_stderr=True
             )
             std_d = prog.get_stderr()
+
             return avg_d, std_d
 
-        def optimize_snr_fn(
-            ctx: TaskContext, update_hook: Callable[[int, NDArray[np.float64]], None]
-        ) -> Tuple[List[NDArray[np.float64]], List[NDArray[np.float64]]]:
-            idx: int = ctx.env_dict["index"]
+        def update_fn(i, ctx, _):
+            ctx.env_dict["index"] = i
 
             last_snr = None
-            if idx > 0:
+            if i > 0:
                 last_snr = np.abs(ctx.data[-1])
-            cur_params = optimizer.next_params(idx, last_snr)
+            cur_params = optimizer.next_params(i, last_snr)
 
-            if cur_params is None:  # already find otimimal point
-                return (
-                    [np.full((1, 2, 2), np.nan, dtype=np.float64)],
-                    [np.full((1, 2, 2), np.nan, dtype=np.float64)],
-                )
+            if cur_params is None:
+                # TODO: Better way to early stop
+                raise RuntimeError("No more parameters to optimize.")
 
-            params[idx, :] = cur_params
-            set_flux_in_dev_cfg(ctx.cfg["dev"], params[idx, 0], label="jpa_flux_dev")
-            set_freq_in_dev_cfg(ctx.cfg["dev"], params[idx, 1], label="jpa_rf_dev")
-            set_power_in_dev_cfg(ctx.cfg["dev"], params[idx, 2], label="jpa_rf_dev")
-
-            return measure_body(ctx, update_hook)
+            params[i, :] = cur_params
+            set_flux_in_dev_cfg(ctx.cfg["dev"], params[i, 0], label="jpa_flux_dev")
+            set_freq_in_dev_cfg(ctx.cfg["dev"], 1e6 * params[i, 1], label="jpa_rf_dev")
+            set_power_in_dev_cfg(ctx.cfg["dev"], params[i, 2], label="jpa_rf_dev")
 
         # initialize figure and axes
-        figsize = (10, 7)
+        figsize = (8, 5)
         fig = plt.figure(figsize=figsize)
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
+
+        fig.suptitle("JPA Auto Optimization")
 
         ax_iter = fig.add_subplot(gs[:, 0])
         ax_flux = fig.add_subplot(gs[0, 1])
@@ -499,7 +496,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                 cur_flx, cur_fpt, cur_pdr = params[idx, :]
 
                 fig.suptitle(
-                    f"Iteration {idx}, Current params: {cur_flx:.2g}, {cur_fpt:.2g}, {cur_pdr:.2g}"
+                    f"Iteration {idx}, Flux: {1e3 * cur_flx:.2g} (mA), Freq: {1e-3 * cur_fpt:.4g} (GHz), Power: {cur_pdr:.2g} (dBm)"
                 )
 
                 if optimizer.phase == 2:
@@ -517,16 +514,15 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                 viewer.get_plotter("power_scatter").update(
                     params[:, 2], snrs, refresh=False
                 )
-
                 viewer.refresh()
 
             results = run_task(
                 task=SoftTask(
                     sweep_name="Iteration",
                     sweep_values=list(range(num_points)),
-                    update_cfg_fn=lambda i, ctx, flx: ctx.env_dict.update(index=i),
+                    update_cfg_fn=update_fn,
                     sub_task=HardTask(
-                        measure_fn=optimize_snr_fn,
+                        measure_fn=measure_body,
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     ),
                 ),
@@ -556,11 +552,10 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         max_snr = float(snrs[max_id])
         best_params = params[max_id, :]
 
-        # fig, ax = plt.subplots(figsize=config.figsize)
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, config.figsize)
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=config.figsize)
 
         def plot_ax(ax, param_idx, label_name) -> None:
-            ax.scatter(params[:, param_idx], snrs)
+            ax.scatter(params[:, param_idx], snrs, s=1)
             best_value = best_params[param_idx]
             ax.axvline(best_value, color="r", ls="--", label=f"best = {best_value:.2g}")
             ax.scatter([best_value], [max_snr], color="r", marker="*")

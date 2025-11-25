@@ -54,7 +54,15 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
     # ==========================================================================#
 
+    def _check_voltage(self, voltage: float) -> None:
+        CHECK_VOLTAGE_LIMIT = 7
+        if abs(voltage) > CHECK_VOLTAGE_LIMIT:
+            raise RuntimeError(
+                f"Try to set voltage to over {CHECK_VOLTAGE_LIMIT}V, are you sure you want to do this?"
+            )
+
     def _set_voltage_direct(self, voltage: float) -> None:
+        self._check_voltage(voltage)
         self.write(f":SOURce:LEVel:AUTO {voltage:.8f}")
         time.sleep(self._rampinterval)
 
@@ -63,6 +71,8 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         current_voltage = self.get_voltage()
         if current_voltage == voltage:
             return
+
+        self._check_voltage(voltage)
 
         if progress:
             dist = abs(current_voltage - voltage)
@@ -93,7 +103,15 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
         return self.get_voltage()
 
+    def _check_current(self, current: float) -> None:
+        CHECK_CURRENT_LIMIT = 7e-3
+        if abs(current) > CHECK_CURRENT_LIMIT:
+            raise RuntimeError(
+                f"Try to set current to over {CHECK_CURRENT_LIMIT}A, are you sure you want to do this?"
+            )
+
     def _set_current_direct(self, current: float) -> None:
+        self._check_current(current)
         self.write(f":SOURce:LEVel:AUTO {current:.8f}")
         time.sleep(self._rampinterval)
 
@@ -102,6 +120,8 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         current_current = self.get_current()
         if current_current == current:
             return
+
+        self._check_current(current)
 
         if progress:
             dist = 1e3 * abs(current_current - current)
@@ -207,29 +227,10 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
                 "Remember to turn value to zero before changing mode"
             )
 
-        CHECK_CURRENT_LIMIT = 10e-3
-        CHECK_VOLTAGE_LIMIT = 10
-
         value = cfg["value"]
         if cur_mode == "current":
-            # protect large current
-            if abs(value) > CHECK_CURRENT_LIMIT:
-                if cfg.get("enable_large_value", False):
-                    raise RuntimeError(
-                        f"Try to set current to over {CHECK_CURRENT_LIMIT}A, are you sure you want to do this? "
-                        "If you are sure, set enable_large_value=True to override"
-                    )
-
             self.set_current(value, progress=progress)
         elif cur_mode == "voltage":
-            # protect large voltage
-            if abs(value) > CHECK_VOLTAGE_LIMIT:
-                if cfg.get("enable_large_value", False):
-                    raise RuntimeError(
-                        f"Try to set voltage to over {CHECK_VOLTAGE_LIMIT}V, are you sure you want to do this? "
-                        "If you are sure, set enable_large_value=True to override"
-                    )
-
             self.set_voltage(value, progress=progress)
         else:
             raise RuntimeError(f"Unknown mode {cur_mode} in device {self.address}")

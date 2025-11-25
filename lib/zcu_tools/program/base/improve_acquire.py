@@ -218,6 +218,40 @@ class CallbackMixin(StdErrorMixin):
 
 
 class SingleShotMixin(TypedAcquireMixin):
+    def acquire(
+        self,
+        *args,
+        g_center: Optional[complex] = None,
+        e_center: Optional[complex] = None,
+        population_radius: Optional[float] = None,
+        **kwargs,
+    ):
+        extra_args = kwargs.pop("extra_args", dict())
+        extra_args.update(
+            g_center=g_center,
+            e_center=e_center,
+            population_radius=population_radius,
+        )
+
+        return super().acquire(*args, extra_args=extra_args, **kwargs)
+
+    def acquire_decimated(
+        self,
+        *args,
+        g_center: Optional[complex] = None,
+        e_center: Optional[complex] = None,
+        population_radius: Optional[float] = None,
+        **kwargs,
+    ):
+        extra_args = kwargs.pop("extra_args", dict())
+        extra_args.update(
+            g_center=g_center,
+            e_center=e_center,
+            population_radius=population_radius,
+        )
+
+        return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
+
     def _process_accumulated(self, acc_buf):
         assert self.acquire_params is not None
         if self.acquire_params["threshold"] is not None:

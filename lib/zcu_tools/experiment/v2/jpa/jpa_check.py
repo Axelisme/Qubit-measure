@@ -5,8 +5,10 @@ from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
     format_sweep1D,
     set_output_in_dev_cfg,
@@ -79,14 +81,33 @@ class JPACheckExperiment(AbsExperiment):
 
         return outputs, fpts, signals
 
-    def analyze(self, result: Optional[JPACheckResultType] = None) -> None:
+    def analyze(self, result: Optional[JPACheckResultType] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         outputs, fpts, signals2D = result
 
-        raise NotImplementedError("analysis not yet implemented")
+        real_signals = jpa_check_signal2real(signals2D)
+
+        fig, ax = plt.subplots(figsize=config.figsize)
+        for i, output in enumerate(outputs):
+            ax.plot(
+                fpts * 1e-6,
+                real_signals[i, :],
+                label=f"JPA {output}",
+                marker="o",
+                markersize=4,
+                linestyle="-",
+            )
+
+        ax.set_xlabel("Frequency (MHz)")
+        ax.set_ylabel("Signal (a.u.)")
+        ax.set_title("JPA Check Result")
+        ax.legend()
+        ax.grid(True)
+
+        return fig
 
     def save(
         self,
