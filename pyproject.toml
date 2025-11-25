@@ -27,6 +27,7 @@ fit = [
   "flask",
   "jupytext",
 ]
+gcp = ["google-cloud-storage", "python-dotenv"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
