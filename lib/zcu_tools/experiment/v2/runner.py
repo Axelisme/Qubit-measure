@@ -132,17 +132,16 @@ class TaskContext(Generic[T_ResultType, T_TaskConfigType]):
         return self.get_data(self.addr_stack + append_addr)
 
 
-class AbsTask(ABC, Generic[T_ResultType, T_TaskConfigType]):
-    def init(
-        self,
-        ctx: TaskContext[T_ResultType, T_TaskConfigType],
-        dynamic_pbar: bool = False,
-    ) -> None:
+T_TaskContextType = TypeVar("T_TaskContextType", bound=TaskContext)
+
+
+class AbsTask(ABC, Generic[T_ResultType, T_TaskContextType]):
+    def init(self, ctx: T_TaskContextType, dynamic_pbar: bool = False) -> None:
         """Initialize the task with the current context. If dynamic_pbar is True, the pbar will only show up in the run() method."""
         pass
 
     @abstractmethod
-    def run(self, ctx: TaskContext[T_ResultType, T_TaskConfigType]) -> None:
+    def run(self, ctx: T_TaskContextType) -> None:
         """Run the task with the current context."""
         pass
 
@@ -152,22 +151,19 @@ class AbsTask(ABC, Generic[T_ResultType, T_TaskConfigType]):
     def get_default_result(self) -> T_ResultType: ...
 
 
-T_TaskContextType = TypeVar("T_TaskContextType", bound=TaskContext)
-
-
 class BatchTask(
-    AbsTask[Dict[T_KeyType, T_ResultType], T_TaskConfigType],
-    Generic[T_ResultType, T_TaskConfigType, T_KeyType, T_TaskContextType],
+    AbsTask[Dict[T_KeyType, T_ResultType], T_TaskContextType],
+    Generic[T_ResultType, T_TaskContextType, T_KeyType],
 ):
     def __init__(
-        self, tasks: Mapping[T_KeyType, AbsTask[T_ResultType, T_TaskConfigType]]
+        self, tasks: Mapping[T_KeyType, AbsTask[T_ResultType, T_TaskContextType]]
     ) -> None:
         self.tasks = tasks
 
     def make_pbar(self, leave: bool) -> tqdm:
         return tqdm(total=len(self.tasks), smoothing=0, leave=leave)
 
-    def init(self, ctx: T_TaskContextType, dynamic_pbar=False) -> None:
+    def init(self, ctx, dynamic_pbar=False) -> None:
         self.dynamic_pbar = dynamic_pbar
         if dynamic_pbar:
             self.task_pbar = None
@@ -177,7 +173,7 @@ class BatchTask(
         for task in self.tasks.values():
             task.init(ctx, dynamic_pbar=True)  # force dynamic pbar for each task
 
-    def run(self, ctx: T_TaskContextType) -> None:
+    def run(self, ctx) -> None:
         if self.dynamic_pbar:
             self.task_pbar = self.make_pbar(leave=False)
         else:
@@ -212,15 +208,15 @@ T_ValueType = TypeVar("T_ValueType", bound=Number)
 
 
 class SoftTask(
-    AbsTask[Sequence[T_ResultType], T_TaskConfigType],
-    Generic[T_ResultType, T_ValueType, T_TaskConfigType, T_TaskContextType],
+    AbsTask[Sequence[T_ResultType], T_TaskContextType],
+    Generic[T_ResultType, T_TaskContextType, T_ValueType],
 ):
     def __init__(
         self,
         sweep_name: str,
         sweep_values: Sequence[T_ValueType],
         update_cfg_fn: Callable[[int, T_TaskContextType, T_ValueType], Any],
-        sub_task: AbsTask[T_ResultType, T_TaskConfigType],
+        sub_task: AbsTask[T_ResultType, T_TaskContextType],
     ) -> None:
         self.sweep_values = sweep_values
         self.sweep_name = sweep_name
@@ -235,7 +231,7 @@ class SoftTask(
             leave=leave,
         )
 
-    def init(self, ctx: T_TaskContextType, dynamic_pbar=False) -> None:
+    def init(self, ctx, dynamic_pbar=False) -> None:
         self.dynamic_pbar = dynamic_pbar
         if dynamic_pbar:
             self.sweep_pbar = None  # initialize in run()
@@ -245,7 +241,7 @@ class SoftTask(
         self.update_cfg_fn(0, ctx, self.sweep_values[0])  # initialize the first value
         self.sub_task.init(ctx, dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: T_TaskContextType) -> None:
+    def run(self, ctx) -> None:
         if self.dynamic_pbar:
             self.sweep_pbar = self.make_pbar(leave=False)
         else:
@@ -277,16 +273,17 @@ class SoftTask(
         ]
 
 
-def default_raw2signal_fn(raw: Sequence[NDArray]) -> NDArray:
+def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
     return raw[0][0].dot([1, 1j])
 
 
 T_RawType = TypeVar("T_RawType")
+T_ArrayDType = TypeVar("T_ArrayDType", bound=DTypeLike)
 
 
 class HardTask(
-    AbsTask[NDArray, T_TaskConfigType],
-    Generic[T_RawType, T_TaskConfigType, T_TaskContextType],
+    AbsTask[NDArray[T_ArrayDType], T_TaskContextType],
+    Generic[T_TaskContextType, T_ArrayDType, T_RawType],
 ):
     def __init__(
         self,
@@ -294,7 +291,9 @@ class HardTask(
             [T_TaskContextType, Callable[[int, T_RawType], Any]],
             T_RawType,
         ],
-        raw2signal_fn: Callable[[T_RawType], NDArray] = default_raw2signal_fn,
+        raw2signal_fn: Callable[
+            [T_RawType], NDArray[T_ArrayDType]
+        ] = default_raw2signal_fn,
         result_shape: Tuple[int, ...] = (),
         dtype: DTypeLike = np.complex128,
     ) -> None:
@@ -303,7 +302,7 @@ class HardTask(
         self.result_shape = result_shape
         self.dtype = dtype
 
-    def make_pbar(self, ctx: T_TaskContextType, leave: bool) -> tqdm:
+    def make_pbar(self, ctx, leave: bool) -> tqdm:
         total = ctx.cfg.get("rounds")
         return tqdm(
             total=total,
@@ -313,14 +312,14 @@ class HardTask(
             disable=total == 1,
         )
 
-    def init(self, ctx: T_TaskContextType, dynamic_pbar=False) -> None:
+    def init(self, ctx, dynamic_pbar=False) -> None:
         self.dynamic_pbar = dynamic_pbar
         if dynamic_pbar:
             self.avg_pbar = None  # initialize in run()
         else:
             self.avg_pbar = self.make_pbar(ctx, leave=True)
 
-    def run(self, ctx: T_TaskContextType) -> None:
+    def run(self, ctx) -> None:
         assert "rounds" in ctx.cfg
 
         if self.dynamic_pbar:
@@ -354,17 +353,17 @@ class HardTask(
             self.avg_pbar.close()
             self.avg_pbar = None
 
-    def get_default_result(self) -> NDArray:
+    def get_default_result(self) -> NDArray[T_ArrayDType]:
         return np.full(self.result_shape, np.nan, dtype=self.dtype)
 
 
-class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskConfigType]):
+class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskContextType]):
     def __init__(
         self,
         name: str,
         num_times: int,
         interval: float,
-        task: AbsTask[T_ResultType, T_TaskConfigType],
+        task: AbsTask[T_ResultType, T_TaskContextType],
         fail_retry: int = 0,
     ) -> None:
         self.name = name
@@ -376,9 +375,7 @@ class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskConfigType]):
     def make_pbar(self, leave: bool) -> tqdm:
         return tqdm(total=self.num_times, smoothing=0, desc=self.name, leave=leave)
 
-    def init(
-        self, ctx: TaskContext[T_ResultType, T_TaskConfigType], dynamic_pbar=False
-    ) -> None:
+    def init(self, ctx, dynamic_pbar=False) -> None:
         self.dynamic_pbar = dynamic_pbar
         if dynamic_pbar:
             self.time_pbar = None  # initialize in run()
@@ -387,7 +384,7 @@ class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskConfigType]):
 
         self.task.init(ctx, dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskContext[T_ResultType, T_TaskConfigType]) -> None:
+    def run(self, ctx) -> None:
         if self.dynamic_pbar:
             self.time_pbar = self.make_pbar(leave=False)
         else:
@@ -433,11 +430,11 @@ class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskConfigType]):
 
 
 def run_task(
-    task: AbsTask[T_ResultType, T_TaskConfigType],
+    task: AbsTask[T_ResultType, T_TaskContextType[T_ResultType, T_TaskConfigType]],
     init_cfg: T_TaskConfigType,
     env_dict: Optional[MutableMapping[str, Any]] = None,
     update_hook: Optional[
-        Callable[[TaskContext[T_ResultType, T_TaskConfigType]], Any]
+        Callable[[T_TaskContextType[T_ResultType, T_TaskConfigType]], Any]
     ] = None,
     update_interval: Optional[float] = 0.1,
 ) -> T_ResultType:
