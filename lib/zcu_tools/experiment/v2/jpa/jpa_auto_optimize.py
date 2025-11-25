@@ -223,9 +223,12 @@ class JPAOptimizer:
                 self.points_in_current_slice
                 >= self.points_per_slice[self.current_slice_idx]
             ):
-                self.current_slice_idx += 1
-                self.points_in_current_slice = 0
-                self._init_2d_optimizer()
+                # Move to next slice if available
+                if self.current_slice_idx + 1 < len(self.flx_grid):
+                    self.current_slice_idx += 1
+                    self.points_in_current_slice = 0
+                    self._init_2d_optimizer()
+                # else: stay on the last slice and continue using current optimizer
 
             # Ask 2D optimizer
             with warnings.catch_warnings():
