@@ -127,7 +127,6 @@ class FluxDepExecutor:
         self.env_dict["flx_values"] = self.flx_values
 
         self.record_path = None
-        self.writer: Optional[FFMpegWriter] = None
         self.measurements: Dict[str, MeasurementTask] = OrderedDict()
 
     def add_measurement(
@@ -163,7 +162,8 @@ class FluxDepExecutor:
         fig, axs = make_plot_frame(
             n_row,
             n_col,
-            plot_instant=False,
+            # plot_instant currently work only for non-recording
+            plot_instant=self.record_path is not None,
             figsize=(min(14, 3.5 * n_col), min(8, 2.5 * n_row)),
         )
 
@@ -184,7 +184,10 @@ class FluxDepExecutor:
     def make_plotter(
         self,
     ) -> Tuple[
-        Figure, MultiLivePlotter[Tuple[str, str]], Callable[[TaskContext], None]
+        Figure,
+        MultiLivePlotter[Tuple[str, str]],
+        Callable[[TaskContext], None],
+        Optional[FFMpegWriter],
     ]:
         fig, axs_map = self.make_ax_layout()
 
@@ -194,8 +197,10 @@ class FluxDepExecutor:
                     "FFmpeg is not found. Please install FFmpeg and add it to your PATH "
                     "to record animations."
                 )
-            self.writer = FFMpegWriter(fps=5)
-            self.writer.setup(fig, str(self.record_path), dpi=200)
+            writer = FFMpegWriter(fps=5)
+            writer.setup(fig, str(self.record_path), dpi=200)
+        else:
+            writer = None
 
         plotters_map = {
             ms_name: ms.make_plotter(ms_name, axs_map[ms_name])
@@ -229,12 +234,17 @@ class FluxDepExecutor:
                     plotters_map[cur_task], ctx, results[cur_task]
                 )
 
-            if self.writer is not None:
-                self.writer.grab_frame()
+            # if writer is not None:
+            if self.record_path is not None:
+                assert writer is not None
+                writer.grab_frame()
 
-            dh.update(fig)
+                # use dh.update to instant refresh in Jupyter
+                dh.update(fig)
+            else:
+                plotter.refresh()
 
-        return fig, plotter, plot_fn
+        return fig, plotter, plot_fn, writer
 
     def run(self) -> Tuple[Mapping[str, ResultType], Figure]:
         if len(self.measurements) == 0:
@@ -249,7 +259,7 @@ class FluxDepExecutor:
         with matplotlib.rc_context(
             {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}
         ):
-            fig, plotter, plot_fn = self.make_plotter()
+            fig, plotter, plot_fn, writer = self.make_plotter()
 
             with plotter:
                 try:
@@ -270,9 +280,9 @@ class FluxDepExecutor:
                     )
                     signals_dict = merge_result_list(results)
                 finally:
-                    if self.writer is not None:
-                        self.writer.finish()
-                        self.writer = None
+                    if self.record_path is not None:
+                        assert writer is not None
+                        writer.finish()
 
         self.last_result = signals_dict
 
