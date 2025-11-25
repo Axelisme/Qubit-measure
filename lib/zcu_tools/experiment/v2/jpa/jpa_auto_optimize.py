@@ -62,8 +62,8 @@ class JPAOptimizer:
         total_points: int,
     ) -> None:
         self.total_points = total_points
-        self.grid_phase_points = total_points // 2
-        self.fine_phase_points = total_points - self.grid_phase_points
+        self.grid_phase_points = max(1, int(total_points * 0.6))
+        self.fine_phase_points = max(0, total_points - self.grid_phase_points)
 
         # Convert sweeps to arrays for bounds
         self.flx_arr = sweep2array(flx_sweep)
@@ -94,49 +94,126 @@ class JPAOptimizer:
     def _setup_grid_search(self) -> None:
         """
         Setup grid search parameters for phase 1.
-        Distribute grid_phase_points across 3D grid with flux as outer loop.
+        Use Latin Hypercube Sampling for freq/power within each flux slice.
+
+        This ensures:
+        - Flux values are on a regular grid (outer loop to minimize switching)
+        - Within each flux slice, freq and power values are unique
+        - Overall coverage is uniform across the freq-power plane
         """
         n_total = self.grid_phase_points
 
-        # Calculate grid dimensions: n_flx * n_fpt * n_pdr ≈ n_total
-        # Prioritize more flux points since switching is expensive
+        # Calculate grid dimensions: n_flx * n_points_per_flux ≈ n_total
         # Use cube root as base, then adjust
         base = int(np.cbrt(n_total))
 
-        # Adjust dimensions to fit n_total while prioritizing freq/power resolution
+        # Number of flux points (keep as regular grid)
         n_flx = max(2, min(len(self.flx_arr), base))
-        remaining = n_total // n_flx
-        n_fpt = max(2, min(len(self.fpt_arr), int(np.sqrt(remaining))))
-        n_pdr = max(2, remaining // n_fpt)
+        # Number of points per flux slice
+        n_points_per_flux = n_total // n_flx
 
-        # Generate grid points
+        # Generate flux grid (regular spacing)
         flx_grid = np.linspace(self.flx_bounds[0], self.flx_bounds[1], n_flx)
-        fpt_grid = np.linspace(self.fpt_bounds[0], self.fpt_bounds[1], n_fpt)
-        pdr_grid = np.linspace(self.pdr_bounds[0], self.pdr_bounds[1], n_pdr)
 
-        # Create grid points list with flux as outer loop (minimize flux switching)
+        # Create grid points using Latin Hypercube Sampling for freq/power
         self.grid_points: List[Tuple[float, float, float]] = []
+
         for flx in flx_grid:
-            for fpt in fpt_grid:
-                for pdr in pdr_grid:
-                    self.grid_points.append((float(flx), float(fpt), float(pdr)))
+            # Generate LHS samples for this flux slice
+            fpt_pdr_points = self._generate_lhs_2d(
+                n_points_per_flux,
+                self.fpt_bounds,
+                self.pdr_bounds,
+            )
+            for fpt, pdr in fpt_pdr_points:
+                self.grid_points.append((float(flx), float(fpt), float(pdr)))
 
         # Truncate to exactly grid_phase_points
         self.grid_points = self.grid_points[: self.grid_phase_points]
+
+        # Store dimensions for reference
         self.n_flx_grid = n_flx
-        self.n_fpt_grid = n_fpt
-        self.n_pdr_grid = n_pdr
+        self.n_points_per_flux = n_points_per_flux
 
         # Store grid spacing for phase 2 (to cover at least adjacent grid points)
+        # For flux, use actual grid spacing
         self.flx_grid_spacing = (
             (self.flx_bounds[1] - self.flx_bounds[0]) / (n_flx - 1) if n_flx > 1 else 0
         )
+        # For freq/power, estimate effective spacing based on LHS distribution
+        n_per_dim = int(np.sqrt(n_points_per_flux))
         self.fpt_grid_spacing = (
-            (self.fpt_bounds[1] - self.fpt_bounds[0]) / (n_fpt - 1) if n_fpt > 1 else 0
+            (self.fpt_bounds[1] - self.fpt_bounds[0]) / n_per_dim
+            if n_per_dim > 1
+            else (self.fpt_bounds[1] - self.fpt_bounds[0]) * 0.1
         )
         self.pdr_grid_spacing = (
-            (self.pdr_bounds[1] - self.pdr_bounds[0]) / (n_pdr - 1) if n_pdr > 1 else 0
+            (self.pdr_bounds[1] - self.pdr_bounds[0]) / n_per_dim
+            if n_per_dim > 1
+            else (self.pdr_bounds[1] - self.pdr_bounds[0]) * 0.1
         )
+
+    def _generate_lhs_2d(
+        self,
+        n_points: int,
+        bounds_x: Tuple[float, float],
+        bounds_y: Tuple[float, float],
+    ) -> List[Tuple[float, float]]:
+        """
+        Generate 2D Latin Hypercube Sampling points.
+
+        Ensures that no two points share the same x or y coordinate bin,
+        while uniformly covering the 2D space.
+
+        Args:
+            n_points: Number of points to generate
+            bounds_x: (min, max) bounds for x dimension
+            bounds_y: (min, max) bounds for y dimension
+
+        Returns:
+            List of (x, y) tuples
+        """
+        if n_points <= 0:
+            return []
+
+        # Divide each dimension into n_points intervals
+        x_edges = np.linspace(bounds_x[0], bounds_x[1], n_points + 1)
+        y_edges = np.linspace(bounds_y[0], bounds_y[1], n_points + 1)
+
+        # Generate one point per interval (at the center with small random jitter)
+        # Use deterministic jitter based on index for reproducibility
+        x_centers = (x_edges[:-1] + x_edges[1:]) / 2
+        y_centers = (y_edges[:-1] + y_edges[1:]) / 2
+
+        # Add small jitter (within the interval) for better space-filling
+        x_interval = (bounds_x[1] - bounds_x[0]) / n_points
+        y_interval = (bounds_y[1] - bounds_y[0]) / n_points
+        jitter_scale = 0.3  # Jitter within 30% of interval
+
+        # Use golden ratio based quasi-random jitter for reproducibility
+        golden = (np.sqrt(5) - 1) / 2
+        x_jitter = np.array(
+            [
+                (((i * golden) % 1) - 0.5) * jitter_scale * x_interval
+                for i in range(n_points)
+            ]
+        )
+        y_jitter = np.array(
+            [
+                (((i * golden * 2) % 1) - 0.5) * jitter_scale * y_interval
+                for i in range(n_points)
+            ]
+        )
+
+        x_values = np.clip(x_centers + x_jitter, bounds_x[0], bounds_x[1])
+        y_values = np.clip(y_centers + y_jitter, bounds_y[0], bounds_y[1])
+
+        # Shuffle y values to break the diagonal correlation
+        # Use a deterministic shuffle based on golden ratio permutation
+        y_permutation = np.argsort([((i * golden) % 1) for i in range(n_points)])
+        y_values_shuffled = y_values[y_permutation]
+
+        return [(float(x), float(y)) for x, y in zip(x_values, y_values_shuffled)]
 
     def _setup_fine_optimization(self) -> None:
         """
@@ -811,7 +888,7 @@ if __name__ == "__main__":
     print(f"Grid phase points: {optimizer.grid_phase_points}")
     print(f"Fine phase points: {optimizer.fine_phase_points}")
     print(
-        f"Grid dimensions: {optimizer.n_flx_grid} x {optimizer.n_fpt_grid} x {optimizer.n_pdr_grid}"
+        f"Grid structure: {optimizer.n_flx_grid} flux slices x {optimizer.n_points_per_flux} LHS points each"
     )
     print(f"Actual grid points: {len(optimizer.grid_points)}")
     print()
