@@ -16,6 +16,7 @@ client = [
     "pyvisa",
     "jupytext",
     "pyro4",
+    "scikit-optimize",
 ]
 server = ["qick", "dill", "numpy==1.23.5"]
 fit = [
