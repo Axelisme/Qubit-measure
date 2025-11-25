@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Tuple, TypeVar
 
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import display
 from matplotlib.animation import FFMpegWriter
@@ -71,6 +72,7 @@ class FluxDepBatchTask(BatchTask):
 
         ctx.env_dict["ref_m"] = predictor.predict_matrix_element(flx)
 
+        ctx.env_dict["first_info"] = {}
         ctx.env_dict["last_info"] = {}
         ctx.env_dict["cur_info"] = {}
 
@@ -85,6 +87,7 @@ class FluxDepBatchTask(BatchTask):
 
         predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
         flx: float = ctx.env_dict["flx_value"]
+        first_info: Dict[str, Any] = ctx.env_dict["first_info"]
         cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
         last_info: Dict[str, Any] = ctx.env_dict["last_info"]
 
@@ -102,6 +105,10 @@ class FluxDepBatchTask(BatchTask):
 
             # update current info to last info
             last_info.update(deepcopy(cur_info))
+
+            # set first info
+            for k, v in cur_info.items():
+                first_info.setdefault(k, deepcopy(v))
 
             # update progress bar
             self.task_pbar.update()
@@ -246,7 +253,7 @@ class FluxDepExecutor:
 
         return fig, plotter, plot_fn, writer
 
-    def run(self) -> Tuple[Mapping[str, ResultType], Figure]:
+    def run(self) -> Mapping[str, ResultType]:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
 
@@ -284,9 +291,11 @@ class FluxDepExecutor:
                         assert writer is not None
                         writer.finish()
 
+            plt.close(fig)
+
         self.last_result = signals_dict
 
-        return signals_dict, fig
+        return signals_dict
 
     def save(
         self,

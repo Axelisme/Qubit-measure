@@ -29,6 +29,7 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .executor import MeasurementTask
 
@@ -284,17 +285,18 @@ class T2RamseyMeasurementTask(
             cur_info["t2r_detune"] = t2r_detune
             cur_info["smooth_t2r"] = 0.5 * (last_info.get("smooth_t2r", t2r) + t2r)
 
-        ctx.set_current_data(
-            T2RamseyResult(
-                raw_signals=raw_signals,
-                length=self.lengths.copy(),
-                t2r=np.array(t2r),
-                t2r_err=np.array(t2r_err),
-                t2r_detune=np.array(t2r_detune),
-                t2r_detune_err=np.array(t2r_detune_err),
-                success=np.array(success),
+        with MinIntervalFunc.force_execute():
+            ctx.set_current_data(
+                T2RamseyResult(
+                    raw_signals=raw_signals,
+                    length=self.lengths.copy(),
+                    t2r=np.array(t2r),
+                    t2r_err=np.array(t2r_err),
+                    t2r_detune=np.array(t2r_detune),
+                    t2r_detune_err=np.array(t2r_detune_err),
+                    success=np.array(success),
+                )
             )
-        )
 
     def get_default_result(self) -> T2RamseyResult:
         return T2RamseyResult(

@@ -25,6 +25,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .executor import MeasurementTask
 
@@ -94,7 +95,7 @@ class Mist_G_MeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictTyp
                 "Flux device value",
                 "Readout Gain (a.u.)",
                 line_axis=1,
-                title=name + "(g_mist)",
+                title=name,
                 existed_axes=[axs["g_mist"]],
             ),
         )
@@ -164,12 +165,13 @@ class Mist_G_MeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictTyp
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
         assert isinstance(raw_signals, np.ndarray)
 
-        ctx.set_current_data(
-            MistResult(
-                raw_signals=raw_signals,
-                success=np.array(True),
+        with MinIntervalFunc.force_execute():
+            ctx.set_current_data(
+                MistResult(
+                    raw_signals=raw_signals,
+                    success=np.array(True),
+                )
             )
-        )
 
     def get_default_result(self) -> MistResult:
         return MistResult(

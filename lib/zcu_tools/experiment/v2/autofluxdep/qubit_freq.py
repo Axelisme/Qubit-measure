@@ -27,6 +27,7 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .executor import MeasurementTask
 
@@ -123,7 +124,7 @@ class QubitFreqMeasurementTask(
                 "Flux device value",
                 "Detune (MHz)",
                 line_axis=1,
-                num_lines=5,
+                num_lines=3,
                 title=name + "(detune)",
                 existed_axes=[axs["detune"]],
             ),
@@ -201,6 +202,10 @@ class QubitFreqMeasurementTask(
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)
 
+        self.uncalibrate_count = 0
+        self.last_calibrated_flx = ctx.env_dict["flx_value"] - 1
+        self.last_detune_slope = 0.0
+
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
         predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
@@ -208,6 +213,9 @@ class QubitFreqMeasurementTask(
         cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
 
         predict_freq = predictor.predict_freq(flx)
+        if self.uncalibrate_count > 1:
+            # linear predict the detune before next calibration point
+            predict_freq += self.last_detune_slope * (flx - self.last_calibrated_flx)
         cur_info["predict_freq"] = predict_freq
 
         cfg_temp = self.cfg_maker(ctx, ml)
@@ -245,10 +253,17 @@ class QubitFreqMeasurementTask(
         success = True
         mean_err = np.mean(np.abs(real_signals - fit_signals))
 
-        if mean_err < 0.4 * np.ptp(fit_signals):
+        # calibrate if good enough
+        if mean_err < 0.3 * np.ptp(fit_signals):
             bias = predictor.calculate_bias(flx, fit_freq)
             predictor.update_bias(bias)
+            self.uncalibrate_count = 0
+            self.last_detune_slope = detune / (flx - self.last_calibrated_flx)
+            self.last_calibrated_flx = flx
+        else:
+            self.uncalibrate_count += 1
 
+        # if fitting is bad, disgard it
         if mean_err > 0.2 * np.ptp(fit_signals):
             detune = np.nan
             fit_freq = np.nan
@@ -260,19 +275,21 @@ class QubitFreqMeasurementTask(
         if success:
             cur_info["qubit_freq"] = fit_freq
             cur_info["fit_detune"] = detune
+            cur_info["fit_kappa"] = kappa
 
-        ctx.set_current_data(
-            QubitFreqResult(
-                raw_signals=raw_signals,
-                predict_freq=np.array(center_freq),
-                fit_detune=np.array(detune),
-                fit_freq=np.array(fit_freq),
-                fit_freq_err=np.array(freq_err),
-                fit_kappa=np.array(kappa),
-                fit_kappa_err=np.array(kappa_err),
-                success=np.array(success),
+        with MinIntervalFunc.force_execute():
+            ctx.set_current_data(
+                QubitFreqResult(
+                    raw_signals=raw_signals,
+                    predict_freq=np.array(center_freq),
+                    fit_detune=np.array(detune),
+                    fit_freq=np.array(fit_freq),
+                    fit_freq_err=np.array(freq_err),
+                    fit_kappa=np.array(kappa),
+                    fit_kappa_err=np.array(kappa_err),
+                    success=np.array(success),
+                )
             )
-        )
 
     def get_default_result(self) -> QubitFreqResult:
         return QubitFreqResult(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, cast
+from typing import Any, Callable, Dict, Optional, Tuple, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -28,6 +28,7 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .executor import MeasurementTask
 
@@ -153,7 +154,7 @@ class LenRabiMeasurementTask(
                 "Flux device value",
                 "Signal",
                 line_axis=1,
-                num_lines=5,
+                num_lines=3,
                 title=name + "(rabi_curve)",
                 existed_axes=[axs["rabi_curve"]],
             ),
@@ -248,7 +249,11 @@ class LenRabiMeasurementTask(
         )
 
         success = True
-        if pi2_len < 0.03 or mean_err > 0.1 * np.ptp(fit_signals):
+        if (
+            pi2_len < 0.03
+            or mean_err > 0.1 * np.ptp(fit_signals)
+            or pi_len > 0.6 * np.max(lengths)
+        ):
             pi_len, pi2_len, rabi_freq = np.nan, np.nan, np.nan
             success = False
 
@@ -269,15 +274,16 @@ class LenRabiMeasurementTask(
             if self.succes_hook is not None:
                 self.succes_hook(ctx, ml)
 
-        ctx.set_current_data(
-            LenRabiResult(
-                raw_signals=raw_signals,
-                pi_length=np.array(pi_len),
-                pi2_length=np.array(pi2_len),
-                rabi_freq=np.array(rabi_freq),
-                success=np.array(success),
+        with MinIntervalFunc.force_execute():
+            ctx.set_current_data(
+                LenRabiResult(
+                    raw_signals=raw_signals,
+                    pi_length=np.array(pi_len),
+                    pi2_length=np.array(pi2_len),
+                    rabi_freq=np.array(rabi_freq),
+                    success=np.array(success),
+                )
             )
-        )
 
     def get_default_result(self) -> LenRabiResult:
         return LenRabiResult(

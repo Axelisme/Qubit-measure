@@ -29,6 +29,7 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .executor import MeasurementTask
 
@@ -253,15 +254,16 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
             cur_info["t1"] = t1
             cur_info["smooth_t1"] = 0.5 * (last_info.get("smooth_t1", t1) + t1)
 
-        ctx.set_current_data(
-            T1Result(
-                raw_signals=raw_signals,
-                length=self.lengths.copy(),
-                t1=np.array(t1),
-                t1_err=np.array(t1err),
-                success=np.array(success),
+        with MinIntervalFunc.force_execute():
+            ctx.set_current_data(
+                T1Result(
+                    raw_signals=raw_signals,
+                    length=self.lengths.copy(),
+                    t1=np.array(t1),
+                    t1_err=np.array(t1err),
+                    success=np.array(success),
+                )
             )
-        )
 
     def get_default_result(self) -> T1Result:
         return T1Result(

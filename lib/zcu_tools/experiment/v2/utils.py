@@ -44,6 +44,7 @@ def wrap_earlystop_check(
         snr = calc_snr(signal2real_fn(signals))
         if snr >= snr_threshold:
             prog.set_early_stop(silent=True)
+
         if snr_hook is not None:
             snr_hook(snr)
 
