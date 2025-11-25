@@ -17,6 +17,7 @@ from zcu_tools.experiment.utils import (
     sweep2array,
 )
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -32,10 +33,6 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 
 JPAPowerResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
-
-
-def jpa_power_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(signals[..., 0] - signals[..., 1])  # (power, )
 
 
 class JPAFreqTaskConfig(TaskConfig, ModularProgramCfg):
@@ -68,24 +65,36 @@ class JPAPowerExperiment(AbsExperiment):
                     ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset", ctx.cfg.get("reset", {"type": "none"})
-                                    ),
-                                    Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                    Readout("readout", ctx.cfg["readout"]),
-                                ],
-                            ).acquire(soc, progress=False, callback=update_hook)
+                            (
+                                prog := ModularProgramV2(
+                                    soccfg,
+                                    ctx.cfg,
+                                    modules=[
+                                        Reset(
+                                            "reset",
+                                            ctx.cfg.get("reset", {"type": "none"}),
+                                        ),
+                                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                                        Readout("readout", ctx.cfg["readout"]),
+                                    ],
+                                )
+                            )
+                            and (
+                                prog.acquire(
+                                    soc,
+                                    progress=False,
+                                    callback=update_hook,
+                                    record_stderr=True,
+                                ),
+                                prog.get_stderr(),
+                            )
                         ),
-                        result_shape=(2,),
+                        raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     ),
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    jpa_powers, jpa_power_signal2real(np.asarray(ctx.data))
+                    jpa_powers, np.abs(np.asarray(ctx.data))
                 ),
             )
             signals = np.asarray(signals)
@@ -104,8 +113,7 @@ class JPAPowerExperiment(AbsExperiment):
         assert result is not None, "no result found"
 
         jpa_powers, signals = result
-
-        real_signals = jpa_power_signal2real(signals)
+        real_signals = np.abs(signals)
 
         max_idx = np.argmax(real_signals)
         best_jpa_power = jpa_powers[max_idx]
@@ -143,8 +151,7 @@ class JPAPowerExperiment(AbsExperiment):
         save_data(
             filepath=filepath,
             x_info={"name": "JPA Power", "unit": "dBm", "values": jpa_powers},
-            y_info={"name": "GE", "unit": "None", "values": np.array([0, 1])},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,
             **kwargs,

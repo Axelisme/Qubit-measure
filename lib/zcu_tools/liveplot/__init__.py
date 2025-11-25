@@ -4,5 +4,6 @@ from .jupyter import (
     LivePlotter2D,
     LivePlotter2DwithLine,
     LivePlotterScatter,
+    instant_plot,
     make_plot_frame,
 )

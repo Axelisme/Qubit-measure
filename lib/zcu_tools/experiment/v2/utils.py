@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Any, Callable, Optional, Sequence, TypeVar
+from typing import Any, Callable, Optional, Sequence, Tuple, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,6 +22,34 @@ def set_pulse_freq(pulse_cfg: PulseCfg, freq: float) -> PulseCfg:
     if "mixer_freq" in pulse_cfg:
         pulse_cfg["mixer_freq"] = freq
     return pulse_cfg
+
+
+def calc_snr_by_std(
+    avg_d: NDArray[np.complex128], std_d: NDArray[np.complex128], ge_axis: int = 0
+) -> NDArray[np.complex128]:
+    # (*sweep)
+    contrast = np.take(avg_d, 1, axis=ge_axis) - np.take(avg_d, 0, axis=ge_axis)
+    noise2_i = np.sum(std_d.real**2, axis=ge_axis)  # (*sweep)
+    noise2_q = np.sum(std_d.imag**2, axis=ge_axis)  # (*sweep)
+    noise = np.sqrt(noise2_i * contrast.real**2 + noise2_q * contrast.imag**2) / np.abs(
+        contrast
+    )
+
+    return contrast / noise
+
+
+def snr_as_signal(
+    raw: Tuple[Sequence[NDArray[np.float64]], Optional[Sequence[NDArray[np.float64]]]],
+    ge_axis: int = 0,
+) -> NDArray[np.complex128]:
+    avg_d, std_d = raw
+
+    assert std_d is not None
+
+    avg_s = avg_d[0][0].dot([1, 1j])  # (ge, *sweep)
+    std_s = std_d[0][0].dot([1, 1j])  # (ge, *sweep)
+
+    return calc_snr_by_std(avg_s, std_s, ge_axis=ge_axis)
 
 
 T_RawResult = TypeVar("T_RawResult")

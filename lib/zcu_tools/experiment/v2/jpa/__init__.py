@@ -1,3 +1,4 @@
+from .jpa_auto_optimize import JPAAutoOptimizeExperiment
 from .jpa_check import JPACheckExperiment
 from .jpa_flux import JPAFluxExperiment
 from .jpa_freq import JPAFreqExperiment
@@ -8,4 +9,5 @@ __all__ = [
     "JPAFluxExperiment",
     "JPACheckExperiment",
     "JPAPowerExperiment",
+    "JPAAutoOptimizeExperiment",
 ]

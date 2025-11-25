@@ -3,12 +3,14 @@ from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -23,9 +25,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 
-from .base import snr_as_signal
-
-LengthResultType = Tuple[np.ndarray, np.ndarray]  # (lengths, snrs)
+LengthResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 class OptimizeLengthTaskConfig(TaskConfig, ModularProgramCfg):
@@ -92,7 +92,7 @@ class OptimizeLengthExperiment(AbsExperiment):
                                 prog.get_stderr(),
                             )
                         ),
-                        raw2signal_fn=lambda raw: snr_as_signal(raw, axis=0),
+                        raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     ),
                 ),
                 init_cfg=cfg,
