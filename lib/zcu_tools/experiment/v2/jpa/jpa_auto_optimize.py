@@ -414,37 +414,17 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
 
-        # (num_points, [flux, freq, power])
-        params = np.full((num_points, 3), np.nan, dtype=np.float64)
-
         optimizer = JPAOptimizer(flx_sweep, fpt_sweep, pdr_sweep, num_points)
 
-        def measure_body(
-            ctx: TaskContext, update_hook: Callable[[int, NDArray[np.float64]], None]
-        ) -> Tuple[List[NDArray[np.float64]], List[NDArray[np.float64]]]:
-            prog = ModularProgramV2(
-                soccfg,
-                ctx.cfg,
-                modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                    Readout("readout", ctx.cfg["readout"]),
-                ],
-            )
-
-            avg_d = prog.acquire(
-                soc, progress=False, callback=update_hook, record_stderr=True
-            )
-            std_d = prog.get_stderr()
-
-            return avg_d, std_d
+        # (num_points, [flux, freq, power])
+        params = np.full((num_points, 3), np.nan, dtype=np.float64)
 
         def update_fn(i, ctx, _):
             ctx.env_dict["index"] = i
 
             last_snr = None
             if i > 0:
-                last_snr = np.abs(ctx.data[-1])
+                last_snr = np.abs(ctx.data[i - 1])
             cur_params = optimizer.next_params(i, last_snr)
 
             if cur_params is None:
@@ -522,7 +502,31 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                     sweep_values=list(range(num_points)),
                     update_cfg_fn=update_fn,
                     sub_task=HardTask(
-                        measure_fn=measure_body,
+                        measure_fn=lambda ctx, update_hook: (
+                            (
+                                prog := ModularProgramV2(
+                                    soccfg,
+                                    ctx.cfg,
+                                    modules=[
+                                        Reset(
+                                            "reset",
+                                            ctx.cfg.get("reset", {"type": "none"}),
+                                        ),
+                                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                                        Readout("readout", ctx.cfg["readout"]),
+                                    ],
+                                )
+                            )
+                            and (
+                                prog.acquire(
+                                    soc,
+                                    progress=False,
+                                    callback=update_hook,
+                                    record_stderr=True,
+                                ),
+                                prog.get_stderr(),
+                            )
+                        ),
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     ),
                 ),
@@ -552,7 +556,25 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         max_snr = float(snrs[max_id])
         best_params = params[max_id, :]
 
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=config.figsize)
+        # fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=config.figsize)
+        figsize = (8, 5)
+        fig = plt.figure(figsize=figsize)
+        gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
+
+        fig.suptitle("JPA Auto Optimization")
+
+        ax_iter = fig.add_subplot(gs[:, 0])
+        ax_flux = fig.add_subplot(gs[0, 1])
+        ax_freq = fig.add_subplot(gs[1, 1])
+        ax_power = fig.add_subplot(gs[2, 1])
+
+        ax_iter.scatter(np.arange(len(snrs)), snrs, s=1)
+        ax_iter.axhline(max_snr, color="r", ls="--", label=f"best = {max_snr:.2g}")
+        ax_iter.scatter([max_id], [max_snr], color="r", marker="*")
+        ax_iter.set_xlabel("Iteration")
+        ax_iter.set_ylabel("SNR")
+        ax_iter.legend()
+        ax_iter.grid(True)
 
         def plot_ax(ax, param_idx, label_name) -> None:
             ax.scatter(params[:, param_idx], snrs, s=1)
@@ -560,13 +582,13 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             ax.axvline(best_value, color="r", ls="--", label=f"best = {best_value:.2g}")
             ax.scatter([best_value], [max_snr], color="r", marker="*")
             ax.set_xlabel(label_name)
-            ax.set_ylabel("SNR (a.u.)")
+            ax.set_ylabel("SNR")
             ax.legend()
             ax.grid(True)
 
-        plot_ax(ax1, 0, "JPA Flux value (a.u.)")
-        plot_ax(ax2, 1, "JPA Frequency (MHz)")
-        plot_ax(ax3, 2, "JPA Power (dBm)")
+        plot_ax(ax_flux, 0, "JPA Flux value (a.u.)")
+        plot_ax(ax_freq, 1, "JPA Frequency (MHz)")
+        plot_ax(ax_power, 2, "JPA Power (dBm)")
 
         return float(best_params[0]), float(best_params[1]), float(best_params[2]), fig
 
