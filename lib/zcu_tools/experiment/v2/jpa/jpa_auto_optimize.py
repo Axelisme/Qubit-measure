@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -10,7 +9,6 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from skopt import Optimizer
-from skopt.space import Real
 from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
@@ -48,8 +46,10 @@ from zcu_tools.utils.datasaver import save_data
 class JPAOptimizer:
     """
     Optimizer for JPA parameters using a two-phase approach with scikit-optimize:
-    1. Flux-sliced 2D optimization (70% points): fixed flux, optimize freq/power.
-    2. Fine 3D optimization (30% points): full 3D bayesian optimization starting from phase 1 data.
+    1. Flux-sliced 2D optimization (80% points): fixed flux, optimize freq/power.
+       - For each flux value, 80% grid search + 20% Bayesian optimization.
+    2. Fine 3D optimization (20% points + savings): full 3D bayesian optimization
+       starting from phase 1 data within a restricted flux range.
     """
 
     def __init__(
@@ -60,122 +60,259 @@ class JPAOptimizer:
         total_points: int,
     ) -> None:
         self.total_points = total_points
-        self.phase1_total_points = int(0.7 * total_points)
-        self.phase2_total_points = total_points - self.phase1_total_points
 
-        # Convert sweeps to arrays for bounds
-        self.flx_arr = sweep2array(flx_sweep)
-        self.fpt_arr = sweep2array(fpt_sweep)
-        self.pdr_arr = sweep2array(pdr_sweep)
+        # Extract bounds from sweeps
+        self.flx_bounds = (flx_sweep["start"], flx_sweep["stop"])
+        self.fpt_bounds = (fpt_sweep["start"], fpt_sweep["stop"])
+        self.pdr_bounds = (pdr_sweep["start"], pdr_sweep["stop"])
 
-        # Bounds
-        self.flx_bounds = (self.flx_arr.min(), self.flx_arr.max())
-        self.fpt_bounds = (self.fpt_arr.min(), self.fpt_arr.max())
-        self.pdr_bounds = (self.pdr_arr.min(), self.pdr_arr.max())
+        # Budget allocation
+        self.phase1_total_budget = int(0.8 * total_points)
+        self.phase2_base_budget = total_points - self.phase1_total_budget
+        self.phase2_extra_budget = 0  # accumulated savings from phase 1
 
-        # Setup Phase 1 Schedule
-        self._setup_phase1_schedule()
-
-        # State
-        self.results: List[
-            Tuple[float, float, float, float]
-        ] = []  # (flx, fpt, pdr, snr)
-        self.current_slice_idx = 0
-        self.points_in_current_slice = 0
-
-        # Optimizers
-        self.opt_2d: Optional[Optimizer] = None
-        self.opt_3d: Optional[Optimizer] = None
-
-        self.last_suggested_params: Optional[Tuple[float, float, float]] = None
-
-    def _setup_phase1_schedule(self) -> None:
-        """
-        Determine flux slices and points per slice for Phase 1.
-        """
-        if self.phase1_total_points <= 0:
-            self.flx_grid = []
-            self.points_per_slice = []
-            return
-
-        # Heuristic: Balance number of slices vs points per slice
-        # We want at least ~10 points per 2D optimization to be useful
-        min_points_per_slice = 10
-        max_slices = max(1, self.phase1_total_points // min_points_per_slice)
-
-        # Also limit slices by available flux points resolution if it's small
-        n_flx_available = len(self.flx_arr)
-        n_slices = min(
-            max_slices, n_flx_available, int(np.sqrt(self.phase1_total_points))
+        # Determine flux grid points (cube root of phase1 budget)
+        self.num_flx_points = max(2, int(round(self.phase1_total_budget ** (1 / 3))))
+        self.flx_grid = np.linspace(
+            self.flx_bounds[0], self.flx_bounds[1], self.num_flx_points
         )
-        n_slices = max(1, n_slices)
+        self.flx_interval = (
+            (self.flx_bounds[1] - self.flx_bounds[0]) / (self.num_flx_points - 1)
+            if self.num_flx_points > 1
+            else (self.flx_bounds[1] - self.flx_bounds[0])
+        )
 
-        # Select flux points linearly spaced from the available array (or range)
-        if n_flx_available > 1:
-            # Pick n_slices indices evenly spaced
-            indices = np.linspace(0, n_flx_available - 1, n_slices, dtype=int)
-            self.flx_grid = self.flx_arr[indices]
-        else:
-            self.flx_grid = np.array([self.flx_arr[0]])
+        # Budget per flux slice
+        self.budget_per_flx = self.phase1_total_budget // self.num_flx_points
 
-        # Distribute points
-        base_points = self.phase1_total_points // n_slices
-        remainder = self.phase1_total_points % n_slices
+        # Calculate grid dimensions for 2D search (80% of budget_per_flx)
+        grid_budget = int(0.8 * self.budget_per_flx)
+        self.grid_size = max(2, int(np.sqrt(grid_budget)))
+        self.fpt_grid = np.linspace(
+            self.fpt_bounds[0], self.fpt_bounds[1], self.grid_size
+        )
+        self.pdr_grid = np.linspace(
+            self.pdr_bounds[0], self.pdr_bounds[1], self.grid_size
+        )
 
-        self.points_per_slice = [base_points] * n_slices
-        for i in range(remainder):
-            self.points_per_slice[i] += 1
+        # Grid spacings for convergence check
+        self.fpt_spacing = (
+            (self.fpt_bounds[1] - self.fpt_bounds[0]) / (self.grid_size - 1)
+            if self.grid_size > 1
+            else (self.fpt_bounds[1] - self.fpt_bounds[0])
+        )
+        self.pdr_spacing = (
+            (self.pdr_bounds[1] - self.pdr_bounds[0]) / (self.grid_size - 1)
+            if self.grid_size > 1
+            else (self.pdr_bounds[1] - self.pdr_bounds[0])
+        )
+
+        # State tracking
+        self.phase = 1
+        self.current_flx_idx = 0
+        self.current_slice_iter = 0
+        self.slice_grid_done = False
+
+        # History storage
+        self.history_X: List[List[float]] = []  # [flx, fpt, pdr]
+        self.history_y: List[float] = []  # SNR values
+
+        # Current slice data (for 2D optimizer)
+        self.slice_X: List[List[float]] = []  # [fpt, pdr]
+        self.slice_y: List[float] = []
+
+        # Pre-generate grid points for current slice
+        self._generate_slice_grid()
+
+        # 2D optimizer for current flux slice (initialized after grid search)
+        self.opt_2d: Optional[Optimizer] = None
+
+        # 3D optimizer for phase 2
+        self.opt_3d: Optional[Optimizer] = None
+        self.phase2_iter = 0
+
+        # Track actual iteration count
+        self._iter_count = 0
+
+        # Flag to track if slice ended due to early stop (convergence)
+        self._slice_early_stop = False
+
+    def _generate_slice_grid(self) -> None:
+        """Generate grid points for the current flux slice."""
+        self.slice_grid_points: List[List[float]] = []
+        for fpt in self.fpt_grid:
+            for pdr in self.pdr_grid:
+                self.slice_grid_points.append([fpt, pdr])
+        self.slice_grid_idx = 0
+
+    def _check_phase1_convergence(self) -> bool:
+        """
+        Check convergence for phase 1 (2D optimization).
+        Calculate per-dimension std of last 30 points.
+        If std < grid spacing for any dimension, consider converged.
+        """
+        if len(self.slice_X) < 30:
+            return False
+
+        recent_points = np.array(self.slice_X[-30:])
+        std_fpt = np.std(recent_points[:, 0])
+        std_pdr = np.std(recent_points[:, 1])
+
+        return std_fpt < self.fpt_spacing or std_pdr < self.pdr_spacing
+
+    def _check_phase2_convergence(self) -> bool:
+        """
+        Check convergence for phase 2 (3D optimization).
+        Calculate std of last 50 SNR values from phase 2 only.
+        If std < mean / 5, consider converged.
+        """
+        # Only check convergence based on phase 2 points
+        if self.phase2_iter < 50:
+            return False
+
+        # Get only phase 2 SNR values (last phase2_iter points in history_y)
+        recent_snrs = np.array(self.history_y[-min(50, self.phase2_iter) :])
+        std_snr = np.std(recent_snrs)
+        mean_snr = np.mean(recent_snrs)
+
+        if mean_snr <= 0:
+            return False
+
+        return std_snr < mean_snr / 5
+
+    def _init_phase2(self) -> None:
+        """Initialize phase 2 with restricted flux range and warm start."""
+        self.phase = 2
+        self.phase2_iter = 0
+
+        # Find best flux from phase 1
+        best_idx = int(np.argmax(self.history_y))
+        best_flx = self.history_X[best_idx][0]
+
+        # Restricted flux range: best_flx ± 1.25 * flx_interval
+        flx_range = 1.25 * self.flx_interval
+        flx_lo = max(self.flx_bounds[0], best_flx - flx_range)
+        flx_hi = min(self.flx_bounds[1], best_flx + flx_range)
+
+        # Create 3D optimizer
+        self.opt_3d = Optimizer(
+            dimensions=[
+                (flx_lo, flx_hi),  # flux
+                self.fpt_bounds,  # freq
+                self.pdr_bounds,  # power
+            ],
+            acq_func="EI",
+            n_initial_points=0,  # we'll warm start with historical data
+        )
+
+        # Filter historical points within the new flux range
+        init_X = []
+        init_y = []
+        for x, y in zip(self.history_X, self.history_y):
+            if flx_lo <= x[0] <= flx_hi:
+                init_X.append(x)
+                init_y.append(-y)  # skopt minimizes, we want to maximize SNR
+
+        # Warm start with filtered historical data (fit=False to save time)
+        if init_X:
+            # Add all points except the last one without fitting
+            for x, y in zip(init_X[:-1], init_y[:-1]):
+                self.opt_3d.tell(x, y, fit=False)
+            # Fit once on the last point
+            self.opt_3d.tell(init_X[-1], init_y[-1], fit=True)
+
+    def _get_phase1_point(self) -> Optional[Tuple[float, float, float]]:
+        """Get next point for phase 1 optimization."""
+        current_flx = self.flx_grid[self.current_flx_idx]
+
+        # Check if we're still in grid search phase
+        if self.slice_grid_idx < len(self.slice_grid_points):
+            fpt, pdr = self.slice_grid_points[self.slice_grid_idx]
+            self.slice_grid_idx += 1
+            return (current_flx, fpt, pdr)
+
+        # Grid search done, switch to 2D Bayesian optimization
+        if not self.slice_grid_done:
+            self.slice_grid_done = True
+            # Initialize 2D optimizer
+            self.opt_2d = Optimizer(
+                dimensions=[self.fpt_bounds, self.pdr_bounds],
+                acq_func="EI",
+                n_initial_points=0,
+            )
+            # Tell optimizer about grid search results (fit=False for speed)
+            if self.slice_X and self.slice_y:
+                for x, y in zip(self.slice_X, self.slice_y):
+                    self.opt_2d.tell(x, -y, fit=False)  # minimize negative SNR
+                # Fit once at the end
+                self.opt_2d.tell(self.slice_X[-1], -self.slice_y[-1], fit=True)
+
+        # Check if we've used up budget for this slice
+        remaining_budget = self.budget_per_flx - self.current_slice_iter
+        if remaining_budget <= 0:
+            self._slice_early_stop = False  # Budget exhausted, not early stop
+            return None  # Signal to move to next slice
+
+        # Check convergence
+        if self._check_phase1_convergence():
+            self._slice_early_stop = True  # Converged, save remaining for phase 2
+            return None  # Signal to move to next slice
+
+        # Get next point from 2D optimizer
+        if self.opt_2d is not None:
+            next_2d = self.opt_2d.ask()
+            return (current_flx, next_2d[0], next_2d[1])
+
+        return None
+
+    def _get_phase2_point(self) -> Optional[Tuple[float, float, float]]:
+        """Get next point for phase 2 optimization."""
+        if self.opt_3d is None:
+            return None
+
+        # Check budget
+        total_phase2_budget = self.phase2_base_budget + self.phase2_extra_budget
+        if self.phase2_iter >= total_phase2_budget:
+            return None
+
+        # Check convergence
+        if self._check_phase2_convergence():
+            return None
+
+        # Get next point from 3D optimizer
+        next_3d = self.opt_3d.ask()
+        return (next_3d[0], next_3d[1], next_3d[2])
+
+    def _advance_to_next_slice(self, early_stop: bool = False) -> None:
+        """Move to the next flux slice.
+
+        Args:
+            early_stop: If True, remaining budget is saved for phase 2.
+                        If False (budget exhausted), no extra budget is added.
+        """
+        # Only save remaining budget if early stopped (converged)
+        if early_stop:
+            remaining = self.budget_per_flx - self.current_slice_iter
+            if remaining > 0:
+                self.phase2_extra_budget += remaining
+
+        self.current_flx_idx += 1
+        self.current_slice_iter = 0
+        self.slice_grid_done = False
+        self.slice_X = []
+        self.slice_y = []
+        self.opt_2d = None
+
+        if self.current_flx_idx < self.num_flx_points:
+            self._generate_slice_grid()
 
     @property
     def phase(self) -> int:
-        """Current optimization phase (1 or 2)."""
-        return 1 if len(self.results) < self.phase1_total_points else 2
+        return self._phase
 
-    def _init_2d_optimizer(self) -> None:
-        """Initialize a new 2D optimizer for the current flux slice."""
-        n_points = self.points_per_slice[self.current_slice_idx]
-        # Heuristic for initial random points in 2D: 30% or at least 3
-        n_initial = max(3, min(n_points, int(0.3 * n_points)))
-
-        self.opt_2d = Optimizer(
-            dimensions=[
-                Real(*self.fpt_bounds, name="freq"),
-                Real(*self.pdr_bounds, name="power"),
-            ],
-            base_estimator="GP",
-            acq_func="gp_hedge",
-            n_initial_points=n_initial,
-        )
-
-    def _init_3d_optimizer(self) -> None:
-        """Initialize 3D optimizer for Phase 2, pre-fed with Phase 1 data."""
-        # For Phase 2, we might want fewer initial points if we already have data,
-        # but skopt uses n_initial_points for random exploration.
-        # Since we feed existing points, we can reduce random exploration or keep it to explore new regions.
-        # Let's set a small number of random points to ensure we don't get stuck immediately if Phase 1 was bad.
-        n_initial = max(3, min(self.phase2_total_points, 5))
-
-        self.opt_3d = Optimizer(
-            dimensions=[
-                Real(*self.flx_bounds, name="flux"),
-                Real(*self.fpt_bounds, name="freq"),
-                Real(*self.pdr_bounds, name="power"),
-            ],
-            base_estimator="GP",
-            acq_func="gp_hedge",
-            n_initial_points=n_initial,
-        )
-
-        # Feed all Phase 1 results
-        # skopt minimizes, so use -snr
-        try:
-            points = [[r[0], r[1], r[2]] for r in self.results]
-            values = [-r[3] for r in self.results]
-            if points:
-                self.opt_3d.tell(points, values)
-        except Exception:
-            # In case of duplicates or other issues, just continue
-            pass
+    @phase.setter
+    def phase(self, value: int) -> None:
+        self._phase = value
 
     def next_params(
         self, i: int, last_snr: Optional[float]
@@ -183,97 +320,60 @@ class JPAOptimizer:
         if i >= self.total_points:
             return None
 
-        # 1. Handle Result from Previous Iteration
-        if last_snr is not None and self.last_suggested_params is not None:
-            flx, fpt, pdr = self.last_suggested_params
-            self.results.append((flx, fpt, pdr, last_snr))
+        # Record last result
+        if last_snr is not None and i > 0:
+            # Update history
+            if len(self.history_X) > 0:
+                self.history_y.append(last_snr)
 
-            # Tell the appropriate optimizer
-            if self.phase == 1:
-                # Note: We might have just switched phases if i == phase1_total_points
-                # But the result belongs to the optimizer that generated it.
-                # Since we process result before generating next, we need to know which optimizer generated it.
-                # Simplification: If we are in Phase 1, update 2D.
-                # If we just transitioned to Phase 2 (i.e. this is the first call of Phase 2),
-                # the previous result was Phase 1, so we should technically update the last 2D optimizer.
-                # However, since we re-feed ALL results to 3D optimizer anyway, strict updating of the discarded 2D optimizer isn't strictly necessary for future points,
-                # BUT it is good practice if we wanted to inspect it.
-                # For simplicity: Update opt_2d if it exists and we are still within its "scope" or just finished it.
-                if self.opt_2d:
-                    try:
-                        self.opt_2d.tell([fpt, pdr], -last_snr)
-                    except ValueError:
-                        pass
-            else:
-                # Phase 2
-                if self.opt_3d:
-                    try:
-                        self.opt_3d.tell([flx, fpt, pdr], -last_snr)
-                    except ValueError:
-                        pass
+                # Update slice data for phase 1
+                if self.phase == 1 and len(self.slice_X) > 0:
+                    self.slice_y.append(last_snr)
+                    # Tell 2D optimizer if active
+                    if self.opt_2d is not None and len(self.slice_y) > len(
+                        self.slice_grid_points
+                    ):
+                        self.opt_2d.tell(self.slice_X[-1], -last_snr)
 
-        # 2. Generate Next Parameters
+                # Tell 3D optimizer if in phase 2
+                if self.phase == 2 and self.opt_3d is not None:
+                    self.opt_3d.tell(self.history_X[-1], -last_snr)
 
-        # Check if we are in Phase 1
-        if i < self.phase1_total_points:
-            # Check if we need to move to next slice or init first slice
-            if self.opt_2d is None:
-                self._init_2d_optimizer()
-            elif (
-                self.points_in_current_slice
-                >= self.points_per_slice[self.current_slice_idx]
-            ):
-                # Move to next slice if available
-                if self.current_slice_idx + 1 < len(self.flx_grid):
-                    self.current_slice_idx += 1
-                    self.points_in_current_slice = 0
-                    self._init_2d_optimizer()
-                # else: stay on the last slice and continue using current optimizer
+        # Get next point based on current phase
+        if self.phase == 1:
+            point = self._get_phase1_point()
 
-            # Ask 2D optimizer
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore", message="The objective has been evaluated.*"
-                )
-                fpt, pdr = self.opt_2d.ask()  # type: ignore
-            flx = float(self.flx_grid[self.current_slice_idx])
+            if point is None:
+                # Move to next slice or phase 2
+                self._advance_to_next_slice(early_stop=self._slice_early_stop)
 
-            self.points_in_current_slice += 1
-            self.last_suggested_params = (flx, fpt, pdr)
-            return (flx, fpt, pdr)
+                if self.current_flx_idx >= self.num_flx_points:
+                    # All flux slices done, move to phase 2
+                    self._init_phase2()
+                    return self.next_params(i, None)
+                else:
+                    # Try again with new slice
+                    return self.next_params(i, None)
 
-        # Phase 2
-        else:
-            if self.opt_3d is None:
-                self._init_3d_optimizer()
+            # Record point
+            self.history_X.append(list(point))
+            self.slice_X.append([point[1], point[2]])  # [fpt, pdr]
+            self.current_slice_iter += 1
+            self._iter_count += 1
+            return point
 
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore", message="The objective has been evaluated.*"
-                )
-                suggested = self.opt_3d.ask()  # type: ignore
-            self.last_suggested_params = tuple(suggested)  # type: ignore
-            return self.last_suggested_params  # type: ignore
+        else:  # phase == 2
+            point = self._get_phase2_point()
 
-    def get_optimal_params(self) -> Tuple[float, float, float]:
-        """
-        Get the optimal parameters found.
-        """
-        if not self.results:
-            raise ValueError("No results available.")
+            if point is None:
+                # Phase 2 converged or budget exhausted
+                return None
 
-        # If Phase 2 ran, ask the 3D optimizer model for the best point
-        if self.opt_3d and self.opt_3d.Xi:
-            best_idx = np.argmin(self.opt_3d.yi)
-            return tuple(self.opt_3d.Xi[best_idx])  # type: ignore
-
-        # Fallback to best measured point
-        best_idx = max(range(len(self.results)), key=lambda i: self.results[i][3])
-        return (
-            self.results[best_idx][0],
-            self.results[best_idx][1],
-            self.results[best_idx][2],
-        )
+            # Record point
+            self.history_X.append(list(point))
+            self.phase2_iter += 1
+            self._iter_count += 1
+            return point
 
 
 JPAOptimizeResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
@@ -306,7 +406,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         # (num_points, [flux, freq, power])
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
 
-        def update_fn(i, ctx, _):
+        def update_fn(i, ctx, _) -> None:
             ctx.env_dict["index"] = i
 
             last_snr = None
@@ -316,7 +416,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
 
             if cur_params is None:
                 # TODO: Better way to early stop
-                raise RuntimeError("No more parameters to optimize.")
+                raise KeyboardInterrupt("No more parameters to optimize.")
 
             params[i, :] = cur_params
             set_flux_in_dev_cfg(ctx.cfg["dev"], params[i, 0], label="jpa_flux_dev")
@@ -522,438 +622,282 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
 
 
 if __name__ == "__main__":
-    # Test JPAOptimizer with a synthetic SNR function
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+    # Test JPAOptimizer with a simulated SNR function
 
-    # Define parameter ranges
-    flx_sweep: SweepCfg = {"start": -1.0, "stop": 1.0, "expts": 21, "step": 0.1}
-    fpt_sweep: SweepCfg = {"start": 5000.0, "stop": 6000.0, "expts": 101, "step": 10.0}
-    pdr_sweep: SweepCfg = {"start": -20.0, "stop": 0.0, "expts": 21, "step": 1.0}
-
-    # True optimal point (unknown to the optimizer)
-    # Note: Due to sinusoidal modulation, the actual optimal may shift slightly
-    TRUE_OPT_FLX = 0.3
-    TRUE_OPT_FPT = 5500.0
-    TRUE_OPT_PDR = -10.0
-    BASE_MAX_SNR = 40.0  # Base SNR at optimal point
-
-    # Sinusoidal modulation parameters
-    SIN_PARAMS = {
-        # Flux modulation: creates periodic structure in flux space
-        "flx_freq1": 2.5,  # Primary frequency (cycles per unit flux)
-        "flx_amp1": 8.0,  # Amplitude of primary oscillation
-        "flx_freq2": 7.0,  # Secondary frequency (higher harmonic)
-        "flx_amp2": 3.0,  # Amplitude of secondary oscillation
-        # Frequency modulation: resonance-like structure
-        "fpt_freq1": 0.02,  # Oscillation frequency in MHz^-1
-        "fpt_amp1": 6.0,  # Amplitude
-        "fpt_freq2": 0.005,  # Slower modulation
-        "fpt_amp2": 4.0,
-        # Power modulation: saturation-like behavior
-        "pdr_freq1": 0.3,  # Oscillation frequency in dBm^-1
-        "pdr_amp1": 5.0,
-        "pdr_freq2": 0.8,  # Higher frequency ripple
-        "pdr_amp2": 2.0,
-        # Cross-coupling terms
-        "flx_fpt_coupling": 0.01,  # Flux-frequency coupling strength
-        "flx_pdr_coupling": 0.05,  # Flux-power coupling strength
-    }
-
-    # Noise parameters
-    NOISE_PARAMS = {
-        "white_noise_std": 1.5,  # Gaussian measurement noise
-        "multiplicative_noise_std": 0.03,  # Proportional to signal (3%)
-        "drift_amplitude": 0.5,  # Slow drift amplitude
-        "drift_freq": 0.01,  # Drift frequency (per measurement)
-    }
-
-    # Global counter for drift simulation
-    measurement_counter = [0]
-
-    def synthetic_snr(flx: float, fpt: float, pdr: float) -> float:
+    def simulate_snr(
+        flx: float, fpt: float, pdr: float, noise_std: float = 0.1
+    ) -> float:
         """
-        Synthetic SNR function with composite sinusoidal structure and realistic noise.
+        Simulate SNR as a combination of Gaussian and sinusoidal functions with noise.
+
+        The SNR landscape has:
+        - A Gaussian peak centered at (flx_0, fpt_0, pdr_0)
+        - Sinusoidal modulation in the flux direction
+        - Measurement noise
         """
-        # Normalized coordinates
-        norm_flx = (flx - TRUE_OPT_FLX) / 0.5
-        norm_fpt = (fpt - TRUE_OPT_FPT) / 200.0
-        norm_pdr = (pdr - TRUE_OPT_PDR) / 5.0
+        # True optimal point
+        flx_0, fpt_0, pdr_0 = 0.5, 7000.0, -10.0
 
-        # Base Gaussian envelope
-        gaussian_envelope = np.exp(-(norm_flx**2 + norm_fpt**2 + norm_pdr**2))
-
-        # Sinusoidal modulations for each parameter
-        # Flux modulation (creates periodic sweet spots)
-        flx_mod = (
-            SIN_PARAMS["flx_amp1"]
-            * np.sin(2 * np.pi * SIN_PARAMS["flx_freq1"] * flx)
-            * np.cos(np.pi * norm_flx)  # Envelope to keep modulation bounded
-            + SIN_PARAMS["flx_amp2"]
-            * np.sin(2 * np.pi * SIN_PARAMS["flx_freq2"] * flx + 0.7)
+        # Gaussian component (main peak)
+        sigma_flx, sigma_fpt, sigma_pdr = 0.15, 300.0, 3.0
+        gauss = np.exp(
+            -((flx - flx_0) ** 2) / (2 * sigma_flx**2)
+            - ((fpt - fpt_0) ** 2) / (2 * sigma_fpt**2)
+            - ((pdr - pdr_0) ** 2) / (2 * sigma_pdr**2)
         )
 
-        # Frequency modulation (resonance-like structure)
-        fpt_centered = fpt - TRUE_OPT_FPT
-        fpt_mod = SIN_PARAMS["fpt_amp1"] * np.sin(
-            2 * np.pi * SIN_PARAMS["fpt_freq1"] * fpt_centered
-        ) + SIN_PARAMS["fpt_amp2"] * np.cos(
-            2 * np.pi * SIN_PARAMS["fpt_freq2"] * fpt_centered + 1.2
-        )
+        # Sinusoidal modulation in flux (simulates flux-dependent behavior)
+        sin_mod = 0.3 * np.sin(2 * np.pi * (flx - 0.2) / 0.4)
 
-        # Power modulation (saturation-like with ripples)
-        pdr_centered = pdr - TRUE_OPT_PDR
-        pdr_mod = (
-            SIN_PARAMS["pdr_amp1"]
-            * np.sin(2 * np.pi * SIN_PARAMS["pdr_freq1"] * pdr_centered)
-            * (1 - 0.3 * np.tanh(pdr_centered / 3))  # Asymmetric saturation
-            + SIN_PARAMS["pdr_amp2"]
-            * np.sin(2 * np.pi * SIN_PARAMS["pdr_freq2"] * pdr_centered + 0.5)
-        )
+        # Sinusoidal modulation in frequency
+        sin_fpt = 0.2 * np.sin(2 * np.pi * (fpt - 6800) / 500)
 
-        # Cross-coupling terms (flux affects frequency response, etc.)
-        coupling = SIN_PARAMS["flx_fpt_coupling"] * flx * fpt_centered * np.sin(
-            np.pi * norm_flx
-        ) + SIN_PARAMS["flx_pdr_coupling"] * flx * pdr_centered * np.cos(
-            2 * np.pi * norm_pdr
-        )
+        # Base SNR with modulations
+        snr_clean = 10.0 * gauss * (1 + sin_mod) * (1 + sin_fpt) + 1.0
 
-        # Combine all components
-        base_snr = (
-            BASE_MAX_SNR * gaussian_envelope
-            + flx_mod * gaussian_envelope**0.5  # Modulation decays slower than base
-            + fpt_mod * gaussian_envelope**0.7
-            + pdr_mod * gaussian_envelope**0.6
-            + coupling
-        )
+        # Add measurement noise
+        noise = np.random.normal(0, noise_std * snr_clean)
+        snr = max(0.1, snr_clean + noise)
 
-        # Add noise components
-        # 1. White noise (measurement uncertainty)
-        white_noise = np.random.normal(0, NOISE_PARAMS["white_noise_std"])
+        return snr
 
-        # 2. Multiplicative noise (signal-dependent)
-        mult_noise = base_snr * np.random.normal(
-            0, NOISE_PARAMS["multiplicative_noise_std"]
-        )
+    # Define sweep ranges
+    flx_sweep: SweepCfg = {"start": 0.0, "stop": 1.0, "expts": 50, "step": 0.02}
+    fpt_sweep: SweepCfg = {"start": 6500.0, "stop": 7500.0, "expts": 50, "step": 20.0}
+    pdr_sweep: SweepCfg = {"start": -20.0, "stop": 0.0, "expts": 50, "step": 0.4}
 
-        # 3. Slow drift (systematic error that changes over time)
-        measurement_counter[0] += 1
-        drift = NOISE_PARAMS["drift_amplitude"] * np.sin(
-            2 * np.pi * NOISE_PARAMS["drift_freq"] * measurement_counter[0]
-        )
+    total_points = 500
 
-        # Final SNR with all noise components
-        noisy_snr = base_snr + white_noise + mult_noise + drift
-
-        # Ensure SNR is positive (physical constraint)
-        return max(0.1, noisy_snr)
-
-    def get_true_snr_surface(n_points: int = 50):
-        """Generate the true (noiseless) SNR surface for visualization."""
-        flx_vals = np.linspace(-1.0, 1.0, n_points)
-        fpt_vals = np.linspace(5000.0, 6000.0, n_points)
-
-        # Save current counter and temporarily disable noise
-        saved_counter = measurement_counter[0]
-        saved_noise = NOISE_PARAMS.copy()
-
-        # Set noise to zero for true surface
-        for key in NOISE_PARAMS:
-            NOISE_PARAMS[key] = 0.0
-
-        # Calculate SNR at each point (fix power at optimal for 2D slice)
-        snr_flx_fpt = np.zeros((n_points, n_points))
-        for i, flx in enumerate(flx_vals):
-            for j, fpt in enumerate(fpt_vals):
-                snr_flx_fpt[i, j] = synthetic_snr(flx, fpt, TRUE_OPT_PDR)
-
-        # Restore noise parameters
-        NOISE_PARAMS.update(saved_noise)
-        measurement_counter[0] = saved_counter
-
-        return flx_vals, fpt_vals, snr_flx_fpt
+    print("=" * 60)
+    print("JPAOptimizer Test")
+    print("=" * 60)
+    print(f"Total points: {total_points}")
+    print(f"Flux range: [{flx_sweep['start']}, {flx_sweep['stop']}]")
+    print(f"Frequency range: [{fpt_sweep['start']}, {fpt_sweep['stop']}] MHz")
+    print(f"Power range: [{pdr_sweep['start']}, {pdr_sweep['stop']}] dBm")
+    print("True optimal: flx=0.5, fpt=7000 MHz, pdr=-10 dBm")
+    print("=" * 60)
 
     # Create optimizer
-    total_points = 100
     optimizer = JPAOptimizer(flx_sweep, fpt_sweep, pdr_sweep, total_points)
 
-    print(f"Total points: {total_points}")
-    print(f"Phase 1 points: {optimizer.phase1_total_points}")
-    print(f"Phase 2 points: {optimizer.phase2_total_points}")
-    print(
-        f"Flux slices: {len(optimizer.flx_grid) if hasattr(optimizer, 'flx_grid') else 'N/A'}"
-    )
-    print()
+    print(f"Phase 1 budget: {optimizer.phase1_total_budget}")
+    print(f"Phase 2 base budget: {optimizer.phase2_base_budget}")
+    print(f"Number of flux slices: {optimizer.num_flx_points}")
+    print(f"Budget per flux slice: {optimizer.budget_per_flx}")
+    print(f"Grid size: {optimizer.grid_size}x{optimizer.grid_size}")
+    print("=" * 60)
 
     # Run optimization
-    all_params: List[Tuple[float, float, float]] = []
-    all_snrs: List[float] = []
-    phases: List[int] = []
+    params_list: List[Tuple[float, float, float]] = []
+    snrs_list: List[float] = []
+    phases_list: List[int] = []
 
     last_snr: Optional[float] = None
     for i in range(total_points):
         params = optimizer.next_params(i, last_snr)
         if params is None:
-            print(f"Optimization completed early at iteration {i}")
+            print(f"Optimization stopped at iteration {i}")
             break
 
         flx, fpt, pdr = params
-        snr = synthetic_snr(flx, fpt, pdr)
+        snr = simulate_snr(flx, fpt, pdr, noise_std=0.05)
 
-        all_params.append(params)
-        all_snrs.append(snr)
-        phases.append(optimizer.phase)
+        params_list.append(params)
+        snrs_list.append(snr)
+        phases_list.append(optimizer.phase)
 
         last_snr = snr
 
-        if i % 20 == 0:
+        if i % 50 == 0:
             print(
-                f"Iteration {i}: phase={optimizer.phase}, "
-                f"params=({flx:.3f}, {fpt:.1f}, {pdr:.1f}), SNR={snr:.2f}"
+                f"Iter {i:4d} | Phase {optimizer.phase} | "
+                f"flx={flx:.4f}, fpt={fpt:.1f}, pdr={pdr:.2f} | SNR={snr:.3f}"
             )
 
-    # Get final results
-    print("\n" + "=" * 60)
+    # Convert to arrays
+    params_arr = np.array(params_list)
+    snrs_arr = np.array(snrs_list)
+    phases_arr = np.array(phases_list)
+
+    # Find best result
+    best_idx = np.argmax(snrs_arr)
+    best_params = params_arr[best_idx]
+    best_snr = snrs_arr[best_idx]
+
+    print("=" * 60)
     print("Optimization Results")
     print("=" * 60)
-
-    # Best measured point
-    best_idx = np.argmax(all_snrs)
-    best_measured = all_params[best_idx]
+    print(f"Total iterations: {len(params_list)}")
+    print(f"Phase 1 points: {np.sum(phases_arr == 1)}")
+    print(f"Phase 2 points: {np.sum(phases_arr == 2)}")
+    print(f"Phase 2 extra budget (savings): {optimizer.phase2_extra_budget}")
+    print(f"Best SNR: {best_snr:.4f} at iteration {best_idx}")
     print(
-        f"Best measured point: flux={best_measured[0]:.4f}, "
-        f"freq={best_measured[1]:.2f}, power={best_measured[2]:.2f}"
+        f"Best params: flx={best_params[0]:.4f}, "
+        f"fpt={best_params[1]:.1f} MHz, pdr={best_params[2]:.2f} dBm"
     )
-    print(f"Best measured SNR: {all_snrs[best_idx]:.2f}")
-
-    # Optimal point from optimizer
-    try:
-        opt_params = optimizer.get_optimal_params()
-        opt_snr = synthetic_snr(*opt_params)
-        print(
-            f"\nOptimizer suggested point: flux={opt_params[0]:.4f}, "
-            f"freq={opt_params[1]:.2f}, power={opt_params[2]:.2f}"
-        )
-        print(f"SNR at suggested point: {opt_snr:.2f}")
-    except Exception as e:
-        print(f"\nOptimizer lookup failed: {e}")
-        opt_params = best_measured
-
+    print("True optimal: flx=0.5, fpt=7000 MHz, pdr=-10 dBm")
     print(
-        f"\nTrue optimal: flux={TRUE_OPT_FLX}, freq={TRUE_OPT_FPT}, power={TRUE_OPT_PDR}"
+        f"Error: flx={abs(best_params[0] - 0.5):.4f}, "
+        f"fpt={abs(best_params[1] - 7000):.1f} MHz, pdr={abs(best_params[2] + 10):.2f} dBm"
     )
-    print(f"Base max SNR: {BASE_MAX_SNR}")
+    print("=" * 60)
 
-    # Convert to numpy arrays for plotting
-    params_arr = np.array(all_params)
-    snrs_arr = np.array(all_snrs)
-    phases_arr = np.array(phases)
+    # Create visualization
+    fig = plt.figure(figsize=(14, 10))
+    fig.suptitle("JPAOptimizer Test Results", fontsize=14)
 
-    # Generate true SNR surface for visualization
-    print("\nGenerating true SNR surface for visualization...")
-    flx_surface, fpt_surface, snr_surface = get_true_snr_surface(80)
-
-    # Create visualization - 3x3 layout
-    fig = plt.figure(figsize=(18, 16))
-
-    # Plot 1: SNR evolution over iterations
-    ax1 = fig.add_subplot(3, 3, 1)
-    colors = ["blue" if p == 1 else "red" for p in phases_arr]
-    ax1.scatter(range(len(snrs_arr)), snrs_arr, c=colors, s=10, alpha=0.7)
-    ax1.axhline(BASE_MAX_SNR, color="green", ls="--", label="Base max SNR")
+    # 1. SNR vs Iteration
+    ax1 = fig.add_subplot(2, 3, 1)
+    phase1_mask = phases_arr == 1
+    phase2_mask = phases_arr == 2
+    ax1.scatter(
+        np.arange(len(snrs_arr))[phase1_mask],
+        snrs_arr[phase1_mask],
+        c="blue",
+        s=5,
+        alpha=0.6,
+        label="Phase 1",
+    )
+    ax1.scatter(
+        np.arange(len(snrs_arr))[phase2_mask],
+        snrs_arr[phase2_mask],
+        c="red",
+        s=5,
+        alpha=0.6,
+        label="Phase 2",
+    )
+    ax1.axhline(best_snr, color="green", ls="--", label=f"Best={best_snr:.2f}")
+    ax1.scatter([best_idx], [best_snr], c="green", s=100, marker="*", zorder=5)
     ax1.set_xlabel("Iteration")
     ax1.set_ylabel("SNR")
-    ax1.set_title("SNR Evolution (Blue=Phase1, Red=Phase2)")
+    ax1.set_title("SNR vs Iteration")
     ax1.legend()
     ax1.grid(True, alpha=0.3)
 
-    # Plot 2: SNR vs Flux
-    ax2 = fig.add_subplot(3, 3, 2)
-    ax2.scatter(params_arr[:, 0], snrs_arr, c=colors, s=15, alpha=0.7)
-    ax2.axvline(TRUE_OPT_FLX, color="green", ls="--", lw=2, label="True optimal")
-    ax2.axvline(opt_params[0], color="purple", ls="-", lw=2, label="Found optimal")
+    # 2. SNR vs Flux
+    ax2 = fig.add_subplot(2, 3, 2)
+    ax2.scatter(
+        params_arr[phase1_mask, 0],
+        snrs_arr[phase1_mask],
+        c="blue",
+        s=5,
+        alpha=0.6,
+        label="Phase 1",
+    )
+    ax2.scatter(
+        params_arr[phase2_mask, 0],
+        snrs_arr[phase2_mask],
+        c="red",
+        s=5,
+        alpha=0.6,
+        label="Phase 2",
+    )
+    ax2.axvline(best_params[0], color="green", ls="--")
+    ax2.axvline(0.5, color="orange", ls=":", label="True optimal")
+    ax2.scatter([best_params[0]], [best_snr], c="green", s=100, marker="*", zorder=5)
     ax2.set_xlabel("Flux (a.u.)")
     ax2.set_ylabel("SNR")
     ax2.set_title("SNR vs Flux")
     ax2.legend()
     ax2.grid(True, alpha=0.3)
 
-    # Plot 3: SNR vs Frequency
-    ax3 = fig.add_subplot(3, 3, 3)
-    ax3.scatter(params_arr[:, 1], snrs_arr, c=colors, s=15, alpha=0.7)
-    ax3.axvline(TRUE_OPT_FPT, color="green", ls="--", lw=2, label="True optimal")
-    ax3.axvline(opt_params[1], color="purple", ls="-", lw=2, label="Found optimal")
+    # 3. SNR vs Frequency
+    ax3 = fig.add_subplot(2, 3, 3)
+    ax3.scatter(
+        params_arr[phase1_mask, 1],
+        snrs_arr[phase1_mask],
+        c="blue",
+        s=5,
+        alpha=0.6,
+        label="Phase 1",
+    )
+    ax3.scatter(
+        params_arr[phase2_mask, 1],
+        snrs_arr[phase2_mask],
+        c="red",
+        s=5,
+        alpha=0.6,
+        label="Phase 2",
+    )
+    ax3.axvline(best_params[1], color="green", ls="--")
+    ax3.axvline(7000, color="orange", ls=":", label="True optimal")
+    ax3.scatter([best_params[1]], [best_snr], c="green", s=100, marker="*", zorder=5)
     ax3.set_xlabel("Frequency (MHz)")
     ax3.set_ylabel("SNR")
     ax3.set_title("SNR vs Frequency")
     ax3.legend()
     ax3.grid(True, alpha=0.3)
 
-    # Plot 4: SNR vs Power
-    ax4 = fig.add_subplot(3, 3, 4)
-    ax4.scatter(params_arr[:, 2], snrs_arr, c=colors, s=15, alpha=0.7)
-    ax4.axvline(TRUE_OPT_PDR, color="green", ls="--", lw=2, label="True optimal")
-    ax4.axvline(opt_params[2], color="purple", ls="-", lw=2, label="Found optimal")
+    # 4. SNR vs Power
+    ax4 = fig.add_subplot(2, 3, 4)
+    ax4.scatter(
+        params_arr[phase1_mask, 2],
+        snrs_arr[phase1_mask],
+        c="blue",
+        s=5,
+        alpha=0.6,
+        label="Phase 1",
+    )
+    ax4.scatter(
+        params_arr[phase2_mask, 2],
+        snrs_arr[phase2_mask],
+        c="red",
+        s=5,
+        alpha=0.6,
+        label="Phase 2",
+    )
+    ax4.axvline(best_params[2], color="green", ls="--")
+    ax4.axvline(-10, color="orange", ls=":", label="True optimal")
+    ax4.scatter([best_params[2]], [best_snr], c="green", s=100, marker="*", zorder=5)
     ax4.set_xlabel("Power (dBm)")
     ax4.set_ylabel("SNR")
     ax4.set_title("SNR vs Power")
     ax4.legend()
     ax4.grid(True, alpha=0.3)
 
-    # Plot 5: True SNR surface
-    ax5 = fig.add_subplot(3, 3, 5)
-    im = ax5.pcolormesh(
-        fpt_surface,
-        flx_surface,
-        snr_surface,
-        cmap="viridis",
-        shading="auto",
-    )
-    # Overlay sampled points
-    ax5.scatter(
+    # 5. 2D scatter: Flux vs Frequency
+    ax5 = fig.add_subplot(2, 3, 5)
+    scatter = ax5.scatter(
+        params_arr[:, 0],
         params_arr[:, 1],
-        params_arr[:, 0],
-        c="white",
-        s=5,
-        alpha=0.5,
-        edgecolors="none",
+        c=snrs_arr,
+        s=10,
+        cmap="viridis",
+        alpha=0.7,
     )
+    ax5.scatter([0.5], [7000], c="red", s=100, marker="x", label="True optimal")
     ax5.scatter(
-        [TRUE_OPT_FPT],
-        [TRUE_OPT_FLX],
-        color="red",
-        s=150,
-        marker="*",
-        label="True optimal",
-        edgecolors="white",
-        linewidths=1,
+        [best_params[0]], [best_params[1]], c="green", s=100, marker="*", label="Found"
     )
-    ax5.scatter(
-        [opt_params[1]],
-        [opt_params[0]],
-        color="lime",
-        s=150,
-        marker="^",
-        label="Found optimal",
-        edgecolors="white",
-        linewidths=1,
-    )
-    ax5.set_xlabel("Frequency (MHz)")
-    ax5.set_ylabel("Flux (a.u.)")
-    ax5.set_title(f"True SNR Surface @ Power={TRUE_OPT_PDR} dBm")
-    ax5.legend(loc="upper right")
-    fig.colorbar(im, ax=ax5, label="SNR")
+    ax5.set_xlabel("Flux (a.u.)")
+    ax5.set_ylabel("Frequency (MHz)")
+    ax5.set_title("Sampled Points (Flux vs Freq)")
+    ax5.legend()
+    plt.colorbar(scatter, ax=ax5, label="SNR")
 
-    # Plot 6: 3D scatter
-    ax6 = fig.add_subplot(3, 3, 6, projection="3d")
-    scatter = ax6.scatter(
-        params_arr[:, 0],
+    # 6. 2D scatter: Frequency vs Power
+    ax6 = fig.add_subplot(2, 3, 6)
+    scatter2 = ax6.scatter(
         params_arr[:, 1],
         params_arr[:, 2],
         c=snrs_arr,
+        s=10,
         cmap="viridis",
-        s=20,
         alpha=0.7,
     )
+    ax6.scatter([7000], [-10], c="red", s=100, marker="x", label="True optimal")
     ax6.scatter(
-        [TRUE_OPT_FLX],
-        [TRUE_OPT_FPT],
-        [TRUE_OPT_PDR],
-        color="red",
-        s=200,
-        marker="*",
-        label="True optimal",
+        [best_params[1]], [best_params[2]], c="green", s=100, marker="*", label="Found"
     )
-    ax6.set_xlabel("Flux")
-    ax6.set_ylabel("Frequency")
-    ax6.set_zlabel("Power")
-    ax6.set_title("3D Parameter Space")
+    ax6.set_xlabel("Frequency (MHz)")
+    ax6.set_ylabel("Power (dBm)")
+    ax6.set_title("Sampled Points (Freq vs Power)")
     ax6.legend()
-    fig.colorbar(scatter, ax=ax6, label="SNR", shrink=0.5)
-
-    # Plot 7: Frequency vs Power Sampling
-    ax7 = fig.add_subplot(3, 3, 7)
-    phase1_mask = phases_arr == 1
-    phase2_mask = phases_arr == 2
-    ax7.scatter(
-        params_arr[phase1_mask, 1],
-        params_arr[phase1_mask, 2],
-        c="blue",
-        s=25,
-        alpha=0.5,
-        label=f"Phase 1 ({phase1_mask.sum()} pts)",
-    )
-    ax7.scatter(
-        params_arr[phase2_mask, 1],
-        params_arr[phase2_mask, 2],
-        c="red",
-        s=25,
-        alpha=0.5,
-        label=f"Phase 2 ({phase2_mask.sum()} pts)",
-    )
-    ax7.scatter(
-        [TRUE_OPT_FPT],
-        [TRUE_OPT_PDR],
-        color="green",
-        s=200,
-        marker="*",
-        label="True optimal",
-    )
-    ax7.set_xlabel("Frequency (MHz)")
-    ax7.set_ylabel("Power (dBm)")
-    ax7.set_title("Freq-Power Sampling Distribution")
-    ax7.legend()
-    ax7.grid(True, alpha=0.3)
-
-    # Plot 8: Flux Sampling Histogram
-    ax8 = fig.add_subplot(3, 3, 8)
-    ax8.hist(
-        params_arr[:, 0],
-        bins=30,
-        alpha=0.7,
-        color="gray",
-        label="All points",
-    )
-    ax8.axvline(TRUE_OPT_FLX, color="green", ls="--", lw=2, label="True optimal")
-    ax8.set_xlabel("Flux")
-    ax8.set_ylabel("Count")
-    ax8.set_title("Flux Sampling Distribution")
-    ax8.legend()
-    ax8.grid(True, alpha=0.3)
-
-    # Plot 9: Convergence (Error)
-    ax9 = fig.add_subplot(3, 3, 9)
-    errors_flx = np.abs(params_arr[:, 0] - TRUE_OPT_FLX) / 2.0
-    errors_fpt = np.abs(params_arr[:, 1] - TRUE_OPT_FPT) / 1000.0
-    errors_pdr = np.abs(params_arr[:, 2] - TRUE_OPT_PDR) / 20.0
-    total_errors = np.sqrt(errors_flx**2 + errors_fpt**2 + errors_pdr**2)
-
-    running_min_error = np.minimum.accumulate(total_errors)
-
-    ax9.plot(
-        range(len(total_errors)), total_errors, ".", alpha=0.3, label="Point Error"
-    )
-    ax9.plot(
-        range(len(running_min_error)),
-        running_min_error,
-        "r-",
-        lw=2,
-        label="Best Error Found",
-    )
-    ax9.axvline(
-        optimizer.phase1_total_points,
-        color="gray",
-        ls="--",
-        label="Phase Transition",
-    )
-    ax9.set_xlabel("Iteration")
-    ax9.set_ylabel("Normalized Distance from Optimal")
-    ax9.set_title("Convergence Analysis")
-    ax9.set_yscale("log")
-    ax9.legend()
-    ax9.grid(True, alpha=0.3)
+    plt.colorbar(scatter2, ax=ax6, label="SNR")
 
     plt.tight_layout()
-    plt.savefig("jpa_optimizer_test.png", dpi=150, bbox_inches="tight")
-    print("\nPlot saved as 'jpa_optimizer_test.png'")
+    plt.savefig("jpa_optimizer_test.png", dpi=150)
+    print("Figure saved to jpa_optimizer_test.png")
     plt.show()
