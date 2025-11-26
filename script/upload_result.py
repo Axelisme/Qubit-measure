@@ -134,7 +134,7 @@ def upload_folder_to_drive(service, local_folder_path, parent_folder_id):
 def main():
     """Main function to parse arguments and trigger the upload."""
     parser = argparse.ArgumentParser(description="Upload qubit measurement results to a specified Google Drive folder.")
-    parser.add_argument("qubit_name", help="The name of the qubit (e.g., Si001). This corresponds to a folder inside the 'result/' directory, which will be uploaded.")
+    parser.add_argument("qubit_names", nargs='+', help="The names of the qubits (e.g., Si001 Si002). These correspond to folders inside the 'result/' directory, which will be uploaded.")
     args = parser.parse_args()
 
     load_dotenv()
@@ -144,19 +144,21 @@ def main():
         print("Error: The 'GOOGLE_DRIVE_PARENT_FOLDER_ID' environment variable is not set.")
         sys.exit(1)
 
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    source_folder = os.path.join(project_root, "result", args.qubit_name)
-
-    if not os.path.isdir(source_folder):
-        print(f"Error: Source folder '{source_folder}' not found.")
-        sys.exit(1)
-
     drive_service = authenticate_drive()
-    
-    qubit_folder_id = find_or_create_folder(drive_service, args.qubit_name, parent_folder_id)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    if qubit_folder_id:
-        upload_folder_to_drive(drive_service, source_folder, qubit_folder_id)
+    for qubit_name in args.qubit_names:
+        print(f"\nProcessing qubit: {qubit_name}")
+        source_folder = os.path.join(project_root, "result", qubit_name)
+
+        if not os.path.isdir(source_folder):
+            print(f"Error: Source folder '{source_folder}' not found. Skipping.")
+            continue
+        
+        qubit_folder_id = find_or_create_folder(drive_service, qubit_name, parent_folder_id)
+
+        if qubit_folder_id:
+            upload_folder_to_drive(drive_service, source_folder, qubit_folder_id)
 
 if __name__ == "__main__":
     main()
