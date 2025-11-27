@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from copy import deepcopy
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -11,13 +12,20 @@ from numpy.typing import NDArray
 from skopt import Optimizer
 from typing_extensions import NotRequired
 
+# Suppress skopt warnings about duplicate points
+warnings.filterwarnings(
+    "ignore",
+    message="The objective has been evaluated at point .* before",
+    category=UserWarning,
+    module="skopt.optimizer.optimizer",
+)
+
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
     make_ge_sweep,
     set_flux_in_dev_cfg,
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
-    sweep2array,
 )
 from zcu_tools.experiment.v2.runner import (
     HardTask,
@@ -45,11 +53,19 @@ from zcu_tools.utils.datasaver import save_data
 
 class JPAOptimizer:
     """
-    Optimizer for JPA parameters using a two-phase approach with scikit-optimize:
-    1. Flux-sliced 2D optimization (80% points): fixed flux, optimize freq/power.
-       - For each flux value, 80% grid search + 20% Bayesian optimization.
-    2. Fine 3D optimization (20% points + savings): full 3D bayesian optimization
-       starting from phase 1 data within a restricted flux range.
+    Multi-phase optimizer for JPA parameters using scikit-optimize:
+
+    Phase 1 (50% of total budget):
+        - Evenly distribute budget among all flux grid points
+        - For each flux value: 100% LHS sampling (pure exploration)
+
+    Phase 2+ (budget = total_points * (1/2)^n for phase n):
+        - Select top 20% flux values by best SNR (ceil)
+        - Generate 3 refinement points per selected flux at -0.5, 0, +0.5 of previous interval
+        - For new flux points: 50% LHS + 50% Bayesian optimization
+        - For existing flux points: 100% Bayesian optimization
+        - Use nearest neighbor's best point as initial guess for BO
+        - Terminates when next phase budget < 100, then use all remaining points
     """
 
     def __init__(
@@ -59,6 +75,10 @@ class JPAOptimizer:
         pdr_sweep: SweepCfg,
         total_points: int,
     ) -> None:
+        from math import ceil
+
+        from scipy.stats import qmc
+
         self.total_points = total_points
 
         # Extract bounds from sweeps
@@ -66,13 +86,13 @@ class JPAOptimizer:
         self.fpt_bounds = (fpt_sweep["start"], fpt_sweep["stop"])
         self.pdr_bounds = (pdr_sweep["start"], pdr_sweep["stop"])
 
-        # Budget allocation
-        self.phase1_total_budget = int(0.8 * total_points)
-        self.phase2_base_budget = total_points - self.phase1_total_budget
-        self.phase2_extra_budget = 0  # accumulated savings from phase 1
+        # Phase 1 budget = 50% of total
+        self.phase1_budget = total_points // 2
+        self.remaining_budget = total_points - self.phase1_budget
 
-        # Determine flux grid points (cube root of phase1 budget)
-        self.num_flx_points = max(2, int(round(self.phase1_total_budget ** (1 / 3))))
+        # Determine flux grid points for phase 1
+        # Use cube root to balance flux points vs 2D optimization budget
+        self.num_flx_points = max(2, int(round(self.phase1_budget ** (1 / 3))))
         self.flx_grid = np.linspace(
             self.flx_bounds[0], self.flx_bounds[1], self.num_flx_points
         )
@@ -82,229 +102,458 @@ class JPAOptimizer:
             else (self.flx_bounds[1] - self.flx_bounds[0])
         )
 
-        # Budget per flux slice
-        self.budget_per_flx = self.phase1_total_budget // self.num_flx_points
+        # Budget per flux slice in phase 1 (100% LHS)
+        self.budget_per_flx = self.phase1_budget // self.num_flx_points
 
-        # Calculate grid dimensions for 2D search (80% of budget_per_flx)
-        grid_budget = int(0.8 * self.budget_per_flx)
-        self.grid_size = max(2, int(np.sqrt(grid_budget)))
-        self.fpt_grid = np.linspace(
-            self.fpt_bounds[0], self.fpt_bounds[1], self.grid_size
-        )
-        self.pdr_grid = np.linspace(
-            self.pdr_bounds[0], self.pdr_bounds[1], self.grid_size
-        )
-
-        # Grid spacings for convergence check
-        self.fpt_spacing = (
-            (self.fpt_bounds[1] - self.fpt_bounds[0]) / (self.grid_size - 1)
-            if self.grid_size > 1
-            else (self.fpt_bounds[1] - self.fpt_bounds[0])
-        )
-        self.pdr_spacing = (
-            (self.pdr_bounds[1] - self.pdr_bounds[0]) / (self.grid_size - 1)
-            if self.grid_size > 1
-            else (self.pdr_bounds[1] - self.pdr_bounds[0])
-        )
+        # LHS sampler for 2D (freq, power) space
+        self._lhs_sampler = qmc.LatinHypercube(d=2)
+        self._ceil = ceil
 
         # State tracking
-        self.phase = 1
+        self._phase = 1
+        self._iter_count = 0
         self.current_flx_idx = 0
         self.current_slice_iter = 0
-        self.slice_grid_done = False
+        self.last_flx: Optional[float] = None  # Track last measured flux value
 
-        # History storage
+        # Current slice LHS points and optimizer
+        self._lhs_points: List[List[float]] = []
+        self._lhs_idx = 0
+        self.opt_2d: Optional[Optimizer] = None
+
+        # Data storage per flux value
+        # flux_data: flx -> [(fpt, pdr, snr), ...]
+        self.flux_data: dict[float, List[Tuple[float, float, float]]] = {}
+        # flux_best: flx -> (best_fpt, best_pdr, best_snr)
+        self.flux_best: dict[float, Tuple[float, float, float]] = {}
+
+        # Global history for compatibility
         self.history_X: List[List[float]] = []  # [flx, fpt, pdr]
         self.history_y: List[float] = []  # SNR values
 
-        # Current slice data (for 2D optimizer)
-        self.slice_X: List[List[float]] = []  # [fpt, pdr]
-        self.slice_y: List[float] = []
+        # Phase 2+ state
+        self.phase_budget = self.phase1_budget  # Current phase budget
+        self.prev_interval = self.flx_interval  # Previous phase interval
+        self._refinement_flx_list: List[
+            float
+        ] = []  # Flux test points for current phase
+        self._refinement_idx = 0
+        self._current_refinement_flx: Optional[float] = None
+        self._refinement_slice_iter = 0
+        self._refinement_budget_per_flx = 0
 
-        # Pre-generate grid points for current slice
-        self._generate_slice_grid()
+        # Phase 2+ LHS and neighbor guess state
+        self._refinement_lhs_budget = 0  # LHS budget for current refinement slice
+        self._refinement_lhs_points: List[List[float]] = []
+        self._refinement_lhs_idx = 0
+        self._neighbor_guess: Optional[List[float]] = None  # [fpt, pdr] from neighbor
+        self._neighbor_guess_used = False
 
-        # 2D optimizer for current flux slice (initialized after grid search)
-        self.opt_2d: Optional[Optimizer] = None
+        # Generate LHS points for first flux slice
+        self._generate_lhs_samples()
 
-        # 3D optimizer for phase 2
-        self.opt_3d: Optional[Optimizer] = None
-        self.phase2_iter = 0
-
-        # Track actual iteration count
-        self._iter_count = 0
-
-        # Flag to track if slice ended due to early stop (convergence)
-        self._slice_early_stop = False
-
-    def _generate_slice_grid(self) -> None:
-        """Generate grid points for the current flux slice."""
-        self.slice_grid_points: List[List[float]] = []
-        for fpt in self.fpt_grid:
-            for pdr in self.pdr_grid:
-                self.slice_grid_points.append([fpt, pdr])
-        self.slice_grid_idx = 0
-
-    def _check_phase1_convergence(self) -> bool:
+    def _generate_lhs_samples(
+        self,
+        n_samples: Optional[int] = None,
+        fpt_bounds: Optional[Tuple[float, float]] = None,
+        pdr_bounds: Optional[Tuple[float, float]] = None,
+    ) -> List[List[float]]:
         """
-        Check convergence for phase 1 (2D optimization).
-        Calculate per-dimension std of last 30 points.
-        If std < grid spacing for any dimension, consider converged.
+        Generate 2D LHS samples for current flux slice.
+
+        Args:
+            n_samples: Number of samples. If None, uses budget_per_flx.
+            fpt_bounds: Frequency bounds. If None, uses self.fpt_bounds.
+            pdr_bounds: Power bounds. If None, uses self.pdr_bounds.
+
+        Returns:
+            List of [fpt, pdr] samples.
         """
-        if len(self.slice_X) < 30:
-            return False
+        if n_samples is None:
+            n_samples = max(1, self.budget_per_flx)
+        else:
+            n_samples = max(1, n_samples)
 
-        recent_points = np.array(self.slice_X[-30:])
-        std_fpt = np.std(recent_points[:, 0])
-        std_pdr = np.std(recent_points[:, 1])
+        if fpt_bounds is None:
+            fpt_bounds = self.fpt_bounds
+        if pdr_bounds is None:
+            pdr_bounds = self.pdr_bounds
 
-        return std_fpt < self.fpt_spacing or std_pdr < self.pdr_spacing
+        # Generate samples in [0, 1]^2
+        samples = self._lhs_sampler.random(n=n_samples)
+        # Scale to actual bounds
+        fpt_range = fpt_bounds[1] - fpt_bounds[0]
+        pdr_range = pdr_bounds[1] - pdr_bounds[0]
+        lhs_points: List[List[float]] = []
+        for s in samples:
+            fpt = fpt_bounds[0] + s[0] * fpt_range
+            pdr = pdr_bounds[0] + s[1] * pdr_range
+            lhs_points.append([fpt, pdr])
 
-    def _check_phase2_convergence(self) -> bool:
+        # For Phase 1 compatibility, also set instance variables
+        self._lhs_points = lhs_points
+        self._lhs_idx = 0
+
+        return lhs_points
+
+    def _get_flux_best_point(self, flx: float) -> Optional[Tuple[float, float, float]]:
+        """Get the best (fpt, pdr, snr) for a given flux value."""
+        return self.flux_best.get(flx)
+
+    def _find_nearest_measured_flx(self, target_flx: float) -> Optional[float]:
+        """Find the nearest flux value that has been measured."""
+        if not self.flux_best:
+            return None
+        measured_flx_list = list(self.flux_best.keys())
+        nearest = min(measured_flx_list, key=lambda x: abs(x - target_flx))
+        return nearest
+
+    def _get_restricted_bounds(
+        self, center_fpt: float, center_pdr: float, phase: int
+    ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         """
-        Check convergence for phase 2 (3D optimization).
-        Calculate std of last 50 SNR values from phase 2 only.
-        If std < mean / 5, consider converged.
+        Get restricted 2D bounds centered on (center_fpt, center_pdr).
+        Range shrinks by factor of 2^(phase-1).
+        Returns intersection with original bounds.
         """
-        # Only check convergence based on phase 2 points
-        if self.phase2_iter < 50:
-            return False
+        shrink_factor = 2 ** (phase - 1)
+        fpt_range = (self.fpt_bounds[1] - self.fpt_bounds[0]) / shrink_factor
+        pdr_range = (self.pdr_bounds[1] - self.pdr_bounds[0]) / shrink_factor
 
-        # Get only phase 2 SNR values (last phase2_iter points in history_y)
-        recent_snrs = np.array(self.history_y[-min(50, self.phase2_iter) :])
-        std_snr = np.std(recent_snrs)
-        mean_snr = np.mean(recent_snrs)
+        fpt_lo = max(self.fpt_bounds[0], center_fpt - fpt_range / 2)
+        fpt_hi = min(self.fpt_bounds[1], center_fpt + fpt_range / 2)
+        pdr_lo = max(self.pdr_bounds[0], center_pdr - pdr_range / 2)
+        pdr_hi = min(self.pdr_bounds[1], center_pdr + pdr_range / 2)
 
-        if mean_snr <= 0:
-            return False
+        return ((fpt_lo, fpt_hi), (pdr_lo, pdr_hi))
 
-        return std_snr < mean_snr / 5
+    def _init_2d_optimizer_for_flux(
+        self,
+        target_flx: float,
+        fpt_bounds: Tuple[float, float],
+        pdr_bounds: Tuple[float, float],
+    ) -> Optimizer:
+        """
+        Initialize 2D optimizer using ONLY data measured at the target flux.
+        This avoids model pollution from neighbor flux values where the optimal
+        (fpt, pdr) may be very different.
 
-    def _init_phase2(self) -> None:
-        """Initialize phase 2 with restricted flux range and warm start."""
-        self.phase = 2
-        self.phase2_iter = 0
+        Args:
+            target_flx: The flux value to optimize for.
+            fpt_bounds: Frequency bounds for optimization.
+            pdr_bounds: Power bounds for optimization.
 
-        # Find best flux from phase 1
-        best_idx = int(np.argmax(self.history_y))
-        best_flx = self.history_X[best_idx][0]
-
-        # Restricted flux range: best_flx ± 1.25 * flx_interval
-        flx_range = 1.25 * self.flx_interval
-        flx_lo = max(self.flx_bounds[0], best_flx - flx_range)
-        flx_hi = min(self.flx_bounds[1], best_flx + flx_range)
-
-        # Create 3D optimizer
-        self.opt_3d = Optimizer(
-            dimensions=[
-                (flx_lo, flx_hi),  # flux
-                self.fpt_bounds,  # freq
-                self.pdr_bounds,  # power
-            ],
+        Returns:
+            Initialized Optimizer instance.
+        """
+        opt = Optimizer(
+            dimensions=[fpt_bounds, pdr_bounds],
             acq_func="EI",
-            n_initial_points=0,  # we'll warm start with historical data
+            n_initial_points=0,
         )
 
-        # Filter historical points within the new flux range
-        init_X = []
-        init_y = []
-        for x, y in zip(self.history_X, self.history_y):
-            if flx_lo <= x[0] <= flx_hi:
-                init_X.append(x)
-                init_y.append(-y)  # skopt minimizes, we want to maximize SNR
+        # Only use data from THIS flux value (avoid model pollution)
+        if target_flx in self.flux_data:
+            init_points: List[Tuple[List[float], float]] = []
+            for fpt, pdr, snr in self.flux_data[target_flx]:
+                # Check if point is within the current bounds
+                if (
+                    fpt_bounds[0] <= fpt <= fpt_bounds[1]
+                    and pdr_bounds[0] <= pdr <= pdr_bounds[1]
+                ):
+                    init_points.append(([fpt, pdr], snr))
 
-        # Warm start with filtered historical data (fit=False to save time)
-        if init_X:
-            # Add all points except the last one without fitting
-            for x, y in zip(init_X[:-1], init_y[:-1]):
-                self.opt_3d.tell(x, y, fit=False)
-            # Fit once on the last point
-            self.opt_3d.tell(init_X[-1], init_y[-1], fit=True)
+            # Tell optimizer about these points (fit=False for speed)
+            if init_points:
+                for x, y in init_points[:-1]:
+                    opt.tell(x, -y, fit=False)  # skopt minimizes, we want to maximize
+                # Fit on the last point
+                opt.tell(init_points[-1][0], -init_points[-1][1], fit=True)
+
+        return opt
+
+    def _select_top_flux_values(self) -> List[float]:
+        """Select top 20% flux values by best SNR."""
+        if not self.flux_best:
+            return []
+
+        # Sort flux values by their best SNR (descending)
+        sorted_flx = sorted(
+            self.flux_best.keys(), key=lambda f: self.flux_best[f][2], reverse=True
+        )
+
+        # Take top 20% (ceil)
+        n_top = self._ceil(len(sorted_flx) * 0.2)
+        n_top = max(1, n_top)  # At least 1
+        return sorted_flx[:n_top]
+
+    def _generate_refinement_points(
+        self, selected_flx_list: List[float]
+    ) -> List[float]:
+        """
+        Generate refinement test points for selected flux values.
+        Each selected flux generates up to 3 points: -0.5, 0, +0.5 of prev_interval.
+        Points outside bounds are ignored.
+        """
+        new_points: set[float] = set()
+        offsets = [
+            -0.5 * self.prev_interval,
+            0,
+            0.5 * self.prev_interval,
+        ]
+
+        for flx in selected_flx_list:
+            for offset in offsets:
+                new_flx = flx + offset
+                # Check bounds
+                if self.flx_bounds[0] <= new_flx <= self.flx_bounds[1]:
+                    # Avoid duplicates and already measured flux values
+                    if new_flx not in self.flux_best:
+                        new_points.add(new_flx)
+
+        return list(new_points)
+
+    def _sort_refinement_points(self, points: List[float]) -> List[float]:
+        """
+        Sort refinement points so the first point is closest to last_flx.
+        Choose ascending or descending order accordingly.
+        """
+        if not points:
+            return points
+
+        if self.last_flx is None:
+            # Default to ascending
+            return sorted(points)
+
+        sorted_asc = sorted(points)
+        sorted_desc = sorted(points, reverse=True)
+
+        # Check which order puts the first point closer to last_flx
+        dist_asc = abs(sorted_asc[0] - self.last_flx)
+        dist_desc = abs(sorted_desc[0] - self.last_flx)
+
+        return sorted_asc if dist_asc <= dist_desc else sorted_desc
+
+    def _init_next_phase(self) -> bool:
+        """
+        Initialize the next phase (phase 2+).
+        Returns True if a new phase was started, False if optimization should end.
+        """
+        # Calculate next phase budget: total_points * (1/2)^n
+        next_phase = self._phase + 1
+        next_budget = int(self.total_points * (1 / 2) ** next_phase)
+
+        # Check termination condition
+        if next_budget < 100:
+            # Last phase: use all remaining budget
+            next_budget = self.remaining_budget
+            if next_budget <= 0:
+                return False
+
+        self._phase = next_phase
+        self.phase_budget = next_budget
+        self.remaining_budget -= next_budget
+
+        # Select top flux values
+        selected_flx = self._select_top_flux_values()
+        if not selected_flx:
+            return False
+
+        # Generate refinement points
+        new_points = self._generate_refinement_points(selected_flx)
+        if not new_points:
+            # No new points to test, continue with direct optimization on selected
+            new_points = selected_flx.copy()
+
+        # Sort refinement points
+        self._refinement_flx_list = self._sort_refinement_points(new_points)
+        self._refinement_idx = 0
+
+        # Budget per refinement flux value
+        if self._refinement_flx_list:
+            self._refinement_budget_per_flx = max(
+                1, self.phase_budget // len(self._refinement_flx_list)
+            )
+        else:
+            self._refinement_budget_per_flx = 0
+
+        # Update interval for next phase
+        self.prev_interval = self.prev_interval / 2  # 1/2 of previous interval
+
+        # Initialize first refinement flux
+        if self._refinement_flx_list:
+            self._init_refinement_slice(self._refinement_flx_list[0])
+
+        return True
+
+    def _init_refinement_slice(self, flx: float) -> None:
+        """
+        Initialize 2D optimization for a refinement flux value.
+
+        For new flux points (not previously measured):
+            - 50% LHS sampling + 50% Bayesian optimization
+        For existing flux points:
+            - 100% Bayesian optimization
+        """
+        self._current_refinement_flx = flx
+        self._refinement_slice_iter = 0
+
+        # Check if this flux has been measured before
+        is_new_flux = flx not in self.flux_data
+
+        # Find nearest measured flux and its best point
+        nearest_flx = self._find_nearest_measured_flx(flx)
+        if nearest_flx is not None and nearest_flx in self.flux_best:
+            best_fpt, best_pdr, _ = self.flux_best[nearest_flx]
+        else:
+            # Fallback to center of bounds
+            best_fpt = (self.fpt_bounds[0] + self.fpt_bounds[1]) / 2
+            best_pdr = (self.pdr_bounds[0] + self.pdr_bounds[1]) / 2
+
+        # Get restricted bounds
+        fpt_bounds, pdr_bounds = self._get_restricted_bounds(
+            best_fpt, best_pdr, self._phase
+        )
+
+        # Store bounds for later use
+        self._current_fpt_bounds = fpt_bounds
+        self._current_pdr_bounds = pdr_bounds
+
+        # Store neighbor's best point as initial guess for BO phase
+        self._neighbor_guess = [best_fpt, best_pdr]
+        self._neighbor_guess_used = False
+
+        # Determine LHS budget based on whether flux is new or existing
+        if is_new_flux:
+            # New flux: 50% LHS + 50% BO
+            self._refinement_lhs_budget = self._refinement_budget_per_flx // 2
+            # Generate LHS samples within restricted bounds
+            self._refinement_lhs_points = self._generate_lhs_samples(
+                n_samples=self._refinement_lhs_budget,
+                fpt_bounds=fpt_bounds,
+                pdr_bounds=pdr_bounds,
+            )
+            self._refinement_lhs_idx = 0
+        else:
+            # Existing flux: 100% BO (no LHS)
+            self._refinement_lhs_budget = 0
+            self._refinement_lhs_points = []
+            self._refinement_lhs_idx = 0
+
+        # Initialize optimizer with only data from THIS flux (avoid model pollution)
+        self.opt_2d = self._init_2d_optimizer_for_flux(flx, fpt_bounds, pdr_bounds)
 
     def _get_phase1_point(self) -> Optional[Tuple[float, float, float]]:
-        """Get next point for phase 1 optimization."""
+        """
+        Get next point for phase 1 optimization.
+        Phase 1 uses pure LHS sampling (no Bayesian optimization).
+        """
         current_flx = self.flx_grid[self.current_flx_idx]
 
-        # Check if we're still in grid search phase
-        if self.slice_grid_idx < len(self.slice_grid_points):
-            fpt, pdr = self.slice_grid_points[self.slice_grid_idx]
-            self.slice_grid_idx += 1
+        # Check if we've used up budget for this slice
+        if self.current_slice_iter >= self.budget_per_flx:
+            return None  # Signal to move to next slice
+
+        # Check if we're still in LHS phase
+        if self._lhs_idx < len(self._lhs_points):
+            fpt, pdr = self._lhs_points[self._lhs_idx]
+            self._lhs_idx += 1
             return (current_flx, fpt, pdr)
 
-        # Grid search done, switch to 2D Bayesian optimization
-        if not self.slice_grid_done:
-            self.slice_grid_done = True
-            # Initialize 2D optimizer
-            self.opt_2d = Optimizer(
-                dimensions=[self.fpt_bounds, self.pdr_bounds],
-                acq_func="EI",
-                n_initial_points=0,
-            )
-            # Tell optimizer about grid search results (fit=False for speed)
-            if self.slice_X and self.slice_y:
-                for x, y in zip(self.slice_X, self.slice_y):
-                    self.opt_2d.tell(x, -y, fit=False)  # minimize negative SNR
-                # Fit once at the end
-                self.opt_2d.tell(self.slice_X[-1], -self.slice_y[-1], fit=True)
+        # All LHS points exhausted for this slice
+        return None
 
-        # Check if we've used up budget for this slice
-        remaining_budget = self.budget_per_flx - self.current_slice_iter
-        if remaining_budget <= 0:
-            self._slice_early_stop = False  # Budget exhausted, not early stop
-            return None  # Signal to move to next slice
+    def _get_phaseN_point(self) -> Optional[Tuple[float, float, float]]:
+        """
+        Get next point for phase 2+ optimization.
 
-        # Check convergence
-        if self._check_phase1_convergence():
-            self._slice_early_stop = True  # Converged, save remaining for phase 2
-            return None  # Signal to move to next slice
+        Execution order:
+        1. LHS points (if any, for new flux points)
+        2. Neighbor's best point as initial guess (if valid and not duplicate)
+        3. Bayesian optimization via opt_2d.ask()
+        """
+        if self._current_refinement_flx is None:
+            return None
 
-        # Get next point from 2D optimizer
+        current_flx = self._current_refinement_flx
+
+        # Check if we've used up budget for this refinement slice
+        if self._refinement_slice_iter >= self._refinement_budget_per_flx:
+            return None  # Signal to move to next refinement flux
+
+        # Step 1: Execute LHS points first (for new flux points)
+        if self._refinement_lhs_idx < len(self._refinement_lhs_points):
+            fpt, pdr = self._refinement_lhs_points[self._refinement_lhs_idx]
+            self._refinement_lhs_idx += 1
+            return (current_flx, fpt, pdr)
+
+        # Step 2: Use neighbor's best point as first BO point (if not used yet)
+        if not self._neighbor_guess_used and self._neighbor_guess is not None:
+            self._neighbor_guess_used = True
+            fpt, pdr = self._neighbor_guess
+
+            # Check if point is within current bounds
+            if (
+                self._current_fpt_bounds[0] <= fpt <= self._current_fpt_bounds[1]
+                and self._current_pdr_bounds[0] <= pdr <= self._current_pdr_bounds[1]
+            ):
+                # Check if this point was already sampled at this flux
+                if current_flx in self.flux_data:
+                    already_sampled = any(
+                        abs(existing_fpt - fpt) < 1e-6
+                        and abs(existing_pdr - pdr) < 1e-6
+                        for existing_fpt, existing_pdr, _ in self.flux_data[current_flx]
+                    )
+                    if not already_sampled:
+                        return (current_flx, fpt, pdr)
+                else:
+                    return (current_flx, fpt, pdr)
+
+        # Step 3: Get next point from 2D optimizer
         if self.opt_2d is not None:
             next_2d = self.opt_2d.ask()
             return (current_flx, next_2d[0], next_2d[1])
 
         return None
 
-    def _get_phase2_point(self) -> Optional[Tuple[float, float, float]]:
-        """Get next point for phase 2 optimization."""
-        if self.opt_3d is None:
-            return None
-
-        # Check budget
-        total_phase2_budget = self.phase2_base_budget + self.phase2_extra_budget
-        if self.phase2_iter >= total_phase2_budget:
-            return None
-
-        # Check convergence
-        if self._check_phase2_convergence():
-            return None
-
-        # Get next point from 3D optimizer
-        next_3d = self.opt_3d.ask()
-        return (next_3d[0], next_3d[1], next_3d[2])
-
-    def _advance_to_next_slice(self, early_stop: bool = False) -> None:
-        """Move to the next flux slice.
-
-        Args:
-            early_stop: If True, remaining budget is saved for phase 2.
-                        If False (budget exhausted), no extra budget is added.
-        """
-        # Only save remaining budget if early stopped (converged)
-        if early_stop:
-            remaining = self.budget_per_flx - self.current_slice_iter
-            if remaining > 0:
-                self.phase2_extra_budget += remaining
-
+    def _advance_to_next_slice(self) -> None:
+        """Move to the next flux slice in phase 1."""
         self.current_flx_idx += 1
         self.current_slice_iter = 0
-        self.slice_grid_done = False
-        self.slice_X = []
-        self.slice_y = []
-        self.opt_2d = None
 
         if self.current_flx_idx < self.num_flx_points:
-            self._generate_slice_grid()
+            self._generate_lhs_samples()
+
+    def _advance_to_next_refinement(self) -> bool:
+        """
+        Move to the next refinement flux in phase 2+.
+        Returns True if there are more refinement points, False otherwise.
+        """
+        self._refinement_idx += 1
+        if self._refinement_idx < len(self._refinement_flx_list):
+            self._init_refinement_slice(self._refinement_flx_list[self._refinement_idx])
+            return True
+        return False
+
+    def _record_measurement(
+        self, flx: float, fpt: float, pdr: float, snr: float
+    ) -> None:
+        """Record a measurement result."""
+        # Add to flux_data
+        if flx not in self.flux_data:
+            self.flux_data[flx] = []
+        self.flux_data[flx].append((fpt, pdr, snr))
+
+        # Update flux_best
+        if flx not in self.flux_best or snr > self.flux_best[flx][2]:
+            self.flux_best[flx] = (fpt, pdr, snr)
+
+        # Update global history
+        self.history_X.append([flx, fpt, pdr])
+        self.history_y.append(snr)
+
+        # Update last_flx
+        self.last_flx = flx
 
     @property
     def phase(self) -> int:
@@ -321,57 +570,83 @@ class JPAOptimizer:
             return None
 
         # Record last result
-        if last_snr is not None and i > 0:
-            # Update history
-            if len(self.history_X) > 0:
-                self.history_y.append(last_snr)
+        if last_snr is not None and i > 0 and len(self.history_X) > 0:
+            last_x = self.history_X[-1]
+            flx, fpt, pdr = last_x[0], last_x[1], last_x[2]
+            # Update flux_data and flux_best (history_X was already added, just update flux structures)
+            if flx not in self.flux_data:
+                self.flux_data[flx] = []
+            # Check if this point was already added
+            if not self.flux_data[flx] or self.flux_data[flx][-1] != (
+                fpt,
+                pdr,
+                last_snr,
+            ):
+                self.flux_data[flx].append((fpt, pdr, last_snr))
+            # Update flux_best
+            if flx not in self.flux_best or last_snr > self.flux_best[flx][2]:
+                self.flux_best[flx] = (fpt, pdr, last_snr)
+            # Update history_y
+            self.history_y.append(last_snr)
+            # Update last_flx
+            self.last_flx = flx
 
-                # Update slice data for phase 1
-                if self.phase == 1 and len(self.slice_X) > 0:
-                    self.slice_y.append(last_snr)
-                    # Tell 2D optimizer if active
-                    if self.opt_2d is not None and len(self.slice_y) > len(
-                        self.slice_grid_points
+            # Tell optimizer about the result (only in Phase 2+)
+            # Phase 1 uses pure LHS, no optimizer feedback needed
+            if self._phase >= 2 and self.opt_2d is not None:
+                # Check if point is within current bounds
+                if hasattr(self, "_current_fpt_bounds") and hasattr(
+                    self, "_current_pdr_bounds"
+                ):
+                    if (
+                        self._current_fpt_bounds[0]
+                        <= fpt
+                        <= self._current_fpt_bounds[1]
+                        and self._current_pdr_bounds[0]
+                        <= pdr
+                        <= self._current_pdr_bounds[1]
                     ):
-                        self.opt_2d.tell(self.slice_X[-1], -last_snr)
-
-                # Tell 3D optimizer if in phase 2
-                if self.phase == 2 and self.opt_3d is not None:
-                    self.opt_3d.tell(self.history_X[-1], -last_snr)
+                        self.opt_2d.tell([fpt, pdr], -last_snr)
 
         # Get next point based on current phase
-        if self.phase == 1:
+        if self._phase == 1:
             point = self._get_phase1_point()
 
             if point is None:
-                # Move to next slice or phase 2
-                self._advance_to_next_slice(early_stop=self._slice_early_stop)
+                # Move to next slice
+                self._advance_to_next_slice()
 
                 if self.current_flx_idx >= self.num_flx_points:
                     # All flux slices done, move to phase 2
-                    self._init_phase2()
+                    if not self._init_next_phase():
+                        return None  # Optimization complete
                     return self.next_params(i, None)
                 else:
                     # Try again with new slice
                     return self.next_params(i, None)
 
-            # Record point
+            # Record point (will be updated with SNR in next call)
             self.history_X.append(list(point))
-            self.slice_X.append([point[1], point[2]])  # [fpt, pdr]
             self.current_slice_iter += 1
             self._iter_count += 1
             return point
 
-        else:  # phase == 2
-            point = self._get_phase2_point()
+        else:  # phase >= 2
+            point = self._get_phaseN_point()
 
             if point is None:
-                # Phase 2 converged or budget exhausted
-                return None
+                # Try to advance to next refinement flux
+                if self._advance_to_next_refinement():
+                    return self.next_params(i, None)
+                else:
+                    # All refinement points done, try next phase
+                    if not self._init_next_phase():
+                        return None  # Optimization complete
+                    return self.next_params(i, None)
 
             # Record point
             self.history_X.append(list(point))
-            self.phase2_iter += 1
+            self._refinement_slice_iter += 1
             self._iter_count += 1
             return point
 
@@ -624,6 +899,8 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
 if __name__ == "__main__":
     # Test JPAOptimizer with a simulated SNR function
 
+    from tqdm.auto import trange
+
     def simulate_snr(
         flx: float, fpt: float, pdr: float, noise_std: float = 0.1
     ) -> float:
@@ -656,7 +933,7 @@ if __name__ == "__main__":
         snr_clean = 10.0 * gauss * (1 + sin_mod) * (1 + sin_fpt) + 1.0
 
         # Add measurement noise
-        noise = np.random.normal(0, noise_std * snr_clean)
+        noise = 0.1 * np.random.normal(0, noise_std * snr_clean)
         snr = max(0.1, snr_clean + noise)
 
         return snr
@@ -669,7 +946,7 @@ if __name__ == "__main__":
     total_points = 500
 
     print("=" * 60)
-    print("JPAOptimizer Test")
+    print("JPAOptimizer Test (Multi-phase Algorithm)")
     print("=" * 60)
     print(f"Total points: {total_points}")
     print(f"Flux range: [{flx_sweep['start']}, {flx_sweep['stop']}]")
@@ -681,11 +958,10 @@ if __name__ == "__main__":
     # Create optimizer
     optimizer = JPAOptimizer(flx_sweep, fpt_sweep, pdr_sweep, total_points)
 
-    print(f"Phase 1 budget: {optimizer.phase1_total_budget}")
-    print(f"Phase 2 base budget: {optimizer.phase2_base_budget}")
+    print(f"Phase 1 budget: {optimizer.phase1_budget}")
     print(f"Number of flux slices: {optimizer.num_flx_points}")
-    print(f"Budget per flux slice: {optimizer.budget_per_flx}")
-    print(f"Grid size: {optimizer.grid_size}x{optimizer.grid_size}")
+    print(f"Budget per flux slice: {optimizer.budget_per_flx} (100% LHS)")
+    print(f"Remaining budget for phase 2+: {optimizer.remaining_budget}")
     print("=" * 60)
 
     # Run optimization
@@ -694,7 +970,7 @@ if __name__ == "__main__":
     phases_list: List[int] = []
 
     last_snr: Optional[float] = None
-    for i in range(total_points):
+    for i in trange(total_points):
         params = optimizer.next_params(i, last_snr)
         if params is None:
             print(f"Optimization stopped at iteration {i}")
@@ -725,13 +1001,17 @@ if __name__ == "__main__":
     best_params = params_arr[best_idx]
     best_snr = snrs_arr[best_idx]
 
+    # Count points per phase
+    unique_phases = np.unique(phases_arr)
+    phase_counts = {p: np.sum(phases_arr == p) for p in unique_phases}
+
     print("=" * 60)
     print("Optimization Results")
     print("=" * 60)
     print(f"Total iterations: {len(params_list)}")
-    print(f"Phase 1 points: {np.sum(phases_arr == 1)}")
-    print(f"Phase 2 points: {np.sum(phases_arr == 2)}")
-    print(f"Phase 2 extra budget (savings): {optimizer.phase2_extra_budget}")
+    for p, count in sorted(phase_counts.items()):
+        print(f"  Phase {p} points: {count}")
+    print(f"Number of unique flux values tested: {len(optimizer.flux_best)}")
     print(f"Best SNR: {best_snr:.4f} at iteration {best_idx}")
     print(
         f"Best params: flx={best_params[0]:.4f}, "
@@ -746,156 +1026,130 @@ if __name__ == "__main__":
 
     # Create visualization
     fig = plt.figure(figsize=(14, 10))
-    fig.suptitle("JPAOptimizer Test Results", fontsize=14)
+    fig.suptitle("JPAOptimizer Test Results (Multi-phase)", fontsize=14)
+
+    # Color map for phases
+    phase_colors = {1: "blue", 2: "red", 3: "green", 4: "orange", 5: "purple"}
 
     # 1. SNR vs Iteration
     ax1 = fig.add_subplot(2, 3, 1)
-    phase1_mask = phases_arr == 1
-    phase2_mask = phases_arr == 2
-    ax1.scatter(
-        np.arange(len(snrs_arr))[phase1_mask],
-        snrs_arr[phase1_mask],
-        c="blue",
-        s=5,
-        alpha=0.6,
-        label="Phase 1",
-    )
-    ax1.scatter(
-        np.arange(len(snrs_arr))[phase2_mask],
-        snrs_arr[phase2_mask],
-        c="red",
-        s=5,
-        alpha=0.6,
-        label="Phase 2",
-    )
-    ax1.axhline(best_snr, color="green", ls="--", label=f"Best={best_snr:.2f}")
-    ax1.scatter([best_idx], [best_snr], c="green", s=100, marker="*", zorder=5)
+    for p in unique_phases:
+        mask = phases_arr == p
+        color = phase_colors.get(p, "gray")
+        ax1.scatter(
+            np.arange(len(snrs_arr))[mask],
+            snrs_arr[mask],
+            c=color,
+            s=5,
+            alpha=0.6,
+            label=f"Phase {p}",
+        )
+    ax1.axhline(best_snr, color="black", ls="--", label=f"Best={best_snr:.2f}")
+    ax1.scatter([best_idx], [best_snr], c="black", s=100, marker="*", zorder=5)
     ax1.set_xlabel("Iteration")
     ax1.set_ylabel("SNR")
     ax1.set_title("SNR vs Iteration")
-    ax1.legend()
+    ax1.legend(fontsize=8)
     ax1.grid(True, alpha=0.3)
 
     # 2. SNR vs Flux
     ax2 = fig.add_subplot(2, 3, 2)
-    ax2.scatter(
-        params_arr[phase1_mask, 0],
-        snrs_arr[phase1_mask],
-        c="blue",
-        s=5,
-        alpha=0.6,
-        label="Phase 1",
-    )
-    ax2.scatter(
-        params_arr[phase2_mask, 0],
-        snrs_arr[phase2_mask],
-        c="red",
-        s=5,
-        alpha=0.6,
-        label="Phase 2",
-    )
-    ax2.axvline(best_params[0], color="green", ls="--")
+    for p in unique_phases:
+        mask = phases_arr == p
+        color = phase_colors.get(p, "gray")
+        ax2.scatter(
+            params_arr[mask, 0],
+            snrs_arr[mask],
+            c=color,
+            s=5,
+            alpha=0.6,
+            label=f"Phase {p}",
+        )
+    ax2.axvline(best_params[0], color="black", ls="--")
     ax2.axvline(0.5, color="orange", ls=":", label="True optimal")
-    ax2.scatter([best_params[0]], [best_snr], c="green", s=100, marker="*", zorder=5)
+    ax2.scatter([best_params[0]], [best_snr], c="black", s=100, marker="*", zorder=5)
     ax2.set_xlabel("Flux (a.u.)")
     ax2.set_ylabel("SNR")
     ax2.set_title("SNR vs Flux")
-    ax2.legend()
+    ax2.legend(fontsize=8)
     ax2.grid(True, alpha=0.3)
 
     # 3. SNR vs Frequency
     ax3 = fig.add_subplot(2, 3, 3)
-    ax3.scatter(
-        params_arr[phase1_mask, 1],
-        snrs_arr[phase1_mask],
-        c="blue",
-        s=5,
-        alpha=0.6,
-        label="Phase 1",
-    )
-    ax3.scatter(
-        params_arr[phase2_mask, 1],
-        snrs_arr[phase2_mask],
-        c="red",
-        s=5,
-        alpha=0.6,
-        label="Phase 2",
-    )
-    ax3.axvline(best_params[1], color="green", ls="--")
+    for p in unique_phases:
+        mask = phases_arr == p
+        color = phase_colors.get(p, "gray")
+        ax3.scatter(
+            params_arr[mask, 1],
+            snrs_arr[mask],
+            c=color,
+            s=5,
+            alpha=0.6,
+            label=f"Phase {p}",
+        )
+    ax3.axvline(best_params[1], color="black", ls="--")
     ax3.axvline(7000, color="orange", ls=":", label="True optimal")
-    ax3.scatter([best_params[1]], [best_snr], c="green", s=100, marker="*", zorder=5)
+    ax3.scatter([best_params[1]], [best_snr], c="black", s=100, marker="*", zorder=5)
     ax3.set_xlabel("Frequency (MHz)")
     ax3.set_ylabel("SNR")
     ax3.set_title("SNR vs Frequency")
-    ax3.legend()
+    ax3.legend(fontsize=8)
     ax3.grid(True, alpha=0.3)
 
     # 4. SNR vs Power
     ax4 = fig.add_subplot(2, 3, 4)
-    ax4.scatter(
-        params_arr[phase1_mask, 2],
-        snrs_arr[phase1_mask],
-        c="blue",
-        s=5,
-        alpha=0.6,
-        label="Phase 1",
-    )
-    ax4.scatter(
-        params_arr[phase2_mask, 2],
-        snrs_arr[phase2_mask],
-        c="red",
-        s=5,
-        alpha=0.6,
-        label="Phase 2",
-    )
-    ax4.axvline(best_params[2], color="green", ls="--")
+    for p in unique_phases:
+        mask = phases_arr == p
+        color = phase_colors.get(p, "gray")
+        ax4.scatter(
+            params_arr[mask, 2],
+            snrs_arr[mask],
+            c=color,
+            s=5,
+            alpha=0.6,
+            label=f"Phase {p}",
+        )
+    ax4.axvline(best_params[2], color="black", ls="--")
     ax4.axvline(-10, color="orange", ls=":", label="True optimal")
-    ax4.scatter([best_params[2]], [best_snr], c="green", s=100, marker="*", zorder=5)
+    ax4.scatter([best_params[2]], [best_snr], c="black", s=100, marker="*", zorder=5)
     ax4.set_xlabel("Power (dBm)")
     ax4.set_ylabel("SNR")
     ax4.set_title("SNR vs Power")
-    ax4.legend()
+    ax4.legend(fontsize=8)
     ax4.grid(True, alpha=0.3)
 
-    # 5. 2D scatter: Flux vs Frequency
+    # 5. 2D scatter: Flux vs Frequency (colored by phase)
     ax5 = fig.add_subplot(2, 3, 5)
-    scatter = ax5.scatter(
-        params_arr[:, 0],
-        params_arr[:, 1],
-        c=snrs_arr,
-        s=10,
-        cmap="viridis",
-        alpha=0.7,
-    )
+    for p in unique_phases:
+        mask = phases_arr == p
+        color = phase_colors.get(p, "gray")
+        ax5.scatter(
+            params_arr[mask, 0],
+            params_arr[mask, 1],
+            c=color,
+            s=10,
+            alpha=0.5,
+            label=f"Phase {p}",
+        )
     ax5.scatter([0.5], [7000], c="red", s=100, marker="x", label="True optimal")
     ax5.scatter(
-        [best_params[0]], [best_params[1]], c="green", s=100, marker="*", label="Found"
+        [best_params[0]], [best_params[1]], c="black", s=100, marker="*", label="Found"
     )
     ax5.set_xlabel("Flux (a.u.)")
     ax5.set_ylabel("Frequency (MHz)")
     ax5.set_title("Sampled Points (Flux vs Freq)")
-    ax5.legend()
-    plt.colorbar(scatter, ax=ax5, label="SNR")
+    ax5.legend(fontsize=8)
+    ax5.grid(True, alpha=0.3)
 
-    # 6. 2D scatter: Frequency vs Power
+    # 6. Flux values and their best SNR
     ax6 = fig.add_subplot(2, 3, 6)
-    scatter2 = ax6.scatter(
-        params_arr[:, 1],
-        params_arr[:, 2],
-        c=snrs_arr,
-        s=10,
-        cmap="viridis",
-        alpha=0.7,
-    )
-    ax6.scatter([7000], [-10], c="red", s=100, marker="x", label="True optimal")
-    ax6.scatter(
-        [best_params[1]], [best_params[2]], c="green", s=100, marker="*", label="Found"
-    )
-    ax6.set_xlabel("Frequency (MHz)")
-    ax6.set_ylabel("Power (dBm)")
-    ax6.set_title("Sampled Points (Freq vs Power)")
-    ax6.legend()
-    plt.colorbar(scatter2, ax=ax6, label="SNR")
+    flux_values = sorted(optimizer.flux_best.keys())
+    best_snrs_per_flux = [optimizer.flux_best[f][2] for f in flux_values]
+    ax6.bar(range(len(flux_values)), best_snrs_per_flux, width=0.8, alpha=0.7)
+    ax6.set_xlabel("Flux Index")
+    ax6.set_ylabel("Best SNR")
+    ax6.set_title(f"Best SNR per Flux ({len(flux_values)} values)")
+    ax6.grid(True, alpha=0.3, axis="y")
 
     plt.tight_layout()
     plt.savefig("jpa_optimizer_test.png", dpi=150)
