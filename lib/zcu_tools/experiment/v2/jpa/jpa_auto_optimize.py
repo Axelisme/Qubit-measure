@@ -435,7 +435,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         ax_freq = fig.add_subplot(gs[1, 1])
         ax_power = fig.add_subplot(gs[2, 1])
 
-        instant_plot(fig, figsize)  # show the figure immediately
+        instant_plot(fig)  # show the figure immediately
 
         with MultiLivePlotter(
             fig,

@@ -3,8 +3,10 @@ from itertools import chain
 from threading import Lock
 from typing import List, Optional, Tuple, TypeVar
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from IPython.display import display
+from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
@@ -15,7 +17,7 @@ from ..segments import AbsSegment
 T_JupyterPlotMixin = TypeVar("T_JupyterPlotMixin", bound="JupyterPlotMixin")
 
 
-def instant_plot(fig: Figure, figsize) -> None:
+def instant_plot(fig: Figure) -> None:
     # this ensures the figure is rendered in Jupyter notebooks right now and can be updated later
     canvas = fig.canvas
 
@@ -24,11 +26,13 @@ def instant_plot(fig: Figure, figsize) -> None:
             "Warning: The matplotlib backend should be set to 'widget' for live plotting."
         )
 
+    figsize = fig.get_size_inches()
+
     canvas.toolbar_visible = False
     canvas.header_visible = False
     canvas.footer_visible = False
-    canvas.layout.width = f"{int(figsize[0] * 100)}px"
-    canvas.layout.height = f"{int(figsize[1] * 100)}px"
+    canvas.layout.width = f"{int(figsize[0] * 80)}px"
+    canvas.layout.height = f"{int(figsize[1] * 80)}px"
 
     canvas._handle_message(canvas, {"type": "send_image_mode"}, [])
     canvas._handle_message(canvas, {"type": "refresh"}, [])
@@ -46,9 +50,34 @@ def make_plot_frame(
     fig, axs = plt.subplots(n_row, n_col, **kwargs)
 
     if plot_instant:
-        instant_plot(fig, kwargs["figsize"])
+        instant_plot(fig)
 
     return fig, axs
+
+
+def grab_frame_with_instant_plot(writer: FFMpegWriter, **savefig_kwargs) -> None:
+    """
+    Equivalent to writer.grab_frame, but it work with figure setting by instant_plot.
+    """
+    # docstring inherited
+    if mpl.rcParams["savefig.bbox"] == "tight":
+        raise ValueError(
+            f"{mpl.rcParams['savefig.bbox']=} must not be 'tight' as it "
+            "may cause frame size to vary, which is inappropriate for animation."
+        )
+    for k in ("dpi", "bbox_inches", "format"):
+        if k in savefig_kwargs:
+            raise TypeError(f"grab_frame got an unexpected keyword argument {k!r}")
+
+    # Readjust the figure size in case it has been changed by the user.
+    # All frames must have the same size to save the movie correctly.
+    # TODO: currently it have bug work with instant plot, maybe fix later
+    # writer.fig.set_size_inches(writer._w, writer._h)
+
+    # Save the figure data to the sink, using the frame format and dpi.
+    writer.fig.savefig(
+        writer._proc.stdin, format=writer.frame_format, dpi=writer.dpi, **savefig_kwargs
+    )
 
 
 class JupyterPlotMixin:
@@ -133,6 +162,8 @@ class JupyterPlotMixin:
         if self.disable:
             return self
 
+        plt.ioff()
+
         for ax_row, seg_row in zip(self.axs, self.segments):
             for ax, segment in zip(ax_row, seg_row):
                 segment.init_ax(ax)
@@ -142,6 +173,8 @@ class JupyterPlotMixin:
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         if self.disable:
             return
+
+        plt.ion()
 
         if self.auto_close and self.fig is not None:
             plt.close(self.fig)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import shutil
-from collections import OrderedDict, defaultdict, UserDict
+from collections import OrderedDict, UserDict, defaultdict
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Tuple, TypeVar
@@ -9,7 +9,6 @@ from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Tuple,
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import display
 from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
@@ -28,7 +27,12 @@ from zcu_tools.experiment.v2.runner import (
     run_task,
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
-from zcu_tools.liveplot import AbsLivePlotter, MultiLivePlotter, make_plot_frame
+from zcu_tools.liveplot import (
+    AbsLivePlotter,
+    MultiLivePlotter,
+    grab_frame_with_instant_plot,
+    make_plot_frame,
+)
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlotter])
@@ -128,11 +132,7 @@ class FluxDepExecutor:
         n_row = int(total_num_axes**0.5)
         n_col = int(np.ceil(total_num_axes / n_row))
         fig, axs = make_plot_frame(
-            n_row,
-            n_col,
-            # plot_instant currently work only for non-recording
-            plot_instant=self.record_path is not None,
-            figsize=(min(14, 3.5 * n_col), min(8, 2.5 * n_row)),
+            n_row, n_col, figsize=(min(14, 3.5 * n_col), min(8, 2.5 * n_row))
         )
 
         # collect axes into dict
@@ -165,7 +165,7 @@ class FluxDepExecutor:
                     "FFmpeg is not found. Please install FFmpeg and add it to your PATH "
                     "to record animations."
                 )
-            writer = FFMpegWriter(fps=5)
+            writer = FFMpegWriter(fps=30)
             writer.setup(fig, str(self.record_path), dpi=200)
         else:
             writer = None
@@ -181,9 +181,6 @@ class FluxDepExecutor:
             return {(n1, n2): v for n1, d2 in d.items() for n2, v in d2.items()}
 
         plotter = MultiLivePlotter(fig, flatten_dict(plotters_map))
-
-        dh = display(fig, display_id=True)
-        assert dh is not None
 
         def plot_fn(ctx: TaskContext) -> None:
             if len(ctx.addr_stack) < 2:
@@ -202,15 +199,11 @@ class FluxDepExecutor:
                     plotters_map[cur_task], ctx, results[cur_task]
                 )
 
-            # if writer is not None:
             if self.record_path is not None:
                 assert writer is not None
-                writer.grab_frame()
+                grab_frame_with_instant_plot(writer)
 
-                # use dh.update to instant refresh in Jupyter
-                dh.update(fig)
-            else:
-                plotter.refresh()
+            plotter.refresh()
 
         return fig, plotter, plot_fn, writer
 

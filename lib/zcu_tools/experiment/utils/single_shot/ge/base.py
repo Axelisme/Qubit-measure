@@ -186,6 +186,7 @@ def fitting_ge_and_plot(
     plt_params = dict(linestyle=":", marker="o", markersize=5)
     axs[0, 0].plot(sg, np.median(Qg), markerfacecolor="b", color="r", **plt_params)
     axs[0, 0].plot(se, np.median(Qe), markerfacecolor="r", color="b", **plt_params)
+    axs[0, 0].set_xlim(np.min(bins), np.max(bins))
 
     axs[0, 1].plot(xs, fit_g_pdfs, "k-", label="total")
     if length_ratio != 0.0:
