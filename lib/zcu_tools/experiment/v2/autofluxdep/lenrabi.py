@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, cast
 
@@ -105,13 +106,11 @@ class LenRabiMeasurementTask(
         ref_pi_product: float,
         cfg_maker: Callable[[TaskContext, ModuleLibrary], Optional[LenRabiCfgTemplate]],
         earlystop_snr: Optional[float] = None,
-        succes_hook: Optional[Callable[[TaskContext, ModuleLibrary], Any]] = None,
     ) -> None:
         self.length_sweep = length_sweep
         self.ref_product = ref_pi_product
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
-        self.succes_hook = succes_hook
 
         self.task = HardTask(
             measure_fn=lambda ctx, update_hook: (
@@ -233,10 +232,8 @@ class LenRabiMeasurementTask(
         cfg_temp = ml.make_cfg(cfg_temp)
 
         cfg = cast(LenRabiCfg, cfg_temp)
+        rabi_pulse = cfg["rabi_pulse"]
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
-
-        cur_gain = cfg["rabi_pulse"]["gain"]
-        assert isinstance(cur_gain, float)
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
         assert isinstance(raw_signals, np.ndarray)
@@ -260,19 +257,19 @@ class LenRabiMeasurementTask(
         cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
         last_info: Dict[str, Any] = ctx.env_dict["last_info"]
         if success:
-            cur_product = pi_len * cur_gain
+            cur_product = pi_len * rabi_pulse["gain"]
             new_gain_factor = cur_info["m_ratio"] * cur_product / self.ref_product
 
             cur_info["pi_length"] = pi_len
             cur_info["pi2_length"] = pi2_len
-            cur_info["pi_gain"] = cur_gain
-            cur_info["pi2_gain"] = cur_gain
             cur_info["gain_factor"] = (
                 last_info.get("gain_factor", 1.0) * new_gain_factor
             ) ** 0.5
 
-            if self.succes_hook is not None:
-                self.succes_hook(ctx, ml)
+            cur_info["pi_pulse"] = deepcopy(rabi_pulse)
+            cur_info["pi_pulse"]["waveform"]["length"] = pi_len
+            cur_info["pi2_pulse"] = deepcopy(rabi_pulse)
+            cur_info["pi2_pulse"]["waveform"]["length"] = pi2_len
 
         with MinIntervalFunc.force_execute():
             ctx.set_current_data(
