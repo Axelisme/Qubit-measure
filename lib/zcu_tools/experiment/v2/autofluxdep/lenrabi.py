@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple, cast
+from typing import Callable, Dict, Optional, Tuple, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,7 +31,7 @@ from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from .executor import MeasurementTask
+from .executor import MeasurementTask, FluxDepInfoDict
 
 
 def lenrabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -162,7 +162,7 @@ class LenRabiMeasurementTask(
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
 
-        self.pi_line.set_xdata([ctx.env_dict["cur_info"].get("pi_length", np.nan)])
+        self.pi_line.set_xdata([ctx.env_dict["info"].get("pi_length", np.nan)])
         plotters["rabi_curve"].update(
             flx_values,
             sweep2array(self.length_sweep),
@@ -231,8 +231,9 @@ class LenRabiMeasurementTask(
         )
         cfg_temp = ml.make_cfg(cfg_temp)
 
+        rabi_pulse = cfg_temp["rabi_pulse"]
+
         cfg = cast(LenRabiCfg, cfg_temp)
-        rabi_pulse = cfg["rabi_pulse"]
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
@@ -254,22 +255,24 @@ class LenRabiMeasurementTask(
             pi_len, pi2_len, rabi_freq = np.nan, np.nan, np.nan
             success = False
 
-        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
-        last_info: Dict[str, Any] = ctx.env_dict["last_info"]
         if success:
-            cur_product = pi_len * rabi_pulse["gain"]
-            new_gain_factor = cur_info["m_ratio"] * cur_product / self.ref_product
+            info: FluxDepInfoDict = ctx.env_dict["info"]
+            info["pi_product"] = pi_len * rabi_pulse["gain"]
+            new_gain_factor = (
+                info["m_ratio"] * info["pi_product"] / info.first["pi_product"]
+            )
 
-            cur_info["pi_length"] = pi_len
-            cur_info["pi2_length"] = pi2_len
-            cur_info["gain_factor"] = (
-                last_info.get("gain_factor", 1.0) * new_gain_factor
-            ) ** 0.5
-
-            cur_info["pi_pulse"] = deepcopy(rabi_pulse)
-            cur_info["pi_pulse"]["waveform"]["length"] = pi_len
-            cur_info["pi2_pulse"] = deepcopy(rabi_pulse)
-            cur_info["pi2_pulse"]["waveform"]["length"] = pi2_len
+            info.update(
+                pi_length=pi_len,
+                pi2_length=pi2_len,
+                gain_factor=np.sqrt(
+                    info.last.get("gain_factor", 1.0) * new_gain_factor
+                ),
+            )
+            info["pi_pulse"] = deepcopy(rabi_pulse)
+            info["pi_pulse"]["waveform"]["length"] = pi_len
+            info["pi2_pulse"] = deepcopy(rabi_pulse)
+            info["pi2_pulse"]["waveform"]["length"] = pi2_len
 
         with MinIntervalFunc.force_execute():
             ctx.set_current_data(

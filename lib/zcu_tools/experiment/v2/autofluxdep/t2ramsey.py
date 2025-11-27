@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union, cast
+from typing import Callable, Dict, Optional, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,7 +31,7 @@ from zcu_tools.utils.fitting import fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from .executor import MeasurementTask
+from .executor import MeasurementTask, FluxDepInfoDict
 
 
 def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -174,7 +174,7 @@ class T2RamseyMeasurementTask(
 
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
-        flx_idx = ctx.env_dict["flx_idx"]
+        info: FluxDepInfoDict = ctx.env_dict["info"]
 
         len_idxs = np.arange(self.num_expts).astype(np.float64)
         real_signals = t2ramsey_fluxdep_signal2real(signals["raw_signals"])
@@ -183,7 +183,9 @@ class T2RamseyMeasurementTask(
         plotters["t2r_over_flx"].update(
             flx_values, len_idxs, real_signals, refresh=False
         )
-        plotters["t2r_curve"].update(self.lengths, real_signals[flx_idx], refresh=False)
+        plotters["t2r_curve"].update(
+            self.lengths, real_signals[info["flx_idx"]], refresh=False
+        )
 
     def save(self, filepath, flx_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
@@ -242,6 +244,7 @@ class T2RamseyMeasurementTask(
 
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
+        info: FluxDepInfoDict = ctx.env_dict["info"]
 
         cfg_temp = self.cfg_maker(ctx, ml)
 
@@ -278,12 +281,10 @@ class T2RamseyMeasurementTask(
             t2r_detune_err = np.nan
             success = False
 
-        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
-        last_info: Dict[str, Any] = ctx.env_dict["last_info"]
         if success:
-            cur_info["t2r"] = t2r
-            cur_info["t2r_detune"] = t2r_detune
-            cur_info["smooth_t2r"] = 0.5 * (last_info.get("smooth_t2r", t2r) + t2r)
+            info["t2r"] = t2r
+            info["t2r_detune"] = t2r_detune
+            info["smooth_t2r"] = 0.5 * (info.last.get("smooth_t2r", t2r) + t2r)
 
         with MinIntervalFunc.force_execute():
             ctx.set_current_data(

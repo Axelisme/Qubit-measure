@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import shutil
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict, defaultdict, UserDict
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Tuple, TypeVar
@@ -15,7 +15,6 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
@@ -62,60 +61,24 @@ class MeasurementTask(
     ) -> None: ...
 
 
-class FluxDepBatchTask(BatchTask):
-    def __init__(self, tasks: Mapping[str, MeasurementTask]) -> None:
-        self.tasks = tasks
+class FluxDepInfoDict(UserDict):
+    def __init__(self, initialdata: Optional[Mapping[str, Any]] = None) -> None:
+        self.first_info: Dict[str, Any] = {}
+        self.last_info: Dict[str, Any] = {}
+        super().__init__(initialdata)
 
-    def init(self, ctx: TaskContext, dynamic_pbar=False) -> None:
-        predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
-        flx: float = ctx.env_dict["flx_value"]
+    @property
+    def last(self) -> Dict[str, Any]:
+        return self.last_info
 
-        ctx.env_dict["ref_m"] = predictor.predict_matrix_element(flx)
+    @property
+    def first(self) -> Dict[str, Any]:
+        return self.first_info
 
-        ctx.env_dict["first_info"] = {}
-        ctx.env_dict["last_info"] = {}
-        ctx.env_dict["cur_info"] = {}
-
-        super().init(ctx, dynamic_pbar=dynamic_pbar)
-
-    def run(self, ctx: TaskContext) -> None:
-        if self.dynamic_pbar:
-            self.task_pbar = self.make_pbar(leave=False)
-        else:
-            assert self.task_pbar is not None
-            self.task_pbar.reset()
-
-        predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
-        flx: float = ctx.env_dict["flx_value"]
-        first_info: Dict[str, Any] = ctx.env_dict["first_info"]
-        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
-        last_info: Dict[str, Any] = ctx.env_dict["last_info"]
-
-        cur_info.clear()  # clear current info
-
-        cur_info["cur_m"] = predictor.predict_matrix_element(flx)
-        cur_info["m_ratio"] = cur_info["cur_m"] / ctx.env_dict["ref_m"]
-
-        for name, task in self.tasks.items():
-            self.task_pbar.set_description(desc=f"Task [{str(name)}]")
-
-            cur_ctx = ctx(addr=name)
-
-            task.run(cur_ctx)
-
-            # update current info to last info
-            last_info.update(deepcopy(cur_info))
-
-            # set first info
-            for k, v in cur_info.items():
-                first_info.setdefault(k, deepcopy(v))
-
-            # update progress bar
-            self.task_pbar.update()
-
-        if self.dynamic_pbar:
-            self.task_pbar.close()
-            self.task_pbar = None
+    def __setitem__(self, key: str, value: Any) -> None:
+        super().__setitem__(key, value)
+        self.first_info.setdefault(key, deepcopy(value))
+        self.last_info[key] = deepcopy(value)
 
 
 class FluxDepExecutor:
@@ -123,15 +86,13 @@ class FluxDepExecutor:
         self,
         flx_values: NDArray[np.float64],
         flux_dev_name: str,
-        flux_dev_cfg: DeviceInfo,
+        predictor: FluxoniumPredictor,
         env_dict: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.flx_values = flx_values
         self.flux_dev_name = flux_dev_name
-        self.flux_dev_cfg = flux_dev_cfg
+        self.predictor = predictor
         self.env_dict = {} if env_dict is None else env_dict
-
-        self.env_dict["flx_values"] = self.flx_values
 
         self.record_path = None
         self.measurements: Dict[str, MeasurementTask] = OrderedDict()
@@ -257,11 +218,25 @@ class FluxDepExecutor:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
 
-        def update_fn(i: int, ctx: TaskContext, flx: float) -> None:
-            set_flux_in_dev_cfg(ctx.cfg["dev"], flx)
+        self.env_dict.update(
+            flx_values=self.flx_values,
+            predictor=self.predictor,
+            info=FluxDepInfoDict(),
+        )
 
-            ctx.env_dict["flx_idx"] = i
-            ctx.env_dict["flx_value"] = flx
+        def update_fn(i: int, ctx: TaskContext, flx: float) -> None:
+            info: FluxDepInfoDict = ctx.env_dict["info"]
+            predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
+
+            info.clear()  # clear current info dict
+
+            info["flx_value"] = flx
+            info["flx_idx"] = i
+
+            info["cur_m"] = predictor.predict_matrix_element(flx)
+            info["m_ratio"] = info["cur_m"] / info.first["cur_m"]
+
+            set_flux_in_dev_cfg(ctx.cfg["dev"], flx, label="flux_dev")
 
         with matplotlib.rc_context(
             {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}
@@ -275,12 +250,10 @@ class FluxDepExecutor:
                             sweep_name="flux",
                             sweep_values=self.flx_values.tolist(),
                             update_cfg_fn=update_fn,
-                            sub_task=FluxDepBatchTask(self.measurements),
+                            sub_task=BatchTask(self.measurements),
                         ),
                         init_cfg=TaskConfig(
-                            dev={
-                                self.flux_dev_name: self.flux_dev_cfg,
-                            }
+                            dev={self.flux_dev_name: {"label": "flux_dev"}}
                         ),
                         env_dict=self.env_dict,
                         update_hook=plot_fn,

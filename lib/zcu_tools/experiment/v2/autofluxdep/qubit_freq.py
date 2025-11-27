@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Sequence, cast
+from typing import Callable, Dict, Optional, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -29,7 +29,7 @@ from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from .executor import MeasurementTask
+from .executor import MeasurementTask, FluxDepInfoDict
 
 
 def qubitfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -133,7 +133,7 @@ class QubitFreqMeasurementTask(
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
 
-        self.freq_line.set_xdata([ctx.env_dict["cur_info"].get("fit_detune", np.nan)])
+        self.freq_line.set_xdata([ctx.env_dict["info"].get("fit_detune", np.nan)])
         plotters["fit_freq"].update(flx_values, signals["fit_freq"], refresh=False)
         plotters["detune"].update(
             flx_values,
@@ -203,20 +203,20 @@ class QubitFreqMeasurementTask(
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)
 
         self.uncalibrate_count = 0
-        self.last_calibrated_flx = ctx.env_dict["flx_value"] - 1
+        self.last_calibrated_flx = ctx.env_dict["info"]["flx_value"] - 1
         self.last_detune_slope = 0.0
 
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
         predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
-        flx: float = ctx.env_dict["flx_value"]
-        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
+        info: FluxDepInfoDict = ctx.env_dict["info"]
 
+        flx = info["flx_value"]
         predict_freq = predictor.predict_freq(flx)
         if self.uncalibrate_count > 1:
             # linear predict the detune before next calibration point
             predict_freq += self.last_detune_slope * (flx - self.last_calibrated_flx)
-        cur_info["predict_freq"] = predict_freq
+        info["predict_freq"] = predict_freq
 
         cfg_temp = self.cfg_maker(ctx, ml)
 
@@ -273,9 +273,11 @@ class QubitFreqMeasurementTask(
             success = False
 
         if success:
-            cur_info["qubit_freq"] = fit_freq
-            cur_info["fit_detune"] = detune
-            cur_info["fit_kappa"] = kappa
+            info.update(
+                qubit_freq=fit_freq,
+                fit_detune=detune,
+                fit_kappa=kappa,
+            )
 
         with MinIntervalFunc.force_execute():
             ctx.set_current_data(

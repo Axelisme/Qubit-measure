@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union, cast
+from typing import Callable, Dict, Optional, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -31,7 +31,7 @@ from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from .executor import MeasurementTask
+from .executor import MeasurementTask, FluxDepInfoDict
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -151,7 +151,7 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
 
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values = ctx.env_dict["flx_values"]
-        flx_idx = ctx.env_dict["flx_idx"]
+        info: FluxDepInfoDict = ctx.env_dict["info"]
 
         len_idxs = np.arange(self.num_expts).astype(np.float64)
         real_signals = t1_fluxdep_signal2real(signals["raw_signals"])
@@ -160,7 +160,9 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
         plotters["t1_over_flx"].update(
             flx_values, len_idxs, real_signals, refresh=False
         )
-        plotters["t1_curve"].update(self.lengths, real_signals[flx_idx], refresh=False)
+        plotters["t1_curve"].update(
+            self.lengths, real_signals[info["flx_idx"]], refresh=False
+        )
 
     def save(self, filepath, flx_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
@@ -219,6 +221,7 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
 
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
+        info: FluxDepInfoDict = ctx.env_dict["info"]
 
         cfg_temp = self.cfg_maker(ctx, ml)
 
@@ -248,11 +251,9 @@ class T1MeasurementTask(MeasurementTask[T1Result, T1Cfg, PlotterDictType]):
             t1, t1err = np.nan, np.nan
             success = False
 
-        cur_info: Dict[str, Any] = ctx.env_dict["cur_info"]
-        last_info: Dict[str, Any] = ctx.env_dict["last_info"]
         if success:
-            cur_info["t1"] = t1
-            cur_info["smooth_t1"] = 0.5 * (last_info.get("smooth_t1", t1) + t1)
+            info["t1"] = t1
+            info["smooth_t1"] = 0.5 * (info.last.get("smooth_t1", t1) + t1)
 
         with MinIntervalFunc.force_execute():
             ctx.set_current_data(
