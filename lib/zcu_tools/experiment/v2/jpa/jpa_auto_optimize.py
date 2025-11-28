@@ -158,6 +158,9 @@ class JPAOptimizer:
         self._neighbor_guess: Optional[List[float]] = None  # [fpt, pdr] from neighbor
         self._neighbor_guess_used = False
 
+        # Final phase flag: only enable optimizer in the final phase
+        self._is_final_phase = False
+
         # Generate LHS points for first flux slice
         self._generate_lhs_samples()
 
@@ -360,6 +363,8 @@ class JPAOptimizer:
             next_budget = self.remaining_budget
             if next_budget <= 0:
                 return False
+            # Mark this as the final phase to enable optimizer
+            self._is_final_phase = True
 
         self._phase = next_phase
         self.phase_budget = next_budget
@@ -401,10 +406,11 @@ class JPAOptimizer:
         """
         Initialize 2D optimization for a refinement flux value.
 
-        For new flux points (not previously measured):
-            - 50% LHS sampling + 50% Bayesian optimization
-        For existing flux points:
-            - 100% Bayesian optimization
+        Non-final phases:
+            - 100% LHS sampling (no optimizer)
+        Final phase:
+            - For new flux points: 50% LHS + 50% Bayesian optimization
+            - For existing flux points: 100% Bayesian optimization
         """
         self._current_refinement_flx = flx
         self._refinement_slice_iter = 0
@@ -434,25 +440,36 @@ class JPAOptimizer:
         self._neighbor_guess = [best_fpt, best_pdr]
         self._neighbor_guess_used = False
 
-        # Determine LHS budget based on whether flux is new or existing
-        if is_new_flux:
-            # New flux: 50% LHS + 50% BO
-            self._refinement_lhs_budget = self._refinement_budget_per_flx // 2
-            # Generate LHS samples within restricted bounds
+        # Determine LHS budget and optimizer usage based on phase
+        if not self._is_final_phase:
+            # Non-final phase: 100% LHS (no optimizer)
+            self._refinement_lhs_budget = self._refinement_budget_per_flx
             self._refinement_lhs_points = self._generate_lhs_samples(
                 n_samples=self._refinement_lhs_budget,
                 fpt_bounds=fpt_bounds,
                 pdr_bounds=pdr_bounds,
             )
             self._refinement_lhs_idx = 0
+            self.opt_2d = None
         else:
-            # Existing flux: 100% BO (no LHS)
-            self._refinement_lhs_budget = 0
-            self._refinement_lhs_points = []
-            self._refinement_lhs_idx = 0
+            # Final phase: use optimizer
+            if is_new_flux:
+                # New flux: 50% LHS + 50% BO
+                self._refinement_lhs_budget = self._refinement_budget_per_flx // 2
+                self._refinement_lhs_points = self._generate_lhs_samples(
+                    n_samples=self._refinement_lhs_budget,
+                    fpt_bounds=fpt_bounds,
+                    pdr_bounds=pdr_bounds,
+                )
+                self._refinement_lhs_idx = 0
+            else:
+                # Existing flux: 100% BO (no LHS)
+                self._refinement_lhs_budget = 0
+                self._refinement_lhs_points = []
+                self._refinement_lhs_idx = 0
 
-        # Initialize optimizer with only data from THIS flux (avoid model pollution)
-        self.opt_2d = self._init_2d_optimizer_for_flux(flx, fpt_bounds, pdr_bounds)
+            # Initialize optimizer with only data from THIS flux (avoid model pollution)
+            self.opt_2d = self._init_2d_optimizer_for_flux(flx, fpt_bounds, pdr_bounds)
 
     def _get_phase1_point(self) -> Optional[Tuple[float, float, float]]:
         """
@@ -1027,7 +1044,7 @@ if __name__ == "__main__":
 
         last_snr = snr
 
-        if i % 100 == 0:  # Update every 10 iterations
+        if i % 500 == 0:  # Update every 10 iterations
             params_arr = np.array(params_list)
             snrs_arr = np.array(snrs_list)
             phases_arr = np.array(phases_list)
