@@ -13,22 +13,33 @@ class FluxoniumPredictor:
     Provide some methods to predict hyper-parameters of fluxonium measurement.
     """
 
-    def __init__(self, result_path: str, bias: float = 0.0) -> None:
-        with open(result_path, "r") as f:
-            data = json.load(f)
-
-        self.result_path = result_path
-        self.params = np.array(
-            [data["params"]["EJ"], data["params"]["EC"], data["params"]["EL"]]
-        )
-        self.A_c = data["half flux"]
-        self.period = data["period"]
+    def __init__(
+        self, params: Tuple[float, float, float], A_c: float, period: float, bias: float
+    ) -> None:
+        self.params = params
+        self.A_c = A_c
+        self.period = period
 
         self.bias = bias
 
         from scqubits import Fluxonium  # lazy import
 
         self.fluxonium = Fluxonium(*self.params, flux=0.5, cutoff=40, truncated_dim=2)
+
+    @classmethod
+    def from_file(cls, result_path: str, bias: float = 0.0) -> FluxoniumPredictor:
+        with open(result_path, "r") as f:
+            data = json.load(f)
+
+            params = (
+                data["params"]["EJ"],
+                data["params"]["EC"],
+                data["params"]["EL"],
+            )
+            A_c = data["half flux"]
+            period = data["period"]
+
+        return cls(params, A_c, period, bias)
 
     def clone(self) -> FluxoniumPredictor:
         return FluxoniumPredictor(self.result_path, bias=self.bias)
