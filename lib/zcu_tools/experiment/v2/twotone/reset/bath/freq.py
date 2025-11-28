@@ -103,7 +103,7 @@ class FreqGainExperiment(AbsExperiment):
         self,
         result: Optional[FreqGainResultType] = None,
         smooth: float = 1.0,
-        find: Literal["min", "max"] = "min",
+        find: Literal["min", "max", "med"] = "min",
     ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -120,9 +120,14 @@ class FreqGainExperiment(AbsExperiment):
         if find == "max":
             gain_opt = gains[np.argmax(np.max(real_signals, axis=1))]
             freq_opt = fpts[np.argmax(np.max(real_signals, axis=0))]
-        else:
+        elif find == "min":
             gain_opt = gains[np.argmin(np.min(real_signals, axis=1))]
             freq_opt = fpts[np.argmin(np.min(real_signals, axis=0))]
+        else:
+            # med_value = np.median(real_signals)
+            med_dists = np.abs(real_signals - np.median(real_signals))
+            gain_opt = gains[np.argmin(np.min(med_dists, axis=1))]
+            freq_opt = fpts[np.argmin(np.min(med_dists, axis=0))]
 
         fig, ax = plt.subplots()
         assert isinstance(fig, Figure)

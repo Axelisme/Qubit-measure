@@ -211,11 +211,16 @@ class QubitFreqMeasurementTask(
         predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
         info: FluxDepInfoDict = ctx.env_dict["info"]
 
+        detunes = sweep2array(self.detune_sweep)
+
         flx = info["flx_value"]
         predict_freq = predictor.predict_freq(flx)
         if self.uncalibrate_count > 1:
             # linear predict the detune before next calibration point
-            predict_freq += self.last_detune_slope * (flx - self.last_calibrated_flx)
+            predict_detune = self.last_detune_slope * (flx - self.last_calibrated_flx)
+            predict_detune = min(predict_detune, np.max(detunes))
+            predict_detune = max(predict_detune, np.min(detunes))
+            predict_freq += predict_detune
         info["predict_freq"] = predict_freq
 
         cfg_temp = self.cfg_maker(ctx, ml)
@@ -244,7 +249,6 @@ class QubitFreqMeasurementTask(
 
         real_signals = qubitfreq_signal2real(raw_signals)
 
-        detunes = sweep2array(self.detune_sweep)
         detune, freq_err, kappa, kappa_err, fit_signals, _ = fit_qubit_freq(
             detunes, real_signals
         )

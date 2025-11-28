@@ -4,10 +4,12 @@ from copy import deepcopy
 from typing import Optional, Tuple
 
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
 
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
@@ -63,6 +65,22 @@ class RabiCheckExperiment(AbsExperiment):
             sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"]),
         )
 
+        def measure_fn(ctx, update_hook):
+            nonlocal pdrs
+            prog = ModularProgramV2(
+                soccfg,
+                ctx.cfg,
+                modules=[
+                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                    Pulse("rabi_pulse", ctx.cfg["rabi_pulse"]),
+                    Reset("tested_reset", ctx.cfg["tested_reset"]),
+                    Pulse("post_pulse", ctx.cfg.get("post_pulse")),
+                    Readout("readout", ctx.cfg["readout"]),
+                ],
+            )
+            pdrs = prog.get_pulse_param("rabi_pulse", "gain", as_array=True)
+            return prog.acquire(soc, progress=False, callback=update_hook)
+
         with LivePlotter1D(
             "Pulse gain", "Amplitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
@@ -76,6 +94,7 @@ class RabiCheckExperiment(AbsExperiment):
                                 Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                                 Pulse("rabi_pulse", ctx.cfg["rabi_pulse"]),
                                 Reset("tested_reset", ctx.cfg["tested_reset"]),
+                                Pulse("post_pulse", ctx.cfg.get("post_pulse")),
                                 Readout("readout", ctx.cfg["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
@@ -94,15 +113,25 @@ class RabiCheckExperiment(AbsExperiment):
 
         return pdrs, signals
 
-    def analyze(
-        self,
-        result: Optional[ResetRabiCheckResultType] = None,
-        *,
-        plot: bool = True,
-    ) -> None:
+    def analyze(self, result: Optional[ResetRabiCheckResultType] = None) -> Figure:
         """Analyze reset rabi check results. (No specific analysis implemented)"""
-        # No specific analysis needed for this experiment
-        raise NotImplementedError("No specific analysis implemented")
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        pdrs, signals = result
+        real_signals = reset_rabi_signal2real(signals)
+
+        w_signals, wo_signals = real_signals
+
+        fig, ax = plt.subplots(figsize=config.figsize)
+
+        ax.plot(pdrs, wo_signals, label="Without Reset", marker=".")
+        ax.plot(pdrs, w_signals, label="With Reset", marker=".")
+        ax.legend()
+        ax.grid(True)
+
+        return fig
 
     def save(
         self,

@@ -89,12 +89,12 @@ class FluxDepExecutor:
     def __init__(
         self,
         flx_values: NDArray[np.float64],
-        flux_dev_name: str,
+        dev_cfg: Dict[str, Dict[str, Any]],
         predictor: FluxoniumPredictor,
         env_dict: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.flx_values = flx_values
-        self.flux_dev_name = flux_dev_name
+        self.dev_cfg = dev_cfg
         self.predictor = predictor
         self.env_dict = {} if env_dict is None else env_dict
 
@@ -245,9 +245,7 @@ class FluxDepExecutor:
                             update_cfg_fn=update_fn,
                             sub_task=BatchTask(self.measurements),
                         ),
-                        init_cfg=TaskConfig(
-                            dev={self.flux_dev_name: {"label": "flux_dev"}}
-                        ),
+                        init_cfg=TaskConfig(dev=self.dev_cfg),
                         env_dict=self.env_dict,
                         update_hook=plot_fn,
                     )

@@ -31,7 +31,10 @@ class FluxoniumPredictor:
         self.fluxonium = Fluxonium(*self.params, flux=0.5, cutoff=40, truncated_dim=2)
 
     def clone(self) -> FluxoniumPredictor:
-        return FluxoniumPredictor(self.result_path, bias=self.bias)
+        predictor = FluxoniumPredictor(self.result_path, bias=self.bias)
+        predictor.A_c = self.A_c
+        predictor.period = self.period
+        return predictor
 
     def A_to_flx(self, cur_A: float) -> float:
         return (cur_A + self.bias - self.A_c) / self.period + 0.5

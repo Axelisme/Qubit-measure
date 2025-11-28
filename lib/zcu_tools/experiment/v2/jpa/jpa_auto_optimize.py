@@ -758,7 +758,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             ),
         ) as viewer:
             # Track phase for each point
-            phases = np.zeros(num_points, dtype=int)
+            phases = np.zeros(num_points, dtype=np.int32)
 
             def plot_fn(ctx: TaskContext) -> None:
                 idx: int = ctx.env_dict["index"]
@@ -770,7 +770,14 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                 phases[idx] = optimizer.phase
 
                 # Assign colors based on phase using matplotlib color cycle
-                colors = [f"C{p}" for p in phases]
+                prop_cycle = plt.rcParams["axes.prop_cycle"]
+                cycle_colors = prop_cycle.by_key()["color"]
+                colors = np.array(
+                    [
+                        cycle_colors[(p - 1) % len(cycle_colors)] if p > 0 else "lightgray"
+                        for p in phases
+                    ]
+                )
 
                 fig.suptitle(
                     f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flx:.2g} (mA), Freq: {1e-3 * cur_fpt:.4g} (GHz), Power: {cur_pdr:.2g} (dBm)"
