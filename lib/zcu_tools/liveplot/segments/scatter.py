@@ -24,7 +24,7 @@ class ScatterSegment(AbsSegment):
         if scatter_kwargs is None:
             scatter_kwargs = {}
 
-        default_scatter_kwargs = {"marker": "."}
+        default_scatter_kwargs = {"marker": ".", "s": 2}
         for k, v in default_scatter_kwargs.items():
             scatter_kwargs.setdefault(k, v)
 
