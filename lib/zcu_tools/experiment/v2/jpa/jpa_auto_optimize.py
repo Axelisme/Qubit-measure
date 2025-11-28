@@ -90,9 +90,18 @@ class JPAOptimizer:
         self.phase1_budget = total_points // 2
         self.remaining_budget = total_points - self.phase1_budget
 
-        # Determine flux grid points for phase 1
-        # Use cube root to balance flux points vs 2D optimization budget
-        self.num_flx_points = max(2, int(round(self.phase1_budget ** (1 / 3))))
+        # Determine flux grid points for phase 1 based on sweep expts ratios
+        n_flx = max(1, flx_sweep["expts"])
+        n_fpt = max(1, fpt_sweep["expts"])
+        n_pdr = max(1, pdr_sweep["expts"])
+
+        # Scale factor to map total product of expts to phase1_budget
+        # n_flx_eff * n_fpt_eff * n_pdr_eff ~= phase1_budget
+        # where n_i_eff = k * n_i
+        total_expts_prod = n_flx * n_fpt * n_pdr
+        k = (self.phase1_budget / total_expts_prod) ** (1 / 3)
+
+        self.num_flx_points = max(2, int(round(k * n_flx)))
         self.flx_grid = np.linspace(
             self.flx_bounds[0], self.flx_bounds[1], self.num_flx_points
         )
@@ -248,8 +257,11 @@ class JPAOptimizer:
         """
         opt = Optimizer(
             dimensions=[fpt_bounds, pdr_bounds],
+            base_estimator="ET",
             acq_func="EI",
             n_initial_points=0,
+            n_jobs=-1,
+            acq_optimizer="auto",
         )
 
         # Only use data from THIS flux value (avoid model pollution)
@@ -265,10 +277,9 @@ class JPAOptimizer:
 
             # Tell optimizer about these points (fit=False for speed)
             if init_points:
-                for x, y in init_points[:-1]:
-                    opt.tell(x, -y, fit=False)  # skopt minimizes, we want to maximize
-                # Fit on the last point
-                opt.tell(init_points[-1][0], -init_points[-1][1], fit=True)
+                xs = [[x] for x, _ in init_points]
+                ys = [-y for _, y in init_points]
+                opt.tell(xs, ys, fit=True)
 
         return opt
 
@@ -729,7 +740,8 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                 ),
             ),
         ) as viewer:
-            colors = np.full(num_points, "b")
+            # Track phase for each point
+            phases = np.zeros(num_points, dtype=int)
 
             def plot_fn(ctx: TaskContext) -> None:
                 idx: int = ctx.env_dict["index"]
@@ -737,24 +749,27 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
 
                 cur_flx, cur_fpt, cur_pdr = params[idx, :]
 
-                fig.suptitle(
-                    f"Iteration {idx}, Flux: {1e3 * cur_flx:.2g} (mA), Freq: {1e-3 * cur_fpt:.4g} (GHz), Power: {cur_pdr:.2g} (dBm)"
-                )
+                # Record current phase for this point
+                phases[idx] = optimizer.phase
 
-                if optimizer.phase == 2:
-                    colors[idx] = "r"
+                # Assign colors based on phase using matplotlib color cycle
+                colors = [f"C{p}" for p in phases]
+
+                fig.suptitle(
+                    f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flx:.2g} (mA), Freq: {1e-3 * cur_fpt:.4g} (GHz), Power: {cur_pdr:.2g} (dBm)"
+                )
 
                 viewer.get_plotter("iter_scatter").update(
-                    np.arange(num_points), snrs, refresh=False
+                    np.arange(num_points), snrs, colors=colors, refresh=False
                 )
                 viewer.get_plotter("flux_scatter").update(
-                    params[:, 0], snrs, refresh=False
+                    params[:, 0], snrs, colors=colors, refresh=False
                 )
                 viewer.get_plotter("freq_scatter").update(
-                    params[:, 1], snrs, refresh=False
+                    params[:, 1], snrs, colors=colors, refresh=False
                 )
                 viewer.get_plotter("power_scatter").update(
-                    params[:, 2], snrs, refresh=False
+                    params[:, 2], snrs, colors=colors, refresh=False
                 )
                 viewer.refresh()
 
@@ -901,6 +916,8 @@ if __name__ == "__main__":
 
     from tqdm.auto import trange
 
+    from zcu_tools.notebook.utils import make_sweep
+
     def simulate_snr(
         flx: float, fpt: float, pdr: float, noise_std: float = 0.1
     ) -> float:
@@ -939,11 +956,11 @@ if __name__ == "__main__":
         return snr
 
     # Define sweep ranges
-    flx_sweep: SweepCfg = {"start": 0.0, "stop": 1.0, "expts": 50, "step": 0.02}
-    fpt_sweep: SweepCfg = {"start": 6500.0, "stop": 7500.0, "expts": 50, "step": 20.0}
-    pdr_sweep: SweepCfg = {"start": -20.0, "stop": 0.0, "expts": 50, "step": 0.4}
+    flx_sweep: SweepCfg = make_sweep(0.0, 1.0, 150)
+    fpt_sweep: SweepCfg = make_sweep(6500.0, 7500.0, 50)
+    pdr_sweep: SweepCfg = make_sweep(-20.0, 0.0, 20)
 
-    total_points = 500
+    total_points = 10000
 
     print("=" * 60)
     print("JPAOptimizer Test (Multi-phase Algorithm)")
@@ -964,13 +981,38 @@ if __name__ == "__main__":
     print(f"Remaining budget for phase 2+: {optimizer.remaining_budget}")
     print("=" * 60)
 
+    # Create visualization
+    fig = plt.figure(figsize=(14, 10))
+    fig.suptitle("JPAOptimizer Test Results (Multi-phase)", fontsize=14)
+
+    # Color map for phases
+    phase_colors_map = {1: "blue", 2: "red", 3: "green", 4: "orange", 5: "purple"}
+
+    # Setup axes
+    ax1 = fig.add_subplot(2, 3, 1)
+    ax2 = fig.add_subplot(2, 3, 2)
+    ax3 = fig.add_subplot(2, 3, 3)
+    ax4 = fig.add_subplot(2, 3, 4)
+    ax5 = fig.add_subplot(2, 3, 5)
+    ax6 = fig.add_subplot(2, 3, 6)
+
+    # Set static titles/labels for non-LivePlotter managed axes or initial setup
+    ax6.set_xlabel("Flux Index")
+    ax6.set_ylabel("Best SNR")
+    ax6.set_title("Best SNR per Flux")
+    ax6.grid(True, alpha=0.3, axis="y")
+
     # Run optimization
     params_list: List[Tuple[float, float, float]] = []
     snrs_list: List[float] = []
     phases_list: List[int] = []
 
     last_snr: Optional[float] = None
-    for i in trange(total_points):
+
+    plt.ion()
+    plt.show()
+
+    for i in trange(total_points, smoothing=0):
         params = optimizer.next_params(i, last_snr)
         if params is None:
             print(f"Optimization stopped at iteration {i}")
@@ -985,11 +1027,74 @@ if __name__ == "__main__":
 
         last_snr = snr
 
-        if i % 50 == 0:
-            print(
-                f"Iter {i:4d} | Phase {optimizer.phase} | "
-                f"flx={flx:.4f}, fpt={fpt:.1f}, pdr={pdr:.2f} | SNR={snr:.3f}"
-            )
+        if i % 100 == 0:  # Update every 10 iterations
+            params_arr = np.array(params_list)
+            snrs_arr = np.array(snrs_list)
+            phases_arr = np.array(phases_list)
+
+            colors = [phase_colors_map.get(p, "gray") for p in phases_arr]
+
+            # Update scatter plots
+            # 1. SNR vs Iteration
+            ax1.clear()
+            ax1.scatter(np.arange(len(snrs_arr)), snrs_arr, c=colors, s=5, alpha=0.6)
+            ax1.set_xlabel("Iteration")
+            ax1.set_ylabel("SNR")
+            ax1.set_title("SNR vs Iteration")
+            ax1.grid(True, alpha=0.3)
+
+            # 2. SNR vs Flux
+            ax2.clear()
+            ax2.scatter(params_arr[:, 0], snrs_arr, c=colors, s=5, alpha=0.6)
+            ax2.set_xlabel("Flux (a.u.)")
+            ax2.set_ylabel("SNR")
+            ax2.set_title("SNR vs Flux")
+            ax2.grid(True, alpha=0.3)
+
+            # 3. SNR vs Frequency
+            ax3.clear()
+            ax3.scatter(params_arr[:, 1], snrs_arr, c=colors, s=5, alpha=0.6)
+            ax3.set_xlabel("Frequency (MHz)")
+            ax3.set_ylabel("SNR")
+            ax3.set_title("SNR vs Frequency")
+            ax3.grid(True, alpha=0.3)
+
+            # 4. SNR vs Power
+            ax4.clear()
+            ax4.scatter(params_arr[:, 2], snrs_arr, c=colors, s=5, alpha=0.6)
+            ax4.set_xlabel("Power (dBm)")
+            ax4.set_ylabel("SNR")
+            ax4.set_title("SNR vs Power")
+            ax4.grid(True, alpha=0.3)
+
+            # 5. Sampled Points (Flux vs Freq)
+            ax5.clear()
+            ax5.scatter(params_arr[:, 0], params_arr[:, 1], c=colors, s=10, alpha=0.5)
+            ax5.set_xlabel("Flux (a.u.)")
+            ax5.set_ylabel("Frequency (MHz)")
+            ax5.set_title("Sampled Points (Flux vs Freq)")
+            ax5.grid(True, alpha=0.3)
+
+            # 6. Bar chart (Best SNR per Flux)
+            ax6.clear()
+            flux_values = sorted(optimizer.flux_best.keys())
+            if flux_values:
+                best_snrs_per_flux = [optimizer.flux_best[f][2] for f in flux_values]
+                ax6.bar(
+                    range(len(flux_values)),
+                    best_snrs_per_flux,
+                    width=0.8,
+                    alpha=0.7,
+                )
+            ax6.set_xlabel("Flux Index")
+            ax6.set_ylabel("Best SNR")
+            ax6.set_title(f"Best SNR per Flux ({len(flux_values)} values)")
+            ax6.grid(True, alpha=0.3, axis="y")
+
+            fig.canvas.draw()
+            fig.canvas.flush_events()
+
+    plt.ioff()  # Turn off interactive mode at the end
 
     # Convert to arrays
     params_arr = np.array(params_list)
@@ -1024,134 +1129,6 @@ if __name__ == "__main__":
     )
     print("=" * 60)
 
-    # Create visualization
-    fig = plt.figure(figsize=(14, 10))
-    fig.suptitle("JPAOptimizer Test Results (Multi-phase)", fontsize=14)
-
-    # Color map for phases
-    phase_colors = {1: "blue", 2: "red", 3: "green", 4: "orange", 5: "purple"}
-
-    # 1. SNR vs Iteration
-    ax1 = fig.add_subplot(2, 3, 1)
-    for p in unique_phases:
-        mask = phases_arr == p
-        color = phase_colors.get(p, "gray")
-        ax1.scatter(
-            np.arange(len(snrs_arr))[mask],
-            snrs_arr[mask],
-            c=color,
-            s=5,
-            alpha=0.6,
-            label=f"Phase {p}",
-        )
-    ax1.axhline(best_snr, color="black", ls="--", label=f"Best={best_snr:.2f}")
-    ax1.scatter([best_idx], [best_snr], c="black", s=100, marker="*", zorder=5)
-    ax1.set_xlabel("Iteration")
-    ax1.set_ylabel("SNR")
-    ax1.set_title("SNR vs Iteration")
-    ax1.legend(fontsize=8)
-    ax1.grid(True, alpha=0.3)
-
-    # 2. SNR vs Flux
-    ax2 = fig.add_subplot(2, 3, 2)
-    for p in unique_phases:
-        mask = phases_arr == p
-        color = phase_colors.get(p, "gray")
-        ax2.scatter(
-            params_arr[mask, 0],
-            snrs_arr[mask],
-            c=color,
-            s=5,
-            alpha=0.6,
-            label=f"Phase {p}",
-        )
-    ax2.axvline(best_params[0], color="black", ls="--")
-    ax2.axvline(0.5, color="orange", ls=":", label="True optimal")
-    ax2.scatter([best_params[0]], [best_snr], c="black", s=100, marker="*", zorder=5)
-    ax2.set_xlabel("Flux (a.u.)")
-    ax2.set_ylabel("SNR")
-    ax2.set_title("SNR vs Flux")
-    ax2.legend(fontsize=8)
-    ax2.grid(True, alpha=0.3)
-
-    # 3. SNR vs Frequency
-    ax3 = fig.add_subplot(2, 3, 3)
-    for p in unique_phases:
-        mask = phases_arr == p
-        color = phase_colors.get(p, "gray")
-        ax3.scatter(
-            params_arr[mask, 1],
-            snrs_arr[mask],
-            c=color,
-            s=5,
-            alpha=0.6,
-            label=f"Phase {p}",
-        )
-    ax3.axvline(best_params[1], color="black", ls="--")
-    ax3.axvline(7000, color="orange", ls=":", label="True optimal")
-    ax3.scatter([best_params[1]], [best_snr], c="black", s=100, marker="*", zorder=5)
-    ax3.set_xlabel("Frequency (MHz)")
-    ax3.set_ylabel("SNR")
-    ax3.set_title("SNR vs Frequency")
-    ax3.legend(fontsize=8)
-    ax3.grid(True, alpha=0.3)
-
-    # 4. SNR vs Power
-    ax4 = fig.add_subplot(2, 3, 4)
-    for p in unique_phases:
-        mask = phases_arr == p
-        color = phase_colors.get(p, "gray")
-        ax4.scatter(
-            params_arr[mask, 2],
-            snrs_arr[mask],
-            c=color,
-            s=5,
-            alpha=0.6,
-            label=f"Phase {p}",
-        )
-    ax4.axvline(best_params[2], color="black", ls="--")
-    ax4.axvline(-10, color="orange", ls=":", label="True optimal")
-    ax4.scatter([best_params[2]], [best_snr], c="black", s=100, marker="*", zorder=5)
-    ax4.set_xlabel("Power (dBm)")
-    ax4.set_ylabel("SNR")
-    ax4.set_title("SNR vs Power")
-    ax4.legend(fontsize=8)
-    ax4.grid(True, alpha=0.3)
-
-    # 5. 2D scatter: Flux vs Frequency (colored by phase)
-    ax5 = fig.add_subplot(2, 3, 5)
-    for p in unique_phases:
-        mask = phases_arr == p
-        color = phase_colors.get(p, "gray")
-        ax5.scatter(
-            params_arr[mask, 0],
-            params_arr[mask, 1],
-            c=color,
-            s=10,
-            alpha=0.5,
-            label=f"Phase {p}",
-        )
-    ax5.scatter([0.5], [7000], c="red", s=100, marker="x", label="True optimal")
-    ax5.scatter(
-        [best_params[0]], [best_params[1]], c="black", s=100, marker="*", label="Found"
-    )
-    ax5.set_xlabel("Flux (a.u.)")
-    ax5.set_ylabel("Frequency (MHz)")
-    ax5.set_title("Sampled Points (Flux vs Freq)")
-    ax5.legend(fontsize=8)
-    ax5.grid(True, alpha=0.3)
-
-    # 6. Flux values and their best SNR
-    ax6 = fig.add_subplot(2, 3, 6)
-    flux_values = sorted(optimizer.flux_best.keys())
-    best_snrs_per_flux = [optimizer.flux_best[f][2] for f in flux_values]
-    ax6.bar(range(len(flux_values)), best_snrs_per_flux, width=0.8, alpha=0.7)
-    ax6.set_xlabel("Flux Index")
-    ax6.set_ylabel("Best SNR")
-    ax6.set_title(f"Best SNR per Flux ({len(flux_values)} values)")
-    ax6.grid(True, alpha=0.3, axis="y")
-
-    plt.tight_layout()
     plt.savefig("jpa_optimizer_test.png", dpi=150)
     print("Figure saved to jpa_optimizer_test.png")
     plt.show()

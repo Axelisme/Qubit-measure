@@ -57,7 +57,17 @@ class ScatterSegment(AbsSegment):
         offsets = np.c_[xs.flatten(), ys.flatten()]
         self.scatter.set_offsets(offsets)
         if colors is not None:
-            self.scatter.set_array(colors.flatten())
+            colors_arr = np.asarray(colors)
+            if (
+                colors_arr.size > 0
+                and np.issubdtype(colors_arr.dtype, np.number)
+                and colors_arr.ndim == 1
+            ):
+                self.scatter.set_array(colors_arr)
+                self.scatter.set_clim(np.nanmin(colors_arr), np.nanmax(colors_arr))
+            else:
+                self.scatter.set_array(None)
+                self.scatter.set_facecolors(colors_arr)
 
         if title is not None:
             ax.set_title(title)
