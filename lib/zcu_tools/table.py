@@ -25,7 +25,7 @@ def auto_sync(
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         @wraps(func)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-            assert isinstance(args[0], SyncTable)
+            assert isinstance(args[0], SyncFile)
 
             if time in ["before", "both"]:
                 args[0].sync()
@@ -42,7 +42,7 @@ def auto_sync(
     return decorator
 
 
-class SyncTable(ABC):
+class SyncFile(ABC):
     def __init__(self, path: Optional[str] = None) -> None:
         self._path = Path(path) if path is not None else None
         self._modify_time = 0
@@ -81,7 +81,7 @@ class SyncTable(ABC):
         self.dump()
 
 
-class SampleTable(SyncTable):
+class SampleTable(SyncFile):
     def __init__(self, csv_path: Optional[str] = None) -> None:
         self.samples = pd.DataFrame()
         super().__init__(csv_path)
@@ -124,10 +124,10 @@ class SampleTable(SyncTable):
         return self.samples
 
 
-class MetaTableView:
+class MetaDictView:
     PROTECTED_KEYS = ["declare_subdict", "dump"]
 
-    def __init__(self, data: dict, table: MetaTable) -> None:
+    def __init__(self, data: dict, table: MetaDict) -> None:
         self._data = data
         self._table = table
 
@@ -140,17 +140,17 @@ class MetaTableView:
         )
 
     def __getattr__(self, name: str, /) -> Any:
-        if MetaTableView._is_protected(name):
+        if MetaDictView._is_protected(name):
             return object.__getattr__(self, name)
 
         self._table.sync()
         value = self._data[name]
         if isinstance(value, dict):
-            return MetaTableView(value, self._table)
+            return MetaDictView(value, self._table)
         return value
 
     def __setattr__(self, name: str, value: Any, /) -> None:
-        if MetaTableView._is_protected(name):
+        if MetaDictView._is_protected(name):
             object.__setattr__(self, name, value)
             return
 
@@ -159,7 +159,7 @@ class MetaTableView:
         self._table.sync()
 
     def __delattr__(self, name: str, /) -> None:
-        if MetaTableView._is_protected(name):
+        if MetaDictView._is_protected(name):
             object.__delattr__(self, name)
             return
 
@@ -170,14 +170,14 @@ class MetaTableView:
     def __repr__(self) -> str:
         return f"MetaTableView({pformat(self._data)})"
 
-    def declare_subdict(self, name: str) -> MetaTableView:
-        if MetaTableView._is_protected(name):
+    def declare_subdict(self, name: str) -> MetaDictView:
+        if MetaDictView._is_protected(name):
             raise ValueError(f"{name} is protected name")
 
         sub_data = self._data.setdefault(name, {})
         if not isinstance(sub_data, dict):
             raise ValueError(f"{name} is already in the table, but not a dict")
-        return MetaTableView(sub_data, self._table)
+        return MetaDictView(sub_data, self._table)
 
     def dump_json(self, path: str) -> None:
         dump_data = numpy2number(self._data)
@@ -187,12 +187,12 @@ class MetaTableView:
             json.dump(dump_data, f, indent=4)
 
 
-class MetaTable(SyncTable):
+class MetaDict(SyncFile):
     PROTECTED_KEYS = ["dump", "load", "sync", "clone"]
 
     def __init__(self, json_path: Optional[str] = None) -> None:
         self._data = {}
-        self._view = MetaTableView(self._data, self)
+        self._view = MetaDictView(self._data, self)
         super().__init__(json_path)
 
     def _load(self) -> None:
@@ -212,10 +212,10 @@ class MetaTable(SyncTable):
             json.dump(data_to_dump, f, indent=4)
 
     @auto_sync("before")
-    def clone(self, path: Optional[str] = None) -> MetaTable:
-        new_table = MetaTable(path)
+    def clone(self, path: Optional[str] = None) -> MetaDict:
+        new_table = MetaDict(path)
         new_table._data = deepcopy(self._data)
-        new_table._view = MetaTableView(self._data, new_table)
+        new_table._view = MetaDictView(self._data, new_table)
         if path is not None:
             new_table.dump()
         return new_table
@@ -229,20 +229,20 @@ class MetaTable(SyncTable):
         )
 
     def __getattr__(self, name: str) -> Any:
-        if MetaTable._is_protected(name):
+        if MetaDict._is_protected(name):
             return object.__getattr__(self, name)
 
         return getattr(self._view, name)
 
     def __setattr__(self, name: str, value: Any) -> None:
-        if MetaTable._is_protected(name):
+        if MetaDict._is_protected(name):
             object.__setattr__(self, name, value)
             return
 
         setattr(self._view, name, value)
 
     def __delattr__(self, name: str) -> None:
-        if MetaTable._is_protected(name):
+        if MetaDict._is_protected(name):
             object.__delattr__(self, name)
             return
 
@@ -263,7 +263,7 @@ if __name__ == "__main__":
         test_json = os.path.join(tmpdir, "test_meta.json")
         # test_json = "test_meta.json"
 
-        mt = MetaTable(test_json)
+        mt = MetaDict(test_json)
         mt.name = "Q1"
         config_mt = mt.declare_subdict("config")
         mt.config.power = 15

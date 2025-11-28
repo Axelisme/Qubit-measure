@@ -814,7 +814,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         params, signals = result
         snrs = np.abs(signals)
 
-        max_id = np.argmax(snrs)
+        max_id = np.nanargmax(snrs)
         max_snr = float(snrs[max_id])
         best_params = params[max_id, :]
 
