@@ -19,7 +19,7 @@ from zcu_tools.experiment.utils import (
 )
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlotterScatter
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -50,13 +50,14 @@ class JPAFreqExperiment(AbsExperiment):
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_freq")
 
         jpa_freqs = sweep2array(cfg["sweep"]["jpa_freq"], allow_array=True)
+        np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
 
         cfg["sweep"] = {"ge": make_ge_sweep()}
         Pulse.set_param(
             cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
 
-        with LivePlotter1D("JPA Frequency (MHz)", "Signal Difference") as viewer:
+        with LivePlotterScatter("JPA Frequency (MHz)", "Signal Difference") as viewer:
             signals = run_task(
                 task=SoftTask(
                     sweep_name="JPA Frequency",
@@ -114,7 +115,6 @@ class JPAFreqExperiment(AbsExperiment):
         assert result is not None, "no result found"
 
         jpa_freqs, signals = result
-        signals = gaussian_filter1d(signals, sigma=3)
 
         real_signals = np.abs(signals)
 
@@ -122,7 +122,7 @@ class JPAFreqExperiment(AbsExperiment):
         best_jpa_freq = jpa_freqs[max_idx]
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        ax.plot(jpa_freqs, real_signals, label="signal difference")
+        ax.scatter(jpa_freqs, real_signals, label="signal difference", s=2)
         ax.axvline(
             best_jpa_freq,
             color="r",

@@ -104,7 +104,7 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
 
         ax2d, ax1d = self.get_ax("2d"), self.get_ax("1d")
         segment2d, segment1d = self.get_segment("2d"), self.get_segment("1d")
-        assert isinstance(segment2d, Plot2DSegment)
+        assert isinstance(segment2d, (Plot2DSegment, PlotNonUniform2DSegment))
         assert isinstance(segment1d, Plot1DSegment)
 
         # use the last non-nan line as current line

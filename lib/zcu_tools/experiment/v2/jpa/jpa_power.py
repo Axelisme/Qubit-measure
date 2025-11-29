@@ -19,7 +19,7 @@ from zcu_tools.experiment.utils import (
 )
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlotterScatter
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -50,13 +50,14 @@ class JPAPowerExperiment(AbsExperiment):
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_power")
 
         jpa_powers = sweep2array(cfg["sweep"]["jpa_power"], allow_array=True)
+        np.random.shuffle(jpa_powers[1:-1])
 
         cfg["sweep"] = {"ge": make_ge_sweep()}
         Pulse.set_param(
             cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
 
-        with LivePlotter1D("Power (dBm)", "Signal Difference") as viewer:
+        with LivePlotterScatter("Power (dBm)", "Signal Difference") as viewer:
             signals = run_task(
                 task=SoftTask(
                     sweep_name="power (dBm)",
@@ -114,14 +115,13 @@ class JPAPowerExperiment(AbsExperiment):
         assert result is not None, "no result found"
 
         jpa_powers, signals = result
-        signals = gaussian_filter1d(signals, sigma=1)
         snrs = np.abs(signals)
 
         max_idx = np.argmax(snrs)
         best_jpa_power = jpa_powers[max_idx]
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        ax.plot(jpa_powers, snrs, label="signal difference")
+        ax.scatter(jpa_powers, snrs, label="signal difference")
         ax.axvline(
             best_jpa_power,
             color="r",
