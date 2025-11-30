@@ -10,6 +10,8 @@ from .modules import (
     Repeat,
     Reset,
     ResetCfg,
+    TriggerCfg,
+    TriggerReadout,
     check_block_mode,
 )
 from .onetone import OneToneProgram, OneToneProgramCfg

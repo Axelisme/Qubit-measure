@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Callable, ClassVar, Dict, Type, TypedDict, Union
+from typing import Callable, ClassVar, Dict, Optional, Type, TypedDict, Union
 
 from qick.asm_v2 import QickParam
 
@@ -24,7 +24,7 @@ class TriggerReadout(Module):
         name: str,
         ro_cfg: TriggerCfg,
         gen_ch: int,
-        gen_freq: Union[float, QickParam],
+        gen_freq: Optional[Union[float, QickParam]] = None,
     ) -> None:
         self.name = name
         self.ro_cfg = ro_cfg
@@ -33,10 +33,15 @@ class TriggerReadout(Module):
 
     def init(self, prog: MyProgramV2) -> None:
         prog.declare_readout(ch=self.ro_cfg["ro_ch"], length=self.ro_cfg["ro_length"])
+
+        ro_freq = self.ro_cfg.get("ro_freq", self.gen_freq)
+        if ro_freq is None:
+            raise ValueError("ro_freq is not set in ro_cfg or gen_freq is not set")
+
         prog.add_readoutconfig(
             ch=self.ro_cfg["ro_ch"],
             name=self.name,
-            freq=self.ro_cfg.get("ro_freq", self.gen_freq),
+            freq=ro_freq,
             gen_ch=self.gen_ch,
         )
 
