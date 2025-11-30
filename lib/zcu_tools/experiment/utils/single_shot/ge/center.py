@@ -28,8 +28,8 @@ def get_rotate_angle(
     dict
         Dictionary with key 'theta' containing the calculated rotation angle in radians.
     """
-    xg, yg = np.mean(Ig), np.mean(Qg)
-    xe, ye = np.mean(Ie), np.mean(Qe)
+    xg, yg = np.median(Ig), np.median(Qg)
+    xe, ye = np.median(Ie), np.median(Qe)
     theta = -np.arctan2((ye - yg), (xe - xg))
     return {"theta": theta}
 

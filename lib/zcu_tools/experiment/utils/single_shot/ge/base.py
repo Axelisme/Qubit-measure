@@ -30,6 +30,9 @@ def scatter_ge_plot(
     Ig, Ie = Ige
     Qg, Qe = Qge
 
+    g_center = np.median(Ig)
+    e_center = np.median(Ie)
+
     rand_gen = np.random.default_rng(42)
     downsample_idx = rand_gen.choice(
         len(Ig), size=min(max_points, len(Ig)), replace=False
@@ -39,7 +42,11 @@ def scatter_ge_plot(
 
     # sort Ig, Qg by Ig from high to low
     sort_g_idx = np.argsort(Ig)
-    sort_e_idx = np.argsort(Ie)[::-1]
+    sort_e_idx = np.argsort(Ie)
+    if g_center < e_center:
+        sort_g_idx = sort_g_idx[::-1]
+    else:
+        sort_e_idx = sort_e_idx[::-1]
     Ig, Qg = Ig.take(sort_g_idx), Qg.take(sort_g_idx)
     Ie, Qe = Ie.take(sort_e_idx), Qe.take(sort_e_idx)
 
@@ -168,8 +175,8 @@ def fitting_ge_and_plot(
     axs[1, 1].hist(xs, bins=bins, weights=e_pdfs, color="r", alpha=0.5)
 
     fixedparams = [None, None, None, init_p0, avg_p, length_ratio]
-    g_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
-    sg, se, s, p0, p_avg, length_ratio = g_params
+    ge_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
+    sg, se, s, p0, p_avg, length_ratio = ge_params
     fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio)
     fit_e_pdfs = calc_population_pdf(xs, sg, se, s, 1.0 - p0, p_avg, length_ratio)
 
@@ -183,9 +190,24 @@ def fitting_ge_and_plot(
     eg_fit = n_eg * gauss_func(xs, sg, s)
     ee_fit = n_ee * gauss_func(xs, se, s)
 
+    rotated_g_center = sg + 1j * np.median(Qg)
+    rotated_e_center = se + 1j * np.median(Qe)
+
     plt_params = dict(linestyle=":", marker="o", markersize=5)
-    axs[0, 0].plot(sg, np.median(Qg), markerfacecolor="b", color="r", **plt_params)
-    axs[0, 0].plot(se, np.median(Qe), markerfacecolor="r", color="b", **plt_params)
+    axs[0, 0].plot(
+        rotated_g_center.real,
+        rotated_g_center.imag,
+        markerfacecolor="b",
+        color="r",
+        **plt_params,
+    )
+    axs[0, 0].plot(
+        rotated_e_center.real,
+        rotated_e_center.imag,
+        markerfacecolor="r",
+        color="b",
+        **plt_params,
+    )
     axs[0, 0].set_xlim(np.min(bins), np.max(bins))
 
     axs[0, 1].plot(xs, fit_g_pdfs, "k-", label="total")
@@ -229,14 +251,18 @@ def fitting_ge_and_plot(
 
     return (
         fid,
-        threshold,
-        theta * 180 / np.pi,
         np.array(
             [
                 [n_gg, n_ge],
                 [n_eg, n_ee],
             ]
         ),
-        g_params,
+        {
+            "ge_params": ge_params,
+            "theta": theta,
+            "threshold": threshold,
+            "g_center": rotated_g_center * np.exp(-1j * theta),
+            "e_center": rotated_e_center * np.exp(-1j * theta),
+        },
         fig,
     )

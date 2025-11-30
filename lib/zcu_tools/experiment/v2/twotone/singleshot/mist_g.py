@@ -32,22 +32,22 @@ def mist_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
     return np.stack([g_pops, e_pops, 1 - g_pops - e_pops], axis=-1)
 
 
-class MISTPowerDepTaskConfig(TaskConfig, ModularProgramCfg):
+class MISTPowerDepSingleShotTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     init_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MISTPowerDepPopulation(AbsExperiment):
+class MISTPowerDepSingleShot(AbsExperiment):
     def run(
         self,
         soc,
         soccfg,
-        cfg: MISTPowerDepTaskConfig,
+        cfg: MISTPowerDepSingleShotTaskConfig,
         g_center: complex,
         e_center: complex,
-        population_radius: float,
+        radius: float,
     ) -> MISTPowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -60,7 +60,16 @@ class MISTPowerDepPopulation(AbsExperiment):
         )
 
         with LivePlotter1D(
-            "Pulse gain", "MIST", segment_kwargs=dict(num_lines=3)
+            "Pulse gain",
+            "MIST",
+            segment_kwargs=dict(
+                num_lines=3,
+                line_kwargs=[
+                    dict(label="Ground"),
+                    dict(label="Excited"),
+                    dict(label="Other"),
+                ],
+            ),
         ) as viewer:
             signals = run_task(
                 task=HardTask(
@@ -80,7 +89,7 @@ class MISTPowerDepPopulation(AbsExperiment):
                             callback=update_hook,
                             g_center=g_center,
                             e_center=e_center,
-                            population_radius=population_radius,
+                            population_radius=radius,
                         )
                     ),
                     raw2signal_fn=lambda raw: raw[0][0],
@@ -118,9 +127,11 @@ class MISTPowerDepPopulation(AbsExperiment):
             xlabel = r"$\bar n$"
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        ax.plot(xs, populations[:, 0], marker=".", label="Ground")
-        ax.plot(xs, populations[:, 1], marker=".", label="Excited")
-        ax.plot(xs, populations[:, 2], marker=".", label="Other")
+
+        plot_kwargs = dict(ls="-", marker="o", markersize=3)
+        ax.plot(xs, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
+        ax.plot(xs, populations[:, 1], color="red", label="Excited", **plot_kwargs)
+        ax.plot(xs, populations[:, 2], color="green", label="Other", **plot_kwargs)
         ax.set_xscale("log")
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel("Population", fontsize=14)
@@ -135,7 +146,7 @@ class MISTPowerDepPopulation(AbsExperiment):
         filepath: str,
         result: Optional[MISTPowerDepResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/mist/pdr_population",
+        tag: str = "twotone/mist/pdr_singleshot",
         **kwargs,
     ) -> None:
         if result is None:
@@ -147,7 +158,7 @@ class MISTPowerDepPopulation(AbsExperiment):
         save_data(
             filepath=filepath,
             x_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
-            y_info={"name": "State", "unit": "None", "values": np.array([0, 1])},
+            y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
             z_info={"name": "Population", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,

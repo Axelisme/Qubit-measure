@@ -14,7 +14,7 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import TwoToneProgram, TwoToneProgramCfg, sweep2param
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.process import rotate2real, minus_background
 
 from ..runner import HardTask, TaskConfig, run_task
 
@@ -22,7 +22,7 @@ FreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real  # type: ignore
+    return np.abs(minus_background(signals))
 
 
 class FreqTaskConfig(TaskConfig, TwoToneProgramCfg): ...

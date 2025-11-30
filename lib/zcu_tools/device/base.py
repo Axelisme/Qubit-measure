@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import sys
 from abc import ABC, abstractmethod
-from typing import TypedDict
+from typing import TypedDict, TYPE_CHECKING
 
 
-from pyvisa import ResourceManager
 from typing_extensions import Generic, NotRequired, TypeVar
+
+if TYPE_CHECKING:
+    from pyvisa import ResourceManager
 
 
 class DeviceInfo(TypedDict):

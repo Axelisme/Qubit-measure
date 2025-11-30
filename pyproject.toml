@@ -36,6 +36,7 @@ fit = [
     "requests",
     "flask",
     "jupytext",
+    "scikit-optimize",
 ]
 gdrive = [
     "google-api-python-client",

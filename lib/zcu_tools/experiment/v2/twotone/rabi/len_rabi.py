@@ -81,7 +81,7 @@ class LenRabiExperiment(AbsExperiment):
                     sweep_values=lens.tolist(),
                     update_cfg_fn=lambda _, ctx, length: Pulse.set_param(
                         ctx.cfg["qub_pulse"], "length", length
-                    ),  # type: ignore
+                    ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
                             TwoToneProgram(soccfg, ctx.cfg).acquire(

@@ -1,6 +1,9 @@
-from typing import Any, Dict, Literal
+from __future__ import annotations
 
-from zcu_tools.device import DeviceInfo
+from typing import Any, Dict, Literal, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from zcu_tools.device import DeviceInfo
 
 # ==================== Helpers for device config ==================== #
 

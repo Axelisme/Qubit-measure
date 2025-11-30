@@ -299,8 +299,8 @@ class SingleShotMixin(TypedAcquireMixin):
             if remove_offset:
                 offset = self.soccfg["readouts"][ro_ch]["iq_offset"]  # type: ignore
                 avg -= offset
-            g_dist = np.linalg.norm(avg.dot([1, 1j]) - g_center)
-            e_dist = np.linalg.norm(avg.dot([1, 1j]) - e_center)
+            g_dist = np.abs(avg.dot([1, 1j]) - g_center)
+            e_dist = np.abs(avg.dot([1, 1j]) - e_center)
             g_shot = np.heaviside(population_radius - g_dist, 0)
             e_shot = np.heaviside(population_radius - e_dist, 0)
             shots.append(np.stack([g_shot, e_shot], axis=-1))

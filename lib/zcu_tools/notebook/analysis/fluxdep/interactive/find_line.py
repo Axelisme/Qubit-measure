@@ -359,11 +359,15 @@ class InteractiveLines:
         best_pos = current_pos
         min_loss = float("inf")
 
+        real_signals = cast2real_and_norm(
+            self.spectrum, use_phase=not self.only_use_magnitude
+        )
+
         # 對每個候選位置計算mirror loss
         for candidate in candidates:
             # 計算該位置的mirror loss
             # 總是使用spectrum來計算(包含phase資訊)
-            diff_amps = diff_mirror(self.mAs, self.spectrum, candidate)
+            diff_amps = diff_mirror(self.mAs, real_signals, candidate)
             valid_amps = diff_amps[diff_amps != 0.0]
 
             # 確保有有效的數據點

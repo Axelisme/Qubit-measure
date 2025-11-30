@@ -5,7 +5,7 @@ from typing import Literal, Optional
 import numpy as np
 from tqdm.auto import tqdm
 
-from .base import BaseDevice, DeviceInfo, ResourceManager
+from .base import BaseDevice, DeviceInfo
 
 STATUS_MAP = {"on": "1", "off": "0"}
 STATUS_MAP_INV = {"1": "on", "0": "off"}
@@ -22,7 +22,7 @@ class YOKOGS200Info(DeviceInfo):
 class YOKOGS200(BaseDevice[YOKOGS200Info]):
     # Initializes session for device.
     # address: address of device, rm: VISA resource manager
-    def __init__(self, address: str, rm: ResourceManager) -> None:
+    def __init__(self, address: str, rm) -> None:
         super().__init__(address, rm)
 
         mode = self.get_mode()

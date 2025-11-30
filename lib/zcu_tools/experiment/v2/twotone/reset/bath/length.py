@@ -6,6 +6,8 @@ from typing import Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -88,12 +90,24 @@ class LengthExperiment(AbsExperiment):
 
         return lens, signals
 
-    def analyze(self, result: Optional[LengthResultType] = None) -> None:
+    def analyze(self, result: Optional[LengthResultType] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        raise NotImplementedError("Analysis not implemented yet")
+        lens, signals = result
+
+        real_signals = bathreset_signal2real(signals)
+
+        fig, ax = plt.subplots()
+
+        ax.plot(lens, real_signals, marker=".")
+        ax.set_xlabel("Length (us)")
+        ax.set_ylabel("Signal (a.u.)")
+        ax.set_title("Bath Reset Length Measurement")
+        ax.grid(True)
+
+        return fig
 
     def save(
         self,

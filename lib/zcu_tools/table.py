@@ -209,7 +209,7 @@ class MetaDict(SyncFile):
         data_to_dump = numpy2number(self._data)
 
         with open(self._path, "w", encoding="utf-8") as f:
-            json.dump(data_to_dump, f, indent=4)
+            json.dump(data_to_dump, f, indent=4, default=str)
 
     @auto_sync("before")
     def clone(self, path: Optional[str] = None) -> MetaDict:

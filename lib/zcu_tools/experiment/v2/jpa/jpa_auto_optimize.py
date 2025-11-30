@@ -774,7 +774,9 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                 cycle_colors = prop_cycle.by_key()["color"]
                 colors = np.array(
                     [
-                        cycle_colors[(p - 1) % len(cycle_colors)] if p > 0 else "lightgray"
+                        cycle_colors[(p - 1) % len(cycle_colors)]
+                        if p > 0
+                        else "lightgray"
                         for p in phases
                     ]
                 )
