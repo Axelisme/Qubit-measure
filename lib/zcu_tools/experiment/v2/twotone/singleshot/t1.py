@@ -33,12 +33,27 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.fitting import fit_ge_decay
 
 # (times, signals)
 T1ResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+def calc_transition_rate(g_p: float, e_p: float, t1: float) -> Tuple[float, float]:
+    """Calculate transition rates from T1 times and steady populations."""
+    if t1 == 0.0:
+        return 0.0, 0.0
+
+    # Using detailed balance: p_g * gamma_ge = p_e * gamma_eg
+    # And total rate: gamma_total = gamma_ge + gamma_eg = 1 / t1
+
+    gamma_ge = (e_p / (g_p + e_p)) / t1
+    gamma_eg = (g_p / (g_p + e_p)) / t1
+
+    return gamma_ge, gamma_eg
+
+
+def calc_populations(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     g_pop, e_pop = signals[..., 0], signals[..., 1]
     return np.stack([g_pop, e_pop, 1 - g_pop - e_pop], axis=-1).real
 
@@ -116,7 +131,7 @@ class T1Experiment(AbsExperiment):
                     result_shape=(len(ts), 2),
                 ),
                 init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data).T),
+                update_hook=lambda ctx: viewer.update(ts, calc_populations(ctx.data).T),
             )
 
         # record last cfg and result
@@ -132,12 +147,22 @@ class T1Experiment(AbsExperiment):
 
         lens, signals = result
 
-        populations = t1_signal2real(signals)
+        populations = calc_populations(signals)
+
+        (
+            (t1, _, g_fit_signals, g_params),
+            (_, _, e_fit_signals, e_params),
+        ) = fit_ge_decay(lens, populations[:, 0], populations[:, 1], share_t1=True)
+
+        gamma_ge, gamma_eg = calc_transition_rate(g_params[0], e_params[0], t1)
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        plot_kwargs = dict(ls="-", marker="o", markersize=3)
+        ax.set_title(f"Γ_ge={gamma_ge:.3f} μs⁻¹, Γ_eg={gamma_eg:.3f} μs⁻¹")
+        ax.plot(lens, g_fit_signals, color="blue", ls="--", label="Ground Fit")
+        ax.plot(lens, e_fit_signals, color="red", ls="--", label="Excited Fit")
+        plot_kwargs = dict(ls="-", marker=".", markersize=3)
         ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
         ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)
         ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)
@@ -240,7 +265,7 @@ class T1WithToneExperiment(AbsExperiment):
                     result_shape=(len(ts), 2),
                 ),
                 init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data).T),
+                update_hook=lambda ctx: viewer.update(ts, calc_populations(ctx.data).T),
             )
 
         # record last cfg and result
@@ -256,12 +281,22 @@ class T1WithToneExperiment(AbsExperiment):
 
         lens, signals = result
 
-        populations = t1_signal2real(signals)
+        populations = calc_populations(signals)
+
+        (
+            (t1, _, g_fit_signals, g_params),
+            (_, _, e_fit_signals, e_params),
+        ) = fit_ge_decay(lens, populations[:, 0], populations[:, 1], share_t1=True)
+
+        gamma_ge, gamma_eg = calc_transition_rate(g_params[0], e_params[0], t1)
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        plot_kwargs = dict(ls="-", marker="o", markersize=3)
+        ax.set_title(f"Γ_ge={gamma_ge:.3f} μs⁻¹, Γ_eg={gamma_eg:.3f} μs⁻¹")
+        ax.plot(lens, g_fit_signals, color="blue", ls="--", label="Ground Fit")
+        ax.plot(lens, e_fit_signals, color="red", ls="--", label="Excited Fit")
+        plot_kwargs = dict(ls="-", marker=".", markersize=3)
         ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
         ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)
         ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)
@@ -372,7 +407,7 @@ class T1WithToneSweepExperiment(AbsExperiment):
             def plot_fn(ctx) -> None:
                 i = ctx.env_dict["idx"]
 
-                populations = t1_signal2real(np.asarray(ctx.data))
+                populations = calc_populations(np.asarray(ctx.data))
 
                 viewer.get_plotter("plot_2d_g").update(
                     gains, ts, populations[..., 0], refresh=False
@@ -432,10 +467,81 @@ class T1WithToneSweepExperiment(AbsExperiment):
 
         return gains, ts, signals
 
-    def analyze(self, result: Optional[T1SweepResultType] = None) -> None:
+    def analyze(self, result: Optional[T1SweepResultType] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
+
+        gains, Ts, signals = result
+
+        populations = calc_populations(signals)
+
+        gammas = np.zeros((len(gains), 2))
+        for i in range(len(gains)):
+            (
+                (t1, _, _, g_params),
+                (_, _, _, e_params),
+            ) = fit_ge_decay(
+                Ts, populations[i, :, 0], populations[i, :, 1], share_t1=True
+            )
+            gamma_ge, gamma_eg = calc_transition_rate(g_params[0], e_params[0], t1)
+            gammas[i] = (gamma_ge, gamma_eg)
+
+        fig, axs = make_plot_frame(2, 2, figsize=(8, 8))
+        assert isinstance(fig, Figure)
+
+        axs[0][0].set_title("Ground Population")
+        im1 = axs[0][0].imshow(
+            populations[..., 0].T,
+            extent=[gains[0], gains[-1], Ts[-1], Ts[0]],
+            aspect="auto",
+            vmin=0.0,
+            vmax=1.0,
+            cmap="viridis",
+        )
+        fig.colorbar(im1, ax=axs[0][0], label="Population")
+        axs[0][0].set_xlabel("Readout Gain")
+        axs[0][0].set_ylabel("Time (s)")
+
+        axs[0][1].set_title("Excited Population")
+        im2 = axs[0][1].imshow(
+            populations[..., 1].T,
+            extent=[gains[0], gains[-1], Ts[-1], Ts[0]],
+            aspect="auto",
+            vmin=0.0,
+            vmax=1.0,
+            cmap="viridis",
+        )
+        fig.colorbar(im2, ax=axs[0][1], label="Population")
+        axs[0][1].set_xlabel("Readout Gain")
+        axs[0][1].set_ylabel("Time (s)")
+
+        axs[1][0].set_title("Other Population")
+        im3 = axs[1][0].imshow(
+            populations[..., 2].T,
+            extent=[gains[0], gains[-1], Ts[-1], Ts[0]],
+            aspect="auto",
+            vmin=0.0,
+            vmax=1.0,
+            cmap="viridis",
+        )
+        fig.colorbar(im3, ax=axs[1][0], label="Population")
+
+        axs[1][1].set_title("Transition Rates")
+        axs[1][1].plot(
+            gains, gammas[:, 0], label="Γ_ge", color="blue", marker=".", ls="-"
+        )
+        axs[1][1].plot(
+            gains, gammas[:, 1], label="Γ_eg", color="red", marker=".", ls="-"
+        )
+        axs[1][1].set_xlabel("Readout Gain")
+        axs[1][1].set_ylabel("Transition Rate (μs⁻¹)")
+        axs[1][1].legend()
+        axs[1][1].grid(True)
+
+        fig.tight_layout()
+
+        return fig
 
     def save(
         self,
