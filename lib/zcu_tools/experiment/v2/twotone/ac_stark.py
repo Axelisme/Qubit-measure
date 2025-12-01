@@ -14,6 +14,7 @@ from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
+    Delay,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -94,6 +95,9 @@ class AcStarkExperiment(AbsExperiment):
         earlystop_snr: Optional[float] = None,
     ) -> AcStarkResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
+
+        if cfg["stark_pulse1"].get("block_mode", True):
+            raise ValueError("Stark pulse 1 must be in block mode")
 
         assert "sweep" in cfg
         assert isinstance(cfg["sweep"], dict)
@@ -291,6 +295,10 @@ class AcStarkExperiment(AbsExperiment):
         )
 
 
+def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    return rotate2real(signals).real
+
+
 class AcStarkRamseyTaskConfig(TaskConfig, ModularProgramCfg):
     stark_pulse: PulseCfg
     pi_pulse: PulseCfg
@@ -309,6 +317,9 @@ class AcStarkRamseyExperiment(AbsExperiment):
     ) -> AcStarkResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
+        if cfg["stark_pulse1"].get("block_mode", True):
+            raise ValueError("Stark pulse 1 must be in block mode")
+
         assert "sweep" in cfg
         assert isinstance(cfg["sweep"], dict)
         gain_sweep = cfg["sweep"].pop("gain")
@@ -321,13 +332,11 @@ class AcStarkRamseyExperiment(AbsExperiment):
             )
         )
 
-        Pulse.set_param(
-            cfg["stark_pulse2"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
-        )
+        t2r_spans = sweep2param("length", cfg["sweep"]["length"])
 
         with LivePlotter2DwithLine(
             "Stark Pulse Gain (a.u.)",
-            "Frequency (MHz)",
+            "Time (us)",
             line_axis=1,
             num_lines=2,
             uniform=False,
@@ -339,7 +348,7 @@ class AcStarkRamseyExperiment(AbsExperiment):
                     sweep_name="resonator gain",
                     sweep_values=pdrs.tolist(),
                     update_cfg_fn=lambda _, ctx, pdr: Pulse.set_param(
-                        ctx.cfg["stark_pulse1"], "gain", pdr
+                        ctx.cfg["stark_pulse"], "gain", pdr
                     ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
@@ -352,8 +361,17 @@ class AcStarkRamseyExperiment(AbsExperiment):
                                             "reset",
                                             ctx.cfg.get("reset", {"type": "none"}),
                                         ),
-                                        Pulse("stark_pulse1", ctx.cfg["stark_pulse1"]),
-                                        Pulse("stark_pulse2", ctx.cfg["stark_pulse2"]),
+                                        Pulse("stark_pulse", ctx.cfg["stark_pulse"]),
+                                        Pulse("pi_pulse1", ctx.cfg["pi_pulse"]),
+                                        Delay("t2_delay", delay=t2r_spans),
+                                        Pulse(
+                                            name="pi2_pulse2",
+                                            cfg={
+                                                **ctx.cfg["pi2_pulse"],
+                                                "phase": ctx.cfg["pi2_pulse"]["phase"]
+                                                + 360 * detune * t2r_spans,
+                                            },
+                                        ),
                                         Readout("readout", ctx.cfg["readout"]),
                                     ],
                                 )
@@ -364,7 +382,7 @@ class AcStarkRamseyExperiment(AbsExperiment):
                                     prog,
                                     update_hook,
                                     earlystop_snr,
-                                    signal2real_fn=np.abs,
+                                    signal2real_fn=acstark_ramsey_signal2real,
                                     snr_hook=lambda snr: ax1d.set_title(
                                         f"snr = {snr:.1f}"
                                     ),
@@ -376,7 +394,7 @@ class AcStarkRamseyExperiment(AbsExperiment):
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    pdrs, lens, acstark_signal2real(np.asarray(ctx.data))
+                    pdrs, lens, acstark_ramsey_signal2real(np.asarray(ctx.data))
                 ),
             )
             signals = np.asarray(signals)
@@ -391,16 +409,14 @@ class AcStarkRamseyExperiment(AbsExperiment):
         self,
         result: Optional[AcStarkResultType] = None,
         *,
-        chi: float,
-        kappa: float,
-        deg: int = 1,
+        detune: float = 0.0,
         cutoff: Optional[float] = None,
-    ) -> tuple[float, Figure]:
+    ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
 
-        pdrs, fpts, signals = result
+        pdrs, lens, signals = result
 
         # apply cutoff if provided
         if cutoff is not None:
@@ -408,76 +424,38 @@ class AcStarkRamseyExperiment(AbsExperiment):
             pdrs = pdrs[valid_indices]
             signals = signals[valid_indices, :]
 
-        amps = acstark_signal2real(signals)
-        s_pdrs, s_fpts = get_resonance_freq(pdrs, fpts, amps)
+        real_signals = acstark_ramsey_signal2real(signals)
+        fft_signals = np.fft.fft(signals, axis=1)
+        fft_freqs = np.fft.fftfreq(
+            signals.shape[1], d=(np.ptp(lens) / (signals.shape[1] - 1))
+        )
 
         pdrs2 = pdrs**2
-        s_pdrs2 = s_pdrs**2
 
-        # fitting max_freqs with ax2 + bx + c
-        x2_fit = np.linspace(min(pdrs2), max(pdrs2), 100)
-        if deg == 1:
-            b, c = np.polyfit(s_pdrs2, s_fpts, 1)
-            y_fit = b * x2_fit + c
-        elif deg == 2:
-            a, b, c = np.polyfit(s_pdrs2, s_fpts, 2)
-            y_fit = a * x2_fit**2 + b * x2_fit + c
-        else:
-            raise ValueError(f"Degree {deg} is not supported.")
-
-        # Calculate the Stark shift
-        eta = kappa**2 / (kappa**2 + chi**2)
-        ac_coeff = abs(b) / (2 * eta * chi)
-
-        # plot the data and the fitted polynomial
-        avg_n = ac_coeff * pdrs2
-
-        fig, ax1 = plt.subplots(figsize=config.figsize)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        # Use NonUniformImage for better visualization with pdr^2 as x-axis
-        im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
-        im.set_data(avg_n, fpts, amps.T)
-        im.set_extent((avg_n[0], avg_n[-1], fpts[0], fpts[-1]))
-        ax1.add_image(im)
+        im1 = NonUniformImage(ax1, cmap="viridis", interpolation="none")
+        im1.set_data(pdrs2, lens, real_signals.T)
+        im1.set_extent((pdrs2[0], pdrs2[-1], lens[0], lens[-1]))
+        ax1.add_image(im1)
+        ax1.set_xlim(pdrs2[0], pdrs2[-1])
+        ax1.set_ylim(lens[0], lens[-1])
+        ax1.set_xlabel("Stark Pulse Gain² (a.u.²)", fontsize=14)
+        ax1.set_ylabel("Time (us)", fontsize=14)
 
-        # Set proper limits for the plot
-        ax1.set_xlim(avg_n[0], avg_n[-1])
-        ax1.set_ylim(fpts[0], fpts[-1])
-
-        # Plot the resonance frequencies and fitted curve
-        ax1.plot(ac_coeff * s_pdrs2, s_fpts, ".", c="k")
-
-        # Fit curve in terms of pdr^2
-        label = r"$\bar n$" + f" = {ac_coeff:.2g} " + r"$gain^2$"
-        n_fit = ac_coeff * x2_fit
-        ax1.plot(n_fit, y_fit, "-", label=label)
-
-        # Create secondary x-axis for pdr^2 (Readout Gain²)
-        ax2 = ax1.twiny()
-
-        # main x-axis: avg_n, secondary x-axis: pdr^2
-        # avg_n = ac_coeff * pdrs^2
-        ax1.set_xticks(ax1.get_xticks())
-        # ax1.set_xticklabels([f"{avg_n:.1f}" for avg_n in ax1.get_xticks()])
-        ax1.set_xlabel(r"Average Photon Number ($\bar n$)", fontsize=14)
-
-        # 上方次 x 軸顯示 pdr
-        avgn_ticks = ax1.get_xticks()
-        pdr_ticks = np.sqrt(avgn_ticks / ac_coeff)
-        ax2.set_xlim(ax1.get_xlim())
-        ax2.set_xticks(avgn_ticks)
-        ax2.set_xticklabels([f"{pdr:.2f}" for pdr in pdr_ticks])
-        ax2.set_xlabel("Readout Gain (a.u.)", fontsize=14)
-
-        ax1.set_ylabel("Qubit Frequency (MHz)", fontsize=14)
-        ax1.legend(fontsize="x-large")
-        ax1.tick_params(axis="both", which="major", labelsize=12)
+        im2 = NonUniformImage(ax2, cmap="viridis", interpolation="none")
+        im2.set_data(pdrs2, fft_freqs, fft_signals.T)
+        im2.set_extent((pdrs2[0], pdrs2[-1], fft_freqs[0], fft_freqs[-1]))
+        ax2.add_image(im2)
+        ax2.set_xlim(pdrs2[0], pdrs2[-1])
+        ax2.set_ylim(fft_freqs[0], fft_freqs[-1])
+        ax2.set_xlabel("Stark Pulse Gain² (a.u.²)", fontsize=14)
+        ax2.set_ylabel("FFT Frequency (MHz)", fontsize=14)
 
         fig.tight_layout()
-        plt.show(fig)
 
-        return ac_coeff, fig
+        return fig
 
     def save(
         self,
@@ -492,12 +470,12 @@ class AcStarkRamseyExperiment(AbsExperiment):
             result = self.last_result
         assert result is not None, "No result found"
 
-        pdrs, fpts, signals2D = result
+        pdrs, lens, signals2D = result
 
         save_data(
             filepath=filepath,
             x_info={"name": "Stark Pulse Gain", "unit": "a.u.", "values": pdrs},
-            y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            y_info={"name": "Time", "unit": "s", "values": lens * 1e-6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
             tag=tag,

@@ -1,5 +1,5 @@
 from . import mist, reset, ro_optimize, time_domain, rabi, singleshot
-from .ac_stark import AcStarkExperiment
+from .ac_stark import AcStarkExperiment, AcStarkRamseyExperiment
 from .allxy import AllXYExperiment
 from .dispersive import DispersiveExperiment
 from .fluxdep import FreqFluxDepExperiment
@@ -16,6 +16,7 @@ __all__ = [
     "ro_optimize",
     "time_domain",
     "AcStarkExperiment",
+    "AcStarkRamseyExperiment",
     "AllXYExperiment",
     "DispersiveExperiment",
     "FreqExperiment",
