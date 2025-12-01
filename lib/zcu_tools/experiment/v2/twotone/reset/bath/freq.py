@@ -35,7 +35,6 @@ FreqGainResultType = Tuple[
 
 class FreqGainTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
-    init_pulse: PulseCfg
     tested_reset: ResetCfg
     readout: ReadoutCfg
 
@@ -62,14 +61,14 @@ class FreqGainExperiment(AbsExperiment):
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
         Reset.set_param(
-            cfg["tested_reset"], "qub_gain", sweep2param("gain", cfg["sweep"]["gain"])
+            cfg["tested_reset"], "res_gain", sweep2param("gain", cfg["sweep"]["gain"])
         )
         Reset.set_param(
             cfg["tested_reset"], "res_freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
         with LivePlotter2D(
-            "Cavity Frequency (MHz)", "Qubit drive Gain (a.u.)"
+            "Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)"
         ) as viewer:
             signals = run_task(
                 task=HardTask(
@@ -79,7 +78,6 @@ class FreqGainExperiment(AbsExperiment):
                             ctx.cfg,
                             modules=[
                                 Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
                                 Reset("tested_reset", ctx.cfg["tested_reset"]),
                                 Readout("readout", ctx.cfg["readout"]),
                             ],
@@ -139,8 +137,10 @@ class FreqGainExperiment(AbsExperiment):
             interpolation="none",
             extent=(fpts[0], fpts[-1], gains[0], gains[-1]),
         )
-        peak_label = f"({gain_opt:.1f} a.u., {freq_opt:.1f}) MHz"
+        peak_label = f"({gain_opt:.2f} a.u., {freq_opt:.1f} MHz)"
         ax.scatter(freq_opt, gain_opt, color="r", s=40, marker="*", label=peak_label)
+        ax.set_xlabel("Cavity Frequency (MHz)", fontsize="x-large")
+        ax.set_ylabel("Cavity drive Gain (a.u.)", fontsize="x-large")
         ax.legend(fontsize="x-large")
         ax.tick_params(axis="both", which="major", labelsize=12)
 
@@ -164,7 +164,7 @@ class FreqGainExperiment(AbsExperiment):
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Qubit drive Gain", "unit": "a.u.", "values": gains},
+            x_info={"name": "Cavity drive Gain", "unit": "a.u.", "values": gains},
             y_info={"name": "Cavity Frequency", "unit": "Hz", "values": fpts * 1e6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,

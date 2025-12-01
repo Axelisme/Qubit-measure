@@ -66,6 +66,8 @@ class LenRabiSingleShotExperiment(AbsExperiment):
                 ],
             ),
         ) as viewer:
+            viewer.get_ax().set_ylim(0.0, 1.0)
+
             signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -113,6 +115,7 @@ class LenRabiSingleShotExperiment(AbsExperiment):
         ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)
         ax.set_xlabel("Pulse length (μs)")
         ax.set_ylabel("Signal Real (a.u.)")
+        ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)
 

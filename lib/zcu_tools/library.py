@@ -99,6 +99,11 @@ def auto_derive_module(
         module_cfg.setdefault("post_delay", 0.0)
         module_cfg.setdefault("block_mode", True)
 
+        if isinstance(module_cfg["waveform"], str):
+            wav_name = module_cfg["waveform"]
+            module_cfg["waveform"] = ml.get_waveform(wav_name)
+            module_cfg["waveform"]["name"] = wav_name
+
     # derive pulse in module
     for key, value in module_cfg.items():
         if is_module_cfg(key, value):

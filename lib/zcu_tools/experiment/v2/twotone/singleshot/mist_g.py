@@ -71,6 +71,8 @@ class MISTPowerDepSingleShot(AbsExperiment):
                 ],
             ),
         ) as viewer:
+            viewer.get_ax().set_ylim(0.0, 1.0)
+
             signals = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
@@ -126,13 +128,12 @@ class MISTPowerDepSingleShot(AbsExperiment):
             xs = ac_coeff * pdrs**2
             xlabel = r"$\bar n$"
 
-        fig, ax = plt.subplots(figsize=config.figsize)
+        fig, ax = plt.subplots(figsize=(6, 6))
 
-        plot_kwargs = dict(ls="-", marker="o", markersize=3)
+        plot_kwargs = dict(ls="-", marker="o", markersize=1)
         ax.plot(xs, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
         ax.plot(xs, populations[:, 1], color="red", label="Excited", **plot_kwargs)
         ax.plot(xs, populations[:, 2], color="green", label="Other", **plot_kwargs)
-        ax.set_xscale("log")
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel("Population", fontsize=14)
         ax.grid(True)
