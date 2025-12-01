@@ -84,6 +84,16 @@ def fit_ge_decay(
             expfunc,
             [g_params, e_params],
             shared_idxs,
+            list_bounds=[
+                (
+                    [-np.inf, -2 * np.abs(g_params[1]), 0],
+                    [np.inf, 2 * np.abs(g_params[1]), np.inf],
+                ),
+                (
+                    [-np.inf, -2 * np.abs(e_params[1]), 0],
+                    [np.inf, 2 * np.abs(e_params[1]), np.inf],
+                ),
+            ],
         )
         g_params, e_params = ge_params
         g_pCov, e_pCov = ge_pcov
@@ -93,10 +103,10 @@ def fit_ge_decay(
     e_t1 = e_params[2]
     e_t1err = np.sqrt(e_pCov[2, 2])
 
-    if g_t1err > np.max(times):
+    if g_t1 > 3 * np.max(times) or g_t1 < 3 * (times[1] - times[0]):
         g_t1 = 0.0
         g_t1err = np.inf
-    if e_t1err > np.max(times):
+    if e_t1 > 3 * np.max(times) or e_t1 < 3 * (times[1] - times[0]):
         e_t1 = 0.0
         e_t1err = np.inf
 

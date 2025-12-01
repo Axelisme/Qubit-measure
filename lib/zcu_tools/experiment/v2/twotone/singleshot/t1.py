@@ -6,6 +6,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from tqdm.auto import trange
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
@@ -41,8 +42,8 @@ T1ResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 def calc_transition_rate(g_p: float, e_p: float, t1: float) -> Tuple[float, float]:
     """Calculate transition rates from T1 times and steady populations."""
-    if t1 == 0.0:
-        return 0.0, 0.0
+    if np.isclose(t1, 0.0, atol=1e-1):
+        return np.nan, np.nan
 
     # Using detailed balance: p_g * gamma_ge = p_e * gamma_eg
     # And total rate: gamma_total = gamma_ge + gamma_eg = 1 / t1
@@ -168,7 +169,6 @@ class T1Experiment(AbsExperiment):
         ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)
         ax.set_xlabel("Time (μs)")
         ax.set_ylabel("Population")
-        ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)
 
@@ -302,7 +302,7 @@ class T1WithToneExperiment(AbsExperiment):
         ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)
         ax.set_xlabel("Time (μs)")
         ax.set_ylabel("Population")
-        ax.set_ylim(0.0, 1.0)
+        # ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)
 
@@ -477,7 +477,7 @@ class T1WithToneSweepExperiment(AbsExperiment):
         populations = calc_populations(signals)
 
         gammas = np.zeros((len(gains), 2))
-        for i in range(len(gains)):
+        for i in trange(len(gains)):
             (
                 (t1, _, _, g_params),
                 (_, _, _, e_params),
@@ -487,16 +487,19 @@ class T1WithToneSweepExperiment(AbsExperiment):
             gamma_ge, gamma_eg = calc_transition_rate(g_params[0], e_params[0], t1)
             gammas[i] = (gamma_ge, gamma_eg)
 
-        fig, axs = make_plot_frame(2, 2, figsize=(8, 8))
+        fig, axs = plt.subplots(2, 2, figsize=(8, 6))
         assert isinstance(fig, Figure)
+
+        vmax = np.nanmax(populations)
+        vmin = np.nanmin(populations)
 
         axs[0][0].set_title("Ground Population")
         im1 = axs[0][0].imshow(
             populations[..., 0].T,
             extent=[gains[0], gains[-1], Ts[-1], Ts[0]],
             aspect="auto",
-            vmin=0.0,
-            vmax=1.0,
+            vmin=vmin,
+            vmax=vmax,
             cmap="viridis",
         )
         fig.colorbar(im1, ax=axs[0][0], label="Population")
@@ -508,8 +511,8 @@ class T1WithToneSweepExperiment(AbsExperiment):
             populations[..., 1].T,
             extent=[gains[0], gains[-1], Ts[-1], Ts[0]],
             aspect="auto",
-            vmin=0.0,
-            vmax=1.0,
+            vmin=vmin,
+            vmax=vmax,
             cmap="viridis",
         )
         fig.colorbar(im2, ax=axs[0][1], label="Population")
@@ -521,19 +524,19 @@ class T1WithToneSweepExperiment(AbsExperiment):
             populations[..., 2].T,
             extent=[gains[0], gains[-1], Ts[-1], Ts[0]],
             aspect="auto",
-            vmin=0.0,
-            vmax=1.0,
+            vmin=vmin,
+            vmax=vmax,
             cmap="viridis",
         )
         fig.colorbar(im3, ax=axs[1][0], label="Population")
+        axs[1][0].set_xlabel("Readout Gain")
+        axs[1][0].set_ylabel("Time (s)")
 
         axs[1][1].set_title("Transition Rates")
-        axs[1][1].plot(
-            gains, gammas[:, 0], label="Γ_ge", color="blue", marker=".", ls="-"
-        )
-        axs[1][1].plot(
-            gains, gammas[:, 1], label="Γ_eg", color="red", marker=".", ls="-"
-        )
+        plot_kwargs = dict(marker=".", ls="-", markersize=1)
+        axs[1][1].plot(gains, gammas[:, 0], label="Γ_ge", color="blue", **plot_kwargs)
+        axs[1][1].plot(gains, gammas[:, 1], label="Γ_eg", color="red", **plot_kwargs)
+        axs[1][1].set_ylim(0.0, 5 * np.nanstd(gammas))
         axs[1][1].set_xlabel("Readout Gain")
         axs[1][1].set_ylabel("Transition Rate (μs⁻¹)")
         axs[1][1].legend()
