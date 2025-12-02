@@ -22,6 +22,7 @@ from zcu_tools.program.v2 import (
     Readout,
     ReadoutCfg,
     Reset,
+    NonBlocking,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
@@ -307,18 +308,9 @@ class AcStarkRamseyTaskConfig(TaskConfig, ModularProgramCfg):
 
 class AcStarkRamseyExperiment(AbsExperiment):
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: AcStarkRamseyTaskConfig,
-        *,
-        detune: float = 0.0,
-        earlystop_snr: Optional[float] = None,
+        self, soc, soccfg, cfg: AcStarkRamseyTaskConfig, *, detune: float = 0.0
     ) -> AcStarkResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
-
-        if cfg["stark_pulse1"].get("block_mode", True):
-            raise ValueError("Stark pulse 1 must be in block mode")
 
         assert "sweep" in cfg
         assert isinstance(cfg["sweep"], dict)
@@ -341,8 +333,6 @@ class AcStarkRamseyExperiment(AbsExperiment):
             num_lines=2,
             uniform=False,
         ) as viewer:
-            ax1d = viewer.get_ax("1d")
-
             signals = run_task(
                 task=SoftTask(
                     sweep_name="resonator gain",
@@ -352,42 +342,43 @@ class AcStarkRamseyExperiment(AbsExperiment):
                     ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
-                            (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse("stark_pulse", ctx.cfg["stark_pulse"]),
-                                        Pulse("pi_pulse1", ctx.cfg["pi_pulse"]),
-                                        Delay("t2_delay", delay=t2r_spans),
-                                        Pulse(
-                                            name="pi2_pulse2",
-                                            cfg={
-                                                **ctx.cfg["pi2_pulse"],
-                                                "phase": ctx.cfg["pi2_pulse"]["phase"]
-                                                + 360 * detune * t2r_spans,
-                                            },
-                                        ),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                )
-                            ).acquire(
-                                soc,
-                                progress=False,
-                                callback=wrap_earlystop_check(
-                                    prog,
-                                    update_hook,
-                                    earlystop_snr,
-                                    signal2real_fn=acstark_ramsey_signal2real,
-                                    snr_hook=lambda snr: ax1d.set_title(
-                                        f"snr = {snr:.1f}"
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset(
+                                        "reset",
+                                        ctx.cfg.get("reset", {"type": "none"}),
                                     ),
-                                ),
-                            )
+                                    NonBlocking(
+                                        [
+                                            Delay(
+                                                "wait_delay",
+                                                delay=ctx.cfg["wait_delay"],
+                                                hard_delay=False,
+                                            ),
+                                            Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
+                                            Delay(
+                                                "t2_delay",
+                                                delay=t2r_spans,
+                                                hard_delay=False,
+                                            ),
+                                            Pulse(
+                                                name="pi2_pulse2",
+                                                cfg={
+                                                    **ctx.cfg["pi2_pulse"],
+                                                    "phase": ctx.cfg["pi2_pulse"][
+                                                        "phase"
+                                                    ]
+                                                    + 360 * detune * t2r_spans,
+                                                },
+                                            ),
+                                        ]
+                                    ),
+                                    Pulse("stark_pulse", ctx.cfg["stark_pulse"]),
+                                    Readout("readout", ctx.cfg["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
                         ),
                         result_shape=(len(lens),),
                     ),
@@ -424,34 +415,43 @@ class AcStarkRamseyExperiment(AbsExperiment):
             pdrs = pdrs[valid_indices]
             signals = signals[valid_indices, :]
 
+        min_interval = 0.2  # MHz
+        n_length = signals.shape[1]
+        n_length = max(n_length, int(n_length / (np.ptp(lens) * min_interval)))
+
         real_signals = acstark_ramsey_signal2real(signals)
-        fft_signals = np.fft.fft(signals, axis=1)
-        fft_freqs = np.fft.fftfreq(
-            signals.shape[1], d=(np.ptp(lens) / (signals.shape[1] - 1))
+        fft_signals = np.abs(
+            np.fft.fft(
+                signals - np.mean(signals, axis=1, keepdims=True), n=n_length, axis=1
+            )
         )
+        fft_freqs = np.fft.fftfreq(n_length, d=(np.ptp(lens) / (signals.shape[1] - 1)))
+        freq_mask = np.logical_and(fft_freqs >= detune - 5.0, fft_freqs <= detune + 5.0)
+        fft_freqs = fft_freqs[freq_mask] - detune
+        fft_signals = fft_signals[:, freq_mask]
+
+        fft_signals /= np.max(fft_signals, axis=1, keepdims=True)
 
         pdrs2 = pdrs**2
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=config.figsize)
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
         assert isinstance(fig, Figure)
 
-        im1 = NonUniformImage(ax1, cmap="viridis", interpolation="none")
+        im1 = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
         im1.set_data(pdrs2, lens, real_signals.T)
         im1.set_extent((pdrs2[0], pdrs2[-1], lens[0], lens[-1]))
         ax1.add_image(im1)
-        ax1.set_xlim(pdrs2[0], pdrs2[-1])
         ax1.set_ylim(lens[0], lens[-1])
-        ax1.set_xlabel("Stark Pulse Gain² (a.u.²)", fontsize=14)
         ax1.set_ylabel("Time (us)", fontsize=14)
 
-        im2 = NonUniformImage(ax2, cmap="viridis", interpolation="none")
+        im2 = NonUniformImage(ax2, cmap="viridis", interpolation="nearest")
         im2.set_data(pdrs2, fft_freqs, fft_signals.T)
         im2.set_extent((pdrs2[0], pdrs2[-1], fft_freqs[0], fft_freqs[-1]))
         ax2.add_image(im2)
         ax2.set_xlim(pdrs2[0], pdrs2[-1])
-        ax2.set_ylim(fft_freqs[0], fft_freqs[-1])
+        ax2.set_ylim(-5.0, 5.0)
         ax2.set_xlabel("Stark Pulse Gain² (a.u.²)", fontsize=14)
-        ax2.set_ylabel("FFT Frequency (MHz)", fontsize=14)
+        ax2.set_ylabel("FFT Detune (MHz)", fontsize=14)
 
         fig.tight_layout()
 

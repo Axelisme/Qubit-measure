@@ -12,6 +12,7 @@ from .modules import (
     ResetCfg,
     TriggerCfg,
     TriggerReadout,
+    NonBlocking,
     check_block_mode,
 )
 from .onetone import OneToneProgram, OneToneProgramCfg

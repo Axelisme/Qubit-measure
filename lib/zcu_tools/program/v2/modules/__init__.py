@@ -1,4 +1,4 @@
-from .base import Delay, Module
+from .base import Delay, Module, NonBlocking
 from .loop import Repeat
 from .pulse import Pulse, PulseCfg, check_block_mode
 from .readout import (

@@ -184,7 +184,7 @@ class MetaDictView:
 
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(dump_data, f, indent=4)
+            json.dump(dump_data, f, indent=4, default=str)
 
 
 class MetaDict(SyncFile):

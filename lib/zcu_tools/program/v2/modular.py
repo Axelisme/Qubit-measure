@@ -1,12 +1,16 @@
 from typing import Mapping, Sequence
+import logging
 
-from typing_extensions import NotRequired, ReadOnly
+from typing_extensions import NotRequired
 
 from qick import QickConfig
 
 from ..base import SweepCfg
 from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module
+from .utils import param2str
+
+logger = logging.getLogger(__name__)
 
 
 class ModularProgramCfg(ProgramV2Cfg):
@@ -42,6 +46,13 @@ class ModularProgramV2(MyProgramV2):
     def _body(self, cfg: ModularProgramCfg) -> None:
         t = 0.0
         for module in self.modules:
+            logger.info(
+                "Running module: %s at %s", module.__class__.__name__, param2str(t)
+            )
+            try:
+                logger.info("\t total length: %s", param2str(module.total_length()))
+            except Exception:
+                pass
             t = module.run(self, t)
 
         # a slight exteral delay to avoid error in delay_auto()
