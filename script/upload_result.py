@@ -1,6 +1,8 @@
 import argparse
 import os
 import sys
+import threading
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
@@ -9,14 +11,37 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
+from joblib import Parallel, delayed
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 TOKEN_FILE = "token.json"
 
+# Thread-local storage for Google Drive service instances
+_thread_local = threading.local()
+
+
+def get_thread_local_service(creds):
+    """Get or create a thread-local Google Drive service instance.
+
+    Args:
+        creds: Google OAuth2 credentials.
+
+    Returns:
+        A Google Drive API service instance unique to this thread.
+    """
+    if not hasattr(_thread_local, "service"):
+        _thread_local.service = build("drive", "v3", credentials=creds)
+    return _thread_local.service
+
 
 def authenticate_drive():
-    """Authenticates with the Google Drive API using OAuth 2.0."""
+    """Authenticates with the Google Drive API using OAuth 2.0.
+
+    Returns:
+        tuple: (service, creds) - The Drive API service and credentials.
+               Credentials are returned for creating thread-local services.
+    """
     creds = None
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first time.
@@ -52,10 +77,18 @@ def authenticate_drive():
     try:
         service = build("drive", "v3", credentials=creds)
         print("Successfully built Google Drive API service.")
-        return service
+        return service, creds
     except Exception as e:
         print(f"Failed to build Google Drive API service: {e}")
         sys.exit(1)
+
+
+def parse_drive_timestamp(timestamp_str):
+    """Parses Google Drive's RFC 3339 timestamp into a datetime object."""
+    # Replace 'Z' with '+00:00' for compatibility with datetime.fromisoformat
+    if timestamp_str.endswith('Z'):
+        timestamp_str = timestamp_str[:-1] + '+00:00'
+    return datetime.fromisoformat(timestamp_str)
 
 
 def find_or_create_folder(service, name, parent_id):
@@ -99,7 +132,7 @@ def find_or_create_folder(service, name, parent_id):
 
 def list_files_in_folder(service, folder_id):
     """Lists all files in a specific Google Drive folder to avoid duplicates."""
-    files_set = set()
+    files_data = {}  # Change to dictionary to store more file info
     page_token = None
     try:
         while True:
@@ -108,7 +141,7 @@ def list_files_in_folder(service, folder_id):
                 .list(
                     q=f"'{folder_id}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'",
                     spaces="drive",
-                    fields="nextPageToken, files(name)",
+                    fields="nextPageToken, files(id, name, modifiedTime)",  # Request id and modifiedTime
                     pageToken=page_token,
                     supportsAllDrives=True,
                     includeItemsFromAllDrives=True,
@@ -116,24 +149,38 @@ def list_files_in_folder(service, folder_id):
                 .execute()
             )
             for file in response.get("files", []):
-                files_set.add(file.get("name"))
+                file_name = file.get("name")
+                if file_name:
+                    files_data[file_name] = {
+                        "id": file.get("id"),
+                        "modifiedTime": file.get("modifiedTime"),
+                    }
 
             page_token = response.get("nextPageToken", None)
             if page_token is None:
                 break
     except HttpError as e:
         print(f"Warning: Could not list files in folder {folder_id}: {e}")
-    return files_set
+    return files_data
 
 
-def upload_folder_to_drive(service, local_folder_path, parent_folder_id):
-    """Recursively uploads a local folder to a Google Drive folder, skipping existing files."""
+def collect_upload_tasks(service, local_folder_path, parent_folder_id, tasks_list):
+    """Recursively traverses a local folder and collects upload tasks.
+
+    Args:
+        service: Google Drive API service instance.
+        local_folder_path: The local folder path to traverse.
+        parent_folder_id: The Google Drive parent folder ID.
+        tasks_list: A list to append upload tasks to. Each task is a tuple of
+                    (task_type, local_path, filename, folder_id, remote_file_id).
+                    task_type is either "create" or "update".
+    """
     if not os.path.isdir(local_folder_path):
         print(f"Error: Source folder '{local_folder_path}' not found.")
         return
 
     print(
-        f"Starting upload of '{local_folder_path}' to Drive folder ID '{parent_folder_id}'..."
+        f"Collecting upload tasks from '{local_folder_path}' to Drive folder ID '{parent_folder_id}'..."
     )
 
     # Cache for folder IDs to avoid redundant API calls
@@ -176,27 +223,67 @@ def upload_folder_to_drive(service, local_folder_path, parent_folder_id):
         existing_files = list_files_in_folder(service, current_parent_id)
 
         for filename in filenames:
-            if filename in existing_files:
-                print(f"  - Skipping '{filename}' (already exists).")
-                continue
-
             local_path = os.path.join(dirpath, filename)
-            print(f"  - Uploading file '{local_path}'...")
+            local_mtime = os.path.getmtime(local_path)
+            local_datetime = datetime.fromtimestamp(local_mtime, tz=timezone.utc)
 
-            file_metadata = {"name": filename, "parents": [current_parent_id]}
-            media = MediaFileUpload(local_path, resumable=True)
+            if filename in existing_files:
+                remote_file_info = existing_files[filename]
+                remote_file_id = remote_file_info["id"]
+                remote_modified_time_str = remote_file_info["modifiedTime"]
+                remote_datetime = parse_drive_timestamp(remote_modified_time_str)
 
-            try:
-                service.files().create(
-                    body=file_metadata,
-                    media_body=media,
-                    fields="id",
-                    supportsAllDrives=True,
-                ).execute()
-            except HttpError as e:
-                print(f"    Error uploading file '{filename}': {e}")
+                # Compare local and remote modification times
+                if local_datetime > remote_datetime:
+                    print(
+                        f"  - Queuing update for '{filename}' (local is newer)."
+                    )
+                    tasks_list.append(("update", local_path, filename, current_parent_id, remote_file_id))
+                else:
+                    print(
+                        f"  - Skipping '{filename}' (remote is up-to-date: {remote_datetime} vs local: {local_datetime})."
+                    )
+                continue  # Move to the next file
 
-    print("\nUpload complete.")
+            # If file does not exist remotely, queue it for upload
+            print(f"  - Queuing new file '{filename}' for upload...")
+            tasks_list.append(("create", local_path, filename, current_parent_id, None))
+
+
+def process_upload_task(creds, task):
+    """Process a single upload task using a thread-local service.
+
+    Args:
+        creds: Google OAuth2 credentials for creating thread-local services.
+        task: A tuple of (task_type, local_path, filename, folder_id, remote_file_id).
+    """
+    task_type, local_path, filename, folder_id, remote_file_id = task
+
+    # Get or create thread-local service
+    service = get_thread_local_service(creds)
+
+    media = MediaFileUpload(local_path, resumable=True)
+
+    try:
+        if task_type == "update":
+            service.files().update(
+                fileId=remote_file_id,
+                media_body=media,
+                fields="id",
+                supportsAllDrives=True,
+            ).execute()
+            print(f"    Updated: {local_path}")
+        else:  # task_type == "create"
+            file_metadata = {"name": filename, "parents": [folder_id]}
+            service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields="id",
+                supportsAllDrives=True,
+            ).execute()
+            print(f"    Uploaded: {local_path}")
+    except HttpError as e:
+        print(f"    Error uploading file '{filename}': {e}")
 
 
 def main():
@@ -209,6 +296,13 @@ def main():
         nargs="+",
         help="The names of the qubits (e.g., Si001 Si002). These correspond to folders inside the 'result/' directory, which will be uploaded.",
     )
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=int,
+        default=4,
+        help="Number of parallel upload threads (default: 4).",
+    )
     args = parser.parse_args()
 
     load_dotenv()
@@ -220,7 +314,7 @@ def main():
         )
         sys.exit(1)
 
-    drive_service = authenticate_drive()
+    drive_service, creds = authenticate_drive()
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     for qubit_name in args.qubit_names:
@@ -236,7 +330,21 @@ def main():
         )
 
         if qubit_folder_id:
-            upload_folder_to_drive(drive_service, source_folder, qubit_folder_id)
+            # Collect all upload tasks
+            tasks = []
+            collect_upload_tasks(drive_service, source_folder, qubit_folder_id, tasks)
+
+            if tasks:
+                print(
+                    f"\nUploading {len(tasks)} file(s) using {args.jobs} threads..."
+                )
+                # Execute uploads in parallel using joblib
+                Parallel(n_jobs=args.jobs, backend="threading")(
+                    delayed(process_upload_task)(creds, task) for task in tasks
+                )
+                print(f"Upload complete for {qubit_name}.")
+            else:
+                print(f"No files to upload for {qubit_name}.")
 
 
 if __name__ == "__main__":
