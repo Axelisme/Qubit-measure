@@ -1,26 +1,31 @@
 from __future__ import annotations
+
 import warnings
-from typing import Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict
 
 if TYPE_CHECKING:
     from .pulse import PulseCfg
 
+
 class PulseRegistry:
     """A registry to manage and share pulse configurations within a program."""
-    def __init__(self):
-        self._pulses: Dict[str, 'PulseCfg'] = {}
 
-    def register(self, name: str, cfg: 'PulseCfg'):
+    def __init__(self):
+        self._pulses: Dict[str, "PulseCfg"] = {}
+
+    def register(self, name: str, cfg: "PulseCfg"):
         """Registers a pulse configuration."""
         if name in self._pulses:
-            warnings.warn(f"Pulse '{name}' is being re-registered. Overwriting previous configuration.")
+            warnings.warn(
+                f"Pulse '{name}' is being re-registered. Overwriting previous configuration."
+            )
         self._pulses[name] = cfg
 
     def has(self, name: str) -> bool:
         """Checks if a pulse is registered."""
         return name in self._pulses
 
-    def check_valid_mixer_freq(self, new_pulse_name: str, new_pulse_cfg: 'PulseCfg'):
+    def check_valid_mixer_freq(self, new_pulse_name: str, new_pulse_cfg: "PulseCfg"):
         """
         Checks if a new pulse's mixer frequency is consistent with other pulses
         on the same channel.
@@ -34,7 +39,7 @@ class PulseRegistry:
         for name, cfg in self._pulses.items():
             if cfg["ch"] != ch:
                 continue
-            
+
             # All pulses on a channel being checked must have a mixer_freq if the new one does.
             if "mixer_freq" not in cfg:
                 raise ValueError(

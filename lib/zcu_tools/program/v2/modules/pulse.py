@@ -112,15 +112,10 @@ class BasePulse(Module):
         if cfg is None:
             return t
 
-        pre_delay = cfg["pre_delay"]
-        length = cfg["waveform"]["length"]
-        post_delay = cfg["post_delay"]
+        prog.pulse(cfg["ch"], self.pulse_name, t=t + cfg["pre_delay"], tag=self.name)
 
-        prog.pulse(cfg["ch"], self.pulse_name, t=t + pre_delay, tag=self.name)
-
-        # block mode is True by default
-        if cfg["block_mode"]:
-            return t + pre_delay + length + post_delay
+        if cfg["block_mode"]:  # default
+            return t + self.total_length()
         else:
             return t  # no block, return the start time as the end time
 

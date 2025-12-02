@@ -1,8 +1,8 @@
 from qick.asm_v2 import AveragerProgramV2
 from typing_extensions import TypedDict
-from zcu_tools.program.base import MyProgram
 
 from qick import QickConfig
+from zcu_tools.program.base import MyProgram
 
 from .modules.registry import PulseRegistry
 
@@ -22,6 +22,7 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             cfg=dict(cfg),
             reps=cfg["reps"],
             initial_delay=0.0,
+            final_wait=0.0,
             final_delay=cfg["relax_delay"],
             **kwargs,
         )

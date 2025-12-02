@@ -9,6 +9,7 @@ from qick.asm_v2 import QickParam
 from ..base import MyProgramV2
 from .base import Module
 from .pulse import Pulse, PulseCfg, check_block_mode
+from .util import calc_max_length
 
 
 class TriggerCfg(TypedDict):
@@ -54,10 +55,10 @@ class TriggerReadout(Module):
         ro_ch = self.ro_cfg["ro_ch"]
         trig_offset = self.ro_cfg["trig_offset"]
 
-        prog.send_readoutconfig(ro_ch, self.name, t=t)  # type: ignore
+        prog.send_readoutconfig(ro_ch, self.name, t=t)
         prog.trigger([ro_ch], t=t + trig_offset)
 
-        return t + self.total_length()
+        return t  # always non-blocking
 
 
 class BaseReadoutCfg(TypedDict):
@@ -190,22 +191,15 @@ class BaseReadout(AbsReadout):
         self.pulse.init(prog)
         self.ro_trigger.init(prog)
 
+    def total_length(self) -> Union[float, QickParam]:
+        return calc_max_length(
+            self.ro_trigger.total_length(), self.pulse.total_length()
+        )
+
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        self.ro_trigger.run(prog, t)
-        self.pulse.run(prog, t)
+        t = self.ro_trigger.run(prog, t)
+        t = self.pulse.run(prog, t)
 
-        # use readout end as the new time
-        ro_time = self.ro_trigger.total_length()
-        pulse_time = self.pulse.total_length()
-
-        if not (ro_time > pulse_time or ro_time < pulse_time):
-            warnings.warn(
-                f"Cannot determine the end time of {self.name}, this may cause unexpected behavior"
-            )
-
-        if ro_time > pulse_time:
-            return t + ro_time
-        else:
-            return t + pulse_time
+        return t

@@ -1,0 +1,28 @@
+import warnings
+from typing import Union
+
+from qick.asm_v2 import QickParam
+
+from ..utils import param2str
+
+
+def calc_max_length(
+    length1: Union[float, QickParam], length2: Union[float, QickParam]
+) -> Union[float, QickParam]:
+    if length1 > length2:
+        return length1
+    elif length1 < length2:
+        return length2
+
+    warnings.warn(
+        f"Detected overlap between {param2str(length1)} and {param2str(length2)}; "
+        "using the maximum length for calculation. "
+        "Note: this approach may not always be correct; it is only correct for some loop iterations and may be inaccurate for others."
+    )
+
+    if isinstance(length1, QickParam):
+        length1 = length1.maxval()
+    if isinstance(length2, QickParam):
+        length2 = length2.maxval()
+
+    return max(length1, length2)

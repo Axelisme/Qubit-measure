@@ -8,6 +8,7 @@ from qick.asm_v2 import QickParam
 from ..base import MyProgramV2
 from .base import Module
 from .pulse import Pulse, PulseCfg, check_block_mode
+from .util import calc_max_length
 
 
 class NoneResetCfg(TypedDict):
@@ -112,8 +113,10 @@ class NoneReset(AbsReset):
     def __init__(self, name: str, cfg: NoneResetCfg) -> None:
         self.name = name
 
-    def init(self, prog: MyProgramV2) -> None:
-        pass
+    def init(self, prog: MyProgramV2) -> None: ...
+
+    def total_length(self) -> Union[float, QickParam]:
+        return 0.0
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
@@ -131,6 +134,9 @@ class PulseReset(AbsReset):
 
     def init(self, prog: MyProgramV2) -> None:
         self.reset_pulse.init(prog)
+
+    def total_length(self) -> Union[float, QickParam]:
+        return self.reset_pulse.total_length()
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
@@ -162,6 +168,11 @@ class TwoPulseReset(AbsReset):
     def init(self, prog: MyProgramV2) -> None:
         self.reset_pulse1.init(prog)
         self.reset_pulse2.init(prog)
+
+    def total_length(self) -> Union[float, QickParam]:
+        return calc_max_length(
+            self.reset_pulse1.total_length(), self.reset_pulse2.total_length()
+        )
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
@@ -216,6 +227,12 @@ class BathReset(AbsReset):
         self.qub_pulse.init(prog)
         self.res_pulse.init(prog)
         self.pi2_pulse.init(prog)
+
+    def total_length(self) -> Union[float, QickParam]:
+        max_length = calc_max_length(
+            self.qub_pulse.total_length(), self.res_pulse.total_length()
+        )
+        return max_length + self.pi2_pulse.total_length()
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0

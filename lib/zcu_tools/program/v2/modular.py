@@ -1,5 +1,5 @@
+from copy import deepcopy
 from typing import Mapping, Sequence
-import logging
 
 from typing_extensions import NotRequired
 
@@ -8,9 +8,6 @@ from qick import QickConfig
 from ..base import SweepCfg
 from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module
-from .utils import param2str
-
-logger = logging.getLogger(__name__)
 
 
 class ModularProgramCfg(ProgramV2Cfg):
@@ -30,6 +27,20 @@ class ModularProgramV2(MyProgramV2):
         **kwargs,
     ) -> None:
         self.modules = modules
+
+        # capture the relax delay from the cfg and set it to None
+        # handle the relax delay in the _body() method
+        # this can avoid the delay_auto() after the program body start from the readout window end
+        # user may expect the relax delay start from the readout pulse end, which usually before the readout window end
+        # for example, if the relax delay is 30 ns, readout pulse is 100 ns, readout trigger offset is 50 ns, readout window length is 100 ns,
+        # default relax delay implemented will add 30 ns to readout window end, which is 180 ns from start of readout
+        # for this implementation, it add relax delay smarter, for this case, it will delay to readout window end.
+        # which is 150 ns from start of readout, is closer to user's expectation (130 ns)
+        # TODO: non-hacky way to implement this?
+        cfg = deepcopy(cfg)
+        self._modular_program_relax_delay = cfg["relax_delay"]
+        cfg["relax_delay"] = None
+
         super().__init__(soccfg, cfg, **kwargs)
 
     def _initialize(self, cfg: ModularProgramCfg) -> None:
@@ -46,17 +57,12 @@ class ModularProgramV2(MyProgramV2):
     def _body(self, cfg: ModularProgramCfg) -> None:
         t = 0.0
         for module in self.modules:
-            logger.info(
-                "Running module: %s at %s", module.__class__.__name__, param2str(t)
-            )
-            try:
-                logger.info("\t total length: %s", param2str(module.total_length()))
-            except Exception:
-                pass
             t = module.run(self, t)
 
-        # a slight exteral delay to avoid error in delay_auto()
-        self.delay(t=t + 0.03)
+        # handle relax delay here
+        # add relax delay start from t, the end time of the last module
+        self.delay(t=t + self._modular_program_relax_delay)
+        self.delay_auto()  # force delay to end of all pulse and readout end
 
 
 class BaseCustomProgramV2(ModularProgramV2):
