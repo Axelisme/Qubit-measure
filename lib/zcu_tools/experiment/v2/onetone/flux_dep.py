@@ -22,7 +22,7 @@ FluxDepResultType = Tuple[
 
 
 def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return minus_background(np.abs(signals), axis=1)
+    return np.abs(signals)
 
 
 class FluxDepTaskConfig(TaskConfig, OneToneProgramCfg): ...

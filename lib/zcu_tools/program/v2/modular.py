@@ -38,7 +38,9 @@ class ModularProgramV2(MyProgramV2):
         # which is 150 ns from start of readout, is closer to user's expectation (130 ns)
         # TODO: non-hacky way to implement this?
         cfg = deepcopy(cfg)
+        self._modular_program_final_wait = cfg.get("final_wait", 0.0)
         self._modular_program_relax_delay = cfg["relax_delay"]
+        cfg["final_wait"] = None
         cfg["relax_delay"] = None
 
         super().__init__(soccfg, cfg, **kwargs)
@@ -62,7 +64,11 @@ class ModularProgramV2(MyProgramV2):
         # handle relax delay here
         # add relax delay start from t, the end time of the last module
         self.delay(t=t + self._modular_program_relax_delay)
-        self.delay_auto()  # force delay to end of all pulse and readout end
+
+        # handle final wait here
+        if self._modular_program_final_wait:
+            self.wait_auto(self._modular_program_final_wait, no_warn=True)
+        self.delay_auto(t=0.0)  # force delay to all pulse and readout end
 
 
 class BaseCustomProgramV2(ModularProgramV2):

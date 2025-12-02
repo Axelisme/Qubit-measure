@@ -22,7 +22,7 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             cfg=dict(cfg),
             reps=cfg["reps"],
             initial_delay=0.0,
-            final_wait=0.0,
+            final_wait=cfg.get("final_wait", 0.0),
             final_delay=cfg["relax_delay"],
             **kwargs,
         )
