@@ -109,7 +109,6 @@ class MISTPowerDep(AbsExperiment):
 
         fig, ax = plt.subplots(figsize=config.figsize)
         ax.plot(xs, amp_diff.T, marker=".")
-        ax.set_xscale("log")
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel("Signal difference (a.u.)", fontsize=14)
         ax.grid(True)

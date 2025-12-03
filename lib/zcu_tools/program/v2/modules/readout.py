@@ -202,4 +202,4 @@ class BaseReadout(AbsReadout):
         t = self.ro_trigger.run(prog, t)
         t = self.pulse.run(prog, t)
 
-        return t
+        return t + self.total_length()

@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
+from matplotlib.figure import Figure
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -63,6 +64,35 @@ class ZigZagExperiment(AbsExperiment):
         with LivePlotter1D(
             "Times", "Signal", segment_kwargs=dict(show_grid=True)
         ) as viewer:
+
+            def measure_fn(ctx: TaskContext, update_hook):
+                zigzag_time = ctx.env_dict["zigzag_time"]
+                if repeat_on == "X90_pulse":
+                    repeat_time = 2 * zigzag_time
+                else:
+                    repeat_time = zigzag_time
+
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset(
+                            "reset",
+                            ctx.cfg.get("reset", {"type": "none"}),
+                        ),
+                        Pulse(name="X90_pulse", cfg=X90_pulse),
+                        Repeat(
+                            name="zigzag_loop",
+                            n=repeat_time,
+                            sub_module=Pulse(
+                                name=f"loop_{repeat_on}",
+                                cfg=ctx.cfg[repeat_on],
+                            ),
+                        ),
+                        Readout("readout", ctx.cfg["readout"]),
+                    ],
+                ).acquire(soc, progress=False, callback=update_hook)
+
             signals = run_task(
                 task=SoftTask(
                     sweep_name="times",
@@ -70,38 +100,7 @@ class ZigZagExperiment(AbsExperiment):
                     update_cfg_fn=lambda _, ctx, time: (
                         ctx.env_dict.update(zigzag_time=time)
                     ),
-                    sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            (zigzag_time := ctx.env_dict["zigzag_time"])
-                            and (
-                                repeat_time := 2 * zigzag_time
-                                if repeat_on == "X90_pulse"
-                                else zigzag_time
-                            )
-                            and (
-                                ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse(name="X90_pulse", cfg=X90_pulse),
-                                        Repeat(
-                                            name="zigzag_loop",
-                                            n=repeat_time,
-                                            sub_module=Pulse(
-                                                name=f"loop_{repeat_on}",
-                                                cfg=ctx.cfg[repeat_on],
-                                            ),
-                                        ),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                ).acquire(soc, progress=False, callback=update_hook)
-                            )
-                        )
-                    ),
+                    sub_task=HardTask(measure_fn=measure_fn),
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
@@ -190,6 +189,35 @@ class ZigZagSweepExperiment(AbsExperiment):
         with LivePlotter2DwithLine(
             "Times", x_info["name"], line_axis=1, num_lines=3
         ) as viewer:
+
+            def measure_fn(ctx: TaskContext, update_hook):
+                zigzag_time = ctx.env_dict["zigzag_time"]
+                if repeat_on == "X90_pulse":
+                    repeat_time = 2 * zigzag_time
+                else:
+                    repeat_time = zigzag_time
+
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset(
+                            "reset",
+                            ctx.cfg.get("reset", {"type": "none"}),
+                        ),
+                        Pulse(name="X90_pulse", cfg=X90_pulse),
+                        Repeat(
+                            name="zigzag_loop",
+                            n=repeat_time,
+                            sub_module=Pulse(
+                                name=f"loop_{repeat_on}",
+                                cfg=ctx.cfg[repeat_on],
+                            ),
+                        ),
+                        Readout("readout", ctx.cfg["readout"]),
+                    ],
+                ).acquire(soc, progress=False, callback=update_hook)
+
             signals = run_task(
                 task=SoftTask(
                     sweep_name="times",
@@ -198,36 +226,7 @@ class ZigZagSweepExperiment(AbsExperiment):
                         zigzag_time=time
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            (repeat_time := ctx.env_dict["zigzag_time"])
-                            and (
-                                repeat_time := 2 * repeat_time
-                                if repeat_on == "X90_pulse"
-                                else repeat_time
-                            )
-                            and (
-                                ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse(name="X90_pulse", cfg=X90_pulse),
-                                        Repeat(
-                                            name="zigzag_loop",
-                                            n=repeat_time,
-                                            sub_module=Pulse(
-                                                name=f"loop_{repeat_on}",
-                                                cfg=ctx.cfg[repeat_on],
-                                            ),
-                                        ),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                ).acquire(soc, progress=False, callback=update_hook)
-                            )
-                        ),
+                        measure_fn=measure_fn,
                         result_shape=(len(values),),
                     ),
                 ),
@@ -249,7 +248,7 @@ class ZigZagSweepExperiment(AbsExperiment):
     def analyze(
         self,
         result: Optional[ZigZagSweepResultType] = None,
-    ) -> Tuple[float, float]:
+    ) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -289,7 +288,7 @@ class ZigZagSweepExperiment(AbsExperiment):
         ax2.set_xlabel("Sweep value (a.u.)")
         ax2.set_ylabel("Cumulative difference (a.u.)")
 
-        return min_value
+        return min_value, fig
 
     def save(
         self,

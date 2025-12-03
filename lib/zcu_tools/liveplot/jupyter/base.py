@@ -28,11 +28,13 @@ def instant_plot(fig: Figure) -> None:
 
     figsize = fig.get_size_inches()
 
+    pixel_per_inch = 70
+
     canvas.toolbar_visible = False
     canvas.header_visible = False
     canvas.footer_visible = False
-    canvas.layout.width = f"{int(figsize[0] * 80)}px"
-    canvas.layout.height = f"{int(figsize[1] * 80)}px"
+    canvas.layout.width = f"{int(figsize[0] * pixel_per_inch)}px"
+    canvas.layout.height = f"{int(figsize[1] * pixel_per_inch)}px"
 
     canvas._handle_message(canvas, {"type": "send_image_mode"}, [])
     canvas._handle_message(canvas, {"type": "refresh"}, [])

@@ -121,7 +121,6 @@ class TaskContext(Generic[T_ResultType, T_TaskConfigType]):
                 assert isinstance(seg, int)
                 target = target[seg]
             elif isinstance(target, dict):
-                assert isinstance(seg, str)
                 target = target[seg]
             else:
                 raise ValueError(f"Expected dict or list, got {type(target)}")
@@ -397,6 +396,8 @@ class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskContextType]):
             while time.time() - start_t < self.interval:
                 time.sleep(0.1)
             start_t = time.time()
+
+            ctx.env_dict["repeat_idx"] = i
 
             for attempt in range(self.fail_retry):
                 try:

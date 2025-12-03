@@ -117,7 +117,7 @@ class JPAPowerExperiment(AbsExperiment):
         jpa_powers, signals = result
         snrs = np.abs(signals)
 
-        max_idx = np.argmax(snrs)
+        max_idx = np.nanargmax(snrs)
         best_jpa_power = jpa_powers[max_idx]
 
         fig, ax = plt.subplots(figsize=config.figsize)
