@@ -1,6 +1,5 @@
 from typing import List, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import scipy.constants as sc
 from scipy.optimize import curve_fit
