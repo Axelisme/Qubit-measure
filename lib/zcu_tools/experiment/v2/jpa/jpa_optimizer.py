@@ -381,6 +381,10 @@ class JPAOptimizer:
         Each selected flux generates up to 3 points at offsets of
         -0.5, 0, +0.5 of prev_interval from the original point.
         Points outside bounds are ignored.
+
+        Note: We include ALL points (even previously measured ones) because
+        in each refinement phase, we want to re-measure with finer (freq, power)
+        grids centered around the best known values.
         """
         new_points: set[float] = set()
         offsets = [
@@ -392,10 +396,10 @@ class JPAOptimizer:
         for flux in selected_flux_list:
             for offset in offsets:
                 new_flux = flux + offset
-                # Check bounds and avoid already measured flux values
+                # Check bounds only - include previously measured flux values
+                # because we want to refine with smaller (freq, power) bounds
                 if self.bounds.flux[0] <= new_flux <= self.bounds.flux[1]:
-                    if new_flux not in self.data.flux_best:
-                        new_points.add(new_flux)
+                    new_points.add(new_flux)
 
         return list(new_points)
 
@@ -480,11 +484,11 @@ class JPAOptimizer:
         if not selected_flux:
             return False
 
-        # Generate refinement points
+        # Generate refinement points (includes previously measured flux values
+        # for refinement with finer freq/power grids)
         new_points = self._generate_refinement_points(selected_flux)
         if not new_points:
-            # No new points to test, continue with direct optimization on selected
-            new_points = selected_flux.copy()
+            return False
 
         # Sort refinement points
         self.refinement.flux_list = self._sort_refinement_points(new_points)
@@ -803,10 +807,13 @@ class JPAOptimizer:
                 # All flux slices done, move to phase 2
                 if not self._init_next_phase():
                     return None  # Optimization complete
-                return self.next_params(i, None)
+                # Don't use recursion with None - directly get next point
+                return self._get_next_phaseN_point(i)
             else:
-                # Try again with new slice
-                return self.next_params(i, None)
+                # Try again with new slice - get point directly without recursion
+                point = self._get_phase1_point()
+                if point is None:
+                    return None  # Should not happen, but handle gracefully
 
         # Record point (will be updated with SNR in next call)
         self.data.history_X.append(list(point))
@@ -821,12 +828,18 @@ class JPAOptimizer:
         if point is None:
             # Try to advance to next refinement flux
             if self._advance_to_next_refinement():
-                return self.next_params(i, None)
+                # Get point directly without recursion
+                point = self._get_phaseN_point()
+                if point is None:
+                    return None  # Should not happen, but handle gracefully
             else:
                 # All refinement points done, try next phase
                 if not self._init_next_phase():
                     return None  # Optimization complete
-                return self.next_params(i, None)
+                # Get point directly without recursion
+                point = self._get_phaseN_point()
+                if point is None:
+                    return None  # Should not happen, but handle gracefully
 
         # Record point
         self.data.history_X.append(list(point))
@@ -917,7 +930,7 @@ if __name__ == "__main__":
     freq_sweep: SweepCfg = make_sweep(6500.0, 7500.0, 50)
     power_sweep: SweepCfg = make_sweep(-20.0, 0.0, 20)
 
-    total_points = 10000
+    total_points = 1000
 
     print("=" * 60)
     print("JPAOptimizer Test (Multi-phase Algorithm)")
