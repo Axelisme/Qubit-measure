@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
 from scipy.ndimage import gaussian_filter1d
+from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
@@ -86,9 +86,10 @@ class JPAPowerExperiment(AbsExperiment):
                                     soc,
                                     progress=False,
                                     callback=update_hook,
-                                    record_stderr=True,
+                                    record_statistic=True,
                                 ),
-                                prog.get_stderr(),
+                                prog.get_covariance(),
+                                prog.get_median(),
                             )
                         ),
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
