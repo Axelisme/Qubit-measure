@@ -103,11 +103,11 @@ def fit_ge_decay(
     e_t1 = e_params[2]
     e_t1err = np.sqrt(e_pCov[2, 2])
 
-    if g_t1 > 3 * np.max(times) or g_t1 < 3 * (times[1] - times[0]):
-        g_t1 = 0.0
+    if g_t1 > 0.8 * np.max(times) or g_t1 < 3 * (times[1] - times[0]):
+        g_t1 = np.nan
         g_t1err = np.inf
-    if e_t1 > 3 * np.max(times) or e_t1 < 3 * (times[1] - times[0]):
-        e_t1 = 0.0
+    if e_t1 > 0.8 * np.max(times) or e_t1 < 3 * (times[1] - times[0]):
+        e_t1 = np.nan
         e_t1err = np.inf
 
     g_fit_signals = expfunc(times, *g_params)

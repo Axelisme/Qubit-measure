@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Literal, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
+from matplotlib.figure import Figure
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -84,12 +85,8 @@ class FreqExperiment(AbsExperiment):
         return fpts, signals
 
     def analyze(
-        self,
-        result: Optional[SingleToneResetFreqResultType] = None,
-        *,
-        type: Literal["lor", "sinc"] = "lor",
-        plot: bool = True,
-    ) -> Tuple[float, float]:
+        self, result: Optional[SingleToneResetFreqResultType] = None
+    ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -104,24 +101,24 @@ class FreqExperiment(AbsExperiment):
         real_signals = reset_signal2real(signals)
 
         freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(
-            fpts, real_signals, type=type
+            fpts, real_signals, type="lor"
         )
 
-        if plot:
-            plt.figure(figsize=config.figsize)
-            plt.tight_layout()
-            plt.plot(fpts, real_signals, label="signal", marker="o", markersize=3)
-            plt.plot(fpts, y_fit, label=f"fit, κ = {kappa:.1g} MHz")
-            label = f"f_reset = {freq:.5g} ± {freq_err:.1g} MHz"
-            plt.axvline(freq, color="r", ls="--", label=label)
-            plt.xlabel("Frequency (MHz)")
-            plt.ylabel("Signal Real (a.u.)")
-            plt.title("Reset frequency optimization")
-            plt.legend()
-            plt.grid(True)
-            plt.show()
+        fig, ax = plt.subplots(figsize=config.figsize)
 
-        return freq, kappa
+        ax.plot(fpts, real_signals, label="signal", marker="o", markersize=3)
+        ax.plot(fpts, y_fit, label=f"fit, κ = {kappa:.1g} MHz")
+        label = f"f_reset = {freq:.5g} ± {freq_err:.1g} MHz"
+        ax.axvline(freq, color="r", ls="--", label=label)
+        ax.set_xlabel("Frequency (MHz)")
+        ax.set_ylabel("Signal Real (a.u.)")
+        ax.legend()
+        ax.grid(True)
+        ax.set_title("Sideband Reset Frequency Sweep")
+
+        fig.tight_layout()
+
+        return freq, kappa, fig
 
     def save(
         self,

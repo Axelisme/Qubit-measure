@@ -121,7 +121,7 @@ class JPAPowerExperiment(AbsExperiment):
         best_jpa_power = jpa_powers[max_idx]
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        ax.scatter(jpa_powers, snrs, label="signal difference")
+        ax.scatter(jpa_powers, snrs, label="signal difference", s=1)
         ax.axvline(
             best_jpa_power,
             color="r",

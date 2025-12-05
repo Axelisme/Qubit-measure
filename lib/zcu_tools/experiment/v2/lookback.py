@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.figure import Figure
 from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.experiment import AbsExperiment, config
@@ -69,7 +70,7 @@ class LookbackExperiment(AbsExperiment):
         smooth: Optional[float] = None,
         ro_cfg: Optional[dict] = None,
         plot_fit: bool = True,
-    ) -> float:
+    ) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -88,27 +89,28 @@ class LookbackExperiment(AbsExperiment):
         else:
             offset = Ts[np.nonzero(candidate_mask)[0][-1]]
 
-        plt.figure(figsize=config.figsize)
-        plt.plot(Ts, signals.real, label="I value")
-        plt.plot(Ts, signals.imag, label="Q value")
-        plt.plot(Ts, y, label="mag")
+        fig, ax = plt.subplots(figsize=config.figsize)
+
+        ax.plot(Ts, signals.real, label="I value")
+        ax.plot(Ts, signals.imag, label="Q value")
+        ax.plot(Ts, y, label="mag")
         if plot_fit:
-            plt.axvline(offset, color="r", linestyle="--", label="predict_offset")
+            ax.axvline(offset, color="r", linestyle="--", label="predict_offset")
         if ro_cfg is not None:
             trig_offset = ro_cfg["trig_offset"]
             ro_length = ro_cfg["ro_length"]
-            plt.axvline(trig_offset, color="g", linestyle="--", label="ro start")
-            plt.axvline(
+            ax.axvline(trig_offset, color="g", linestyle="--", label="ro start")
+            ax.axvline(
                 trig_offset + ro_length, color="g", linestyle="--", label="ro end"
             )
+        ax.set_xlabel("Time (us)")
+        ax.set_ylabel("a.u.")
+        ax.grid(True)
+        ax.legend()
 
-        plt.xlabel("Time (us)")
-        plt.ylabel("a.u.")
-        plt.grid(True)
-        plt.legend()
-        plt.show()
+        fig.tight_layout()
 
-        return offset
+        return offset, fig
 
     def save(
         self,

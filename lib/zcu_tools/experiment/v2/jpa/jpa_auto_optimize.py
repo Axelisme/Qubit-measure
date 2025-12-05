@@ -109,7 +109,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                     "Iteration", "SNR (a.u.)", existed_axes=[[ax_iter]]
                 ),
                 flux_scatter=LivePlotterScatter(
-                    "JPA Flux value (a.u.)", "SNR (a.u.)", existed_axes=[[ax_flux]]
+                    "JPA Flux (mA)", "SNR (a.u.)", existed_axes=[[ax_flux]]
                 ),
                 freq_scatter=LivePlotterScatter(
                     "JPA Frequency (MHz)", "SNR (a.u.)", existed_axes=[[ax_freq]]
@@ -151,7 +151,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                     np.arange(num_points), snrs, colors=colors, refresh=False
                 )
                 viewer.get_plotter("flux_scatter").update(
-                    params[:, 0], snrs, colors=colors, refresh=False
+                    1e3 * params[:, 0], snrs, colors=colors, refresh=False
                 )
                 viewer.get_plotter("freq_scatter").update(
                     params[:, 1], snrs, colors=colors, refresh=False

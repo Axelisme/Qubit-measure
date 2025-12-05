@@ -122,12 +122,12 @@ class RabiCheckExperiment(AbsExperiment):
         pdrs, signals = result
         real_signals = reset_rabi_signal2real(signals)
 
-        w_signals, wo_signals = real_signals
+        wo_signals, w_signals = real_signals
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
-        ax.plot(pdrs, wo_signals, label="Without Reset", marker=".")
         ax.plot(pdrs, w_signals, label="With Reset", marker=".")
+        ax.plot(pdrs, wo_signals, label="Without Reset", marker=".")
         ax.legend()
         ax.grid(True)
 

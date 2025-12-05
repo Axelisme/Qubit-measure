@@ -32,6 +32,8 @@ class JPACheckTaskConfig(TaskConfig, OneToneProgramCfg): ...
 
 
 class JPACheckExperiment(AbsExperiment):
+    OUTPUT_MAP = {0: "off", 1: "on"}
+
     def run(self, soc, soccfg, cfg: JPACheckTaskConfig) -> JPACheckResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
@@ -45,7 +47,6 @@ class JPACheckExperiment(AbsExperiment):
         )
 
         outputs = np.array([0, 1])
-        OUTPUT_MAP = {0: "off", 1: "on"}
 
         with LivePlotter1D(
             "Frequency (MHz)", "Magnitude", segment_kwargs=dict(num_lines=2)
@@ -56,7 +57,7 @@ class JPACheckExperiment(AbsExperiment):
                     sweep_values=outputs.tolist(),
                     update_cfg_fn=lambda i, ctx, output: set_output_in_dev_cfg(
                         ctx.cfg["dev"],
-                        OUTPUT_MAP[output],  # type: ignore
+                        self.OUTPUT_MAP[output],
                         label="jpa_rf_dev",
                     ),
                     sub_task=HardTask(
@@ -93,17 +94,16 @@ class JPACheckExperiment(AbsExperiment):
         fig, ax = plt.subplots(figsize=config.figsize)
         for i, output in enumerate(outputs):
             ax.plot(
-                fpts * 1e-6,
+                fpts,
                 real_signals[i, :],
-                label=f"JPA {output}",
+                label=f"JPA {self.OUTPUT_MAP[output]}",
                 marker="o",
                 markersize=4,
                 linestyle="-",
             )
 
         ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("Signal (a.u.)")
-        ax.set_title("JPA Check Result")
+        ax.set_ylabel("Signal Magnitude (a.u.)")
         ax.legend()
         ax.grid(True)
 

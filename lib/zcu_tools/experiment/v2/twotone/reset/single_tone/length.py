@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
+from matplotlib.figure import Figure
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -89,7 +90,9 @@ class LengthExperiment(AbsExperiment):
 
         return lens, signals
 
-    def analyze(self, result: Optional[SingleToneResetLengthResultType] = None) -> None:
+    def analyze(
+        self, result: Optional[SingleToneResetLengthResultType] = None
+    ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -109,7 +112,10 @@ class LengthExperiment(AbsExperiment):
         ax.set_ylabel("Signal (a.u.)", fontsize=14)
         ax.grid(True)
         ax.tick_params(axis="both", which="major", labelsize=12)
-        plt.show()
+
+        fig.tight_layout()
+
+        return fig
 
     def save(
         self,

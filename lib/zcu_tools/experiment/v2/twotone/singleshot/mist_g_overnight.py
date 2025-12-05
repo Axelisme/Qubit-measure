@@ -1,5 +1,6 @@
 from copy import deepcopy
 from typing import Optional, Tuple
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -183,9 +184,13 @@ class MISTPowerDepOvernight(AbsExperiment):
             result = self.last_result
         assert result is not None, "no result found"
 
-        iters, pdrs, signals = result
+        _, pdrs, signals = result
 
         populations = calc_populations(signals)
+
+        max_populations = np.nanmax(populations, axis=0)
+        min_populations = np.nanmin(populations, axis=0)
+        med_populations = np.nanmedian(populations, axis=0)
 
         if ac_coeff is None:
             xs = pdrs
@@ -194,39 +199,27 @@ class MISTPowerDepOvernight(AbsExperiment):
             xs = ac_coeff * pdrs**2
             xlabel = r"$\bar n$"
 
-        fig, axs = plt.subplots(3, 1, figsize=(8, 8), sharex=True)
+        fig, ax = plt.subplots(figsize=(8, 5))
         assert isinstance(fig, Figure)
 
-        axs[0].imshow(
-            populations[..., 0],
-            aspect="auto",
-            origin="lower",
-            extent=(xs[0], xs[-1], iters[0], iters[-1]),
-        )
-        axs[0].set_ylabel("Iteration")
-        axs[0].set_title("Ground State Population")
-        fig.colorbar(axs[0].images[0], ax=axs[0], label="Population")
+        med_kwargs = dict(marker="x", linestyle="-", markersize=4)
+        side_kwargs = dict(linestyle="--", alpha=0.3)
+        ax.plot(xs, max_populations[:, 0], color="b", **side_kwargs)
+        ax.plot(xs, med_populations[:, 0], color="b", label="Ground", **med_kwargs)
+        ax.plot(xs, min_populations[:, 0], color="b", **side_kwargs)
 
-        axs[1].imshow(
-            populations[..., 1],
-            aspect="auto",
-            origin="lower",
-            extent=(xs[0], xs[-1], iters[0], iters[-1]),
-        )
-        axs[1].set_ylabel("Iteration")
-        axs[1].set_title("Excited State Population")
-        fig.colorbar(axs[1].images[0], ax=axs[1], label="Population")
+        ax.plot(xs, max_populations[:, 1], color="r", **side_kwargs)
+        ax.plot(xs, med_populations[:, 1], color="r", label="Excited", **med_kwargs)
+        ax.plot(xs, min_populations[:, 1], color="r", **side_kwargs)
 
-        axs[2].imshow(
-            populations[..., 2],
-            aspect="auto",
-            origin="lower",
-            extent=(xs[0], xs[-1], iters[0], iters[-1]),
-        )
-        axs[2].set_xlabel(xlabel)
-        axs[2].set_ylabel("Iteration")
-        axs[2].set_title("Other State Population")
-        fig.colorbar(axs[2].images[0], ax=axs[2], label="Population")
+        ax.plot(xs, max_populations[:, 2], color="g", **side_kwargs)
+        ax.plot(xs, med_populations[:, 2], color="g", label="Other", **med_kwargs)
+        ax.plot(xs, min_populations[:, 2], color="g", **side_kwargs)
+
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("Population")
+        ax.legend()
+        ax.grid(True)
 
         fig.tight_layout()
 
@@ -237,7 +230,7 @@ class MISTPowerDepOvernight(AbsExperiment):
         filepath: str,
         result: Optional[MISTPowerDepOvernightResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/mist/pdr_overnight",
+        tag: str = "twotone/mist/pdr_overnight_singleshot",
         **kwargs,
     ) -> None:
         if result is None:
@@ -246,29 +239,31 @@ class MISTPowerDepOvernight(AbsExperiment):
 
         iters, pdrs, overnight_signals = result
 
+        filepath = Path(filepath)
+
         save_data(
-            filepath=filepath,
-            x_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
-            y_info={"name": "Iteration", "unit": "None", "values": iters},
+            filepath=filepath.with_name(filepath.name + "_g"),
+            x_info={"name": "Iteration", "unit": "None", "values": iters},
+            y_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
             z_info={
                 "name": "Ground Population",
                 "unit": "a.u.",
-                "values": overnight_signals[..., 0],
+                "values": overnight_signals[..., 0].T,
             },
             comment=comment,
-            tag=tag,
+            tag=tag + "_g",
             **kwargs,
         )
         save_data(
-            filepath=filepath,
-            x_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
-            y_info={"name": "Iteration", "unit": "None", "values": iters},
+            filepath=filepath.with_name(filepath.name + "_e"),
+            x_info={"name": "Iteration", "unit": "None", "values": iters},
+            y_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
             z_info={
                 "name": "Excited Population",
                 "unit": "a.u.",
-                "values": overnight_signals[..., 1],
+                "values": overnight_signals[..., 1].T,
             },
             comment=comment,
-            tag=tag,
+            tag=tag + "_e",
             **kwargs,
         )
