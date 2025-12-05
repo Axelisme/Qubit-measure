@@ -5,6 +5,8 @@ from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 from typing_extensions import TypeAlias
 
+from .util import OnlineStatisticTracker
+
 
 class TypedAcquireMixin(AcquireMixin):
     """
@@ -19,6 +21,26 @@ class TypedAcquireMixin(AcquireMixin):
     ) -> Union[NDArray[np.float64], int]:
         return super().get_time_axis(ro_index, length_only)
 
+    def _summarize_accumulated(
+        self, rounds_buf: List[NDArray[np.float64]]
+    ) -> NDArray[np.float64]:
+        return super()._summarize_accumulated(rounds_buf)
+
+    def _summarize_decimated(
+        self, rounds_buf: List[NDArray[np.float64]]
+    ) -> NDArray[np.float64]:
+        return super()._summarize_decimated(rounds_buf)
+
+    def _average_buf(
+        self,
+        buf: List[NDArray[np.float64]],
+        length_norm: bool = True,
+        remove_offset: bool = True,
+    ) -> List[NDArray[np.float64]]:
+        return super()._average_buf(
+            buf, length_norm=length_norm, remove_offset=remove_offset
+        )
+
     def acquire(self, *args, **kwargs) -> List[NDArray[np.float64]]:
         return super().acquire(*args, **kwargs)  # type: ignore
 
@@ -26,103 +48,65 @@ class TypedAcquireMixin(AcquireMixin):
         return super().acquire_decimated(*args, **kwargs)  # type: ignore
 
 
-class StdErrorMixin(TypedAcquireMixin):
+class StatisticMixin(TypedAcquireMixin):
     """
-    Add standard error information for acquired method to the AcquireMixin class
+    Add statistic information for acquired method to the AcquireMixin class
     """
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.stderr_buf: Optional[List[List[NDArray]]] = None
+        self._statistic_trackers: Optional[List[OnlineStatisticTracker]] = None
 
-    def get_stderr_raw(self) -> Optional[List[List[NDArray[np.float64]]]]:
-        return self.stderr_buf
-
-    def get_stderr(self) -> Optional[List[NDArray[np.float64]]]:
-        rounds_buf = self.get_rounds()
-        stderr_buf = self.get_stderr_raw()
-        if stderr_buf is None:
+    def get_covariance(self) -> Optional[List[NDArray[np.float64]]]:
+        if self._statistic_trackers is None:
             return None
 
-        assert rounds_buf is not None
-        return self._summarize_accumulated_std(rounds_buf, stderr_buf)
+        return [tracker.covariance for tracker in self._statistic_trackers]
 
-    def _summarize_accumulated_std(
-        self,
-        rounds_buf: List[List[NDArray[np.float64]]],
-        std_buf: List[List[NDArray[np.float64]]],
-    ) -> List[NDArray[np.float64]]:
-        return [
-            np.sqrt(
-                np.mean(
-                    [u[i] ** 2 + s[i] ** 2 for u, s in zip(rounds_buf, std_buf)], axis=0
-                )
-                - np.mean([u[i] for u in rounds_buf], axis=0) ** 2
-            )
-            for i in range(len(self.ro_chs))  # type: ignore
-        ]
+    def get_median(self) -> Optional[List[NDArray[np.float64]]]:
+        if self._statistic_trackers is None:
+            return None
 
-    def _stderr_buf(
-        self, d_reps: List[NDArray[np.int64]], length_norm: bool = True
-    ) -> List[NDArray[np.float64]]:
-        std_d = []
-        for i_ch, (_, ro) in enumerate(self.ro_chs.items()):  # type: ignore
-            # std over the avg_level
-            std = d_reps[i_ch].std(axis=self.avg_level)
-            if length_norm and not ro["edge_counting"]:
-                std /= ro["length"]
-            # the reads_per_shot axis should be the first one
-            std_d.append(np.moveaxis(std, -2, 0))
-
-        return std_d
-
-    def _process_accumulated_for_stderr(
-        self, acc_buf: List[NDArray[np.int64]]
-    ) -> List[NDArray[np.float64]]:
-        assert self.acquire_params is not None
-
-        if self.acquire_params["threshold"] is None:
-            return self._stderr_buf(acc_buf, length_norm=True)
-        else:
-            d_reps = [np.zeros_like(d) for d in acc_buf]
-            self.shots = self._apply_threshold(
-                acc_buf,
-                self.acquire_params["threshold"],
-                self.acquire_params["angle"],
-                self.acquire_params["remove_offset"],
-            )
-            for i, ch_shot in enumerate(self.shots):
-                d_reps[i][..., 0] = ch_shot  # type: ignore
-            # TODO: stderr on thresholded data is meaningless, but still return it for now
-            return self._stderr_buf(d_reps, length_norm=False)
+        return [tracker.rough_median for tracker in self._statistic_trackers]
 
     def finish_round(self) -> bool:
         not_finish = super().finish_round()
 
-        # save the standard error information for the accumulated data
+        assert self.acc_buf is not None
         assert self.acquire_params is not None
 
-        if self.acquire_params["type"] == "accumulated":
-            if self.acquire_params["record_stderr"]:
-                assert self.acc_buf is not None
-                assert self.stderr_buf is not None
-                self.stderr_buf.append(
-                    self._process_accumulated_for_stderr(self.acc_buf)
+        if self.acquire_params["record_statistic"]:
+            assert self._statistic_trackers is not None
+            if self.acquire_params["type"] != "accumulated":
+                raise NotImplementedError(
+                    "Statistic is not implemented for type other than accumulated"
                 )
-        elif self.acquire_params.get("record_stderr", False):
-            # currently not supported for type other than accumulated
-            raise NotImplementedError(
-                "Standard error is not implemented for type other than accumulated"
-            )
+
+            if self.acquire_params["threshold"] is not None:
+                raise NotImplementedError(
+                    "Statistic is not implemented for thresholded data"
+                )
+
+            for d_rep, tracker, (_, ro) in zip(
+                self.acc_buf, self._statistic_trackers, self.ro_chs.values()
+            ):
+                d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
+
+                if not ro["edge_counting"]:
+                    d_rep /= ro["length"]
+
+                tracker.update(d_rep)  # (..., m, 2)
 
         return not_finish
 
-    def acquire(self, *args, record_stderr=False, **kwargs):
-        if record_stderr:
-            self.stderr_buf = []
+    def acquire(self, *args, record_statistic=False, **kwargs):
+        if record_statistic:
+            self._statistic_trackers = [
+                OnlineStatisticTracker() for _ in self.ro_chs.keys()
+            ]
         extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(record_stderr=record_stderr)
-        return super().acquire(*args, extra_args=extra_args, **kwargs)  # type: ignore
+        extra_args.update(record_statistic=record_statistic)
+        return super().acquire(*args, extra_args=extra_args, **kwargs)
 
 
 class EarlyStopMixin(TypedAcquireMixin):
@@ -156,12 +140,22 @@ class EarlyStopMixin(TypedAcquireMixin):
         return not_finish and not self.early_stop
 
 
-BaseCallbackType: TypeAlias = Callable[[int, List[NDArray]], None]
-StdCallbackType: TypeAlias = Callable[[int, Tuple[List[NDArray], List[NDArray]]], None]
-CallbackType: TypeAlias = Union[BaseCallbackType, StdCallbackType]
+BaseCallbackType: TypeAlias = Callable[[int, List[NDArray[np.float64]]], None]
+StatisticCallbackType: TypeAlias = Callable[
+    [
+        int,
+        Tuple[
+            List[NDArray[np.float64]],
+            List[NDArray[np.float64]],
+            List[NDArray[np.float64]],
+        ],
+    ],
+    None,
+]
+CallbackType: TypeAlias = Union[BaseCallbackType, StatisticCallbackType]
 
 
-class CallbackMixin(StdErrorMixin):
+class CallbackMixin(StatisticMixin):
     """
     Add callback functionality to the AcquireMixin class
     """
@@ -193,13 +187,15 @@ class CallbackMixin(StdErrorMixin):
             round_n = len(self.rounds_buf)
             if self.acquire_params["type"] == "accumulated":
                 avg_d = self._summarize_accumulated(self.rounds_buf)
-                if self.acquire_params.get("record_stderr", False):
-                    callback = cast(StdCallbackType, callback)
+                if self.acquire_params.get("record_statistic", False):
+                    callback = cast(StatisticCallbackType, callback)
 
-                    std_d = self.get_stderr()
-                    assert std_d is not None
+                    cov_d = self.get_covariance()
+                    med_d = self.get_median()
+                    assert cov_d is not None
+                    assert med_d is not None
 
-                    callback(round_n, (avg_d, std_d))
+                    callback(round_n, (avg_d, cov_d, med_d))
                 else:
                     callback = cast(BaseCallbackType, callback)
 
@@ -287,12 +283,12 @@ class SingleShotMixin(TypedAcquireMixin):
 
     def _apply_classification(
         self,
-        acc_buf,
+        acc_buf: List[NDArray[np.float64]],
         g_center: complex,
         e_center: complex,
         population_radius: float,
         remove_offset: bool,
-    ):
+    ) -> List[NDArray[np.float64]]:
         shots = []
         for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):  # type: ignore
             avg = acc_buf[i_ch] / ro["length"]
@@ -308,5 +304,5 @@ class SingleShotMixin(TypedAcquireMixin):
 
 
 class ImproveAcquireMixin(
-    SingleShotMixin, CallbackMixin, EarlyStopMixin, StdErrorMixin
+    SingleShotMixin, CallbackMixin, EarlyStopMixin, StatisticMixin
 ): ...

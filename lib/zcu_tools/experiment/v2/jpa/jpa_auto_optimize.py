@@ -187,9 +187,10 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                                     soc,
                                     progress=False,
                                     callback=update_hook,
-                                    record_stderr=True,
+                                    record_statistic=True,
                                 ),
-                                prog.get_stderr(),
+                                prog.get_covariance(),
+                                prog.get_median(),
                             )
                         ),
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),

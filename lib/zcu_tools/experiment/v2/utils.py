@@ -39,17 +39,27 @@ def calc_snr_by_std(
 
 
 def snr_as_signal(
-    raw: Tuple[Sequence[NDArray[np.float64]], Optional[Sequence[NDArray[np.float64]]]],
+    raw: Tuple[
+        Sequence[NDArray[np.float64]],
+        Optional[Sequence[NDArray[np.float64]]],
+        Optional[Sequence[NDArray[np.float64]]],
+    ],
     ge_axis: int = 0,
 ) -> NDArray[np.complex128]:
-    avg_d, std_d = raw
+    _, cov_d, med_d = raw
+    assert cov_d is not None  # (ge, *sweep, 2, 2)
+    assert med_d is not None  # (ge, *sweep, 2)
 
-    assert std_d is not None
+    cov_d = cov_d[0][0]
+    med_d = med_d[0][0]
+    assert cov_d.shape[ge_axis] == 2
+    assert med_d.shape[ge_axis] == 2
 
-    avg_s = avg_d[0][0].dot([1, 1j])  # (ge, *sweep)
-    std_s = std_d[0][0].dot([1, 1j])  # (ge, *sweep)
+    # (ge, *sweep)
+    contrast = np.take(med_d, 1, axis=ge_axis) - np.take(med_d, 0, axis=ge_axis)
+    noise = np.min(np.sqrt(np.diagonal(cov_d, axis1=-2, axis2=-1)), axis=-1)
 
-    return calc_snr_by_std(avg_s, std_s, ge_axis=ge_axis)
+    return contrast / (noise + 1e-12)
 
 
 T_RawResult = TypeVar("T_RawResult")
