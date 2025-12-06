@@ -30,4 +30,9 @@ from .decay import (
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi
 from .resonance import HangerModel, TransmissionModel, get_proper_model
-from .singleshot import calc_population_pdf, fit_singleshot, gauss_func
+from .singleshot import (
+    calc_population_pdf,
+    fit_singleshot,
+    gauss_func,
+    fit_singleshot_p0,
+)

@@ -75,7 +75,7 @@ class StatisticMixin(TypedAcquireMixin):
         assert self.acc_buf is not None
         assert self.acquire_params is not None
 
-        if self.acquire_params["record_statistic"]:
+        if self.acquire_params.get("record_statistic", False):
             assert self._statistic_trackers is not None
             if self.acquire_params["type"] != "accumulated":
                 raise NotImplementedError(
@@ -87,13 +87,13 @@ class StatisticMixin(TypedAcquireMixin):
                     "Statistic is not implemented for thresholded data"
                 )
 
-            for d_rep, tracker, (_, ro) in zip(
+            for d_rep, tracker, ro in zip(
                 self.acc_buf, self._statistic_trackers, self.ro_chs.values()
             ):
                 d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
 
                 if not ro["edge_counting"]:
-                    d_rep /= ro["length"]
+                    d_rep = d_rep / ro["length"]
 
                 tracker.update(d_rep)  # (..., m, 2)
 

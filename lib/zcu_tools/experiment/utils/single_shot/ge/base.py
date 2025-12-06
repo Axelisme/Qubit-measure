@@ -9,6 +9,7 @@ from zcu_tools.utils.fitting.singleshot import (
     calc_population_pdf,
     fit_singleshot,
     gauss_func,
+    fit_singleshot_p0,
 )
 
 
@@ -177,13 +178,15 @@ def fitting_ge_and_plot(
     fixedparams = [None, None, None, init_p0, avg_p, length_ratio]
     ge_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
     sg, se, s, p0, p_avg, length_ratio = ge_params
-    fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio)
-    fit_e_pdfs = calc_population_pdf(xs, sg, se, s, 1.0 - p0, p_avg, length_ratio)
+    (p0_g,), _ = fit_singleshot_p0(xs, g_pdfs, init_p0=p0, ge_params=ge_params)
+    (p0_e,), _ = fit_singleshot_p0(xs, e_pdfs, init_p0=1.0 - p0, ge_params=ge_params)
+    fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_g, p_avg, length_ratio)
+    fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_e, p_avg, length_ratio)
 
-    n_gg = 1.0 - p0
-    n_ge = p0
-    n_ee = 1.0 - p0
-    n_eg = p0
+    n_gg = 1.0 - p0_g
+    n_ge = p0_g
+    n_ee = p0_e
+    n_eg = 1.0 - p0_e
 
     gg_fit = n_gg * gauss_func(xs, sg, s)
     ge_fit = n_ge * gauss_func(xs, se, s)
@@ -231,7 +234,7 @@ def fitting_ge_and_plot(
     fid, threshold = calc_fidelity(g_pdfs, e_pdfs, bins)
     ideal_fid = calc_ideal_fidelity(sg, se, s)
 
-    axs[1, 0].set_title(r"${F}_{ge}: $" + f"{fid:.1%} / {ideal_fid:.1%}", fontsize=14)
+    axs[1, 0].set_title(r"${F}_{ge}: $" + f"{fid:.1%} / {ideal_fid:.3%}", fontsize=14)
 
     for ax in axs.flat:
         ax.axvline(threshold, color="0.2", linestyle="--")
@@ -259,6 +262,8 @@ def fitting_ge_and_plot(
         ),
         {
             "ge_params": ge_params,
+            "p0_g": p0_g,
+            "p0_e": p0_e,
             "theta": theta,
             "threshold": threshold,
             "g_center": rotated_g_center * np.exp(-1j * theta),

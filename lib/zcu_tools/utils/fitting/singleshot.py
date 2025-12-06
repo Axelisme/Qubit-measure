@@ -154,3 +154,12 @@ def fit_singleshot(xs, g_pdfs, e_pdfs, fitparams=None, fixedparams=None):
         bounds=bounds,
         fixedparams=fixedparams,
     )
+
+
+def fit_singleshot_p0(xs, pdfs, init_p0, ge_params):
+    sg, se, s, _, p_avg, length_ratio = ge_params
+
+    def calc_pdf(xs, p0):
+        return calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio)
+
+    return fit_func(xs, pdfs, calc_pdf, init_p=[init_p0], bounds=([0.0], [1.0]))

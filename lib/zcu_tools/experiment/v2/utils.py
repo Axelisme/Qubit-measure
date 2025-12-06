@@ -24,20 +24,6 @@ def set_pulse_freq(pulse_cfg: PulseCfg, freq: float) -> PulseCfg:
     return pulse_cfg
 
 
-def calc_snr_by_std(
-    avg_d: NDArray[np.complex128], std_d: NDArray[np.complex128], ge_axis: int = 0
-) -> NDArray[np.complex128]:
-    # (*sweep)
-    contrast = np.take(avg_d, 1, axis=ge_axis) - np.take(avg_d, 0, axis=ge_axis)
-    noise2_i = np.sum(std_d.real**2, axis=ge_axis)  # (*sweep)
-    noise2_q = np.sum(std_d.imag**2, axis=ge_axis)  # (*sweep)
-    noise = np.sqrt(noise2_i * contrast.real**2 + noise2_q * contrast.imag**2) / np.abs(
-        contrast
-    )
-
-    return contrast / noise
-
-
 def snr_as_signal(
     raw: Tuple[
         Sequence[NDArray[np.float64]],
@@ -56,8 +42,12 @@ def snr_as_signal(
     assert med_d.shape[ge_axis] == 2
 
     # (ge, *sweep)
-    contrast = np.take(med_d, 1, axis=ge_axis) - np.take(med_d, 0, axis=ge_axis)
-    noise = np.min(np.sqrt(np.diagonal(cov_d, axis1=-2, axis2=-1)), axis=-1)
+    contrast = (np.take(med_d, 1, axis=ge_axis) - np.take(med_d, 0, axis=ge_axis)).dot(
+        [1, 1j]
+    )
+    noise = np.mean(
+        np.max(np.sqrt(np.diagonal(cov_d, axis1=-2, axis2=-1)), axis=-1), axis=ge_axis
+    )
 
     return contrast / (noise + 1e-12)
 
