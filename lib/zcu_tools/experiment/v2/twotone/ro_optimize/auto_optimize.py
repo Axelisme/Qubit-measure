@@ -11,7 +11,7 @@ from skopt.space import Real
 from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import make_ge_sweep
+from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
@@ -48,13 +48,18 @@ class ReadoutOptimizer:
     ) -> None:
         self.num_points = num_points
 
+        fpts = sweep2array(fpt_sweep, allow_array=True)
+        pdrs = sweep2array(pdr_sweep, allow_array=True)
+        lens = sweep2array(len_sweep, allow_array=True)
+
         self.optimizer = Optimizer(
             dimensions=[
-                Real(name="freq", low=fpt_sweep.min, high=fpt_sweep.max),
-                Real(name="gain", low=pdr_sweep.min, high=pdr_sweep.max),
-                Real(name="length", low=len_sweep.min, high=len_sweep.max),
+                Real(name="freq", low=fpts.min(), high=fpts.max()),
+                Real(name="gain", low=pdrs.min(), high=pdrs.max()),
+                Real(name="length", low=lens.min(), high=lens.max()),
             ],
             n_initial_points=num_points // 3,
+            initial_point_generator="lhs",
             base_estimator="ET",
             acq_func="EI",
             n_jobs=-1,
@@ -114,6 +119,7 @@ class AutoOptimizeExperiment(AbsExperiment):
                 # TODO: Better way to early stop
                 raise KeyboardInterrupt("No more parameters to optimize.")
 
+            params[i, :] = cur_params
             Readout.set_param(ctx.cfg["readout"], "freq", cur_params[0])
             Readout.set_param(ctx.cfg["readout"], "gain", cur_params[1])
             Readout.set_param(ctx.cfg["readout"], "length", cur_params[2])
@@ -166,7 +172,7 @@ class AutoOptimizeExperiment(AbsExperiment):
                 viewer.get_plotter("freq_scatter").update(
                     params[:, 0], snrs, refresh=False
                 )
-                viewer.get_plotter("freq_scatter").update(
+                viewer.get_plotter("gain_scatter").update(
                     params[:, 1], snrs, refresh=False
                 )
                 viewer.get_plotter("len_scatter").update(
@@ -213,6 +219,7 @@ class AutoOptimizeExperiment(AbsExperiment):
                 update_hook=plot_fn,
             )
             signals = np.asarray(results)
+        plt.close(fig)
 
         # record the last cfg and result
         self.last_cfg = cfg

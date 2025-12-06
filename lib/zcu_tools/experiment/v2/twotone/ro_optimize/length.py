@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import NotRequired
+from matplotlib.figure import Figure
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
@@ -111,7 +112,7 @@ class OptimizeLengthExperiment(AbsExperiment):
 
     def analyze(
         self, result: Optional[LengthResultType] = None, *, t0: Optional[float] = None
-    ) -> float:
+    ) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -133,16 +134,16 @@ class OptimizeLengthExperiment(AbsExperiment):
         max_length = float(lengths[max_id])
         max_snr = float(snrs[max_id])
 
-        plt.figure(figsize=config.figsize)
-        plt.plot(lengths, snrs)
-        plt.axvline(max_length, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
-        plt.xlabel("Readout Length (us)")
-        plt.ylabel("SNR (a.u.)")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
+        fig, ax = plt.subplots(figsize=config.figsize)
 
-        return max_length
+        ax.plot(lengths, snrs)
+        ax.axvline(max_length, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
+        ax.set_xlabel("Readout Length (us)")
+        ax.set_ylabel("SNR (a.u.)")
+        ax.legend()
+        ax.grid(True)
+
+        return max_length, fig
 
     def save(
         self,

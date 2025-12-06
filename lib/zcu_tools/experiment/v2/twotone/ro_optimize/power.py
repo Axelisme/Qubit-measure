@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import NotRequired
+from matplotlib.figure import Figure
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
@@ -93,7 +94,9 @@ class OptimizePowerExperiment(AbsExperiment):
 
         return gains, signals
 
-    def analyze(self, result: Optional[PowerResultType] = None) -> float:
+    def analyze(
+        self, result: Optional[PowerResultType] = None, penalty_ratio: float = 0.0
+    ) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -106,21 +109,22 @@ class OptimizePowerExperiment(AbsExperiment):
         snrs[np.isnan(snrs)] = 0.0
 
         snrs = gaussian_filter1d(snrs, 1)
+        penaltized_snrs = snrs * np.exp(-powers * penalty_ratio)
 
-        max_id = np.argmax(snrs)
+        max_id = np.argmax(penaltized_snrs)
         max_power = float(powers[max_id])
         max_snr = float(snrs[max_id])
 
-        plt.figure(figsize=config.figsize)
-        plt.plot(powers, snrs)
-        plt.axvline(max_power, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
-        plt.xlabel("Readout Power")
-        plt.ylabel("SNR (a.u.)")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
+        fig, ax = plt.subplots(figsize=config.figsize)
 
-        return max_power
+        ax.plot(powers, snrs)
+        ax.axvline(max_power, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
+        ax.set_xlabel("Readout Power")
+        ax.set_ylabel("SNR (a.u.)")
+        ax.legend()
+        ax.grid(True)
+
+        return max_power, fig
 
     def save(
         self,

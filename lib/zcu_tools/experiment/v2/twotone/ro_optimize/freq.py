@@ -6,6 +6,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import NotRequired
+from matplotlib.figure import Figure
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
@@ -94,7 +95,7 @@ class OptimizeFreqExperiment(AbsExperiment):
 
     def analyze(
         self, result: Optional[FreqResultType] = None, *, smooth: float = 1.0
-    ) -> float:
+    ) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -112,16 +113,16 @@ class OptimizeFreqExperiment(AbsExperiment):
         max_fpt = float(fpts[max_id])
         max_snr = float(snrs[max_id])
 
-        plt.figure(figsize=config.figsize)
-        plt.plot(fpts, snrs)
-        plt.axvline(max_fpt, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
-        plt.xlabel("Frequency (MHz)")
-        plt.ylabel("SNR (a.u.)")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
+        fig, ax = plt.subplots(figsize=config.figsize)
 
-        return max_fpt
+        ax.plot(fpts, snrs)
+        ax.axvline(max_fpt, color="r", ls="--", label=f"max SNR = {max_snr:.2f}")
+        ax.set_xlabel("Frequency (MHz)")
+        ax.set_ylabel("SNR (a.u.)")
+        ax.legend()
+        ax.grid(True)
+
+        return max_fpt, fig
 
     def save(
         self,
