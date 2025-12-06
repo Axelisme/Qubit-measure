@@ -74,7 +74,7 @@ class ReadoutOptimizer:
             return None
 
         if last_snr is not None:
-            self.optimizer.tell(self.last_param, last_snr)
+            self.optimizer.tell(self.last_param, -last_snr)
 
         self.last_param = self.optimizer.ask()
         return self.last_param
