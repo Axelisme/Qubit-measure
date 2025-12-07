@@ -70,6 +70,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
 
         # (num_points, [flux, freq, power])
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
+        phases = np.zeros(num_points, dtype=np.int32)
 
         def update_fn(i, ctx, _) -> None:
             ctx.env_dict["index"] = i
@@ -84,6 +85,8 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                 raise KeyboardInterrupt("No more parameters to optimize.")
 
             params[i, :] = cur_params
+            phases[i] = optimizer.phase
+
             set_flux_in_dev_cfg(ctx.cfg["dev"], params[i, 0], label="jpa_flux_dev")
             set_freq_in_dev_cfg(ctx.cfg["dev"], 1e6 * params[i, 1], label="jpa_rf_dev")
             set_power_in_dev_cfg(ctx.cfg["dev"], params[i, 2], label="jpa_rf_dev")
@@ -119,17 +122,12 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                 ),
             ),
         ) as viewer:
-            # Track phase for each point
-            phases = np.zeros(num_points, dtype=np.int32)
 
             def plot_fn(ctx: TaskContext) -> None:
                 idx: int = ctx.env_dict["index"]
                 snrs = np.abs(ctx.data)  # (num_points, )
 
                 cur_flx, cur_fpt, cur_pdr = params[idx, :]
-
-                # Record current phase for this point
-                phases[idx] = optimizer.phase
 
                 # Assign colors based on phase using matplotlib color cycle
                 prop_cycle = plt.rcParams["axes.prop_cycle"]

@@ -12,6 +12,7 @@ from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     RepeatOverTime,
+    ReTryIfFail,
     TaskConfig,
     run_task,
 )
@@ -80,24 +81,31 @@ class MISTPowerDepOvernight(AbsExperiment):
                     name="repeat_over_time",
                     num_times=num_times,
                     interval=cfg["interval"],
-                    task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset", ctx.cfg.get("reset", {"type": "none"})
-                                    ),
-                                    Pulse("init_pulse", cfg=ctx.cfg.get("init_pulse")),
-                                    Pulse("probe_pulse", cfg=ctx.cfg["probe_pulse"]),
-                                    Readout("readout", ctx.cfg["readout"]),
-                                ],
-                            ).acquire(soc, progress=False, callback=update_hook)
+                    task=ReTryIfFail(
+                        max_retries=fail_retry,
+                        task=HardTask(
+                            measure_fn=lambda ctx, update_hook: (
+                                ModularProgramV2(
+                                    soccfg,
+                                    ctx.cfg,
+                                    modules=[
+                                        Reset(
+                                            "reset",
+                                            ctx.cfg.get("reset", {"type": "none"}),
+                                        ),
+                                        Pulse(
+                                            "init_pulse", cfg=ctx.cfg.get("init_pulse")
+                                        ),
+                                        Pulse(
+                                            "probe_pulse", cfg=ctx.cfg["probe_pulse"]
+                                        ),
+                                        Readout("readout", ctx.cfg["readout"]),
+                                    ],
+                                ).acquire(soc, progress=False, callback=update_hook)
+                            ),
+                            result_shape=(len(pdrs),),
                         ),
-                        result_shape=(len(pdrs),),
                     ),
-                    fail_retry=fail_retry,
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(

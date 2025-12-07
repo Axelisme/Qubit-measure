@@ -45,7 +45,7 @@ class FluxDepExperiment(AbsExperiment):
         Readout.set_param(cfg["readout"], "freq", sweep2param("freq", fpt_sweep))
 
         with LivePlotter2DwithLine(
-            "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=5
+            "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
             signals = run_task(
                 task=SoftTask(

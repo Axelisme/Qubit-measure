@@ -152,6 +152,7 @@ def fitting_ge_and_plot(
     length_ratio: Optional[float] = None,
     init_p0: Optional[float] = None,
     avg_p: Optional[float] = None,
+    align_t1: bool = True,
 ) -> Tuple[float, float, float, np.ndarray, dict, plt.Figure]:
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
@@ -178,10 +179,14 @@ def fitting_ge_and_plot(
     fixedparams = [None, None, None, init_p0, avg_p, length_ratio]
     ge_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
     sg, se, s, p0, p_avg, length_ratio = ge_params
-    (p0_g,), _ = fit_singleshot_p0(xs, g_pdfs, init_p0=p0, ge_params=ge_params)
-    (p0_e,), _ = fit_singleshot_p0(xs, e_pdfs, init_p0=1.0 - p0, ge_params=ge_params)
-    fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_g, p_avg, length_ratio)
-    fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_e, p_avg, length_ratio)
+    (p0_g, l_ratio_g), _ = fit_singleshot_p0(
+        xs, g_pdfs, init_p0=p0, ge_params=ge_params, fit_length_ratio=not align_t1
+    )
+    (p0_e, l_ratio_e), _ = fit_singleshot_p0(
+        xs, e_pdfs, init_p0=1.0 - p0, ge_params=ge_params, fit_length_ratio=not align_t1
+    )
+    fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_g, p_avg, l_ratio_g)
+    fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_e, p_avg, l_ratio_e)
 
     n_gg = 1.0 - p0_g
     n_ge = p0_g
@@ -234,7 +239,9 @@ def fitting_ge_and_plot(
     fid, threshold = calc_fidelity(g_pdfs, e_pdfs, bins)
     ideal_fid = calc_ideal_fidelity(sg, se, s)
 
-    axs[1, 0].set_title(r"${F}_{ge}: $" + f"{fid:.1%} / {ideal_fid:.3%}", fontsize=14)
+    axs[1, 0].set_title(
+        r"${F}_{ge}: $" + f"{fid:.1%} / {1e2 * ideal_fid:.3g}%", fontsize=14
+    )
 
     for ax in axs.flat:
         ax.axvline(threshold, color="0.2", linestyle="--")
@@ -248,7 +255,10 @@ def fitting_ge_and_plot(
         axs[1, 0].set_ylim(y_min, y_max)
         axs[1, 1].set_ylim(y_min, y_max)
 
-    fig.suptitle(f"Readout length = {length_ratio:.1f} " + r"$T_1$")
+    if align_t1:
+        fig.suptitle(f"Readout length = {length_ratio:.1f} " + r"$T_1$")
+    else:
+        fig.suptitle(f"Readout length = {l_ratio_g:.1f} / {l_ratio_e:.1f} " + r"$T_1$")
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.25, wspace=0.15)
 
@@ -264,6 +274,8 @@ def fitting_ge_and_plot(
             "ge_params": ge_params,
             "p0_g": p0_g,
             "p0_e": p0_e,
+            "length_ratio_g": l_ratio_g,
+            "length_ratio_e": l_ratio_e,
             "theta": theta,
             "threshold": threshold,
             "g_center": rotated_g_center * np.exp(-1j * theta),

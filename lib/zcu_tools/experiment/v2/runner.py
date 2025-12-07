@@ -356,6 +356,41 @@ class HardTask(
         return np.full(self.result_shape, np.nan, dtype=self.dtype)
 
 
+class ReTryIfFail(
+    AbsTask[T_ResultType, T_TaskContextType], Generic[T_ResultType, T_TaskContextType]
+):
+    def __init__(
+        self, task: AbsTask[T_ResultType, T_TaskContextType], max_retries: int
+    ) -> None:
+        self.task = task
+        self.max_retries = max_retries
+
+    def init(self, ctx, dynamic_pbar=False) -> None:
+        self.dynamic_pbar = dynamic_pbar
+        self.task.init(ctx, dynamic_pbar=dynamic_pbar)
+
+    def run(self, ctx) -> None:
+        for attempt in range(self.max_retries):
+            try:
+                self.task.run(ctx)
+            except Exception:
+                print(
+                    f"Failed to run task, retrying... ({attempt + 1}/{self.max_retries})"
+                )
+                self.task.cleanup()  # cleanup and re-init
+                self.task.init(ctx, dynamic_pbar=self.dynamic_pbar)
+                continue
+            break
+        else:
+            self.task.run(ctx)
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
+
+    def get_default_result(self) -> T_ResultType:
+        return self.task.get_default_result()
+
+
 class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskContextType]):
     def __init__(
         self,
@@ -363,13 +398,11 @@ class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskContextType]):
         num_times: int,
         interval: float,
         task: AbsTask[T_ResultType, T_TaskContextType],
-        fail_retry: int = 0,
     ) -> None:
         self.name = name
         self.num_times = num_times
         self.interval = interval
         self.task = task
-        self.fail_retry = fail_retry
 
     def make_pbar(self, leave: bool) -> tqdm:
         return tqdm(total=self.num_times, smoothing=0, desc=self.name, leave=leave)
@@ -399,17 +432,7 @@ class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskContextType]):
 
             ctx.env_dict["repeat_idx"] = i
 
-            for attempt in range(self.fail_retry):
-                try:
-                    self.task.run(ctx(addr=i))
-                except Exception:
-                    print(
-                        f"Failed to run task, retrying... ({attempt + 1}/{self.fail_retry})"
-                    )
-                    continue
-                break
-            else:
-                self.task.run(ctx(addr=i))
+            self.task.run(ctx(addr=i))
 
             self.time_pbar.update()
 

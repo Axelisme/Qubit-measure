@@ -156,10 +156,20 @@ def fit_singleshot(xs, g_pdfs, e_pdfs, fitparams=None, fixedparams=None):
     )
 
 
-def fit_singleshot_p0(xs, pdfs, init_p0, ge_params):
+def fit_singleshot_p0(xs, pdfs, init_p0, ge_params, fit_length_ratio=False):
     sg, se, s, _, p_avg, length_ratio = ge_params
 
-    def calc_pdf(xs, p0):
+    def calc_pdf(xs, p0, length_ratio):
         return calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio)
 
-    return fit_func(xs, pdfs, calc_pdf, init_p=[init_p0], bounds=([0.0], [1.0]))
+    fixedparams = [None, None]
+    if not fit_length_ratio:
+        fixedparams[1] = length_ratio
+
+    return fit_func(
+        xs,
+        pdfs,
+        calc_pdf,
+        init_p=[init_p0, length_ratio],
+        bounds=([0.0, 0.5 * length_ratio], [1.0, 2.0 * length_ratio]),
+    )

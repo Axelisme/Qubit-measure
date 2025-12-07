@@ -482,6 +482,10 @@ class T1WithToneSweepExperiment(AbsExperiment):
 
         gains, Ts, signals = result
 
+        valid_mask = np.all(np.isfinite(signals), axis=(1, 2))
+        gains = gains[valid_mask]
+        signals = signals[valid_mask]
+
         populations = calc_populations(signals)
 
         if ac_coeff is None:

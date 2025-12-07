@@ -8,7 +8,13 @@ from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import (
+    HardTask,
+    SoftTask,
+    TaskConfig,
+    run_task,
+    ReTryIfFail,
+)
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveFindPoints,
@@ -31,7 +37,9 @@ class FreqFluxDepTaskConfig(TaskConfig, TwoToneProgramCfg): ...
 
 
 class FreqFluxDepExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: FreqFluxDepTaskConfig) -> FreqFluxDepResultType:
+    def run(
+        self, soc, soccfg, cfg: FreqFluxDepTaskConfig, fail_retry: int = 0
+    ) -> FreqFluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -57,13 +65,16 @@ class FreqFluxDepExperiment(AbsExperiment):
                     update_cfg_fn=lambda _, ctx, flx: (
                         set_flux_in_dev_cfg(ctx.cfg["dev"], flx)
                     ),
-                    sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            TwoToneProgram(soccfg, ctx.cfg).acquire(
-                                soc, progress=False, callback=update_hook
-                            )
+                    sub_task=ReTryIfFail(
+                        max_retries=fail_retry,
+                        task=HardTask(
+                            measure_fn=lambda ctx, update_hook: (
+                                TwoToneProgram(soccfg, ctx.cfg).acquire(
+                                    soc, progress=False, callback=update_hook
+                                )
+                            ),
+                            result_shape=(len(fpts),),
                         ),
-                        result_shape=(len(fpts),),
                     ),
                 ),
                 init_cfg=cfg,
@@ -94,7 +105,7 @@ class FreqFluxDepExperiment(AbsExperiment):
         signals2D = minus_background(signals2D, axis=1)
 
         actline = InteractiveLines(
-            signals2D.T, mAs=values, fpts=fpts, mA_c=mA_c, mA_e=mA_e
+            signals2D, mAs=values, fpts=fpts, mA_c=mA_c, mA_e=mA_e
         )
 
         return actline
