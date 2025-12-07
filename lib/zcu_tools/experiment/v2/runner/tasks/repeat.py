@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+from time import time
+from typing import Sequence
+
+from tqdm.auto import tqdm
+from typing_extensions import Generic, List
+
+from .base import AbsTask, T_ResultType, T_TaskContextType
+
+
+class ReTryIfFail(
+    AbsTask[T_ResultType, T_TaskContextType], Generic[T_ResultType, T_TaskContextType]
+):
+    def __init__(
+        self, task: AbsTask[T_ResultType, T_TaskContextType], max_retries: int
+    ) -> None:
+        self.task = task
+        self.max_retries = max_retries
+
+    def init(self, ctx, dynamic_pbar=False) -> None:
+        self.dynamic_pbar = dynamic_pbar
+        self.task.init(ctx, dynamic_pbar=dynamic_pbar)
+
+    def run(self, ctx) -> None:
+        for attempt in range(self.max_retries):
+            try:
+                self.task.run(ctx)
+            except Exception:
+                print(
+                    f"Failed to run task, retrying... ({attempt + 1}/{self.max_retries})"
+                )
+                self.task.cleanup()  # cleanup and re-init
+                self.task.init(ctx, dynamic_pbar=self.dynamic_pbar)
+                continue
+            break
+        else:
+            self.task.run(ctx)
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
+
+    def get_default_result(self) -> T_ResultType:
+        return self.task.get_default_result()
+
+
+class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskContextType]):
+    def __init__(
+        self,
+        name: str,
+        num_times: int,
+        interval: float,
+        task: AbsTask[T_ResultType, T_TaskContextType],
+    ) -> None:
+        self.name = name
+        self.num_times = num_times
+        self.interval = interval
+        self.task = task
+
+    def make_pbar(self, leave: bool) -> tqdm:
+        return tqdm(total=self.num_times, smoothing=0, desc=self.name, leave=leave)
+
+    def init(self, ctx, dynamic_pbar=False) -> None:
+        self.dynamic_pbar = dynamic_pbar
+        if dynamic_pbar:
+            self.time_pbar = None  # initialize in run()
+        else:
+            self.time_pbar = self.make_pbar(leave=True)
+
+        self.task.init(ctx, dynamic_pbar=dynamic_pbar)
+
+    def run(self, ctx) -> None:
+        if self.dynamic_pbar:
+            self.time_pbar = self.make_pbar(leave=False)
+        else:
+            assert self.time_pbar is not None
+            self.time_pbar.reset()
+
+        start_t = time.time() - 2 * self.interval
+
+        for i in range(self.num_times):
+            while time.time() - start_t < self.interval:
+                time.sleep(0.1)
+            start_t = time.time()
+
+            ctx.env_dict["repeat_idx"] = i
+
+            self.task.run(ctx(addr=i))
+
+            self.time_pbar.update()
+
+        if self.dynamic_pbar:
+            assert self.time_pbar is not None
+            self.time_pbar.close()
+            self.time_pbar = None
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
+
+        if not self.dynamic_pbar:
+            assert self.time_pbar is not None
+            self.time_pbar.close()
+            self.time_pbar = None
+
+    def get_default_result(self) -> List[T_ResultType]:
+        return [self.task.get_default_result() for _ in range(self.num_times)]
