@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import Generic, Sequence
 
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
@@ -22,7 +22,10 @@ T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
-class HardTask(AbsTask[NDArray[T_DType], T_RootResult, T_TaskConfig]):
+class HardTask(
+    AbsTask[NDArray[T_DType], T_RootResult, T_TaskConfig],
+    Generic[T_DType, T_RootResult, T_TaskConfig, T_Raw],
+):
     def __init__(
         self,
         measure_fn: Callable[

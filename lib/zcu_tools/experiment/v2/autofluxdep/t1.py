@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple, Union, cast
+from typing import Callable, Dict, List, Optional, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -119,7 +119,9 @@ class T1MeasurementTask(
             )
 
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = HardTask[np.complex128, T_RootResultType, T1Cfg](
+        self.task = HardTask[
+            np.complex128, T_RootResultType, T1Cfg, List[NDArray[np.float64]]
+        ](
             measure_fn=measure_t1_fn,
             result_shape=(num_expts,),
         )

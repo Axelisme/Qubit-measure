@@ -5,7 +5,7 @@ from typing import Callable, Dict, Optional, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import List, NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
@@ -92,7 +92,12 @@ class QubitFreqMeasurementTask(
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        self.task = HardTask[np.complex128, T_RootResultType, TwoToneProgramCfg](
+        self.task = HardTask[
+            np.complex128,
+            T_RootResultType,
+            TwoToneProgramCfg,
+            List[NDArray[np.float64]],
+        ](
             measure_fn=lambda ctx, update_hook: (
                 prog := TwoToneProgram(ctx.env_dict["soccfg"], ctx.cfg)
             ).acquire(

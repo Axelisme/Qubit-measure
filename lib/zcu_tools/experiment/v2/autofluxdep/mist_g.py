@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Callable,
+    Dict,
+    List,
+    NotRequired,
+    Optional,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
@@ -77,7 +84,9 @@ class Mist_G_MeasurementTask(
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
 
-        self.task = HardTask[np.complex128, T_RootResultType, MistCfg](
+        self.task = HardTask[
+            np.complex128, T_RootResultType, MistCfg, List[NDArray[np.float64]]
+        ](
             measure_fn=lambda ctx, update_hook: ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 ctx.cfg,

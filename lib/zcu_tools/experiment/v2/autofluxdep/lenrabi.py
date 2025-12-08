@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from re import sub
-from typing import Callable, Dict, Optional, Tuple, cast
+from typing import Callable, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -106,7 +105,11 @@ class LenRabiMeasurementTask(
         length_sweep: SweepCfg,
         ref_pi_product: float,
         cfg_maker: Callable[
-            [TaskContextView, ModuleLibrary], Optional[LenRabiCfgTemplate]
+            [
+                TaskContextView[LenRabiResult, T_RootResultType, TaskConfig],
+                ModuleLibrary,
+            ],
+            Optional[LenRabiCfgTemplate],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -115,7 +118,9 @@ class LenRabiMeasurementTask(
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        self.task = HardTask[np.complex128, T_RootResultType, LenRabiCfg](
+        self.task = HardTask[
+            np.complex128, T_RootResultType, LenRabiCfg, List[NDArray[np.float64]]
+        ](
             measure_fn=lambda ctx, update_hook: (
                 prog := ModularProgramV2(
                     ctx.env_dict["soccfg"],
@@ -235,9 +240,8 @@ class LenRabiMeasurementTask(
         )
         cfg_temp = ml.make_cfg(cfg_temp)
 
-        rabi_pulse = cfg_temp["rabi_pulse"]
-
         cfg = cast(LenRabiCfg, cfg_temp)
+        rabi_pulse = cfg["rabi_pulse"]
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.get_data()["raw_signals"]
