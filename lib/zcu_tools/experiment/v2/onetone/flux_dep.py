@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Mapping, Optional, Tuple
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.process import minus_background
 
 from ..runner import HardTask, SoftTask, TaskConfig, run_task
 
@@ -25,7 +25,8 @@ def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class FluxDepTaskConfig(TaskConfig, OneToneProgramCfg): ...
+class FluxDepTaskConfig(TaskConfig, OneToneProgramCfg):
+    dev: Mapping[str, DeviceInfo]
 
 
 class FluxDepExperiment(AbsExperiment):

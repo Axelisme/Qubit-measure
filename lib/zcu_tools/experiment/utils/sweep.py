@@ -73,7 +73,9 @@ def check_time_sweep(
         )
 
 
-def sweep2array(sweep: Union[SweepCfg, NDArray], allow_array: bool = False) -> NDArray:
+def sweep2array(
+    sweep: Union[SweepCfg, NDArray[np.float64]], allow_array: bool = False
+) -> NDArray[np.float64]:
     """
     Convert sweep parameter to a numpy array.
 
@@ -93,7 +95,7 @@ def sweep2array(sweep: Union[SweepCfg, NDArray], allow_array: bool = False) -> N
     elif isinstance(sweep, list) or isinstance(sweep, np.ndarray):
         if not allow_array:
             raise ValueError("Custom sweep is not allowed")
-        return np.array(sweep)
+        return np.asarray(sweep)
     else:
         raise ValueError("Invalid sweep format")
 

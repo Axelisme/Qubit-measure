@@ -5,36 +5,36 @@ from typing import Sequence
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
 from tqdm.auto import tqdm
-from typing_extensions import Any, Callable, Generic, Tuple, TypeVar
+from typing_extensions import Any, Callable, Tuple, TypeVar
 
 from zcu_tools.device import GlobalDeviceManager
 
-from .base import AbsTask, T_TaskContextType
+from .base import AbsTask, Result, TaskConfig, TaskContextView
 
 
 def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
     return raw[0][0].dot([1, 1j])
 
 
-T_RawType = TypeVar("T_RawType")
-T_ArrayDType = TypeVar("T_ArrayDType", bound=DTypeLike)
+T_Raw = TypeVar("T_Raw")
+T_DType = TypeVar("T_DType", bound=np.number)
+T_RootResult = TypeVar("T_RootResult", bound=Result)
+T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
-class HardTask(
-    AbsTask[NDArray[T_ArrayDType], T_TaskContextType],
-    Generic[T_TaskContextType, T_ArrayDType, T_RawType],
-):
+class HardTask(AbsTask[NDArray[T_DType], T_RootResult, T_TaskConfig]):
     def __init__(
         self,
         measure_fn: Callable[
-            [T_TaskContextType, Callable[[int, T_RawType], Any]],
-            T_RawType,
+            [
+                TaskContextView[NDArray[T_DType], T_RootResult, T_TaskConfig],
+                Callable[[int, T_Raw], Any],
+            ],
+            T_Raw,
         ],
-        raw2signal_fn: Callable[
-            [T_RawType], NDArray[T_ArrayDType]
-        ] = default_raw2signal_fn,
+        raw2signal_fn: Callable[[T_Raw], NDArray[T_DType]] = default_raw2signal_fn,
         result_shape: Tuple[int, ...] = (),
-        dtype: DTypeLike = np.complex128,
+        dtype: DTypeLike = complex,
     ) -> None:
         self.measure_fn = measure_fn
         self.raw2signal_fn = raw2signal_fn
@@ -69,17 +69,17 @@ class HardTask(
 
         GlobalDeviceManager.setup_devices(ctx.cfg["dev"], progress=False)
 
-        def update_hook(ir: int, raw: T_RawType) -> None:
+        def update_hook(ir: int, raw) -> None:
             assert self.avg_pbar is not None
             self.avg_pbar.update(ir - self.avg_pbar.n)
 
-            ctx.set_current_data(self.raw2signal_fn(raw))
+            ctx.set_data(self.raw2signal_fn(raw))
 
         signal = self.raw2signal_fn(self.measure_fn(ctx, update_hook))
 
         self.avg_pbar.update(ctx.cfg["rounds"] - self.avg_pbar.n)
 
-        ctx.set_current_data(signal)
+        ctx.set_data(signal)
 
         if self.dynamic_pbar:
             assert self.avg_pbar is not None
@@ -92,5 +92,5 @@ class HardTask(
             self.avg_pbar.close()
             self.avg_pbar = None
 
-    def get_default_result(self) -> NDArray[T_ArrayDType]:
+    def get_default_result(self) -> NDArray[T_DType]:
         return np.full(self.result_shape, np.nan, dtype=self.dtype)

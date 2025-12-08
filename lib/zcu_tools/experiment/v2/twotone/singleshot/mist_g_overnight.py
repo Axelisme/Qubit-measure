@@ -1,6 +1,6 @@
 from copy import deepcopy
-from typing import Optional, Tuple
 from pathlib import Path
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,19 +8,20 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     RepeatOverTime,
+    ReTryIfFail,
     TaskConfig,
     run_task,
 )
 from zcu_tools.liveplot import (
-    LivePlotter2D,
     LivePlotter1D,
-    make_plot_frame,
+    LivePlotter2D,
     MultiLivePlotter,
+    make_plot_frame,
 )
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -36,7 +37,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 
 MISTPowerDepOvernightResultType = Tuple[
-    NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
+    NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]
 ]
 
 
@@ -133,37 +134,42 @@ class MISTPowerDepOvernight(AbsExperiment):
                     name="repeat_over_time",
                     num_times=num_times,
                     interval=cfg["interval"],
-                    task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset", ctx.cfg.get("reset", {"type": "none"})
-                                    ),
-                                    Pulse(
-                                        name="init_pulse", cfg=ctx.cfg.get("init_pulse")
-                                    ),
-                                    Pulse(
-                                        name="probe_pulse", cfg=ctx.cfg["probe_pulse"]
-                                    ),
-                                    Readout("readout", ctx.cfg["readout"]),
-                                ],
-                            ).acquire(
-                                soc,
-                                progress=False,
-                                callback=update_hook,
-                                g_center=g_center,
-                                e_center=e_center,
-                                population_radius=radius,
-                            )
+                    task=ReTryIfFail(
+                        max_retries=fail_retry,
+                        task=HardTask(
+                            measure_fn=lambda ctx, update_hook: (
+                                ModularProgramV2(
+                                    soccfg,
+                                    ctx.cfg,
+                                    modules=[
+                                        Reset(
+                                            "reset",
+                                            ctx.cfg.get("reset", {"type": "none"}),
+                                        ),
+                                        Pulse(
+                                            name="init_pulse",
+                                            cfg=ctx.cfg.get("init_pulse"),
+                                        ),
+                                        Pulse(
+                                            name="probe_pulse",
+                                            cfg=ctx.cfg["probe_pulse"],
+                                        ),
+                                        Readout("readout", ctx.cfg["readout"]),
+                                    ],
+                                ).acquire(
+                                    soc,
+                                    progress=False,
+                                    callback=update_hook,
+                                    g_center=g_center,
+                                    e_center=e_center,
+                                    population_radius=radius,
+                                )
+                            ),
+                            raw2signal_fn=lambda raw: raw[0][0],
+                            result_shape=(len(gains), 2),
+                            dtype=np.float64,
                         ),
-                        raw2signal_fn=lambda raw: raw[0][0],
-                        result_shape=(len(gains), 2),
-                        dtype=np.float64,
                     ),
-                    fail_retry=fail_retry,
                 ),
                 init_cfg=cfg,
                 update_hook=plot_fn,
@@ -173,7 +179,7 @@ class MISTPowerDepOvernight(AbsExperiment):
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result = (iters, gains, signals)
+        self.last_result: MISTPowerDepOvernightResultType = (iters, gains, signals)
 
         return iters, gains, signals
 
@@ -239,10 +245,10 @@ class MISTPowerDepOvernight(AbsExperiment):
 
         iters, pdrs, overnight_signals = result
 
-        filepath = Path(filepath)
+        _filepath = Path(filepath)
 
         save_data(
-            filepath=filepath.with_name(filepath.name + "_g"),
+            filepath=str(_filepath.with_name(_filepath.name + "_g")),
             x_info={"name": "Iteration", "unit": "None", "values": iters},
             y_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
             z_info={
@@ -255,7 +261,7 @@ class MISTPowerDepOvernight(AbsExperiment):
             **kwargs,
         )
         save_data(
-            filepath=filepath.with_name(filepath.name + "_e"),
+            filepath=str(_filepath.with_name(_filepath.name + "_e")),
             x_info={"name": "Iteration", "unit": "None", "values": iters},
             y_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
             z_info={

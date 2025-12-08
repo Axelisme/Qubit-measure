@@ -5,42 +5,43 @@ from copy import deepcopy
 
 from typing_extensions import Any, Callable, Generic, MutableMapping, Optional, TypeVar
 
-from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import min_interval
 
-from ..context import AddrType, ResultType, TaskConfig, TaskContext
+from ..context import Result, TaskConfig, TaskContext, TaskContextView
 
-T_KeyType = TypeVar("T_KeyType", bound=AddrType)
-
-T_ResultType = TypeVar("T_ResultType", bound=ResultType)
-T_TaskConfigType = TypeVar("T_TaskConfigType", bound=TaskConfig)
-T_TaskContextType = TypeVar("T_TaskContextType", bound=TaskContext)
+T_Result = TypeVar("T_Result", bound=Result)
+T_RootResult = TypeVar("T_RootResult", bound=Result)
+T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
-class AbsTask(ABC, Generic[T_ResultType, T_TaskContextType]):
-    def init(self, ctx: T_TaskContextType, dynamic_pbar: bool = False) -> None:
+class AbsTask(ABC, Generic[T_Result, T_RootResult, T_TaskConfig]):
+    def init(
+        self,
+        ctx: TaskContextView[T_Result, T_RootResult, T_TaskConfig],
+        dynamic_pbar: bool = False,
+    ) -> None:
         """Initialize the task with the current context. If dynamic_pbar is True, the pbar will only show up in the run() method."""
 
     @abstractmethod
-    def run(self, ctx: T_TaskContextType) -> None:
+    def run(self, ctx: TaskContextView[T_Result, T_RootResult, T_TaskConfig]) -> None:
         """Run the task with the current context."""
 
     def cleanup(self) -> None: ...
 
     @abstractmethod
-    def get_default_result(self) -> T_ResultType: ...
+    def get_default_result(self) -> T_Result: ...
 
 
 def run_task(
-    task: AbsTask[T_ResultType, T_TaskContextType[T_ResultType, T_TaskConfigType]],
-    init_cfg: T_TaskConfigType,
+    task: AbsTask[T_Result, T_Result, T_TaskConfig],
+    init_cfg: T_TaskConfig,
     env_dict: Optional[MutableMapping[str, Any]] = None,
     update_hook: Optional[
-        Callable[[T_TaskContextType[T_ResultType, T_TaskConfigType]], Any]
+        Callable[[TaskContextView[Result, T_Result, TaskConfig]], Any]
     ] = None,
     update_interval: Optional[float] = 0.1,
-) -> T_ResultType:
+) -> T_Result:
     cfg = deepcopy(init_cfg)
     init_result = task.get_default_result()
 
@@ -49,14 +50,12 @@ def run_task(
 
     update_hook = min_interval(update_hook, update_interval)
 
-    # initialize devices with progress bar
-    GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
-
-    ctx = TaskContext(cfg, init_result, update_hook, env_dict)
+    ctx = TaskContext(init_result, env_dict)
+    ctx_view = ctx.view(cfg, update_hook)
 
     try:
-        task.init(ctx, dynamic_pbar=False)
-        task.run(ctx)
+        task.init(ctx_view, dynamic_pbar=False)
+        task.run(ctx_view)
         task.cleanup()
     except KeyboardInterrupt:
         print("Received KeyboardInterrupt, early stopping the program")

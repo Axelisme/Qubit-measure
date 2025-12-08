@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import sys
 from abc import ABC, abstractmethod
-from typing import TypedDict, TYPE_CHECKING
-
+from typing import TYPE_CHECKING, TypedDict
 
 from typing_extensions import Generic, NotRequired, TypeVar
 

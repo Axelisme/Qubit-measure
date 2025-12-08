@@ -1,26 +1,30 @@
 from __future__ import annotations
 
-from numbers import Number
-from typing import Sequence
-
 from tqdm.auto import tqdm
-from typing_extensions import Any, Callable, Generic, List, TypeVar
+from typing_extensions import Any, Callable, List, Sequence, TypeVar, Union
 
-from .base import AbsTask, T_ResultType, T_TaskContextType
+from .base import AbsTask, Result, TaskConfig, TaskContextView
 
-T_ValueType = TypeVar("T_ValueType", bound=Number)
+T_ValueType = TypeVar("T_ValueType", bound=Union[int, float, complex])
+T_RootResult = TypeVar("T_RootResult", bound=Result)
+T_ChildResult = TypeVar("T_ChildResult", bound=Result)
+T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
-class SoftTask(
-    AbsTask[Sequence[T_ResultType], T_TaskContextType],
-    Generic[T_ResultType, T_TaskContextType, T_ValueType],
-):
+class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult, T_TaskConfig]):
     def __init__(
         self,
         sweep_name: str,
         sweep_values: Sequence[T_ValueType],
-        update_cfg_fn: Callable[[int, T_TaskContextType, T_ValueType], Any],
-        sub_task: AbsTask[T_ResultType, T_TaskContextType],
+        update_cfg_fn: Callable[
+            [
+                int,
+                TaskContextView[Sequence[T_ChildResult], T_RootResult, T_TaskConfig],
+                T_ValueType,
+            ],
+            Any,
+        ],
+        sub_task: AbsTask[T_ChildResult, T_RootResult, T_TaskConfig],
     ) -> None:
         self.sweep_values = sweep_values
         self.sweep_name = sweep_name
@@ -42,8 +46,7 @@ class SoftTask(
         else:
             self.sweep_pbar = self.make_pbar(leave=True)
 
-        self.update_cfg_fn(0, ctx, self.sweep_values[0])  # initialize the first value
-        self.sub_task.init(ctx, dynamic_pbar=dynamic_pbar)
+        self.sub_task.init(ctx(addr=0), dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx) -> None:
         if self.dynamic_pbar:
@@ -71,7 +74,7 @@ class SoftTask(
             self.sweep_pbar.close()
             self.sweep_pbar = None
 
-    def get_default_result(self) -> List[T_ResultType]:
+    def get_default_result(self) -> List[T_ChildResult]:
         return [
             self.sub_task.get_default_result() for _ in range(len(self.sweep_values))
         ]

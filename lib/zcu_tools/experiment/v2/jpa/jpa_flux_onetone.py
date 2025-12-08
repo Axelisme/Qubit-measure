@@ -1,22 +1,17 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import (
-    OneToneProgramCfg,
-    OneToneProgram,
-    Readout,
-    ReadoutCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
 from zcu_tools.utils.datasaver import save_data
 
 JPAFluxResultType = Tuple[
@@ -24,7 +19,8 @@ JPAFluxResultType = Tuple[
 ]
 
 
-class JPAFluxByOneToneTaskConfig(TaskConfig, OneToneProgramCfg): ...
+class JPAFluxByOneToneTaskConfig(TaskConfig, OneToneProgramCfg):
+    dev: Mapping[str, DeviceInfo]
 
 
 class JPAFluxByOneToneExperiment(AbsExperiment):

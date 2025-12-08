@@ -4,16 +4,19 @@ from time import time
 from typing import Sequence
 
 from tqdm.auto import tqdm
-from typing_extensions import Generic, List
+from typing_extensions import List, TypeVar
 
-from .base import AbsTask, T_ResultType, T_TaskContextType
+from .base import AbsTask, Result, TaskConfig
+
+T_RootResult = TypeVar("T_RootResult", bound=Result)
+T_ChildResult = TypeVar("T_ChildResult", bound=Result)
+T_Result = TypeVar("T_Result", bound=Result)
+T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
-class ReTryIfFail(
-    AbsTask[T_ResultType, T_TaskContextType], Generic[T_ResultType, T_TaskContextType]
-):
+class ReTryIfFail(AbsTask[T_Result, T_RootResult, T_TaskConfig]):
     def __init__(
-        self, task: AbsTask[T_ResultType, T_TaskContextType], max_retries: int
+        self, task: AbsTask[T_Result, T_RootResult, T_TaskConfig], max_retries: int
     ) -> None:
         self.task = task
         self.max_retries = max_retries
@@ -40,17 +43,17 @@ class ReTryIfFail(
     def cleanup(self) -> None:
         self.task.cleanup()
 
-    def get_default_result(self) -> T_ResultType:
+    def get_default_result(self) -> T_Result:
         return self.task.get_default_result()
 
 
-class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskContextType]):
+class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult, T_TaskConfig]):
     def __init__(
         self,
         name: str,
         num_times: int,
         interval: float,
-        task: AbsTask[T_ResultType, T_TaskContextType],
+        task: AbsTask[T_ChildResult, T_RootResult, T_TaskConfig],
     ) -> None:
         self.name = name
         self.num_times = num_times
@@ -67,7 +70,7 @@ class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskContextType]):
         else:
             self.time_pbar = self.make_pbar(leave=True)
 
-        self.task.init(ctx, dynamic_pbar=dynamic_pbar)
+        self.task.init(ctx(addr=0), dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx) -> None:
         if self.dynamic_pbar:
@@ -102,5 +105,5 @@ class RepeatOverTime(AbsTask[Sequence[T_ResultType], T_TaskContextType]):
             self.time_pbar.close()
             self.time_pbar = None
 
-    def get_default_result(self) -> List[T_ResultType]:
+    def get_default_result(self) -> List[T_ChildResult]:
         return [self.task.get_default_result() for _ in range(self.num_times)]

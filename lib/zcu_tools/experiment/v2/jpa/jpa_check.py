@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Tuple, TypedDict
 
-import numpy as np
-from numpy.typing import NDArray
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
     format_sweep1D,
@@ -28,7 +29,8 @@ def jpa_check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     return np.abs(signals)
 
 
-class JPACheckTaskConfig(TaskConfig, OneToneProgramCfg): ...
+class JPACheckTaskConfig(TaskConfig, OneToneProgramCfg):
+    dev: Mapping[str, DeviceInfo]
 
 
 class JPACheckExperiment(AbsExperiment):
@@ -57,7 +59,7 @@ class JPACheckExperiment(AbsExperiment):
                     sweep_values=outputs.tolist(),
                     update_cfg_fn=lambda i, ctx, output: set_output_in_dev_cfg(
                         ctx.cfg["dev"],
-                        self.OUTPUT_MAP[output],
+                        self.OUTPUT_MAP[output],  # type: ignore
                         label="jpa_rf_dev",
                     ),
                     sub_task=HardTask(

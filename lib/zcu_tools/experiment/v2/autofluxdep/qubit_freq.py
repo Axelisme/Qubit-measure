@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
@@ -26,10 +26,10 @@ from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
-from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.process import rotate2real
 
-from .executor import MeasurementTask, FluxDepInfoDict
+from .executor import FluxDepInfoDict, MeasurementTask, T_RootResultType
 
 
 def qubitfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -78,13 +78,13 @@ class PlotterDictType(TypedDict, closed=True):
 
 
 class QubitFreqMeasurementTask(
-    MeasurementTask[QubitFreqResult, QubitFreqCfg, PlotterDictType]
+    MeasurementTask[QubitFreqResult, T_RootResultType, TaskConfig, PlotterDictType]
 ):
     def __init__(
         self,
         detune_sweep: SweepCfg,
         cfg_maker: Callable[
-            [TaskContext, ModuleLibrary], Optional[QubitFreqCfgTemplate]
+            [TaskContextView, ModuleLibrary], Optional[QubitFreqCfgTemplate]
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -92,7 +92,7 @@ class QubitFreqMeasurementTask(
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        self.task = HardTask(
+        self.task = HardTask[np.complex128, T_RootResultType, TwoToneProgramCfg](
             measure_fn=lambda ctx, update_hook: (
                 prog := TwoToneProgram(ctx.env_dict["soccfg"], ctx.cfg)
             ).acquire(
@@ -200,7 +200,7 @@ class QubitFreqMeasurementTask(
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)
+        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
         self.uncalibrate_count = 0
         self.last_calibrated_flx = ctx.env_dict["info"]["flx_value"] - 1
@@ -230,7 +230,8 @@ class QubitFreqMeasurementTask(
 
         cfg_temp = dict(cfg_temp)
         deepupdate(
-            cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"detune": self.detune_sweep}}
+            cfg_temp,
+            {"dev": ctx.cfg.get("dev", {}), "sweep": {"detune": self.detune_sweep}},
         )
         cfg_temp = ml.make_cfg(cfg_temp)
 
@@ -242,9 +243,9 @@ class QubitFreqMeasurementTask(
         )
 
         cfg = cast(QubitFreqCfg, cfg_temp)
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
+        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 
-        raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
+        raw_signals = ctx.get_data()["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         real_signals = qubitfreq_signal2real(raw_signals)
@@ -284,7 +285,7 @@ class QubitFreqMeasurementTask(
             )
 
         with MinIntervalFunc.force_execute():
-            ctx.set_current_data(
+            ctx.set_data(
                 QubitFreqResult(
                     raw_signals=raw_signals,
                     predict_freq=np.array(center_freq),

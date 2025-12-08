@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Mapping, Optional, Tuple
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
+    ReTryIfFail,
     SoftTask,
     TaskConfig,
     run_task,
-    ReTryIfFail,
 )
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
@@ -33,7 +34,8 @@ def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class FreqFluxDepTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+class FreqFluxDepTaskConfig(TaskConfig, TwoToneProgramCfg):
+    dev: Mapping[str, DeviceInfo]
 
 
 class FreqFluxDepExperiment(AbsExperiment):

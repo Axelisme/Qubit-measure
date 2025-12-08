@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Dict, Optional, Tuple
+from typing import Dict, Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -95,7 +95,7 @@ def predict_state_with_error(
 
 
 def allxy_signal2real(
-    signals_dict: Dict[Tuple[str, str], NDArray[np.complex128]],
+    signals_dict: Mapping[Tuple[str, str], NDArray[np.complex128]],
 ) -> NDArray[np.float64]:
     all_signals = np.array(list(signals_dict.values()))
     return rotate2real(all_signals).real  # type: ignore
@@ -187,6 +187,7 @@ class AllXYExperiment(AbsExperiment):
                     allxy_signal2real(ctx.data),
                 ),
             )
+        signals_dict = dict(signals_dict)
 
         # Cache results
         self.last_cfg = cfg

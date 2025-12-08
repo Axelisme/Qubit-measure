@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
@@ -28,10 +28,10 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
-from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.process import rotate2real
 
-from .executor import MeasurementTask, FluxDepInfoDict
+from .executor import FluxDepInfoDict, MeasurementTask, T_RootResultType
 
 
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -83,12 +83,16 @@ class PlotterDictType(TypedDict, closed=True):
     t2e_curve: LivePlotter1D
 
 
-class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, T2EchoCfg, PlotterDictType]):
+class T2EchoMeasurementTask(
+    MeasurementTask[T2EchoResult, T_RootResultType, TaskConfig, PlotterDictType]
+):
     def __init__(
         self,
         num_expts: int,
         detune_ratio: float,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], Optional[T2EchoCfgTemplate]],
+        cfg_maker: Callable[
+            [TaskContextView, ModuleLibrary], Optional[T2EchoCfgTemplate]
+        ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.num_expts = num_expts
@@ -96,7 +100,7 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, T2EchoCfg, PlotterDict
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_t2echo_fn(ctx: TaskContext, update_hook: Callable):
+        def measure_t2echo_fn(ctx: TaskContextView, update_hook: Callable):
             t2e_params = sweep2param("length", ctx.cfg["sweep"]["length"])
             prog = ModularProgramV2(
                 ctx.env_dict["soccfg"],
@@ -231,7 +235,7 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, T2EchoCfg, PlotterDict
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)
+        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
@@ -246,14 +250,16 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, T2EchoCfg, PlotterDict
         self.lengths = sweep2array(len_sweep)
 
         cfg_temp = dict(cfg_temp)
-        deepupdate(cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}})
+        deepupdate(
+            cfg_temp, {"dev": ctx.cfg.get("dev", {}), "sweep": {"length": len_sweep}}
+        )
         cfg_temp = ml.make_cfg(cfg_temp)
         cfg_temp["activate_detune"] = self.detune_ratio / len_sweep["step"]
 
         cfg = cast(T2EchoCfg, cfg_temp)
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
+        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 
-        raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
+        raw_signals = ctx.get_data()["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         real_signals = t2echo_signal2real(raw_signals)
@@ -276,7 +282,7 @@ class T2EchoMeasurementTask(MeasurementTask[T2EchoResult, T2EchoCfg, PlotterDict
             info["smooth_t2e"] = 0.5 * (info.last.get("smooth_t2e", t2e) + t2e)
 
         with MinIntervalFunc.force_execute():
-            ctx.set_current_data(
+            ctx.set_data(
                 T2EchoResult(
                     raw_signals=raw_signals,
                     length=self.lengths.copy(),

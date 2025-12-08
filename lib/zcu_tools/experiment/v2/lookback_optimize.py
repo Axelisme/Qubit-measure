@@ -16,6 +16,7 @@ from zcu_tools.experiment.v2.runner import (
     SoftTask,
     TaskConfig,
     TaskContext,
+    TaskContextView,
     run_task,
 )
 from zcu_tools.liveplot import (
@@ -55,8 +56,6 @@ class LookbackOptimizeExperiment(AbsExperiment):
     ) -> LookbackOptimizeResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
-        assert cfg["readout"]["pulse_cfg"]["waveform"]["style"] == "padding"
-
         if cfg.setdefault("reps", 1) != 1:
             warnings.warn("reps is not 1 in config, this will be ignored.")
             cfg["reps"] = 1
@@ -95,17 +94,17 @@ class LookbackOptimizeExperiment(AbsExperiment):
             ),
         ) as viewer:
 
-            def update_pre_len(i: int, ctx: TaskContext, pre_len: float) -> None:
+            def update_pre_len(i: int, ctx: TaskContextView, pre_len: float) -> None:
                 Pulse.set_param(ctx.cfg["pre_pulse"], "length", pre_len)
                 ctx.env_dict["pre_len"] = pre_len
                 ctx.env_dict["pre_len_i"] = i
 
-            def update_post_len(i: int, ctx: TaskContext, post_len: float) -> None:
+            def update_post_len(i: int, ctx: TaskContextView, post_len: float) -> None:
                 Pulse.set_param(ctx.cfg["post_pulse"], "length", post_len)
                 ctx.env_dict["post_len"] = post_len
                 ctx.env_dict["post_len_i"] = i
 
-            def plot_fn(ctx: TaskContext) -> None:
+            def plot_fn(ctx: TaskContextView) -> None:
                 pre_len_i = ctx.env_dict["pre_len_i"]
                 post_len_i = ctx.env_dict["post_len_i"]
                 pre_len = ctx.env_dict["pre_len"]
@@ -182,9 +181,7 @@ class LookbackOptimizeExperiment(AbsExperiment):
 
         return pre_lens, post_lens, Ts, signals
 
-    def analyze(
-        self, result: Optional[LookbackOptimizeResultType] = None
-    ) -> Tuple[float, float, float, Figure]:
+    def analyze(self, result: Optional[LookbackOptimizeResultType] = None) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

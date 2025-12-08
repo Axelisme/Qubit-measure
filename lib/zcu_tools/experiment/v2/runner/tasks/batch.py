@@ -1,19 +1,21 @@
 from __future__ import annotations
 
-from typing import Dict, Mapping
-
 from tqdm.auto import tqdm
-from typing_extensions import Generic
+from typing_extensions import Hashable, Mapping, TypeVar
 
-from .base import AbsTask, T_KeyType, T_ResultType, T_TaskContextType
+from .base import AbsTask, Result, TaskConfig
+
+T_Key = TypeVar("T_Key", bound=Hashable)
+
+T_RootResult = TypeVar("T_RootResult", bound=Result)
+T_ChildResult = TypeVar("T_ChildResult", bound=Result)
+T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
-class BatchTask(
-    AbsTask[Dict[T_KeyType, T_ResultType], T_TaskContextType],
-    Generic[T_ResultType, T_TaskContextType, T_KeyType],
-):
+class BatchTask(AbsTask[Mapping[T_Key, T_ChildResult], T_RootResult, T_TaskConfig]):
     def __init__(
-        self, tasks: Mapping[T_KeyType, AbsTask[T_ResultType, T_TaskContextType]]
+        self,
+        tasks: Mapping[T_Key, AbsTask[T_ChildResult, T_RootResult, T_TaskConfig]],
     ) -> None:
         self.tasks = tasks
 
@@ -27,8 +29,9 @@ class BatchTask(
         else:
             self.task_pbar = self.make_pbar(leave=True)
 
-        for task in self.tasks.values():
-            task.init(ctx, dynamic_pbar=True)  # force dynamic pbar for each task
+        for name, task in self.tasks.items():
+            # force dynamic pbar for each task
+            task.init(ctx(addr=name), dynamic_pbar=True)
 
     def run(self, ctx) -> None:
         if self.dynamic_pbar:
@@ -57,5 +60,5 @@ class BatchTask(
             self.task_pbar.close()
             self.task_pbar = None
 
-    def get_default_result(self) -> Dict[T_KeyType, T_ResultType]:
+    def get_default_result(self) -> Mapping[T_Key, T_ChildResult]:
         return {name: task.get_default_result() for name, task in self.tasks.items()}

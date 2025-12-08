@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
@@ -78,7 +78,8 @@ class RabiCheckExperiment(AbsExperiment):
                     Readout("readout", ctx.cfg["readout"]),
                 ],
             )
-            pdrs = prog.get_pulse_param("rabi_pulse", "gain", as_array=True)
+            _pdrs = prog.get_pulse_param("rabi_pulse", "gain", as_array=True)
+            pdrs = cast(NDArray[np.float64], _pdrs)
             return prog.acquire(soc, progress=False, callback=update_hook)
 
         with LivePlotter1D(
@@ -86,19 +87,7 @@ class RabiCheckExperiment(AbsExperiment):
         ) as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("rabi_pulse", ctx.cfg["rabi_pulse"]),
-                                Reset("tested_reset", ctx.cfg["tested_reset"]),
-                                Pulse("post_pulse", ctx.cfg.get("post_pulse")),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                    measure_fn=measure_fn,
                     result_shape=(2, len(pdrs)),
                 ),
                 init_cfg=cfg,

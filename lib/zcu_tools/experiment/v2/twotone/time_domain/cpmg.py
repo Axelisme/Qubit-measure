@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,7 +16,7 @@ from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
     TaskConfig,
-    TaskContext,
+    TaskContextView,
     run_task,
 )
 from zcu_tools.liveplot import LivePlotter2DwithLine
@@ -75,7 +75,7 @@ class CPMGExperiment(AbsExperiment):
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
 
-        def measure_fn(ctx: TaskContext, update_hook: Callable[[int, Any], None]):
+        def measure_fn(ctx: TaskContextView, update_hook: Callable[[int, Any], None]):
             interval = cpmg_spans / ctx.cfg["time"]
             return ModularProgramV2(
                 soccfg,
@@ -151,7 +151,7 @@ class CPMGExperiment(AbsExperiment):
             if t2err > 0.5 * t2r:
                 continue
 
-            fit_params = tuple(pOpt)
+            fit_params = cast(Tuple[float, float, float], tuple(pOpt))
 
             t2s[i] = t2r
             t2errs[i] = t2err

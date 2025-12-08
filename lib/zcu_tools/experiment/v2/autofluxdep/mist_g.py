@@ -8,7 +8,7 @@ from numpy.typing import NDArray
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext
+from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
@@ -27,7 +27,7 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from .executor import MeasurementTask
+from .executor import MeasurementTask, T_RootResultType
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -64,16 +64,20 @@ class PlotterDictType(TypedDict, closed=True):
     g_mist: LivePlotter2DwithLine
 
 
-class Mist_G_MeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictType]):
+class Mist_G_MeasurementTask(
+    MeasurementTask[MistResult, T_RootResultType, TaskConfig, PlotterDictType]
+):
     def __init__(
         self,
         gain_sweep: SweepCfg,
-        cfg_maker: Callable[[TaskContext, ModuleLibrary], Optional[MistCfgTemplate]],
+        cfg_maker: Callable[
+            [TaskContextView, ModuleLibrary], Optional[MistCfgTemplate]
+        ],
     ) -> None:
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
 
-        self.task = HardTask(
+        self.task = HardTask[np.complex128, T_RootResultType, MistCfg](
             measure_fn=lambda ctx, update_hook: ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
@@ -137,7 +141,7 @@ class Mist_G_MeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictTyp
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)
+        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
@@ -149,7 +153,8 @@ class Mist_G_MeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictTyp
 
         cfg_temp = dict(cfg_temp)
         deepupdate(
-            cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"gain": self.gain_sweep}}
+            cfg_temp,
+            {"dev": ctx.cfg.get("dev", {}), "sweep": {"gain": self.gain_sweep}},
         )
         cfg_temp = ml.make_cfg(cfg_temp)
 
@@ -160,13 +165,13 @@ class Mist_G_MeasurementTask(MeasurementTask[MistResult, MistCfg, PlotterDictTyp
         )
 
         cfg = cast(MistCfg, cfg_temp)
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))
+        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 
-        raw_signals = ctx.get_current_data(append_addr=["raw_signals"])
+        raw_signals = ctx.get_data()["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         with MinIntervalFunc.force_execute():
-            ctx.set_current_data(
+            ctx.set_data(
                 MistResult(
                     raw_signals=raw_signals,
                     success=np.array(True),

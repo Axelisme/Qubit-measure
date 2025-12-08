@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
 import numpy as np
 import plotly.graph_objects as go
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
@@ -50,6 +51,8 @@ class MistFluxDepTaskConfig(TaskConfig, ModularProgramCfg):
     init_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
+
+    dev: Mapping[str, DeviceInfo]
 
 
 class MistFluxDepExperiment(AbsExperiment):

@@ -661,6 +661,7 @@ class JPAOptimizer:
         # Step 3: Get next point from 2D optimizer
         if self._optimizer_2d is not None:
             next_2d = self._optimizer_2d.ask()
+            assert next_2d is not None
             return (current_flux, next_2d[0], next_2d[1])
 
         return None

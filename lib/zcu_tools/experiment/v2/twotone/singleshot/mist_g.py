@@ -106,7 +106,7 @@ class MISTPowerDepSingleShot(AbsExperiment):
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result = (pdrs, signals)
+        self.last_result: MISTPowerDepResultType = (pdrs, signals)
 
         return pdrs, signals
 

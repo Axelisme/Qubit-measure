@@ -11,7 +11,12 @@ from numpy.typing import NDArray
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContext, run_task
+from zcu_tools.experiment.v2.runner import (
+    HardTask,
+    TaskConfig,
+    TaskContextView,
+    run_task,
+)
 from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
@@ -70,7 +75,7 @@ class SingleShotExperiment(AbsExperiment):
             cfg["probe_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
 
-        def measure_fn(ctx: TaskContext, _):
+        def measure_fn(ctx: TaskContextView, _):
             prog = ModularProgramV2(
                 soccfg,
                 ctx.cfg,

@@ -1,8 +1,8 @@
-from abc import ABC, abstractmethod
 import warnings
-from typing import Union, List
+from abc import ABC, abstractmethod
 
 from qick.asm_v2 import QickParam
+from typing_extensions import Sequence, Union
 
 from ..base import MyProgramV2
 
@@ -48,7 +48,7 @@ class Delay(Module):
 
 
 class NonBlocking(Module):
-    def __init__(self, modules: List[Module]) -> None:
+    def __init__(self, modules: Sequence[Module]) -> None:
         self.modules = modules
 
     def init(self, prog: MyProgramV2) -> None:

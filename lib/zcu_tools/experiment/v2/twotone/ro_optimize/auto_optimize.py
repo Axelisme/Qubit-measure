@@ -1,6 +1,6 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,7 +16,7 @@ from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
     TaskConfig,
-    TaskContext,
+    TaskContextView,
     run_task,
 )
 from zcu_tools.experiment.v2.utils import snr_as_signal
@@ -76,8 +76,11 @@ class ReadoutOptimizer:
         if last_snr is not None:
             self.optimizer.tell(self.last_param, -last_snr)
 
-        self.last_param = self.optimizer.ask()
-        return self.last_param
+        param = self.optimizer.ask()
+        param = cast(Optional[Tuple[float, float, float]], param)
+
+        self.last_param = param
+        return param
 
 
 class AutoOptimizeTaskConfig(TaskConfig, ModularProgramCfg):
@@ -107,7 +110,7 @@ class AutoOptimizeExperiment(AbsExperiment):
         # (num_points, [freq, gain, length])
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
 
-        def update_fn(i: int, ctx: TaskContext, _) -> None:
+        def update_fn(i: int, ctx: TaskContextView, _) -> None:
             ctx.env_dict["index"] = i
 
             last_snr = None
@@ -156,7 +159,7 @@ class AutoOptimizeExperiment(AbsExperiment):
             ),
         ) as viewer:
 
-            def plot_fn(ctx: TaskContext) -> None:
+            def plot_fn(ctx: TaskContextView) -> None:
                 idx: int = ctx.env_dict["index"]
                 snrs = np.abs(ctx.data)  # (num_points, )
 
@@ -290,7 +293,7 @@ class AutoOptimizeExperiment(AbsExperiment):
 
         params, signals = result
 
-        filepath = Path(filepath)
+        _filepath = Path(filepath)
 
         x_info = {
             "name": "Iteration",
@@ -299,7 +302,7 @@ class AutoOptimizeExperiment(AbsExperiment):
         }
 
         save_data(
-            filepath=str(filepath.with_name(filepath.name + "_params")),
+            filepath=str(_filepath.with_name(_filepath.name + "_params")),
             x_info=x_info,
             y_info={"name": "Parameter Type", "unit": "a.u.", "values": [0, 1, 2]},
             z_info={"name": "Parameters", "unit": "a.u.", "values": params.T},
@@ -309,7 +312,7 @@ class AutoOptimizeExperiment(AbsExperiment):
         )
 
         save_data(
-            filepath=str(filepath.with_name(filepath.name + "_signals")),
+            filepath=str(_filepath.with_name(_filepath.name + "_signals")),
             x_info=x_info,
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,

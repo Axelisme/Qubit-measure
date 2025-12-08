@@ -21,7 +21,7 @@ from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
     TaskConfig,
-    TaskContext,
+    TaskContextView,
     run_task,
 )
 from zcu_tools.experiment.v2.utils import snr_as_signal
@@ -72,7 +72,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
 
-        def update_fn(i, ctx, _) -> None:
+        def update_fn(i, ctx: TaskContextView, _) -> None:
             ctx.env_dict["index"] = i
 
             last_snr = None
@@ -123,7 +123,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             ),
         ) as viewer:
 
-            def plot_fn(ctx: TaskContext) -> None:
+            def plot_fn(ctx: TaskContextView) -> None:
                 idx: int = ctx.env_dict["index"]
                 snrs = np.abs(ctx.data)  # (num_points, )
 
@@ -270,7 +270,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
 
         params, signals = result
 
-        filepath = Path(filepath)
+        _filepath = Path(filepath)
 
         x_info = {
             "name": "Iteration",
@@ -279,7 +279,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         }
 
         save_data(
-            filepath=str(filepath.with_name(filepath.name + "_params")),
+            filepath=str(_filepath.with_name(_filepath.name + "_params")),
             x_info=x_info,
             y_info={"name": "Parameter Type", "unit": "a.u.", "values": [0, 1, 2]},
             z_info={"name": "Parameters", "unit": "a.u.", "values": params.T},
@@ -289,7 +289,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         )
 
         save_data(
-            filepath=str(filepath.with_name(filepath.name + "_signals")),
+            filepath=str(_filepath.with_name(_filepath.name + "_signals")),
             x_info=x_info,
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,

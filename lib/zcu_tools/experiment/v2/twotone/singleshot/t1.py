@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
 from pathlib import Path
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from tqdm.auto import trange
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from tqdm.auto import trange
 from typing_extensions import NotRequired
-
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task, SoftTask
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import (
     LivePlotter1D,
     LivePlotter2D,
@@ -585,10 +584,10 @@ class T1WithToneSweepExperiment(AbsExperiment):
         assert result is not None, "no result found"
 
         gains, Ts, signals = result
-        filepath = Path(filepath)
+        _filepath = Path(filepath)
 
         save_data(
-            filepath=filepath.with_name(filepath.name + "_g_population.npz"),
+            filepath=str(_filepath.with_name(_filepath.name + "_g_population.npz")),
             x_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
             y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
             z_info={
@@ -601,7 +600,7 @@ class T1WithToneSweepExperiment(AbsExperiment):
             **kwargs,
         )
         save_data(
-            filepath=filepath.with_name(filepath.name + "_e_population.npz"),
+            filepath=str(_filepath.with_name(_filepath.name + "_e_population.npz")),
             x_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
             y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
             z_info={

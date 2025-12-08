@@ -17,12 +17,12 @@ from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
     ModularProgramV2,
+    NonBlocking,
     Pulse,
     PulseCfg,
     Readout,
     ReadoutCfg,
     Reset,
-    NonBlocking,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
@@ -303,7 +303,10 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
 class AcStarkRamseyTaskConfig(TaskConfig, ModularProgramCfg):
     stark_pulse: PulseCfg
     pi_pulse: PulseCfg
+    pi2_pulse: PulseCfg
     readout: ReadoutCfg
+
+    wait_delay: float
 
 
 class AcStarkRamseyExperiment(AbsExperiment):

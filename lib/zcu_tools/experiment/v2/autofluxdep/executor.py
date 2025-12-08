@@ -14,16 +14,15 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
-    ResultType,
+    Result,
     SoftTask,
-    T_ResultType,
-    T_TaskConfigType,
     TaskConfig,
-    TaskContext,
+    TaskContextView,
     run_task,
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
@@ -38,9 +37,14 @@ from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlotter])
 
 
+T_ResultType = TypeVar("T_ResultType", bound=Result)
+T_RootResultType = TypeVar("T_RootResultType", bound=Result)
+T_TaskConfigType = TypeVar("T_TaskConfigType", bound=TaskConfig)
+
+
 class MeasurementTask(
-    AbsTask[T_ResultType, T_TaskConfigType],
-    Generic[T_ResultType, T_TaskConfigType, T_PlotterDictType],
+    AbsTask[T_ResultType, T_RootResultType, T_TaskConfigType],
+    Generic[T_ResultType, T_RootResultType, T_TaskConfigType, T_PlotterDictType],
 ):
     def num_axes(self) -> Dict[str, int]: ...
 
@@ -51,7 +55,7 @@ class MeasurementTask(
     def update_plotter(
         self,
         plotters: T_PlotterDictType,
-        ctx: TaskContext,
+        ctx: TaskContextView,
         signals: T_ResultType,
     ) -> None: ...
 
@@ -63,6 +67,10 @@ class MeasurementTask(
         comment: Optional[str],
         prefix_tag: str,
     ) -> None: ...
+
+
+class FluxDepTaskConfig(TaskConfig):
+    dev: Mapping[str, DeviceInfo]
 
 
 class FluxDepInfoDict(UserDict):
@@ -89,7 +97,7 @@ class FluxDepExecutor:
     def __init__(
         self,
         flx_values: NDArray[np.float64],
-        dev_cfg: Dict[str, Dict[str, Any]],
+        dev_cfg: Mapping[str, DeviceInfo],
         predictor: FluxoniumPredictor,
         env_dict: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -154,7 +162,7 @@ class FluxDepExecutor:
     ) -> Tuple[
         Figure,
         MultiLivePlotter[Tuple[str, str]],
-        Callable[[TaskContext], None],
+        Callable[[TaskContextView], None],
         Optional[FFMpegWriter],
     ]:
         fig, axs_map = self.make_ax_layout()
@@ -182,12 +190,12 @@ class FluxDepExecutor:
 
         plotter = MultiLivePlotter(fig, flatten_dict(plotters_map))
 
-        def plot_fn(ctx: TaskContext) -> None:
-            if len(ctx.addr_stack) < 2:
+        def plot_fn(ctx: TaskContextView) -> None:
+            if len(ctx._addr_stack) < 2:
                 cur_tasks = list(self.measurements.keys())
             else:
-                assert isinstance(ctx.addr_stack[1], str)
-                cur_tasks = [ctx.addr_stack[1]]
+                assert isinstance(ctx._addr_stack[1], str)
+                cur_tasks = [ctx._addr_stack[1]]
 
             results = ctx.get_data()
             assert isinstance(results, list)
@@ -207,7 +215,7 @@ class FluxDepExecutor:
 
         return fig, plotter, plot_fn, writer
 
-    def run(self) -> Mapping[str, ResultType]:
+    def run(self) -> Mapping[str, Result]:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
 
@@ -217,7 +225,7 @@ class FluxDepExecutor:
             info=FluxDepInfoDict(),
         )
 
-        def update_fn(i: int, ctx: TaskContext, flx: float) -> None:
+        def update_fn(i: int, ctx: TaskContextView, flx: float) -> None:
             info: FluxDepInfoDict = ctx.env_dict["info"]
             predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
 
@@ -245,7 +253,7 @@ class FluxDepExecutor:
                             update_cfg_fn=update_fn,
                             sub_task=BatchTask(self.measurements),
                         ),
-                        init_cfg=TaskConfig(dev=self.dev_cfg),
+                        init_cfg=FluxDepTaskConfig(dev=self.dev_cfg),
                         env_dict=self.env_dict,
                         update_hook=plot_fn,
                     )
@@ -264,7 +272,7 @@ class FluxDepExecutor:
     def save(
         self,
         filepath: str,
-        results: Optional[Mapping[str, ResultType]] = None,
+        results: Optional[Mapping[str, Result]] = None,
         comment: Optional[str] = None,
         prefix_tag: str = "autoflux_dep",
     ) -> None:
