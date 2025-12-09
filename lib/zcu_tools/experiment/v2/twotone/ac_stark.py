@@ -25,7 +25,7 @@ from zcu_tools.program.v2 import (
     Reset,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background, rotate2real
 
@@ -295,6 +295,24 @@ class AcStarkExperiment(AbsExperiment):
             **kwargs,
         )
 
+    def load(self, filepath: str, **kwargs) -> AcStarkResultType:
+        signals2D, pdrs, fpts = load_data(filepath, **kwargs)
+        assert pdrs is not None and fpts is not None
+        assert len(pdrs.shape) == 1 and len(fpts.shape) == 1
+        assert signals2D.shape == (len(fpts), len(pdrs))
+
+        fpts = fpts * 1e-6  # Hz -> MHz
+        signals2D = signals2D.T  # transpose back
+
+        pdrs = pdrs.astype(np.float64)
+        fpts = fpts.astype(np.float64)
+        signals2D = signals2D.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (pdrs, fpts, signals2D)
+
+        return pdrs, fpts, signals2D
+
 
 def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
@@ -484,3 +502,21 @@ class AcStarkRamseyExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> AcStarkResultType:
+        signals2D, pdrs, lens = load_data(filepath, **kwargs)
+        assert pdrs is not None and lens is not None
+        assert len(pdrs.shape) == 1 and len(lens.shape) == 1
+        assert signals2D.shape == (len(lens), len(pdrs))
+
+        lens = lens * 1e6  # s -> us
+        signals2D = signals2D.T  # transpose back
+
+        pdrs = pdrs.astype(np.float64)
+        lens = lens.astype(np.float64)
+        signals2D = signals2D.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (pdrs, lens, signals2D)
+
+        return pdrs, lens, signals2D

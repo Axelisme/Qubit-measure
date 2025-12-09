@@ -5,9 +5,9 @@ from typing import Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from matplotlib.figure import Figure
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -23,10 +23,10 @@ from zcu_tools.program.v2 import (
     Reset,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..runner import HardTask, SoftTask, TaskConfig, TaskContext, run_task
+from ..runner import HardTask, SoftTask, TaskConfig, TaskContextView, run_task
 
 # (times, signals)
 ZigZagResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
@@ -65,7 +65,7 @@ class ZigZagExperiment(AbsExperiment):
             "Times", "Signal", segment_kwargs=dict(show_grid=True)
         ) as viewer:
 
-            def measure_fn(ctx: TaskContext, update_hook):
+            def measure_fn(ctx: TaskContextView, update_hook):
                 zigzag_time = ctx.env_dict["zigzag_time"]
                 if repeat_on == "X90_pulse":
                     repeat_time = 2 * zigzag_time
@@ -143,6 +143,20 @@ class ZigZagExperiment(AbsExperiment):
             **kwargs,
         )
 
+    def load(self, filepath: str, **kwargs) -> ZigZagResultType:
+        signals, times, _ = load_data(filepath, **kwargs)
+        assert times is not None
+        assert len(times.shape) == 1 and len(signals.shape) == 1
+        assert times.shape == signals.shape
+
+        times = times.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (times, signals)
+
+        return times, signals
+
 
 # (times, values, signals)
 ZigZagSweepResultType = Tuple[
@@ -190,7 +204,7 @@ class ZigZagSweepExperiment(AbsExperiment):
             "Times", x_info["name"], line_axis=1, num_lines=3
         ) as viewer:
 
-            def measure_fn(ctx: TaskContext, update_hook):
+            def measure_fn(ctx: TaskContextView, update_hook):
                 zigzag_time = ctx.env_dict["zigzag_time"]
                 if repeat_on == "X90_pulse":
                     repeat_time = 2 * zigzag_time
@@ -313,3 +327,20 @@ class ZigZagSweepExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> ZigZagSweepResultType:
+        signals, times, values = load_data(filepath, **kwargs)
+        assert times is not None and values is not None
+        assert len(times.shape) == 1 and len(values.shape) == 1
+        assert signals.shape == (len(values), len(times))
+
+        signals = signals.T  # transpose back
+
+        times = times.astype(np.int64)
+        values = values.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (times, values, signals)
+
+        return times, values, signals

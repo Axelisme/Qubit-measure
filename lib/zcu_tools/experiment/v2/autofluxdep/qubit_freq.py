@@ -204,6 +204,66 @@ class QubitFreqMeasurementTask(
             tag=prefix_tag + "/success",
         )
 
+    def load(self, filepath: str, **kwargs) -> QubitFreqResult:
+        data = np.load(filepath)
+
+        flx_values = data["flx_values"]
+        detunes = data["detunes"]
+        fit_detune = data["fit_detune"]
+        fit_freq_err = data["fit_freq_err"]
+        fit_kappa = data["fit_kappa"]
+        fit_kappa_err = data["fit_kappa_err"]
+
+        signals_stored, flx_sig, detunes_sig = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs
+        )
+        assert flx_sig is not None and detunes_sig is not None
+        assert np.array_equal(flx_values, flx_sig)
+        assert np.array_equal(detunes, detunes_sig)
+        assert signals_stored.shape == (len(detunes), len(flx_values))
+
+        predict_freq_data, flx_predict, _ = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_predict_freq")),
+            **kwargs,
+        )
+        fit_freq_data, flx_fit, _ = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_fit_freq")), **kwargs
+        )
+        success_data, flx_success, _ = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_success")), **kwargs
+        )
+
+        assert flx_predict is not None and flx_fit is not None and flx_success is not None
+        assert (
+            predict_freq_data.shape
+            == fit_freq_data.shape
+            == success_data.shape
+            == (len(flx_values),)
+        )
+        assert np.array_equal(flx_values, flx_predict)
+        assert np.array_equal(flx_values, flx_fit)
+        assert np.array_equal(flx_values, flx_success)
+
+        raw_signals = signals_stored.T.astype(np.complex128)
+        predict_freq = predict_freq_data.astype(np.float64)
+        fit_detune = np.asarray(fit_detune, dtype=np.float64)
+        fit_freq = fit_freq_data.astype(np.float64)
+        fit_freq_err = np.asarray(fit_freq_err, dtype=np.float64)
+        fit_kappa = np.asarray(fit_kappa, dtype=np.float64)
+        fit_kappa_err = np.asarray(fit_kappa_err, dtype=np.float64)
+        success = success_data.astype(np.bool_)
+
+        return QubitFreqResult(
+            raw_signals=raw_signals,
+            predict_freq=predict_freq,
+            fit_detune=fit_detune,
+            fit_freq=fit_freq,
+            fit_freq_err=fit_freq_err,
+            fit_kappa=fit_kappa,
+            fit_kappa_err=fit_kappa_err,
+            success=success,
+        )
+
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 

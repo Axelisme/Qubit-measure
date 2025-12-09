@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable, ClassVar, Dict, Literal, Type, Union
+from typing import Callable, ClassVar, Dict, Literal, Type, Union, cast
 
 from qick.asm_v2 import QickParam
 from typing_extensions import NotRequired, TypedDict
@@ -108,6 +108,10 @@ class Waveform(AbsWaveform):
         return self.waveform.waveform_cfg
 
 
+class ConstWaveformCfg(WaveformCfg):
+    style: Literal["const"]
+
+
 @Waveform.register_waveform("const")
 class ConstWaveform(AbsWaveform):
     @classmethod
@@ -116,23 +120,28 @@ class ConstWaveform(AbsWaveform):
         waveform_cfg: WaveformCfg,
         param_name: str,
         param_value: Union[float, QickParam],
-    ) -> WaveformCfg:
+    ) -> ConstWaveformCfg:
+        wav_cfg = cast(ConstWaveformCfg, waveform_cfg)
+
         if param_name == "on/off":
-            waveform_cfg["length"] = (
-                param_value * (waveform_cfg["length"] - 0.01) + 0.01
-            )
+            wav_cfg["length"] = param_value * (wav_cfg["length"] - 0.01) + 0.01
         elif param_name == "length":
-            waveform_cfg["length"] = param_value
+            wav_cfg["length"] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
 
-        return waveform_cfg
+        return wav_cfg
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return {
             "style": "const",
             "length": self.waveform_cfg["length"],
         }
+
+
+class CosineWaveformCfg(WaveformCfg):
+    style: Literal["cosine"]
+    length: float
 
 
 @Waveform.register_waveform("cosine")
@@ -147,14 +156,21 @@ class CosineWaveform(AbsWaveform):
         }
 
 
+class GaussWaveformCfg(WaveformCfg):
+    style: Literal["gauss"]
+    sigma: float
+    length: float
+
+
 @Waveform.register_waveform("gauss")
 class GaussWaveform(AbsWaveform):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
+        wav_cfg = cast(GaussWaveformCfg, self.waveform_cfg)
         prog.add_gauss(
             ch,
             self.name,
-            sigma=self.waveform_cfg["sigma"],
-            length=self.waveform_cfg["length"],
+            sigma=wav_cfg["sigma"],
+            length=wav_cfg["length"],
             **kwargs,
         )
 
@@ -163,18 +179,27 @@ class GaussWaveform(AbsWaveform):
             "style": "arb",
             "envelope": self.name,
         }
+
+
+class DragWaveformCfg(WaveformCfg):
+    style: Literal["drag"]
+    sigma: float
+    delta: float
+    alpha: float
+    length: float
 
 
 @Waveform.register_waveform("drag")
 class DragWaveform(AbsWaveform):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
+        wav_cfg = cast(DragWaveformCfg, self.waveform_cfg)
         prog.add_DRAG(
             ch,
             self.name,
-            sigma=self.waveform_cfg["sigma"],
-            length=self.waveform_cfg["length"],
-            delta=self.waveform_cfg["delta"],
-            alpha=self.waveform_cfg["alpha"],
+            sigma=wav_cfg["sigma"],
+            length=wav_cfg["length"],
+            delta=wav_cfg["delta"],
+            alpha=wav_cfg["alpha"],
             **kwargs,
         )
 
@@ -183,6 +208,11 @@ class DragWaveform(AbsWaveform):
             "style": "arb",
             "envelope": self.name,
         }
+
+
+class FlatTopWaveformCfg(WaveformCfg):
+    style: Literal["flat_top"]
+    raise_waveform: WaveformCfg
 
 
 @Waveform.register_waveform("flat_top")
@@ -190,7 +220,9 @@ class FlatTopWaveform(AbsWaveform):
     def __init__(self, name: str, waveform_cfg: WaveformCfg) -> None:
         super().__init__(name, waveform_cfg)
 
-        raise_cfg = waveform_cfg["raise_waveform"]
+        wav_cfg = cast(FlatTopWaveformCfg, self.waveform_cfg)
+
+        raise_cfg = wav_cfg["raise_waveform"]
         if raise_cfg["style"] == "flat_top":
             raise ValueError("Nested flat top pulses are not supported")
 
@@ -210,23 +242,25 @@ class FlatTopWaveform(AbsWaveform):
         waveform_cfg: WaveformCfg,
         param_name: str,
         param_value: Union[float, QickParam],
-    ) -> WaveformCfg:
+    ) -> FlatTopWaveformCfg:
+        wav_cfg = cast(FlatTopWaveformCfg, waveform_cfg)
+
         if param_name == "on/off":
-            min_length = 0.01 + waveform_cfg["raise_waveform"]["length"]
-            waveform_cfg["length"] = min_length + param_value * (
-                waveform_cfg["length"] - min_length
+            min_length = 0.01 + wav_cfg["raise_waveform"]["length"]
+            wav_cfg["length"] = min_length + param_value * (
+                wav_cfg["length"] - min_length
             )
         elif param_name == "length":
-            waveform_cfg["length"] = param_value
+            wav_cfg["length"] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
 
-        return waveform_cfg
+        return wav_cfg
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
+        wav_cfg = cast(FlatTopWaveformCfg, self.waveform_cfg)
         return {
             "style": "flat_top",
             "envelope": self.name,
-            "length": self.waveform_cfg["length"]
-            - self.waveform_cfg["raise_waveform"]["length"],
+            "length": wav_cfg["length"] - wav_cfg["raise_waveform"]["length"],
         }

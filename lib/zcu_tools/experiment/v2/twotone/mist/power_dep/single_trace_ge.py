@@ -23,7 +23,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 MISTPowerDepGEResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -230,3 +230,26 @@ class MISTPowerDepGE(AbsExperiment):
             tag=tag + "/e",
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> MISTPowerDepGEResultType:
+        # This experiment saves two separate tags, load only reads one file
+        # so we just load the main data structure
+        signals_g, pdrs, y_values = load_data(filepath, **kwargs)
+        assert pdrs is not None and y_values is not None
+        assert len(pdrs.shape) == 1 and len(y_values.shape) == 1
+        assert signals_g.shape == (len(y_values), len(pdrs))
+
+        # Reconstruct signals shape: (pdrs, 2, 2) - but we only have partial data
+        # Return what we can load - g signals
+        signals_g = signals_g.T  # transpose back
+
+        # Note: This is a partial load - only g signals are recovered
+        signals = np.zeros((len(pdrs), 2, 2), dtype=np.complex128)
+        signals[:, 0, :] = signals_g.astype(np.complex128)
+
+        pdrs = pdrs.astype(np.float64)
+
+        self.last_cfg = None
+        self.last_result = (pdrs, signals)
+
+        return pdrs, signals

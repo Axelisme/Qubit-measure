@@ -23,12 +23,12 @@ class TypedAcquireMixin(AcquireMixin):
 
     def _summarize_accumulated(
         self, rounds_buf: List[NDArray[np.float64]]
-    ) -> NDArray[np.float64]:
+    ) -> List[NDArray[np.float64]]:
         return super()._summarize_accumulated(rounds_buf)
 
     def _summarize_decimated(
         self, rounds_buf: List[NDArray[np.float64]]
-    ) -> NDArray[np.float64]:
+    ) -> List[NDArray[np.float64]]:
         return super()._summarize_decimated(rounds_buf)
 
     def _average_buf(
@@ -38,7 +38,9 @@ class TypedAcquireMixin(AcquireMixin):
         remove_offset: bool = True,
     ) -> List[NDArray[np.float64]]:
         return super()._average_buf(
-            buf, length_norm=length_norm, remove_offset=remove_offset
+            buf,  # type: ignore
+            length_norm=length_norm,
+            remove_offset=remove_offset,
         )
 
     def acquire(self, *args, **kwargs) -> List[NDArray[np.float64]]:
@@ -90,10 +92,12 @@ class StatisticMixin(TypedAcquireMixin):
             for d_rep, tracker, ro in zip(
                 self.acc_buf, self._statistic_trackers, self.ro_chs.values()
             ):
+                assert self.avg_level is not None
                 d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
 
                 if not ro["edge_counting"]:
                     d_rep = d_rep / ro["length"]
+                d_rep = cast(NDArray[np.float64], d_rep)
 
                 tracker.update(d_rep)  # (..., m, 2)
 

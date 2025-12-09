@@ -26,7 +26,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay_fringe
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
@@ -239,6 +239,53 @@ class T2RamseyMeasurementTask(
             z_info={"name": "T2 Ramsey", "unit": "s", "values": result["t2r"] * 1e-6},
             comment=comment,
             tag=prefix_tag + "/t2r",
+        )
+
+    def load(self, filepath: str, **kwargs) -> T2RamseyResult:
+        data = np.load(filepath)
+
+        flx_values = data["flx_values"]
+        t2r_err = data["t2r_err"]
+        t2r_detune_err = data["t2r_detune_err"]
+        success = data["success"]
+
+        signals_stored, flx_sig, len_idxs = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs
+        )
+        assert flx_sig is not None and len_idxs is not None
+        assert np.array_equal(flx_values, flx_sig)
+        assert signals_stored.shape == (len(len_idxs), len(flx_values))
+
+        length_stored, flx_len, _ = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_length")), **kwargs
+        )
+        assert flx_len is not None
+        assert length_stored.shape == (len(flx_len), len(len_idxs))
+        assert np.array_equal(flx_values, flx_len)
+
+        t2r_stored, flx_t2r, _ = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_t2r")), **kwargs
+        )
+        assert flx_t2r is not None
+        assert t2r_stored.shape == (len(flx_t2r),)
+        assert np.array_equal(flx_values, flx_t2r)
+
+        length = length_stored[0].astype(np.float64) * 1e6
+        raw_signals = signals_stored.T.astype(np.complex128)
+        t2r = t2r_stored.astype(np.float64) * 1e6
+        t2r_err = t2r_err.astype(np.float64)
+        t2r_detune = data["t2r_detune"].astype(np.float64)
+        t2r_detune_err = t2r_detune_err.astype(np.float64)
+        success = success.astype(np.bool_)
+
+        return T2RamseyResult(
+            raw_signals=raw_signals,
+            length=length,
+            t2r=t2r,
+            t2r_err=t2r_err,
+            t2r_detune=t2r_detune,
+            t2r_detune_err=t2r_detune_err,
+            success=success,
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:

@@ -236,6 +236,48 @@ class T2EchoMeasurementTask(
             tag=prefix_tag + "/t2e",
         )
 
+    def load(self, filepath: str, **kwargs) -> T2EchoResult:
+        data = np.load(filepath)
+
+        flx_values = data["flx_values"]
+        t2e_err = data["t2e_err"]
+        success = data["success"]
+
+        signals_stored, flx_sig, len_idxs = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs
+        )
+        assert flx_sig is not None and len_idxs is not None
+        assert np.array_equal(flx_values, flx_sig)
+        assert signals_stored.shape == (len(len_idxs), len(flx_values))
+
+        length_stored, flx_len, _ = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_length")), **kwargs
+        )
+        assert flx_len is not None
+        assert length_stored.shape == (len(flx_len), len(len_idxs))
+        assert np.array_equal(flx_values, flx_len)
+
+        t2e_stored, flx_t2e, _ = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_t2e")), **kwargs
+        )
+        assert flx_t2e is not None
+        assert t2e_stored.shape == (len(flx_t2e),)
+        assert np.array_equal(flx_values, flx_t2e)
+
+        length = length_stored[0].astype(np.float64) * 1e6
+        raw_signals = signals_stored.T.astype(np.complex128)
+        t2e = t2e_stored.astype(np.float64) * 1e6
+        t2e_err = t2e_err.astype(np.float64)
+        success = success.astype(np.bool_)
+
+        return T2EchoResult(
+            raw_signals=raw_signals,
+            length=length,
+            t2e=t2e,
+            t2e_err=t2e_err,
+            success=success,
+        )
+
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 

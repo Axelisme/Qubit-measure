@@ -15,6 +15,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
@@ -68,6 +69,8 @@ class MeasurementTask(
         prefix_tag: str,
     ) -> None: ...
 
+    def load(self, filepath: str, **kwargs) -> T_ResultType: ...
+
 
 class FluxDepTaskConfig(TaskConfig):
     dev: Mapping[str, DeviceInfo]
@@ -93,18 +96,11 @@ class FluxDepInfoDict(UserDict):
         self.last_info[key] = deepcopy(value)
 
 
-class FluxDepExecutor:
-    def __init__(
-        self,
-        flx_values: NDArray[np.float64],
-        dev_cfg: Mapping[str, DeviceInfo],
-        predictor: FluxoniumPredictor,
-        env_dict: Optional[Dict[str, Any]] = None,
-    ) -> None:
+class FluxDepExecutor(AbsExperiment):
+    def __init__(self, flx_values: NDArray[np.float64]) -> None:
+        super().__init__()
+
         self.flx_values = flx_values
-        self.dev_cfg = dev_cfg
-        self.predictor = predictor
-        self.env_dict = {} if env_dict is None else env_dict
 
         self.record_path = None
         self.measurements: Dict[str, MeasurementTask] = OrderedDict()
@@ -215,13 +211,23 @@ class FluxDepExecutor:
 
         return fig, plotter, plot_fn, writer
 
-    def run(self) -> Mapping[str, Result]:
+    def run(
+        self,
+        dev_cfg: Mapping[str, DeviceInfo],
+        predictor: FluxoniumPredictor,
+        env_dict: Optional[Dict[str, Any]] = None,
+    ) -> Mapping[str, Result]:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
 
-        self.env_dict.update(
+        if env_dict is None:
+            env_dict = {}
+
+        cfg = FluxDepTaskConfig(dev=dev_cfg)
+
+        env_dict.update(
             flx_values=self.flx_values,
-            predictor=self.predictor,
+            predictor=predictor,
             info=FluxDepInfoDict(),
         )
 
@@ -253,21 +259,26 @@ class FluxDepExecutor:
                             update_cfg_fn=update_fn,
                             sub_task=BatchTask(self.measurements),
                         ),
-                        init_cfg=FluxDepTaskConfig(dev=self.dev_cfg),
-                        env_dict=self.env_dict,
+                        init_cfg=cfg,
+                        env_dict=env_dict,
                         update_hook=plot_fn,
                     )
-                    signals_dict = merge_result_list(results)
+
                 finally:
                     if self.record_path is not None:
                         assert writer is not None
                         writer.finish()
-
             plt.close(fig)
 
+        signals_dict = merge_result_list(results)
+
+        self.last_cfg = cfg
         self.last_result = signals_dict
 
         return signals_dict
+
+    def analyze(self, result: Optional[Mapping[str, Result]] = None) -> None:
+        raise NotImplementedError("Not implemented")
 
     def save(
         self,
@@ -289,3 +300,16 @@ class FluxDepExecutor:
                 comment,
                 prefix_tag + f"/{ms_name}",
             )
+
+    def load(self, filepath: str, **kwargs) -> Mapping[str, Result]:
+        _filepath = Path(filepath)
+
+        loaded: Dict[str, Result] = {}
+        for ms_name, ms in self.measurements.items():
+            ms_filepath = str(_filepath.with_name(_filepath.name + f"_{ms_name}"))
+            loaded[ms_name] = ms.load(ms_filepath, **kwargs)
+
+        self.last_cfg = None
+        self.last_result = loaded
+
+        return loaded

@@ -12,7 +12,7 @@ from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..runner import HardTask, SoftTask, TaskConfig, run_task
 
@@ -124,3 +124,20 @@ class FluxDepExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> FluxDepResultType:
+        signals2D, fpts, values = load_data(filepath, **kwargs)
+        assert fpts is not None and values is not None
+        assert len(fpts.shape) == 1 and len(values.shape) == 1
+        assert signals2D.shape == (len(values), len(fpts))
+
+        fpts = fpts * 1e-6  # Hz -> MHz
+
+        values = values.astype(np.float64)
+        fpts = fpts.astype(np.float64)
+        signals2D = signals2D.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (values, fpts, signals2D)
+
+        return values, fpts, signals2D

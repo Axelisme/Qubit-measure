@@ -149,6 +149,22 @@ class Mist_G_MeasurementTask(
             tag=prefix_tag + "/signals_g",
         )
 
+    def load(self, filepath: str, **kwargs) -> MistResult:
+        data = np.load(filepath)
+
+        flx_values = data["flx_values"]
+        gains = data["gains"]
+        raw_signals = data["raw_signals"]
+        success = data["success"]
+
+        assert raw_signals.shape == (len(flx_values), len(gains))
+        assert success.shape == ()
+
+        raw_signals = raw_signals.astype(np.complex128)
+        success = np.asarray(success, dtype=np.bool_)
+
+        return MistResult(raw_signals=raw_signals, success=success)
+
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 

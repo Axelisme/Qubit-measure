@@ -22,7 +22,7 @@ from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveLines,
 )
 from zcu_tools.program.v2 import TwoToneProgram, TwoToneProgramCfg, sweep2param
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
 FreqFluxDepResultType = Tuple[
@@ -149,3 +149,21 @@ class FreqFluxDepExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> FreqFluxDepResultType:
+        signals2D, values, fpts = load_data(filepath, **kwargs)
+        assert values is not None and fpts is not None
+        assert len(values.shape) == 1 and len(fpts.shape) == 1
+        assert signals2D.shape == (len(fpts), len(values))
+
+        fpts = fpts * 1e-6  # Hz -> MHz
+        signals2D = signals2D.T  # transpose back
+
+        values = values.astype(np.float64)
+        fpts = fpts.astype(np.float64)
+        signals2D = signals2D.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (values, fpts, signals2D)
+
+        return values, fpts, signals2D

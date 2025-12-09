@@ -33,7 +33,7 @@ from zcu_tools.program.v2 import (
     TriggerCfg,
     TriggerReadout,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 LookbackOptimizeResultType = Tuple[
     NDArray[np.float64],
@@ -199,3 +199,11 @@ class LookbackOptimizeExperiment(AbsExperiment):
         assert result is not None, "no result found"
 
         pre_lens, post_lens, Ts, signals = result
+
+        # Note: This experiment has a complex data structure
+        # The save logic needs to be properly implemented if required
+
+    def load(self, filepath: str, **kwargs) -> LookbackOptimizeResultType:
+        # Note: This experiment has complex data structure that may not be
+        # fully recoverable from a single save file.
+        raise NotImplementedError("load method not implemented for LookbackOptimizeExperiment")

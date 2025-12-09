@@ -35,7 +35,7 @@ class OnlineStatisticTracker:
     ) -> Tuple[int, NDArray[np.float64], NDArray[np.float64]]:
         """Merge two sets of statistics. Supports leading dimensions."""
         n = n1 + n2
-        mean = (mean1 * n1 + mean2 * n2) / n
+        mean = (mean1 * n1 + mean2 * n2) / float(n)
 
         delta = mean1 - mean2  # (..., 2)
         # Compute outer product for each leading dimension: (..., 2, 2)
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     from matplotlib.patches import Ellipse
 
     def plot_covariance_ellipse(
-        ax, mean: NDArray, cov: NDArray, n_std: float = 2.0, **kwargs
+        ax, mean: Tuple[float, float], cov: NDArray, n_std: float = 2.0, **kwargs
     ):
         """Plot an ellipse representing the covariance matrix."""
         eigenvalues, eigenvectors = np.linalg.eigh(cov)
@@ -190,6 +190,8 @@ if __name__ == "__main__":
     online_mean = tracker.mean  # (2, 2) - [G, E] x [I, Q]
     online_median = tracker.rough_median  # (2, 2)
     online_cov = tracker.covariance  # (2, 2, 2) - [G, E] x [2, 2]
+
+    assert online_mean is not None
 
     # Extract G and E statistics
     online_mean_G, online_mean_E = online_mean[0], online_mean[1]
@@ -348,7 +350,7 @@ if __name__ == "__main__":
     # Plot covariance ellipses for each Gaussian center (2 std)
     plot_covariance_ellipse(
         ax1,
-        mean1,
+        tuple(mean1),
         iso_cov,
         n_std=2,
         fill=False,
@@ -359,7 +361,7 @@ if __name__ == "__main__":
     )
     plot_covariance_ellipse(
         ax1,
-        mean2,
+        tuple(mean2),
         iso_cov,
         n_std=2,
         fill=False,
@@ -434,6 +436,7 @@ if __name__ == "__main__":
         tracker_conv.update(batch_GE)
 
         # Record history for G (index 0) and E (index 1)
+        assert tracker_conv.mean is not None
         means_history_G.append(tracker_conv.mean[0].copy())
         means_history_E.append(tracker_conv.mean[1].copy())
         medians_history_G.append(tracker_conv.rough_median[0].copy())

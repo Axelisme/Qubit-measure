@@ -32,7 +32,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 JPAFluxResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -162,3 +162,17 @@ class JPAFluxExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> JPAFluxResultType:
+        signals, jpa_flxs, _ = load_data(filepath, **kwargs)
+        assert jpa_flxs is not None
+        assert len(jpa_flxs.shape) == 1 and len(signals.shape) == 1
+        assert jpa_flxs.shape == signals.shape
+
+        jpa_flxs = jpa_flxs.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (jpa_flxs, signals)
+
+        return jpa_flxs, signals

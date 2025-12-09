@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (pdrs, signals_2d)  # signals shape: (2, len(pdrs)) for [w/o reset, w/ reset]
@@ -145,3 +145,17 @@ class RabiCheckExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> ResetRabiCheckResultType:
+        signals, pdrs, y_values = load_data(filepath, **kwargs)
+        assert pdrs is not None and y_values is not None
+        assert len(pdrs.shape) == 1 and len(y_values.shape) == 1
+        assert signals.shape == (len(y_values), len(pdrs))
+
+        pdrs = pdrs.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (pdrs, signals)
+
+        return pdrs, signals

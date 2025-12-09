@@ -25,7 +25,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 FreqGainResultType = Tuple[
@@ -171,3 +171,21 @@ class FreqGainExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> FreqGainResultType:
+        signals, gains, fpts = load_data(filepath, **kwargs)
+        assert gains is not None and fpts is not None
+        assert len(gains.shape) == 1 and len(fpts.shape) == 1
+        assert signals.shape == (len(fpts), len(gains))
+
+        fpts = fpts * 1e-6  # Hz -> MHz
+        signals = signals.T  # transpose back
+
+        gains = gains.astype(np.float64)
+        fpts = fpts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (gains, fpts, signals)
+
+        return gains, fpts, signals

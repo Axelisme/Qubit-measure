@@ -12,7 +12,7 @@ from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 JPAFluxResultType = Tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
@@ -108,3 +108,21 @@ class JPAFluxByOneToneExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> JPAFluxResultType:
+        signals, jpa_flxs, fpts = load_data(filepath, **kwargs)
+        assert jpa_flxs is not None and fpts is not None
+        assert len(jpa_flxs.shape) == 1 and len(fpts.shape) == 1
+        assert signals.shape == (len(fpts), len(jpa_flxs))
+
+        fpts = fpts * 1e-6  # Hz -> MHz
+        signals = signals.T  # transpose back
+
+        jpa_flxs = jpa_flxs.astype(np.float64)
+        fpts = fpts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (jpa_flxs, fpts, signals)
+
+        return jpa_flxs, fpts, signals

@@ -22,7 +22,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 MISTPowerDepResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -140,3 +140,17 @@ class MISTPowerDep(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> MISTPowerDepResultType:
+        signals, pdrs, _ = load_data(filepath, **kwargs)
+        assert pdrs is not None
+        assert len(pdrs.shape) == 1 and len(signals.shape) == 1
+        assert pdrs.shape == signals.shape
+
+        pdrs = pdrs.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (pdrs, signals)
+
+        return pdrs, signals

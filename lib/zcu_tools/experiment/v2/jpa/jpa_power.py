@@ -31,7 +31,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 JPAPowerResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -161,3 +161,17 @@ class JPAPowerExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> JPAPowerResultType:
+        signals, jpa_powers, _ = load_data(filepath, **kwargs)
+        assert jpa_powers is not None
+        assert len(jpa_powers.shape) == 1 and len(signals.shape) == 1
+        assert jpa_powers.shape == signals.shape
+
+        jpa_powers = jpa_powers.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (jpa_powers, signals)
+
+        return jpa_powers, signals

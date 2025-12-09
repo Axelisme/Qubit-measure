@@ -33,7 +33,6 @@
 import warnings
 
 import numpy as np
-
 from qiskit_metal import Dict, draw
 from qiskit_metal.qlibrary.core import BaseQubit
 

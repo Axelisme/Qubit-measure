@@ -25,7 +25,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.simulate import mA2flx
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 MistFluxDepResultType = Tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
@@ -184,3 +184,20 @@ class MistFluxDepExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> MistFluxDepResultType:
+        signals, values, gains = load_data(filepath, **kwargs)
+        assert values is not None and gains is not None
+        assert len(values.shape) == 1 and len(gains.shape) == 1
+        assert signals.shape == (len(gains), len(values))
+
+        signals = signals.T  # transpose back
+
+        values = values.astype(np.float64)
+        gains = gains.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (values, gains, signals)
+
+        return values, gains, signals

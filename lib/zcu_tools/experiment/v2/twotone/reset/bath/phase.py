@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.base import cosfunc, fitcos
 from zcu_tools.utils.process import rotate2real
 
@@ -147,3 +147,17 @@ class PhaseExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> PhaseResultType:
+        signals, phases, _ = load_data(filepath, **kwargs)
+        assert phases is not None
+        assert len(phases.shape) == 1 and len(signals.shape) == 1
+        assert phases.shape == signals.shape
+
+        phases = phases.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (phases, signals)
+
+        return phases, signals

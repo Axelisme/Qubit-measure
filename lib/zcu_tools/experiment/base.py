@@ -28,3 +28,6 @@ class AbsExperiment(Generic[T_Result, T_Config], ABC):
         comment: Optional[str] = None,
         tag: str = "",
     ) -> None: ...
+
+    @abstractmethod
+    def load(self, filepath: str, **kwargs) -> T_Result: ...

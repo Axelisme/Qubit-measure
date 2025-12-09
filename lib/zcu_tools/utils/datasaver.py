@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.config import config
 
@@ -155,7 +156,7 @@ def save_local_data(
 
 def load_local_data(
     filepath: str,
-) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+) -> Tuple[NDArray, NDArray, Optional[NDArray]]:
     """
     Load data from a local HDF5 file.
 
@@ -163,7 +164,7 @@ def load_local_data(
         file_path (str): The path to the HDF5 file.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]: The loaded z, x, and y data arrays.
+        Tuple[NDArray, NDArray, Optional[NDArray]]: The loaded z, x, and y data arrays.
     """
     import h5py
 
@@ -174,8 +175,8 @@ def load_local_data(
         return np.array([]), np.array([]), None
 
     def parser_data(
-        data: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+        data: NDArray,
+    ) -> Tuple[NDArray, NDArray, Optional[NDArray]]:
         if data.shape[2] == 1:  # 1D data,
             x_data = data[:, 0, 0][:]
             y_data = None
@@ -198,18 +199,21 @@ def load_local_data(
             z_data = [z_data]
 
             def check_log_valid(
-                z_i: np.ndarray, x_i: np.ndarray, y_i: np.ndarray
+                z_i: NDArray, x_i: NDArray, y_i: Optional[NDArray]
             ) -> None:
                 if not x_data.shape == x_i.shape:
                     raise ValueError("x data shape mismatch")
+                if not np.allclose(x_data, x_i):
+                    raise ValueError("Find different x data in log data")
+
                 if y_i is not None:
                     if y_data is None:
                         raise ValueError("y data is None")
                     if not y_data.shape == y_i.shape:
                         raise ValueError("y data shape mismatch")
 
-                if not np.allclose(x_data, x_i) or not np.allclose(y_data, y_i):
-                    raise ValueError("Find different x or y data in log data")
+                    if not np.allclose(y_data, y_i):
+                        raise ValueError("Find different y data in log data")
 
             i = 2
             while f"Log_{i}" in file:
@@ -323,7 +327,7 @@ def load_data(
     filepath: str,
     server_ip: Optional[str] = None,
     port: int = 4999,
-) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
+) -> Tuple[NDArray, NDArray, Optional[NDArray]]:
     """
     Load data either locally or from a remote server.
 
@@ -333,7 +337,7 @@ def load_data(
         port (int, optional): The port number of the server. Defaults to 4999.
 
     Returns:
-        Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]: The loaded z, x, and y data arrays.
+        Tuple[NDArray, NDArray, Optional[NDArray]]: The loaded z, x, and y data arrays.
     """
     if server_ip is not None:
         if not os.path.exists(filepath):

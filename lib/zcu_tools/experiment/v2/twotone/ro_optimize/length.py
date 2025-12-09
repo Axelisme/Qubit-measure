@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 LengthResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -167,3 +167,19 @@ class OptimizeLengthExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> LengthResultType:
+        signals, lengths, _ = load_data(filepath, **kwargs)
+        assert lengths is not None
+        assert len(lengths.shape) == 1 and len(signals.shape) == 1
+        assert lengths.shape == signals.shape
+
+        lengths = lengths * 1e6  # s -> us
+
+        lengths = lengths.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (lengths, signals)
+
+        return lengths, signals

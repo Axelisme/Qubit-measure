@@ -37,7 +37,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 from .jpa_optimizer import JPAOptimizer
 
@@ -296,3 +296,32 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             tag=tag + "/signals",
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> JPAOptimizeResultType:
+        _filepath = Path(filepath)
+
+        # Load params (iterations x 3)
+        params_data, iters, param_types = load_data(
+            str(_filepath.with_name(_filepath.name + "_params")), **kwargs
+        )
+        assert iters is not None and param_types is not None
+        assert len(iters.shape) == 1 and len(param_types.shape) == 1
+        assert params_data.shape == (len(param_types), len(iters))
+
+        params = params_data.T  # transpose back (num_points, 3)
+
+        # Load signals
+        signals, iters_sig, _ = load_data(
+            str(_filepath.with_name(_filepath.name + "_signals")), **kwargs
+        )
+        assert iters_sig is not None
+        assert len(signals.shape) == 1
+        assert signals.shape[0] == params.shape[0]
+
+        params = params.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (params, signals)
+
+        return params, signals

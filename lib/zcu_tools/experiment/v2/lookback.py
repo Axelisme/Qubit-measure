@@ -13,7 +13,7 @@ from scipy.ndimage import gaussian_filter1d
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 from .runner import HardTask, TaskConfig, run_task
 
@@ -134,3 +134,19 @@ class LookbackExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> LookbackResultType:
+        signals, Ts, _ = load_data(filepath, **kwargs)
+        assert Ts is not None
+        assert len(Ts.shape) == 1 and len(signals.shape) == 1
+        assert Ts.shape == signals.shape
+
+        Ts = Ts * 1e6  # s -> us
+
+        Ts = Ts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (Ts, signals)
+
+        return Ts, signals

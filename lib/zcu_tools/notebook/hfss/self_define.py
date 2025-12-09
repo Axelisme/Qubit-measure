@@ -13,8 +13,9 @@
 # that they have been altered from the originals.
 """File contains dictionary for Rectangle and the make()."""
 
-from qiskit_metal import draw, Dict
+from qiskit_metal import Dict, draw
 from qiskit_metal.qlibrary.core import QComponent
+
 
 class Cross(QComponent):
     """A cross.
@@ -37,13 +38,22 @@ class Cross(QComponent):
         * subtract: 'False'
         * helper: 'False'
     """
-    component_metadata = Dict(short_name='Cross')
+
+    component_metadata = Dict(short_name="Cross")
     """Component metadata"""
 
-    default_options = Dict(width='100um', height='100um', trace_width='5um', orientation=0, subtract=False, helper=False)
+    default_options = Dict(
+        width="100um",
+        height="100um",
+        trace_width="5um",
+        orientation=0,
+        subtract=False,
+        helper=False,
+    )
     """Default connector options"""
 
     TOOLTIP = """A cross."""
+
     def make(self):
         """The make function implements the logic that creates the geoemtry
         (poly, path, etc.) from the qcomponent.options dictionary of
@@ -59,11 +69,15 @@ class Cross(QComponent):
         cross = draw.rotate(cross, p.orientation)
         ##############################################
         # add qgeometry
-        self.add_qgeometry('poly', {'cross': cross},
-                           subtract=p.subtract,
-                           helper=p.helper,
-                           layer=p.layer,
-                           chip=p.chip)
+        self.add_qgeometry(
+            "poly",
+            {"cross": cross},
+            subtract=p.subtract,
+            helper=p.helper,
+            layer=p.layer,
+            chip=p.chip,
+        )
+
 
 class Fillet_vertex(QComponent):
     """Tool shape for creating fillet objects.
@@ -83,9 +97,8 @@ class Fillet_vertex(QComponent):
         * subtract: 'False'
         * helper: 'False'
     """
-    default_options = Dict(fillet='50um',
-                           subtract='False',
-                           helper='False')
+
+    default_options = Dict(fillet="50um", subtract="False", helper="False")
     """Default drawing options"""
 
     TOOLTIP = """A single configurable square with fillet"""
@@ -100,18 +113,24 @@ class Fillet_vertex(QComponent):
 
         # create the geometry
 
-        square = draw.rectangle(p.fillet, p.fillet, p.pos_x+p.fillet/2, p.pos_y+p.fillet/2)
+        square = draw.rectangle(
+            p.fillet, p.fillet, p.pos_x + p.fillet / 2, p.pos_y + p.fillet / 2
+        )
         circle = draw.Point(p.pos_x, p.pos_y).buffer(p.fillet)
         fil_ver = draw.subtract(square, circle)
         fil_ver = draw.rotate(fil_ver, p.orientation)
-        
+
         ##############################################
         # add qgeometry
-        self.add_qgeometry('poly', {'fillet_vertex': fil_ver},
-                           subtract=p.subtract,
-                           helper=p.helper,
-                           layer=p.layer,
-                           chip=p.chip)
+        self.add_qgeometry(
+            "poly",
+            {"fillet_vertex": fil_ver},
+            subtract=p.subtract,
+            helper=p.helper,
+            layer=p.layer,
+            chip=p.chip,
+        )
+
 
 class Rect_fillet(QComponent):
     """A single configurable square with fillet at vertices.
@@ -134,11 +153,9 @@ class Rect_fillet(QComponent):
         * helper: 'False'
     """
 
-    default_options = Dict(width='500um',
-                           height='300um',
-                           fillet='50um',
-                           subtract='False',
-                           helper='False')
+    default_options = Dict(
+        width="500um", height="300um", fillet="50um", subtract="False", helper="False"
+    )
     """Default drawing options"""
 
     TOOLTIP = """A single configurable square with fillet"""
@@ -152,20 +169,25 @@ class Rect_fillet(QComponent):
         p = self.p  # p for parsed parameters. Access to the parsed options.
 
         # create the geometry
-        rect1 = draw.rectangle(p.width-2*p.fillet, p.height, p.pos_x, p.pos_y)
-        rect2 = draw.rectangle(p.width, p.height-2*p.fillet, p.pos_x, p.pos_y)
+        rect1 = draw.rectangle(p.width - 2 * p.fillet, p.height, p.pos_x, p.pos_y)
+        rect2 = draw.rectangle(p.width, p.height - 2 * p.fillet, p.pos_x, p.pos_y)
         cir = draw.Point(p.pos_x, p.pos_y).buffer(p.fillet)
-        x,y = +p.width/2-p.fillet, +p.height/2-p.fillet
-        rect_fil = draw.union(rect1, rect2, 
-                              draw.translate(cir, x, y),
-                              draw.translate(cir,-x, y),
-                              draw.translate(cir, x,-y),
-                              draw.translate(cir,-x,-y),
-                              )
+        x, y = +p.width / 2 - p.fillet, +p.height / 2 - p.fillet
+        rect_fil = draw.union(
+            rect1,
+            rect2,
+            draw.translate(cir, x, y),
+            draw.translate(cir, -x, y),
+            draw.translate(cir, x, -y),
+            draw.translate(cir, -x, -y),
+        )
         ##############################################
         # add qgeometry
-        self.add_qgeometry('poly', {'rectangle': rect_fil},
-                           subtract=p.subtract,
-                           helper=p.helper,
-                           layer=p.layer,
-                           chip=p.chip)
+        self.add_qgeometry(
+            "poly",
+            {"rectangle": rect_fil},
+            subtract=p.subtract,
+            helper=p.helper,
+            layer=p.layer,
+            chip=p.chip,
+        )

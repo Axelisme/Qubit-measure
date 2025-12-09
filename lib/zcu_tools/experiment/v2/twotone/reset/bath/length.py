@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (lens, signals)
@@ -131,3 +131,19 @@ class LengthExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> LengthResultType:
+        signals, lens, _ = load_data(filepath, **kwargs)
+        assert lens is not None
+        assert len(lens.shape) == 1 and len(signals.shape) == 1
+        assert lens.shape == signals.shape
+
+        lens = lens * 1e6  # s -> us
+
+        lens = lens.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (lens, signals)
+
+        return lens, signals

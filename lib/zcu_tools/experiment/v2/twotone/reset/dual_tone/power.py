@@ -25,7 +25,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 # (pdrs1, pdrs2, signals_2d)
 DualToneResetPowerResultType = Tuple[
@@ -176,3 +176,20 @@ class PowerExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> DualToneResetPowerResultType:
+        signals, pdrs1, pdrs2 = load_data(filepath, **kwargs)
+        assert pdrs1 is not None and pdrs2 is not None
+        assert len(pdrs1.shape) == 1 and len(pdrs2.shape) == 1
+        assert signals.shape == (len(pdrs2), len(pdrs1))
+
+        signals = signals.T  # transpose back
+
+        pdrs1 = pdrs1.astype(np.float64)
+        pdrs2 = pdrs2.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (pdrs1, pdrs2, signals)
+
+        return pdrs1, pdrs2, signals

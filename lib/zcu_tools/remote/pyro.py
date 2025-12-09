@@ -10,7 +10,7 @@ from qick import QickConfig
 from zcu_tools.program.bitfiles import get_bitfile
 
 
-def setup_pyro4():
+def setup_pyro4() -> None:
     # use dill instead of pickle
     Pyro4.config.SERIALIZER = "pickle"
     # Pyro4.config.SERIALIZER = "dill"
@@ -37,7 +37,7 @@ def get_program_module(version: Literal["v1", "v2"]) -> ModuleType:
 
 def get_localhost_ip(ns: Pyro4.naming.NameServer, iface: str) -> str:
     # if we have multiple network interfaces, we want to register the daemon using the IP address that faces the nameserver
-    host = Pyro4.socketutil.getInterfaceAddress(ns._pyroUri.host)
+    host = Pyro4.socketutil.getInterfaceAddress(ns._pyroUri.host)  # type: ignore
     # if the nameserver is running on the QICK, the above will usually return the loopback address - not useful
     if host == "127.0.0.1":
         # if the eth0 interface has an IPv4 address, use that
@@ -107,11 +107,11 @@ def make_proxy(
 
             import IPython
 
-            ip = IPython.get_ipython()
+            ip = IPython.get_ipython()  # type: ignore
             if ip is not None:
 
                 def exception_handler(*_):
-                    sys.stderr.write("".join(Pyro4.util.getPyroTraceback()))
+                    sys.stderr.write("".join(Pyro4.util.getPyroTraceback()))  # type: ignore
 
                 ip.set_custom_exc(
                     (Exception,), exception_handler

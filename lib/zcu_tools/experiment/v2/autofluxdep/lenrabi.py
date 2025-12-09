@@ -222,6 +222,57 @@ class LenRabiMeasurementTask(
             tag=prefix_tag + "/success",
         )
 
+    def load(self, filepath: str, **kwargs) -> LenRabiResult:
+        # main container (has pi2_length and rabi_freq)
+        data = np.load(filepath)
+        pi2_length = data["pi2_length"]
+        rabi_freq = data["rabi_freq"]
+        success_main = data["success"]
+
+        # signals
+        signals_stored, flx_values, lengths = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs
+        )
+        assert flx_values is not None and lengths is not None
+        assert signals_stored.shape == (len(lengths), len(flx_values))
+
+        # pi_length
+        pi_length_data, flx_pi, _ = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_pi_length")), **kwargs
+        )
+        assert flx_pi is not None
+        assert pi_length_data.shape == (len(flx_pi),)
+        assert np.array_equal(flx_pi, flx_values)
+
+        # success
+        success_data, flx_succ, _ = load_data(
+            str(Path(filepath).with_name(Path(filepath).name + "_success")), **kwargs
+        )
+        assert flx_succ is not None
+        assert success_data.shape == (len(flx_succ),)
+        assert np.array_equal(flx_succ, flx_values)
+
+        assert (
+            pi2_length.shape
+            == rabi_freq.shape
+            == success_main.shape
+            == pi_length_data.shape
+        )
+
+        raw_signals = signals_stored.T.astype(np.complex128)
+        pi_length = pi_length_data.astype(np.float64)
+        pi2_length = pi2_length.astype(np.float64)
+        rabi_freq = rabi_freq.astype(np.float64)
+        success = success_data.astype(np.bool_) & success_main.astype(np.bool_)
+
+        return LenRabiResult(
+            raw_signals=raw_signals,
+            pi_length=pi_length,
+            pi2_length=pi2_length,
+            rabi_freq=rabi_freq,
+            success=success,
+        )
+
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 

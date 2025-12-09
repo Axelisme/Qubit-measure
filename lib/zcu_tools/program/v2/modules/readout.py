@@ -55,7 +55,7 @@ class TriggerReadout(Module):
         ro_ch = self.ro_cfg["ro_ch"]
         trig_offset = self.ro_cfg["trig_offset"]
 
-        prog.send_readoutconfig(ro_ch, self.name, t=t)
+        prog.send_readoutconfig(ro_ch, self.name, t=t)  # type: ignore
         prog.trigger([ro_ch], t=t + trig_offset)
 
         return t  # always non-blocking

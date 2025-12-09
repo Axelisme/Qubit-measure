@@ -21,7 +21,7 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 from ..runner import BatchTask, HardTask, TaskConfig, run_task
@@ -333,3 +333,22 @@ class AllXYExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> AllXYResultType:
+        signals, gate_indices, _ = load_data(filepath, **kwargs)
+        assert gate_indices is not None
+        assert len(gate_indices.shape) == 1 and len(signals.shape) == 1
+        assert len(gate_indices) == len(ALLXY_SEQUENCE)
+        assert signals.shape == gate_indices.shape
+
+        signals = signals.astype(np.complex128)
+
+        # Reconstruct signals_dict from flat signals array
+        signals_dict: AllXYResultType = {}
+        for i, seq in enumerate(ALLXY_SEQUENCE):
+            signals_dict[seq] = signals[i : i + 1]
+
+        self.last_cfg = None
+        self.last_result = signals_dict
+
+        return signals_dict

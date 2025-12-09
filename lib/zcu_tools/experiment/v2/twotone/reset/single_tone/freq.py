@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
@@ -142,3 +142,19 @@ class FreqExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> SingleToneResetFreqResultType:
+        signals, fpts, _ = load_data(filepath, **kwargs)
+        assert fpts is not None
+        assert len(fpts.shape) == 1 and len(signals.shape) == 1
+        assert fpts.shape == signals.shape
+
+        fpts = fpts * 1e-6  # Hz -> MHz
+
+        fpts = fpts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (fpts, signals)
+
+        return fpts, signals

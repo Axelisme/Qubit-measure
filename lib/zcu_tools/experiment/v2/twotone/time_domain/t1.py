@@ -28,7 +28,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
@@ -154,6 +154,22 @@ class T1Experiment(AbsExperiment):
             **kwargs,
         )
 
+    def load(self, filepath: str, **kwargs) -> T1ResultType:
+        signals, Ts, _ = load_data(filepath, **kwargs)
+        assert Ts is not None
+        assert len(Ts.shape) == 1 and len(signals.shape) == 1
+        assert Ts.shape == signals.shape
+
+        Ts = Ts * 1e6  # s -> us
+
+        Ts = Ts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (Ts, signals)
+
+        return Ts, signals
+
 
 class T1WithToneTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
@@ -264,6 +280,22 @@ class T1WithToneExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> T1ResultType:
+        signals, Ts, _ = load_data(filepath, **kwargs)
+        assert Ts is not None
+        assert len(Ts.shape) == 1 and len(signals.shape) == 1
+        assert Ts.shape == signals.shape
+
+        Ts = Ts * 1e6  # s -> us
+
+        Ts = Ts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (Ts, signals)
+
+        return Ts, signals
 
 
 # (values, times, signals)
@@ -424,3 +456,21 @@ class T1WithToneSweepExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> T1SweepResultType:
+        signals, gains, Ts = load_data(filepath, **kwargs)
+        assert gains is not None and Ts is not None
+        assert len(gains.shape) == 1 and len(Ts.shape) == 1
+        assert signals.shape == (len(Ts), len(gains))
+
+        Ts = Ts * 1e6  # s -> us
+        signals = signals.T  # transpose back
+
+        gains = gains.astype(np.float64)
+        Ts = Ts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (gains, Ts, signals)
+
+        return gains, Ts, signals

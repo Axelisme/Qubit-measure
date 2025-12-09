@@ -28,7 +28,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 MISTPowerDepOvernightResultType = Tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
@@ -187,3 +187,18 @@ class MISTPowerDepOvernight(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> MISTPowerDepOvernightResultType:
+        overnight_signals, pdrs, iters = load_data(filepath, **kwargs)
+        assert pdrs is not None and iters is not None
+        assert len(pdrs.shape) == 1 and len(iters.shape) == 1
+        assert overnight_signals.shape == (len(iters), len(pdrs))
+
+        iters = iters.astype(np.int64)
+        pdrs = pdrs.astype(np.float64)
+        overnight_signals = overnight_signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (iters, pdrs, overnight_signals)
+
+        return iters, pdrs, overnight_signals

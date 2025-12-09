@@ -26,7 +26,7 @@ from zcu_tools.program.v2 import (
     TwoToneProgramCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 # (signals)
 SingleShotResultType = NDArray[np.complex128]
@@ -163,3 +163,11 @@ class SingleShotExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> SingleShotResultType:
+        signals, _, _ = load_data(filepath, **kwargs)
+
+        self.last_cfg = None
+        self.last_result = signals
+
+        return signals

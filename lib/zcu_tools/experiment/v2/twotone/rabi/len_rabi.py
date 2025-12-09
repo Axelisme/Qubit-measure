@@ -13,7 +13,7 @@ from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import Pulse, TwoToneProgram, TwoToneProgramCfg, sweep2param
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
@@ -173,3 +173,19 @@ class LenRabiExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> LenRabiResultType:
+        signals, lens, _ = load_data(filepath, **kwargs)
+        assert lens is not None
+        assert len(lens.shape) == 1 and len(signals.shape) == 1
+        assert lens.shape == signals.shape
+
+        lens = lens * 1e6  # s -> us
+
+        lens = lens.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (lens, signals)
+
+        return lens, signals

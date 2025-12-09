@@ -10,7 +10,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program.v2 import TwoToneProgram, TwoToneProgramCfg, sweep2param
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
 from ..runner import HardTask, TaskConfig, run_task
@@ -98,3 +98,20 @@ class PowerDepExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> PowerDepResultType:
+        signals2D, fpts, pdrs = load_data(filepath, **kwargs)
+        assert fpts is not None and pdrs is not None
+        assert len(fpts.shape) == 1 and len(pdrs.shape) == 1
+        assert signals2D.shape == (len(pdrs), len(fpts))
+
+        fpts = fpts * 1e-6  # Hz -> MHz
+
+        pdrs = pdrs.astype(np.float64)
+        fpts = fpts.astype(np.float64)
+        signals2D = signals2D.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (pdrs, fpts, signals2D)
+
+        return pdrs, fpts, signals2D

@@ -18,7 +18,7 @@ from zcu_tools.experiment.utils import (
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 JPACheckResultType = Tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
@@ -134,3 +134,20 @@ class JPACheckExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> JPACheckResultType:
+        signals2D, fpts, outputs = load_data(filepath, **kwargs)
+        assert fpts is not None and outputs is not None
+        assert len(fpts.shape) == 1 and len(outputs.shape) == 1
+        assert signals2D.shape == (len(outputs), len(fpts))
+
+        fpts = fpts * 1e-6  # Hz -> MHz
+
+        outputs = outputs.astype(np.float64)
+        fpts = fpts.astype(np.float64)
+        signals2D = signals2D.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (outputs, fpts, signals2D)
+
+        return outputs, fpts, signals2D

@@ -32,7 +32,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 JPAFreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -163,3 +163,19 @@ class JPAFreqExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> JPAFreqResultType:
+        signals, jpa_freqs, _ = load_data(filepath, **kwargs)
+        assert jpa_freqs is not None
+        assert len(jpa_freqs.shape) == 1 and len(signals.shape) == 1
+        assert jpa_freqs.shape == signals.shape
+
+        jpa_freqs = jpa_freqs * 1e-6  # Hz -> MHz
+
+        jpa_freqs = jpa_freqs.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (jpa_freqs, signals)
+
+        return jpa_freqs, signals

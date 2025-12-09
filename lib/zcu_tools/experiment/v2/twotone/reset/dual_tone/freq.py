@@ -25,7 +25,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background, rotate2real
 
 
@@ -247,3 +247,22 @@ class FreqExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> DualToneResetFreqResultType:
+        signals, fpts1, fpts2 = load_data(filepath, **kwargs)
+        assert fpts1 is not None and fpts2 is not None
+        assert len(fpts1.shape) == 1 and len(fpts2.shape) == 1
+        assert signals.shape == (len(fpts2), len(fpts1))
+
+        fpts1 = fpts1 * 1e-6  # Hz -> MHz
+        fpts2 = fpts2 * 1e-6  # Hz -> MHz
+        signals = signals.T  # transpose back
+
+        fpts1 = fpts1.astype(np.float64)
+        fpts2 = fpts2.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (fpts1, fpts2, signals)
+
+        return fpts1, fpts2, signals

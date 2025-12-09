@@ -32,7 +32,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_ge_decay
 
 # (times, signals)
@@ -200,6 +200,23 @@ class T1Experiment(AbsExperiment):
             **kwargs,
         )
 
+    def load(self, filepath: str, **kwargs) -> T1ResultType:
+        signals, Ts, y_values = load_data(filepath, **kwargs)
+        assert Ts is not None and y_values is not None
+        assert len(Ts.shape) == 1 and len(y_values.shape) == 1
+        assert signals.shape == (len(y_values), len(Ts))
+
+        Ts = Ts * 1e6  # s -> us
+        signals = signals.T  # transpose back
+
+        Ts = Ts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (Ts, signals)
+
+        return Ts, signals
+
 
 class T1WithToneTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
@@ -335,6 +352,23 @@ class T1WithToneExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> T1ResultType:
+        signals, Ts, y_values = load_data(filepath, **kwargs)
+        assert Ts is not None and y_values is not None
+        assert len(Ts.shape) == 1 and len(y_values.shape) == 1
+        assert signals.shape == (len(y_values), len(Ts))
+
+        Ts = Ts * 1e6  # s -> us
+        signals = signals.T  # transpose back
+
+        Ts = Ts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (Ts, signals)
+
+        return Ts, signals
 
 
 # (values, times, signals)
@@ -612,3 +646,36 @@ class T1WithToneSweepExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> T1SweepResultType:
+        _filepath = Path(filepath)
+
+        # Load ground populations
+        g_pop, gains, Ts = load_data(
+            str(_filepath.with_name(_filepath.name + "_g_population.npz")), **kwargs
+        )
+        assert gains is not None and Ts is not None
+        assert len(gains.shape) == 1 and len(Ts.shape) == 1
+        assert g_pop.shape == (len(Ts), len(gains))
+
+        # Load excited populations
+        e_pop, gains_e, Ts_e = load_data(
+            str(_filepath.with_name(_filepath.name + "_e_population.npz")), **kwargs
+        )
+        assert gains_e is not None and Ts_e is not None
+        assert e_pop.shape == (len(Ts_e), len(gains_e))
+        assert np.array_equal(gains, gains_e) and np.array_equal(Ts, Ts_e)
+
+        Ts = Ts * 1e6  # s -> us
+
+        # Reconstruct signals shape: (gains, ts, 2)
+        signals = np.stack([g_pop.T, e_pop.T], axis=-1)
+
+        gains = gains.astype(np.float64)
+        Ts = Ts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (gains, Ts, signals)
+
+        return gains, Ts, signals

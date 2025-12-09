@@ -16,7 +16,7 @@ from zcu_tools.program.v2 import (
     TwoToneProgramCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.resonance import fit_edelay, get_proper_model
 
 from ..runner import HardTask, TaskConfig, run_task
@@ -153,3 +153,19 @@ class DispersiveExperiment(AbsExperiment):
             tag=tag,
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> DispersiveResultType:
+        signals, fpts, y_values = load_data(filepath, **kwargs)
+        assert fpts is not None
+        assert len(fpts.shape) == 1
+        assert signals.shape == (2, len(fpts))
+
+        fpts = fpts * 1e-6  # Hz -> MHz
+
+        fpts = fpts.astype(np.float64)
+        signals = signals.astype(np.complex128)
+
+        self.last_cfg = None
+        self.last_result = (fpts, signals)
+
+        return fpts, signals
