@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
@@ -233,7 +233,9 @@ class QubitFreqMeasurementTask(
             str(Path(filepath).with_name(Path(filepath).name + "_success")), **kwargs
         )
 
-        assert flx_predict is not None and flx_fit is not None and flx_success is not None
+        assert (
+            flx_predict is not None and flx_fit is not None and flx_success is not None
+        )
         assert (
             predict_freq_data.shape
             == fit_freq_data.shape
