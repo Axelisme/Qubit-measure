@@ -6,5 +6,6 @@ from .tasks import (
     RepeatOverTime,
     ReTryIfFail,
     SoftTask,
+    default_raw2signal_fn,
     run_task,
 )

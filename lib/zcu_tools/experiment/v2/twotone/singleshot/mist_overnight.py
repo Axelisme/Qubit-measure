@@ -184,7 +184,11 @@ class MISTPowerDepOvernight(AbsExperiment):
         return iters, gains, signals
 
     def analyze(
-        self, result: Optional[MISTPowerDepOvernightResultType] = None, *, ac_coeff=None
+        self,
+        result: Optional[MISTPowerDepOvernightResultType] = None,
+        *,
+        ac_coeff=None,
+        log_scale=False,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -221,6 +225,9 @@ class MISTPowerDepOvernight(AbsExperiment):
         ax.plot(xs, max_populations[:, 2], color="g", **side_kwargs)
         ax.plot(xs, med_populations[:, 2], color="g", label="Other", **med_kwargs)
         ax.plot(xs, min_populations[:, 2], color="g", **side_kwargs)
+
+        if log_scale:
+            ax.set_xscale("log")
 
         ax.set_xlabel(xlabel)
         ax.set_ylabel("Population")

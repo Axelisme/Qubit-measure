@@ -111,13 +111,18 @@ class MISTPowerDepSingleShot(AbsExperiment):
         return pdrs, signals
 
     def analyze(
-        self, result: Optional[MISTPowerDepResultType] = None, *, ac_coeff=None
+        self,
+        result: Optional[MISTPowerDepResultType] = None,
+        *,
+        ac_coeff=None,
+        log_scale=False,
     ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         pdrs, signals = result
+        signals = signals.real
 
         populations = mist_signal2real(signals)
 
@@ -139,6 +144,8 @@ class MISTPowerDepSingleShot(AbsExperiment):
         ax.grid(True)
         ax.tick_params(axis="both", which="major", labelsize=12)
         ax.set_ylim(0, 1)
+        if log_scale:
+            ax.set_xscale("log")
 
         return fig
 

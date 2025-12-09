@@ -8,7 +8,7 @@ from scipy.ndimage import gaussian_filter
 from zcu_tools.program.v2 import ModularProgramV2, PulseCfg
 from zcu_tools.utils.func_tools import min_interval
 
-from .runner import T_ResultType, default_raw2signal_fn
+from .runner import Result, default_raw2signal_fn
 
 
 def calc_snr(real_signals: NDArray[np.float64]) -> float:
@@ -86,7 +86,10 @@ def wrap_earlystop_check(
     return wrapped_update_hook
 
 
-def merge_result_list(results: Sequence[T_ResultType]) -> T_ResultType:
+T_Result = TypeVar("T_Result", bound=Result)
+
+
+def merge_result_list(results: Sequence[T_Result]) -> T_Result:
     assert isinstance(results, list) and len(results) > 0
     if isinstance(results[0], dict):
         return {
