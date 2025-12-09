@@ -1,7 +1,9 @@
-from typing import Literal, Tuple
+from typing import Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 from .base import fidelity_func
 from .center import fit_ge_by_center
@@ -13,7 +15,7 @@ NUM_BINS = 201
 
 def singleshot_visualize(
     signals: np.ndarray, plot_center: bool = True
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """
     Visualize single-shot measurements in IQ plane.
 
@@ -81,10 +83,10 @@ def singleshot_visualize(
 
 def singleshot_ge_analysis(
     signals: np.ndarray,
-    angle: float = None,
+    angle: Optional[float] = None,
     backend: Literal["center", "regression", "pca"] = "pca",
     **kwargs,
-) -> Tuple[float, float, float, np.ndarray, dict, plt.Figure]:
+) -> Tuple[float, float, float, np.ndarray, dict, Figure]:
     """
     Analyze ground and excited state signals to determine classification parameters.
 

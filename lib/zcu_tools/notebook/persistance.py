@@ -111,16 +111,16 @@ def load_spects(load_path: str) -> Dict[str, Any]:
             s_spects.update(
                 {
                     key: {
-                        "mA_c": grp["mA_c"][()],
-                        "period": grp["period"][()],
+                        "mA_c": grp["mA_c"][()],  # type: ignore
+                        "period": grp["period"][()],  # type: ignore
                         "spectrum": {
-                            "mAs": grp["spectrum"]["mAs"][()],
-                            "fpts": grp["spectrum"]["fpts"][()],
-                            "data": grp["spectrum"]["data"][()],
+                            "mAs": grp["spectrum"]["mAs"][()],  # type: ignore
+                            "fpts": grp["spectrum"]["fpts"][()],  # type: ignore
+                            "data": grp["spectrum"]["data"][()],  # type: ignore
                         },
                         "points": {
-                            "mAs": grp["points"]["mAs"][()],
-                            "fpts": grp["points"]["fpts"][()],
+                            "mAs": grp["points"]["mAs"][()],  # type: ignore
+                            "fpts": grp["points"]["fpts"][()],  # type: ignore
                         },
                     }
                 }

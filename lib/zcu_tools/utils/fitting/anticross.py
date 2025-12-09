@@ -55,7 +55,7 @@ def fit_hyperbolic(
         )
 
     if np.any(np.isnan([a, b, c, d, e, f])):
-        return (np.nan,) * 6
+        return (np.nan, np.nan, np.nan, np.nan, np.nan, np.nan)
 
     # ---------------------------------------------------------------------
     # 2. Define residuals for least-squares optimisation
@@ -175,7 +175,7 @@ def fit_anticross2d(
         # 用線性插值取得每個 rf_0 對應的 signal
         vals1 = [np.interp(f, fpts, amps[i]) for i, f in enumerate(fit_fpts1)]
         vals2 = [np.interp(f, fpts, amps[i]) for i, f in enumerate(fit_fpts2)]
-        return -np.nanmean(vals1) - np.nanmean(vals2)
+        return float(-np.nanmean(vals1) - np.nanmean(vals2))
 
     fit_kwargs = dict(
         method="L-BFGS-B",

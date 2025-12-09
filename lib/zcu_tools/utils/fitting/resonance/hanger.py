@@ -2,6 +2,8 @@ from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.patches import Circle
 
 from .base import (
     calc_phase,
@@ -79,7 +81,7 @@ class HangerModel:
         )
 
     @classmethod
-    def visualize_fit(cls, fpts, signals, param_dict: dict) -> plt.Figure:
+    def visualize_fit(cls, fpts, signals, param_dict: dict) -> Figure:
         freq = param_dict["freq"]
         kappa = param_dict["kappa"]
         theta0 = param_dict["theta0"]
@@ -118,7 +120,7 @@ class HangerModel:
         )
 
         ax1.plot(norm_signals.real, norm_signals.imag)
-        ax1.add_patch(plt.Circle((norm_xc, norm_yc), norm_r0, fill=False, color="red"))
+        ax1.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color="red"))
         ax1.plot([norm_xc, 1], [norm_yc, 0], "kx--")
         ax1.axhline(0, color="k", linestyle="--")
         ax1.set_aspect("equal")

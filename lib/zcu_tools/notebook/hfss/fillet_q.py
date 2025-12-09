@@ -32,9 +32,12 @@
 
 import warnings
 
-import numpy as np
-from qiskit_metal import Dict, draw
-from qiskit_metal.qlibrary.core import BaseQubit
+try:
+    from qiskit_metal import Dict, draw  # type: ignore
+    from qiskit_metal.qlibrary.core import BaseQubit  # type: ignore
+except ImportError:
+    print("qiskit_metal is not installed")
+    raise
 
 
 class Fillet_Qubit(BaseQubit):

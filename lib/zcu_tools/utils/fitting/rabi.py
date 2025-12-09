@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple, cast
 
 import numpy as np
 
@@ -15,6 +15,7 @@ def fit_rabi(
     """Return (pi_x, pi2_x, freq, fit_signals, (pOpt, pCov))"""
 
     # choose fitting function
+    fixedparams: List[Optional[float]]
     if decay:
         fit_func = fitdecaycos
         cos_func = decaycos
@@ -43,5 +44,7 @@ def fit_rabi(
     else:
         pi_x = (1.0 - phase / 360) / freq
         pi2_x = (0.75 - phase / 360) / freq
+
+    pOpt = cast(Tuple[float, float, float, float, float], tuple(pOpt))
 
     return float(pi_x), float(pi2_x), float(freq), fit_signals, (pOpt, pCov)

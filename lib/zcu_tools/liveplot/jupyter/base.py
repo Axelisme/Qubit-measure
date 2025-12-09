@@ -30,16 +30,16 @@ def instant_plot(fig: Figure) -> None:
 
     pixel_per_inch = 70
 
-    canvas.toolbar_visible = False
-    canvas.header_visible = False
-    canvas.footer_visible = False
-    canvas.layout.width = f"{int(figsize[0] * pixel_per_inch)}px"
-    canvas.layout.height = f"{int(figsize[1] * pixel_per_inch)}px"
+    canvas.toolbar_visible = False  # type: ignore
+    canvas.header_visible = False  # type: ignore
+    canvas.footer_visible = False  # type: ignore
+    canvas.layout.width = f"{int(figsize[0] * pixel_per_inch)}px"  # type: ignore
+    canvas.layout.height = f"{int(figsize[1] * pixel_per_inch)}px"  # type: ignore
 
-    canvas._handle_message(canvas, {"type": "send_image_mode"}, [])
-    canvas._handle_message(canvas, {"type": "refresh"}, [])
-    canvas._handle_message(canvas, {"type": "initialized"}, [])
-    canvas._handle_message(canvas, {"type": "draw"}, [])
+    canvas._handle_message(canvas, {"type": "send_image_mode"}, [])  # type: ignore
+    canvas._handle_message(canvas, {"type": "refresh"}, [])  # type: ignore
+    canvas._handle_message(canvas, {"type": "initialized"}, [])  # type: ignore
+    canvas._handle_message(canvas, {"type": "draw"}, [])  # type: ignore
 
     display(canvas)
 
@@ -78,7 +78,10 @@ def grab_frame_with_instant_plot(writer: FFMpegWriter, **savefig_kwargs) -> None
 
     # Save the figure data to the sink, using the frame format and dpi.
     writer.fig.savefig(
-        writer._proc.stdin, format=writer.frame_format, dpi=writer.dpi, **savefig_kwargs
+        writer._proc.stdin,  # type: ignore
+        format=writer.frame_format,
+        dpi=writer.dpi,
+        **savefig_kwargs,
     )
 
 

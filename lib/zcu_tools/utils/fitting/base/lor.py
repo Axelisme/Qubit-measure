@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 
@@ -15,7 +15,7 @@ def lorfunc(x: np.ndarray, *p) -> np.ndarray:
 def fitlor(
     xdata: np.ndarray,
     ydata: np.ndarray,
-    fitparams: Optional[List[Optional[float]]] = None,
+    fitparams: Optional[Sequence[Optional[float]]] = None,
 ) -> Tuple[List[float], Any]:
     if fitparams is None:
         fitparams = [None] * 5
@@ -34,6 +34,7 @@ def fitlor(
         gamma = np.abs(yscale) / 10
 
         assign_init_p(fitparams, [y0, slope, yscale, x0, gamma])
+    fitparams = cast(List[float], fitparams)
 
     # bounds
     yscale = fitparams[2]
@@ -60,7 +61,7 @@ def asym_lorfunc(x: np.ndarray, *p) -> np.ndarray:
 def fit_asym_lor(
     xdata: np.ndarray,
     ydata: np.ndarray,
-    fitparams: Optional[List[Optional[float]]] = None,
+    fitparams: Optional[Sequence[Optional[float]]] = None,
 ) -> Tuple[List[float], Any]:
     if fitparams is None:
         fitparams = [None] * 6
@@ -76,19 +77,12 @@ def fit_asym_lor(
         else:
             yscale = np.max(ydata) - y0
             x0 = xdata[np.argmax(ydata)]
-        # gamma = (xdata[-1] - xdata[0]) / 100
-        # calculate gamma from variance
-        # weights = np.abs(ydata - np.median(ydata))
-        # weights = np.where(weights > 0.7 * np.max(weights), 0, weights)
-        # weights = weights / np.sum(weights)
-        # gamma = np.sqrt(np.sum(weights * (xdata - x0) ** 2)) / 10
-        # calculate alpha from skewness
-        # skewness = np.sum(weights * (xdata - x0) ** 3) / gamma**3
-        # alpha = -skewness / 5
+
         gamma = np.abs(yscale) / 10
         alpha = 0
 
         assign_init_p(fitparams, [y0, slope, yscale, x0, gamma, alpha])
+    fitparams = cast(List[float], fitparams)
 
     # bounds
     yscale = fitparams[2]

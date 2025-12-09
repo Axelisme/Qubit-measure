@@ -13,9 +13,12 @@
 # that they have been altered from the originals.
 """Tee-shaped coupler with fillet for Q components."""
 
-import numpy as np
-from qiskit_metal import Dict, draw
-from qiskit_metal.qlibrary.core.base import QComponent
+try:
+    from qiskit_metal import Dict, draw  # type: ignore
+    from qiskit_metal.qlibrary.core.base import QComponent  # type: ignore
+except ImportError:
+    print("qiskit_metal is not installed")
+    raise
 
 
 class Round_Tee(QComponent):
@@ -64,9 +67,9 @@ class Round_Tee(QComponent):
             p.cpw_width + 2 * p.cpw_gap,
             p.tee_fillet,
             p.tee_width + 2 * p.cpw_gap,
-            subtract=1,
+            subtract=True,
         )
-        self.make_round_tee(p.cpw_width, p.tee_fillet, p.tee_width, subtract=0)
+        self.make_round_tee(p.cpw_width, p.tee_fillet, p.tee_width, subtract=False)
 
     def make_round_tee(self, cpw_width, fillet, tee_width, subtract=False):
         p = self.p

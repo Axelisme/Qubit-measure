@@ -1,6 +1,8 @@
+from typing import List, Optional, Sequence, cast
+
 import numpy as np
 
-from .base import batch_fit_func, fit_func, assign_init_p
+from .base import assign_init_p, batch_fit_func, fit_func
 
 
 # Gaussian function
@@ -9,7 +11,12 @@ def gauss_func(x, y0, yscale, x_c, sigma):
     return y0 + yscale * np.exp(-0.5 * ((x - x_c) / sigma) ** 2)
 
 
-def fit_gauss(xdata, ydata, fitparams=None, fixedparams=None):
+def fit_gauss(
+    xdata,
+    ydata,
+    fitparams: Optional[Sequence[Optional[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
+):
     """params: [y0, yscale, x_c, sigma]"""
     if fixedparams is not None and len(fixedparams) != 4:
         raise ValueError(
@@ -37,6 +44,7 @@ def fit_gauss(xdata, ydata, fitparams=None, fixedparams=None):
             * np.sum(norm_ydata > 0.5 * np.abs(yscale))
         )
         assign_init_p(fitparams, [y0, yscale, x_c, sigma])
+    fitparams = cast(List[float], fitparams)
 
     # bounds
     y0, yscale, x_c, sigma = fitparams
@@ -149,11 +157,19 @@ def fit_dual_gauss_gmm(signals):
     gmm = GaussianMixture(n_components=2, covariance_type="spherical")
     gmm.fit(signals)
 
-    yscale1 = signals.shape[0] * gmm.weights_[0]
-    yscale2 = signals.shape[1] * gmm.weights_[1]
-    x_c1, x_c2 = gmm.means_[0][0], gmm.means_[1][0]
-    sigma1 = np.sqrt(gmm.covariances_[0])
-    sigma2 = np.sqrt(gmm.covariances_[1])
+    means = gmm.means_
+    weights = gmm.weights_
+    covariances = gmm.covariances_
+
+    assert means is not None
+    assert weights is not None
+    assert covariances is not None
+
+    yscale1 = signals.shape[0] * weights[0]
+    yscale2 = signals.shape[1] * weights[1]
+    x_c1, x_c2 = means[0][0], means[1][0]
+    sigma1 = np.sqrt(covariances[0])
+    sigma2 = np.sqrt(covariances[1])
 
     if x_c1 < x_c2:  # make first peak left
         return [yscale1, x_c1, sigma1, yscale2, x_c2, sigma2]

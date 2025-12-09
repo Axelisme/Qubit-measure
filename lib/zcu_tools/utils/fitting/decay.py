@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import numpy as np
 
@@ -95,7 +95,7 @@ def fit_ge_decay(
                 ),
             ],
         )
-        g_params, e_params = ge_params
+        g_params, e_params = tuple(ge_params[0]), tuple(ge_params[1])
         g_pCov, e_pCov = ge_pcov
 
     g_t1 = g_params[2]
@@ -136,6 +136,8 @@ def fit_decay_fringe(
     detune: float = pOpt[2]
     detune_err: float = np.sqrt(pCov[2, 2])
 
+    pOpt = cast(Tuple[float, float, float, float, float], tuple(pOpt))
+
     return t2f, t2ferr, detune, detune_err, fit_signals, (pOpt, pCov)
 
 
@@ -151,12 +153,14 @@ def fit_gauss_decay(
 
     fit_signals = gauss_func(xs, *pOpt)
 
-    sigma: float = pOpt[2]
+    sigma = pOpt[2]
     sigma_err: float = np.sqrt(pCov[2, 2])
 
     # effective T2
     # f(0) * exp(-1) = f(0) * exp(-t2^2 / (2*sigma^2))
     t2 = np.sqrt(2) * sigma
     t2_err = np.sqrt(2) * sigma_err
+
+    pOpt = cast(Tuple[float, float, float, float, float], tuple(pOpt))
 
     return t2, t2_err, fit_signals, (pOpt, pCov)

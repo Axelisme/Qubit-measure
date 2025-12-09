@@ -1,3 +1,5 @@
+from typing import List, Optional, Sequence, cast
+
 import numpy as np
 import scipy.stats as stats
 from scipy.special import iv
@@ -59,13 +61,21 @@ def gauss_func(xs, x_c, s) -> np.ndarray:
     return f / np.sum(f)
 
 
-def fit_singleshot(xs, g_pdfs, e_pdfs, fitparams=None, fixedparams=None):
+def fit_singleshot(
+    xs,
+    g_pdfs,
+    e_pdfs,
+    fitparams: Optional[Sequence[Optional[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
+):
     """fitparams: [sg, se, s, p0, p_avg, length_ratio]"""
     if fixedparams is not None:
         if len(fixedparams) != 6:
             raise ValueError(
                 "Fixed parameters must be a list of six elements: [sg, se, s, p0, p_avg, length_ratio]"
             )
+
+        fixedparams = list(fixedparams)
 
         length_ratio = fixedparams[5]
         if length_ratio == 0.0:
@@ -110,6 +120,7 @@ def fit_singleshot(xs, g_pdfs, e_pdfs, fitparams=None, fixedparams=None):
         length_ratio = 0.01
 
         assign_init_p(fitparams, [sg, se, s, p0, p_avg, length_ratio])
+    fitparams = cast(List[float], fitparams)
 
     sg, se, s, p0, p_avg, length_ratio = fitparams
     bounds = (

@@ -23,6 +23,7 @@ class ScatterSegment(AbsSegment):
 
         if scatter_kwargs is None:
             scatter_kwargs = {}
+        scatter_kwargs = dict(scatter_kwargs)
 
         default_scatter_kwargs = {"marker": ".", "s": 2}
         for k, v in default_scatter_kwargs.items():
@@ -58,16 +59,9 @@ class ScatterSegment(AbsSegment):
         self.scatter.set_offsets(offsets)
         if colors is not None:
             colors_arr = np.asarray(colors)
-            if (
-                colors_arr.size > 0
-                and np.issubdtype(colors_arr.dtype, np.number)
-                and colors_arr.ndim == 1
-            ):
-                self.scatter.set_array(colors_arr)
-                self.scatter.set_clim(np.nanmin(colors_arr), np.nanmax(colors_arr))
-            else:
-                self.scatter.set_array(None)
-                self.scatter.set_facecolors(colors_arr)
+
+            self.scatter.set_array(colors_arr)
+            self.scatter.set_clim(np.nanmin(colors_arr), np.nanmax(colors_arr))
 
         if title is not None:
             ax.set_title(title)

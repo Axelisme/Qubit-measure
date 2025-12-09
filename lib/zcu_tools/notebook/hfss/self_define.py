@@ -13,8 +13,12 @@
 # that they have been altered from the originals.
 """File contains dictionary for Rectangle and the make()."""
 
-from qiskit_metal import Dict, draw
-from qiskit_metal.qlibrary.core import QComponent
+try:
+    from qiskit_metal import Dict, draw  # type: ignore
+    from qiskit_metal.qlibrary.core import QComponent  # type: ignore
+except ImportError:
+    print("qiskit_metal is not installed")
+    raise
 
 
 class Cross(QComponent):

@@ -1,5 +1,6 @@
 from functools import wraps
-from typing import Callable, List, Optional, Sequence, Tuple
+from token import OP
+from typing import Callable, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import scipy as sp
@@ -7,11 +8,15 @@ import scipy as sp
 
 def with_fixed_params(
     fitfunc: Callable[..., np.ndarray],
-    init_p: List[float],
-    bounds: Optional[Tuple[List[float], List[float]]],
-    fixedparams: List[Optional[float]],
-) -> Tuple[Callable[..., np.ndarray], np.ndarray, Optional[np.ndarray]]:
-    fixedparams_array = np.array(fixedparams, dtype=np.float64)  # convert None to nan
+    init_p: Sequence[Optional[float]],
+    bounds: Optional[Tuple[Sequence[float], Sequence[float]]],
+    fixedparams: Sequence[Optional[float]],
+) -> Tuple[
+    Callable[..., np.ndarray],
+    Sequence[Optional[float]],
+    Optional[Tuple[Sequence[float], Sequence[float]]],
+]:
+    fixedparams_array = np.asarray(fixedparams, dtype=np.float64)  # convert None to nan
     non_fixed_idxs = np.isnan(fixedparams_array)
 
     @wraps(fitfunc)
@@ -27,37 +32,39 @@ def with_fixed_params(
         return fitfunc(xs, *params)
 
     init_p_array = np.array(init_p)[non_fixed_idxs]
+    init_p = list(init_p_array)
 
     if bounds is not None:
         bounds_array = np.array(bounds)[:, non_fixed_idxs]
+        bounds = (list(bounds_array[0]), list(bounds_array[1]))
     else:
-        bounds_array = None
+        bounds = None
 
-    return wrapped_func, init_p_array, bounds_array
+    return wrapped_func, init_p, bounds
 
 
 def add_fixed_params_back(
-    pOpt: List[float], pCov: np.ndarray, fixedparams: List[Optional[float]]
+    pOpt: List[float], pCov: np.ndarray, fixedparams: Sequence[Optional[float]]
 ) -> Tuple[List[float], np.ndarray]:
-    fixedparams = np.array(fixedparams, dtype=float)
-    non_fixed_idxs = np.isnan(fixedparams)
+    _fixedparams = np.asarray(fixedparams, dtype=float)
+    non_fixed_idxs = np.isnan(_fixedparams)
 
-    pOpt_full = fixedparams.copy()
+    pOpt_full = _fixedparams.copy()
     pOpt_full[non_fixed_idxs] = pOpt
 
-    pCov_full = np.zeros((len(fixedparams), len(fixedparams)))
+    pCov_full = np.zeros((len(_fixedparams), len(_fixedparams)))
     pCov_full[:, non_fixed_idxs][non_fixed_idxs] = pCov
 
-    return pOpt_full, pCov_full
+    return list(pOpt_full), pCov_full
 
 
 def fit_func(
     xdata: np.ndarray,
     ydata: np.ndarray,
     fitfunc: Callable[..., np.ndarray],
-    init_p: Optional[List[float]] = None,
-    bounds: Optional[Tuple[List[float], List[float]]] = None,
-    fixedparams: Optional[List[Optional[float]]] = None,
+    init_p: Optional[Sequence[Optional[float]]] = None,
+    bounds: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
     estimate_sigma: bool = True,
     **kwargs,
 ) -> Tuple[List[float], np.ndarray]:
@@ -82,7 +89,9 @@ def fit_func(
             fitfunc, xdata, ydata, p0=init_p, bounds=bounds, **kwargs
         )
     except RuntimeError:
-        pOpt = list(init_p)
+        if init_p is None:
+            raise
+        pOpt = [p if p is not None else np.nan for p in init_p]
         pCov = np.full(shape=(len(init_p), len(init_p)), fill_value=np.inf)
 
     if fixedparams is not None and len(fixedparams) > 0:
@@ -105,18 +114,26 @@ def batch_fit_func(
     n_params_total = len(list_init_p[0])  # 總參數個數（以第一組為準）
 
     # 計算哪些是非共享參數索引
-    shared_idxs = set(shared_idxs)
-    local_idxs = set(range(n_params_total)) - shared_idxs
+    _shared_idxs = set(shared_idxs)
+    local_idxs = set(range(n_params_total)) - _shared_idxs
     local_idxs = sorted(local_idxs)
-    shared_idxs = sorted(shared_idxs)
+    _shared_idxs = sorted(_shared_idxs)
 
-    n_shared = len(shared_idxs)
+    n_shared = len(_shared_idxs)
     n_local = len(local_idxs)
 
-    def build_batch_params(list_p0, list_bounds, fixedparams):
-        nonlocal shared_idxs, local_idxs
+    def build_batch_params(
+        list_p0: Sequence[Sequence[float]],
+        list_bounds: Optional[Sequence[Tuple[Sequence[float], Sequence[float]]]],
+        fixedparams: Optional[Sequence[Optional[float]]],
+    ) -> Tuple[
+        List[float],
+        Optional[Tuple[Sequence[float], Sequence[float]]],
+        Optional[Sequence[Optional[float]]],
+    ]:
+        nonlocal _shared_idxs, local_idxs
 
-        shared_p0 = [np.mean([p[j] for p in list_p0]) for j in shared_idxs]
+        shared_p0 = [np.mean([p[j] for p in list_p0]).item() for j in _shared_idxs]
         local_p0 = []
         for p in list_p0:
             local_p0.extend(p[j] for j in local_idxs)
@@ -124,23 +141,23 @@ def batch_fit_func(
 
         # 組合 bounds（若有）
         if list_bounds is not None:
-            list_bounds = np.array(list_bounds)
-            lower_shared = np.min(list_bounds[:, 0, shared_idxs], axis=0)
-            upper_shared = np.max(list_bounds[:, 1, shared_idxs], axis=0)
+            array_bounds = np.array(list_bounds)
+            lower_shared = np.min(array_bounds[:, 0, _shared_idxs], axis=0)  # type: ignore
+            upper_shared = np.max(array_bounds[:, 1, _shared_idxs], axis=0)  # type: ignore
             lower_local = []
             upper_local = []
             for b in list_bounds:
                 lower_local.extend(b[0][j] for j in local_idxs)
                 upper_local.extend(b[1][j] for j in local_idxs)
             batch_bounds = (
-                np.concatenate([lower_shared, lower_local]),
-                np.concatenate([upper_shared, upper_local]),
+                list(np.concatenate([lower_shared, lower_local])),
+                list(np.concatenate([upper_shared, upper_local])),
             )
         else:
             batch_bounds = None
 
         if fixedparams is not None and any([p is not None for p in fixedparams]):
-            shared_fixed = [fixedparams[s] for s in shared_idxs]
+            shared_fixed = [fixedparams[s] for s in _shared_idxs]
             local_fixed = [fixedparams[ll] for ll in local_idxs] * n_groups
             fixedparams = shared_fixed + local_fixed
         else:
@@ -154,13 +171,16 @@ def batch_fit_func(
         total_indices = []
         total_params = []
         for i in range(n_groups):
-            group_indices = [None] * n_params_total
-            for j, share_idx in enumerate(shared_idxs):
+            group_indices: List[Optional[int]] = [None] * n_params_total
+            for j, share_idx in enumerate(_shared_idxs):
                 group_indices[share_idx] = j
             for j, local_idx in enumerate(local_idxs):
                 group_indices[local_idx] = j + i * n_local + n_shared
-            total_indices.append(group_indices)
-            total_params.append([batch_params[i] for i in group_indices])
+            assert all([gi is not None for gi in group_indices])
+
+            _group_indices = cast(List[int], group_indices)
+            total_indices.append(_group_indices)
+            total_params.append([batch_params[i] for i in _group_indices])
         return total_params, total_indices
 
     # 定義合併的全域模型函數
@@ -179,7 +199,7 @@ def batch_fit_func(
 
     # 擬合
     popt, pcov = fit_func(
-        None,
+        None,  # type: ignore
         batch_y,
         batched_func,
         init_p=batch_p0,
@@ -189,7 +209,7 @@ def batch_fit_func(
     )
 
     # 還原每組共變異數子矩陣
-    list_popt, total_indices = build_total_params(popt)
+    list_popt, total_indices = build_total_params(tuple(popt))
     list_pcov = []
     for i in range(n_groups):
         # 擷取子矩陣
@@ -197,8 +217,8 @@ def batch_fit_func(
 
         # 建立完整大小的共變異數矩陣（含共享與本地參數）
         pcov_i = np.full((n_params_total, n_params_total), np.nan)
-        for m, mi in enumerate(shared_idxs + local_idxs):
-            for n, ni in enumerate(shared_idxs + local_idxs):
+        for m, mi in enumerate(_shared_idxs + local_idxs):
+            for n, ni in enumerate(_shared_idxs + local_idxs):
                 pcov_i[mi, ni] = sub_pcov[m, n]
 
         list_pcov.append(pcov_i)
@@ -207,8 +227,9 @@ def batch_fit_func(
 
 
 def assign_init_p(
-    fitparams: List[Optional[float]], init_p: List[float]
+    fitparams: Sequence[Optional[float]], init_p: Sequence[float]
 ) -> List[Optional[float]]:
+    fitparams = list(fitparams)
     for i, p in enumerate(init_p):
         if fitparams[i] is None:
             fitparams[i] = p

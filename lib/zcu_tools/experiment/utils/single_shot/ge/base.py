@@ -2,14 +2,17 @@ from typing import Callable, Dict, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from scipy.special import erfc
 
 # from zcu_tools.utils.fitting import fit_dual_gauss, gauss_func
 from zcu_tools.utils.fitting.singleshot import (
     calc_population_pdf,
     fit_singleshot,
-    gauss_func,
     fit_singleshot_p0,
+    gauss_func,
 )
 
 
@@ -22,7 +25,7 @@ def rotate(
 
 
 def scatter_ge_plot(
-    ax: plt.Axes,
+    ax: Axes,
     Ige: Tuple[np.ndarray, np.ndarray],
     Qge: Tuple[np.ndarray, np.ndarray],
     title: Optional[str] = None,
@@ -80,11 +83,11 @@ def hist(
     Ig: np.ndarray,
     Ie: np.ndarray,
     numbins: Union[int, str] = "auto",
-    ax: Optional[plt.Axes] = None,
+    ax: Optional[Axes] = None,
     title: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     I_tot = np.concatenate((Ie, Ig))
-    xlims = [np.min(I_tot), np.max(I_tot)]
+    xlims = (np.min(I_tot), np.max(I_tot))
     bins = np.histogram_bin_edges(I_tot, bins=numbins)
     ng, *_ = np.histogram(Ig, bins=bins, range=xlims)
     ne, *_ = np.histogram(Ie, bins=bins, range=xlims)
@@ -94,8 +97,8 @@ def hist(
         plt_params = dict(
             x=0.5 * (bins[1:] + bins[:-1]), bins=bins, range=xlims, alpha=0.5
         )
-        ax.hist(color="b", weights=ng, label="g", **plt_params)
-        ax.hist(color="r", weights=ne, label="e", **plt_params)
+        ax.hist(color="b", weights=ng, label="g", **plt_params)  # type: ignore
+        ax.hist(color="r", weights=ne, label="e", **plt_params)  # type: ignore
         ax.set_ylabel("Counts", fontsize=14)
         ax.set_xlabel("I [ADC levels]", fontsize=14)
         ax.legend(loc="upper right")
@@ -153,7 +156,7 @@ def fitting_ge_and_plot(
     init_p0: Optional[float] = None,
     avg_p: Optional[float] = None,
     align_t1: bool = True,
-) -> Tuple[float, float, float, np.ndarray, dict, plt.Figure]:
+) -> Tuple[float, NDArray, Dict, Figure]:
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
 

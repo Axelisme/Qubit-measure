@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import warnings
 from abc import ABC, abstractmethod
-from collections import OrderedDict
 from copy import deepcopy
 from functools import wraps
 from pathlib import Path
@@ -57,6 +56,7 @@ class SyncFile(ABC):
     def _dump(self) -> None: ...
 
     def update_modify_time(self) -> None:
+        assert self._path is not None
         self._modify_time = self._path.stat().st_mtime_ns
 
     def load(self) -> None:
@@ -87,6 +87,7 @@ class SampleTable(SyncFile):
         super().__init__(csv_path)
 
     def _load(self) -> None:
+        assert self._path is not None
         try:
             self.samples = pd.read_csv(self._path)
         except pd.errors.EmptyDataError:
@@ -94,6 +95,7 @@ class SampleTable(SyncFile):
 
     def _dump(self) -> None:
         # ensure directory exists
+        assert self._path is not None
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self.samples.to_csv(self._path, index=False)  # write csv
 
@@ -141,7 +143,7 @@ class MetaDictView:
 
     def __getattr__(self, name: str, /) -> Any:
         if MetaDictView._is_protected(name):
-            return object.__getattr__(self, name)
+            return object.__getattr__(self, name)  # type: ignore
 
         self._table.sync()
         value = self._data[name]
@@ -196,6 +198,7 @@ class MetaDict(SyncFile):
         super().__init__(json_path)
 
     def _load(self) -> None:
+        assert self._path is not None
         try:
             with open(self._path, "r", encoding="utf-8") as f:
                 self._data.clear()
@@ -204,6 +207,7 @@ class MetaDict(SyncFile):
             warnings.warn(f"Failed to load {self._path}, ignoring...")
 
     def _dump(self) -> None:
+        assert self._path is not None
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
         data_to_dump = numpy2number(self._data)
@@ -230,7 +234,7 @@ class MetaDict(SyncFile):
 
     def __getattr__(self, name: str) -> Any:
         if MetaDict._is_protected(name):
-            return object.__getattr__(self, name)
+            return object.__getattr__(self, name)  # type: ignore
 
         return getattr(self._view, name)
 
@@ -286,4 +290,4 @@ if __name__ == "__main__":
             },
         }
         print(mt)
-        mt.nest_dict.dump_json("nest_dict.json")
+        mt.nest_dict.dump_json("nest_dict.json")  # type: ignore

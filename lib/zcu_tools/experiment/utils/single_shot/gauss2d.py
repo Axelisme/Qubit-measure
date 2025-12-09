@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Tuple, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from sklearn.mixture import GaussianMixture
@@ -70,9 +71,14 @@ def fit_gauss_2d(
 
     # 填充實際擬合的組件參數
     means = gmm.means_
-    covariances = np.maximum(gmm.covariances_, 1e-9)  # 防止 sqrt(負數) 或 sigma=0
-    sigmas = np.sqrt(covariances)
     weights = gmm.weights_
+    covariances = cast(NDArray[np.float64], gmm.covariances_)
+    covariances = np.clip(covariances, 1e-9, None)  # 防止 sqrt(負數) 或 sigma=0
+
+    assert weights is not None
+    assert means is not None
+
+    sigmas = np.sqrt(covariances)
 
     params = np.column_stack((means[:, 0], means[:, 1], sigmas, weights))
 

@@ -1,3 +1,5 @@
+from typing import List, Optional, Sequence, cast
+
 import numpy as np
 
 from .base import assign_init_p, fit_func
@@ -10,7 +12,12 @@ def cosfunc(x, *p):
     return y0 + yscale * np.cos(2 * np.pi * (freq * x + phase / 360))
 
 
-def fitcos(xdata, ydata, fitparams=None, fixedparams=None):
+def fitcos(
+    xdata,
+    ydata,
+    fitparams: Optional[Sequence[Optional[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
+):
     """fitparams = [y0, yscale, freq, phase]"""
     if fitparams is None:
         fitparams = [None] * 4
@@ -34,6 +41,7 @@ def fitcos(xdata, ydata, fitparams=None, fixedparams=None):
         phase = np.angle(fft[max_id], deg=True) % 360
 
         assign_init_p(fitparams, [y0, yscale, freq, phase])
+    fitparams = cast(List[float], fitparams)
 
     # bounds
     yscale = fitparams[1]
@@ -60,7 +68,12 @@ def decaycos(x, *p):
     )
 
 
-def fitdecaycos(xdata, ydata, fitparams=None, fixedparams=None):
+def fitdecaycos(
+    xdata,
+    ydata,
+    fitparams: Optional[Sequence[Optional[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
+):
     """return (y0, yscale, freq, phase, decay_time), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 5
@@ -85,6 +98,7 @@ def fitdecaycos(xdata, ydata, fitparams=None, fixedparams=None):
         decay_time = xdata[-1] - xdata[0]
 
         assign_init_p(fitparams, [y0, yscale, freq, phase, decay_time])
+    fitparams = cast(List[float], fitparams)
 
     # bounds
     yscale = fitparams[1]

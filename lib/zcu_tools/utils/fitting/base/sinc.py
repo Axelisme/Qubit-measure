@@ -1,3 +1,5 @@
+from typing import List, Optional, Sequence, cast
+
 import numpy as np
 
 from .base import assign_init_p, fit_func
@@ -10,7 +12,7 @@ def sincfunc(x, *p):
 
 
 # 擬合sinc函數
-def fitsinc(xdata, ydata, fitparams=None):
+def fitsinc(xdata, ydata, fitparams: Optional[Sequence[Optional[float]]] = None):
     if fitparams is None:
         fitparams = [None] * 5
 
@@ -28,6 +30,7 @@ def fitsinc(xdata, ydata, fitparams=None):
         gamma = (xdata[-1] - xdata[0]) / 10
 
         assign_init_p(fitparams, [y0, slope, yscale, x0, gamma])
+    fitparams = cast(List[float], fitparams)
 
     # 參數邊界
     yscale = fitparams[2]

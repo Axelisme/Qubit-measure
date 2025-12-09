@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import List, Optional, Tuple, Union, cast
 
 import numpy as np
 import scipy as sp
@@ -115,9 +115,9 @@ def fit_resonant_params(
     init_Ql = 2 * init_freq / fwhm
     init_theta0 = 0.5 * (np.max(phases) + np.min(phases))
 
-    fixedparams = [None] * 3
+    fixedparams: List[Union[float, None]] = [None] * 3
     if not fit_theta0:
-        init_theta0 = np.angle(circle_params[0] + 1j * circle_params[1])
+        init_theta0 = np.angle(circle_params[0] + 1j * circle_params[1]).item()
         while init_theta0 < np.min(phases):
             init_theta0 += 2 * np.pi
         while init_theta0 > np.max(phases):
@@ -136,7 +136,7 @@ def fit_resonant_params(
         fixedparams=fixedparams,
     )
 
-    return tuple(pOpt)
+    return cast(Tuple[float, float, float], tuple(pOpt))
 
 
 def normalize_signal(

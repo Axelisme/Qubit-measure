@@ -89,8 +89,11 @@ class StatisticMixin(TypedAcquireMixin):
                     "Statistic is not implemented for thresholded data"
                 )
 
+            ro_chs = self.ro_chs  # type: ignore
+
+            assert isinstance(ro_chs, dict)
             for d_rep, tracker, ro in zip(
-                self.acc_buf, self._statistic_trackers, self.ro_chs.values()
+                self.acc_buf, self._statistic_trackers, ro_chs.values()
             ):
                 assert self.avg_level is not None
                 d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
@@ -104,10 +107,11 @@ class StatisticMixin(TypedAcquireMixin):
         return not_finish
 
     def acquire(self, *args, record_statistic=False, **kwargs):
+        ro_chs = self.ro_chs  # type: ignore
+
+        assert isinstance(ro_chs, dict)
         if record_statistic:
-            self._statistic_trackers = [
-                OnlineStatisticTracker() for _ in self.ro_chs.keys()
-            ]
+            self._statistic_trackers = [OnlineStatisticTracker() for _ in ro_chs.keys()]
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(record_statistic=record_statistic)
         return super().acquire(*args, extra_args=extra_args, **kwargs)
