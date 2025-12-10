@@ -8,15 +8,15 @@ dependencies = ["numpy", "tqdm", "matplotlib", "typing-extensions"]
 
 [project.optional-dependencies]
 client = [
-    "qick",
+    "zcu-tools[fit]",
+    "qick @ git+https://github.com/openquantumhardware/qick.git",
+    "labber @ git+https://github.com/Axelisme/labber_api.git",
     "numpy==1.23.5",
     "matplotlib==3.9",
     "pyyaml",
     "dill",
     "pyvisa",
-    "jupytext",
     "pyro4",
-    "scikit-optimize",
 ]
 server = ["qick", "dill", "numpy==1.23.5"]
 fit = [
@@ -58,7 +58,7 @@ ignore = ["E402", "F401"]
 
 [tool.pyright]
 include = ["lib"]
-typeCheckingMode = "off"
+typeCheckingMode = "basic"
 reportExplicitAny = "none"
 reportMissingTypeStubs = "none"
 
