@@ -227,9 +227,8 @@ def batch_fit_func(
 
 
 def assign_init_p(
-    fitparams: Sequence[Optional[float]], init_p: Sequence[float]
+    fitparams: List[Optional[float]], init_p: Sequence[float]
 ) -> List[Optional[float]]:
-    fitparams = list(fitparams)
     for i, p in enumerate(init_p):
         if fitparams[i] is None:
             fitparams[i] = p

@@ -21,6 +21,7 @@ def fitcos(
     """fitparams = [y0, yscale, freq, phase]"""
     if fitparams is None:
         fitparams = [None] * 4
+    fitparams = list(fitparams)
 
     if fixedparams is not None and len(fixedparams) != 4:
         raise ValueError(
@@ -77,6 +78,7 @@ def fitdecaycos(
     """return (y0, yscale, freq, phase, decay_time), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 5
+    fitparams = list(fitparams)
 
     if fixedparams is not None and len(fixedparams) != 5:
         raise ValueError(

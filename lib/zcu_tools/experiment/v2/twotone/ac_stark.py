@@ -67,7 +67,8 @@ def get_resonance_freq(
         if np.any(np.isnan(amp)):
             continue
 
-        curr_freq = fitlor(fpts, amp)[0][3]
+        param, _ = fitlor(fpts, amp)
+        curr_freq = param[3]
 
         if abs(curr_freq - prev_freq) > 0.1 * (fpts[-1] - fpts[0]):
             continue
@@ -297,12 +298,11 @@ class AcStarkExperiment(AbsExperiment):
 
     def load(self, filepath: str, **kwargs) -> AcStarkResultType:
         signals2D, pdrs, fpts = load_data(filepath, **kwargs)
-        assert pdrs is not None and fpts is not None
+        assert fpts is not None
         assert len(pdrs.shape) == 1 and len(fpts.shape) == 1
-        assert signals2D.shape == (len(fpts), len(pdrs))
+        assert signals2D.shape == (len(pdrs), len(fpts))
 
         fpts = fpts * 1e-6  # Hz -> MHz
-        signals2D = signals2D.T  # transpose back
 
         pdrs = pdrs.astype(np.float64)
         fpts = fpts.astype(np.float64)

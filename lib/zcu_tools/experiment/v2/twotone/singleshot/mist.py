@@ -175,9 +175,6 @@ class MISTPowerDepSingleShot(AbsExperiment):
 
     def load(self, filepath: str, **kwargs) -> MISTPowerDepResultType:
         signals, pdrs, _ = load_data(filepath, **kwargs)
-        assert pdrs is not None
-
-        signals = signals.T  # transpose back
 
         self.last_cfg = None
         self.last_result = (pdrs, signals)

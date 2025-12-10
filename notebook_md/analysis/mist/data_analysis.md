@@ -7,9 +7,9 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.17.2
+      jupytext_version: 1.18.1
   kernelspec:
-    display_name: axelenv13
+    display_name: .venv
     language: python
     name: python3
   language_info:
@@ -21,30 +21,33 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.5
+    version: 3.9.23
 ---
 
 ```python
 %load_ext autoreload
-import os
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+
 %autoreload 2
-from zcu_tools.utils.datasaver import load_data
 import zcu_tools.experiment.v2 as ze
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate import mA2flx
 ```
 
 ```python
-qub_name = "Q12_2D[4]/Q4"
+qub_name = "Q12_2D[5]/Q4"
+
+result_dir = Path(f"../../../result/{qub_name}")
+image_dir = result_dir / "image" / "mist_data_analysis" / "-4.000mA"
+image_dir.mkdir(parents=True, exist_ok=True)
 ```
 
 ```python
-loadpath = f"../../../result/{qub_name}/params.json"
-_, params, mA_c, period, allows, _ = load_result(loadpath)
+_, params, mA_c, period, allows, _ = load_result(f"{result_dir}/params.json")
 EJ, EC, EL = params
 
 print(allows)
@@ -56,146 +59,78 @@ if "sample_f" in allows:
     sample_f = allows["sample_f"]
 ```
 
-# Reset
-
-```python
-xname = r"$|1, 0\rangle -> |2, 0\rangle$"
-yname = r"$|2, 0\rangle -> |0, 1\rangle$"
-```
-
-```python
-filepath = (
-    "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_mux_reset_freq@-0.417mA_9.hdf5"
-)
-signals, fpts1, fpts2 = load_data(filepath)
-
-fpts1 /= 1e6
-fpts2 /= 1e6
-```
-
-```python
-ze.twotone.reset.dual_tone.FreqExperiment().analyze(
-    result=(fpts1, fpts2, signals), xname=xname, yname=yname
-)
-```
-
-## reset gain
-
-```python
-filepath = (
-    "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_mux_reset_gain@-0.417mA_3.hdf5"
-)
-signals, pdrs1, pdrs2 = load_data(filepath)
-```
-
-```python
-ze.twotone.reset.dual_tone.PowerExperiment().analyze(
-    result=(pdrs1, pdrs2, signals), xname=xname, yname=yname
-)
-```
-
-## reset time
-
-```python
-filepath = (
-    "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_mux_reset_time@-0.417mA_4.hdf5"
-)
-signals, Ts, _ = load_data(filepath)
-
-Ts *= 1e6
-```
-
-```python
-ze.twotone.reset.dual_tone.LengthExperiment().analyze(result=(Ts, signals))
-```
-
 # Dispersive shift
 
 ```python
-filepath = r"C:\Users\QEL\Desktop\MeasureScriptX\QuantumMeasurementProcedures\Members\axel\Qubit-measure\Database\Q12_2D[4]\Q4\2025\11\Data_1114\R4_dispersive@4.000mA_1.hdf5"
-signals, fpts, _ = load_data(filepath)
-fpts /= 1e6
-
-chi, kappa, fig = ze.twotone.dispersive.DispersiveExperiment().analyze(
-    result=(fpts, signals.T)
+filepath = (
+    r"../../../Database/Q12_2D[5]/Q4/Q4_dispersive_shift_gain0.050@-4.000mA_1.hdf5"
 )
+exp = ze.twotone.dispersive.DispersiveExperiment()
+exp.load(filepath)
+
+chi, kappa, fig = exp.analyze()
 plt.show(fig)
+fig.savefig(image_dir / "dispersive_shift.png")
 plt.close(fig)
 ```
 
 # AC stark shift
 
 ```python
-filepath = r"C:\Users\QEL\Desktop\MeasureScriptX\QuantumMeasurementProcedures\Members\axel\Qubit-measure\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_ac_stark@4.000mA_1.hdf5"
-signals, pdrs, fpts = load_data(filepath)
-fpts /= 1e6
+filepath = r"../../../Database/Q12_2D[5]/Q4/Q4_ac_stark@-4.000mA_1.hdf5"
+# signals, pdrs, fpts = load_data(filepath)
+# fpts /= 1e6
 
-ac_coeff, fig = ze.twotone.ac_stark.AcStarkExperiment().analyze(
-    result=(pdrs, fpts, signals), chi=chi, kappa=kappa, cutoff=0.04
-)
+exp = ze.twotone.ac_stark.AcStarkExperiment()
+exp.load(filepath)
+ac_coeff, fig = exp.analyze(chi=chi, kappa=kappa, cutoff=0.01)
+
 plt.show(fig)
+fig.savefig(image_dir / "ac_stark.png")
 plt.close(fig)
 ```
 
 # Power dep
 
 ```python
-filepath = (
-    # "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_abnormal_pdr@-0.417mA_1.hdf5"
-    "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_abnormal_pdr@-0.417mA_2.hdf5"
-)
-signals, pdrs, _ = load_data(filepath)
-signals = signals.T
-```
-
-```python
 %matplotlib inline
-ze.twotone.mist.MISTPowerDep().analyze(
-    result=(pdrs, signals),
-    # g0=e0,
-    # e0=g0,
-    ac_coeff=ac_coeff,
+filepath = (
+    "../../../Database/Q12_2D[5]/Q4/Q4_mist_g_singleshot_short@-4.000mA_2.hdf5"
+    # "../../../Database/Q12_2D[5]/Q4/Q4_mist_e_singleshot_short@-4.000mA_3.hdf5"
+    # "../../../Database/Q12_2D[5]/Q4/Q4_mist_g_singleshot_short@-0.650mA_1.hdf5"
+    # "../../../Database/Q12_2D[5]/Q4/Q4_mist_e_singleshot_short@-0.650mA_2.hdf5"
 )
+
+exp = ze.twotone.singleshot.mist.MISTPowerDepSingleShot()
+exp.load(filepath)
+fig = exp.analyze(
+    ac_coeff=ac_coeff,
+    log_scale=True,
+)
+
+
+plt.show(fig)
+fig.savefig(image_dir / (filepath.split("/")[-1].split("@")[0] + ".png"))
+plt.close(fig)
 ```
 
 ## overnight
 
 ```python
-filepath = "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_mist_pdr_overnight@-0.417mA_2.hdf5"
-g_signals, pdrs, iters = load_data(filepath)
-g_signals = g_signals.T
-```
+filepath = "../../../Database/Q12_2D[5]/Q4/Q4_mist_overnight@-4.000mA_6.hdf5"
 
-```python
-ze.twotone.mist.MISTPowerDepOvernight().analyze(
-    result=(iters, pdrs, g_signals),
-    # g0=g0,
-    # e0=e0,
+exp = ze.twotone.singleshot.mist_overnight.MISTPowerDepOvernight()
+exp.load(filepath)
+fig = exp.analyze(
     ac_coeff=ac_coeff,
 )
-```
 
-```python
-filepath = "../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_mist_pdr_overnight@-0.417mA_3.hdf5"
-e_signals, pdrs, iters = load_data(filepath)
-e_signals = e_signals.T
-```
-
-```python
-ze.twotone.mist.MISTPowerDepOvernight().analyze(
-    result=(iters, pdrs, e_signals),
-    # g0=g0,
-    # e0=e0,
-    ac_coeff=ac_coeff,
-)
+plt.show(fig)
+fig.savefig(f"{image_dir}/mist_overnight.png")
+plt.close(fig)
 ```
 
 # Power dep over flux
-
-```python
-filepath = r"C:\Users\QEL\Desktop\MeasureScriptX\QuantumMeasurementProcedures\Members\axel\Qubit-measure\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_mist_flux_bare@4.000mA_1.hdf5"
-signals, As, pdrs = load_data(filepath)
-```
 
 ```python
 sim_filepath = (
@@ -212,9 +147,14 @@ with np.load(sim_filepath) as data:
 ```
 
 ```python
-fig = ze.twotone.flux_dep.MistExperiment().analyze(
-    result=(As, pdrs, signals), mA_c=mA_c, period=period, ac_coeff=ac_coeff
+filepath = (
+    r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_mist_flux_bare@4.000mA_1.hdf5"
 )
+
+
+exp = ze.twotone.mist.flux_dep.MistFluxDepExperiment()
+As, pdrs, signals = exp.load(filepath)
+fig = exp.analyze(mA_c=mA_c, period=period, ac_coeff=ac_coeff)
 
 from zcu_tools.notebook.analysis.mist.branch import plot_cn_with_mist
 
@@ -227,20 +167,10 @@ plot_cn_with_mist(
     mist_flxs=mA2flx(As, mA_c, period),
 )
 
-if isinstance(fig, plt.Figure):
-    fig.savefig(f"../../../result/{qub_name}/image/mist_over_flux.png")
-else:
-    prefix = f"../../../result/{qub_name}/"
-    # postfix = "branch/mist_over_flux_with_simulation.png"
-    postfix = "branch_floquet/mist_over_flux_with_simulation.png"
 
-    os.makedirs(os.path.dirname(os.path.join(prefix, "image", postfix)), exist_ok=True)
-    os.makedirs(os.path.dirname(os.path.join(prefix, "web", postfix)), exist_ok=True)
-
-    fig.update_layout(height=800)
-    fig.write_image(os.path.join(prefix, "image", postfix))
-    fig.write_html(os.path.join(prefix, "web", postfix.replace(".png", ".html")))
-    fig.show()
+fig.update_layout(height=800)
+fig.write_image(image_dir / "branch_floquet/mist_over_flux_with_simulation.png")
+fig.show()
 ```
 
 ```python

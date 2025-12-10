@@ -19,6 +19,7 @@ def fitlor(
 ) -> Tuple[List[float], Any]:
     if fitparams is None:
         fitparams = [None] * 5
+    fitparams = list(fitparams)
 
     # guess initial parameters
     if any([p is None for p in fitparams]):
@@ -65,6 +66,7 @@ def fit_asym_lor(
 ) -> Tuple[List[float], Any]:
     if fitparams is None:
         fitparams = [None] * 6
+    fitparams = list(fitparams)
 
     # guess initial parameters
     if any([p is None for p in fitparams]):

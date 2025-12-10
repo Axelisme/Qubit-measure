@@ -2,7 +2,7 @@ from typing import List, Optional, Sequence, cast
 
 import numpy as np
 
-from .base import assign_init_p, batch_fit_func, fit_func
+from .base import assign_init_p, fit_func
 
 
 # Gaussian function
@@ -25,6 +25,7 @@ def fit_gauss(
 
     if fitparams is None:
         fitparams = [None] * 4
+    fitparams = list(fitparams)
 
     # guess initial parameters
     if any([p is None for p in fitparams]):

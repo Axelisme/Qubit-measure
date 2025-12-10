@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, cast
+from typing import List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -16,13 +16,12 @@ def expfunc(x: np.ndarray, *p: float) -> np.ndarray:
 def fitexp(
     xdata: np.ndarray,
     ydata: np.ndarray,
-    fitparams: Optional[
-        Tuple[Optional[float], Optional[float], Optional[float]]
-    ] = None,
+    fitparams: Optional[Sequence[Optional[float]]] = None,
 ) -> Tuple[Tuple[float, float, float], np.ndarray]:
     """return (y0, yscale, decay_time), (pOpt, pCov)"""
     if fitparams is None:
-        fitparams = (None, None, None)
+        fitparams = [None] * 3
+    fitparams = list(fitparams)
 
     # guess initial parameters
     if any([p is None for p in fitparams]):
@@ -33,7 +32,7 @@ def fitexp(
         decay_time = (x_2 / np.log(2) + x_4 / np.log(4)) / 2
 
         assign_init_p(fitparams, [y0, yscale, decay_time])
-    fitparams = cast(Tuple[float, float, float], tuple(fitparams))
+    fitparams = cast(List[float], fitparams)
 
     # bounds
     bounds = (
@@ -53,19 +52,12 @@ def dual_expfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
 def fit_dualexp(
     xdata: np.ndarray,
     ydata: np.ndarray,
-    fitparams: Optional[
-        Tuple[
-            Optional[float],
-            Optional[float],
-            Optional[float],
-            Optional[float],
-            Optional[float],
-        ]
-    ] = None,
+    fitparams: Optional[Sequence[Optional[float]]] = None,
 ) -> Tuple[Tuple[float, float, float, float, float], np.ndarray]:
     """return (y0, yscale1, decay_time1, yscale2, decay_time2), (pOpt, pCov)"""
     if fitparams is None:
-        fitparams = (None, None, None, None, None)
+        fitparams = [None] * 5
+    fitparams = list(fitparams)
 
     # guess initial parameters
     if any([p is None for p in fitparams]):
@@ -93,7 +85,7 @@ def fit_dualexp(
         yscale2 /= 2
 
         assign_init_p(fitparams, [y0, yscale1, decay1, yscale2, decay2])
-    fitparams = cast(Tuple[float, float, float, float, float], tuple(fitparams))
+    fitparams = cast(List[float], fitparams)
 
     # bounds
     bounds = (

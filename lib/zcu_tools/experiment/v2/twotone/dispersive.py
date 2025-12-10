@@ -155,12 +155,12 @@ class DispersiveExperiment(AbsExperiment):
         )
 
     def load(self, filepath: str, **kwargs) -> DispersiveResultType:
-        signals, fpts, y_values = load_data(filepath, **kwargs)
-        assert fpts is not None
+        signals, fpts, _ = load_data(filepath, **kwargs)
         assert len(fpts.shape) == 1
-        assert signals.shape == (2, len(fpts))
+        assert signals.shape == (len(fpts), 2)
 
         fpts = fpts * 1e-6  # Hz -> MHz
+        signals = signals.T  # transpose back
 
         fpts = fpts.astype(np.float64)
         signals = signals.astype(np.complex128)

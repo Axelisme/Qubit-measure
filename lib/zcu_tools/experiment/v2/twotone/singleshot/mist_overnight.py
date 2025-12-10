@@ -34,7 +34,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 MISTPowerDepOvernightResultType = Tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]
@@ -280,3 +280,31 @@ class MISTPowerDepOvernight(AbsExperiment):
             tag=tag + "_e",
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> MISTPowerDepOvernightResultType:
+        _filepath = Path(filepath)
+
+        g_filepath = _filepath.with_name(_filepath.name + "_g")
+        e_filepath = _filepath.with_name(_filepath.name + "_e")
+
+        g_signals, g_iters, g_pdrs = load_data(str(g_filepath), **kwargs)
+        e_signals, e_iters, e_pdrs = load_data(str(e_filepath), **kwargs)
+
+        assert g_pdrs is not None and e_pdrs is not None
+        assert len(g_pdrs.shape) == 1 and len(e_pdrs.shape) == 1
+        assert g_signals.shape == (len(g_iters), len(g_pdrs))
+        assert e_signals.shape == (len(e_iters), len(e_pdrs))
+        assert g_signals.shape == e_signals.shape
+
+        iters = g_iters
+        pdrs = g_pdrs
+        signals = np.stack([g_signals, e_signals], axis=-1)
+
+        iters = iters.astype(np.int64)
+        pdrs = pdrs.astype(np.float64)
+        signals = signals.astype(np.float64)
+
+        self.last_cfg = None
+        self.last_result = (iters, pdrs, signals)
+
+        return iters, pdrs, signals
