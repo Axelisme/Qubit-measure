@@ -18,8 +18,8 @@ class InteractiveLines:
 
     def __init__(self, spectrum, mAs, fpts, mA_c=None, mA_e=None) -> None:
         plt.ioff()  # 避免立即顯示圖表
-        self.fig_main, self.ax_main = plt.subplots(figsize=(6, 4))
-        self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(3, 3))
+        self.fig_main, self.ax_main = plt.subplots()
+        self.fig_zoom, self.ax_zoom = plt.subplots()
         self.fig_main.tight_layout()
         self.fig_zoom.tight_layout()
         plt.ion()
@@ -68,37 +68,27 @@ class InteractiveLines:
 
         # 顯示 widget
         display(
-            widgets.HBox(
+            widgets.VBox(
                 [
-                    widgets.Box(
-                        [self.fig_main.canvas], layout=widgets.Layout(width="60%")
-                    ),
-                    widgets.VBox(
+                    widgets.HBox(
                         [
-                            widgets.HBox(
-                                [
-                                    self.red_button,
-                                    self.blue_button,
-                                ]
-                            ),
+                            self.red_button,
+                            self.blue_button,
+                            self.auto_align_button,
+                            self.swap_button,
+                            self.finish_button,
+                        ]
+                    ),
+                    widgets.HBox(
+                        [
+                            self.status_text,
                             self.position_text,
-                            widgets.HBox(
-                                [
-                                    self.auto_align_button,
-                                    self.swap_button,
-                                    self.conjugate_checkbox,
-                                    self.only_use_magnitude_checkbox,
-                                ]
-                            ),
-                            widgets.HBox(
-                                [
-                                    self.status_text,
-                                    self.finish_button,
-                                ]
-                            ),
-                            self.fig_zoom.canvas,
-                        ],
-                        layout=widgets.Layout(width="70%"),
+                            self.conjugate_checkbox,
+                            self.only_use_magnitude_checkbox,
+                        ]
+                    ),
+                    widgets.HBox(
+                        [self.fig_main.canvas, self.fig_zoom.canvas],
                     ),
                 ]
             )
@@ -122,14 +112,12 @@ class InteractiveLines:
             tooltip="完成選擇並返回結果",
         )
         self.conjugate_checkbox = widgets.Checkbox(
-            value=False, description="Conjugate Line", indent=False
+            value=False, description="Conjugate Line"
         )
 
         # 新增: 僅使用振幅顯示的切換開關
         self.only_use_magnitude_checkbox = widgets.Checkbox(
-            value=self.only_use_magnitude,
-            description="Magnitude Only",
-            indent=False,
+            value=self.only_use_magnitude, description="Magnitude Only"
         )
         self.swap_button = widgets.Button(
             description="交換線條",
@@ -187,7 +175,7 @@ class InteractiveLines:
 
         # 設置變數
         self.picked = None
-        self.min_dist = 0.1 * abs(mAs[-1] - mAs[0])
+        self.min_dist = 0.01 * abs(mAs[-1] - mAs[0])
         self.is_finished = False
         self.active_line = None  # 用來跟踪目前正在移動的線
 
@@ -399,9 +387,9 @@ class InteractiveLines:
             return
 
         # 選擇最近的線
-        if red_dist < blue_dist and red_dist < self.min_dist / 2:
+        if red_dist < blue_dist and red_dist < 3 * self.min_dist:
             self.set_picked_red(None)
-        elif blue_dist <= red_dist and blue_dist < self.min_dist / 2:
+        elif blue_dist <= red_dist and blue_dist < 3 * self.min_dist:
             self.set_picked_blue(None)
 
     def onmove(self, event) -> None:
@@ -505,10 +493,7 @@ class InteractiveLines:
         """運行交互式選擇器並返回兩條線的位置"""
         if not self.is_finished and finish:
             self.finish_interactive()
-        precision = 0.5 * (self.mAs[-1] - self.mAs[0]) / len(self.mAs)
-        mA_c = precision * round((self.mA_c - self.mAs[0]) / precision) + self.mAs[0]
-        mA_e = precision * round((self.mA_e - self.mAs[0]) / precision) + self.mAs[0]
-        return float(mA_c), float(mA_e)
+        return float(self.mA_c), float(self.mA_e)
 
     def on_toggle_magnitude(self, change) -> None:
         """切換是否僅使用振幅資料的顯示模式"""

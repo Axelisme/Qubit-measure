@@ -51,7 +51,9 @@ def dump_result(
 
 def load_result(
     path: str,
-) -> Tuple[str, np.ndarray, float, float, Dict[str, Any], Dict[str, Any]]:
+) -> Tuple[
+    str, Tuple[float, float, float], float, float, Dict[str, Any], Dict[str, Any]
+]:
     """
     Load the result from a json file
 
@@ -69,7 +71,7 @@ def load_result(
 
     return (
         data["name"],
-        np.array([data["params"]["EJ"], data["params"]["EC"], data["params"]["EL"]]),
+        (data["params"]["EJ"], data["params"]["EC"], data["params"]["EL"]),
         data["half flux"],
         data["period"],
         data["allows"],

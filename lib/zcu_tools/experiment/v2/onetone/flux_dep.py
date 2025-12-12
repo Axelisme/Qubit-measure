@@ -129,9 +129,10 @@ class FluxDepExperiment(AbsExperiment):
         signals2D, fpts, values = load_data(filepath, **kwargs)
         assert fpts is not None and values is not None
         assert len(fpts.shape) == 1 and len(values.shape) == 1
-        assert signals2D.shape == (len(values), len(fpts))
+        assert signals2D.shape == (len(fpts), len(values))
 
         fpts = fpts * 1e-6  # Hz -> MHz
+        signals2D = signals2D.T  # transpose back
 
         values = values.astype(np.float64)
         fpts = fpts.astype(np.float64)

@@ -94,8 +94,8 @@ def fit_edelay(fpts, signals) -> float:
     return edelay
 
 
-def calc_phase(signals, xc, yc) -> np.ndarray:
-    return np.unwrap(np.angle(signals - (xc + 1j * yc)))
+def calc_phase(signals, xc, yc, axis: int = 0) -> np.ndarray:
+    return np.unwrap(np.angle(signals - (xc + 1j * yc)), axis=axis)
 
 
 def phase_func(fpts, resonant_f, Ql, theta0: float) -> np.ndarray:

@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Any, Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
@@ -20,7 +20,7 @@ def search_proper_g(
     signals: np.ndarray,
     g_bound: Tuple[float, float],
     g_init: Optional[float] = None,
-) -> callable:
+) -> Callable[[], Tuple[float, float]]:
     """
     Search the proper coupling strength g and resonator frequency r_f by plotting the dispersive shift
     of ground and excited state vs. flux. Returns a function that when called, returns (g, r_f) values.
@@ -36,7 +36,7 @@ def search_proper_g(
     default_step = 5
 
     if g_init is None:
-        g_init = round(0.5 * (g_bound[0] + g_bound[1]), 3)
+        g_init = round(0.5 * (g_bound[0] + g_bound[1]), 1)
 
     # Create parameter input widgets
     qub_dim_input = widgets.IntText(
@@ -64,29 +64,28 @@ def search_proper_g(
     )
 
     # Create slider widgets
-    g_slider = widgets.FloatSlider(
-        value=g_init,
-        min=g_bound[0],
-        max=g_bound[1],
-        step=0.001,
-        description="g (GHz):",
+    g_MHz_slider = widgets.FloatSlider(
+        value=1e3 * g_init,
+        min=1e3 * g_bound[0],
+        max=1e3 * g_bound[1],
+        step=1.0,
+        description="g (MHz):",
         continuous_update=False,
         style={"description_width": "initial"},
-        readout_format=".3f",
+        readout_format=".1f",
     )
 
     # Calculate r_f slider parameters
-    rf_step = 0.5 * (sp_fpts.max() - sp_fpts.min()) / len(sp_fpts)
 
-    rf_slider = widgets.FloatSlider(
-        value=r_f,
-        min=sp_fpts.min(),
-        max=sp_fpts.max(),
-        step=rf_step,
-        description="r_f (GHz):",
+    rf_MHz_slider = widgets.FloatSlider(
+        value=1e3 * r_f,
+        min=1e3 * sp_fpts.min(),
+        max=1e3 * sp_fpts.max(),
+        step=1e3 * 0.5 * (sp_fpts.max() - sp_fpts.min()) / len(sp_fpts),
+        description="r_f (MHz):",
         continuous_update=False,
         style={"description_width": "initial"},
-        readout_format=".6f",
+        readout_format=".1f",
     )
 
     @lru_cache(maxsize=None)
@@ -123,24 +122,26 @@ def search_proper_g(
         aspect="auto",
         origin="lower",
         interpolation="none",
-        extent=(sp_flxs[0], sp_flxs[-1], sp_fpts[0], sp_fpts[-1]),
+        extent=(sp_flxs[0], sp_flxs[-1], 1e3 * sp_fpts[0], 1e3 * sp_fpts[-1]),
         cmap="viridis",
     )
 
-    (line_g,) = ax.plot(sp_flxs[::flx_step], rf_0, "b-", label="Ground state")
-    (line_e,) = ax.plot(sp_flxs[::flx_step], rf_1, "r-", label="Excited state")
-    line_bare = ax.axhline(y=r_f, color="k", linestyle="--", label="Bare resonator")
+    (line_g,) = ax.plot(sp_flxs[::flx_step], 1e3 * rf_0, "b-", label="Ground state")
+    (line_e,) = ax.plot(sp_flxs[::flx_step], 1e3 * rf_1, "r-", label="Excited state")
+    line_bare = ax.axhline(
+        y=1e3 * r_f, color="k", linestyle="--", label="Bare resonator"
+    )
 
-    ax.set_ylim(sp_fpts.min(), sp_fpts.max())
+    ax.set_ylim(1e3 * sp_fpts.min(), 1e3 * sp_fpts.max())
     ax.set_xlabel(r"Flux $\Phi_{ext}/\Phi_0$")
-    ax.set_ylabel("Frequency (GHz)")
-    ax.set_title(f"g = {g_init:.3f} GHz, r_f = {r_f:.6f} GHz")
+    ax.set_ylabel("Frequency (MHz)")
+    ax.set_title(f"g = {1e3 * g_init:.1f} MHz, r_f = {1e3 * r_f:.1f} MHz")
     ax.legend(loc="upper right")
 
     # Register callback for slider changes
     def update_plot() -> None:
-        cur_g = g_slider.value
-        cur_rf = rf_slider.value
+        cur_g = 1e-3 * g_MHz_slider.value
+        cur_rf = 1e-3 * rf_MHz_slider.value
 
         flx_step = step_input.value
         rf_0, rf_1 = get_dispersive(
@@ -153,16 +154,16 @@ def search_proper_g(
         )
 
         # Update the lines
-        line_g.set_data(sp_flxs[::flx_step], rf_0)
-        line_e.set_data(sp_flxs[::flx_step], rf_1)
-        line_bare.set_ydata([cur_rf])
+        line_g.set_data(sp_flxs[::flx_step], 1e3 * rf_0)
+        line_e.set_data(sp_flxs[::flx_step], 1e3 * rf_1)
+        line_bare.set_ydata([1e3 * cur_rf])
 
         # Update the title with current values
-        ax.set_title(f"g = {cur_g:.3f} GHz, r_f = {cur_rf:.6f} GHz")
+        ax.set_title(f"g = {1e3 * cur_g:.1f} MHz, r_f = {1e3 * cur_rf:.1f} MHz")
 
     # Add observers for all widgets
-    g_slider.observe(lambda _: update_plot(), names="value")
-    rf_slider.observe(lambda _: update_plot(), names="value")
+    g_MHz_slider.observe(lambda _: update_plot(), names="value")
+    rf_MHz_slider.observe(lambda _: update_plot(), names="value")
     qub_dim_input.observe(lambda _: update_plot(), names="value")
     qub_cutoff_input.observe(lambda _: update_plot(), names="value")
     res_dim_input.observe(lambda _: update_plot(), names="value")
@@ -172,11 +173,11 @@ def search_proper_g(
     parameter_box = widgets.HBox(
         [qub_dim_input, qub_cutoff_input, res_dim_input, step_input]
     )
-    display(widgets.VBox([parameter_box, g_slider, rf_slider]))
+    display(widgets.VBox([parameter_box, widgets.HBox([g_MHz_slider, rf_MHz_slider])]))
 
     def close_and_get_values() -> tuple[float, float]:
         plt.close(fig)
-        return g_slider.value, rf_slider.value
+        return 1e-3 * g_MHz_slider.value, 1e-3 * rf_MHz_slider.value
 
     return close_and_get_values
 
@@ -190,7 +191,7 @@ def auto_fit_dispersive(
     g_bound: Tuple[float, float] = (0.01, 0.2),
     g_init: Optional[float] = None,
     fit_rf: bool = False,
-) -> float:
+) -> Tuple[float, Optional[float]]:
     """
     Auto fit the coupling strength g by maximizing the overlap of predicted ground state frequency with onetone spectrum
     """
@@ -201,9 +202,9 @@ def auto_fit_dispersive(
 
     def update_pbar(g, r_f):
         pbar.update(1)
-        postfix = f"g = {g:.3f} GHz"
+        postfix = f"g = {1e3 * g:.1f} MHz"
         if fit_rf:
-            postfix += f", r_f = {r_f:.3f} GHz"
+            postfix += f", r_f = {1e3 * r_f:.1f} MHz"
         pbar.set_postfix_str(postfix)
 
     amps = np.abs(signals)
