@@ -43,14 +43,34 @@ if "sample_f" in allows:
 
 # r_f = 7.520
 rf_w = 11.2e-3
-g = 0.130
+# g = 0.130
 
 sim_flxs = np.linspace(-0.05, 0.55, 200)
+```
+
+```python
+1e3 * mA_c, 1e3 * (mA_c - 0.5 * period)
 ```
 
 # Process data
 
 ```python
+%matplotlib widget
+filepath = r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1127\R4_flux_1.hdf5"
+signals, fpts, flxs = load_data(filepath)
+fpts /= 1e6
+
+actline = ze.onetone.FluxDepExperiment().analyze(result=(flxs, fpts, signals.T))
+```
+
+```python
+mA_c, mA_e = actline.get_positions()
+period = 2 * abs(mA_e - mA_c)
+1e3 * mA_c, 1e3 * mA_e
+```
+
+```python
+%matplotlib inline
 filepath = (
     r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\R4_dispersive@4.000mA_1.hdf5"
 )
@@ -80,8 +100,8 @@ plt.close(fig)
 
 ```python
 filepaths = [
-    r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_mist_flux_bare@4.000mA_1.hdf5",
-    # r"../../../Database/Q12_2D[2]/Q4/2025/06/Data_0609/Q4_mist_flx_pdr@-0.417mA_1.hdf5",
+    # r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1116\Q4_mist_flux_bare@-4.990mA_1.hdf5",
+    r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1127\Q4_autofluxdep_onlyfreq@-3.000mA_mist_g_signals_g_1.hdf5"
 ]
 
 # ac_coeff = 67
@@ -144,10 +164,14 @@ overlay_over_flx = data["overlay_over_flx"]
 ```
 
 ```python
+from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
+
 threshold = 0.9
 
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True)
 fig.update_layout(height=600, margin=dict(t=10, b=20, l=20))
+
+add_secondary_xaxis(fig, sim_flxs, As, num_ticks=24, row=2, col=1)
 
 for filepath in filepaths:
     signals, As, pdrs = load_data(filepath)
@@ -155,7 +179,6 @@ for filepath in filepaths:
     photons = ac_coeff * pdrs**2
 
     real_signals = mist_signal2real(signals)
-
     fig.add_trace(
         go.Heatmap(
             x=flxs,
@@ -171,7 +194,7 @@ plot_overlay(
     fig,
     "Ground",
     overlay_over_flx[..., 0],
-    1 - sim_flxs,
+    sim_flxs,
     sim_photons,
     threshold,
     row=2,
@@ -181,7 +204,7 @@ plot_overlay(
     fig,
     "Excited",
     overlay_over_flx[..., 1],
-    1 - sim_flxs,
+    sim_flxs,
     sim_photons,
     threshold,
     row=3,
@@ -191,6 +214,7 @@ plot_overlay(
 
 fig.write_image(result_dir.joinpath("image", "mist_over_flux.png"))
 fig.write_html(result_dir.joinpath("web", "mist_over_flux.html"))
+
 
 fig.show()
 ```

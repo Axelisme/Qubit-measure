@@ -7,7 +7,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.17.2
+      jupytext_version: 1.18.1
   kernelspec:
     display_name: axelenv13
     language: python
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.4
+    version: 3.13.5
 ---
 
 ```python
@@ -41,19 +41,20 @@ from zcu_tools.simulate import mA2flx
 ```
 
 ```python
-qub_name = "Si001"
+qub_name = "Q12_2D[5]/Q1"
 
 mA_c = None
 mA_e = None
 period = None
 s_spects = {}
 
-os.makedirs(f"../../result/{qub_name}/image/fluxdep_fit", exist_ok=True)
-os.makedirs(f"../../result/{qub_name}/web/fluxdep_fit", exist_ok=True)
+result_dir = f"../../result/{qub_name}"
+os.makedirs(f"{result_dir}/image/fluxdep_fit", exist_ok=True)
+os.makedirs(f"{result_dir}/web/fluxdep_fit", exist_ok=True)
 ```
 
 ```python
-loadpath = f"../../result/{qub_name}/params.json"
+loadpath = f"{result_dir}/params.json"
 _, sp_params, mA_c, period, allows, _ = zp.load_result(loadpath)
 
 mA_e = mA_c + 0.5 * period
@@ -65,7 +66,7 @@ pprint(allows)
 ```python
 # spect_path = r"..\..\Database\Si001\2025\10\Data_1028\Si001_flux_1.hdf5"
 # spect_path = r"..\..\Database\Si001\2025\10\Data_1028\Si001_flux_2.hdf5"
-spect_path = r"..\..\Database\Si001\2025\10\Data_1028\Si001_flux_3.hdf5"
+spect_path = r"..\..\Database\Q12_2D[5]\Q1\2025\12\Data_1206\Q1_flux_1.hdf5"
 spectrum, _As, _fpts = load_data(spect_path)
 mAs, fpts, spectrum = zp.format_rawdata(_As, _fpts, spectrum)
 ```
@@ -117,12 +118,12 @@ s_spects.keys()
 # Save & Load
 
 ```python
-processed_spect_path = f"../../result/{qub_name}/data/fluxdep/spectrums.hdf5"
+processed_spect_path = f"{result_dir}/data/fluxdep/spectrums.hdf5"
 zp.dump_spects(processed_spect_path, s_spects, mode="w")
 ```
 
 ```python
-processed_spect_path = f"../../result/{qub_name}/data/fluxdep/spectrums.hdf5"
+processed_spect_path = f"{result_dir}/data/fluxdep/spectrums.hdf5"
 s_spects = zp.load_spects(processed_spect_path)
 s_spects.keys()
 ```
@@ -181,12 +182,10 @@ ELb = (0.1, 2.0)
 
 ```python
 allows = {
-    "transitions": [(0, 1), (0, 2), (1, 2)],
-    # "transitions": [(0, 1), (0, 2)],
-    # "red side": [(0, 1), (0, 2), (1, 2), (0, 3)],
-    "mirror": [(0, 1), (0, 2), (1, 3)],
-    # "mirror2": [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (1, 3)],
-    "r_f": 5.927,
+    "transitions": [(0, 1), (0, 2), (1, 2), (1, 3)],
+    "red side": [(0, 1)],
+    "mirror": [(0, 2), (0, 3), (1, 3)],
+    "r_f": 5.352,
     "sample_f": 9.584640 / 2,
     # "sample_f": 6.881280 / 2,
 }
@@ -204,9 +203,9 @@ allows = {
 ```python
 %matplotlib inline
 best_params, fig = zf.search_in_database(
-    s_flxs, s_fpts, r"../../Database/simulation/fluxonium_all.h5", allows, EJb, ECb, ELb
+    s_flxs, s_fpts, r"../../Database/simulation/fluxonium_1.h5", allows, EJb, ECb, ELb
 )
-fig.savefig(f"../../result/{qub_name}/image/search_result.png")
+fig.savefig(f"{result_dir}/image/search_result.png")
 ```
 
 ```python
@@ -216,9 +215,9 @@ _, energies = calculate_energy_vs_flx(best_params, t_flxs, cutoff=40, evals_coun
 ```python
 v_allows = {
     **allows,
-    # "transitions": [(0, 1), (0, 2), (1, 2), (0, 3)],
-    # "red side": [(0, 1), (0, 2), (1, 2), (0, 3)],
-    # "mirror": [(0, 1), (0, 2), (1, 2), (0, 3)],
+    # "transitions": [(0, 1), (0, 2), (1, 2), (1, 3)],
+    # "red side": [(0, 1)],
+    # "mirror": [(0, 2), (0, 3), (1, 3)],
     # "transitions": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 15)],
     # "red side": [(i, j) for i in [0, 1, 2] for j in range(i + 1, 15)],
     # "mirror": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
@@ -262,7 +261,7 @@ _, energies = calculate_energy_vs_flx(sp_params, t_flxs, cutoff=40, evals_count=
 ```python
 v_allows = {
     **allows,
-    "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 5)],
+    # "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 5)],
     # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
 }
 
@@ -286,21 +285,21 @@ fig.show()
 ```
 
 ```python
-fig.write_html(f"../../result/{qub_name}/web/spect_fit.html", include_plotlyjs="cdn")
-fig.write_image(f"../../result/{qub_name}/image/spect_fit.png", format="png")
+fig.write_html(f"{result_dir}/web/spect_fit.html", include_plotlyjs="cdn")
+fig.write_image(f"{result_dir}/image/spect_fit.png", format="png")
 ```
 
 # Save Parameters
 
 ```python
 # dump the data
-savepath = f"../../result/{qub_name}/params.json"
+savepath = f"{result_dir}/params.json"
 
 zp.dump_result(savepath, qub_name, sp_params, mA_c, period, allows)
 ```
 
 ```python
-savepath = f"../../result/{qub_name}/data/fluxdep/selected_points.npz"
+savepath = f"{result_dir}/data/fluxdep/selected_points.npz"
 
 np.savez(savepath, flxs=s_flxs, fpts=s_fpts, selected=s_selected)
 ```

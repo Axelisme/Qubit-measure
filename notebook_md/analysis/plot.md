@@ -7,7 +7,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.17.2
+      jupytext_version: 1.18.1
   kernelspec:
     display_name: axelenv13
     language: python
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.4
+    version: 3.13.5
 ---
 
 ```python
@@ -39,7 +39,7 @@ from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 ```
 
 ```python
-qub_name = "Si001"
+qub_name = "Q12_2D[4]/Q4"
 
 os.makedirs(f"../../result/{qub_name}/image/design", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/web/design", exist_ok=True)
@@ -119,14 +119,16 @@ fig = zp.plot_dispersive_shift(params, flxs, r_f=r_f, g=g, mAs=mAs, upto=1)
 ```
 
 ```python
-fig.update_yaxes(range=[-1e-2, 1e-2])
+fig.update_yaxes(range=[-1e1, 1e1])
 fig.show()
 ```
 
 # Flux dependence
 
 ```python
-_, energies = calculate_energy_vs_flx(params, flxs, spectrum_data=spectrum_data, evals_count=70, cutoff=120)
+_, energies = calculate_energy_vs_flx(
+    params, flxs, spectrum_data=spectrum_data, evals_count=70, cutoff=120
+)
 ```
 
 ```python
