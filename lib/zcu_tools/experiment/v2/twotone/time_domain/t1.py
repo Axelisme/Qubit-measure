@@ -77,41 +77,44 @@ class T1Experiment(AbsExperiment):
             ts = np.asarray(len_sweep)
         ts = np.array([soccfg.cycles2us(soccfg.us2cycles(t)) for t in ts])
 
-        orders = vdc_permutation(len(ts))
-        restore_orders = np.argsort(orders)
-
         def measure_fn(ctx, update_hook):
-            assert "t1_delay" in ctx.cfg
+            rounds = ctx.cfg.pop("rounds", 1)
+            ctx.cfg["rounds"] = 1
 
-            return ModularProgramV2(
-                soccfg,
-                ctx.cfg,
-                modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                    Delay("t1_delay", delay=ctx.cfg["t1_delay"]),
-                    Readout("readout", ctx.cfg["readout"]),
-                ],
-            ).acquire(soc, progress=False, callback=update_hook)
+            acc_signals = np.zeros_like(ts, dtype=np.complex128)
+            for ir in range(rounds):
+                for i, t1_delay in enumerate(ts):
+                    raw_i = ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                            Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                            Delay("t1_delay", delay=t1_delay),
+                            Readout("readout", ctx.cfg["readout"]),
+                        ],
+                    ).acquire(soc, progress=False)
+
+                    signal_i = raw_i[0][0].dot([1, 1j])
+
+                    acc_signals[i] += signal_i
+
+                update_hook(ir, acc_signals / (ir + 1))
+
+            return acc_signals / rounds
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="length",
-                    sweep_values=ts[orders].tolist(),
-                    update_cfg_fn=lambda _, ctx, length: ctx.cfg.update(
-                        t1_delay=length
-                    ),
-                    sub_task=HardTask(measure_fn=measure_fn),
+                task=HardTask(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: raw,
+                    result_shape=(len(ts),),
                 ),
                 init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    ts, t1_signal2real(np.asarray(ctx.data))[restore_orders]
-                ),
+                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
             )
-        signals = np.asarray(signals)[restore_orders]
 
         # record last cfg and result
         self.last_cfg = cfg
