@@ -13,6 +13,7 @@ from typing_extensions import NotRequired
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
     make_ge_sweep,
+    sweep2array,
     set_flux_in_dev_cfg,
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
@@ -41,7 +42,9 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from .jpa_optimizer import JPAOptimizer
 
-JPAOptimizeResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+JPAOptimizeResultType = Tuple[
+    NDArray[np.float64], NDArray[np.int32], NDArray[np.complex128]
+]
 
 
 class JPAOptTaskConfig(TaskConfig, ModularProgramCfg):
@@ -129,21 +132,11 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
 
                 cur_flx, cur_fpt, cur_pdr = params[idx, :]
 
-                # Assign colors based on phase using matplotlib color cycle
-                prop_cycle = plt.rcParams["axes.prop_cycle"]
-                cycle_colors = prop_cycle.by_key()["color"]
-                colors = np.array(
-                    [
-                        cycle_colors[(p - 1) % len(cycle_colors)]
-                        if p > 0
-                        else "lightgray"
-                        for p in phases
-                    ]
-                )
-
                 fig.suptitle(
                     f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flx:.2g} (mA), Freq: {1e-3 * cur_fpt:.4g} (GHz), Power: {cur_pdr:.2g} (dBm)"
                 )
+
+                colors = phases
 
                 viewer.get_plotter("iter_scatter").update(
                     np.arange(num_points), snrs, colors=colors, refresh=False
@@ -202,9 +195,9 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         plt.close(fig)
 
         self.last_cfg = cfg
-        self.last_result = (params, signals)
+        self.last_result = (params, phases, signals)
 
-        return params, signals
+        return params, phases, signals
 
     def analyze(
         self, result: Optional[JPAOptimizeResultType] = None
@@ -213,14 +206,15 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             result = self.last_result
         assert result is not None, "no result found"
 
-        params, signals = result
+        params, phases, signals = result
         snrs = np.abs(signals)
 
         max_id = np.nanargmax(snrs)
         max_snr = float(snrs[max_id])
         best_params = params[max_id, :]
 
-        # fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=config.figsize)
+        colors = phases
+
         figsize = (8, 5)
         fig = plt.figure(figsize=figsize)
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
@@ -232,7 +226,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         ax_freq = fig.add_subplot(gs[1, 1])
         ax_power = fig.add_subplot(gs[2, 1])
 
-        ax_iter.scatter(np.arange(len(snrs)), snrs, s=1)
+        ax_iter.scatter(np.arange(len(snrs)), snrs, c=colors, s=1)
         ax_iter.axhline(max_snr, color="r", ls="--", label=f"best = {max_snr:.2g}")
         ax_iter.scatter([max_id], [max_snr], color="r", marker="*")
         ax_iter.set_xlabel("Iteration")
@@ -241,7 +235,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         ax_iter.grid(True)
 
         def plot_ax(ax, param_idx, label_name) -> None:
-            ax.scatter(params[:, param_idx], snrs, s=1)
+            ax.scatter(params[:, param_idx], snrs, c=colors, s=1)
             best_value = best_params[param_idx]
             ax.axvline(best_value, color="r", ls="--", label=f"best = {best_value:.2g}")
             ax.scatter([best_value], [max_snr], color="r", marker="*")
@@ -268,7 +262,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             result = self.last_result
         assert result is not None, "no result found"
 
-        params, signals = result
+        params, phases, signals = result
 
         _filepath = Path(filepath)
 
@@ -285,6 +279,15 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             z_info={"name": "Parameters", "unit": "a.u.", "values": params.T},
             comment=comment,
             tag=tag + "/params",
+            **kwargs,
+        )
+
+        save_data(
+            filepath=str(_filepath.with_name(_filepath.name + "_phases")),
+            x_info=x_info,
+            z_info={"name": "Phase", "unit": "a.u.", "values": phases},
+            comment=comment,
+            tag=tag + "/phases",
             **kwargs,
         )
 
@@ -310,6 +313,13 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
 
         params = params_data.T  # transpose back (num_points, 3)
 
+        phases, iters_ph, _ = load_data(
+            str(_filepath.with_name(_filepath.name + "_phases")), **kwargs
+        )
+        assert iters_ph is not None
+        assert len(iters_ph.shape) == 1
+        assert phases.shape[0] == params.shape[0]
+
         # Load signals
         signals, iters_sig, _ = load_data(
             str(_filepath.with_name(_filepath.name + "_signals")), **kwargs
@@ -322,6 +332,6 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         signals = signals.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (params, signals)
+        self.last_result = (params, phases, signals)
 
-        return params, signals
+        return params, phases, signals

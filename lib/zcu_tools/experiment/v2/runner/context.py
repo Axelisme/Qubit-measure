@@ -148,6 +148,7 @@ class TaskContextView(Generic[T_Result, T_RootResult, T_TaskConfig]):
         return TaskContextView(
             self.context,
             actual_cfg,
+            update_hook=self.update_hook,
             _addr_stack=self._addr_stack + [addr],
             _root=root,
         )
@@ -162,8 +163,7 @@ class TaskContextView(Generic[T_Result, T_RootResult, T_TaskConfig]):
         self.context.set_data(value, self._addr_stack)
 
         if self.update_hook is not None:
-            ctx_view = cast(TaskContextView[Result, T_RootResult, TaskConfig], self)
-            self.update_hook(ctx_view)
+            self.update_hook(self)  # type: ignore[arg-type]
 
     def get_data(self) -> T_Result:
         result = self.context.get_data(self._addr_stack)

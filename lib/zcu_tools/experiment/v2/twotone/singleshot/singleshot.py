@@ -125,7 +125,7 @@ class SingleShotExperiment(AbsExperiment):
         result: Optional[SingleShotResultType] = None,
         backend: Literal["center", "regression", "pca"] = "pca",
         **kwargs,
-    ) -> Tuple[float, float, float, np.ndarray, dict, Figure]:
+    ) -> Tuple[float, np.ndarray, dict, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

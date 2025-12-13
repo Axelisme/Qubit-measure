@@ -13,6 +13,7 @@ from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_sweep
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -67,6 +68,8 @@ class T2RamseyCfg(TaskConfig, ModularProgramCfg):
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
     activate_detune: float
+
+    sweep: Dict[str, SweepCfg]
 
 
 class T2RamseyResult(TypedDict, closed=True):

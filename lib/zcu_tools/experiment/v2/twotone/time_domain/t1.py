@@ -31,6 +31,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.math import vdc_permutation
 
 # (times, signals)
 T1ResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
@@ -45,6 +46,8 @@ class T1TaskConfig(TaskConfig, ModularProgramCfg):
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
+    t1_delay: NotRequired[float]
+
 
 class T1Experiment(AbsExperiment):
     """T1 relaxation time measurement.
@@ -53,7 +56,70 @@ class T1Experiment(AbsExperiment):
     to measure the qubit's energy relaxation.
     """
 
-    def run(self, soc, soccfg, cfg: T1TaskConfig) -> T1ResultType:
+    def _run_non_uniform(self, soc, soccfg, cfg: T1TaskConfig) -> T1ResultType:
+        cfg = deepcopy(cfg)
+
+        assert "sweep" in cfg
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        len_sweep = cfg["sweep"]["length"]
+        del cfg["sweep"]
+
+        if isinstance(len_sweep, dict):
+            ts = (
+                np.linspace(
+                    len_sweep["start"] ** (1 / 3),
+                    len_sweep["stop"] ** (1 / 3),
+                    len_sweep["expts"],
+                )
+                ** 3
+            )
+        else:
+            ts = np.asarray(len_sweep)
+        ts = np.array([soccfg.cycles2us(soccfg.us2cycles(t)) for t in ts])
+
+        orders = vdc_permutation(len(ts))
+        restore_orders = np.argsort(orders)
+
+        def measure_fn(ctx, update_hook):
+            assert "t1_delay" in ctx.cfg
+
+            return ModularProgramV2(
+                soccfg,
+                ctx.cfg,
+                modules=[
+                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                    Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                    Delay("t1_delay", delay=ctx.cfg["t1_delay"]),
+                    Readout("readout", ctx.cfg["readout"]),
+                ],
+            ).acquire(soc, progress=False, callback=update_hook)
+
+        with LivePlotter1D(
+            "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
+        ) as viewer:
+            signals = run_task(
+                task=SoftTask(
+                    sweep_name="length",
+                    sweep_values=ts[orders].tolist(),
+                    update_cfg_fn=lambda _, ctx, length: ctx.cfg.update(
+                        t1_delay=length
+                    ),
+                    sub_task=HardTask(measure_fn=measure_fn),
+                ),
+                init_cfg=cfg,
+                update_hook=lambda ctx: viewer.update(
+                    ts, t1_signal2real(np.asarray(ctx.data))[restore_orders]
+                ),
+            )
+        signals = np.asarray(signals)[restore_orders]
+
+        # record last cfg and result
+        self.last_cfg = cfg
+        self.last_result = (ts, signals)
+
+        return ts, signals
+
+    def _run_uniform(self, soc, soccfg, cfg: T1TaskConfig) -> T1ResultType:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -94,6 +160,12 @@ class T1Experiment(AbsExperiment):
         self.last_result = (ts, signals)
 
         return ts, signals
+
+    def run(self, soc, soccfg, cfg: T1TaskConfig, uniform: bool = True) -> T1ResultType:
+        if uniform:
+            return self._run_uniform(soc, soccfg, cfg)
+        else:
+            return self._run_non_uniform(soc, soccfg, cfg)
 
     def analyze(
         self, result: Optional[T1ResultType] = None, *, dual_exp: bool = False

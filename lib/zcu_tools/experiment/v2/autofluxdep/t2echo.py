@@ -13,6 +13,7 @@ from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_sweep
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -67,6 +68,8 @@ class T2EchoCfg(TaskConfig, ModularProgramCfg):
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
     activate_detune: float
+
+    sweep: Dict[str, SweepCfg]
 
 
 class T2EchoResult(TypedDict, closed=True):
@@ -137,10 +140,7 @@ class T2EchoMeasurementTask(
         self.lengths = np.linspace(0, 1, num_expts)
         self.task = HardTask[
             np.complex128, T_RootResultType, T2EchoCfg, List[NDArray[np.float64]]
-        ](
-            measure_fn=measure_t2echo_fn,
-            result_shape=(num_expts,),
-        )
+        ](measure_fn=measure_t2echo_fn, result_shape=(num_expts,))
 
     def num_axes(self) -> Dict[str, int]:
         return dict(t2e=1, t2e_over_flx=1, t2e_curve=1)
@@ -293,11 +293,11 @@ class T2EchoMeasurementTask(
         len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
         self.lengths = sweep2array(len_sweep)
 
-        cfg_temp = dict(cfg_temp)
         deepupdate(
-            cfg_temp, {"dev": ctx.cfg.get("dev", {}), "sweep": {"length": len_sweep}}
+            cfg_temp,  # type: ignore
+            {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}},
         )
-        cfg_temp = ml.make_cfg(cfg_temp)
+        cfg_temp = ml.make_cfg(cfg_temp)  # type: ignore
         cfg_temp["activate_detune"] = self.detune_ratio / len_sweep["step"]
 
         cfg = cast(T2EchoCfg, cfg_temp)

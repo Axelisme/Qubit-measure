@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    NotRequired,
+    TypedDict,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
@@ -13,6 +22,7 @@ from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_sweep
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -65,6 +75,8 @@ class T1Cfg(TaskConfig, ModularProgramCfg):
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
+    sweep: Dict[str, SweepCfg]
+
 
 class T1Result(TypedDict, closed=True):
     raw_signals: NDArray[np.complex128]
@@ -94,16 +106,14 @@ class T1MeasurementTask(
         self.earlystop_snr = earlystop_snr
 
         def measure_t1_fn(ctx: TaskContextView, update_hook: Callable):
+            t1_span = sweep2param("length", ctx.cfg["sweep"]["length"])
             prog = ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
                     Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                     Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                    Delay(
-                        name="t1_delay",
-                        delay=sweep2param("length", ctx.cfg["sweep"]["length"]),
-                    ),
+                    Delay("t1_delay", delay=t1_span),
                     Readout("readout", ctx.cfg["readout"]),
                 ],
             )
@@ -276,9 +286,11 @@ class T1MeasurementTask(
         len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
         self.lengths = sweep2array(len_sweep)
 
-        cfg_temp = dict(cfg_temp)
+        dev_cfg = ctx.cfg["dev"]  # type: ignore
+
         deepupdate(
-            cfg_temp, {"dev": ctx.cfg.get("dev", {}), "sweep": {"length": len_sweep}}
+            cfg_temp,
+            {"dev": dev_cfg, "sweep": {"length": len_sweep}},
         )
         cfg_temp = ml.make_cfg(cfg_temp)
 

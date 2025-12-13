@@ -1,4 +1,4 @@
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from matplotlib.collections import PathCollection
@@ -49,7 +49,7 @@ class ScatterSegment(AbsSegment):
         ax: Axes,
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
-        colors: Optional[NDArray[Any]] = None,
+        colors: Optional[Union[Sequence[Tuple], NDArray]] = None,
         title: Optional[str] = None,
     ) -> None:
         if self.scatter is None:
@@ -58,10 +58,11 @@ class ScatterSegment(AbsSegment):
         offsets = np.c_[xs.flatten(), ys.flatten()]
         self.scatter.set_offsets(offsets)
         if colors is not None:
-            colors_arr = np.asarray(colors)
-
-            self.scatter.set_array(colors_arr)
-            self.scatter.set_clim(np.nanmin(colors_arr), np.nanmax(colors_arr))
+            if isinstance(colors, np.ndarray):
+                self.scatter.set_array(colors)
+                self.scatter.set_clim(np.nanmin(colors), np.nanmax(colors))
+            else:
+                self.scatter.set_color(colors)
 
         if title is not None:
             ax.set_title(title)

@@ -11,6 +11,7 @@ def fit_rabi(
     *,
     decay: bool = False,
     init_phase: Optional[float] = None,
+    min_length: float = 0.0,
 ) -> Tuple[float, float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
     """Return (pi_x, pi2_x, freq, fit_signals, (pOpt, pCov))"""
 
@@ -44,6 +45,10 @@ def fit_rabi(
     else:
         pi_x = (1.0 - phase / 360) / freq
         pi2_x = (0.75 - phase / 360) / freq
+
+    while pi2_x < min_length:
+        pi2_x += 0.5 / freq
+        pi_x += 0.5 / freq
 
     pOpt = cast(Tuple[float, float, float, float, float], tuple(pOpt))
 

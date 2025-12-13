@@ -8,6 +8,7 @@ from typing_extensions import NotRequired
 from ..base import MyProgramV2
 from .base import Module
 from .waveform import Waveform, WaveformCfg
+from .util import round_timestamp
 
 
 class PulseCfg(TypedDict):
@@ -115,7 +116,7 @@ class BasePulse(Module):
         prog.pulse(cfg["ch"], self.pulse_name, t=t + cfg["pre_delay"], tag=self.name)
 
         if cfg["block_mode"]:  # default
-            return t + self.total_length()
+            return round_timestamp(prog, t + self.total_length(), gen_ch=cfg["ch"])
         else:
             return t  # no block, return the start time as the end time
 

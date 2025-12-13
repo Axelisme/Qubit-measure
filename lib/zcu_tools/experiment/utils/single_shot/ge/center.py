@@ -34,7 +34,7 @@ def get_rotate_angle(
     return {"theta": theta}
 
 
-def fit_ge_by_center(signals: np.ndarray, **kwargs) -> tuple:
+def fit_ge_by_center(signals: np.ndarray, **kwargs):
     """
     Analyze ground and excited state signals using the center method.
 

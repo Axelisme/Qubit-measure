@@ -14,6 +14,28 @@ T_Result = TypeVar("T_Result", bound=Result)
 T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
+def run_with_retries(
+    task: AbsTask,
+    ctx,
+    retry_time: int,
+    dynamic_pbar: bool = False,
+    raise_error: bool = True,
+) -> None:
+    for attempt in range(retry_time + 1):
+        try:
+            task.run(ctx)
+        except Exception:
+            if attempt == retry_time:
+                if raise_error:
+                    raise
+            else:
+                print(f"Failed to run task, retrying... ({attempt + 1}/{retry_time})")
+                task.cleanup()  # cleanup and re-init
+                task.init(ctx, dynamic_pbar=dynamic_pbar)
+                continue
+        break
+
+
 class ReTryIfFail(AbsTask[T_Result, T_RootResult, T_TaskConfig]):
     def __init__(
         self, task: AbsTask[T_Result, T_RootResult, T_TaskConfig], max_retries: int
@@ -26,19 +48,9 @@ class ReTryIfFail(AbsTask[T_Result, T_RootResult, T_TaskConfig]):
         self.task.init(ctx, dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx) -> None:
-        for attempt in range(self.max_retries):
-            try:
-                self.task.run(ctx)
-            except Exception:
-                print(
-                    f"Failed to run task, retrying... ({attempt + 1}/{self.max_retries})"
-                )
-                self.task.cleanup()  # cleanup and re-init
-                self.task.init(ctx, dynamic_pbar=self.dynamic_pbar)
-                continue
-            break
-        else:
-            self.task.run(ctx)
+        run_with_retries(
+            self.task, ctx, retry_time=self.max_retries, dynamic_pbar=self.dynamic_pbar
+        )
 
     def cleanup(self) -> None:
         self.task.cleanup()

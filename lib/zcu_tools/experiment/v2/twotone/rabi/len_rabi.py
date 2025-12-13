@@ -114,7 +114,11 @@ class LenRabiExperiment(AbsExperiment):
             return self._run_for_arb(soc, soccfg, cfg)
 
     def analyze(
-        self, result: Optional[LenRabiResultType] = None, *, decay: bool = True
+        self,
+        result: Optional[LenRabiResultType] = None,
+        *,
+        decay: bool = True,
+        min_length: float = 0.03,
     ) -> Tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -132,7 +136,7 @@ class LenRabiExperiment(AbsExperiment):
         real_signals = real_signals[~nan_mask]
 
         pi_len, pi2_len, freq, y_fit, _ = fit_rabi(
-            lens, real_signals, decay=decay, init_phase=None
+            lens, real_signals, decay=decay, init_phase=None, min_length=min_length
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)

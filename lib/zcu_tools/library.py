@@ -16,6 +16,7 @@ from typing import (
     TextIO,
     TypeVar,
     Union,
+    TYPE_CHECKING,
 )
 
 import yaml
@@ -23,6 +24,9 @@ from typing_extensions import ParamSpec
 
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.utils import deepupdate, numpy2number
+
+if TYPE_CHECKING:
+    from zcu_tools.program.v2 import WaveformCfg, PulseCfg, ReadoutCfg, ResetCfg
 
 try:  # pragma: no cover - platform specific
     import fcntl
@@ -89,7 +93,8 @@ def auto_derive_module(
     # load module configuration if it is a string
     if isinstance(module_cfg, str):
         name = module_cfg
-        module_cfg = deepcopy(ml.get_module(name))
+        module_cfg = deepcopy(ml.get_module(name))  # type: ignore[assignment]
+    assert isinstance(module_cfg, dict)
     module_cfg["name"] = name
 
     # if it also a pulse cfg, exclude raise_waveform in flat_top
@@ -139,6 +144,9 @@ def auto_sync(
     return decorator
 
 
+T_Cfg = TypeVar("T_Cfg", bound=MutableMapping[str, Any])
+
+
 class ModuleLibrary:
     """
     Module library is a class that contains the waveforms and modules of the experiment.
@@ -168,9 +176,7 @@ class ModuleLibrary:
 
         return ml
 
-    def make_cfg(
-        self, exp_cfg: MutableMapping[str, Any], **kwargs
-    ) -> MutableMapping[str, Any]:
+    def make_cfg(self, exp_cfg: T_Cfg, **kwargs) -> T_Cfg:
         """
         Create a deep copy of the experiment configuration, update it with additional parameters,
         and automatically derive missing configuration values.
@@ -275,20 +281,20 @@ class ModuleLibrary:
     @auto_sync("before")
     def get_waveform(
         self, name: str, override_cfg: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    ) -> WaveformCfg:
         waveform = deepcopy(self.waveforms[name])
         if override_cfg is not None:
             deepupdate(waveform, override_cfg, behavior="force")
-        return waveform
+        return waveform  # type: ignore[return-value]
 
     @auto_sync("before")
     def get_module(
         self, name: str, override_cfg: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    ) -> Union[PulseCfg, ReadoutCfg, ResetCfg]:
         module = deepcopy(self.modules[name])
         if override_cfg is not None:
             deepupdate(module, override_cfg, behavior="force")
-        return module
+        return module  # type: ignore[return-value]
 
     @auto_sync("after")
     def update_module(self, name: str, override_cfg: Dict[str, Any]) -> None:

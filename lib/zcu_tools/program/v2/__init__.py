@@ -14,6 +14,7 @@ from .modules import (
     TriggerReadout,
     NonBlocking,
     check_block_mode,
+    WaveformCfg,
 )
 from .onetone import OneToneProgram, OneToneProgramCfg
 from .twotone import TwoToneProgram, TwoToneProgramCfg

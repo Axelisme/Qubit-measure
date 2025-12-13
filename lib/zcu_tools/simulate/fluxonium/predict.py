@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from typing import Literal, Tuple
+from typing import Literal, Tuple, Union, overload
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.optimize import root_scalar
 
 
@@ -22,7 +23,7 @@ class FluxoniumPredictor:
 
         self.bias = bias
 
-        from scqubits import Fluxonium  # lazy import
+        from scqubits.core.fluxonium import Fluxonium  # lazy import
 
         self.fluxonium = Fluxonium(*self.params, flux=0.5, cutoff=40, truncated_dim=2)
 
@@ -97,7 +98,21 @@ class FluxoniumPredictor:
 
         return float(energies[transition[1]] - energies[transition[0]]) * 1e3  # MHz
 
-    def predict_freq(self, cur_A: float, transition: Tuple[int, int] = (0, 1)) -> float:
+    @overload
+    def predict_freq(
+        self, cur_A: float, transition: Tuple[int, int] = (0, 1)
+    ) -> float: ...
+
+    @overload
+    def predict_freq(
+        self, cur_A: NDArray[np.float64], transition: Tuple[int, int] = (0, 1)
+    ) -> NDArray[np.float64]: ...
+
+    def predict_freq(
+        self,
+        cur_A: Union[float, NDArray[np.float64]],
+        transition: Tuple[int, int] = (0, 1),
+    ) -> Union[float, NDArray[np.float64]]:
         """
         Predict the transition frequency of a fluxonium qubit.
         Args:
@@ -123,12 +138,28 @@ class FluxoniumPredictor:
 
         return float(np.abs(oper[transition[0], transition[1]]))
 
+    @overload
     def predict_matrix_element(
         self,
         cur_A: float,
         transition: Tuple[int, int] = (0, 1),
         operator: Literal["phi", "n"] = "n",
-    ) -> float:
+    ) -> float: ...
+
+    @overload
+    def predict_matrix_element(
+        self,
+        cur_A: NDArray[np.float64],
+        transition: Tuple[int, int] = (0, 1),
+        operator: Literal["phi", "n"] = "n",
+    ) -> NDArray[np.float64]: ...
+
+    def predict_matrix_element(
+        self,
+        cur_A: Union[float, NDArray[np.float64]],
+        transition: Tuple[int, int] = (0, 1),
+        operator: Literal["phi", "n"] = "n",
+    ) -> Union[float, NDArray[np.float64]]:
         """
         Predict the matrix element of operator between two levels of a fluxonium qubit.
         Args:
@@ -140,6 +171,10 @@ class FluxoniumPredictor:
         """
         if isinstance(cur_A, Iterable):
             return np.array(
-                [self._predict_matrix_element(ca, transition, operator) for ca in cur_A]
+                [
+                    self._predict_matrix_element(ca, transition, operator)
+                    for ca in cur_A
+                ],
+                dtype=np.float64,
             )
         return self._predict_matrix_element(cur_A, transition, operator)

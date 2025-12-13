@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -27,7 +27,7 @@ class LivePlotterScatter(JupyterPlotMixin, AbsLivePlotter):
         self,
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
-        colors: Optional[NDArray[Any]] = None,
+        colors: Optional[Union[Sequence[Tuple], NDArray]] = None,
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:

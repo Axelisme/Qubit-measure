@@ -86,7 +86,7 @@ def singleshot_ge_analysis(
     angle: Optional[float] = None,
     backend: Literal["center", "regression", "pca"] = "pca",
     **kwargs,
-) -> Tuple[float, float, float, np.ndarray, dict, Figure]:
+):
     """
     Analyze ground and excited state signals to determine classification parameters.
 

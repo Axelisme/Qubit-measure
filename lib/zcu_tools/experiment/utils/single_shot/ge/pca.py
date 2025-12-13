@@ -13,5 +13,5 @@ def get_rotate_angle(
     return {"theta": -angle}
 
 
-def fit_ge_by_pca(signals: np.ndarray, **kwargs) -> tuple:
+def fit_ge_by_pca(signals: np.ndarray, **kwargs):
     return fitting_ge_and_plot(signals, get_rotate_angle, **kwargs)

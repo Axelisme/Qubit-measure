@@ -14,12 +14,13 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
-from zcu_tools.device import DeviceInfo
+from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
+    run_with_retries,
     Result,
     SoftTask,
     TaskConfig,
@@ -94,6 +95,37 @@ class FluxDepInfoDict(UserDict):
         super().__setitem__(key, value)
         self.first_info.setdefault(key, deepcopy(value))
         self.last_info[key] = deepcopy(value)
+
+
+class FluxDepBatchTask(BatchTask):
+    def __init__(self, tasks, retry_time: int = 0) -> None:
+        self.retry_time = retry_time
+
+        super().__init__(tasks)
+
+    def run(self, ctx) -> None:
+        if self.dynamic_pbar:
+            self.task_pbar = self.make_pbar(leave=False)
+        else:
+            assert self.task_pbar is not None
+            self.task_pbar.reset()
+
+        for name, task in self.tasks.items():
+            self.task_pbar.set_description(desc=f"Task [{str(name)}]")
+
+            run_with_retries(
+                task,
+                ctx(addr=name),
+                self.retry_time,
+                dynamic_pbar=True,
+                raise_error=False,
+            )
+
+            self.task_pbar.update()
+
+        if self.dynamic_pbar:
+            self.task_pbar.close()
+            self.task_pbar = None
 
 
 class FluxDepExecutor(AbsExperiment):
@@ -193,9 +225,7 @@ class FluxDepExecutor(AbsExperiment):
                 assert isinstance(ctx._addr_stack[1], str)
                 cur_tasks = [ctx._addr_stack[1]]
 
-            results = ctx.get_data()
-            assert isinstance(results, list)
-            results = merge_result_list(results)
+            results = merge_result_list(ctx.data)
 
             assert isinstance(results, dict)
             for cur_task in cur_tasks:
@@ -216,6 +246,7 @@ class FluxDepExecutor(AbsExperiment):
         dev_cfg: Mapping[str, DeviceInfo],
         predictor: FluxoniumPredictor,
         env_dict: Optional[Dict[str, Any]] = None,
+        retry_time: int = 3,
     ) -> Mapping[str, Result]:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
@@ -245,6 +276,9 @@ class FluxDepExecutor(AbsExperiment):
 
             set_flux_in_dev_cfg(ctx.cfg["dev"], flx, label="flux_dev")
 
+        set_flux_in_dev_cfg(cfg["dev"], self.flx_values[0], label="flux_dev")
+        GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+
         with matplotlib.rc_context(
             {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}
         ):
@@ -257,7 +291,10 @@ class FluxDepExecutor(AbsExperiment):
                             sweep_name="flux",
                             sweep_values=self.flx_values.tolist(),
                             update_cfg_fn=update_fn,
-                            sub_task=BatchTask(self.measurements),
+                            sub_task=FluxDepBatchTask(
+                                self.measurements,
+                                retry_time=retry_time,
+                            ),
                         ),
                         init_cfg=cfg,
                         env_dict=env_dict,

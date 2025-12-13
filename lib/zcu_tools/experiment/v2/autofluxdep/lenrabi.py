@@ -2,11 +2,20 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    NotRequired,
+    TypedDict,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    cast,
+    Union,
+)
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
@@ -74,15 +83,17 @@ def auto_fit_lenrabi(
 
 
 class LenRabiCfgTemplate(TypedDict):
-    reset: NotRequired[ResetCfg]
-    rabi_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: NotRequired[Union[ResetCfg, str]]
+    rabi_pulse: Union[PulseCfg, str]
+    readout: Union[ReadoutCfg, str]
 
 
 class LenRabiCfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     rabi_pulse: PulseCfg
     readout: ReadoutCfg
+
+    sweep: Dict[str, SweepCfg]
 
 
 class LenRabiResult(TypedDict, closed=True):
@@ -118,27 +129,22 @@ class LenRabiMeasurementTask(
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        self.task = HardTask[
-            np.complex128, T_RootResultType, LenRabiCfg, List[NDArray[np.float64]]
-        ](
-            measure_fn=lambda ctx, update_hook: (
-                prog := ModularProgramV2(
-                    ctx.env_dict["soccfg"],
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                        Pulse(
-                            "rabi_pulse",
-                            Pulse.set_param(
-                                ctx.cfg["rabi_pulse"],
-                                "length",
-                                sweep2param("length", self.length_sweep),
-                            ),
-                        ),
-                        Readout("readout", ctx.cfg["readout"]),
-                    ],
-                )
-            ).acquire(
+        def measure_fn(ctx: TaskContextView, update_hook: Callable):
+            Pulse.set_param(
+                ctx.cfg["rabi_pulse"],
+                "length",
+                sweep2param("length", self.length_sweep),
+            )
+            prog = ModularProgramV2(
+                ctx.env_dict["soccfg"],
+                ctx.cfg,
+                modules=[
+                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                    Pulse("rabi_pulse", ctx.cfg["rabi_pulse"]),
+                    Readout("readout", ctx.cfg["readout"]),
+                ],
+            )
+            return prog.acquire(
                 ctx.env_dict["soc"],
                 progress=False,
                 callback=wrap_earlystop_check(
@@ -147,9 +153,11 @@ class LenRabiMeasurementTask(
                     self.earlystop_snr,
                     signal2real_fn=lenrabi_signal2real,
                 ),
-            ),
-            result_shape=(self.length_sweep["expts"],),
-        )
+            )
+
+        self.task = HardTask[
+            np.complex128, T_RootResultType, LenRabiCfg, List[NDArray[np.float64]]
+        ](measure_fn=measure_fn, result_shape=(self.length_sweep["expts"],))
 
     def num_axes(self) -> Dict[str, int]:
         return dict(rabi_curve=2)

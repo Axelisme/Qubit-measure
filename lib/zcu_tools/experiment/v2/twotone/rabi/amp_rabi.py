@@ -74,7 +74,7 @@ class AmpRabiExperiment(AbsExperiment):
             init_phase = 180
 
         pi_amp, pi2_amp, _, y_fit, _ = fit_rabi(
-            pdrs, real_signals, decay=False, init_phase=init_phase
+            pdrs, real_signals, decay=False, init_phase=init_phase, min_length=0.0
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)

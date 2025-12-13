@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, Optional, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import List, NotRequired, TypedDict
+from typing_extensions import (
+    List,
+    NotRequired,
+    TypedDict,
+    Union,
+    Callable,
+    Dict,
+    Optional,
+    cast,
+)
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
@@ -53,9 +61,9 @@ def qubitfreq_fluxdep_signal2real(
 
 
 class QubitFreqCfgTemplate(TypedDict):
-    reset: NotRequired[ResetCfg]
-    qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    reset: NotRequired[Union[ResetCfg, str]]
+    qub_pulse: Union[PulseCfg, str]
+    readout: Union[ReadoutCfg, str]
 
 
 class QubitFreqCfg(TaskConfig, TwoToneProgramCfg): ...
@@ -295,12 +303,11 @@ class QubitFreqMeasurementTask(
         if cfg_temp is None:
             return  # skip this task
 
-        cfg_temp = dict(cfg_temp)
         deepupdate(
-            cfg_temp,
+            cfg_temp,  # type: ignore
             {"dev": ctx.cfg.get("dev", {}), "sweep": {"detune": self.detune_sweep}},
         )
-        cfg_temp = ml.make_cfg(cfg_temp)
+        cfg_temp = ml.make_cfg(cfg_temp)  # type: ignore
 
         center_freq = cfg_temp["qub_pulse"]["freq"]
         Pulse.set_param(

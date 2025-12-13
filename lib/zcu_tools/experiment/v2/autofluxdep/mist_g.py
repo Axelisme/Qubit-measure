@@ -12,6 +12,7 @@ from typing_extensions import (
     Optional,
     TypedDict,
     cast,
+    Union,
 )
 
 from zcu_tools.experiment.utils import sweep2array
@@ -50,44 +51,49 @@ def mist_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
     return np.array(list(map(mist_signal2real, signals)), dtype=np.float64)
 
 
-class MistCfgTemplate(TypedDict):
+class Mist_G_CfgTemplate(TypedDict):
+    reset: NotRequired[Union[ResetCfg, str]]
+    mist_pulse: Union[PulseCfg, str]
+    readout: Union[ReadoutCfg, str]
+
+
+class Mist_G_Cfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     mist_pulse: PulseCfg
     readout: ReadoutCfg
 
-
-class MistCfg(TaskConfig, ModularProgramCfg):
-    reset: NotRequired[ResetCfg]
-    mist_pulse: PulseCfg
-    readout: ReadoutCfg
+    sweep: Dict[str, SweepCfg]
 
 
-class MistResult(TypedDict, closed=True):
+class Mist_G_Result(TypedDict, closed=True):
     raw_signals: NDArray[np.complex128]
     success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict, closed=True):
+class Plotter_G_DictType(TypedDict, closed=True):
     g_mist: LivePlotter2DwithLine
 
 
 class Mist_G_MeasurementTask(
-    MeasurementTask[MistResult, T_RootResultType, TaskConfig, PlotterDictType]
+    MeasurementTask[Mist_G_Result, T_RootResultType, TaskConfig, Plotter_G_DictType]
 ):
     def __init__(
         self,
         gain_sweep: SweepCfg,
         cfg_maker: Callable[
-            [TaskContextView, ModuleLibrary], Optional[MistCfgTemplate]
+            [TaskContextView, ModuleLibrary], Optional[Mist_G_CfgTemplate]
         ],
     ) -> None:
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
 
-        self.task = HardTask[
-            np.complex128, T_RootResultType, MistCfg, List[NDArray[np.float64]]
-        ](
-            measure_fn=lambda ctx, update_hook: ModularProgramV2(
+        def measure_fn(ctx: TaskContextView, update_hook: Optional[Callable]):
+            Pulse.set_param(
+                ctx.cfg["mist_pulse"],
+                "gain",
+                sweep2param("gain", ctx.cfg["sweep"]["gain"]),
+            )
+            return ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
@@ -95,15 +101,17 @@ class Mist_G_MeasurementTask(
                     Pulse(name="mist_pulse", cfg=ctx.cfg["mist_pulse"]),
                     Readout("readout", ctx.cfg["readout"]),
                 ],
-            ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook),
-            result_shape=(self.gain_sweep["expts"],),
-        )
+            ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook)
+
+        self.task = HardTask[
+            np.complex128, T_RootResultType, Mist_G_Cfg, List[NDArray[np.float64]]
+        ](measure_fn=measure_fn, result_shape=(self.gain_sweep["expts"],))
 
     def num_axes(self) -> Dict[str, int]:
         return dict(g_mist=2)
 
-    def make_plotter(self, name, axs) -> PlotterDictType:
-        return PlotterDictType(
+    def make_plotter(self, name, axs) -> Plotter_G_DictType:
+        return Plotter_G_DictType(
             g_mist=LivePlotter2DwithLine(
                 "Flux device value",
                 "Readout Gain (a.u.)",
@@ -115,6 +123,7 @@ class Mist_G_MeasurementTask(
 
     def update_plotter(self, plotters, ctx, signals) -> None:
         flx_values: np.ndarray = ctx.env_dict["flx_values"]
+
         gains: np.ndarray = sweep2array(self.gain_sweep)
 
         # shape: (flx, gains)
@@ -149,7 +158,7 @@ class Mist_G_MeasurementTask(
             tag=prefix_tag + "/signals_g",
         )
 
-    def load(self, filepath: str, **kwargs) -> MistResult:
+    def load(self, filepath: str, **kwargs) -> Mist_G_Result:
         data = np.load(filepath)
 
         flx_values = data["flx_values"]
@@ -163,7 +172,7 @@ class Mist_G_MeasurementTask(
         raw_signals = raw_signals.astype(np.complex128)
         success = np.asarray(success, dtype=np.bool_)
 
-        return MistResult(raw_signals=raw_signals, success=success)
+        return Mist_G_Result(raw_signals=raw_signals, success=success)
 
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
@@ -176,20 +185,15 @@ class Mist_G_MeasurementTask(
         if cfg_temp is None:
             return  # skip this task
 
-        cfg_temp = dict(cfg_temp)
+        dev_cfg = ctx.cfg["dev"]  # type: ignore
+
         deepupdate(
             cfg_temp,
-            {"dev": ctx.cfg.get("dev", {}), "sweep": {"gain": self.gain_sweep}},
+            {"dev": dev_cfg, "sweep": {"gain": self.gain_sweep}},
         )
         cfg_temp = ml.make_cfg(cfg_temp)
 
-        Pulse.set_param(
-            cfg_temp["mist_pulse"],
-            "gain",
-            sweep2param("gain", cfg_temp["sweep"]["gain"]),
-        )
-
-        cfg = cast(MistCfg, cfg_temp)
+        cfg = cast(Mist_G_Cfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.get_data()["raw_signals"]
@@ -197,14 +201,14 @@ class Mist_G_MeasurementTask(
 
         with MinIntervalFunc.force_execute():
             ctx.set_data(
-                MistResult(
+                Mist_G_Result(
                     raw_signals=raw_signals,
                     success=np.array(True),
                 )
             )
 
-    def get_default_result(self) -> MistResult:
-        return MistResult(
+    def get_default_result(self) -> Mist_G_Result:
+        return Mist_G_Result(
             raw_signals=self.task.get_default_result(),
             success=np.array(True),
         )

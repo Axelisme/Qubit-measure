@@ -46,6 +46,8 @@ class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult, T_TaskConfig]):
         else:
             self.sweep_pbar = self.make_pbar(leave=True)
 
+        self.update_cfg_fn(0, ctx, self.sweep_values[0])
+
         self.sub_task.init(ctx(addr=0), dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx) -> None:
