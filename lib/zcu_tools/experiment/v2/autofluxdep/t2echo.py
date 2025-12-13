@@ -11,7 +11,7 @@ from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
-from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
+from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -82,7 +82,6 @@ class T2EchoResult(TypedDict, closed=True):
 
 class PlotterDictType(TypedDict, closed=True):
     t2e: LivePlotter1D
-    t2e_over_flx: LivePlotter2D
     t2e_curve: LivePlotter1D
 
 
@@ -143,7 +142,7 @@ class T2EchoMeasurementTask(
         ](measure_fn=measure_t2echo_fn, result_shape=(num_expts,))
 
     def num_axes(self) -> Dict[str, int]:
-        return dict(t2e=1, t2e_over_flx=1, t2e_curve=1)
+        return dict(t2e=1, t2e_curve=1)
 
     def make_plotter(self, name, axs) -> PlotterDictType:
         return PlotterDictType(
@@ -154,12 +153,6 @@ class T2EchoMeasurementTask(
                 segment_kwargs=dict(
                     title=name + "(t2e)", line_kwargs=[dict(linestyle="None")]
                 ),
-            ),
-            t2e_over_flx=LivePlotter2D(
-                "Flux device value",
-                "Time index",
-                segment_kwargs=dict(title=name + "(t2e over flux)"),
-                existed_axes=[axs["t2e_over_flx"]],
             ),
             t2e_curve=LivePlotter1D(
                 "Signal",
@@ -173,13 +166,9 @@ class T2EchoMeasurementTask(
         flx_values = ctx.env_dict["flx_values"]
         info: FluxDepInfoDict = ctx.env_dict["info"]
 
-        len_idxs = np.arange(self.num_expts).astype(np.float64)
         real_signals = t2echo_fluxdep_signal2real(signals["raw_signals"])
 
         plotters["t2e"].update(flx_values, signals["t2e"], refresh=False)
-        plotters["t2e_over_flx"].update(
-            flx_values, len_idxs, real_signals, refresh=False
-        )
         plotters["t2e_curve"].update(
             self.lengths, real_signals[info["flx_idx"]], refresh=False
         )

@@ -11,7 +11,7 @@ from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
-from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
+from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -84,7 +84,6 @@ class T2RamseyResult(TypedDict, closed=True):
 
 class PlotterDictType(TypedDict, closed=True):
     t2r: LivePlotter1D
-    t2r_over_flx: LivePlotter2D
     t2r_curve: LivePlotter1D
 
 
@@ -151,7 +150,7 @@ class T2RamseyMeasurementTask(
         )
 
     def num_axes(self) -> Dict[str, int]:
-        return dict(t2r=1, t2r_over_flx=1, t2r_curve=1)
+        return dict(t2r=1, t2r_curve=1)
 
     def make_plotter(self, name, axs) -> PlotterDictType:
         return PlotterDictType(
@@ -162,12 +161,6 @@ class T2RamseyMeasurementTask(
                 segment_kwargs=dict(
                     title=name + "(t2r)", line_kwargs=[dict(linestyle="None")]
                 ),
-            ),
-            t2r_over_flx=LivePlotter2D(
-                "Flux device value",
-                "Time index",
-                segment_kwargs=dict(title=name + "(t2r over flux)"),
-                existed_axes=[axs["t2r_over_flx"]],
             ),
             t2r_curve=LivePlotter1D(
                 "Signal",
@@ -181,13 +174,9 @@ class T2RamseyMeasurementTask(
         flx_values = ctx.env_dict["flx_values"]
         info: FluxDepInfoDict = ctx.env_dict["info"]
 
-        len_idxs = np.arange(self.num_expts).astype(np.float64)
         real_signals = t2ramsey_fluxdep_signal2real(signals["raw_signals"])
 
         plotters["t2r"].update(flx_values, signals["t2r"], refresh=False)
-        plotters["t2r_over_flx"].update(
-            flx_values, len_idxs, real_signals, refresh=False
-        )
         plotters["t2r_curve"].update(
             self.lengths, real_signals[info["flx_idx"]], refresh=False
         )

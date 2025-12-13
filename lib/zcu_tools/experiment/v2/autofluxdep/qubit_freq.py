@@ -5,13 +5,13 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import (
-    List,
-    NotRequired,
-    TypedDict,
-    Union,
     Callable,
     Dict,
+    List,
+    NotRequired,
     Optional,
+    TypedDict,
+    Union,
     cast,
 )
 
@@ -277,10 +277,6 @@ class QubitFreqMeasurementTask(
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-        self.uncalibrate_count = 0
-        self.last_calibrated_flx = ctx.env_dict["info"]["flx_value"] - 1
-        self.last_detune_slope = 0.0
-
     def run(self, ctx) -> None:
         ml: ModuleLibrary = ctx.env_dict["ml"]
         predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
@@ -290,12 +286,6 @@ class QubitFreqMeasurementTask(
 
         flx = info["flx_value"]
         predict_freq = predictor.predict_freq(flx)
-        if self.uncalibrate_count > 1:
-            # linear predict the detune before next calibration point
-            predict_detune = self.last_detune_slope * (flx - self.last_calibrated_flx)
-            predict_detune = min(predict_detune, np.max(detunes))
-            predict_detune = max(predict_detune, np.min(detunes))
-            predict_freq += predict_detune
         info["predict_freq"] = predict_freq
 
         cfg_temp = self.cfg_maker(ctx, ml)
@@ -336,11 +326,6 @@ class QubitFreqMeasurementTask(
         if mean_err < 0.3 * np.ptp(fit_signals):
             bias = predictor.calculate_bias(flx, fit_freq)
             predictor.update_bias(bias)
-            self.uncalibrate_count = 0
-            self.last_detune_slope = detune / (flx - self.last_calibrated_flx)
-            self.last_calibrated_flx = flx
-        else:
-            self.uncalibrate_count += 1
 
         # if fitting is bad, disgard it
         if mean_err > 0.2 * np.ptp(fit_signals):

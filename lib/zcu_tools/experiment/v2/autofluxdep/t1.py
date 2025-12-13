@@ -20,7 +20,7 @@ from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
-from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
+from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -88,7 +88,6 @@ class T1Result(TypedDict, closed=True):
 
 class PlotterDictType(TypedDict, closed=True):
     t1: LivePlotter1D
-    t1_over_flx: LivePlotter2D
     t1_curve: LivePlotter1D
 
 
@@ -137,7 +136,7 @@ class T1MeasurementTask(
         )
 
     def num_axes(self) -> Dict[str, int]:
-        return dict(t1=1, t1_over_flx=1, t1_curve=1)
+        return dict(t1=1, t1_curve=1)
 
     def make_plotter(self, name, axs) -> PlotterDictType:
         return PlotterDictType(
@@ -148,12 +147,6 @@ class T1MeasurementTask(
                 segment_kwargs=dict(
                     title=name + "(t1)", line_kwargs=[dict(linestyle="None")]
                 ),
-            ),
-            t1_over_flx=LivePlotter2D(
-                "Flux device value",
-                "Time index",
-                segment_kwargs=dict(title=name + "(t1 over flux)"),
-                existed_axes=[axs["t1_over_flx"]],
             ),
             t1_curve=LivePlotter1D(
                 "Signal",
@@ -167,13 +160,9 @@ class T1MeasurementTask(
         flx_values = ctx.env_dict["flx_values"]
         info: FluxDepInfoDict = ctx.env_dict["info"]
 
-        len_idxs = np.arange(self.num_expts).astype(np.float64)
         real_signals = t1_fluxdep_signal2real(signals["raw_signals"])
 
         plotters["t1"].update(flx_values, signals["t1"], refresh=False)
-        plotters["t1_over_flx"].update(
-            flx_values, len_idxs, real_signals, refresh=False
-        )
         plotters["t1_curve"].update(
             self.lengths, real_signals[info["flx_idx"]], refresh=False
         )
@@ -289,10 +278,10 @@ class T1MeasurementTask(
         dev_cfg = ctx.cfg["dev"]  # type: ignore
 
         deepupdate(
-            cfg_temp,
+            cfg_temp,  # type: ignore
             {"dev": dev_cfg, "sweep": {"length": len_sweep}},
         )
-        cfg_temp = ml.make_cfg(cfg_temp)
+        cfg_temp = ml.make_cfg(cfg_temp)  # type: ignore
 
         cfg = cast(T1Cfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
