@@ -102,9 +102,11 @@ def plot_cn_over_flx(
         pop = populations_over_flx[:, i, :]
         cn = calc_critical_photons(photons, pop, critical_level)
 
+        clip_pop = np.clip(pop, 0, critical_level)
+
         fig.add_trace(
             go.Heatmap(
-                z=pop.T,
+                z=clip_pop.T,
                 x=flxs,
                 y=photons,
                 colorscale="Viridis",

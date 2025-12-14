@@ -26,6 +26,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.simulate import mA2flx
 from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 
 MistFluxDepResultType = Tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
@@ -159,6 +160,9 @@ class MistFluxDepExperiment(AbsExperiment):
             go.Heatmap(x=xs, y=ys, z=amp_diff.T, showscale=False, colorscale="Greys")
         )
 
+        if mA_c is not None and period is not None:
+            add_secondary_xaxis(fig, xs, dev_values)
+
         return fig
 
     def save(
@@ -189,9 +193,7 @@ class MistFluxDepExperiment(AbsExperiment):
         signals, values, gains = load_data(filepath, **kwargs)
         assert values is not None and gains is not None
         assert len(values.shape) == 1 and len(gains.shape) == 1
-        assert signals.shape == (len(gains), len(values))
-
-        signals = signals.T  # transpose back
+        assert signals.shape == (len(values), len(gains))
 
         values = values.astype(np.float64)
         gains = gains.astype(np.float64)

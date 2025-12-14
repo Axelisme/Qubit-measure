@@ -33,7 +33,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import save_data, load_data
 
 AutoOptResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -319,3 +319,20 @@ class AutoOptimizeExperiment(AbsExperiment):
             tag=tag + "/signals",
             **kwargs,
         )
+
+    def load(self, filepath: str) -> AutoOptResultType:
+        _filepath = Path(filepath)
+
+        params_data, _, _ = load_data(
+            filepath=str(_filepath.with_name(_filepath.name + "_params"))
+        )
+
+        signals_data, _, _ = load_data(
+            filepath=str(_filepath.with_name(_filepath.name + "_signals"))
+        )
+
+        params = params_data.astype(np.float64)
+        signals = signals_data.astype(np.complex128)
+
+        self.last_result = (params, signals)
+        return params, signals
