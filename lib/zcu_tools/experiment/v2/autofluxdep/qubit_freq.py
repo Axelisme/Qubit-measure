@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -20,6 +21,7 @@ from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
+from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program.base import SweepCfg
 from zcu_tools.program.v2 import (
     Pulse,
@@ -173,7 +175,7 @@ class QubitFreqMeasurementTask(
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/signals",
         )
 
@@ -186,7 +188,7 @@ class QubitFreqMeasurementTask(
                 "unit": "Hz",
                 "values": result["predict_freq"] * 1e6,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/predict_freq",
         )
 
@@ -199,7 +201,7 @@ class QubitFreqMeasurementTask(
                 "unit": "Hz",
                 "values": result["fit_freq"] * 1e6,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/fit_freq",
         )
 
@@ -208,7 +210,7 @@ class QubitFreqMeasurementTask(
             filepath=str(filepath.with_name(filepath.name + "_success")),
             x_info=x_info,
             z_info={"name": "Success", "unit": "bool", "values": result["success"]},
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/success",
         )
 
@@ -275,6 +277,7 @@ class QubitFreqMeasurementTask(
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
+        self.init_cfg = deepcopy(ctx.cfg)
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
     def run(self, ctx) -> None:
@@ -293,20 +296,20 @@ class QubitFreqMeasurementTask(
         if cfg_temp is None:
             return  # skip this task
 
+        cfg_temp = dict(cfg_temp)
         deepupdate(
-            cfg_temp,  # type: ignore
+            cfg_temp,
             {"dev": ctx.cfg.get("dev", {}), "sweep": {"detune": self.detune_sweep}},
         )
-        cfg_temp = ml.make_cfg(cfg_temp)  # type: ignore
+        cfg = cast(QubitFreqCfg, ml.make_cfg(cfg_temp))
 
-        center_freq = cfg_temp["qub_pulse"]["freq"]
+        center_freq = cfg["qub_pulse"]["freq"]
         Pulse.set_param(
-            cfg_temp["qub_pulse"],
+            cfg["qub_pulse"],
             "freq",
             center_freq + sweep2param("detune", self.detune_sweep),
         )
 
-        cfg = cast(QubitFreqCfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.get_data()["raw_signals"]

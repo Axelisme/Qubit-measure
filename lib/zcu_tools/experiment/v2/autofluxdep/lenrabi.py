@@ -6,15 +6,15 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import (
-    NotRequired,
-    TypedDict,
     Callable,
     Dict,
     List,
+    NotRequired,
     Optional,
     Tuple,
-    cast,
+    TypedDict,
     Union,
+    cast,
 )
 
 from zcu_tools.experiment.utils import sweep2array
@@ -22,6 +22,7 @@ from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -204,7 +205,7 @@ class LenRabiMeasurementTask(
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/signals",
         )
 
@@ -217,7 +218,7 @@ class LenRabiMeasurementTask(
                 "unit": "s",
                 "values": result["pi_length"] * 1e-6,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/pi_length",
         )
 
@@ -226,7 +227,7 @@ class LenRabiMeasurementTask(
             filepath=str(filepath.with_name(filepath.name + "_success")),
             x_info=x_info,
             z_info={"name": "Success", "unit": "bool", "values": result["success"]},
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/success",
         )
 
@@ -282,6 +283,7 @@ class LenRabiMeasurementTask(
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
+        self.init_cfg = deepcopy(ctx.cfg)
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
     def run(self, ctx) -> None:
@@ -297,9 +299,8 @@ class LenRabiMeasurementTask(
             cfg_temp,
             {"dev": ctx.cfg.get("dev", {}), "sweep": {"length": self.length_sweep}},
         )
-        cfg_temp = ml.make_cfg(cfg_temp)
+        cfg = cast(LenRabiCfg, ml.make_cfg(cfg_temp))
 
-        cfg = cast(LenRabiCfg, cfg_temp)
         rabi_pulse = cfg["rabi_pulse"]
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 

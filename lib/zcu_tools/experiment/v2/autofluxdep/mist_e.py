@@ -1,24 +1,26 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import (
-    NotRequired,
-    TypedDict,
     Callable,
     Dict,
     List,
+    NotRequired,
     Optional,
-    cast,
+    TypedDict,
     Union,
+    cast,
 )
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -156,7 +158,7 @@ class Mist_E_MeasurementTask(
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/signals_e",
         )
 
@@ -177,6 +179,7 @@ class Mist_E_MeasurementTask(
         return Mist_E_Result(raw_signals=raw_signals, success=success)
 
     def init(self, ctx, dynamic_pbar=False) -> None:
+        self.init_cfg = deepcopy(ctx.cfg)
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
     def run(self, ctx) -> None:
@@ -187,13 +190,13 @@ class Mist_E_MeasurementTask(
         if cfg_temp is None:
             return  # skip this task
 
+        cfg_temp = dict(cfg_temp)
         deepupdate(
             cfg_temp,
-            {"dev": ctx.cfg["dev"], "sweep": {"gain": self.gain_sweep}},
+            {"dev": ctx.cfg.get("dev", {}), "sweep": {"gain": self.gain_sweep}},
         )
-        cfg_temp = ml.make_cfg(cfg_temp)
+        cfg = cast(Mist_E_Cfg, ml.make_cfg(cfg_temp))
 
-        cfg = cast(Mist_E_Cfg, cfg_temp)
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.get_data()["raw_signals"]
