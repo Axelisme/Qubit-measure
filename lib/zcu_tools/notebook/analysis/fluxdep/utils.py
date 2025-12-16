@@ -11,7 +11,7 @@ from .processing import cast2real_and_norm
 
 
 def add_secondary_xaxis(
-    fig: go.Figure, flxs: np.ndarray, mAs: np.ndarray, num_ticks: int = 12, **kwargs
+    fig: go.Figure, flxs: np.ndarray, mAs: np.ndarray, num_ticks: int = 12, **fig_kwargs
 ):
     # Choose a small number of evenly spaced tick positions by index
     n = flxs.shape[0]
@@ -36,7 +36,7 @@ def add_secondary_xaxis(
             showlegend=False,
             zorder=0,
         ),
-        **kwargs,
+        **fig_kwargs,
     )
     fig.update_layout(
         xaxis2=dict(

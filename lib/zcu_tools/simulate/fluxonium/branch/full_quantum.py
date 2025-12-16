@@ -1,11 +1,11 @@
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import numpy as np
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm, trange
 
 if TYPE_CHECKING:
-    from scqubits import Fluxonium, HilbertSpace, Oscillator, ParameterSweep
+    from scqubits.core.hilbert_space import HilbertSpace
 
 
 def make_hilbertspace(
@@ -17,7 +17,10 @@ def make_hilbertspace(
     g: float,
     flx: float = 0.5,
 ) -> "HilbertSpace":
-    from scqubits import Fluxonium, HilbertSpace, Oscillator  # lazy import
+    # lazy import
+    from scqubits.core.fluxonium import Fluxonium
+    from scqubits.core.hilbert_space import HilbertSpace
+    from scqubits.core.oscillator import Oscillator
 
     resonator = Oscillator(r_f, truncated_dim=res_dim)
     fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
@@ -51,8 +54,8 @@ def calc_population(bra_array: np.ndarray, evec: np.ndarray) -> float:
 
 
 def calc_branch_population(
-    hilbertspace: "HilbertSpace", branchs: np.ndarray, upto: int = -1
-) -> np.ndarray:
+    hilbertspace: "HilbertSpace", branchs: List[int], upto: int = -1
+) -> Dict[int, np.ndarray]:
     """
     Calculate the average population of the states in branchs upto provided photon number
     """
@@ -80,6 +83,8 @@ def calc_branch_population(
         )
     ).reshape(len(branchs), upto)
 
+    populations = dict(zip(branchs, populations))
+
     return populations
 
 
@@ -95,18 +100,16 @@ def calc_branch_population_over_flux(
     branchs: Optional[list[int]] = None,
     batch_size: int = 10,
 ) -> np.ndarray:
-    from scqubits import (  # lazy import
-        Fluxonium,
-        HilbertSpace,
-        Oscillator,
-        ParameterSweep,
-    )
+    from scqubits.core.param_sweep import ParameterSweep  # lazy import
+
+    if branchs is None:
+        branchs = list(range(qub_dim))
 
     hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g)
     fluxonium, resonator = hilbertspace.subsystem_list
 
     def update_hilbertspace(flx: float) -> None:
-        fluxonium.flux = flx
+        fluxonium.flux = flx  # type: ignore
 
     bra_array = make_bra_array(hilbertspace, qub_dim, res_dim)
 

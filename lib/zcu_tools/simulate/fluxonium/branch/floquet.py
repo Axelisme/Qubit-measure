@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import qutip as qt
@@ -20,9 +20,9 @@ class FloquetBranchAnalysis:
         self.r_f = r_f
         self.g = g
 
-        import scqubits as scq  # lazy import
+        from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-        fluxonium = scq.Fluxonium(
+        fluxonium = Fluxonium(
             *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
         )
         if esys is None:
@@ -42,7 +42,10 @@ class FloquetBranchAnalysis:
         )
 
     def calc_branch_infos(
-        self, fbasis_n: List[qt.FloquetBasis], branchs: List[int], progress: bool = True
+        self,
+        fbasis_n: Sequence[qt.FloquetBasis],
+        branchs: List[int],
+        progress: bool = True,
     ) -> Dict[int, List[int]]:
         branch_infos = {b: [] for b in branchs}
         fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]
@@ -71,7 +74,7 @@ class FloquetBranchAnalysis:
         progress: bool = True,
     ) -> Dict[int, List[float]]:
         fstates_t_n = [
-            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])
+            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])  # type: ignore
             for fbasis in tqdm(
                 fbasis_n, desc="Computing time dependent states", disable=not progress
             )
@@ -100,7 +103,8 @@ class FloquetBranchAnalysis:
             )(b)
             for b in branch_infos.keys()
         )
-        branch_populations = dict(branch_populations)
+        branch_populations = dict(branch_populations)  # type: ignore
+        branch_populations = cast(Dict[int, List[float]], branch_populations)
 
         return branch_populations
 
@@ -118,7 +122,7 @@ def calc_branch_infos(
     avg_times: Optional[np.ndarray] = None,
     progress: bool = True,
     esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-) -> Tuple[Dict[int, List[int]], Dict[int, List[float]]]:
+) -> Tuple[Dict[int, List[int]], List[qt.FloquetBasis]]:
     fb_analysis = FloquetBranchAnalysis(
         params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff, esys=esys
     )
@@ -129,6 +133,8 @@ def calc_branch_infos(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    assert isinstance(fbasis_n, list)
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     return branch_infos, fbasis_n
@@ -197,9 +203,9 @@ class FloquetWithTLSBranchAnalysis:
         self.r_f = r_f
         self.g = g
 
-        import scqubits as scq  # lazy import
+        from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-        fluxonium = scq.Fluxonium(
+        fluxonium = Fluxonium(
             *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
         )
         if esys is None:
@@ -256,10 +262,10 @@ class FloquetWithTLSBranchAnalysis:
         progress: bool = True,
     ) -> Dict[int, List[float]]:
         if avg_times is None:
-            avg_times = [0.0]
+            avg_times = np.array([0.0])
 
         fstates_t_n = [
-            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])
+            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])  # type: ignore
             for fbasis in tqdm(
                 fbasis_n,
                 desc="Computing time dependent states",
@@ -295,7 +301,10 @@ class FloquetWithTLSBranchAnalysis:
             )(b)
             for b in branch_infos.keys()
         )
-        branch_populations = dict(branch_populations)
+        assert isinstance(branch_populations, list)
+
+        branch_populations = dict(branch_populations)  # type: ignore
+        branch_populations = cast(Dict[int, List[float]], branch_populations)
 
         return branch_populations
 
@@ -315,7 +324,7 @@ def calc_branch_infos_with_tls(
     avg_times: Optional[np.ndarray] = None,
     progress: bool = True,
     esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-) -> Tuple[Dict[int, List[int]], Dict[int, List[float]]]:
+) -> Tuple[Dict[int, List[int]], List[qt.FloquetBasis]]:
     fb_analysis = FloquetWithTLSBranchAnalysis(
         params,
         r_f,
@@ -334,6 +343,8 @@ def calc_branch_infos_with_tls(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    assert isinstance(fbasis_n, list)
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     return branch_infos, fbasis_n

@@ -259,7 +259,7 @@ class AcStarkExperiment(AbsExperiment):
         pdr_ticks = np.sqrt(avgn_ticks / ac_coeff)
         ax2.set_xlim(ax1.get_xlim())
         ax2.set_xticks(avgn_ticks)
-        ax2.set_xticklabels([f"{pdr:.2f}" for pdr in pdr_ticks])
+        ax2.set_xticklabels([f"{pdr:.2g}" for pdr in pdr_ticks])
         ax2.set_xlabel("Readout Gain (a.u.)", fontsize=14)
 
         ax1.set_ylabel("Qubit Frequency (MHz)", fontsize=14)

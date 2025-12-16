@@ -1,8 +1,10 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Mapping, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from plotly.subplots import make_subplots
 
 
@@ -12,7 +14,7 @@ def plot_chi_and_snr_over_photon(
     snrs: np.ndarray,
     qub_name: str,
     flx: float,
-) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
+) -> Tuple[Figure, Tuple[Axes, Axes]]:
     best_n = photons[np.argsort(snrs)[-3]]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
@@ -34,13 +36,15 @@ def plot_chi_and_snr_over_photon(
 
 
 def plot_populations_over_photon(
-    branchs: List[int], photons: np.ndarray, branch_populations: Dict[int, List[float]]
+    branchs: List[int],
+    photons: np.ndarray,
+    branch_populations: Mapping[int, np.ndarray],
 ) -> go.Figure:
     fig = go.Figure()
 
     for b in branchs:
         pop_b = branch_populations[b]
-        if np.ptp(pop_b) > 1.0:
+        if np.ptp(pop_b) > 1.0 or b in [0, 1]:
             color = None
             name = f"Branch {b}"
             showlegend = True
@@ -95,7 +99,7 @@ def plot_cn_over_flx(
         rows=2,
         cols=1,
         subplot_titles=("Ground State", "Excited State"),
-        vertical_spacing=0.1,
+        vertical_spacing=0.01,
     )
 
     for i, critical_level in enumerate(critical_levels.values()):
@@ -144,13 +148,29 @@ def plot_cn_with_mist(
     populations_over_flx: np.ndarray,
     critical_levels: Dict[int, float],
     mist_flxs: np.ndarray,
+    fill_alpha: float = 0.2,
+    **fig_kwargs,
 ):
     flxs = np.concatenate([flxs, 1 - flxs[::-1]])
     populations_over_flx = np.concatenate(
         [populations_over_flx, populations_over_flx[::-1, ...]], axis=0
     )
 
-    colors = ["blue", "red", "green", "yellow", "purple", "orange", "brown", "pink"]
+    # Define colors with RGB values for fill support
+    colors_rgb = {
+        "blue": (0, 0, 255),
+        "red": (255, 0, 0),
+        "green": (0, 128, 0),
+        "yellow": (255, 255, 0),
+        "purple": (128, 0, 128),
+        "orange": (255, 165, 0),
+        "brown": (139, 69, 19),
+        "pink": (255, 192, 203),
+    }
+    color_names = list(colors_rgb.keys())
+
+    y_max = photons.max()
+
     for b, critical_level in critical_levels.items():
         b_populations = populations_over_flx[:, b, :]
 
@@ -163,16 +183,36 @@ def plot_cn_with_mist(
 
         cn = calc_critical_photons(photons, b_populations, critical_level)
 
+        color_name = color_names[b % len(color_names)]
+        r, g, b_val = colors_rgb[color_name]
+        fill_color = f"rgba({r}, {g}, {b_val}, {fill_alpha})"
+
+        # Add invisible upper boundary trace
+        fig.add_trace(
+            go.Scatter(
+                x=mist_flxs,
+                y=np.full_like(mist_flxs, y_max),
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            **fig_kwargs,
+        )
+
+        # Add curve with fill to the upper boundary
         fig.add_trace(
             go.Scatter(
                 x=mist_flxs,
                 y=cn,
                 mode="markers+lines",
-                marker=dict(color=colors[b], size=6),
-                line=dict(color=colors[b]),
+                marker=dict(color=color_name, size=1),
+                line=dict(color=color_name),
                 name=f"Branch {b}",
-                # showlegend=False,
-            )
+                fill="tonexty",
+                fillcolor=fill_color,
+            ),
+            **fig_kwargs,
         )
     fig.update_xaxes(title_text="Flux", range=[mist_flxs.min(), mist_flxs.max()])
     fig.update_yaxes(title_text="Photon Number", range=[photons.min(), photons.max()])

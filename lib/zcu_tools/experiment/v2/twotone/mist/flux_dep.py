@@ -13,6 +13,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -26,7 +27,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.simulate import mA2flx
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 
 MistFluxDepResultType = Tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
@@ -35,14 +35,17 @@ MistFluxDepResultType = Tuple[
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     avg_len = max(int(0.05 * signals.shape[1]), 1)
-    std_len = max(int(0.3 * signals.shape[1]), 5)
 
     mist_signals = np.abs(
         signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
     )
     if np.all(np.isnan(mist_signals)):
         return mist_signals
-    mist_signals = np.clip(mist_signals, 0, 5 * np.nanstd(mist_signals[:, :std_len]))
+
+    import matplotlib.pyplot as plt
+
+    ref_signals = np.sort(mist_signals.flatten())[: int(0.5 * mist_signals.size)]
+    mist_signals = np.clip(mist_signals, 0, 10 * np.nanmedian(ref_signals))
 
     return mist_signals
 
@@ -125,6 +128,9 @@ class MistFluxDepExperiment(AbsExperiment):
         period: Optional[float] = None,
         ac_coeff: Optional[float] = None,
         fig: Optional[go.Figure] = None,
+        secondary_xaxis: bool = True,
+        auto_range: bool = True,
+        **fig_kwargs,
     ) -> go.Figure:
         if result is None:
             result = self.last_result
@@ -146,7 +152,7 @@ class MistFluxDepExperiment(AbsExperiment):
             xlabel = r"$\phi$ (a.u.)"
         else:
             xlabel = r"$A$ (mA)"
-        fig.update_xaxes(title_text=xlabel, title_font_size=14, range=[xs[0], xs[-1]])
+        fig.update_xaxes(title_text=xlabel, title_font_size=14)
 
         if ac_coeff is None:
             ys = pdrs
@@ -154,14 +160,20 @@ class MistFluxDepExperiment(AbsExperiment):
         else:
             ys = ac_coeff * pdrs**2
             ylabel = r"$\bar n$"
-        fig.update_yaxes(title_text=ylabel, title_font_size=12, range=[ys[0], ys[-1]])
+        fig.update_yaxes(title_text=ylabel, title_font_size=12)
 
         fig.add_trace(
-            go.Heatmap(x=xs, y=ys, z=amp_diff.T, showscale=False, colorscale="Greys")
+            go.Heatmap(x=xs, y=ys, z=amp_diff.T, showscale=False, colorscale="Greys"),
+            **fig_kwargs,
         )
 
-        if mA_c is not None and period is not None:
-            add_secondary_xaxis(fig, xs, dev_values)
+        if secondary_xaxis:
+            assert mA_c is not None and period is not None
+            add_secondary_xaxis(fig, xs, dev_values, **fig_kwargs)
+
+        if auto_range:
+            fig.update_xaxes(range=[xs[0], xs[-1]])
+            fig.update_yaxes(range=[ys[0], ys[-1]])
 
         return fig
 
