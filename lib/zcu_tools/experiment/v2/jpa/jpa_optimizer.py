@@ -447,14 +447,15 @@ class JPAOptimizer:
 
     def _init_final_phase(self, next_phase: int) -> bool:
         """Initialize the final optimization phase."""
-        next_budget = self.budget.remaining
+        # Use actual remaining iterations to recover any lost points from integer division
+        next_budget = self.budget.total - self._iter_count
         if next_budget <= 0:
             return False
 
         self._is_final_phase = True
         self._phase = next_phase
         self._phase_budget = next_budget
-        self.budget.remaining -= next_budget
+        self.budget.remaining = 0
 
         # Select the single best flux from all measured points
         best_flux = self._get_best_flux()

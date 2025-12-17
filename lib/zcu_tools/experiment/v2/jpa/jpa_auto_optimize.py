@@ -7,13 +7,14 @@ from typing import Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
+from mpl_toolkits.mplot3d import Axes3D
+from matplotlib.colors import Normalize
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
     make_ge_sweep,
-    sweep2array,
     set_flux_in_dev_cfg,
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
@@ -249,6 +250,41 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         plot_ax(ax_power, 2, "JPA Power (dBm)")
 
         return float(best_params[0]), float(best_params[1]), float(best_params[2]), fig
+
+    def plot_sample_params(
+        self, result: Optional[JPAOptimizeResultType] = None
+    ) -> Figure:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        params, phases, signals = result
+        snrs = np.abs(signals)
+
+        max_snr = np.nanmax(snrs)
+        if max_snr > 0:
+            alphas = snrs / max_snr
+        else:
+            alphas = np.zeros_like(snrs)
+
+        alphas = np.clip(alphas, 0, 1)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(projection="3d")
+        assert isinstance(ax, Axes3D)
+
+        cmap = plt.get_cmap("viridis")
+        norm = Normalize(vmin=float(np.nanmin(phases)), vmax=float(np.nanmax(phases)))
+        colors = cmap(norm(phases))
+        colors[:, 3] = alphas
+
+        ax.scatter(params[:, 0], params[:, 1], params[:, 2], c=colors)  # type: ignore
+
+        ax.set_xlabel("Flux value")
+        ax.set_ylabel("Freq (MHz)")
+        ax.set_zlabel("Power (dBm)")
+
+        return fig
 
     def save(
         self,
