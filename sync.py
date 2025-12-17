@@ -13,10 +13,6 @@ import jupytext  # pyright: ignore
 # Helper utilities
 # ------------------------------
 
-# ------------------------------
-# Helper utilities
-# ------------------------------
-
 
 def get_jupytext_version() -> Optional[str]:
     """Checks for jupytext and returns its version."""

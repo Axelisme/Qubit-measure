@@ -2,6 +2,8 @@ import argparse
 import os
 import sys
 import threading
+import fnmatch
+from typing import List
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -16,6 +18,7 @@ from joblib import Parallel, delayed
 # If modifying these scopes, delete the file token.json.
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 TOKEN_FILE = "token.json"
+IGNORE_FILE: List[str] = ["*.lock"]
 
 # Thread-local storage for Google Drive service instances
 _thread_local = threading.local()
@@ -188,7 +191,11 @@ def collect_upload_tasks(service, local_folder_path, parent_folder_id, tasks_lis
     # Value: Google Drive Folder ID
     folder_id_cache = {".": parent_folder_id}
 
-    for dirpath, _, filenames in os.walk(local_folder_path):
+    for dirpath, dirnames, filenames in os.walk(local_folder_path):
+        # Prune ignored directories and files
+        dirnames[:] = [d for d in dirnames if not any(fnmatch.fnmatch(d, p) for p in IGNORE_FILE)]
+        filenames[:] = [f for f in filenames if not any(fnmatch.fnmatch(f, p) for p in IGNORE_FILE)]
+
         relative_dir = os.path.relpath(dirpath, local_folder_path)
 
         # Determine the Drive folder ID for the current local directory
