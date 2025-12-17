@@ -19,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
-from zcu_tools.experiment.v2.utils import wrap_earlystop_check
+from zcu_tools.experiment.v2.utils import wrap_earlystop_check, round_zcu_time
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.notebook.utils import make_comment, make_sweep
@@ -292,6 +292,7 @@ class T2EchoMeasurementTask(
 
         len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
         self.lengths = sweep2array(len_sweep)
+        self.lengths = round_zcu_time(self.lengths, ctx.env_dict["soccfg"])
 
         cfg_temp = dict(cfg_temp)
         deepupdate(

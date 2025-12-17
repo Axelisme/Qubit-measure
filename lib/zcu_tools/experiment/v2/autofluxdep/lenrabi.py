@@ -19,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
-from zcu_tools.experiment.v2.utils import wrap_earlystop_check
+from zcu_tools.experiment.v2.utils import wrap_earlystop_check, round_zcu_time
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.utils import make_comment
@@ -310,6 +310,10 @@ class LenRabiMeasurementTask(
         real_signals = lenrabi_signal2real(raw_signals)
 
         lengths = sweep2array(self.length_sweep)
+        lengths = round_zcu_time(
+            lengths, ctx.env_dict["soccfg"], gen_ch=rabi_pulse["ch"]
+        )
+
         pi_len, pi2_len, rabi_freq, mean_err, fit_signals = auto_fit_lenrabi(
             lengths, real_signals
         )

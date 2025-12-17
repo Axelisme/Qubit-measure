@@ -1,9 +1,12 @@
 from functools import wraps
-from typing import Any, Callable, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Callable, Optional, Sequence, Tuple, TypeVar, TYPE_CHECKING
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+
+if TYPE_CHECKING:
+    from qick import QickConfig
 
 from zcu_tools.program.v2 import ModularProgramV2, PulseCfg
 from zcu_tools.utils.func_tools import min_interval
@@ -11,7 +14,17 @@ from zcu_tools.utils.func_tools import min_interval
 from .runner import Result, default_raw2signal_fn
 
 
-def calc_snr(real_signals: NDArray[np.float64]) -> float:
+def round_zcu_time(
+    us: NDArray[np.float64], soccfg: QickConfig, gen_ch: Optional[int] = None
+) -> NDArray[np.float64]:
+    @np.vectorize
+    def _convert_time(t: float) -> float:
+        return soccfg.cycles2us(soccfg.us2cycles(t, gen_ch=gen_ch), gen_ch=gen_ch)
+
+    return _convert_time(us)
+
+
+def estimate_snr(real_signals: NDArray[np.float64]) -> float:
     smooth_signals = gaussian_filter(real_signals, sigma=1)
     noise = np.mean(np.abs(real_signals - smooth_signals))
     return float((np.max(smooth_signals) - np.min(smooth_signals)) / noise)
@@ -69,7 +82,7 @@ def wrap_earlystop_check(
 
     def check_snr(raw: T_RawResult) -> None:
         signals = raw2signal_fn(raw)
-        snr = calc_snr(signal2real_fn(signals))
+        snr = estimate_snr(signal2real_fn(signals))
         if snr >= snr_threshold:
             prog.set_early_stop(silent=True)
 

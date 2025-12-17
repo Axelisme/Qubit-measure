@@ -90,8 +90,8 @@ class HardTask(
             self.avg_pbar = None
 
     def cleanup(self) -> None:
-        if not self.dynamic_pbar:
-            assert self.avg_pbar is not None
+        # if raise error in run(), avg_pbar may not be closed
+        if self.avg_pbar is not None:
             self.avg_pbar.close()
             self.avg_pbar = None
 

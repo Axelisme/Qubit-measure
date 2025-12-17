@@ -12,6 +12,7 @@ from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
@@ -69,6 +70,7 @@ class CPMGExperiment(AbsExperiment):
 
         times = sweep2array(times_sweep, allow_array=True)
         ts = sweep2array(len_sweep)  # predicted times
+        ts = round_zcu_time(ts, soccfg)
 
         cpmg_spans = sweep2param("length", len_sweep)
 

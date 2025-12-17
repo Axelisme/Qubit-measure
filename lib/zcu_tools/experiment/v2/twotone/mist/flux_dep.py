@@ -42,8 +42,6 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     if np.all(np.isnan(mist_signals)):
         return mist_signals
 
-    import matplotlib.pyplot as plt
-
     ref_signals = np.sort(mist_signals.flatten())[: int(0.5 * mist_signals.size)]
     mist_signals = np.clip(mist_signals, 0, 10 * np.nanmedian(ref_signals))
 

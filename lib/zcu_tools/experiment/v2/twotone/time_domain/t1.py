@@ -14,6 +14,7 @@ from typing_extensions import NotRequired
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task, SoftTask
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
@@ -67,15 +68,16 @@ class T1Experiment(AbsExperiment):
         if isinstance(len_sweep, dict):
             ts = (
                 np.linspace(
-                    len_sweep["start"] ** (1 / 3),
-                    len_sweep["stop"] ** (1 / 3),
+                    len_sweep["start"] ** (1 / 2),
+                    len_sweep["stop"] ** (1 / 2),
                     len_sweep["expts"],
                 )
-                ** 3
+                ** 2
             )
         else:
             ts = np.asarray(len_sweep)
-        ts = np.array([soccfg.cycles2us(soccfg.us2cycles(t)) for t in ts])
+        ts = round_zcu_time(ts, soccfg)
+        ts = np.unique(ts)
 
         def measure_fn(ctx, update_hook):
             rounds = ctx.cfg.pop("rounds", 1)
@@ -95,9 +97,7 @@ class T1Experiment(AbsExperiment):
                         ],
                     ).acquire(soc, progress=False)
 
-                    signal_i = raw_i[0][0].dot([1, 1j])
-
-                    acc_signals[i] += signal_i
+                    acc_signals[i] += raw_i[0][0].dot([1, 1j])
 
                 update_hook(ir, acc_signals / (ir + 1))
 

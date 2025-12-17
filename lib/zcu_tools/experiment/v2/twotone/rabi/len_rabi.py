@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import Pulse, TwoToneProgram, TwoToneProgramCfg, sweep2param
@@ -40,6 +41,7 @@ class LenRabiExperiment(AbsExperiment):
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
         lens = sweep2array(cfg["sweep"]["length"])  # predicted
+        lens = round_zcu_time(lens, soccfg, gen_ch=cfg["qub_pulse"]["ch"])
 
         Pulse.set_param(
             cfg["qub_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
@@ -48,11 +50,9 @@ class LenRabiExperiment(AbsExperiment):
         with LivePlotter1D("Length (us)", "Signal") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
-                        )
-                    ),
+                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(lens),),
                 ),
                 init_cfg=cfg,
@@ -73,6 +73,8 @@ class LenRabiExperiment(AbsExperiment):
         len_sweep = cfg["sweep"].pop("length")
 
         lens = sweep2array(len_sweep)  # predicted
+        lens = round_zcu_time(lens, soccfg, gen_ch=cfg["qub_pulse"]["ch"])
+        lens = np.unique(lens)  # remove duplicates
 
         with LivePlotter1D("Length (us)", "Signal") as viewer:
             signals = run_task(
