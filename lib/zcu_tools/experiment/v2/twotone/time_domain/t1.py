@@ -68,11 +68,11 @@ class T1Experiment(AbsExperiment):
         if isinstance(len_sweep, dict):
             ts = (
                 np.linspace(
-                    len_sweep["start"] ** (1 / 2),
-                    len_sweep["stop"] ** (1 / 2),
+                    len_sweep["start"] ** (1 / 1.3),
+                    len_sweep["stop"] ** (1 / 1.3),
                     len_sweep["expts"],
                 )
-                ** 2
+                ** 1.3
             )
         else:
             ts = np.asarray(len_sweep)
