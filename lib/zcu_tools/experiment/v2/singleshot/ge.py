@@ -121,6 +121,73 @@ class GE_Experiment(AbsExperiment):
 
         return singleshot_ge_analysis(signals, backend=backend, **kwargs)
 
+    def calc_confusion_matrix(
+        self,
+        g_center: complex,
+        e_center: complex,
+        radius: float,
+        init_populations: NDArray[np.float64],
+        result: Optional[GE_ResultType] = None,
+    ) -> Tuple[NDArray[np.float64], Figure]:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        signals = result
+
+        g_signals, e_signals = signals[0], signals[1]
+
+        p_gg = np.mean(np.abs(g_signals - g_center) <= radius)
+        p_ge = np.mean(np.abs(g_signals - e_center) <= radius)
+        p_eg = np.mean(np.abs(e_signals - g_center) <= radius)
+        p_ee = np.mean(np.abs(e_signals - e_center) <= radius)
+        p_go = 1.0 - p_gg - p_ge
+        p_eo = 1.0 - p_eg - p_ee
+
+        Q = np.array(
+            [
+                [p_gg, p_ge, p_go],
+                [p_eg, p_ee, p_eo],
+            ]
+        )
+
+        C_ge = np.linalg.solve(init_populations, Q)
+
+        C_ge[C_ge < 0] = 0.0  # avoid negative values due to numerical errors
+        C_ge /= C_ge.sum(axis=1, keepdims=True)  # normalize
+
+        # assume always correctly identify 'O' state
+        confusion_matrix = np.concatenate([C_ge, np.array([[0.0, 0.0, 1.0]])], axis=0)
+
+        # plot confusion matrix
+        fig = Figure(figsize=(6, 5))
+        ax = fig.add_subplot(1, 1, 1)
+
+        im = ax.imshow(confusion_matrix, cmap="Blues", vmin=0, vmax=1)
+        fig.colorbar(im, ax=ax)
+
+        for i in range(confusion_matrix.shape[0]):
+            for j in range(confusion_matrix.shape[1]):
+                val = confusion_matrix[i, j]
+                ax.text(
+                    j,
+                    i,
+                    f"{val:.2%}",
+                    ha="center",
+                    va="center",
+                    color="white" if val > 0.5 else "black",
+                )
+
+        ax.set_xticks([0, 1, 2])
+        ax.set_yticks([0, 1, 2])
+        ax.set_xticklabels(["G", "E", "O"])
+        ax.set_yticklabels(["G", "E", "O"])
+        ax.set_xlabel("Measured State")
+        ax.set_ylabel("Prepared State")
+        ax.set_title("Confusion Matrix")
+
+        return confusion_matrix, fig
+
     def save(
         self,
         filepath: str,
