@@ -100,7 +100,7 @@ preditor.period = 2 * abs(md.mA_e - md.mA_c)
 # Start Measurement
 
 ```python
-flux_yoko.set_current(0.0e-3)
+flux_yoko.set_current(-2.8e-3)
 ```
 
 ```python
@@ -113,7 +113,9 @@ gc.collect()
 
 ```python
 %matplotlib widget
-flx_values = np.linspace(0.0e-3, -5.2e-3, 201)
+flx_values = np.linspace(-2.8e-3, -2.2e-3, 251)
+
+filename = f"{qub_name}_autofluxdep_animation"
 
 init_pi_pulse = ml.get_module("pi_amp")
 
@@ -122,7 +124,7 @@ executor = (
     .add_measurement(
         "qubit_freq",
         zefd.QubitFreqMeasurementTask(
-            detune_sweep=make_sweep(-10, 10, step=0.05),
+            detune_sweep=make_sweep(-5, 5, step=0.025),
             cfg_maker=lambda ctx, ml: (cur_qf := ctx.env_dict["info"]["predict_freq"])
             and zefd.QubitFreqCfgTemplate(
                 {
@@ -186,50 +188,50 @@ executor = (
             earlystop_snr=30,
         ),
     )
-    .add_measurement(
-        "t1",
-        zefd.T1MeasurementTask(
-            num_expts=151,
-            cfg_maker=lambda ctx, ml: (
-                cur_t1 := ctx.env_dict["info"].last.get("smooth_t1", md.t1)
-            )
-            and (cur_pi_pulse := ctx.env_dict["info"].get("pi_pulse"))
-            and zefd.T1CfgTemplate(
-                {
-                    "pi_pulse": cur_pi_pulse,
-                    "readout": "readout_dpm",
-                    "relax_delay": max(1.0, 3 * cur_t1),
-                    "reps": 1000,
-                    "rounds": 10,
-                    "sweep_range": (0.5, max(1.0, 10 * cur_t1)),
-                }
-            ),
-            earlystop_snr=20,
-        ),
-    )
-    .add_measurement(
-        "t2ramsey",
-        zefd.T2RamseyMeasurementTask(
-            num_expts=151,
-            detune_ratio=0.05,
-            cfg_maker=lambda ctx, ml: (
-                cur_t1 := ctx.env_dict["info"].get("smooth_t1", md.t1)
-            )
-            and (cur_t2r := ctx.env_dict["info"].last.get("smooth_t2r", md.t2r))
-            and (cur_pi2_pulse := ctx.env_dict["info"].get("pi2_pulse"))
-            and zefd.T2RamseyCfgTemplate(
-                {
-                    "pi2_pulse": cur_pi2_pulse,
-                    "readout": "readout_dpm",
-                    "relax_delay": max(1.0, 3 * cur_t1),
-                    "reps": 1000,
-                    "rounds": 10,
-                    "sweep_range": (0, 2 * cur_t2r),
-                }
-            ),
-            earlystop_snr=20,
-        ),
-    )
+    # .add_measurement(
+    #     "t1",
+    #     zefd.T1MeasurementTask(
+    #         num_expts=151,
+    #         cfg_maker=lambda ctx, ml: (
+    #             cur_t1 := ctx.env_dict["info"].last.get("smooth_t1", md.t1)
+    #         )
+    #         and (cur_pi_pulse := ctx.env_dict["info"].get("pi_pulse"))
+    #         and zefd.T1CfgTemplate(
+    #             {
+    #                 "pi_pulse": cur_pi_pulse,
+    #                 "readout": "readout_dpm",
+    #                 "relax_delay": max(1.0, 3 * cur_t1),
+    #                 "reps": 1000,
+    #                 "rounds": 10,
+    #                 "sweep_range": (0.5, max(1.0, 10 * cur_t1)),
+    #             }
+    #         ),
+    #         earlystop_snr=20,
+    #     ),
+    # )
+    # .add_measurement(
+    #     "t2ramsey",
+    #     zefd.T2RamseyMeasurementTask(
+    #         num_expts=151,
+    #         detune_ratio=0.05,
+    #         cfg_maker=lambda ctx, ml: (
+    #             cur_t1 := ctx.env_dict["info"].get("smooth_t1", md.t1)
+    #         )
+    #         and (cur_t2r := ctx.env_dict["info"].last.get("smooth_t2r", md.t2r))
+    #         and (cur_pi2_pulse := ctx.env_dict["info"].get("pi2_pulse"))
+    #         and zefd.T2RamseyCfgTemplate(
+    #             {
+    #                 "pi2_pulse": cur_pi2_pulse,
+    #                 "readout": "readout_dpm",
+    #                 "relax_delay": max(1.0, 3 * cur_t1),
+    #                 "reps": 1000,
+    #                 "rounds": 10,
+    #                 "sweep_range": (0, 2 * cur_t2r),
+    #             }
+    #         ),
+    #         earlystop_snr=20,
+    #     ),
+    # )
     # .add_measurement(
     #     "t2echo",
     #     zefd.T2EchoMeasurementTask(
@@ -305,9 +307,7 @@ executor = (
             ),
         ),
     )
-    .record_animation(
-        f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/autofluxdep_onlyfreq_animation.mp4"
-    )
+    .record_animation(f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.mp4")
 )
 _ = executor.run(
     dev_cfg={
@@ -328,9 +328,7 @@ _ = executor.run(
 
 ```python
 executor.save(
-    filepath=os.path.join(
-        database_path, f"{qub_name}_autofluxdep_onlyfreq@{md.cur_A * 1e3:.3f}mA"
-    ),
+    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
     comment=datetime.now().strftime("Autofluxdep run at %Y-%m-%d %H:%M:%S"),
 )
 ```
