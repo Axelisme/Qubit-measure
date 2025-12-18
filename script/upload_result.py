@@ -1,10 +1,10 @@
 import argparse
+import fnmatch
 import os
 import sys
 import threading
-import fnmatch
-from typing import List
 from datetime import datetime, timezone
+from typing import List
 
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
@@ -89,8 +89,8 @@ def authenticate_drive():
 def parse_drive_timestamp(timestamp_str):
     """Parses Google Drive's RFC 3339 timestamp into a datetime object."""
     # Replace 'Z' with '+00:00' for compatibility with datetime.fromisoformat
-    if timestamp_str.endswith('Z'):
-        timestamp_str = timestamp_str[:-1] + '+00:00'
+    if timestamp_str.endswith("Z"):
+        timestamp_str = timestamp_str[:-1] + "+00:00"
     return datetime.fromisoformat(timestamp_str)
 
 
@@ -193,8 +193,12 @@ def collect_upload_tasks(service, local_folder_path, parent_folder_id, tasks_lis
 
     for dirpath, dirnames, filenames in os.walk(local_folder_path):
         # Prune ignored directories and files
-        dirnames[:] = [d for d in dirnames if not any(fnmatch.fnmatch(d, p) for p in IGNORE_FILE)]
-        filenames[:] = [f for f in filenames if not any(fnmatch.fnmatch(f, p) for p in IGNORE_FILE)]
+        dirnames[:] = [
+            d for d in dirnames if not any(fnmatch.fnmatch(d, p) for p in IGNORE_FILE)
+        ]
+        filenames[:] = [
+            f for f in filenames if not any(fnmatch.fnmatch(f, p) for p in IGNORE_FILE)
+        ]
 
         relative_dir = os.path.relpath(dirpath, local_folder_path)
 
@@ -242,10 +246,16 @@ def collect_upload_tasks(service, local_folder_path, parent_folder_id, tasks_lis
 
                 # Compare local and remote modification times
                 if local_datetime > remote_datetime:
-                    print(
-                        f"  - Queuing update for '{filename}' (local is newer)."
+                    print(f"  - Queuing update for '{filename}' (local is newer).")
+                    tasks_list.append(
+                        (
+                            "update",
+                            local_path,
+                            filename,
+                            current_parent_id,
+                            remote_file_id,
+                        )
                     )
-                    tasks_list.append(("update", local_path, filename, current_parent_id, remote_file_id))
                 else:
                     print(
                         f"  - Skipping '{filename}' (remote is up-to-date: {remote_datetime} vs local: {local_datetime})."
@@ -342,9 +352,7 @@ def main():
             collect_upload_tasks(drive_service, source_folder, qubit_folder_id, tasks)
 
             if tasks:
-                print(
-                    f"\nUploading {len(tasks)} file(s) using {args.jobs} threads..."
-                )
+                print(f"\nUploading {len(tasks)} file(s) using {args.jobs} threads...")
                 # Execute uploads in parallel using joblib
                 Parallel(n_jobs=args.jobs, backend="threading")(
                     delayed(process_upload_task)(creds, task) for task in tasks
