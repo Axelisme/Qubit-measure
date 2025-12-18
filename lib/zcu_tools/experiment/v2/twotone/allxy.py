@@ -143,7 +143,7 @@ class AllXYExperiment(AbsExperiment):
             ylabel="Signal",
             segment_kwargs=dict(
                 show_grid=True,
-                line_kwargs=[dict(marker="o", linestyle=None, markersize=5)],
+                line_kwargs=[dict(marker=".", linestyle=None, markersize=5)],
             ),
         )
 

@@ -110,11 +110,11 @@ class DispersiveExperiment(AbsExperiment):
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
         avg_kappa = (g_kappa + e_kappa) / 2  # average linewidth κ/2π
 
-        fig = plt.figure(figsize=config.figsize)
-        spec = fig.add_gridspec(2, 2)
-        ax_main = fig.add_subplot(spec[0, :])
-        ax_g = fig.add_subplot(spec[1, 0])
-        ax_e = fig.add_subplot(spec[1, 1])
+        fig = plt.figure(figsize=(10, 4))
+        spec = fig.add_gridspec(2, 3)
+        ax_main = fig.add_subplot(spec[:, :2])
+        ax_g = fig.add_subplot(spec[0, 2])
+        ax_e = fig.add_subplot(spec[1, 2])
 
         # Plot data and fits
         ax_main.plot(fpts, g_amps, marker=".", c="b", label="Ground state")
@@ -143,7 +143,13 @@ class DispersiveExperiment(AbsExperiment):
             )
             norm_xc, norm_yc, norm_r0 = norm_circle_params
 
-            ax.plot(norm_signals.real, norm_signals.imag, color=color, marker=".")
+            ax.plot(
+                norm_signals.real,
+                norm_signals.imag,
+                color=color,
+                marker=".",
+                markersize=1,
+            )
             ax.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color=color))
             ax.plot([norm_xc, 1], [norm_yc, 0], "kx--")
             ax.axhline(0, color="k", linestyle="--")

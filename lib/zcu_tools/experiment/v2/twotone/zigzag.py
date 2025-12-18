@@ -298,6 +298,7 @@ class ZigZagSweepExperiment(AbsExperiment):
             linestyle="--",
             label=f"x = {min_value:.3f}",
         )
+        ax2.grid(True)
         ax2.legend()
         ax2.set_xlabel("Sweep value (a.u.)")
         ax2.set_ylabel("Cumulative difference (a.u.)")

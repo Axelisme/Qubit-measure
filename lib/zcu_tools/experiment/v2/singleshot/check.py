@@ -97,7 +97,6 @@ class CheckExperiment(AbsExperiment):
 
     def analyze(
         self,
-        /,
         g_center: complex,
         e_center: complex,
         radius: float,
@@ -117,24 +116,57 @@ class CheckExperiment(AbsExperiment):
         mask_e = dists_e < radius
         mask_o = ~(mask_g | mask_e)
 
+        o_center_real = np.median(signals[mask_o].real)
+        o_center_imag = np.median(signals[mask_o].imag)
+        o_center = o_center_real + 1j * o_center_imag
+
         ng = np.sum(mask_g) / signals.shape[0]
         ne = np.sum(mask_e) / signals.shape[0]
         no = np.sum(mask_o) / signals.shape[0]
 
         fig, ax = plt.subplots(figsize=(6, 6))
 
-        colors = np.full(signals.shape, "gray")
+        colors = np.full(signals.shape, "gray", dtype=object)
         colors[mask_g] = "blue"
         colors[mask_e] = "red"
         colors[mask_o] = "green"
 
         # plot shots
-        ax.scatter(signals.real, signals.imag, c=colors, s=1, alpha=0.5)
+        num_sample = signals.shape[0]
+        downsample_num = min(50000, num_sample)
+        downsample_mask = np.arange(0, num_sample, max(1, num_sample // downsample_num))
+        downsample_signals = signals[downsample_mask]
+        ax.scatter(
+            downsample_signals.real,
+            downsample_signals.imag,
+            c=colors[downsample_mask].tolist(),
+            s=1,
+            alpha=0.5,
+        )
 
         # plot centers with circle
         plt_params = dict(linestyle=":", color="k", marker="o", markersize=5)
-        ax.plot(g_center.real, g_center.imag, markerfacecolor="b", **plt_params)
-        ax.plot(e_center.real, e_center.imag, markerfacecolor="r", **plt_params)
+        ax.plot(
+            g_center.real,
+            g_center.imag,
+            markerfacecolor="b",
+            label="Ground",
+            **plt_params,
+        )
+        ax.plot(
+            e_center.real,
+            e_center.imag,
+            markerfacecolor="r",
+            label="Excited",
+            **plt_params,
+        )
+        ax.plot(
+            o_center.real,
+            o_center.imag,
+            markerfacecolor="g",
+            label="Other",
+            **plt_params,
+        )
         ax.add_patch(
             Circle(
                 (g_center.real, g_center.imag),
@@ -154,10 +186,15 @@ class CheckExperiment(AbsExperiment):
             )
         )
 
+        ax.grid(True)
+        ax.axis("equal")
+        ax.legend()
         ax.set_xlabel("I value (a.u.)")
         ax.set_ylabel("Q value (a.u.)")
 
-        ax.set_title(f"Population: G: {ng:.3f}, E: {ne:.3f}, O: {no:.3f}")
+        ax.set_title(
+            f"Population: Ground: {ng:.1%}, Excited: {ne:.1%}, Other: {no:.1%}"
+        )
 
         return fig
 

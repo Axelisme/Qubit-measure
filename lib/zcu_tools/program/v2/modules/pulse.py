@@ -116,7 +116,7 @@ class BasePulse(Module):
         prog.pulse(cfg["ch"], self.pulse_name, t=t + cfg["pre_delay"], tag=self.name)
 
         if cfg["block_mode"]:  # default
-            return round_timestamp(prog, t + self.total_length(), gen_ch=cfg["ch"])
+            return t + round_timestamp(prog, self.total_length(), gen_ch=cfg["ch"])
         else:
             return t  # no block, return the start time as the end time
 
