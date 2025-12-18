@@ -67,7 +67,7 @@ if "r_f" in allows:
 # Plot with Onetone
 
 ```python
-onetone_path = r"../../Database/Q12_2D[5]/Q1/s002_onetone_flux_Q0_015.hdf5"
+onetone_path = r"../../Database/Q12_2D[5]/Q1/R1_flux_1.hdf5"
 
 
 exp = FluxDepExperiment()
@@ -126,7 +126,7 @@ norm_phases = (phases - np.min(phases, axis=1, keepdims=True)) / np.ptp(
 )
 
 norm_phases = np.diff(norm_phases, axis=1, prepend=norm_phases[0, 0])
-norm_phases = np.clip(norm_phases, -5 * np.std(norm_phases), 5 * np.std(norm_phases))
+norm_phases = np.clip(norm_phases, -1 * np.std(norm_phases), 1 * np.std(norm_phases))
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4))
 ax1.imshow(

@@ -8,15 +8,14 @@ from pathlib import Path
 
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
-from zcu_tools.experiment.v2.twotone.mist.flux_dep import mist_signal2real
 from zcu_tools.utils.datasaver import load_data
-from zcu_tools.simulate import mA2flx
+from zcu_tools.simulate import mA2flx, flx2mA
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.notebook.analysis.mist.branch.overlay import calc_overlay, plot_overlay
 ```
 
 ```python
-qub_name = "Q12_2D[4]/Q4"
+qub_name = "Q12_2D[5]/Q1"
 
 result_dir = Path(f"../../../result/{qub_name}")
 result_dir.mkdir(parents=True, exist_ok=True)
@@ -27,7 +26,7 @@ result_dir.joinpath("web").mkdir(exist_ok=True)
 
 ```python
 _, params, mA_c, period, allows, data_dict = load_result(
-    result_dir.joinpath("params.json")
+    str(result_dir / "params.json")
 )
 
 if dispersive_cfg := data_dict.get("dispersive"):
@@ -57,10 +56,11 @@ sim_flxs = np.linspace(-0.05, 0.55, 200)
 ```python
 %matplotlib widget
 filepath = r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1127\R4_flux_1.hdf5"
-signals, fpts, flxs = load_data(filepath)
-fpts /= 1e6
 
-actline = ze.onetone.FluxDepExperiment().analyze(result=(flxs, fpts, signals.T))
+exp = ze.onetone.FluxDepExperiment()
+flxs, fpts, signals = exp.load(filepath)
+
+actline = exp.analyze()
 ```
 
 ```python
@@ -74,12 +74,13 @@ period = 2 * abs(mA_e - mA_c)
 filepath = (
     r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\R4_dispersive@4.000mA_1.hdf5"
 )
-signals, fpts, _ = load_data(filepath)
-fpts /= 1e6
+# signals, fpts, _ = load_data(filepath)
+# fpts /= 1e6
 
-chi, kappa, fig = ze.twotone.dispersive.DispersiveExperiment().analyze(
-    result=(fpts, signals.T)
-)
+exp = ze.twotone.dispersive.DispersiveExperiment()
+fpts, signals = exp.load(filepath)
+
+chi, kappa, fig = exp.analyze()
 plt.show(fig)
 plt.close(fig)
 ```
@@ -88,12 +89,12 @@ plt.close(fig)
 filepath = (
     r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_ac_stark@4.000mA_1.hdf5"
 )
-signals, pdrs, fpts = load_data(filepath)
-fpts /= 1e6
 
-ac_coeff, fig = ze.twotone.ac_stark.AcStarkExperiment().analyze(
-    result=(pdrs, fpts, signals), chi=chi, kappa=kappa, cutoff=0.04
-)
+exp = ze.twotone.ac_stark.AcStarkExperiment()
+pdrs, fpts, signals = exp.load(filepath)
+
+ac_coeff, fig = exp.analyze(chi=chi, kappa=kappa, cutoff=0.04)
+
 plt.show(fig)
 plt.close(fig)
 ```
@@ -101,15 +102,17 @@ plt.close(fig)
 ```python
 filepaths = [
     # r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1116\Q4_mist_flux_bare@-4.990mA_1.hdf5",
-    r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1127\Q4_autofluxdep_onlyfreq@-3.000mA_mist_g_signals_g_1.hdf5"
+    r"../../../Database/Q12_2D[5]/Q1/Q1_mist_over_flux@-7.000mA_1.hdf5"
 ]
 
-# ac_coeff = 67
+ac_coeff = 1e3
 
 fig = go.Figure()
 
 for filepath in filepaths:
     signals, As, pdrs = load_data(filepath)
+    assert pdrs is not None
+
     flxs = mA2flx(As, mA_c, period)
     photons = ac_coeff * pdrs**2
 
@@ -161,20 +164,24 @@ data = np.load(result_dir.joinpath("data", "overlay_over_flx.npz"))
 sim_flxs = data["flxs"]
 sim_photons = data["photons"]
 overlay_over_flx = data["overlay_over_flx"]
+
+sim_As = flx2mA(sim_flxs, mA_c, period)
 ```
 
 ```python
-from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
-
 threshold = 0.9
+
+map_flxs = 1 - sim_flxs
 
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True)
 fig.update_layout(height=600, margin=dict(t=10, b=20, l=20))
 
-add_secondary_xaxis(fig, sim_flxs, As, num_ticks=24, row=2, col=1)
+from zcu_tools.experiment.v2.twotone.mist.flux_dep import mist_signal2real
 
 for filepath in filepaths:
     signals, As, pdrs = load_data(filepath)
+    assert pdrs is not None
+
     flxs = mA2flx(As, mA_c, period)
     photons = ac_coeff * pdrs**2
 
@@ -194,7 +201,7 @@ plot_overlay(
     fig,
     "Ground",
     overlay_over_flx[..., 0],
-    sim_flxs,
+    map_flxs,
     sim_photons,
     threshold,
     row=2,
@@ -204,7 +211,7 @@ plot_overlay(
     fig,
     "Excited",
     overlay_over_flx[..., 1],
-    sim_flxs,
+    map_flxs,
     sim_photons,
     threshold,
     row=3,
@@ -217,10 +224,6 @@ fig.write_html(result_dir.joinpath("web", "mist_over_flux.html"))
 
 
 fig.show()
-```
-
-```python
-
 ```
 
 ```python

@@ -1,13 +1,14 @@
 ```python
 %load_ext autoreload
 import os
+from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
 
 %autoreload 2
 from zcu_tools.notebook.persistance import load_result
-from zcu_tools.notebook.analysis.branch import (
+from zcu_tools.notebook.analysis.mist.branch import (
     plot_cn_over_flx,
     plot_populations_over_photon,
 )
@@ -19,16 +20,18 @@ from zcu_tools.simulate.fluxonium.branch.full_quantum import (
 ```
 
 ```python
-qub_name = "Q12_2D/Q4"
+qub_name = "Q12_2D[5]/Q1"
 
-os.makedirs(f"../../result/{qub_name}/image/branch", exist_ok=True)
-os.makedirs(f"../../result/{qub_name}/web/branch", exist_ok=True)
-os.makedirs(f"../../result/{qub_name}/data/branch", exist_ok=True)
+result_dir = Path(f"../../../result/{qub_name}")
+
+result_dir.mkdir(parents=True, exist_ok=True)
+result_dir.joinpath("image", "branch").mkdir(parents=True, exist_ok=True)
+result_dir.joinpath("web", "branch").mkdir(parents=True, exist_ok=True)
+result_dir.joinpath("data", "branch").mkdir(parents=True, exist_ok=True)
 ```
 
 ```python
-loadpath = f"../../result/{qub_name}/params.json"
-_, params, mA_c, period, allows, data_dict = load_result(loadpath)
+_, params, mA_c, period, allows, data_dict = load_result(f"{result_dir}/params.json")
 
 print(f"EJ: {params[0]:.3f} GHz, EC: {params[1]:.3f} GHz, EL: {params[2]:.3f} GHz")
 
@@ -49,69 +52,15 @@ elif "r_f" in allows:
 
 qub_dim = 20
 qub_cutoff = 60
-res_dim = 80
+res_dim = 110
 
 photons = np.arange(0, res_dim - 10)
-```
-
-```python
-flx = 0.5
-branchs = [0, 1]
-
-
-hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g, flx=flx)
-```
-
-# SNR power dependence
-
-```python
-if not hilbertspace.lookup_exists():
-    hilbertspace.generate_lookup(ordering="LX")
-
-evals, _ = hilbertspace.eigensys(evals_count=qub_dim * res_dim)
-
-dressed_indices = [
-    [hilbertspace.dressed_index((b, int(n))) for n in photons] for b in branchs
-]
-
-branch_energies = np.array([evals[dressed_indices[b]] for b in branchs])
-```
-
-```python
-rf_w = 0.006
-
-f01_over_n = branch_energies[1] - branch_energies[0]
-chi_over_n = f01_over_n[1:] - f01_over_n[:-1]
-
-
-def signal_diff(x):
-    return 1 - np.exp(-(x**2) / (2 * rf_w**2))
-
-
-snrs = np.abs(signal_diff(chi_over_n) * np.sqrt(photons[:-1]))
-best_n = photons[np.argmax(snrs)]
-
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-ax1.set_title(f"{qub_name} at flux = {flx:.1f}")
-ax1.plot(photons[:-1], chi_over_n)
-ax1.set_ylabel(r"$\chi_{01}$ [GHz]")
-ax1.grid()
-
-ax2.plot(photons[:-1], snrs)
-ax2.axvline(x=best_n, color="red", linestyle="--", label=f"n = {best_n:.1f}")
-ax2.set_ylabel(r"SNR")
-ax2.set_xlabel(r"Photon number")
-ax2.grid()
-ax2.legend()
-
-fig.savefig(f"../../result/{qub_name}/image/branch/snr_over_n.png")
-plt.show()
 ```
 
 # Single
 
 ```python
-flx = 0.5
+flx = 0.8312
 branchs = list(range(15))
 
 hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g, flx=flx)
@@ -121,8 +70,8 @@ populations_over_flx = calc_branch_population(hilbertspace, branchs, upto=photon
 ```python
 fig = plot_populations_over_photon(branchs, photons, populations_over_flx)
 
-fig.write_html(f"../../result/{qub_name}/web/branch/populations_at_phi{flx:.1f}.html")
-fig.write_image(f"../../result/{qub_name}/image/branch/populations_at_phi{flx:.1f}.png")
+fig.write_html(f"{result_dir}/web/branch/populations_at_phi{flx:.1f}.html")
+fig.write_image(f"{result_dir}/image/branch/populations_at_phi{flx:.1f}.png")
 fig.show()
 ```
 

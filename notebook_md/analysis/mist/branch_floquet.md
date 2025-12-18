@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.18.1
   kernelspec:
-    display_name: axelenv
+    display_name: .venv
     language: python
     name: python3
 ---
@@ -15,8 +15,9 @@ jupyter:
 ```python
 %load_ext autoreload
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, cast
 
+import qutip as qt
 import numpy as np
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
@@ -24,19 +25,16 @@ import matplotlib.pyplot as plt
 from IPython.display import display
 
 %autoreload 2
-from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.notebook.analysis.mist.branch import (
     plot_cn_over_flx,
     plot_populations_over_photon,
-    plot_chi_and_snr_over_photon,
     calc_critical_photons,
 )
 from zcu_tools.simulate.fluxonium.branch.floquet import (
     FloquetBranchAnalysis,
     FloquetWithTLSBranchAnalysis,
 )
-from zcu_tools.notebook.analysis.design import calc_snr
 ```
 
 # Load Parameters
@@ -65,28 +63,20 @@ elif "r_f" in allows:
     r_f = allows["r_f"]
     print(f"r_f: {r_f} GHz")
 
-g = 100e-3  # GHz
+# g = 100e-3  # GHz
 rf_w = 6.1e-3  # GHz
-
-predictor = FluxoniumPredictor.from_file(loadpath)
 ```
 
 # Single
 
 ```python
-flx = predictor.A_to_flx(1.162e-3)
-flx
+flx = 0.8
 ```
 
 ```python
-# r_f = 5.25
-rf_w = 0.0041
-g = 0.1
-# flx = 0.5
-
 qub_dim = 40
-qub_cutoff = 80
-max_photon = 20
+qub_cutoff = 60
+max_photon = 120
 
 amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
 photons = (amps / (2 * g)) ** 2
@@ -94,7 +84,7 @@ photons = (amps / (2 * g)) ** 2
 
 def calc_populations(
     branchs: List[int], progress: bool = True
-) -> Tuple[Dict[int, List[int]], Dict[int, List[float]]]:
+) -> Dict[int, np.ndarray]:
     avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
 
     fb_analysis = FloquetBranchAnalysis(
@@ -107,13 +97,14 @@ def calc_populations(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     branch_populations = fb_analysis.calc_branch_populations(
         fbasis_n, branch_infos, avg_times, progress=progress
     )
 
-    return branch_populations
+    return {k: np.asarray(v) for k, v in branch_populations.items()}
 ```
 
 ```python
@@ -125,12 +116,8 @@ branch_populations = calc_populations(branchs)
 ```python
 fig = plot_populations_over_photon(branchs, photons, branch_populations)
 
-fig.write_html(
-    f"../../../result/{qub_name}/web/branch_floquet/populations_phi{flx:0.2f}.html"
-)
-fig.write_image(
-    f"../../../result/{qub_name}/image/branch_floquet/populations_phi{flx:0.2f}.png"
-)
+fig.write_html(f"{result_dir}/web/branch_floquet/populations_phi{flx:0.2f}.html")
+fig.write_image(f"{result_dir}/image/branch_floquet/populations_phi{flx:0.2f}.png")
 fig.show()
 ```
 
@@ -252,10 +239,6 @@ peak_Etls
 # Sweep flux
 
 ```python
-# r_f = 5.7945
-# rf_w = 0.006
-# g = 0.11
-
 qub_dim = 30
 qub_cutoff = 60
 max_photon = 100
@@ -282,6 +265,7 @@ def calc_populations_with_flx(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     branch_populations = fb_analysis.calc_branch_populations(
