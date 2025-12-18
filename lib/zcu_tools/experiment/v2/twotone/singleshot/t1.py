@@ -404,7 +404,11 @@ class T1WithToneSweepExperiment(AbsExperiment):
             cfg["test_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
         )
 
-        gains = sweep2array(gain_sweep, allow_array=True)  # predicted
+        gains = np.sqrt(
+            np.linspace(
+                gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
+            )
+        )
         ts = sweep2array(cfg["sweep"]["length"])  # predicted times
 
         fig, axs = make_plot_frame(2, 2, figsize=(12, 6))

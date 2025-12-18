@@ -50,7 +50,7 @@ def mist_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
         return mist_signals
 
     ref_signals = np.sort(mist_signals.flatten())[: int(0.5 * mist_signals.size)]
-    mist_signals = np.clip(mist_signals, 0, 10 * np.nanmedian(ref_signals))
+    mist_signals = np.clip(mist_signals, 0, 5 * np.nanmedian(ref_signals))
 
     return mist_signals
 
@@ -131,12 +131,7 @@ class Mist_G_MeasurementTask(
         gains: np.ndarray = sweep2array(self.gain_sweep)
 
         # shape: (flx, gains)
-        real_signals = mist_fluxdep_signal2real(signals["raw_signals"])
-
-        std_len = max(int(0.3 * real_signals.shape[1]), 5)
-        mist_signals = np.clip(
-            real_signals, 0, 5 * np.nanstd(real_signals[:, :std_len])
-        )
+        mist_signals = mist_fluxdep_signal2real(signals["raw_signals"])
 
         plotters["g_mist"].update(flx_values, gains, mist_signals, refresh=False)
 

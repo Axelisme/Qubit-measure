@@ -277,6 +277,7 @@ def fitting_ge_and_plot(
             "ge_params": ge_params,
             "p0_g": p0_g,
             "p0_e": p0_e,
+            "s": s,
             "length_ratio_g": l_ratio_g,
             "length_ratio_e": l_ratio_e,
             "theta": theta,

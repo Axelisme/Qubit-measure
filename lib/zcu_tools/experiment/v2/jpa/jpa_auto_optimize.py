@@ -262,12 +262,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         snrs = np.abs(signals)
 
         max_snr = np.nanmax(snrs)
-        if max_snr > 0:
-            alphas = snrs / max_snr
-        else:
-            alphas = np.zeros_like(snrs)
-
-        alphas = np.clip(alphas, 0, 1)
+        alphas = snrs / max(max_snr, 1e-12)
 
         fig = plt.figure()
         ax = fig.add_subplot(projection="3d")
@@ -278,7 +273,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         colors = cmap(norm(phases))
         colors[:, 3] = alphas
 
-        ax.scatter(params[:, 0], params[:, 1], params[:, 2], c=colors)  # type: ignore
+        ax.scatter(params[:, 0], params[:, 1], params[:, 2], c=colors, s=0.1)  # type: ignore
 
         ax.set_xlabel("Flux value")
         ax.set_ylabel("Freq (MHz)")
