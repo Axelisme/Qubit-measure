@@ -199,12 +199,30 @@ class MetaDict(SyncFile):
 
     def _load(self) -> None:
         assert self._path is not None
+
+        def _restore_complex(obj: Any) -> Any:
+            if isinstance(obj, dict):
+                return {k: _restore_complex(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [_restore_complex(v) for v in obj]
+            elif isinstance(obj, str):
+                try:
+                    return complex(obj)
+                except ValueError:
+                    return obj
+            else:
+                return obj
+
+        file_data = None
         try:
             with open(self._path, "r", encoding="utf-8") as f:
-                self._data.clear()
-                self._data.update(json.load(f))
+                file_data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             warnings.warn(f"Failed to load {self._path}, ignoring...")
+
+        if file_data is not None:
+            self._data.clear()
+            self._data.update(_restore_complex(file_data))
 
     def _dump(self) -> None:
         assert self._path is not None
