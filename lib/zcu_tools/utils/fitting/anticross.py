@@ -1,6 +1,7 @@
 from typing import Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.optimize import least_squares, minimize
 from tqdm.auto import tqdm
 
@@ -13,8 +14,8 @@ from .base import (
 
 
 def get_predict_ys(
-    xs: np.ndarray, a: float, b: float, c: float, d: float, e: float, f: float
-) -> Tuple[np.ndarray, np.ndarray]:
+    xs: NDArray[np.float64], a: float, b: float, c: float, d: float, e: float, f: float
+) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
     # 對每個 xs 求兩個 y，分別對應 ys1, ys2, 其中 ys1 > ys2
 
     # c y^2 + (d + e x) y + (a x^2 + b x + f) = 0
@@ -34,7 +35,10 @@ def get_predict_ys(
 
 
 def fit_hyperbolic(
-    xs: np.ndarray, ys1: np.ndarray, ys2: np.ndarray, horizontal_line: bool = False
+    xs: NDArray[np.float64],
+    ys1: NDArray[np.float64],
+    ys2: NDArray[np.float64],
+    horizontal_line: bool = False,
 ) -> Tuple[float, float, float, float, float, float]:
     if np.sum(ys1 > ys2) < len(ys1) / 2:
         ys1, ys2 = ys2, ys1
@@ -60,7 +64,7 @@ def fit_hyperbolic(
     # ---------------------------------------------------------------------
     # 2. Define residuals for least-squares optimisation
     # ---------------------------------------------------------------------
-    def _residual(params: np.ndarray) -> np.ndarray:
+    def _residual(params: NDArray[np.float64]) -> NDArray[np.float64]:
         if horizontal_line:
             a = 0.0
             b, c, d, e, f = params
@@ -106,15 +110,18 @@ def fit_hyperbolic(
 
 
 def fit_anticross(
-    xs: np.ndarray, fpts1: np.ndarray, fpts2: np.ndarray, horizontal_line: bool = False
+    xs: NDArray[np.float64],
+    fpts1: NDArray[np.float64],
+    fpts2: NDArray[np.float64],
+    horizontal_line: bool = False,
 ) -> Tuple[
     float,
     float,
     float,
     float,
     float,
-    np.ndarray,
-    np.ndarray,
+    NDArray[np.float64],
+    NDArray[np.float64],
     Tuple[float, float, float, float, float, float],
 ]:
     """
@@ -139,7 +146,7 @@ def fit_anticross(
 
 
 def fit_anticross2d(
-    xs: np.ndarray, fpts: np.ndarray, signals: np.ndarray
+    xs: NDArray[np.float64], fpts: NDArray[np.float64], signals: NDArray[np.complex128]
 ) -> Tuple[float, float, float, float, float]:
     MAX_ITER = 1000
 
@@ -149,7 +156,7 @@ def fit_anticross2d(
         pbar.update(1)
         pbar.set_postfix_str(f"({cx:.3f}, {cy:.3f}, {width:.3f})")
 
-    amps = np.abs(signals)
+    amps = np.abs(signals).astype(np.float64)
 
     # determine whether fit the value to max or min
     if np.sum(amps[:, amps.shape[1] // 2] - amps[:, 0]) > 0:

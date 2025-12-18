@@ -22,7 +22,7 @@ from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.notebook.utils import make_comment
-from zcu_tools.program.base import SweepCfg
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Pulse,
     PulseCfg,
@@ -303,7 +303,7 @@ class QubitFreqMeasurementTask(
         )
         cfg = cast(QubitFreqCfg, ml.make_cfg(cfg_temp))
 
-        center_freq = cfg["qub_pulse"]["freq"]
+        center_freq = cast(float, cfg["qub_pulse"]["freq"])
         Pulse.set_param(
             cfg["qub_pulse"],
             "freq",
@@ -323,7 +323,7 @@ class QubitFreqMeasurementTask(
         fit_freq = center_freq + detune
 
         success = True
-        mean_err = np.mean(np.abs(real_signals - fit_signals))
+        mean_err = float(np.mean(np.abs(real_signals - fit_signals)))
 
         # calibrate if good enough
         if mean_err < 0.3 * np.ptp(fit_signals):

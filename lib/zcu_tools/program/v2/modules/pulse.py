@@ -7,8 +7,8 @@ from typing_extensions import NotRequired
 
 from ..base import MyProgramV2
 from .base import Module
-from .waveform import Waveform, WaveformCfg
 from .util import round_timestamp
+from .waveform import Waveform, WaveformCfg
 
 
 class PulseCfg(TypedDict):

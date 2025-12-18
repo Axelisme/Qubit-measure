@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import wraps
-from typing import Any, Callable, Optional, Sequence, Tuple, TypeVar, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence, Tuple, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray

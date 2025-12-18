@@ -1,25 +1,28 @@
-from typing import TYPE_CHECKING, Optional, Tuple
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional, Tuple, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 if TYPE_CHECKING:
-    # otherwise, lazy import
-    import scqubits as scq
+    from scqubits.core.param_sweep import ParameterSweep
+    from scqubits.core.storage import SpectrumData
 
 
 def calculate_n_oper(
     params: Tuple[float, float, float],
     flx: float,
     return_dim: int = 4,
-    esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-) -> np.ndarray:
+    esys: Optional[Tuple[NDArray[np.float64], NDArray[np.float64]]] = None,
+) -> NDArray[np.float64]:
     """
     Calculate the matrix elements of the fluxonium
     """
 
     cutoff = 30
 
-    from scqubits import Fluxonium  # lazy import
+    from scqubits.core.fluxonium import Fluxonium
 
     fluxonium = Fluxonium(*params, flux=flx, cutoff=cutoff, truncated_dim=return_dim)
     if esys is None:
@@ -34,8 +37,8 @@ def calculate_n_oper_vs_flx(
     params: Tuple[float, float, float],
     flxs: np.ndarray,
     return_dim: int = 4,
-    spectrum_data: Optional["scq.SpectrumData"] = None,
-) -> Tuple["scq.SpectrumData", np.ndarray]:
+    spectrum_data: Optional[SpectrumData] = None,
+) -> Tuple[SpectrumData, NDArray[np.float64]]:
     """
     Calculate the matrix elements of the fluxonium vs. a parameter
     """
@@ -43,7 +46,7 @@ def calculate_n_oper_vs_flx(
     if spectrum_data is None:
         cutoff = 40
 
-        from scqubits import Fluxonium  # lazy import
+        from scqubits.core.fluxonium import Fluxonium
 
         fluxonium = Fluxonium(
             *params, flux=0.5, cutoff=cutoff, truncated_dim=return_dim
@@ -61,13 +64,13 @@ def calculate_n_oper_vs_flx(
 
 def calculate_system_n_oper_vs_flx(
     params: Tuple[float, float, float],
-    flxs: np.ndarray,
+    flxs: NDArray[np.float64],
     r_f: float,
     g: float,
     return_dim: int = 4,
     progress: bool = True,
-    sweep: Optional["scq.ParameterSweep"] = None,
-) -> Tuple["scq.ParameterSweep", np.ndarray]:
+    sweep: Optional[ParameterSweep] = None,
+) -> Tuple[ParameterSweep, NDArray[np.float64]]:
     """
     Calculate the matrix elements of the system over a parameter sweep
     """
@@ -77,13 +80,15 @@ def calculate_system_n_oper_vs_flx(
         qub_dim = 20
         res_dim = 10
 
-        import scqubits as scq  # lazy import
+        import scqubits.settings as scq_settings
+        from scqubits.core.fluxonium import Fluxonium
+        from scqubits.core.hilbert_space import HilbertSpace
+        from scqubits.core.oscillator import Oscillator
+        from scqubits.utils.spectrum_utils import identity_wrap
 
-        resonator = scq.Oscillator(r_f, truncated_dim=res_dim)
-        fluxonium = scq.Fluxonium(
-            *params, flux=0.5, cutoff=cutoff, truncated_dim=qub_dim
-        )
-        hilbertspace = scq.HilbertSpace([resonator, fluxonium])
+        resonator = Oscillator(r_f, truncated_dim=res_dim)
+        fluxonium = Fluxonium(*params, flux=0.5, cutoff=cutoff, truncated_dim=qub_dim)
+        hilbertspace = HilbertSpace([resonator, fluxonium])
         hilbertspace.add_interaction(
             g=g, op1=resonator.creation_operator, op2=fluxonium.n_operator, add_hc=True
         )
@@ -91,9 +96,9 @@ def calculate_system_n_oper_vs_flx(
         def update_hilbertspace(flx: float) -> None:
             fluxonium.flux = flx
 
-        old = scq.settings.PROGRESSBAR_DISABLED
-        scq.settings.PROGRESSBAR_DISABLED = not progress
-        sweep = scq.ParameterSweep(
+        old = scq_settings.PROGRESSBAR_DISABLED
+        scq_settings.PROGRESSBAR_DISABLED = not progress
+        sweep = ParameterSweep(
             hilbertspace,
             {"params": flxs},
             update_hilbertspace=update_hilbertspace,
@@ -101,15 +106,15 @@ def calculate_system_n_oper_vs_flx(
             subsys_update_info={"params": [fluxonium]},
             labeling_scheme="LX",
         )
-        scq.settings.PROGRESSBAR_DISABLED = old
+        scq_settings.PROGRESSBAR_DISABLED = old
 
     def get_n_oper(
-        paramsweep: scq.ParameterSweep, paramindex_tuple: Tuple[int, int], **kwargs
-    ) -> np.ndarray:
-        fluxonium: scq.Fluxonium = paramsweep.get_subsys(1)
+        paramsweep: ParameterSweep, paramindex_tuple: Tuple[int, int], **kwargs
+    ) -> NDArray[np.float64]:
+        fluxonium = cast(Fluxonium, paramsweep.get_subsys(1))
 
         bare_evecs = paramsweep["bare_evecs"]["subsys":1][paramindex_tuple]
-        id_wrapped_op = scq.identity_wrap(
+        id_wrapped_op = identity_wrap(
             fluxonium.n_operator,
             fluxonium,
             paramsweep.hilbertspace.subsystem_list,

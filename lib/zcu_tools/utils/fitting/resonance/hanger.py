@@ -1,9 +1,9 @@
-from typing import Optional, Tuple
-
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
+from numpy.typing import NDArray
+from typing_extensions import Optional, Tuple, TypedDict
 
 from .base import (
     calc_phase,
@@ -36,9 +36,32 @@ def calc_Qi(Ql: float, Qc: float) -> float:
     return 1 / (1 / Ql - np.real(1 / Qc))
 
 
+class HangerParams(TypedDict):
+    freq: float
+    kappa: float
+    Ql: float
+    Qc: float
+    Qi: float
+    phi: float
+    a0: complex
+    edelay: float
+    theta0: float
+    circle_params: Tuple[float, float, float]
+
+
 class HangerModel:
     @classmethod
-    def calc_signals(cls, fpts, freq, Ql, Qc, phi, a0, edelay, **kwargs) -> np.ndarray:
+    def calc_signals(
+        cls,
+        fpts: NDArray[np.float64],
+        freq: float,
+        Ql: float,
+        Qc: float,
+        phi: float,
+        a0: complex,
+        edelay: float,
+        **kwargs,
+    ) -> NDArray[np.complex128]:
         return (
             a0
             * np.exp(-1j * 2 * np.pi * fpts * edelay)
@@ -50,8 +73,11 @@ class HangerModel:
 
     @classmethod
     def fit(
-        cls, fpts: np.ndarray, signals: np.ndarray, edelay: Optional[float] = None
-    ) -> dict:
+        cls,
+        fpts: NDArray[np.float64],
+        signals: NDArray[np.complex128],
+        edelay: Optional[float] = None,
+    ) -> HangerParams:
         """Dict[freq, kappa, Ql, Qc, Qi, phi, a0, edelay, circle_params]"""
         if edelay is None:
             edelay = fit_edelay(fpts, signals)
@@ -67,7 +93,7 @@ class HangerModel:
         Qc = calc_Qc(Ql, phi, norm_r0)
         Qi = calc_Qi(Ql, Qc)
 
-        return dict(
+        return HangerParams(
             freq=freq,
             kappa=freq / Ql,
             Ql=Ql,
@@ -81,7 +107,7 @@ class HangerModel:
         )
 
     @classmethod
-    def visualize_fit(cls, fpts, signals, param_dict: dict) -> Figure:
+    def visualize_fit(cls, fpts, signals, param_dict: HangerParams) -> Figure:
         freq = param_dict["freq"]
         kappa = param_dict["kappa"]
         theta0 = param_dict["theta0"]

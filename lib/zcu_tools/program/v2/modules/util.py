@@ -1,7 +1,7 @@
 import warnings
-from typing import Union, Optional
+from typing import Optional, Union
 
-from qick.asm_v2 import QickParam, AbsQickProgram
+from qick.asm_v2 import AbsQickProgram, QickParam
 
 from ..utils import param2str
 

@@ -1,9 +1,7 @@
-from copy import deepcopy
 from typing import Mapping, Sequence
 
-from typing_extensions import NotRequired
-
 from qick import QickConfig
+from typing_extensions import NotRequired
 
 from ..base import SweepCfg
 from .base import MyProgramV2, ProgramV2Cfg

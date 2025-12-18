@@ -6,6 +6,7 @@ from copy import deepcopy
 from functools import wraps
 from pathlib import Path
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -16,7 +17,6 @@ from typing import (
     TextIO,
     TypeVar,
     Union,
-    TYPE_CHECKING,
 )
 
 import yaml
@@ -26,7 +26,7 @@ from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.utils import deepupdate, numpy2number
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2 import WaveformCfg, PulseCfg, ReadoutCfg, ResetCfg
+    from zcu_tools.program.v2 import PulseCfg, ReadoutCfg, ResetCfg, WaveformCfg
 
 try:  # pragma: no cover - platform specific
     import fcntl

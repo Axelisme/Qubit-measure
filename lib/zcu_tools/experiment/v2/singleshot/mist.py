@@ -7,7 +7,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import NotRequired
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter1D

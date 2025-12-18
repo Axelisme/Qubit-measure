@@ -8,10 +8,10 @@ from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-
-# import scqubits as scq # use lazy import
 from h5py import File
 from joblib import Parallel, delayed
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from numba import njit
 from scipy.optimize import least_squares
 from tqdm.auto import tqdm, trange
@@ -23,12 +23,15 @@ from .models import count_max_evals, energy2linearform
 
 def search_in_database(
     flxs, fpts, datapath, allows, EJb, ECb, ELb, n_jobs=-1, fuzzy=True
-) -> Tuple[np.ndarray, plt.Figure]:
+) -> Tuple[np.ndarray, Figure]:
     # Load data from database
     with File(datapath, "r") as file:
-        f_flxs = file["flxs"][:]  # (f_flxs, )
-        f_params = file["params"][:]  # (N, 3)
-        f_energies = file["energies"][:]  # (N, f_flxs, M)
+        f_flxs = file["flxs"][:]  # (f_flxs, ) # type: ignore[index]
+        f_params = file["params"][:]  # (N, 3) # type: ignore[index]
+        f_energies = file["energies"][:]  # (N, f_flxs, M) # type: ignore[index]
+    assert isinstance(f_flxs, np.ndarray)
+    assert isinstance(f_params, np.ndarray)
+    assert isinstance(f_energies, np.ndarray)
 
     # Interpolate points
     flxs = np.mod(flxs, 1.0)
@@ -234,6 +237,8 @@ def search_in_database(
 
     def process_energy(i, fuzzy) -> Tuple[int, float, float]:
         nonlocal f_params, sf_energies, fpts, allows
+        assert isinstance(f_params, np.ndarray)
+
         param = f_params[i]
         a_min = max(EJb[0] / param[0], ECb[0] / param[1], ELb[0] / param[2])
         a_max = min(EJb[1] / param[0], ECb[1] / param[1], ELb[1] / param[2])
@@ -246,7 +251,7 @@ def search_in_database(
         return i, *candidate_breakpoint_search(fpts, Bs, Cs, a_min, a_max)
 
     try:
-        for i, dist, factor in Parallel(
+        for i, dist, factor in Parallel(  # type: ignore[reportGeneralTypeIssues]
             return_as="generator_unordered", n_jobs=n_jobs, require="sharedmem"
         )(delayed(process_energy)(i, fuzzy) for i in idx_bar):
             results[i] = dist, factor
@@ -333,9 +338,9 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000) -> np.nd
 
         return dists
 
-    import scqubits as scq  # lazy import to speed up import time
+    import scqubits.settings as scq_settings
 
-    scq.settings.PROGRESSBAR_DISABLED, old = True, scq.settings.PROGRESSBAR_DISABLED
+    scq_settings.PROGRESSBAR_DISABLED, old = True, scq_settings.PROGRESSBAR_DISABLED
 
     EJb, ECb, ELb = param_b
     res = least_squares(
@@ -348,7 +353,7 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000) -> np.nd
 
     pbar.close()
 
-    scq.settings.PROGRESSBAR_DISABLED = old
+    scq_settings.PROGRESSBAR_DISABLED = old
 
     if isinstance(res, np.ndarray):  # old version
         best_params = res

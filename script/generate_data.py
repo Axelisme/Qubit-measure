@@ -2,12 +2,14 @@
 # and save them in a file
 
 import os
+from typing import List, Tuple, cast
 
 import h5py as h5
 import matplotlib.pyplot as plt
 import numpy as np
-import scqubits as scq
+import scqubits.settings as scq_settings
 from joblib import Parallel, delayed
+from scqubits.core.fluxonium import Fluxonium
 from tqdm.auto import tqdm
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 
@@ -29,14 +31,14 @@ ELb = (0.01, 3.0)
 
 
 DRY_RUN = True
-scq.settings.PROGRESSBAR_DISABLED = True
+scq_settings.PROGRESSBAR_DISABLED = True
 
 cutoff = 40
 evals_count = 15
 flxs = np.linspace(0.0, 0.5, 120)
 
 
-fluxonium = scq.Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=cutoff)
+fluxonium = Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=cutoff)
 
 
 def dump_data(filepath, flxs, params, energies, Ebounds):
@@ -145,9 +147,10 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
         directions[:, 2] *= z_range[1]
 
         # 使用並行化篩選與長方體相交的射線
-        results = Parallel(n_jobs=n_jobs, batch_size=2**14)(
+        results = Parallel(n_jobs=n_jobs, batch_size=2**14)(  # type: ignore
             delayed(check_direction)(direction) for direction in directions
         )
+        results = cast(List[Tuple[np.ndarray, bool]], results)
 
         # 提取相交的方向
         intersect_dirs = [result[0] for result in results if result[1]]
@@ -193,7 +196,7 @@ else:
     ]
 
 
-scq.settings.PROGRESSBAR_DISABLED = False
+scq_settings.PROGRESSBAR_DISABLED = False
 
 # we can flip the data around 0.5 to make the other half
 # since the fluxonium is symmetric

@@ -7,7 +7,6 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.special import erfc
 
-# from zcu_tools.utils.fitting import fit_dual_gauss, gauss_func
 from zcu_tools.utils.fitting.singleshot import (
     calc_population_pdf,
     fit_singleshot,

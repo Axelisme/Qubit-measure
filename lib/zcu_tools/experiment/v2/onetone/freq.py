@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple, cast
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -96,9 +96,14 @@ class FreqExperiment(AbsExperiment):
             raise ValueError(f"Invalid model type: {model_type}")
 
         param_dict = model.fit(fpts, signals, edelay)
-        fig = model.visualize_fit(fpts, signals, param_dict)
+        fig = model.visualize_fit(fpts, signals, param_dict)  # type: ignore
 
-        return float(param_dict["freq"]), float(param_dict["kappa"]), param_dict, fig
+        return (
+            float(param_dict["freq"]),
+            float(param_dict["kappa"]),
+            dict(param_dict),
+            fig,
+        )
 
     def save(
         self,

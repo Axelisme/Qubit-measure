@@ -3,6 +3,7 @@ from .base import MyProgramV2, ProgramV2Cfg
 from .modular import ModularProgramCfg, ModularProgramV2
 from .modules import (
     Delay,
+    NonBlocking,
     Pulse,
     PulseCfg,
     Readout,
@@ -12,9 +13,8 @@ from .modules import (
     ResetCfg,
     TriggerCfg,
     TriggerReadout,
-    NonBlocking,
-    check_block_mode,
     WaveformCfg,
+    check_block_mode,
 )
 from .onetone import OneToneProgram, OneToneProgramCfg
 from .twotone import TwoToneProgram, TwoToneProgramCfg
