@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Tuple
 
 import numpy as np
 import scipy.constants as sc
+from numpy.typing import NDArray
 
 if TYPE_CHECKING:
-    # otherwise, lazy import
-    import scqubits as scq
+    from scqubits.core.fluxonium import Fluxonium
+    from scqubits.core.oscillator import Oscillator
 
 # -----------------------------
 # The equations:
@@ -19,30 +22,30 @@ if TYPE_CHECKING:
 
 
 def percell(
-    Egn: np.ndarray,
-    Vec_gn: np.ndarray,
-    Een: np.ndarray,
-    Vec_en: np.ndarray,
-    Vec_n: np.ndarray,
+    Egn: NDArray[np.float64],
+    Vec_gn: NDArray[np.complex128],
+    Een: NDArray[np.float64],
+    Vec_en: NDArray[np.complex128],
+    Vec_n: NDArray[np.complex128],
     r_f: float,
     kappa: float,
     Temp: float,
-    ns: np.ndarray,
-    fluxonium: "scq.Fluxonium",
-    resonator: "scq.Oscillator",
-) -> np.ndarray:
+    ns: NDArray[np.int64],
+    fluxonium: Fluxonium,
+    resonator: Oscillator,
+) -> NDArray[np.float64]:
     """
     Calculate the transition rate of 0-1 caused by percell effect.
     """
 
-    import scqubits as scq  # lazy import
+    from scqubits.utils.spectrum_utils import identity_wrap
 
     beta_hbar = sc.hbar / (sc.k * Temp) * 1e9
 
-    def P_res(n: np.ndarray) -> np.ndarray:
+    def P_res(n: NDArray[np.int64]) -> NDArray[np.float64]:
         return (1 - np.exp(-beta_hbar * r_f)) * np.exp(-n * beta_hbar * r_f)
 
-    def n_th(w_j: np.ndarray) -> np.ndarray:
+    def n_th(w_j: NDArray[np.float64]) -> NDArray[np.float64]:
         return 1 / (np.exp(beta_hbar * w_j) - 1)
 
     P_res_ns = P_res(ns)
@@ -56,11 +59,8 @@ def percell(
     E_1n0m_up[~up_mask] = np.inf
     n_ths = n_th(E_1n0m_up)  # (ns, ns)
     # calculate <0, n'|a^dag|1, n>
-    ad_op = scq.identity_wrap(
-        resonator.creation_operator,
-        resonator,
-        [fluxonium, resonator],
-        evecs=Vec_n,
+    ad_op = identity_wrap(
+        resonator.creation_operator, resonator, [fluxonium, resonator], evecs=Vec_n
     )
     ad_1n0n = np.zeros((len(ns), len(ns)), dtype=complex)
     for ng in ns:
@@ -76,11 +76,8 @@ def percell(
     E_1n0n_down[~down_mask] = np.inf
     n_ths = n_th(E_1n0n_down)  # (ns, ns)
     # calculate <0, n'|a|1, n>
-    a_op = scq.identity_wrap(
-        resonator.annihilation_operator,
-        resonator,
-        [fluxonium, resonator],
-        evecs=Vec_n,
+    a_op = identity_wrap(
+        resonator.annihilation_operator, resonator, [fluxonium, resonator], evecs=Vec_n
     )
     a_1n0n = np.zeros((len(ns), len(ns)), dtype=complex)
     for ng in ns:
@@ -89,26 +86,31 @@ def percell(
 
     Percell_down = np.nansum(P_res_ns[None, :] * kappa * n_ths * np.abs(a_1n0n) ** 2)
 
-    return 1 / (Percell_up + Percell_down)
+    Percell_total = np.asarray(1 / (Percell_up + Percell_down), dtype=np.float64)
+
+    return Percell_total
 
 
 def calculate_percell_t1_vs_flx(
-    flxs: np.ndarray,
+    flxs: NDArray[np.float64],
     r_f: float,
     kappa: float,
     g: float,
     Temp: float,
     params: Tuple[float, float, float],
-) -> np.ndarray:
+) -> NDArray[np.float64]:
     Nf = 10
     Nr = 10
     ns = np.arange(0, Nr)
 
-    import scqubits as scq  # lazy import
+    from scqubits.core.fluxonium import Fluxonium
+    from scqubits.core.hilbert_space import HilbertSpace
+    from scqubits.core.oscillator import Oscillator
+    from scqubits.core.param_sweep import ParameterSweep
 
-    fluxonium = scq.Fluxonium(*params, flux=0.0, cutoff=40, truncated_dim=Nf)
-    resonator = scq.Oscillator(E_osc=r_f, truncated_dim=Nr)
-    hilbertspace = scq.HilbertSpace([fluxonium, resonator])
+    fluxonium = Fluxonium(*params, flux=0.0, cutoff=40, truncated_dim=Nf)
+    resonator = Oscillator(E_osc=r_f, truncated_dim=Nr)
+    hilbertspace = HilbertSpace([fluxonium, resonator])
     hilbertspace.add_interaction(
         g=g, op1=fluxonium.n_operator, op2=resonator.creation_operator, add_hc=True
     )
@@ -116,7 +118,7 @@ def calculate_percell_t1_vs_flx(
     def update_hilbertspace(flx: float) -> None:
         fluxonium.flux = flx
 
-    sweep = scq.ParameterSweep(
+    sweep = ParameterSweep(
         hilbertspace=hilbertspace,
         paramvals_by_name={"flux": flxs},
         update_hilbertspace=update_hilbertspace,
@@ -125,15 +127,18 @@ def calculate_percell_t1_vs_flx(
     )
 
     def get_percell_t1(
-        paramsweep: scq.ParameterSweep, paramindex_tuple: tuple, **kwargs
-    ) -> np.ndarray:
-        fluxonium: scq.Fluxonium = paramsweep.get_subsys(0)
-        resonator: scq.Oscillator = paramsweep.get_subsys(1)
+        paramsweep: ParameterSweep, paramindex_tuple: tuple, **kwargs
+    ) -> NDArray[np.float64]:
+        fluxonium = paramsweep.get_subsys(0)
+        resonator = paramsweep.get_subsys(1)
+        assert isinstance(fluxonium, Fluxonium)
+        assert isinstance(resonator, Oscillator)
+
         evals = paramsweep["evals"][paramindex_tuple]
         evecs = paramsweep["evecs"][paramindex_tuple]
         Vec_n = paramsweep["bare_evecs"]["subsys":1][paramindex_tuple]
 
-        def get_esys(state: int) -> Tuple[np.ndarray, np.ndarray]:
+        def get_esys(state: int) -> Tuple[NDArray[np.float64], NDArray[np.complex128]]:
             idxs = [paramsweep.dressed_index((state, n), paramindex_tuple) for n in ns]
             mask = np.array([idx is None for idx in idxs])
 

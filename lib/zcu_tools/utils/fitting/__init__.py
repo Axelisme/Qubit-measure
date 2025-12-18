@@ -33,6 +33,6 @@ from .resonance import HangerModel, TransmissionModel, get_proper_model
 from .singleshot import (
     calc_population_pdf,
     fit_singleshot,
-    gauss_func,
     fit_singleshot_p0,
+    gauss_func,
 )

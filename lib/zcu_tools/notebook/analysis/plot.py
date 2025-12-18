@@ -1,8 +1,9 @@
-from typing import List, Optional, Tuple
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import numpy as np
 import plotly.graph_objects as go
-import scqubits as scq
 
 from zcu_tools.notebook.analysis.fluxdep.utils import add_secondary_xaxis
 from zcu_tools.simulate.fluxonium import (
@@ -11,6 +12,9 @@ from zcu_tools.simulate.fluxonium import (
     calculate_n_oper_vs_flx,
 )
 from zcu_tools.simulate.fluxonium.dispersive import calculate_chi_vs_flx
+
+if TYPE_CHECKING:
+    from scqubits.core.storage import SpectrumData
 
 PLOT_CUTOFF = 40
 PLOT_EVALS_COUNT = 15
@@ -21,8 +25,8 @@ def plot_matrix_elements(
     flxs: np.ndarray,
     show_idxs: List[Tuple[int, int]],
     mAs: Optional[np.ndarray] = None,
-    spectrum_data: Optional[scq.SpectrumData] = None,
-) -> Tuple[go.Figure, scq.SpectrumData]:
+    spectrum_data: Optional[SpectrumData] = None,
+) -> Tuple[go.Figure, SpectrumData]:
     need_dim = max(max(i, j) for i, j in show_idxs) + 1
 
     spectrum_data, matrix_elements = calculate_n_oper_vs_flx(

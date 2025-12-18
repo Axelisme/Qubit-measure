@@ -1,19 +1,25 @@
+from __future__ import annotations
+
 from functools import partial
 from typing import TYPE_CHECKING, Callable, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
-    import scqubits as scq
+    from scqubits.core.fluxonium import Fluxonium
+    from scqubits.core.storage import SpectrumData
 
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy as sp
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from scipy.optimize import minimize
 
 from zcu_tools.simulate import flx2mA, mA2flx
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flx_with
 
 
-def freq2omega(fpts: np.ndarray) -> np.ndarray:
+def freq2omega(fpts: NDArray[np.float64]) -> NDArray[np.float64]:
     """GHz -> rad/ns"""
     return 2 * np.pi * fpts
 
@@ -25,12 +31,12 @@ def calc_therm_ratio(omega: float, T: float) -> float:
 
 def calc_Qcap_vs_omega(
     params: List[float],
-    fpts: np.ndarray,
-    T1s: np.ndarray,
-    n_elements: np.ndarray,
-    T1errs: Optional[np.ndarray] = None,
+    fpts: NDArray[np.float64],
+    T1s: NDArray[np.float64],
+    n_elements: NDArray[np.float64],
+    T1errs: Optional[NDArray[np.float64]] = None,
     guess_Temp: float = 20e-3,
-) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+) -> Union[NDArray[np.float64], Tuple[NDArray[np.float64], NDArray[np.float64]]]:
     """fpts: GHz, T1s: ns, guess_Temp: K"""
     omegas = freq2omega(fpts)
 
@@ -61,13 +67,13 @@ def calc_Qcap_vs_omega(
 
 
 def calc_Qind_vs_omega(
-    params: List[float],
-    fpts: np.ndarray,
-    T1s: np.ndarray,
-    phi_elements: np.ndarray,
-    T1errs: Optional[np.ndarray] = None,
+    params: Tuple[float, float, float],
+    fpts: NDArray[np.float64],
+    T1s: NDArray[np.float64],
+    phi_elements: NDArray[np.float64],
+    T1errs: Optional[NDArray[np.float64]] = None,
     guess_Temp: float = 20e-3,
-) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+) -> Union[NDArray[np.float64], Tuple[NDArray[np.float64], NDArray[np.float64]]]:
     """fpts: GHz, T1s: ns, guess_Temp: K"""
     omegas = freq2omega(fpts)
 
@@ -98,7 +104,7 @@ def calc_Qind_vs_omega(
 
 def find_proper_Temp(
     guess_Temp: float,
-    calc_Q_fn: Callable[[float], np.ndarray],
+    calc_Q_fn: Callable[[float], NDArray[np.float64]],
 ) -> float:
     """use scipy.optimize.minimize to find the proper Temp, the proper Temp is the one that minimizes the difference between all Q values"""
 
@@ -113,11 +119,11 @@ def find_proper_Temp(
 
 
 def plot_Q_vs_omega(
-    fpts: np.ndarray,
-    Q_vs_omega: np.ndarray,
-    Q_vs_omega_err: np.ndarray,
+    fpts: NDArray[np.float64],
+    Q_vs_omega: NDArray[np.float64],
+    Q_vs_omega_err: NDArray[np.float64],
     Qname: str = r"$Q_{cap}$",
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """fpts: GHz, Q_vs_omega: ns/rad, Q_vs_omega_err: ns/rad"""
     omegas = freq2omega(fpts)
 
@@ -135,12 +141,12 @@ def plot_Q_vs_omega(
 
 
 def add_Q_fit(
-    ax: plt.Axes,
-    fpts: np.ndarray,
-    Q_vs_omega: np.ndarray,
+    ax: Axes,
+    fpts: NDArray[np.float64],
+    Q_vs_omega: NDArray[np.float64],
     w_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
     fit_constant: bool = False,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
     """fpts: GHz, Q_vs_omega: ns/rad, w_range: (GHz, GHz)"""
     omegas = freq2omega(fpts)
 
@@ -177,11 +183,11 @@ def add_Q_fit(
 
 
 def plot_t1_vs_m01(
-    elements: np.ndarray,
-    T1s: np.ndarray,
-    T1errs: Optional[np.ndarray] = None,
+    elements: NDArray[np.float64],
+    T1s: NDArray[np.float64],
+    T1errs: Optional[NDArray[np.float64]] = None,
     op_name: str = r"$n_{01}$",
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots()
 
@@ -213,12 +219,12 @@ def plot_t1_vs_m01(
 
 
 def plot_sample_t1(
-    s_mAs: np.ndarray,
-    s_T1s: np.ndarray,
-    s_T1errs: np.ndarray,
+    s_mAs: NDArray[np.float64],
+    s_T1s: NDArray[np.float64],
+    s_T1errs: NDArray[np.float64],
     mA_c: float,
     period: float,
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
 
@@ -242,21 +248,21 @@ def plot_sample_t1(
 
 
 def plot_t1_with_sample(
-    s_mAs: np.ndarray,
-    s_T1s: np.ndarray,
-    s_T1errs: np.ndarray,
+    s_mAs: NDArray[np.float64],
+    s_T1s: NDArray[np.float64],
+    s_T1errs: NDArray[np.float64],
     mA_c: float,
     period: float,
-    fluxonium: "scq.Fluxonium",
-    spectrum_data: "scq.SpectrumData",
-    t_flxs: np.ndarray,
+    fluxonium: Fluxonium,
+    spectrum_data: SpectrumData,
+    t_flxs: NDArray[np.float64],
     *,
     name: str,
     noise_name: str,
     values: list[float],
     Temp: float,
     **other_noise_options: dict,
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """T1s: ns"""
     t_mAs = flx2mA(t_flxs, mA_c=mA_c, period=period)
 
@@ -302,17 +308,17 @@ def plot_t1_with_sample(
 
 
 def plot_eff_t1_with_sample(
-    s_mAs: np.ndarray,
-    s_T1s: np.ndarray,
-    s_T1errs: np.ndarray,
-    t1_effs: np.ndarray,
+    s_mAs: NDArray[np.float64],
+    s_T1s: NDArray[np.float64],
+    s_T1errs: NDArray[np.float64],
+    t1_effs: NDArray[np.float64],
     mA_c: float,
     period: float,
-    t_flxs: np.ndarray,
+    t_flxs: NDArray[np.float64],
     *,
     label: str = "t1_eff",
     title: Optional[str] = None,
-) -> Tuple[plt.Figure, plt.Axes]:
+) -> Tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     if title is not None:

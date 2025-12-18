@@ -15,6 +15,7 @@ def sincfunc(x, *p):
 def fitsinc(xdata, ydata, fitparams: Optional[Sequence[Optional[float]]] = None):
     if fitparams is None:
         fitparams = [None] * 5
+    fitparams = list(fitparams)
 
     # 初始參數猜測
     if any(p is None for p in fitparams):

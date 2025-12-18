@@ -33,7 +33,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data, load_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
 AutoOptResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 

@@ -1,9 +1,10 @@
 import numpy as np
+from numpy.typing import NDArray
 
 
 def mA2flx(
-    mAs: np.ndarray, mA_c: float, period: float, fold: bool = False
-) -> np.ndarray:
+    mAs: NDArray[np.float64], mA_c: float, period: float, fold: bool = False
+) -> NDArray[np.float64]:
     flxs = (mAs - mA_c) / period + 0.5
     if fold:
         flxs = np.mod(flxs, 1)
@@ -12,7 +13,9 @@ def mA2flx(
     return flxs
 
 
-def flx2mA(flxs: np.ndarray, mA_c: float, period: float) -> np.ndarray:
+def flx2mA(
+    flxs: NDArray[np.float64], mA_c: float, period: float
+) -> NDArray[np.float64]:
     return (flxs - 0.5) * period + mA_c
 
 

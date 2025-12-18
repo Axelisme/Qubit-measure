@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from abc import ABC, abstractmethod
 
-from typing_extensions import Generic, NotRequired, TypeVar, TYPE_CHECKING, TypedDict
+from typing_extensions import TYPE_CHECKING, Generic, NotRequired, TypedDict, TypeVar
 
 if TYPE_CHECKING:
     from pyvisa import ResourceManager

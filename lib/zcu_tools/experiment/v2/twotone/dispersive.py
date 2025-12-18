@@ -1,10 +1,10 @@
 from copy import deepcopy
 from typing import Optional, Tuple
 
-import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
+import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
 
@@ -22,8 +22,8 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.resonance import (
     fit_edelay,
     get_proper_model,
-    remove_edelay,
     normalize_signal,
+    remove_edelay,
 )
 
 from ..runner import HardTask, TaskConfig, run_task
@@ -103,8 +103,8 @@ class DispersiveExperiment(AbsExperiment):
         g_freq, g_kappa = g_params["freq"], g_params["kappa"]
         e_freq, e_kappa = e_params["freq"], e_params["kappa"]
 
-        g_fit = np.abs(model.calc_signals(fpts, **g_params))
-        e_fit = np.abs(model.calc_signals(fpts, **e_params))
+        g_fit = np.abs(model.calc_signals(fpts, **g_params))  # type: ignore
+        e_fit = np.abs(model.calc_signals(fpts, **e_params))  # type: ignore
 
         # Calculate dispersive shift and average linewidth
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
@@ -153,8 +153,8 @@ class DispersiveExperiment(AbsExperiment):
             ax.set_ylabel(r"$Im(S_{21})$")
 
         # Plot individual circle fit
-        _plot_circle_fit(ax_g, g_signals, g_params, "b")
-        _plot_circle_fit(ax_e, e_signals, e_params, "r")
+        _plot_circle_fit(ax_g, g_signals, dict(g_params), "b")
+        _plot_circle_fit(ax_e, e_signals, dict(e_params), "r")
         ax_g.set_title("Circle fit (Ground)")
         ax_e.set_title("Circle fit (Excited)")
 

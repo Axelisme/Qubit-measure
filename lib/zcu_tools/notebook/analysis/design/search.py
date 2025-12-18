@@ -40,16 +40,19 @@ def generate_params_table(
         EJ = np.array([EJ])
     elif isinstance(EJ, tuple):
         EJ = np.arange(EJ[0], EJ[1], precision)
+    assert isinstance(EJ, np.ndarray)
 
     if isinstance(EC, float):
         EC = np.array([EC])
     elif isinstance(EC, tuple):
         EC = np.arange(EC[0], EC[1], precision)
+    assert isinstance(EC, np.ndarray)
 
     if isinstance(EL, float):
         EL = np.array([EL])
     elif isinstance(EL, tuple):
         EL = np.arange(EL[0], EL[1], precision)
+    assert isinstance(EL, np.ndarray)
 
     return pd.DataFrame(
         [
@@ -72,9 +75,9 @@ def calculate_esys(params_table: pd.DataFrame) -> None:
     會在 params_table 中新增一個 "esys" 欄位
     """
 
-    import scqubits as scq  # lazy import
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-    fluxonium = scq.Fluxonium(
+    fluxonium = Fluxonium(
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
 
@@ -120,9 +123,9 @@ def calculate_m01(params_table: pd.DataFrame) -> None:
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
 
-    import scqubits as scq  # lazy import
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-    fluxonium = scq.Fluxonium(
+    fluxonium = Fluxonium(
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
 
@@ -138,11 +141,11 @@ def calculate_m01(params_table: pd.DataFrame) -> None:
 
 
 def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) -> None:
-    params_list = params_table.to_dict(orient="records")
+    params_list = np.asarray(params_table.to_dict(orient="records"), dtype=object)
 
-    import scqubits as scq  # lazy import
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-    def update_fn(fluxonium: scq.Fluxonium, row: Dict[str, Any]) -> None:
+    def update_fn(fluxonium: Fluxonium, row: Dict[str, Any]) -> None:
         fluxonium.flux = row["flx"]
         fluxonium.EJ = row["EJ"]
         fluxonium.EC = row["EC"]
@@ -191,14 +194,15 @@ def calculate_t1(
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
 
-    import scqubits as scq  # lazy import
+    import scqubits.settings as scq
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-    fluxonium = scq.Fluxonium(
+    fluxonium = Fluxonium(
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
 
     # Suppress the warning when calculating t1
-    old, scq.settings.T1_DEFAULT_WARNING = scq.settings.T1_DEFAULT_WARNING, False
+    old, scq.T1_DEFAULT_WARNING = scq.T1_DEFAULT_WARNING, False
 
     def calc_single_t1(row):
         fluxonium.flux = row["flx"]
@@ -214,7 +218,7 @@ def calculate_t1(
 
     params_table["t1"] = params_table.apply(calc_single_t1, axis=1)
 
-    scq.settings.T1_DEFAULT_WARNING = old
+    scq.T1_DEFAULT_WARNING = old
 
 
 def avoid_collision(
@@ -404,11 +408,12 @@ def add_real_sample(
     )
     snr = np.sort(snrs)[-3]
 
-    import scqubits as scq  # lazy import
+    import scqubits.settings as scq
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
 
     # calculate t1
-    fluxonium = scq.Fluxonium(*param, flux=flx, cutoff=DESIGN_CUTOFF, truncated_dim=2)
-    scq.settings.T1_DEFAULT_WARNING = False
+    fluxonium = Fluxonium(*param, flux=flx, cutoff=DESIGN_CUTOFF, truncated_dim=2)
+    scq.T1_DEFAULT_WARNING = False
     predict_t1 = 1e-3 * fluxonium.t1_effective(
         noise_channels=noise_channels,
         common_noise_options=dict(i=1, j=0, T=Temp),

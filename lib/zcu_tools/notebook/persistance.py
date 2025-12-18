@@ -1,14 +1,17 @@
+from __future__ import annotations
+
 import json
 import os
 from typing import Any, Dict, Tuple
 
 import h5py as h5
 import numpy as np
+from numpy.typing import NDArray
 
 
 def format_rawdata(
-    As: np.ndarray, fpts: np.ndarray, spectrum: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    As: NDArray[np.float64], fpts: NDArray[np.float64], spectrum: NDArray[np.float64]
+) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     fpts = fpts / 1e9  # convert to GHz
 
     if As[0] > As[-1]:  # Ensure that the fluxes are in increasing
@@ -24,7 +27,7 @@ def format_rawdata(
 def dump_result(
     path: str,
     name: str,
-    params: np.ndarray,
+    params: Tuple[float, float, float],
     cflx: float,
     period: float,
     allows: Dict[str, Any],

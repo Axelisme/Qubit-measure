@@ -1,7 +1,7 @@
+from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 from typing_extensions import TypedDict
 
-from qick import QickConfig
 from zcu_tools.program.base import MyProgram
 
 from .modules.registry import PulseRegistry

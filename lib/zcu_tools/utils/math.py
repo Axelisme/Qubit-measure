@@ -1,7 +1,8 @@
 import numpy as np
+from numpy.typing import NDArray
 
 
-def van_der_corput(n, base=2):
+def van_der_corput(n: int, base: int = 2) -> NDArray[np.float64]:
     """
     Generate n elements of a van der Corput sequence in base 'base'.
     """
@@ -18,7 +19,7 @@ def van_der_corput(n, base=2):
     return vdc
 
 
-def vdc_permutation(n, base=2):
+def vdc_permutation(n: int, base: int = 2) -> NDArray[np.int64]:
     """
     Generate a permutation of n elements based on the van der Corput sequence.
     """

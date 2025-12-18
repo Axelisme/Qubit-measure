@@ -12,7 +12,6 @@ from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
@@ -20,6 +19,7 @@ from zcu_tools.experiment.v2.runner import (
     TaskContextView,
     run_task,
 )
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
     Delay,

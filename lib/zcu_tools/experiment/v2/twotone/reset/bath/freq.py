@@ -17,8 +17,6 @@ from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
-    Pulse,
-    PulseCfg,
     Readout,
     ReadoutCfg,
     Reset,

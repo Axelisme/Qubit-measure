@@ -1,3 +1,5 @@
+import qick.asm_v2 as qick_asm_v2
+
 from .base import Delay, Module, NonBlocking
 from .loop import Repeat
 from .pulse import Pulse, PulseCfg, check_block_mode
@@ -18,13 +20,11 @@ from .reset import (
     ResetCfg,
     TwoPulseReset,
 )
-from .waveform import WaveformCfg
 from .util import param2str
+from .waveform import WaveformCfg
 
-# TODO: monkey patching fix
-# Implement __str__ and __repr__ methods for qick.asm_v2.QickParam
-
-import qick.asm_v2 as qick_asm_v2
+# TODO: waiting qick official implementation
+# Monkey patching: implement __str__ and __repr__ methods for qick.asm_v2.QickParam
 
 
 def param_repr(self) -> str:

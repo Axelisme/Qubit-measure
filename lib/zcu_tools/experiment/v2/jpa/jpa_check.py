@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Mapping, Optional, Tuple, TypedDict
+from typing import Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np

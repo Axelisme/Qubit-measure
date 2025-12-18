@@ -1,18 +1,25 @@
 from typing import List, Optional, Tuple, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .base import cosfunc, decaycos, fitcos, fitdecaycos
 
 
 def fit_rabi(
-    xs: np.ndarray,
-    real_signals: np.ndarray,
+    xs: NDArray[np.float64],
+    real_signals: NDArray[np.float64],
     *,
     decay: bool = False,
     init_phase: Optional[float] = None,
     min_length: float = 0.0,
-) -> Tuple[float, float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
+) -> Tuple[
+    float,
+    float,
+    float,
+    NDArray[np.float64],
+    Tuple[Tuple[float, ...], NDArray[np.float64]],
+]:
     """Return (pi_x, pi2_x, freq, fit_signals, (pOpt, pCov))"""
 
     # choose fitting function

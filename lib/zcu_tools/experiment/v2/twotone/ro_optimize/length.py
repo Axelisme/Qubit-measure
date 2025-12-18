@@ -3,10 +3,10 @@ from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typing_extensions import NotRequired
-from matplotlib.figure import Figure
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array

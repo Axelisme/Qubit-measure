@@ -34,11 +34,13 @@ def make_pulse(
     gain: Optional[float] = None,
     length: Optional[float] = None,
 ) -> PulseCfg:
-    pulse_cfg = ml.get_module(pulse_name)
+    pulse_cfg = cast(PulseCfg, ml.get_module(pulse_name))
+
     if freq is not None:
         pulse_cfg["freq"] = freq
     if gain is not None:
         pulse_cfg["gain"] = gain
     if length is not None:
         pulse_cfg["waveform"]["length"] = length
-    return cast(PulseCfg, pulse_cfg)
+
+    return pulse_cfg
