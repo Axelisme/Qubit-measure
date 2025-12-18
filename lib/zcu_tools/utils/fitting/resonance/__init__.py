@@ -10,6 +10,7 @@ from .base import (
     get_rough_edelay,
     phase_func,
     remove_edelay,
+    normalize_signal,
 )
 from .hanger import HangerModel
 from .transmission import TransmissionModel

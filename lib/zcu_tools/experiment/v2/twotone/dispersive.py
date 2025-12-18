@@ -1,9 +1,11 @@
 from copy import deepcopy
 from typing import Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
+import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
+from matplotlib.axes import Axes
+from matplotlib.patches import Circle
 from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment, config
@@ -17,7 +19,12 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting.resonance import fit_edelay, get_proper_model
+from zcu_tools.utils.fitting.resonance import (
+    fit_edelay,
+    get_proper_model,
+    remove_edelay,
+    normalize_signal,
+)
 
 from ..runner import HardTask, TaskConfig, run_task
 
@@ -103,28 +110,53 @@ class DispersiveExperiment(AbsExperiment):
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
         avg_kappa = (g_kappa + e_kappa) / 2  # average linewidth κ/2π
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig = plt.figure(figsize=config.figsize)
+        spec = fig.add_gridspec(2, 2)
+        ax_main = fig.add_subplot(spec[0, :])
+        ax_g = fig.add_subplot(spec[1, 0])
+        ax_e = fig.add_subplot(spec[1, 1])
 
         # Plot data and fits
-        ax.plot(fpts, g_amps, marker=".", c="b", label="Ground state")
-        ax.plot(fpts, e_amps, marker=".", c="r", label="Excited state")
-        ax.plot(fpts, g_fit, "b-", alpha=0.7)
-        ax.plot(fpts, e_fit, "r-", alpha=0.7)
+        ax_main.plot(fpts, g_amps, marker=".", c="b", label="Ground state")
+        ax_main.plot(fpts, e_amps, marker=".", c="r", label="Excited state")
+        ax_main.plot(fpts, g_fit, "b-", alpha=0.7)
+        ax_main.plot(fpts, e_fit, "r-", alpha=0.7)
 
         # Mark resonance frequencies
         label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_kappa:.1f} MHz"
         label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_kappa:.1f} MHz"
-        ax.axvline(g_freq, color="b", ls="--", alpha=0.7, label=label_g)
-        ax.axvline(e_freq, color="r", ls="--", alpha=0.7, label=label_e)
+        ax_main.axvline(g_freq, color="b", ls="--", alpha=0.7, label=label_g)
+        ax_main.axvline(e_freq, color="r", ls="--", alpha=0.7, label=label_e)
 
-        ax.set_xlabel("Frequency (MHz)")
-        ax.set_ylabel("Amplitude (a.u.)")
-        ax.set_title(
+        ax_main.set_xlabel("Frequency (MHz)")
+        ax_main.set_ylabel("Amplitude (a.u.)")
+        ax_main.set_title(
             f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {avg_kappa:.1f} MHz"
         )
-        ax.legend()
-        ax.grid(True)
+        ax_main.legend()
+        ax_main.grid(True)
+
+        def _plot_circle_fit(ax: Axes, signals: NDArray, params_dict: dict, color: str):
+            rot_signals = remove_edelay(fpts, signals, edelay)
+            norm_signals, norm_circle_params = normalize_signal(
+                rot_signals, params_dict["circle_params"], params_dict["a0"]
+            )
+            norm_xc, norm_yc, norm_r0 = norm_circle_params
+
+            ax.plot(norm_signals.real, norm_signals.imag, color=color, marker=".")
+            ax.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color=color))
+            ax.plot([norm_xc, 1], [norm_yc, 0], "kx--")
+            ax.axhline(0, color="k", linestyle="--")
+            ax.set_aspect("equal")
+            ax.grid(True)
+            ax.set_xlabel(r"$Re(S_{21})$")
+            ax.set_ylabel(r"$Im(S_{21})$")
+
+        # Plot individual circle fit
+        _plot_circle_fit(ax_g, g_signals, g_params, "b")
+        _plot_circle_fit(ax_e, e_signals, e_params, "r")
+        ax_g.set_title("Circle fit (Ground)")
+        ax_e.set_title("Circle fit (Excited)")
 
         fig.tight_layout()
 
