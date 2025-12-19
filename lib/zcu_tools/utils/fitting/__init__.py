@@ -36,3 +36,4 @@ from .singleshot import (
     fit_singleshot_p0,
     gauss_func,
 )
+from .multi_decay import fit_transition_rates
