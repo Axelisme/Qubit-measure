@@ -189,6 +189,7 @@ class MISTPowerDepOvernight(AbsExperiment):
         *,
         ac_coeff=None,
         log_scale=False,
+        confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -197,6 +198,10 @@ class MISTPowerDepOvernight(AbsExperiment):
         _, pdrs, signals = result
 
         populations = calc_populations(signals)
+
+        if confusion_matrix is not None:  # readout correction
+            populations = populations @ np.linalg.inv(confusion_matrix)
+            populations = np.clip(populations, 0.0, 1.0)
 
         max_populations = np.nanmax(populations, axis=0)
         min_populations = np.nanmin(populations, axis=0)
@@ -212,19 +217,19 @@ class MISTPowerDepOvernight(AbsExperiment):
         fig, ax = plt.subplots(figsize=(8, 5))
         assert isinstance(fig, Figure)
 
-        med_kwargs = dict(marker="x", linestyle="-", markersize=4)
+        med_kwargs = dict(marker=".", linestyle="-", markersize=4)
         side_kwargs = dict(linestyle="--", alpha=0.3)
-        ax.plot(xs, max_populations[:, 0], color="b", **side_kwargs)
-        ax.plot(xs, med_populations[:, 0], color="b", label="Ground", **med_kwargs)
-        ax.plot(xs, min_populations[:, 0], color="b", **side_kwargs)
+        ax.plot(xs, max_populations[:, 0], color="b", **side_kwargs)  # type: ignore
+        ax.plot(xs, med_populations[:, 0], color="b", label="Ground", **med_kwargs)  # type: ignore
+        ax.plot(xs, min_populations[:, 0], color="b", **side_kwargs)  # type: ignore
 
-        ax.plot(xs, max_populations[:, 1], color="r", **side_kwargs)
-        ax.plot(xs, med_populations[:, 1], color="r", label="Excited", **med_kwargs)
-        ax.plot(xs, min_populations[:, 1], color="r", **side_kwargs)
+        ax.plot(xs, max_populations[:, 1], color="r", **side_kwargs)  # type: ignore
+        ax.plot(xs, med_populations[:, 1], color="r", label="Excited", **med_kwargs)  # type: ignore
+        ax.plot(xs, min_populations[:, 1], color="r", **side_kwargs)  # type: ignore
 
-        ax.plot(xs, max_populations[:, 2], color="g", **side_kwargs)
-        ax.plot(xs, med_populations[:, 2], color="g", label="Other", **med_kwargs)
-        ax.plot(xs, min_populations[:, 2], color="g", **side_kwargs)
+        ax.plot(xs, max_populations[:, 2], color="g", **side_kwargs)  # type: ignore
+        ax.plot(xs, med_populations[:, 2], color="g", label="Other", **med_kwargs)  # type: ignore
+        ax.plot(xs, min_populations[:, 2], color="g", **side_kwargs)  # type: ignore
 
         if log_scale:
             ax.set_xscale("log")

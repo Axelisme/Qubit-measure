@@ -101,7 +101,6 @@ class CheckExperiment(AbsExperiment):
         e_center: complex,
         radius: float,
         result: Optional[CheckResultType] = None,
-        numbins: Union[int, str] = "auto",
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -151,21 +150,21 @@ class CheckExperiment(AbsExperiment):
             g_center.imag,
             markerfacecolor="b",
             label="Ground",
-            **plt_params,
+            **plt_params,  # type: ignore
         )
         ax.plot(
             e_center.real,
             e_center.imag,
             markerfacecolor="r",
             label="Excited",
-            **plt_params,
+            **plt_params,  # type: ignore
         )
         ax.plot(
             o_center.real,
             o_center.imag,
             markerfacecolor="g",
             label="Other",
-            **plt_params,
+            **plt_params,  # type: ignore
         )
         ax.add_patch(
             Circle(

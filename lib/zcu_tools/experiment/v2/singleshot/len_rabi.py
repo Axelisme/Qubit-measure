@@ -94,7 +94,10 @@ class LenRabiSingleShotExperiment(AbsExperiment):
         return lens, signals
 
     def analyze(
-        self, result: Optional[LenRabiResultType] = None, *, decay: bool = True
+        self,
+        result: Optional[LenRabiResultType] = None,
+        *,
+        confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -102,15 +105,19 @@ class LenRabiSingleShotExperiment(AbsExperiment):
 
         lens, signals = result
 
-        populations = rabi_signal2real(signals)
+        populations = rabi_signal2real(signals)  # (len, geo)
+
+        if confusion_matrix is not None:  # readout correction
+            populations = populations @ np.linalg.inv(confusion_matrix)
+            populations = np.clip(populations, 0.0, 1.0)
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
         plot_kwargs = dict(ls="-", marker="o", markersize=3)
-        ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
-        ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)
-        ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)
+        ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
+        ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
+        ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
         ax.set_xlabel("Pulse length (μs)")
         ax.set_ylabel("Population (a.u.)")
         # ax.set_ylim(0.0, 1.0)

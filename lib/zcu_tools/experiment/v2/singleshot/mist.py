@@ -116,6 +116,7 @@ class MISTPowerDepSingleShot(AbsExperiment):
         *,
         ac_coeff=None,
         log_scale=False,
+        confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -125,6 +126,10 @@ class MISTPowerDepSingleShot(AbsExperiment):
         signals = signals.real
 
         populations = mist_signal2real(signals)
+
+        if confusion_matrix is not None:  # readout correction
+            populations = populations @ np.linalg.inv(confusion_matrix)
+            populations = np.clip(populations, 0.0, 1.0)
 
         if ac_coeff is None:
             xs = pdrs
@@ -136,9 +141,9 @@ class MISTPowerDepSingleShot(AbsExperiment):
         fig, ax = plt.subplots(figsize=(6, 6))
 
         plot_kwargs = dict(ls="-", marker="o", markersize=1)
-        ax.plot(xs, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
-        ax.plot(xs, populations[:, 1], color="red", label="Excited", **plot_kwargs)
-        ax.plot(xs, populations[:, 2], color="green", label="Other", **plot_kwargs)
+        ax.plot(xs, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
+        ax.plot(xs, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
+        ax.plot(xs, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel("Population", fontsize=14)
         ax.grid(True)

@@ -5,6 +5,7 @@ from copy import deepcopy
 from typing import Literal, Optional, Tuple, cast
 
 import numpy as np
+import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
@@ -160,8 +161,7 @@ class GE_Experiment(AbsExperiment):
         confusion_matrix = np.concatenate([C_ge, np.array([[0.0, 0.0, 1.0]])], axis=0)
 
         # plot confusion matrix
-        fig = Figure(figsize=(6, 5))
-        ax = fig.add_subplot(1, 1, 1)
+        fig, ax = plt.subplots(figsize=(6, 5))
 
         im = ax.imshow(confusion_matrix, cmap="Blues", vmin=0, vmax=1)
         fig.colorbar(im, ax=ax)

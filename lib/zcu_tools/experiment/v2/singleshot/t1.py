@@ -140,7 +140,12 @@ class T1Experiment(AbsExperiment):
 
         return ts, signals
 
-    def analyze(self, result: Optional[T1ResultType] = None) -> Figure:
+    def analyze(
+        self,
+        result: Optional[T1ResultType] = None,
+        *,
+        confusion_matrix: Optional[NDArray[np.float64]] = None,
+    ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -148,6 +153,10 @@ class T1Experiment(AbsExperiment):
         lens, signals = result
 
         populations = calc_populations(signals)
+
+        if confusion_matrix is not None:  # readout correction
+            populations = populations @ np.linalg.inv(confusion_matrix)
+            populations = np.clip(populations, 0.0, 1.0)
 
         (
             (t1, _, g_fit_signals, g_params),
@@ -165,9 +174,9 @@ class T1Experiment(AbsExperiment):
         ax.plot(lens, g_fit_signals, color="blue", ls="--", label="Ground Fit")
         ax.plot(lens, e_fit_signals, color="red", ls="--", label="Excited Fit")
         plot_kwargs = dict(ls="-", marker=".", markersize=3)
-        ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
-        ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)
-        ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)
+        ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
+        ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
+        ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
         ax.set_xlabel("Time (μs)")
         ax.set_ylabel("Population")
         ax.legend(loc=4)
@@ -292,7 +301,12 @@ class T1WithToneExperiment(AbsExperiment):
 
         return ts, signals
 
-    def analyze(self, result: Optional[T1ResultType] = None) -> Figure:
+    def analyze(
+        self,
+        result: Optional[T1ResultType] = None,
+        *,
+        confusion_matrix: Optional[NDArray[np.float64]] = None,
+    ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -300,6 +314,10 @@ class T1WithToneExperiment(AbsExperiment):
         lens, signals = result
 
         populations = calc_populations(signals)
+
+        if confusion_matrix is not None:  # readout correction
+            populations = populations @ np.linalg.inv(confusion_matrix)
+            populations = np.clip(populations, 0.0, 1.0)
 
         (
             (t1, _, g_fit_signals, g_params),
@@ -317,9 +335,9 @@ class T1WithToneExperiment(AbsExperiment):
         ax.plot(lens, g_fit_signals, color="blue", ls="--", label="Ground Fit")
         ax.plot(lens, e_fit_signals, color="red", ls="--", label="Excited Fit")
         plot_kwargs = dict(ls="-", marker=".", markersize=3)
-        ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)
-        ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)
-        ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)
+        ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
+        ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
+        ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
         ax.set_xlabel("Time (μs)")
         ax.set_ylabel("Population")
         # ax.set_ylim(0.0, 1.0)
@@ -511,7 +529,9 @@ class T1WithToneSweepExperiment(AbsExperiment):
     def analyze(
         self,
         result: Optional[T1SweepResultType] = None,
+        *,
         ac_coeff: Optional[float] = None,
+        confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -524,6 +544,10 @@ class T1WithToneSweepExperiment(AbsExperiment):
         signals = signals[valid_mask]
 
         populations = calc_populations(signals)
+
+        if confusion_matrix is not None:  # readout correction
+            populations = populations @ np.linalg.inv(confusion_matrix)
+            populations = np.clip(populations, 0.0, 1.0)
 
         if ac_coeff is None:
             xs = gains
