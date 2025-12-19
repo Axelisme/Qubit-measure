@@ -33,7 +33,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting import fit_ge_decay
+from zcu_tools.utils.fitting import fit_ge_decay, fit_transition_rates
 
 # (times, signals)
 T1ResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
@@ -435,13 +435,22 @@ class T1WithToneSweepExperiment(AbsExperiment):
             fig,
             dict(
                 plot_2d_g=LivePlotter2D(
-                    "Readout Gain", "Time (us)", existed_axes=[[axs[0][0]]]
+                    "Readout Gain",
+                    "Time (us)",
+                    uniform=False,
+                    existed_axes=[[axs[0][0]]],
                 ),
                 plot_2d_e=LivePlotter2D(
-                    "Readout Gain", "Time (us)", existed_axes=[[axs[1][0]]]
+                    "Readout Gain",
+                    "Time (us)",
+                    uniform=False,
+                    existed_axes=[[axs[1][0]]],
                 ),
                 plot_2d_o=LivePlotter2D(
-                    "Readout Gain", "Time (us)", existed_axes=[[axs[1][1]]]
+                    "Readout Gain",
+                    "Time (us)",
+                    uniform=False,
+                    existed_axes=[[axs[1][1]]],
                 ),
                 plot_1d=LivePlotter1D(
                     "Time (us)",
