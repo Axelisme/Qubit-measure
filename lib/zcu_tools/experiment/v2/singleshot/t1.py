@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from tqdm.auto import trange
+from tqdm.auto import tqdm
 from typing_extensions import NotRequired
 
 from zcu_tools.experiment import AbsExperiment, config
@@ -33,7 +33,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting import fit_ge_decay, fit_transition_rates
+from zcu_tools.utils.fitting import fit_transition_rates, fit_ge_decay
 
 # (times, signals)
 T1ResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
@@ -319,21 +319,19 @@ class T1WithToneExperiment(AbsExperiment):
             populations = populations @ np.linalg.inv(confusion_matrix)
             populations = np.clip(populations, 0.0, 1.0)
 
-        (
-            (t1, _, g_fit_signals, g_params),
-            (_, _, e_fit_signals, e_params),
-        ) = fit_ge_decay(lens, populations[:, 0], populations[:, 1], share_t1=True)
+        rates, fit_pops, _ = fit_transition_rates(lens, populations)
 
-        gamma_ge, gamma_eg = calc_transition_rate(g_params[0], e_params[0], t1)
+        T_g = rates[0] + rates[5]
+        T_e = rates[1] + rates[2]
+        t1 = 1.0 / (T_g + T_e)
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.set_title(
-            f"T_1 = {t1:.1f} μs, Γ_ge={gamma_ge:.3f} μs⁻¹, Γ_eg={gamma_eg:.3f} μs⁻¹"
-        )
-        ax.plot(lens, g_fit_signals, color="blue", ls="--", label="Ground Fit")
-        ax.plot(lens, e_fit_signals, color="red", ls="--", label="Excited Fit")
+        ax.set_title(f"T_1 = {t1:.1f} μs, Γ_ge={T_g:.3f} μs⁻¹, Γ_eg={T_e:.3f} μs⁻¹")
+        ax.plot(lens, fit_pops[:, 0], color="blue", ls="--", label="Ground Fit")
+        ax.plot(lens, fit_pops[:, 1], color="red", ls="--", label="Excited Fit")
+        ax.plot(lens, fit_pops[:, 2], color="green", ls="--", label="Other Fit")
         plot_kwargs = dict(ls="-", marker=".", markersize=3)
         ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
         ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
@@ -397,7 +395,7 @@ T1SweepResultType = Tuple[
 
 class T1WithToneSweepTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
-    pi_pulse: PulseCfg
+    pi_pulse: NotRequired[PulseCfg]
     test_pulse: PulseCfg
     readout: ReadoutCfg
 
@@ -506,7 +504,7 @@ class T1WithToneSweepExperiment(AbsExperiment):
                                     Reset(
                                         "reset", ctx.cfg.get("reset", {"type": "none"})
                                     ),
-                                    Pulse(name="pi_pulse", cfg=ctx.cfg["pi_pulse"]),
+                                    Pulse("pi_pulse", cfg=ctx.cfg.get("pi_pulse")),
                                     Pulse(name="test_pulse", cfg=ctx.cfg["test_pulse"]),
                                     Readout("readout", cfg=ctx.cfg["readout"]),
                                 ],
@@ -558,6 +556,42 @@ class T1WithToneSweepExperiment(AbsExperiment):
             populations = populations @ np.linalg.inv(confusion_matrix)
             populations = np.clip(populations, 0.0, 1.0)
 
+        num_gain = populations.shape[0]
+        min_rate = 0.1 / np.max(Ts)
+
+        worst_loss = 0.0
+        worst_pop = None
+        worst_fit = None
+
+        # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
+        transition_rates = np.zeros((num_gain, 6), dtype=np.float64)
+        for i, pop in enumerate(tqdm(populations, desc="Fitting transition rates")):
+            rates, fit_pop, _ = fit_transition_rates(Ts, pop)
+            transition_rates[i] = rates
+
+            loss = np.mean(np.abs(fit_pop - pop))
+            if loss > worst_loss:
+                worst_loss = loss
+                worst_pop = pop
+                worst_fit = fit_pop
+        transition_rates[transition_rates < min_rate] = 0.0
+
+        fig, ax = plt.subplots(figsize=config.figsize)
+        assert isinstance(fig, Figure)
+
+        assert worst_pop is not None and worst_fit is not None
+        ax.scatter(Ts, worst_pop[:, 0], label="G", color="blue", s=1)
+        ax.scatter(Ts, worst_pop[:, 1], label="E", color="red", s=1)
+        ax.scatter(Ts, worst_pop[:, 2], label="O", color="green", s=1)
+        ax.plot(Ts, worst_fit[:, 0], color="blue", ls="--")
+        ax.plot(Ts, worst_fit[:, 1], color="red", ls="--")
+        ax.plot(Ts, worst_fit[:, 2], color="green", ls="--")
+        ax.grid(True)
+        ax.set_title(f"Worst fit loss: {worst_loss:.3e}")
+        ax.set_xlabel("Time (μs)")
+        ax.set_ylabel("Population")
+        plt.show(fig)
+
         if ac_coeff is None:
             xs = gains
             xlabel = "probe gain (a.u.)"
@@ -565,78 +599,40 @@ class T1WithToneSweepExperiment(AbsExperiment):
             xs = ac_coeff * gains**2
             xlabel = r"$\bar n$"
 
-        t1s = np.zeros(len(gains), dtype=np.float64)
-        t1errs = np.zeros(len(gains), dtype=np.float64)
-        steady_pops = np.full((len(gains), 2), np.nan, dtype=np.float64)
-        gammas = np.zeros((len(gains), 2), dtype=np.float64)
-        for i in trange(len(gains)):
-            (
-                (t1, t1err, _, g_params),
-                (_, _, _, e_params),
-            ) = fit_ge_decay(
-                Ts, populations[i, :, 0], populations[i, :, 1], share_t1=True
-            )
-            if not np.isfinite(t1):
-                clip_len = min(10, len(Ts) // 30)
-                clip_Ts = Ts[:clip_len]
-                clip_populations = populations[i, :clip_len]
-                (
-                    (t1, t1err, _, g_params),
-                    (_, _, _, e_params),
-                ) = fit_ge_decay(
-                    clip_Ts,
-                    clip_populations[:, 0],
-                    clip_populations[:, 1],
-                    share_t1=True,
-                )
-            gamma_ge, gamma_eg = calc_transition_rate(g_params[0], e_params[0], t1)
-            gammas[i] = (gamma_ge, gamma_eg)
-            t1s[i] = t1
-            t1errs[i] = t1err
-            if np.isfinite(t1):
-                steady_pops[i] = (g_params[0], e_params[0])
-            else:
-                avg_len = max(10, len(Ts) // 10)
-                steady_pops[i] = (
-                    np.mean(populations[i, -avg_len:, 0]),
-                    np.mean(populations[i, -avg_len:, 1]),
-                )
+        fig, axs = plt.subplots(3, 2, figsize=(12, 8), sharex=True)
 
-        fig, axs = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
-        assert isinstance(fig, Figure)
+        def _plot_population(ax, pop, label):
+            ax.scatter([], [], s=0, label=label)
+            ax.imshow(pop.T, aspect="auto", extent=(xs[0], xs[-1], Ts[-1], Ts[0]))
+            ax.set_ylabel("Time (μs)")
+            ax.legend()
 
-        axs[0].set_title("T1 under Readout Tone")
-        axs[0].errorbar(
-            xs, t1s, yerr=t1errs, marker=".", ls="-", markersize=3, capsize=2
-        )
-        axs[0].set_ylabel("T1 (μs)")
-        axs[0].grid(True)
+        _plot_population(axs[0][0], populations[..., 0], "Ground")
+        _plot_population(axs[1][0], populations[..., 1], "Excited")
+        _plot_population(axs[2][0], populations[..., 2], "Other")
 
-        axs[1].set_title("Steady Populations")
-        plot_kwargs = dict(marker=".", ls="-", markersize=3)
-        axs[1].plot(xs, steady_pops[:, 0], label="Ground", color="blue", **plot_kwargs)
-        axs[1].plot(xs, steady_pops[:, 1], label="Excited", color="red", **plot_kwargs)
-        axs[1].plot(
-            xs,
-            1 - steady_pops[:, 0] - steady_pops[:, 1],
-            label="Other",
-            color="green",
-            ls="--",
-        )
-        axs[1].set_ylabel("Steady Population")
-        axs[1].legend()
-        axs[1].grid(True)
+        # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
+        R_go = transition_rates[..., 4]
+        R_g = transition_rates[..., 0] + R_go
+        R_eo = transition_rates[..., 2]
+        R_e = transition_rates[..., 1] + R_eo
 
-        axs[2].set_title("Transition Rates")
-        plot_kwargs = dict(marker=".", ls="-", markersize=3)
-        axs[2].plot(xs, gammas[:, 0], label="Γ_ge", color="blue", **plot_kwargs)
-        axs[2].plot(xs, gammas[:, 1], label="Γ_eg", color="red", **plot_kwargs)
-        axs[2].set_ylim(0.0, 5 * np.nanstd(gammas))
-        axs[2].set_xlim(xs[0], xs[-1])
-        axs[2].set_ylabel("Transition Rate (μs⁻¹)")
-        axs[2].set_xlabel(xlabel)
-        axs[2].legend()
-        axs[2].grid(True)
+        axs[0][1].plot(xs, R_g, label="Γ_ge + Γ_go", color="blue")
+        axs[0][1].plot(xs, R_go, label="Γ_go", color="blue", ls="--")
+
+        axs[1][1].plot(xs, R_e, label="Γ_eg + Γ_eo", color="red")
+        axs[1][1].plot(xs, R_eo, label="Γ_eo", color="red", ls="--")
+
+        axs[2][1].plot(xs, R_eo, label="Γ_eo", color="red", ls="--")
+        axs[2][1].plot(xs, R_go, label="Γ_go", color="blue", ls="--")
+
+        max_rate = np.nanmax([R_g, R_e])
+        for ax in (axs[0][1], axs[1][1], axs[2][1]):
+            ax.legend()
+            ax.set_ylim(0, max_rate * 1.1)
+            ax.grid(True)
+            ax.set_ylabel("Rate (μs⁻¹)")
+        axs[2][1].set_xlabel(xlabel)
 
         fig.tight_layout()
 
@@ -658,7 +654,7 @@ class T1WithToneSweepExperiment(AbsExperiment):
         _filepath = Path(filepath)
 
         save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_g_population.npz")),
+            filepath=str(_filepath.with_name(_filepath.name + "_g_population")),
             x_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
             y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
             z_info={
@@ -671,7 +667,7 @@ class T1WithToneSweepExperiment(AbsExperiment):
             **kwargs,
         )
         save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_e_population.npz")),
+            filepath=str(_filepath.with_name(_filepath.name + "_e_population")),
             x_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
             y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
             z_info={
@@ -684,29 +680,25 @@ class T1WithToneSweepExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1SweepResultType:
-        _filepath = Path(filepath)
+    def load(self, filepath: List[str], **kwargs) -> T1SweepResultType:
+        g_filepath, e_filepath = filepath
 
         # Load ground populations
-        g_pop, gains, Ts = load_data(
-            str(_filepath.with_name(_filepath.name + "_g_population.npz")), **kwargs
-        )
+        g_pop, gains, Ts = load_data(g_filepath, **kwargs)
         assert gains is not None and Ts is not None
         assert len(gains.shape) == 1 and len(Ts.shape) == 1
-        assert g_pop.shape == (len(Ts), len(gains))
+        assert g_pop.shape == (len(gains), len(Ts))
 
         # Load excited populations
-        e_pop, gains_e, Ts_e = load_data(
-            str(_filepath.with_name(_filepath.name + "_e_population.npz")), **kwargs
-        )
+        e_pop, gains_e, Ts_e = load_data(e_filepath, **kwargs)
         assert gains_e is not None and Ts_e is not None
-        assert e_pop.shape == (len(Ts_e), len(gains_e))
+        assert e_pop.shape == (len(gains_e), len(Ts_e))
         assert np.array_equal(gains, gains_e) and np.array_equal(Ts, Ts_e)
 
         Ts = Ts * 1e6  # s -> us
 
         # Reconstruct signals shape: (gains, ts, 2)
-        signals = np.stack([g_pop.T, e_pop.T], axis=-1)
+        signals = np.stack([g_pop, e_pop], axis=-1)
 
         gains = gains.astype(np.float64)
         Ts = Ts.astype(np.float64)

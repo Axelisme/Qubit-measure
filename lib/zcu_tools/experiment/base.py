@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, Optional, TypeVar
+from typing import Any, Dict, Generic, Optional, TypeVar, Union, List
 
 T_Result = TypeVar("T_Result")
 T_Config = TypeVar("T_Config", bound=Dict[str, Any])
@@ -30,4 +30,4 @@ class AbsExperiment(Generic[T_Result, T_Config], ABC):
     ) -> None: ...
 
     @abstractmethod
-    def load(self, filepath: str, **kwargs) -> T_Result: ...
+    def load(self, filepath: Union[str, List[str]], **kwargs) -> T_Result: ...

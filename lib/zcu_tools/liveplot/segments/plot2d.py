@@ -93,6 +93,8 @@ class PlotNonUniform2DSegment(AbsSegment):
             ax.set_title(self.title)
 
         self.im = NonUniformImage(ax, cmap="viridis", interpolation="nearest")
+        self.im.set_extent((0, 1, 0, 1))
+        self.im.set_data([0, 1], [0, 1], [[0, 1e-6], [0, 1e-6]])
         ax.add_image(self.im)
 
     def update(
