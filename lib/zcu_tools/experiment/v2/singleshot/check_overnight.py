@@ -117,7 +117,7 @@ def _calc_mask(
 
 def _calc_populations(masks: NDArray[np.bool_]) -> NDArray[np.float64]:
     float_masks = masks.astype(np.float64)
-    return np.mean(float_masks, axis=-1, dtype=np.float64)
+    return np.mean(float_masks, axis=-2, dtype=np.float64)
 
 
 def _calc_color(
@@ -297,7 +297,7 @@ class CheckOvernightExperiment(AbsExperiment):
             populations = populations @ np.linalg.inv(confusion_matrix)
             populations = np.clip(populations, 0.0, 1.0)
 
-        med_populations = np.median(populations, axis=0, keepdims=True)  # (1, 3)
+        med_populations = np.median(populations)
         delta_populations = np.sum(np.abs(populations - med_populations), axis=-1)
 
         max_idx = np.argmax(delta_populations).item()
@@ -308,7 +308,11 @@ class CheckOvernightExperiment(AbsExperiment):
         downdample_num = min(10000, shots.shape[0])
         ds_idxs = np.arange(0, shots.shape[0], max(1, shots.shape[0] // downdample_num))
 
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 8))
+        fig = plt.figure(figsize=(8, 8))
+        grid = fig.add_gridspec(2, 2)
+        ax1 = fig.add_subplot(grid[0, :])
+        ax2 = fig.add_subplot(grid[1, 0])
+        ax3 = fig.add_subplot(grid[1, 1])
 
         ax1.set_title("Populations over time")
         ax1.set_xlabel("Iteration")
@@ -316,20 +320,21 @@ class CheckOvernightExperiment(AbsExperiment):
         ax1.plot(iters, populations[:, 0], label="Ground", color="blue")
         ax1.plot(iters, populations[:, 1], label="Excited", color="red")
         ax1.plot(iters, populations[:, 2], label="Other", color="green")
-        ax1.axvline(max_iter, color="black", linestyle="--", label="Slice 1")
-        ax1.axvline(min_iter, color="gray", linestyle="--", label="Slice 2")
+        ax1.axvline(
+            max_iter, color="black", linestyle="--", label=f"Iteration {max_iter}"
+        )
+        ax1.axvline(
+            min_iter, color="gray", linestyle="--", label=f"Iteration {min_iter}"
+        )
         ax1.legend()
         ax1.grid(True)
 
-        def _plot_slice(ax: Axes, iter_idx: int, name: str) -> None:
+        def _plot_slice(ax: Axes, iter_idx: int) -> None:
             signals_i = signals[iter_idx]  # (shots, )
             masks_i = masks[iter_idx]  # (shots, 3)
             population_i = populations[iter_idx]  # (3, )
 
-            ax.set_title(
-                f"{name}: Iteration {iters[iter_idx]}, "
-                f"Population: ({population_i[0]:.2g}/{population_i[1]:.2g}/{population_i[2]:.2g})"
-            )
+            ax.set_title(f"Iteration {iters[iter_idx]}")
             _plot_circle(ax, g_center, radius, "Ground State", "blue")
             _plot_circle(ax, e_center, radius, "Excited State", "red")
             colors_i = _calc_color(signals_i, masks_i)  # (shots, )
@@ -337,17 +342,28 @@ class CheckOvernightExperiment(AbsExperiment):
                 signals_i[ds_idxs].real,
                 signals_i[ds_idxs].imag,
                 c=colors_i[ds_idxs].tolist(),
-                s=5,
-                alpha=0.7,
+                s=1,
             )
+
+            ax.text(
+                0.05,
+                0.95,
+                f"Population:\nG: {population_i[0]:.1%}\nE: {population_i[1]:.1%}\nO: {population_i[2]:.1%}",
+                transform=ax.transAxes,
+                verticalalignment="top",
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+            )
+
             ax.set_xlabel("I value (a.u.)")
             ax.set_ylabel("Q value (a.u.)")
             ax.set_aspect("equal")
             ax.legend()
             ax.grid(True)
 
-        _plot_slice(ax2, max_idx, "Slice 1")
-        _plot_slice(ax3, min_idx, "Slice 2")
+        _plot_slice(ax2, max_idx)
+        _plot_slice(ax3, min_idx)
+
+        fig.tight_layout()
 
         return fig
 
