@@ -28,7 +28,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (pdrs, signals_2d)  # signals shape: (2, len(pdrs)) for [w/o reset, w/ reset]
-ResetRabiCheckResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+RabiCheckResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -42,8 +42,8 @@ class RabiCheckTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class RabiCheckExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: RabiCheckTaskConfig) -> ResetRabiCheckResultType:
+class RabiCheckExp(AbsExperiment[RabiCheckResultType, RabiCheckTaskConfig]):
+    def run(self, soc, soccfg, cfg: RabiCheckTaskConfig) -> RabiCheckResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -102,7 +102,7 @@ class RabiCheckExperiment(AbsExperiment):
 
         return pdrs, signals
 
-    def analyze(self, result: Optional[ResetRabiCheckResultType] = None) -> Figure:
+    def analyze(self, result: Optional[RabiCheckResultType] = None) -> Figure:
         """Analyze reset rabi check results. (No specific analysis implemented)"""
         if result is None:
             result = self.last_result
@@ -125,7 +125,7 @@ class RabiCheckExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[ResetRabiCheckResultType] = None,
+        result: Optional[RabiCheckResultType] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/rabi_check",
         **kwargs,
@@ -146,7 +146,7 @@ class RabiCheckExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> ResetRabiCheckResultType:
+    def load(self, filepath: str, **kwargs) -> RabiCheckResultType:
         signals, pdrs, y_values = load_data(filepath, **kwargs)
         assert pdrs is not None and y_values is not None
         assert len(pdrs.shape) == 1 and len(y_values.shape) == 1

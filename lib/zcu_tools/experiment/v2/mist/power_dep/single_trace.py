@@ -42,7 +42,7 @@ class MISTPowerDepTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class MISTPowerDep(AbsExperiment):
+class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConfig]):
     def run(self, soc, soccfg, cfg: MISTPowerDepTaskConfig) -> MISTPowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

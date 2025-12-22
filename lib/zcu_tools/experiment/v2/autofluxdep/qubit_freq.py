@@ -87,7 +87,7 @@ class PlotterDictType(TypedDict, closed=True):
     detune: LivePlotter2DwithLine
 
 
-class QubitFreqMeasurementTask(
+class QubitFreqTask(
     MeasurementTask[QubitFreqResult, T_RootResultType, TaskConfig, PlotterDictType]
 ):
     def __init__(

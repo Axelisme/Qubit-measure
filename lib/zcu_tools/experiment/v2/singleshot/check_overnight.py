@@ -141,7 +141,9 @@ class CheckOvernightTaskConfig(TaskConfig, ModularProgramCfg):
     interval: float
 
 
-class CheckOvernightExperiment(AbsExperiment):
+class CheckOvernightExperiment(
+    AbsExperiment[CheckOvernightResultType, CheckOvernightTaskConfig]
+):
     def run(
         self,
         soc,

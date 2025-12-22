@@ -44,7 +44,7 @@ class JPAFreqTaskConfig(TaskConfig, ModularProgramCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class JPAPowerExperiment(AbsExperiment):
+class JPAPowerExp(AbsExperiment[JPAPowerResultType, JPAFreqTaskConfig]):
     def run(self, soc, soccfg, cfg: JPAFreqTaskConfig) -> JPAPowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

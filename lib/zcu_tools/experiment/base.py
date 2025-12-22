@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, Optional, TypeVar, Union, List
+from typing import Any, Mapping, Generic, Optional, TypeVar, Union, List
+
 
 T_Result = TypeVar("T_Result")
-T_Config = TypeVar("T_Config", bound=Dict[str, Any])
+T_Config = TypeVar("T_Config", bound=Mapping[str, Any])
 
 
 class AbsExperiment(Generic[T_Result, T_Config], ABC):

@@ -29,7 +29,7 @@ class FluxDepTaskConfig(TaskConfig, OneToneProgramCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class FluxDepExperiment(AbsExperiment):
+class FluxDepExp(AbsExperiment[FluxDepResultType, FluxDepTaskConfig]):
     def run(self, soc, soccfg, cfg: FluxDepTaskConfig) -> FluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

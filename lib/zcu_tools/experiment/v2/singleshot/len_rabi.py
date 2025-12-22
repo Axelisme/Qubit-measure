@@ -24,15 +24,15 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.stack([g_pop, e_pop, 1 - g_pop - e_pop], axis=-1).real
 
 
-class LenRabiSingleShotTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+class LenRabiTaskConfig(TaskConfig, TwoToneProgramCfg): ...
 
 
-class LenRabiSingleShotExperiment(AbsExperiment):
+class LenRabiExperiment(AbsExperiment[LenRabiResultType, LenRabiTaskConfig]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: LenRabiSingleShotTaskConfig,
+        cfg: LenRabiTaskConfig,
         g_center: complex,
         e_center: complex,
         radius: float,

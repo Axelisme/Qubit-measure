@@ -34,9 +34,7 @@ def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 # (fpts1, fpts2, signals_2d)
-DualToneResetFreqResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+FreqResultType = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
 class FreqTaskConfig(TaskConfig, ModularProgramCfg):
@@ -46,8 +44,8 @@ class FreqTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class FreqExperiment(AbsExperiment):
-    def run_soft(self, soc, soccfg, cfg: FreqTaskConfig) -> DualToneResetFreqResultType:
+class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
+    def run_soft(self, soc, soccfg, cfg: FreqTaskConfig) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -107,7 +105,7 @@ class FreqExperiment(AbsExperiment):
 
         return fpts1, fpts2, signals
 
-    def run_hard(self, soc, soccfg, cfg: FreqTaskConfig) -> DualToneResetFreqResultType:
+    def run_hard(self, soc, soccfg, cfg: FreqTaskConfig) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -168,7 +166,7 @@ class FreqExperiment(AbsExperiment):
         cfg: FreqTaskConfig,
         *,
         method: Literal["soft", "hard"] = "soft",
-    ) -> DualToneResetFreqResultType:
+    ) -> FreqResultType:
         if method == "soft":
             return self.run_soft(soc, soccfg, cfg)
         else:
@@ -176,7 +174,7 @@ class FreqExperiment(AbsExperiment):
 
     def analyze(
         self,
-        result: Optional[DualToneResetFreqResultType] = None,
+        result: Optional[FreqResultType] = None,
         *,
         smooth: float = 1.0,
         xname: Optional[str] = None,
@@ -227,7 +225,7 @@ class FreqExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[DualToneResetFreqResultType] = None,
+        result: Optional[FreqResultType] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/dual_tone/freq",
         **kwargs,
@@ -248,7 +246,7 @@ class FreqExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> DualToneResetFreqResultType:
+    def load(self, filepath: str, **kwargs) -> FreqResultType:
         signals, fpts1, fpts2 = load_data(filepath, **kwargs)
         assert fpts1 is not None and fpts2 is not None
         assert len(fpts1.shape) == 1 and len(fpts2.shape) == 1

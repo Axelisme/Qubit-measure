@@ -29,14 +29,14 @@ from zcu_tools.utils.datasaver import load_data, save_data
 LengthResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class OptimizeLengthTaskConfig(TaskConfig, ModularProgramCfg):
+class LengthTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class OptimizeLengthExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: OptimizeLengthTaskConfig) -> LengthResultType:
+class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
+    def run(self, soc, soccfg, cfg: LengthTaskConfig) -> LengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg

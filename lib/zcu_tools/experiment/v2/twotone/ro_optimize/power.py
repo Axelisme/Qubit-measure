@@ -29,14 +29,14 @@ from zcu_tools.utils.datasaver import load_data, save_data
 PowerResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class OptimizePowerTaskConfig(TaskConfig, ModularProgramCfg):
+class PowerTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class OptimizePowerExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: OptimizePowerTaskConfig) -> PowerResultType:
+class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
+    def run(self, soc, soccfg, cfg: PowerTaskConfig) -> PowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg

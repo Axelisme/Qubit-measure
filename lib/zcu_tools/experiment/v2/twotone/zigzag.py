@@ -42,7 +42,7 @@ class ZigZagTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class ZigZagExperiment(AbsExperiment):
+class ZigZagExp(AbsExperiment[ZigZagResultType, ZigZagTaskConfig]):
     def run(
         self,
         soc,
@@ -164,7 +164,7 @@ ZigZagSweepResultType = Tuple[
 ]
 
 
-class ZigZagSweepExperiment(AbsExperiment):
+class ZigZagSweepExp(AbsExperiment[ZigZagSweepResultType, ZigZagTaskConfig]):
     SWEEP_MAP = {
         "gain": {"name": "Gain (a.u.)", "param_key": "gain"},
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},

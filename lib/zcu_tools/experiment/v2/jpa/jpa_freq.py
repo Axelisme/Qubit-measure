@@ -7,7 +7,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter1d
 from typing_extensions import NotRequired
 
 from zcu_tools.device import DeviceInfo
@@ -45,7 +44,7 @@ class JPAFreqTaskConfig(TaskConfig, ModularProgramCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class JPAFreqExperiment(AbsExperiment):
+class JPAFreqExp(AbsExperiment[JPAFreqResultType, JPAFreqTaskConfig]):
     def run(self, soc, soccfg, cfg: JPAFreqTaskConfig) -> JPAFreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

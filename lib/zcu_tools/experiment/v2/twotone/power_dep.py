@@ -27,7 +27,7 @@ def pdrdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 class PowerDepTaskConfig(TaskConfig, TwoToneProgramCfg): ...
 
 
-class PowerDepExperiment(AbsExperiment):
+class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
     def run(self, soc, soccfg, cfg: PowerDepTaskConfig) -> PowerDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

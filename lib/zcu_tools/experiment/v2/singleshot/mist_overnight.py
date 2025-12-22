@@ -12,6 +12,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
+    SoftTask,
     RepeatOverTime,
     ReTryIfFail,
     TaskConfig,
@@ -54,8 +55,31 @@ class MISTPowerDepOvernightTaskConfig(TaskConfig, ModularProgramCfg):
     interval: float
 
 
-class MISTPowerDepOvernight(AbsExperiment):
+class MISTPowerDepOvernight(
+    AbsExperiment[MISTPowerDepOvernightResultType, MISTPowerDepOvernightTaskConfig]
+):
     def run(
+        self,
+        soc,
+        soccfg,
+        cfg: MISTPowerDepOvernightTaskConfig,
+        g_center: complex,
+        e_center: complex,
+        radius: float,
+        *,
+        num_times=50,
+        fail_retry=3,
+        run_hard: bool = True,
+    ) -> MISTPowerDepOvernightResultType:
+        args = (soc, soccfg, cfg, g_center, e_center, radius)
+        kwargs = dict(num_times=num_times, fail_retry=fail_retry)
+
+        if run_hard:
+            return self._run_hard(*args, **kwargs)
+
+        return self._run_soft(*args, **kwargs)
+
+    def _run_hard(
         self,
         soc,
         soccfg,
@@ -179,7 +203,138 @@ class MISTPowerDepOvernight(AbsExperiment):
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result: MISTPowerDepOvernightResultType = (iters, gains, signals)
+        self.last_result = (iters, gains, signals)
+
+        return iters, gains, signals
+
+    def _run_soft(
+        self,
+        soc,
+        soccfg,
+        cfg: MISTPowerDepOvernightTaskConfig,
+        g_center: complex,
+        e_center: complex,
+        radius: float,
+        *,
+        num_times=50,
+        fail_retry=3,
+    ) -> MISTPowerDepOvernightResultType:
+        cfg = deepcopy(cfg)  # prevent in-place modification
+
+        assert "sweep" in cfg
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
+
+        iters = np.arange(num_times, dtype=np.int64)
+        gains = sweep2array(cfg["sweep"]["gain"], allow_array=True)
+
+        fig, axs = make_plot_frame(2, 2, figsize=(8, 8))
+
+        with MultiLivePlotter(
+            fig,
+            dict(
+                plot_2d_g=LivePlotter2D(
+                    "Iteration", "Readout Gain", existed_axes=[[axs[0][0]]]
+                ),
+                plot_2d_e=LivePlotter2D(
+                    "Iteration", "Readout Gain", existed_axes=[[axs[1][0]]]
+                ),
+                plot_2d_o=LivePlotter2D(
+                    "Iteration", "Readout Gain", existed_axes=[[axs[1][1]]]
+                ),
+                plot_1d=LivePlotter1D(
+                    "Readout Gain",
+                    "Population",
+                    existed_axes=[[axs[0][1]]],
+                    segment_kwargs=dict(
+                        num_lines=3,
+                        line_kwargs=[
+                            dict(label="Ground"),
+                            dict(label="Excited"),
+                            dict(label="Other"),
+                        ],
+                    ),
+                ),
+            ),
+        ) as viewer:
+
+            def plot_fn(ctx) -> None:
+                i = ctx.env_dict["repeat_idx"]
+
+                populations = calc_populations(np.asarray(ctx.data))
+
+                viewer.get_plotter("plot_2d_g").update(
+                    iters, gains, populations[..., 0], refresh=False
+                )
+                viewer.get_plotter("plot_2d_e").update(
+                    iters, gains, populations[..., 1], refresh=False
+                )
+                viewer.get_plotter("plot_2d_o").update(
+                    iters, gains, populations[..., 2], refresh=False
+                )
+                viewer.get_plotter("plot_1d").update(
+                    gains, populations[i].T, refresh=False
+                )
+
+                viewer.refresh()
+
+            signals = run_task(
+                task=RepeatOverTime(
+                    name="repeat_over_time",
+                    num_times=num_times,
+                    interval=cfg["interval"],
+                    task=SoftTask(
+                        sweep_name="gain",
+                        sweep_values=gains.tolist(),
+                        update_cfg_fn=lambda i, ctx, gain: Pulse.set_param(
+                            ctx.cfg["probe_pulse"], "gain", gain
+                        ),
+                        sub_task=ReTryIfFail(
+                            max_retries=fail_retry,
+                            task=HardTask(
+                                measure_fn=lambda ctx, update_hook: (
+                                    ModularProgramV2(
+                                        soccfg,
+                                        ctx.cfg,
+                                        modules=[
+                                            Reset(
+                                                "reset",
+                                                ctx.cfg.get("reset", {"type": "none"}),
+                                            ),
+                                            Pulse(
+                                                name="init_pulse",
+                                                cfg=ctx.cfg.get("init_pulse"),
+                                            ),
+                                            Pulse(
+                                                name="probe_pulse",
+                                                cfg=ctx.cfg["probe_pulse"],
+                                            ),
+                                            Readout("readout", ctx.cfg["readout"]),
+                                        ],
+                                    ).acquire(
+                                        soc,
+                                        progress=False,
+                                        callback=update_hook,
+                                        g_center=g_center,
+                                        e_center=e_center,
+                                        population_radius=radius,
+                                    )
+                                ),
+                                raw2signal_fn=lambda raw: raw[0][0],
+                                result_shape=(2,),
+                                dtype=np.float64,
+                            ),
+                        ),
+                    ),
+                ),
+                init_cfg=cfg,
+                update_hook=plot_fn,
+            )
+            signals = np.asarray(signals)
+        plt.close(fig)
+
+        # record the last result
+        self.last_cfg = cfg
+        self.last_result = (iters, gains, signals)
 
         return iters, gains, signals
 

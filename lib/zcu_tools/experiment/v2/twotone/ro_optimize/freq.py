@@ -29,14 +29,14 @@ from zcu_tools.utils.datasaver import load_data, save_data
 FreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class OptimizeFreqTaskConfig(TaskConfig, ModularProgramCfg):
+class FreqTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class OptimizeFreqExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: OptimizeFreqTaskConfig) -> FreqResultType:
+class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
+    def run(self, soc, soccfg, cfg: FreqTaskConfig) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg

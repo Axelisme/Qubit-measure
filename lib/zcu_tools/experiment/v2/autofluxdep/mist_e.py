@@ -80,7 +80,7 @@ class Plotter_E_DictType(TypedDict, closed=True):
     e_mist: LivePlotter2DwithLine
 
 
-class Mist_E_MeasurementTask(
+class Mist_E_Task(
     MeasurementTask[Mist_E_Result, T_RootResultType, TaskConfig, Plotter_E_DictType]
 ):
     def __init__(

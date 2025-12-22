@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
@@ -38,7 +38,7 @@ def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 class DispersiveTaskConfig(TaskConfig, TwoToneProgramCfg): ...
 
 
-class DispersiveExperiment(AbsExperiment):
+class DispersiveExp(AbsExperiment[DispersiveResultType, DispersiveTaskConfig]):
     def run(self, soc, soccfg, cfg: DispersiveTaskConfig) -> DispersiveResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

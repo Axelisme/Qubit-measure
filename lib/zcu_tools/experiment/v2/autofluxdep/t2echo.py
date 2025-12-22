@@ -95,7 +95,7 @@ class PlotterDictType(TypedDict, closed=True):
     t2e_curve: LivePlotter1D
 
 
-class T2EchoMeasurementTask(
+class T2EchoTask(
     MeasurementTask[T2EchoResult, T_RootResultType, TaskConfig, PlotterDictType]
 ):
     def __init__(

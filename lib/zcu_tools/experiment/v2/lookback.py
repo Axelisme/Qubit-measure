@@ -27,7 +27,7 @@ def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return np.abs(signals)
 
 
-class LookbackExperiment(AbsExperiment):
+class LookbackExp(AbsExperiment[LookbackResultType, LookbackTaskConfig]):
     def run(self, soc, soccfg, cfg: LookbackTaskConfig) -> LookbackResultType:
         cfg = deepcopy(cfg)
 
@@ -57,7 +57,7 @@ class LookbackExperiment(AbsExperiment):
             )
 
         # record last cfg and result
-        self.last_cfg = dict(cfg)
+        self.last_cfg = cfg
         self.last_result = (Ts, signals)
 
         return Ts, signals

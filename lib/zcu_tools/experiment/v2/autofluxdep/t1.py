@@ -92,9 +92,7 @@ class PlotterDictType(TypedDict, closed=True):
     t1_curve: LivePlotter1D
 
 
-class T1MeasurementTask(
-    MeasurementTask[T1Result, T_RootResultType, TaskConfig, PlotterDictType]
-):
+class T1Task(MeasurementTask[T1Result, T_RootResultType, TaskConfig, PlotterDictType]):
     def __init__(
         self,
         num_expts: int,

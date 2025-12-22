@@ -78,7 +78,7 @@ class Plotter_G_DictType(TypedDict, closed=True):
     g_mist: LivePlotter2DwithLine
 
 
-class Mist_G_MeasurementTask(
+class Mist_G_Task(
     MeasurementTask[Mist_G_Result, T_RootResultType, TaskConfig, Plotter_G_DictType]
 ):
     def __init__(

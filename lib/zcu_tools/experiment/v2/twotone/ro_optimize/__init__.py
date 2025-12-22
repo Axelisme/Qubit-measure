@@ -1,11 +1,4 @@
-from .auto_optimize import AutoOptimizeExperiment
-from .freq import OptimizeFreqExperiment
-from .length import OptimizeLengthExperiment
-from .power import OptimizePowerExperiment
-
-__all__ = [
-    "OptimizeFreqExperiment",
-    "OptimizeLengthExperiment",
-    "OptimizePowerExperiment",
-    "AutoOptimizeExperiment",
-]
+from .auto_optimize import AutoExp
+from .freq import FreqExp
+from .length import LengthExp
+from .power import PowerExp

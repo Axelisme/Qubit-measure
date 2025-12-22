@@ -56,7 +56,7 @@ class CPMGTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class CPMGExperiment(AbsExperiment):
+class CPMGExp(AbsExperiment[CPMGResultType, CPMGTaskConfig]):
     def run(
         self, soc, soccfg, cfg: CPMGTaskConfig, *, progress: bool = True
     ) -> CPMGResultType:

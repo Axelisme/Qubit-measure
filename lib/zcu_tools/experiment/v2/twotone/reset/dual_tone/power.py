@@ -28,7 +28,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 
 # (pdrs1, pdrs2, signals_2d)
-DualToneResetPowerResultType = Tuple[
+PowerResultType = Tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -40,8 +40,8 @@ class PowerTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class PowerExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: PowerTaskConfig) -> DualToneResetPowerResultType:
+class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
+    def run(self, soc, soccfg, cfg: PowerTaskConfig) -> PowerResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
@@ -102,7 +102,7 @@ class PowerExperiment(AbsExperiment):
 
     def analyze(
         self,
-        result: Optional[DualToneResetPowerResultType] = None,
+        result: Optional[PowerResultType] = None,
         *,
         smooth: float = 1.0,
         xname: Optional[str] = None,
@@ -156,7 +156,7 @@ class PowerExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[DualToneResetPowerResultType] = None,
+        result: Optional[PowerResultType] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/dual_tone/power",
         **kwargs,
@@ -177,7 +177,7 @@ class PowerExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> DualToneResetPowerResultType:
+    def load(self, filepath: str, **kwargs) -> PowerResultType:
         signals, pdrs1, pdrs2 = load_data(filepath, **kwargs)
         assert pdrs1 is not None and pdrs2 is not None
         assert len(pdrs1.shape) == 1 and len(pdrs2.shape) == 1
