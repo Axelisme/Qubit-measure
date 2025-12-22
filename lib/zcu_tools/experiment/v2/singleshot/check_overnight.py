@@ -381,20 +381,23 @@ class CheckOvernightExperiment(AbsExperiment):
 
         iters, shots, signals = result
 
-        _filepath = Path(filepath)
+        if comment is None:
+            comment = ""
 
-        save_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_g")),
-            x_info={"name": "Shot Index", "unit": "None", "values": shots},
-            y_info={"name": "Iteration", "unit": "None", "values": iters},
-            z_info={"name": "Ground Population", "unit": "a.u.", "values": signals},
+        np.savez_compressed(
+            filepath,
+            iters=iters,
+            shots=shots,
+            signals=signals,
             comment=comment,
             tag=tag,
-            **kwargs,
         )
 
     def load(self, filepath: str, **kwargs) -> CheckOvernightResultType:
-        signals, shots, iters = load_data(filepath, **kwargs)
+        data = np.load(filepath)
+        iters = data["iters"]
+        shots = data["shots"]
+        signals = data["signals"]
         assert iters is not None
         assert signals.shape == (len(iters), len(shots))
 
