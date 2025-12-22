@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, Optional, Tuple, cast
+from typing_extensions import NotRequired, Optional, Tuple, cast, Callable
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import (
@@ -43,14 +43,24 @@ CheckOvernightResultType = Tuple[
 
 def calc_population_mask(
     signals: NDArray[np.float64], g_center: complex, e_center: complex, radius: float
-) -> NDArray[np.bool_]:
-    dists_g = np.abs(signals - g_center)
-    dists_e = np.abs(signals - e_center)
+) -> NDArray[np.float64]:
+    masks = np.full((*signals.shape, 3), np.nan, dtype=np.float64)
+
+    valid_mask = np.isfinite(signals)
+    if not np.any(valid_mask):
+        return masks
+
+    dists_g = np.abs(signals[valid_mask] - g_center)
+    dists_e = np.abs(signals[valid_mask] - e_center)
     mask_g = dists_g < radius
     mask_e = dists_e < radius
     mask_o = ~(mask_g | mask_e)
 
-    return np.stack([mask_g, mask_e, mask_o], axis=-1)
+    masks[valid_mask, 0] = mask_g
+    masks[valid_mask, 1] = mask_e
+    masks[valid_mask, 2] = mask_o
+
+    return masks
 
 
 class CheckOvernightTaskConfig(TaskConfig, ModularProgramCfg):
@@ -87,7 +97,15 @@ class CheckOvernightExperiment(AbsExperiment):
             warnings.warn("reps will be overwritten by singleshot measurement shots")
         cfg["reps"] = cfg["shots"]
 
-        def measure_fn(ctx: TaskContextView, _):
+        def _get_shot_iq(prog: ModularProgramV2):
+            acc_buf = prog.get_raw()
+            assert acc_buf is not None
+
+            length = cast(int, list(prog.ro_chs.values())[0]["length"])
+
+            return acc_buf[0] / length  # (reps, 1, 2)
+
+        def measure_fn(ctx: TaskContextView, update_hook: Callable):
             prog = ModularProgramV2(
                 soccfg,
                 ctx.cfg,
@@ -98,26 +116,27 @@ class CheckOvernightExperiment(AbsExperiment):
                     Readout("readout", ctx.cfg["readout"]),
                 ],
             )
-            prog.acquire(soc, progress=True)
 
-            acc_buf = prog.get_raw()
-            assert acc_buf is not None
+            prog.acquire(
+                soc,
+                progress=False,
+                update_hook=lambda i, *_: update_hook(i, _get_shot_iq(prog)),
+            )
 
-            length = cast(int, list(prog.ro_chs.values())[0]["length"])
-            avgiq = acc_buf[0] / length  # (reps, 1, 2)
+            return _get_shot_iq(prog)  # (reps, 1, 2)
 
-            return avgiq
-
-        def raw2signal_fn(avgiq: NDArray[np.float64]) -> NDArray[np.complex128]:
-            i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, )
+        def raw2signal_fn(shot_iq: NDArray[np.float64]) -> NDArray[np.complex128]:
+            i0, q0 = shot_iq[..., 0, 0], shot_iq[..., 0, 1]  # (reps, )
             return np.array(i0 + 1j * q0)  # (reps, )
 
         iters = np.arange(num_times, dtype=np.int64)
         shots = np.arange(cfg["shots"], dtype=np.int64)
 
-        fig, axs = make_plot_frame(2, 1, figsize=(8, 6))
+        fig, axs = make_plot_frame(1, 2, figsize=(12, 5))
         ax_scatter = axs[0][0]
         ax_1d = axs[0][1]
+
+        ax_scatter.set_aspect("equal")
 
         # plot centers with circle
         plt_params = dict(linestyle=":", color="k", marker="o", markersize=5)
@@ -175,7 +194,7 @@ class CheckOvernightExperiment(AbsExperiment):
                 ),
             ),
         ) as viewer:
-            downsample_num = min(50000, cfg["shots"])
+            downsample_num = min(10000, cfg["shots"])
             downsample_mask = np.arange(
                 0, cfg["shots"], max(1, cfg["shots"] // downsample_num)
             )
@@ -191,10 +210,11 @@ class CheckOvernightExperiment(AbsExperiment):
                 signals_i = signals[i]  # (shots, )
                 populations = np.mean(masks, axis=1, dtype=np.float64)  # (iters, 3)
 
+                masks_i = masks[i].astype(bool)  # (shots, 3)
                 colors_i = np.full_like(signals_i, "gray", dtype=object)
-                colors_i[masks[i, :, 0]] = "blue"
-                colors_i[masks[i, :, 1]] = "red"
-                colors_i[masks[i, :, 2]] = "green"
+                colors_i[masks_i[:, 0]] = "blue"
+                colors_i[masks_i[:, 1]] = "red"
+                colors_i[masks_i[:, 2]] = "green"
 
                 viewer.get_plotter("plot_scatter").update(
                     signals_i[downsample_mask].real,
@@ -251,7 +271,7 @@ class CheckOvernightExperiment(AbsExperiment):
         filepath: str,
         result: Optional[CheckOvernightResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "singleshot/overnight",
+        tag: str = "singleshot/check_overnight",
         **kwargs,
     ) -> None:
         if result is None:
