@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Union, List
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -65,6 +65,7 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         title: Optional[str] = None,
         uniform: bool = True,
         segment2d_kwargs: Optional[dict] = None,
+        segment1d_line_kwargs: Optional[List[dict]] = None,
         **kwargs,
     ) -> None:
         if segment2d_kwargs is None:
@@ -82,6 +83,11 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
             dict(marker="None", alpha=0.3, color="red") for _ in range(num_lines)
         ]
         line_kwargs[-1].update(label="current line", marker=".", alpha=1.0, color="C0")
+
+        if segment1d_line_kwargs is not None:
+            assert len(segment1d_line_kwargs) == num_lines
+            for lk, sk in zip(line_kwargs, segment1d_line_kwargs):
+                lk.update(sk)
 
         segment1d = Plot1DSegment(
             xlabel1d, "", title=title, num_lines=num_lines, line_kwargs=line_kwargs
