@@ -133,7 +133,7 @@ class LenRabiSingleShotExperiment(AbsExperiment):
         filepath: str,
         result: Optional[LenRabiResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/ge/rabi_length_singleshot",
+        tag: str = "singleshot/ge/rabi_length",
         **kwargs,
     ) -> None:
         if result is None:

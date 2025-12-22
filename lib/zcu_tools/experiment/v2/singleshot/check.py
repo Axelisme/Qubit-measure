@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, Optional, Union, cast
+from typing_extensions import NotRequired, Optional, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import (

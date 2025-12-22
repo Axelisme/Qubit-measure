@@ -248,7 +248,7 @@ class MISTPowerDepOvernight(AbsExperiment):
         filepath: str,
         result: Optional[MISTPowerDepOvernightResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/mist/pdr_overnight_singleshot",
+        tag: str = "singleshot/mist/pdr_overnight",
         **kwargs,
     ) -> None:
         if result is None:

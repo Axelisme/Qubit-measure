@@ -27,7 +27,13 @@ class LivePlotterScatter(JupyterPlotMixin, AbsLivePlotter):
         self,
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
-        colors: Optional[Union[Sequence[Tuple], NDArray]] = None,
+        colors: Union[
+            Sequence[str],
+            Sequence[Tuple[float, float, float]],
+            Sequence[Tuple[float, float, float, float]],
+            NDArray[np.float64],
+            None,
+        ] = None,
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:

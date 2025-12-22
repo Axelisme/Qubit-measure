@@ -49,7 +49,13 @@ class ScatterSegment(AbsSegment):
         ax: Axes,
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
-        colors: Optional[Union[Sequence[Tuple], NDArray]] = None,
+        colors: Union[
+            Sequence[str],
+            Sequence[Tuple[float, float, float]],
+            Sequence[Tuple[float, float, float, float]],
+            NDArray[np.float64],
+            None,
+        ] = None,
         title: Optional[str] = None,
     ) -> None:
         if self.scatter is None:
@@ -60,7 +66,9 @@ class ScatterSegment(AbsSegment):
         if colors is not None:
             if isinstance(colors, np.ndarray):
                 self.scatter.set_array(colors)
-                self.scatter.set_clim(np.nanmin(colors), np.nanmax(colors))
+                self.scatter.set_clim(
+                    np.nanmin(colors).item(), np.nanmax(colors).item()
+                )
             else:
                 self.scatter.set_color(colors)
 

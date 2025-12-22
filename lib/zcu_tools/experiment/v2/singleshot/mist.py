@@ -159,7 +159,7 @@ class MISTPowerDepSingleShot(AbsExperiment):
         filepath: str,
         result: Optional[MISTPowerDepResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/mist/pdr_singleshot",
+        tag: str = "singleshot/mist/pdr",
         **kwargs,
     ) -> None:
         if result is None:

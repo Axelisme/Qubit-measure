@@ -643,7 +643,7 @@ class T1WithToneSweepExperiment(AbsExperiment):
         filepath: str,
         result: Optional[T1SweepResultType] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/ge/t1_with_tone_sweep_singleshot",
+        tag: str = "singleshot/ge/t1_with_tone_sweep",
         **kwargs,
     ) -> None:
         if result is None:
