@@ -120,7 +120,7 @@ class LenRabiSingleShotExperiment(AbsExperiment):
         ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
         ax.set_xlabel("Pulse length (μs)")
         ax.set_ylabel("Population (a.u.)")
-        # ax.set_ylim(0.0, 1.0)
+        ax.set_ylim(0.0, 1.0)
         ax.legend(loc=4)
         ax.grid(True)
 
