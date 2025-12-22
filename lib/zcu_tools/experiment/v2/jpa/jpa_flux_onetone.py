@@ -14,7 +14,7 @@ from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAFluxResultType = Tuple[
+JPAFluxByOneToneResultType = Tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -23,8 +23,12 @@ class JPAFluxByOneToneTaskConfig(TaskConfig, OneToneProgramCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class JPAFluxByOneToneExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: JPAFluxByOneToneTaskConfig) -> JPAFluxResultType:
+class JPAFluxByOneToneExp(
+    AbsExperiment[JPAFluxByOneToneResultType, JPAFluxByOneToneTaskConfig]
+):
+    def run(
+        self, soc, soccfg, cfg: JPAFluxByOneToneTaskConfig
+    ) -> JPAFluxByOneToneResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -76,7 +80,7 @@ class JPAFluxByOneToneExperiment(AbsExperiment):
 
         return jpa_flxs, fpts, signals
 
-    def analyze(self, result: Optional[JPAFluxResultType] = None) -> None:
+    def analyze(self, result: Optional[JPAFluxByOneToneResultType] = None) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -88,7 +92,7 @@ class JPAFluxByOneToneExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[JPAFluxResultType] = None,
+        result: Optional[JPAFluxByOneToneResultType] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/flux_onetone",
         **kwargs,
@@ -109,7 +113,7 @@ class JPAFluxByOneToneExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAFluxResultType:
+    def load(self, filepath: str, **kwargs) -> JPAFluxByOneToneResultType:
         signals, jpa_flxs, fpts = load_data(filepath, **kwargs)
         assert jpa_flxs is not None and fpts is not None
         assert len(jpa_flxs.shape) == 1 and len(fpts.shape) == 1

@@ -49,7 +49,7 @@ class T1TaskConfig(TaskConfig, ModularProgramCfg):
     t1_delay: NotRequired[float]
 
 
-class T1Experiment(AbsExperiment):
+class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
     """T1 relaxation time measurement.
 
     Applies a π pulse and then waits for a variable time before readout
@@ -252,7 +252,7 @@ class T1WithToneTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class T1WithToneExperiment(AbsExperiment):
+class T1WithToneExp(AbsExperiment):
     def run(self, soc, soccfg, cfg: T1WithToneTaskConfig) -> T1ResultType:
         cfg = deepcopy(cfg)
 
@@ -389,7 +389,7 @@ class T1WithToneSweepTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class T1WithToneSweepExperiment(AbsExperiment):
+class T1WithToneSweepExp(AbsExperiment):
     def run(self, soc, soccfg, cfg: T1WithToneSweepTaskConfig) -> T1SweepResultType:
         cfg = deepcopy(cfg)
 

@@ -29,7 +29,7 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 class LenRabiTaskConfig(TaskConfig, TwoToneProgramCfg): ...
 
 
-class LenRabiExperiment(AbsExperiment):
+class LenRabiExp(AbsExperiment[LenRabiResultType, LenRabiTaskConfig]):
     def _run_for_flat(self, soc, soccfg, cfg: LenRabiTaskConfig) -> LenRabiResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 

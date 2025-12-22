@@ -57,7 +57,7 @@ class MistFluxDepTaskConfig(TaskConfig, ModularProgramCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class MistFluxDepExperiment(AbsExperiment):
+class MistFluxDepExp(AbsExperiment[MistFluxDepResultType, MistFluxDepTaskConfig]):
     def run(self, soc, soccfg, cfg: MistFluxDepTaskConfig) -> MistFluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

@@ -41,7 +41,7 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     return rotate2real(signals).real
 
 
-class FreqGainExperiment(AbsExperiment):
+class FreqGainExp(AbsExperiment[FreqGainResultType, FreqGainTaskConfig]):
     def run(self, soc, soccfg, cfg: FreqGainTaskConfig) -> FreqGainResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

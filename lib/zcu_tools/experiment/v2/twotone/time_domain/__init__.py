@@ -1,13 +1,4 @@
-from .cpmg import CPMGExperiment
-from .t1 import T1Experiment, T1WithToneExperiment, T1WithToneSweepExperiment
-from .t2echo import T2EchoExperiment
-from .t2ramsey import T2RamseyExperiment
-
-__all__ = [
-    "T1Experiment",
-    "T1WithToneExperiment",
-    "T1WithToneSweepExperiment",
-    "T2RamseyExperiment",
-    "T2EchoExperiment",
-    "CPMGExperiment",
-]
+from .cpmg import CPMGExp
+from .t1 import T1Exp, T1WithToneExp, T1WithToneSweepExp
+from .t2echo import T2EchoExp
+from .t2ramsey import T2RamseyExp

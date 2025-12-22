@@ -9,13 +9,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import (
-    OneToneProgram,
-    OneToneProgramCfg,
-    Readout,
-    ReadoutCfg,
-    sweep2param,
-)
+from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background, rescale
 
@@ -34,7 +28,7 @@ def pdrdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 class PowerDepTaskConfig(TaskConfig, OneToneProgramCfg): ...
 
 
-class PowerDepExperiment(AbsExperiment):
+class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
     def run(
         self,
         soc,

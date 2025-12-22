@@ -28,7 +28,7 @@ def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 class FreqTaskConfig(TaskConfig, TwoToneProgramCfg): ...
 
 
-class FreqExperiment(AbsExperiment):
+class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
     def run(self, soc, soccfg, cfg: FreqTaskConfig) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

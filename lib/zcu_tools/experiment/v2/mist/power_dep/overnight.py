@@ -51,7 +51,9 @@ class MISTPowerDepOvernightTaskConfig(TaskConfig, ModularProgramCfg):
     interval: float
 
 
-class MISTPowerDepOvernight(AbsExperiment):
+class MISTPowerDepOvernightExp(
+    AbsExperiment[MISTPowerDepOvernightResultType, MISTPowerDepOvernightTaskConfig]
+):
     def run(
         self,
         soc,

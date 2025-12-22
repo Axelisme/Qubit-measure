@@ -45,7 +45,7 @@ class T2EchoTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class T2EchoExperiment(AbsExperiment):
+class T2EchoExp(AbsExperiment[T2EchoResultType, T2EchoTaskConfig]):
     def run(
         self, soc, soccfg, cfg: T2EchoTaskConfig, *, detune: float = 0.0
     ) -> T2EchoResultType:
@@ -93,7 +93,7 @@ class T2EchoExperiment(AbsExperiment):
             )
 
         # record last cfg and result
-        self.last_cfg = dict(cfg)
+        self.last_cfg = cfg
         self.last_result = (ts, signals)
 
         return ts, signals

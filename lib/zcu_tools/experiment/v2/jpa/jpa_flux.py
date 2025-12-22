@@ -45,7 +45,7 @@ class JPAFluxTaskConfig(TaskConfig, ModularProgramCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class JPAFluxExperiment(AbsExperiment):
+class JPAFluxExp(AbsExperiment[JPAFluxResultType, JPAFluxTaskConfig]):
     def run(self, soc, soccfg, cfg: JPAFluxTaskConfig) -> JPAFluxResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

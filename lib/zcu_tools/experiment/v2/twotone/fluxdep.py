@@ -38,7 +38,7 @@ class FreqFluxDepTaskConfig(TaskConfig, TwoToneProgramCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class FreqFluxDepExperiment(AbsExperiment):
+class FreqFluxDepExp(AbsExperiment[FreqFluxDepResultType, FreqFluxDepTaskConfig]):
     def run(
         self, soc, soccfg, cfg: FreqFluxDepTaskConfig, fail_retry: int = 0
     ) -> FreqFluxDepResultType:

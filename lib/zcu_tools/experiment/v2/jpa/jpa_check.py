@@ -33,7 +33,7 @@ class JPACheckTaskConfig(TaskConfig, OneToneProgramCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class JPACheckExperiment(AbsExperiment):
+class JPACheckExp(AbsExperiment[JPACheckResultType, JPACheckTaskConfig]):
     OUTPUT_MAP = {0: "off", 1: "on"}
 
     def run(self, soc, soccfg, cfg: JPACheckTaskConfig) -> JPACheckResultType:

@@ -29,7 +29,7 @@ from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 # (fpts, signals)
-SingleToneResetFreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+FreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -43,8 +43,8 @@ class FreqTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class FreqExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: FreqTaskConfig) -> SingleToneResetFreqResultType:
+class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
+    def run(self, soc, soccfg, cfg: FreqTaskConfig) -> FreqResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -85,7 +85,7 @@ class FreqExperiment(AbsExperiment):
         return fpts, signals
 
     def analyze(
-        self, result: Optional[SingleToneResetFreqResultType] = None
+        self, result: Optional[FreqResultType] = None
     ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -123,7 +123,7 @@ class FreqExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[SingleToneResetFreqResultType] = None,
+        result: Optional[FreqResultType] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/single_tone/freq",
         **kwargs,
@@ -143,7 +143,7 @@ class FreqExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> SingleToneResetFreqResultType:
+    def load(self, filepath: str, **kwargs) -> FreqResultType:
         signals, fpts, _ = load_data(filepath, **kwargs)
         assert fpts is not None
         assert len(fpts.shape) == 1 and len(signals.shape) == 1

@@ -97,7 +97,7 @@ class PlotterDictType(TypedDict, closed=True):
     t2r_curve: LivePlotter1D
 
 
-class T2RamseyMeasurementTask(
+class T2RamseyTask(
     MeasurementTask[T2RamseyResult, T_RootResultType, TaskConfig, PlotterDictType]
 ):
     def __init__(

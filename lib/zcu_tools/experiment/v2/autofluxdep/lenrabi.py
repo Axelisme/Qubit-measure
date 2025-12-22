@@ -109,7 +109,7 @@ class PlotterDictType(TypedDict, closed=True):
     rabi_curve: LivePlotter2DwithLine
 
 
-class LenRabiMeasurementTask(
+class LenRabiTask(
     MeasurementTask[LenRabiResult, T_RootResultType, TaskConfig, PlotterDictType]
 ):
     def __init__(

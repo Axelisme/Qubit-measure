@@ -28,7 +28,7 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 class AmpRabiTaskConfig(TaskConfig, TwoToneProgramCfg): ...
 
 
-class AmpRabiExperiment(AbsExperiment):
+class AmpRabiExp(AbsExperiment[AmpRabiResultType, AmpRabiTaskConfig]):
     def run(self, soc, soccfg, cfg: AmpRabiTaskConfig) -> AmpRabiResultType:
         cfg = deepcopy(cfg)
 

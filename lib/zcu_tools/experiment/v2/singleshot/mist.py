@@ -32,19 +32,19 @@ def mist_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
     return np.stack([g_pops, e_pops, 1 - g_pops - e_pops], axis=-1)
 
 
-class MISTPowerDepSingleShotTaskConfig(TaskConfig, ModularProgramCfg):
+class MISTPowerDepTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     init_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MISTPowerDepSingleShot(AbsExperiment):
+class MISTPowerDep(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConfig]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: MISTPowerDepSingleShotTaskConfig,
+        cfg: MISTPowerDepTaskConfig,
         g_center: complex,
         e_center: complex,
         radius: float,

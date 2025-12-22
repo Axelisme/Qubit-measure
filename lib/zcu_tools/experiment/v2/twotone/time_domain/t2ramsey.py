@@ -44,7 +44,7 @@ class T2RamseyTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class T2RamseyExperiment(AbsExperiment):
+class T2RamseyExp(AbsExperiment[T2RamseyResultType, T2RamseyTaskConfig]):
     def run(
         self, soc, soccfg, cfg: T2RamseyTaskConfig, *, detune: float = 0.0
     ) -> T2RamseyResultType:

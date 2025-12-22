@@ -28,7 +28,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (lens, signals)
-SingleToneResetLengthResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+LengthResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -42,10 +42,8 @@ class LengthTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class LengthExperiment(AbsExperiment):
-    def run(
-        self, soc, soccfg, cfg: LengthTaskConfig
-    ) -> SingleToneResetLengthResultType:
+class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
+    def run(self, soc, soccfg, cfg: LengthTaskConfig) -> LengthResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -90,9 +88,7 @@ class LengthExperiment(AbsExperiment):
 
         return lens, signals
 
-    def analyze(
-        self, result: Optional[SingleToneResetLengthResultType] = None
-    ) -> Figure:
+    def analyze(self, result: Optional[LengthResultType] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -120,7 +116,7 @@ class LengthExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[SingleToneResetLengthResultType] = None,
+        result: Optional[LengthResultType] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/single_tone/length",
         **kwargs,
@@ -140,7 +136,7 @@ class LengthExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> SingleToneResetLengthResultType:
+    def load(self, filepath: str, **kwargs) -> LengthResultType:
         signals, lens, _ = load_data(filepath, **kwargs)
         assert lens is not None
         assert len(lens.shape) == 1 and len(signals.shape) == 1

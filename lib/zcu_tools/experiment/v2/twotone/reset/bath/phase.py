@@ -42,7 +42,7 @@ class PhaseTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class PhaseExperiment(AbsExperiment):
+class PhaseExp(AbsExperiment[PhaseResultType, PhaseTaskConfig]):
     def run(self, soc, soccfg, cfg: PhaseTaskConfig) -> PhaseResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 

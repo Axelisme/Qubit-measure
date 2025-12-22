@@ -35,7 +35,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-AutoOptResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+AutoResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 class ReadoutOptimizer:
@@ -83,16 +83,14 @@ class ReadoutOptimizer:
         return param
 
 
-class AutoOptimizeTaskConfig(TaskConfig, ModularProgramCfg):
+class AutoTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class AutoOptimizeExperiment(AbsExperiment):
-    def run(
-        self, soc, soccfg, cfg: AutoOptimizeTaskConfig, num_points: int
-    ) -> AutoOptResultType:
+class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
+    def run(self, soc, soccfg, cfg: AutoTaskConfig, num_points: int) -> AutoResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -231,7 +229,7 @@ class AutoOptimizeExperiment(AbsExperiment):
         return params, signals
 
     def analyze(
-        self, result: Optional[AutoOptResultType] = None
+        self, result: Optional[AutoResultType] = None
     ) -> Tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -282,7 +280,7 @@ class AutoOptimizeExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[AutoOptResultType] = None,
+        result: Optional[AutoResultType] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/auto",
         **kwargs,
@@ -320,7 +318,7 @@ class AutoOptimizeExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str) -> AutoOptResultType:
+    def load(self, filepath: str) -> AutoResultType:
         _filepath = Path(filepath)
 
         params_data, _, _ = load_data(

@@ -87,7 +87,7 @@ class AcStarkTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class AcStarkExperiment(AbsExperiment):
+class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
     def run(
         self,
         soc,
@@ -327,7 +327,7 @@ class AcStarkRamseyTaskConfig(TaskConfig, ModularProgramCfg):
     wait_delay: float
 
 
-class AcStarkRamseyExperiment(AbsExperiment):
+class AcStarkRamseyExp(AbsExperiment):
     def run(
         self, soc, soccfg, cfg: AcStarkRamseyTaskConfig, *, detune: float = 0.0
     ) -> AcStarkResultType:

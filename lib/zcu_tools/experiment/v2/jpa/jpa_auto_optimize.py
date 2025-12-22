@@ -54,7 +54,7 @@ class JPAOptTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class JPAAutoOptimizeExperiment(AbsExperiment):
+class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig]):
     def run(
         self, soc, soccfg, cfg: JPAOptTaskConfig, num_points: int
     ) -> JPAOptimizeResultType:

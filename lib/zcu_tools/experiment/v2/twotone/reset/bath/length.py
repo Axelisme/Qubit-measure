@@ -42,7 +42,7 @@ class LengthTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class LengthExperiment(AbsExperiment):
+class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
     def run(
         self, soc, soccfg, cfg: LengthTaskConfig, detune: float = 0.0
     ) -> LengthResultType:

@@ -115,7 +115,7 @@ class AllXYTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class AllXYExperiment(AbsExperiment):
+class AllXYExp(AbsExperiment[AllXYResultType, AllXYTaskConfig]):
     def run(self, soc, soccfg, cfg: AllXYTaskConfig) -> AllXYResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
