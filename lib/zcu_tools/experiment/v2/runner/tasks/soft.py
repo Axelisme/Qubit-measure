@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from tqdm.auto import tqdm
-from typing_extensions import Any, Callable, List, Sequence, TypeVar, Union
+from typing_extensions import Any, Callable, List, Sequence, TypeVar, Union, Optional
 
 from .base import AbsTask, Result, TaskConfig, TaskContextView
 
@@ -31,6 +31,8 @@ class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult, T_TaskConfig]):
         self.update_cfg_fn = update_cfg_fn
         self.sub_task = sub_task
 
+        self.sweep_pbar: Optional[tqdm] = None
+
     def make_pbar(self, leave: bool) -> tqdm:
         return tqdm(
             total=len(self.sweep_values),
@@ -41,11 +43,11 @@ class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult, T_TaskConfig]):
 
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.dynamic_pbar = dynamic_pbar
-        if dynamic_pbar:
-            self.sweep_pbar = None  # initialize in run()
-        else:
+
+        if not dynamic_pbar:
             self.sweep_pbar = self.make_pbar(leave=True)
 
+        # TODO: should we pre-update the cfg in init?
         self.update_cfg_fn(0, ctx, self.sweep_values[0])
 
         self.sub_task.init(ctx(addr=0), dynamic_pbar=dynamic_pbar)
@@ -71,8 +73,7 @@ class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult, T_TaskConfig]):
     def cleanup(self) -> None:
         self.sub_task.cleanup()
 
-        if not self.dynamic_pbar:
-            assert self.sweep_pbar is not None
+        if self.sweep_pbar is not None:
             self.sweep_pbar.close()
             self.sweep_pbar = None
 

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Generic, Sequence
 
 import numpy as np
 from numpy.typing import DTypeLike, NDArray
 from tqdm.auto import tqdm
-from typing_extensions import Any, Callable, Tuple, TypeVar
+from typing_extensions import Any, Callable, Tuple, TypeVar, Optional, Generic, Sequence
 
 from zcu_tools.device import GlobalDeviceManager
 
@@ -44,6 +43,8 @@ class HardTask(
         self.result_shape = result_shape
         self.dtype = dtype
 
+        self.avg_pbar: Optional[tqdm] = None
+
     def make_pbar(self, ctx, leave: bool) -> tqdm:
         total = ctx.cfg.get("rounds")
         return tqdm(
@@ -56,9 +57,8 @@ class HardTask(
 
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.dynamic_pbar = dynamic_pbar
-        if dynamic_pbar:
-            self.avg_pbar = None  # initialize in run()
-        else:
+
+        if not dynamic_pbar:
             self.avg_pbar = self.make_pbar(ctx, leave=True)
 
     def run(self, ctx) -> None:
@@ -85,7 +85,6 @@ class HardTask(
         ctx.set_data(signal)
 
         if self.dynamic_pbar:
-            assert self.avg_pbar is not None
             self.avg_pbar.close()
             self.avg_pbar = None
 
