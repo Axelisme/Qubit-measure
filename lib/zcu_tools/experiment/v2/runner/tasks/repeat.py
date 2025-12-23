@@ -25,10 +25,11 @@ def run_with_retries(
     for attempt in range(retry_time + 1):
         try:
             task.run(ctx)
-        except Exception:
+        except Exception as e:
             if attempt == retry_time:
                 if raise_error:
                     raise
+                print(e)
             else:
                 print(f"Failed to run task, retrying... ({attempt + 1}/{retry_time})")
                 task.cleanup()  # cleanup and re-init

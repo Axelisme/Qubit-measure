@@ -5,7 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Callable, Dict, List, NotRequired, TypedDict
+from typing_extensions import Callable, Dict, List, NotRequired, TypedDict, cast
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
@@ -27,6 +27,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .executor import MeasurementTask, T_RootResult
 
@@ -77,9 +78,10 @@ class T1PlotAndSaveMixin:
     def update_plotter(self, plotters, ctx, results) -> None:
         iters = ctx.env_dict["iters"]
 
+        lengths = results["lengths"][0]
         real_signals = t1_overnight_signal2real(results["signals"])
 
-        plotters["t1"].update(iters, results["lengths"], real_signals, refresh=False)
+        plotters["t1"].update(iters, lengths, real_signals, refresh=False)
 
     def save(self, filepath, iters, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
@@ -88,11 +90,13 @@ class T1PlotAndSaveMixin:
 
         comment = make_comment(self.cfg, comment)  # type: ignore
 
+        lengths = result["lengths"][0]
+
         # signals
         save_data(
             filepath=str(filepath.with_name(filepath.name + "_signals")),
             x_info=x_info,
-            y_info={"name": "Time", "unit": "s", "values": 1e-6 * result["lengths"]},
+            y_info={"name": "Time", "unit": "s", "values": 1e-6 * lengths},
             z_info={"name": "Signal", "unit": "a.u.", "values": result["signals"].T},
             comment=comment,
             tag=prefix_tag + "/signals",
@@ -108,10 +112,10 @@ class T1Cfg(TaskConfig, ModularProgramCfg):
 
 
 class T1Task(
-    MeasurementTask[T1Result, T_RootResult, T1Cfg, T1PlotterDict], T1PlotAndSaveMixin
+    T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1Cfg, T1PlotterDict]
 ):
-    def __init__(self, cfg: T1Cfg) -> None:
-        cfg = deepcopy(cfg)
+    def __init__(self, cfg) -> None:
+        cfg = cast(T1Cfg, deepcopy(cfg))
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -130,7 +134,7 @@ class T1Task(
                     Delay("t1_delay", delay=t1_span),
                     Readout("readout", ctx.cfg["readout"]),
                 ],
-            ).acquire(ctx.env_dict["soc"], progress=False, update_hook=update_hook)
+            ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook)
 
         self.task = HardTask[
             np.complex128, T_RootResult, T1Cfg, List[NDArray[np.float64]]
@@ -147,12 +151,13 @@ class T1Task(
     def run(self, ctx) -> None:
         self.task.run(ctx(addr="signals", new_cfg=self.cfg))  # type: ignore
 
-        ctx.set_data(
-            T1Result(
-                lengths=self.lengths,
-                signals=ctx.get_data()["signals"],
+        with MinIntervalFunc.force_execute():
+            ctx.set_data(
+                T1Result(
+                    lengths=self.lengths,
+                    signals=ctx.get_data()["signals"],
+                )
             )
-        )
 
     def get_default_result(self) -> T1Result:
         return T1Result(
@@ -167,18 +172,18 @@ class T1Task(
 class T1WithToneCfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
-    test_pulse: PulseCfg
+    probe_pulse: PulseCfg
     readout: ReadoutCfg
 
     sweep: Dict[str, SweepCfg]
 
 
 class T1WithToneTask(
-    MeasurementTask[T1Result, T_RootResult, T1WithToneCfg, T1PlotterDict],
     T1PlotAndSaveMixin,
+    MeasurementTask[T1Result, T_RootResult, T1WithToneCfg, T1PlotterDict],
 ):
-    def __init__(self, cfg: T1WithToneCfg) -> None:
-        cfg = deepcopy(cfg)
+    def __init__(self, cfg) -> None:
+        cfg = cast(T1WithToneCfg, deepcopy(cfg))
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -187,21 +192,23 @@ class T1WithToneTask(
         self.lengths = sweep2array(len_sweep)
 
         def measure_t1_fn(ctx: TaskContextView, update_hook: Callable):
-            t1_span = sweep2param("length", ctx.cfg["sweep"]["length"])
-            Pulse.set_param(ctx.cfg["test_pulse"], "length", t1_span)
+            cfg = deepcopy(ctx.cfg)
+
+            Pulse.set_param(
+                cfg["probe_pulse"],
+                "length",
+                sweep2param("length", cfg["sweep"]["length"]),
+            )
             return ModularProgramV2(
                 ctx.env_dict["soccfg"],
-                ctx.cfg,
+                cfg,
                 modules=[
-                    Reset(
-                        "reset",
-                        ctx.cfg.get("reset", {"type": "none"}),
-                    ),
-                    Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                    Pulse("test_pulse", ctx.cfg["test_pulse"]),
-                    Readout("readout", ctx.cfg["readout"]),
+                    Reset("reset", cfg.get("reset", {"type": "none"})),
+                    Pulse("pi_pulse", cfg["pi_pulse"]),
+                    Pulse("probe_pulse", cfg["probe_pulse"]),
+                    Readout("readout", cfg["readout"]),
                 ],
-            ).acquire(ctx.env_dict["soc"], progress=False, update_hook=update_hook)
+            ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook)
 
         self.task = HardTask[
             np.complex128, T_RootResult, T1Cfg, List[NDArray[np.float64]]

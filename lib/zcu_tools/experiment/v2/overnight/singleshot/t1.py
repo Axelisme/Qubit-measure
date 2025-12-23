@@ -3,12 +3,13 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, List, Dict, Callable, TypedDict
+from typing_extensions import NotRequired, List, Dict, Callable, TypedDict, cast
 
 from zcu_tools.program import SweepCfg
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter2D, LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -23,6 +24,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from ..executor import MeasurementTask, T_RootResult
 from .util import calc_populations
@@ -55,7 +57,7 @@ class T1_PlotAndSaveMixin:
                 "Readout Gain",
                 "Time (us)",
                 uniform=False,
-                existed_axes=[[axs["populations_g"]]],
+                existed_axes=[axs["populations_g"]],
                 segment_kwargs=dict(
                     title=f"{name} Ground",
                 ),
@@ -98,7 +100,7 @@ class T1_PlotAndSaveMixin:
         iters = ctx.env_dict["iters"]
         i = ctx.env_dict["repeat_idx"]
 
-        lengths = results["lengths"]
+        lengths = results["lengths"][0]
         populations = calc_populations(results["populations"])  # (iters, times, 3)
 
         plotters["populations_g"].update(
@@ -117,7 +119,7 @@ class T1_PlotAndSaveMixin:
 
         x_info = {"name": "Iteration", "unit": "a.u.", "values": iters}
 
-        lengths = result["lengths"]
+        lengths = result["lengths"][0]
         populations = result["populations"]
 
         comment = make_comment(self.cfg, comment)  # type: ignore
@@ -160,12 +162,12 @@ class T1Cfg(TaskConfig, ModularProgramCfg):
 
 
 class T1Task(
-    MeasurementTask[T1Result, T_RootResult, T1Cfg, T1PlotterDict], T1_PlotAndSaveMixin
+    T1_PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1Cfg, T1PlotterDict]
 ):
     def __init__(
-        self, cfg: T1Cfg, g_center: complex, e_center: complex, radius: float
+        self, cfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
-        cfg = deepcopy(cfg)
+        cfg = cast(T1Cfg, deepcopy(cfg))
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -204,15 +206,30 @@ class T1Task(
             result_shape=(len_sweep["expts"], 2),
         )
 
+    def init(self, ctx, dynamic_pbar=False) -> None:
+        self.lengths = round_zcu_time(self.lengths, ctx.env_dict["soccfg"])
+
+        self.task.init(ctx(addr="populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
+
     def run(self, ctx) -> None:
         self.task.run(ctx(addr="populations", new_cfg=self.cfg))  # type: ignore
 
-        ctx.set_data(
-            T1Result(
-                lengths=self.lengths,
-                populations=ctx.get_data()["populations"],
+        with MinIntervalFunc.force_execute():
+            ctx.set_data(
+                T1Result(
+                    lengths=self.lengths,
+                    populations=ctx.get_data()["populations"],
+                )
             )
+
+    def get_default_result(self) -> T1Result:
+        return T1Result(
+            lengths=self.lengths,
+            populations=self.task.get_default_result(),
         )
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
 
 
 class T1WithToneCfg(TaskConfig, ModularProgramCfg):
@@ -225,13 +242,13 @@ class T1WithToneCfg(TaskConfig, ModularProgramCfg):
 
 
 class T1WithToneTask(
-    MeasurementTask[T1Result, T_RootResult, T1WithToneCfg, T1PlotterDict],
     T1_PlotAndSaveMixin,
+    MeasurementTask[T1Result, T_RootResult, T1WithToneCfg, T1PlotterDict],
 ):
     def __init__(
-        self, cfg: T1WithToneCfg, g_center: complex, e_center: complex, radius: float
+        self, cfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
-        cfg = deepcopy(cfg)
+        cfg = cast(T1WithToneCfg, deepcopy(cfg))
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -240,19 +257,21 @@ class T1WithToneTask(
         self.lengths = sweep2array(len_sweep)
 
         def measure_t1_fn(ctx: TaskContextView, update_hook: Callable):
-            t1_span = sweep2param("length", ctx.cfg["sweep"]["length"])
-            Pulse.set_param(ctx.cfg["test_pulse"], "length", t1_span)
+            cfg = deepcopy(ctx.cfg)
+
+            Pulse.set_param(
+                cfg["probe_pulse"],
+                "length",
+                sweep2param("length", cfg["sweep"]["length"]),
+            )
             return ModularProgramV2(
                 ctx.env_dict["soccfg"],
-                ctx.cfg,
+                cfg,
                 modules=[
-                    Reset(
-                        "reset",
-                        ctx.cfg.get("reset", {"type": "none"}),
-                    ),
-                    Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                    Pulse("test_pulse", ctx.cfg["test_pulse"]),
-                    Readout("readout", ctx.cfg["readout"]),
+                    Reset("reset", cfg.get("reset", {"type": "none"})),
+                    Pulse("pi_pulse", cfg["pi_pulse"]),
+                    Pulse("probe_pulse", cfg["probe_pulse"]),
+                    Readout("readout", cfg["readout"]),
                 ],
             ).acquire(
                 ctx.env_dict["soc"],
@@ -271,12 +290,27 @@ class T1WithToneTask(
             result_shape=(len_sweep["expts"], 2),
         )
 
+    def init(self, ctx, dynamic_pbar=False) -> None:
+        self.lengths = round_zcu_time(self.lengths, ctx.env_dict["soccfg"])
+
+        self.task.init(ctx(addr="populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
+
     def run(self, ctx) -> None:
         self.task.run(ctx(addr="populations", new_cfg=self.cfg))  # type: ignore
 
-        ctx.set_data(
-            T1Result(
-                lengths=self.lengths,
-                populations=ctx.get_data()["populations"],
+        with MinIntervalFunc.force_execute():
+            ctx.set_data(
+                T1Result(
+                    lengths=self.lengths,
+                    populations=ctx.get_data()["populations"],
+                )
             )
+
+    def get_default_result(self) -> T1Result:
+        return T1Result(
+            lengths=self.lengths,
+            populations=self.task.get_default_result(),
         )
+
+    def cleanup(self) -> None:
+        self.task.cleanup()

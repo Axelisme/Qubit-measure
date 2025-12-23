@@ -87,12 +87,8 @@ class OvernightBatchTask(BatchTask):
                 ctx(addr=name),
                 self.retry_time,
                 dynamic_pbar=True,
-                raise_error=False,
+                # raise_error=False,
             )
-
-            # force update
-            with MinIntervalFunc.force_execute():
-                ctx.trigger_hook()
 
             self.task_pbar.update()
 
@@ -239,7 +235,7 @@ class OvernightExecutor(AbsExperiment):
         filepath: str,
         results: Optional[Mapping[str, Result]] = None,
         comment: Optional[str] = None,
-        prefix_tag: str = "autoflux_dep",
+        prefix_tag: str = "overnight",
     ) -> None:
         if results is None:
             results = self.last_result
