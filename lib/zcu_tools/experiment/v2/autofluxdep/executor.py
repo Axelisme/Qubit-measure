@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+from abc import abstractmethod
 from collections import OrderedDict, UserDict, defaultdict
 from copy import deepcopy
 from pathlib import Path
@@ -20,12 +21,12 @@ from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
-    run_with_retries,
     Result,
     SoftTask,
     TaskConfig,
     TaskContextView,
     run_task,
+    run_with_retries,
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import (
@@ -48,12 +49,15 @@ class MeasurementTask(
     AbsTask[T_ResultType, T_RootResultType, T_TaskConfigType],
     Generic[T_ResultType, T_RootResultType, T_TaskConfigType, T_PlotterDictType],
 ):
+    @abstractmethod
     def num_axes(self) -> Dict[str, int]: ...
 
+    @abstractmethod
     def make_plotter(
         self, name: str, axs: Dict[str, List[Axes]]
     ) -> T_PlotterDictType: ...
 
+    @abstractmethod
     def update_plotter(
         self,
         plotters: T_PlotterDictType,
@@ -61,6 +65,7 @@ class MeasurementTask(
         signals: T_ResultType,
     ) -> None: ...
 
+    @abstractmethod
     def save(
         self,
         filepath: str,
@@ -70,6 +75,7 @@ class MeasurementTask(
         prefix_tag: str,
     ) -> None: ...
 
+    @abstractmethod
     def load(self, filepath: str, **kwargs) -> T_ResultType: ...
 
 
@@ -91,10 +97,10 @@ class FluxDepInfoDict(UserDict):
     def first(self) -> Dict[str, Any]:
         return self.first_info
 
-    def __setitem__(self, key: str, value: Any) -> None:
-        super().__setitem__(key, value)
-        self.first_info.setdefault(key, deepcopy(value))
-        self.last_info[key] = deepcopy(value)
+    def __setitem__(self, key: str, item: Any) -> None:
+        super().__setitem__(key, item)
+        self.first_info.setdefault(key, deepcopy(item))
+        self.last_info[key] = deepcopy(item)
 
 
 class FluxDepBatchTask(BatchTask):
@@ -128,7 +134,7 @@ class FluxDepBatchTask(BatchTask):
             self.task_pbar = None
 
 
-class FluxDepExecutor(AbsExperiment):
+class FluxDepExecutor(AbsExperiment[Mapping[str, Result], FluxDepTaskConfig]):
     def __init__(self, flx_values: NDArray[np.float64]) -> None:
         super().__init__()
 
@@ -314,26 +320,28 @@ class FluxDepExecutor(AbsExperiment):
 
         return signals_dict
 
-    def analyze(self, result: Optional[Mapping[str, Result]] = None) -> None:
+    def analyze(
+        self, *args, result: Optional[Mapping[str, Result]] = None, **kwargs
+    ) -> None:
         raise NotImplementedError("Not implemented")
 
     def save(
         self,
         filepath: str,
-        results: Optional[Mapping[str, Result]] = None,
+        result: Optional[Mapping[str, Result]] = None,
         comment: Optional[str] = None,
         prefix_tag: str = "autoflux_dep",
     ) -> None:
-        if results is None:
-            results = self.last_result
-        assert results is not None, "no result found"
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
 
         _filepath = Path(filepath)
         for ms_name, ms in self.measurements.items():
             ms.save(
                 str(_filepath.with_name(_filepath.name + f"_{ms_name}")),
                 self.flx_values,
-                results[ms_name],
+                result[ms_name],
                 comment,
                 prefix_tag + f"/{ms_name}",
             )

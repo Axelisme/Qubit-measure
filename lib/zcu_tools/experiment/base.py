@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Mapping, Generic, Optional, TypeVar, Union, List
-
+from typing import Any, Generic, List, Mapping, Optional, TypeVar, Union
 
 T_Result = TypeVar("T_Result")
 T_Config = TypeVar("T_Config", bound=Mapping[str, Any])
@@ -16,19 +15,15 @@ class AbsExperiment(Generic[T_Result, T_Config], ABC):
         self.last_result: Optional[T_Result] = None
 
     @abstractmethod
-    def run(self) -> T_Result: ...
+    def run(self, *args, **kwargs) -> T_Result: ...
 
     @abstractmethod
-    def analyze(self, result: Optional[T_Result] = None) -> None: ...
+    def analyze(self, *args, result: Optional[T_Result] = None, **kwargs) -> None: ...
 
     @abstractmethod
     def save(
-        self,
-        filepath: str,
-        result: Optional[T_Result] = None,
-        comment: Optional[str] = None,
-        tag: str = "",
+        self, filepath: str, result: Optional[T_Result] = None, **kwargs
     ) -> None: ...
 
     @abstractmethod
-    def load(self, filepath: Union[str, List[str]], **kwargs) -> T_Result: ...
+    def load(self, filepath: str, **kwargs) -> T_Result: ...

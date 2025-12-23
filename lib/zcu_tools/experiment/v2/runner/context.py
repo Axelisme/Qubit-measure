@@ -73,7 +73,7 @@ class TaskContext(Generic[T_Result]):
         elif isinstance(target, np.ndarray):
             if not isinstance(value, (np.ndarray, Number)):
                 raise ValueError(f"Expected NDArray or number, got {type(value)}")
-            np.copyto(target, value)
+            np.copyto(dst=target, src=value)
 
     def get_data(
         self, addr_stack: Optional[List[Union[int, Hashable]]] = None

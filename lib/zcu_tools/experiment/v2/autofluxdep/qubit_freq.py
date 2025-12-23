@@ -82,13 +82,13 @@ class QubitFreqResult(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict, closed=True):
+class FreqPlotterDict(TypedDict, closed=True):
     fit_freq: LivePlotter1D
     detune: LivePlotter2DwithLine
 
 
 class QubitFreqTask(
-    MeasurementTask[QubitFreqResult, T_RootResultType, TaskConfig, PlotterDictType]
+    MeasurementTask[QubitFreqResult, T_RootResultType, TaskConfig, FreqPlotterDict]
 ):
     def __init__(
         self,
@@ -126,9 +126,9 @@ class QubitFreqTask(
     def num_axes(self) -> Dict[str, int]:
         return dict(fit_freq=1, detune=2)
 
-    def make_plotter(self, name, axs) -> PlotterDictType:
+    def make_plotter(self, name, axs) -> FreqPlotterDict:
         self.freq_line = axs["detune"][1].axvline(np.nan, color="red", linestyle="--")
-        return PlotterDictType(
+        return FreqPlotterDict(
             fit_freq=LivePlotter1D(
                 "Flux device value",
                 "Frequency (MHz)",
@@ -217,12 +217,12 @@ class QubitFreqTask(
     def load(self, filepath: str, **kwargs) -> QubitFreqResult:
         data = np.load(filepath)
 
-        flx_values = data["flx_values"]
-        detunes = data["detunes"]
-        fit_detune = data["fit_detune"]
-        fit_freq_err = data["fit_freq_err"]
-        fit_kappa = data["fit_kappa"]
-        fit_kappa_err = data["fit_kappa_err"]
+        flx_values: NDArray[np.float64] = data["flx_values"]
+        detunes: NDArray[np.float64] = data["detunes"]
+        fit_detune: NDArray[np.float64] = data["fit_detune"]
+        fit_freq_err: NDArray[np.float64] = data["fit_freq_err"]
+        fit_kappa: NDArray[np.float64] = data["fit_kappa"]
+        fit_kappa_err: NDArray[np.float64] = data["fit_kappa_err"]
 
         signals_stored, flx_sig, detunes_sig = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs

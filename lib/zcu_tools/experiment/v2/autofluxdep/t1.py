@@ -19,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
-from zcu_tools.experiment.v2.utils import wrap_earlystop_check, round_zcu_time
+from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.notebook.utils import make_comment, make_sweep
@@ -87,12 +87,12 @@ class T1Result(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict, closed=True):
+class T1PlotterDict(TypedDict, closed=True):
     t1: LivePlotter1D
     t1_curve: LivePlotter1D
 
 
-class T1Task(MeasurementTask[T1Result, T_RootResultType, TaskConfig, PlotterDictType]):
+class T1Task(MeasurementTask[T1Result, T_RootResultType, TaskConfig, T1PlotterDict]):
     def __init__(
         self,
         num_expts: int,
@@ -137,8 +137,8 @@ class T1Task(MeasurementTask[T1Result, T_RootResultType, TaskConfig, PlotterDict
     def num_axes(self) -> Dict[str, int]:
         return dict(t1=1, t1_curve=1)
 
-    def make_plotter(self, name, axs) -> PlotterDictType:
-        return PlotterDictType(
+    def make_plotter(self, name, axs) -> T1PlotterDict:
+        return T1PlotterDict(
             t1=LivePlotter1D(
                 "Flux device value",
                 "T1 (us)",

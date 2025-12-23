@@ -76,12 +76,12 @@ class Mist_E_Result(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class Plotter_E_DictType(TypedDict, closed=True):
+class Mist_E_PlotterDict(TypedDict, closed=True):
     e_mist: LivePlotter2DwithLine
 
 
 class Mist_E_Task(
-    MeasurementTask[Mist_E_Result, T_RootResultType, TaskConfig, Plotter_E_DictType]
+    MeasurementTask[Mist_E_Result, T_RootResultType, TaskConfig, Mist_E_PlotterDict]
 ):
     def __init__(
         self,
@@ -117,8 +117,8 @@ class Mist_E_Task(
     def num_axes(self) -> Dict[str, int]:
         return dict(e_mist=2)
 
-    def make_plotter(self, name, axs) -> Plotter_E_DictType:
-        return Plotter_E_DictType(
+    def make_plotter(self, name, axs) -> Mist_E_PlotterDict:
+        return Mist_E_PlotterDict(
             e_mist=LivePlotter2DwithLine(
                 "Flux device value",
                 "Readout Gain (a.u.)",

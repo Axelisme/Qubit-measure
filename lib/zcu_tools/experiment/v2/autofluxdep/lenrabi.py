@@ -19,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
-from zcu_tools.experiment.v2.utils import wrap_earlystop_check, round_zcu_time
+from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.utils import make_comment
@@ -105,12 +105,12 @@ class LenRabiResult(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict, closed=True):
+class LenRabiPlotterDict(TypedDict, closed=True):
     rabi_curve: LivePlotter2DwithLine
 
 
 class LenRabiTask(
-    MeasurementTask[LenRabiResult, T_RootResultType, TaskConfig, PlotterDictType]
+    MeasurementTask[LenRabiResult, T_RootResultType, TaskConfig, LenRabiPlotterDict]
 ):
     def __init__(
         self,
@@ -151,7 +151,7 @@ class LenRabiTask(
                 callback=wrap_earlystop_check(
                     prog,
                     update_hook,
-                    self.earlystop_snr,
+                    snr_threshold=self.earlystop_snr,
                     signal2real_fn=lenrabi_signal2real,
                 ),
             )
@@ -163,9 +163,9 @@ class LenRabiTask(
     def num_axes(self) -> Dict[str, int]:
         return dict(rabi_curve=2)
 
-    def make_plotter(self, name, axs) -> PlotterDictType:
+    def make_plotter(self, name, axs) -> LenRabiPlotterDict:
         self.pi_line = axs["rabi_curve"][1].axvline(np.nan, color="red", linestyle="--")
-        return PlotterDictType(
+        return LenRabiPlotterDict(
             rabi_curve=LivePlotter2DwithLine(
                 "Flux device value",
                 "Signal",

@@ -19,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
-from zcu_tools.experiment.v2.utils import wrap_earlystop_check, round_zcu_time
+from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.notebook.utils import make_comment, make_sweep
@@ -92,13 +92,13 @@ class T2RamseyResult(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict, closed=True):
+class T2RamseyPlotterDict(TypedDict, closed=True):
     t2r: LivePlotter1D
     t2r_curve: LivePlotter1D
 
 
 class T2RamseyTask(
-    MeasurementTask[T2RamseyResult, T_RootResultType, TaskConfig, PlotterDictType]
+    MeasurementTask[T2RamseyResult, T_RootResultType, TaskConfig, T2RamseyPlotterDict]
 ):
     def __init__(
         self,
@@ -131,7 +131,7 @@ class T2RamseyTask(
                     Pulse(
                         name="pi2_pulse2",
                         cfg=Pulse.set_param(
-                            PulseCfg(ctx.cfg["pi2_pulse"]),
+                            ctx.cfg["pi2_pulse"],
                             "phase",
                             ctx.cfg["pi2_pulse"]["phase"]
                             + 360 * ctx.cfg["activate_detune"] * t2r_params,
@@ -162,8 +162,8 @@ class T2RamseyTask(
     def num_axes(self) -> Dict[str, int]:
         return dict(t2r=1, t2r_curve=1)
 
-    def make_plotter(self, name, axs) -> PlotterDictType:
-        return PlotterDictType(
+    def make_plotter(self, name, axs) -> T2RamseyPlotterDict:
+        return T2RamseyPlotterDict(
             t2r=LivePlotter1D(
                 "Flux device value",
                 "T2Ramsey (us)",
