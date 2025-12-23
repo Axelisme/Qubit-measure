@@ -103,7 +103,7 @@ class MISTPowerDepOvernight(
             cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
         )
 
-        fig, axs = make_plot_frame(2, 2, figsize=(8, 8))
+        fig, axs = make_plot_frame(2, 2, figsize=(12, 8))
 
         with MultiLivePlotter(
             fig,
@@ -155,7 +155,7 @@ class MISTPowerDepOvernight(
 
             signals = run_task(
                 task=RepeatOverTime(
-                    name="repeat_over_time",
+                    name="Iteration",
                     num_times=num_times,
                     interval=cfg["interval"],
                     task=ReTryIfFail(
@@ -223,11 +223,14 @@ class MISTPowerDepOvernight(
 
         assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
+        gain_sweep = cfg["sweep"]["gain"]
+
+        del cfg["sweep"]  # remove sweep from cfg for SoftTask
 
         iters = np.arange(num_times, dtype=np.int64)
-        gains = sweep2array(cfg["sweep"]["gain"], allow_array=True)
+        gains = sweep2array(gain_sweep, allow_array=True)
 
-        fig, axs = make_plot_frame(2, 2, figsize=(8, 8))
+        fig, axs = make_plot_frame(2, 2, figsize=(12, 8))
 
         with MultiLivePlotter(
             fig,
@@ -279,7 +282,7 @@ class MISTPowerDepOvernight(
 
             signals = run_task(
                 task=RepeatOverTime(
-                    name="repeat_over_time",
+                    name="Iteration",
                     num_times=num_times,
                     interval=cfg["interval"],
                     task=SoftTask(
