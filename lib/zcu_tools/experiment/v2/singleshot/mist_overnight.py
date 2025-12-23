@@ -49,13 +49,13 @@ def calc_populations(signals: NDArray[np.float64]) -> NDArray[np.float64]:
 
 class MISTPowerDepOvernightTaskConfig(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
-    init_pulse: PulseCfg
+    init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
     interval: float
 
 
-class MISTPowerDepOvernight(
+class MISTPowerDepOvernightExp(
     AbsExperiment[MISTPowerDepOvernightResultType, MISTPowerDepOvernightTaskConfig]
 ):
     def run(

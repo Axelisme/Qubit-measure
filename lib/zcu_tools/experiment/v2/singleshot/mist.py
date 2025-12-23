@@ -39,7 +39,7 @@ class MISTPowerDepTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class MISTPowerDep(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConfig]):
+class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConfig]):
     def run(
         self,
         soc,

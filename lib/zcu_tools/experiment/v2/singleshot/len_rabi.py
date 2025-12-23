@@ -27,7 +27,7 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 class LenRabiTaskConfig(TaskConfig, TwoToneProgramCfg): ...
 
 
-class LenRabiExperiment(AbsExperiment[LenRabiResultType, LenRabiTaskConfig]):
+class LenRabiExp(AbsExperiment[LenRabiResultType, LenRabiTaskConfig]):
     def run(
         self,
         soc,

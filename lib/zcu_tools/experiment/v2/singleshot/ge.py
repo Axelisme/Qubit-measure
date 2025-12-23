@@ -39,7 +39,7 @@ class GE_TaskConfig(TaskConfig, TwoToneProgramCfg):
     shots: int
 
 
-class GE_Experiment(AbsExperiment[GE_ResultType, GE_TaskConfig]):
+class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
     def run(self, soc, soccfg, cfg: GE_TaskConfig) -> GE_ResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 

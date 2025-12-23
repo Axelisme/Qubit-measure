@@ -64,7 +64,7 @@ class T1TaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class T1Experiment(AbsExperiment[T1ResultType, T1TaskConfig]):
+class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
     """T1 relaxation time measurement.
 
     Applies a π pulse and then waits for a variable time before readout
@@ -234,7 +234,7 @@ class T1WithToneTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class T1WithTone(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
+class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
     def run(
         self,
         soc,
@@ -400,7 +400,7 @@ class T1WithToneSweepTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class T1WithToneSweep(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskConfig]):
+class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskConfig]):
     def run(
         self,
         soc,

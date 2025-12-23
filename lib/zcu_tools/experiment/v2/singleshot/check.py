@@ -42,7 +42,7 @@ class CheckTaskConfig(TaskConfig, TwoToneProgramCfg):
     shots: int
 
 
-class CheckExperiment(AbsExperiment[CheckResultType, CheckTaskConfig]):
+class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
     def run(self, soc, soccfg, cfg: CheckTaskConfig) -> CheckResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
 

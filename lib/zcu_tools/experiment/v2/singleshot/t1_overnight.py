@@ -56,7 +56,7 @@ class T1WithToneOvernightTaskConfig(TaskConfig, ModularProgramCfg):
     interval: float
 
 
-class T1WithToneOvernight(
+class T1WithToneOvernightExp(
     AbsExperiment[T1WithToneOvernightResultType, T1WithToneOvernightTaskConfig]
 ):
     def run(
