@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, Optional, Tuple, List, Dict, Union
+from typing_extensions import NotRequired, Optional, Tuple, List
 from tqdm.auto import tqdm
 
 from zcu_tools.experiment import AbsExperiment
@@ -23,7 +23,6 @@ from zcu_tools.liveplot import (
     LivePlotter2D,
     LivePlotter1D,
 )
-from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
