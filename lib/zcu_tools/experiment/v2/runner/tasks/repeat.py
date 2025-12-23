@@ -95,6 +95,8 @@ class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult, T_TaskConfig
         if not dynamic_pbar:
             self.iter_pbar, self.time_pbar = self.make_pbar(leave=True)
 
+        ctx.env_dict["repeat_idx"] = 0
+
         self.task.init(ctx(addr=0), dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx) -> None:

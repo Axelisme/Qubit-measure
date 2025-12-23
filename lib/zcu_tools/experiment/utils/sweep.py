@@ -1,5 +1,5 @@
 import warnings
-from typing import Mapping, MutableMapping, Optional, Union, cast
+from typing import Mapping, Dict, Optional, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -10,9 +10,7 @@ from zcu_tools.program import SweepCfg
 T = TypeVar("T", bound=Union[SweepCfg, NDArray])
 
 
-def format_sweep1D(
-    sweep: Union[Mapping[str, T], T], name: str
-) -> MutableMapping[str, T]:
+def format_sweep1D(sweep: Union[Mapping[str, T], T], name: str) -> Dict[str, T]:
     """
     Convert abbreviated single sweep to regular format.
 
@@ -42,7 +40,7 @@ def format_sweep1D(
         assert sweep.get(name) is not None, f"Key {name} is not found in the sweep"
 
         # it is already in regular format
-        return sweep
+        return dict(sweep)
     else:
         raise ValueError(sweep)
 
