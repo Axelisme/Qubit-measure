@@ -129,9 +129,10 @@ class SampleTable(SyncFile):
 class MetaDictView:
     PROTECTED_KEYS = ["declare_subdict", "dump"]
 
-    def __init__(self, data: dict, table: MetaDict) -> None:
+    def __init__(self, data: dict, table: MetaDict, read_only: bool = False) -> None:
         self._data = data
         self._table = table
+        self._read_only = read_only
 
     @classmethod
     def _is_protected(cls, name: str) -> bool:
@@ -156,6 +157,10 @@ class MetaDictView:
             object.__setattr__(self, name, value)
             return
 
+        if self._read_only:
+            warnings.warn("Cannot modify read-only MetaDictView, ignoring...")
+            return
+
         self._table.sync()
         self._data[name] = value
         self._table.sync()
@@ -163,6 +168,10 @@ class MetaDictView:
     def __delattr__(self, name: str, /) -> None:
         if MetaDictView._is_protected(name):
             object.__delattr__(self, name)
+            return
+
+        if self._read_only:
+            warnings.warn("Cannot modify read-only MetaDictView, ignoring...")
             return
 
         self._table.sync()
@@ -175,6 +184,9 @@ class MetaDictView:
     def declare_subdict(self, name: str) -> MetaDictView:
         if MetaDictView._is_protected(name):
             raise ValueError(f"{name} is protected name")
+
+        if self._read_only:
+            raise ValueError("Cannot modify read-only MetaDictView")
 
         sub_data = self._data.setdefault(name, {})
         if not isinstance(sub_data, dict):
@@ -192,9 +204,12 @@ class MetaDictView:
 class MetaDict(SyncFile):
     PROTECTED_KEYS = ["dump", "load", "sync", "clone"]
 
-    def __init__(self, json_path: Optional[str] = None) -> None:
+    def __init__(
+        self, json_path: Optional[str] = None, read_only: bool = False
+    ) -> None:
         self._data = {}
-        self._view = MetaDictView(self._data, self)
+        self._view = MetaDictView(self._data, self, read_only=read_only)
+
         super().__init__(json_path)
 
     def _load(self) -> None:
