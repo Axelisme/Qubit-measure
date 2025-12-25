@@ -24,12 +24,9 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
+from .util import calc_populations
+
 MISTPowerDepResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
-
-
-def mist_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float64]:
-    g_pops, e_pops = signals[:, 0], signals[:, 1]
-    return np.stack([g_pops, e_pops, 1 - g_pops - e_pops], axis=-1)
 
 
 class MISTPowerDepTaskConfig(TaskConfig, ModularProgramCfg):
@@ -100,7 +97,7 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConf
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    pdrs, mist_signal2real(ctx.data).T
+                    pdrs, calc_populations(ctx.data).T
                 ),
             )
 
@@ -122,10 +119,9 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConf
             result = self.last_result
         assert result is not None, "no result found"
 
-        pdrs, signals = result
-        signals = signals.real
+        pdrs, populations = result
 
-        populations = mist_signal2real(signals)
+        populations = calc_populations(populations)
 
         if confusion_matrix is not None:  # readout correction
             populations = populations @ np.linalg.inv(confusion_matrix)
@@ -166,22 +162,22 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConf
             result = self.last_result
         assert result is not None, "no result found"
 
-        pdrs, signals = result
+        pdrs, populations = result
 
         save_data(
             filepath=filepath,
             x_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
             y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Population", "unit": "a.u.", "values": signals.T},
+            z_info={"name": "Population", "unit": "a.u.", "values": populations.T},
             comment=comment,
             tag=tag,
             **kwargs,
         )
 
     def load(self, filepath: str, **kwargs) -> MISTPowerDepResultType:
-        signals, pdrs, _ = load_data(filepath, **kwargs)
+        populations, pdrs, _ = load_data(filepath, **kwargs)
 
         self.last_cfg = None
-        self.last_result = (pdrs, signals)
+        self.last_result = (pdrs, populations)
 
-        return pdrs, signals
+        return pdrs, populations

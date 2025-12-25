@@ -15,13 +15,10 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import Pulse, TwoToneProgram, TwoToneProgramCfg, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
+from .util import calc_populations
+
 # (lens, signals)
-LenRabiResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
-
-
-def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    g_pop, e_pop = signals[:, 0], signals[:, 1]
-    return np.stack([g_pop, e_pop, 1 - g_pop - e_pop], axis=-1).real
+LenRabiResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class LenRabiTaskConfig(TaskConfig, TwoToneProgramCfg): ...
@@ -66,7 +63,7 @@ class LenRabiExp(AbsExperiment[LenRabiResultType, LenRabiTaskConfig]):
         ) as viewer:
             viewer.get_ax().set_ylim(0.0, 1.0)
 
-            signals = run_task(
+            populations = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         TwoToneProgram(soccfg, ctx.cfg).acquire(
@@ -80,18 +77,19 @@ class LenRabiExp(AbsExperiment[LenRabiResultType, LenRabiTaskConfig]):
                     ),
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(lens), 2),
+                    dtype=np.float64,
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    lens, rabi_signal2real(ctx.data).T
+                    lens, calc_populations(ctx.data).T
                 ),
             )
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (lens, signals)
+        self.last_result = (lens, populations)
 
-        return lens, signals
+        return lens, populations
 
     def analyze(
         self,
@@ -103,9 +101,9 @@ class LenRabiExp(AbsExperiment[LenRabiResultType, LenRabiTaskConfig]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, signals = result
+        lens, populations = result
 
-        populations = rabi_signal2real(signals)  # (len, geo)
+        populations = calc_populations(populations)  # (len, geo)
 
         if confusion_matrix is not None:  # readout correction
             populations = populations @ np.linalg.inv(confusion_matrix)
@@ -140,25 +138,25 @@ class LenRabiExp(AbsExperiment[LenRabiResultType, LenRabiTaskConfig]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, signals = result
+        lens, populations = result
         save_data(
             filepath=filepath,
             x_info={"name": "Length", "unit": "s", "values": lens * 1e-6},
             y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
+            z_info={"name": "Population", "unit": "a.u.", "values": populations.T},
             comment=comment,
             tag=tag,
             **kwargs,
         )
 
     def load(self, filepath: str, **kwargs) -> LenRabiResultType:
-        signals, lens, _ = load_data(filepath, **kwargs)
+        populations, lens, _ = load_data(filepath, **kwargs)
         assert lens is not None
 
         lens = lens * 1e6  # s -> us
-        signals = signals.T  # transpose back
+        populations = populations.T  # transpose back
 
         self.last_cfg = None
-        self.last_result = (lens, signals)
+        self.last_result = (lens, populations)
 
-        return lens, signals
+        return lens, populations

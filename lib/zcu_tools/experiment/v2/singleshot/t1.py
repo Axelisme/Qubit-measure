@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,10 +33,12 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting import fit_transition_rates, fit_ge_decay
+from zcu_tools.utils.fitting import fit_ge_decay, fit_transition_rates
+
+from .util import calc_populations
 
 # (times, signals)
-T1ResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T1ResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 def calc_transition_rate(g_p: float, e_p: float, t1: float) -> Tuple[float, float]:
@@ -51,11 +53,6 @@ def calc_transition_rate(g_p: float, e_p: float, t1: float) -> Tuple[float, floa
     gamma_eg = (g_p / (g_p + e_p)) / t1
 
     return gamma_ge, gamma_eg
-
-
-def calc_populations(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    g_pop, e_pop = signals[..., 0], signals[..., 1]
-    return np.stack([g_pop, e_pop, 1 - g_pop - e_pop], axis=-1).real
 
 
 class T1TaskConfig(TaskConfig, ModularProgramCfg):
@@ -101,7 +98,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
         ) as viewer:
             viewer.get_ax().set_ylim(0.0, 1.0)
 
-            signals = run_task(
+            populations = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -129,6 +126,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
                     ),
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(ts), 2),
+                    dtype=np.float64,
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(ts, calc_populations(ctx.data).T),
@@ -136,9 +134,9 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (ts, signals)
+        self.last_result = (ts, populations)
 
-        return ts, signals
+        return ts, populations
 
     def analyze(
         self,
@@ -150,9 +148,9 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, signals = result
+        lens, populations = result
 
-        populations = calc_populations(signals)
+        populations = calc_populations(populations)
 
         if confusion_matrix is not None:  # readout correction
             populations = populations @ np.linalg.inv(confusion_matrix)
@@ -210,21 +208,21 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
         )
 
     def load(self, filepath: str, **kwargs) -> T1ResultType:
-        signals, Ts, y_values = load_data(filepath, **kwargs)
+        populations, Ts, y_values = load_data(filepath, **kwargs)
         assert Ts is not None and y_values is not None
         assert len(Ts.shape) == 1 and len(y_values.shape) == 1
-        assert signals.shape == (len(y_values), len(Ts))
+        assert populations.shape == (len(y_values), len(Ts))
 
         Ts = Ts * 1e6  # s -> us
-        signals = signals.T  # transpose back
+        populations = populations.T  # transpose back
 
         Ts = Ts.astype(np.float64)
-        signals = signals.astype(np.complex128)
+        populations = populations.astype(np.float64)
 
         self.last_cfg = None
-        self.last_result = (Ts, signals)
+        self.last_result = (Ts, populations)
 
-        return Ts, signals
+        return Ts, populations
 
 
 class T1WithToneTaskConfig(TaskConfig, ModularProgramCfg):
@@ -267,7 +265,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
                 ],
             ),
         ) as viewer:
-            signals = run_task(
+            populations = run_task(
                 task=HardTask(
                     measure_fn=lambda ctx, update_hook: (
                         ModularProgramV2(
@@ -290,6 +288,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
                     ),
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(ts), 2),
+                    dtype=np.float64,
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(ts, calc_populations(ctx.data).T),
@@ -297,9 +296,9 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (ts, signals)
+        self.last_result = (ts, populations)
 
-        return ts, signals
+        return ts, populations
 
     def analyze(
         self,
@@ -311,9 +310,9 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        lens, signals = result
+        lens, populations = result
 
-        populations = calc_populations(signals)
+        populations = calc_populations(populations)
 
         if confusion_matrix is not None:  # readout correction
             populations = populations @ np.linalg.inv(confusion_matrix)
@@ -370,27 +369,25 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
         )
 
     def load(self, filepath: str, **kwargs) -> T1ResultType:
-        signals, Ts, y_values = load_data(filepath, **kwargs)
+        populations, Ts, y_values = load_data(filepath, **kwargs)
         assert Ts is not None and y_values is not None
         assert len(Ts.shape) == 1 and len(y_values.shape) == 1
-        assert signals.shape == (len(y_values), len(Ts))
+        assert populations.shape == (len(y_values), len(Ts))
 
         Ts = Ts * 1e6  # s -> us
-        signals = signals.T  # transpose back
+        populations = populations.T  # transpose back
 
         Ts = Ts.astype(np.float64)
-        signals = signals.astype(np.complex128)
+        populations = populations.astype(np.float64)
 
         self.last_cfg = None
-        self.last_result = (Ts, signals)
+        self.last_result = (Ts, populations)
 
-        return Ts, signals
+        return Ts, populations
 
 
 # (values, times, signals)
-T1SweepResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+T1SweepResultType = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
 
 
 class T1WithToneSweepTaskConfig(TaskConfig, ModularProgramCfg):
@@ -490,7 +487,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
 
                 viewer.refresh()
 
-            signals = run_task(
+            populations = run_task(
                 task=SoftTask(
                     sweep_name="gain",
                     sweep_values=gains.tolist(),
@@ -519,19 +516,20 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
                         ),
                         raw2signal_fn=lambda raw: raw[0][0],
                         result_shape=(len(ts), 2),
+                        dtype=np.float64,
                     ),
                 ),
                 init_cfg=cfg,
                 update_hook=plot_fn,
             )
-            signals = np.asarray(signals)
+            populations = np.asarray(populations)
         plt.close(fig)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (gains, ts, signals)
+        self.last_result = (gains, ts, populations)
 
-        return gains, ts, signals
+        return gains, ts, populations
 
     def analyze(
         self,
@@ -544,13 +542,13 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, Ts, signals = result
+        gains, Ts, populations = result
 
-        valid_mask = np.all(np.isfinite(signals), axis=(1, 2))
+        valid_mask = np.all(np.isfinite(populations), axis=(1, 2))
         gains = gains[valid_mask]
-        signals = signals[valid_mask]
+        populations = populations[valid_mask]
 
-        populations = calc_populations(signals)
+        populations = calc_populations(populations)
 
         if confusion_matrix is not None:  # readout correction
             populations = populations @ np.linalg.inv(confusion_matrix)
@@ -650,7 +648,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, Ts, signals = result
+        gains, Ts, populations = result
         _filepath = Path(filepath)
 
         save_data(
@@ -660,7 +658,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
             z_info={
                 "name": "Ground Populations",
                 "unit": "a.u.",
-                "values": signals[..., 0].T,
+                "values": populations[..., 0].T,
             },
             comment=comment,
             tag=tag,
@@ -673,7 +671,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
             z_info={
                 "name": "Excited Populations",
                 "unit": "a.u.",
-                "values": signals[..., 1].T,
+                "values": populations[..., 1].T,
             },
             comment=comment,
             tag=tag,
@@ -698,13 +696,13 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
         Ts = Ts * 1e6  # s -> us
 
         # Reconstruct signals shape: (gains, ts, 2)
-        signals = np.stack([g_pop, e_pop], axis=-1)
+        populations = np.stack([g_pop, e_pop], axis=-1)
 
         gains = gains.astype(np.float64)
         Ts = Ts.astype(np.float64)
-        signals = signals.astype(np.complex128)
+        populations = populations.astype(np.float64)
 
         self.last_cfg = None
-        self.last_result = (gains, Ts, signals)
+        self.last_result = (gains, Ts, populations)
 
-        return gains, Ts, signals
+        return gains, Ts, populations

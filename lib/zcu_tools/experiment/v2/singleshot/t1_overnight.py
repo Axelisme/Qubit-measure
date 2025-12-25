@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, Optional, Tuple, List
 from tqdm.auto import tqdm
+from typing_extensions import List, NotRequired, Optional, Tuple
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -15,13 +15,14 @@ from zcu_tools.experiment.v2.runner import (
     RepeatOverTime,
     ReTryIfFail,
     TaskConfig,
+    TaskContextView,
     run_task,
 )
 from zcu_tools.liveplot import (
+    LivePlotter1D,
+    LivePlotter2D,
     MultiLivePlotter,
     make_plot_frame,
-    LivePlotter2D,
-    LivePlotter1D,
 )
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -37,14 +38,11 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_transition_rates
 
+from .util import calc_populations
+
 T1WithToneOvernightResultType = Tuple[
-    NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
+    NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]
 ]
-
-
-def calc_populations(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    g_pop, e_pop = signals[..., 0], signals[..., 1]
-    return np.stack([g_pop, e_pop, 1 - g_pop - e_pop], axis=-1).real
 
 
 class T1WithToneOvernightTaskConfig(TaskConfig, ModularProgramCfg):
@@ -122,8 +120,8 @@ class T1WithToneOvernightExp(
             ),
         ) as viewer:
 
-            def plot_fn(ctx) -> None:
-                i = ctx.env_dict["idx"]
+            def plot_fn(ctx: TaskContextView) -> None:
+                i = ctx.env_dict["repeat_idx"]
 
                 populations = calc_populations(np.asarray(ctx.data))
 
@@ -142,7 +140,7 @@ class T1WithToneOvernightExp(
 
                 viewer.refresh()
 
-            signals = run_task(
+            populations = run_task(
                 task=RepeatOverTime(
                     name="Iteration",
                     num_times=num_times,
@@ -174,6 +172,7 @@ class T1WithToneOvernightExp(
                             ),
                             raw2signal_fn=lambda raw: raw[0][0],
                             result_shape=(len(ts), 2),
+                            dtype=np.float64,
                         ),
                     ),
                 ),
@@ -181,13 +180,13 @@ class T1WithToneOvernightExp(
                 update_hook=plot_fn,
             )
         plt.close(fig)
-        signals = np.asarray(signals)  # (iters, shots, 2)
+        populations = np.asarray(populations)  # (iters, shots, 2)
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (iters, ts, signals)
+        self.last_result = (iters, ts, populations)
 
-        return iters, ts, signals
+        return iters, ts, populations
 
     def analyze(
         self,
@@ -200,13 +199,13 @@ class T1WithToneOvernightExp(
             result = self.last_result
         assert result is not None, "no result found"
 
-        iters, Ts, signals = result
+        iters, Ts, populations = result
 
-        valid_mask = np.all(np.isfinite(signals), axis=(1, 2))
+        valid_mask = np.all(np.isfinite(populations), axis=(1, 2))
         iters = iters[valid_mask]
-        signals = signals[valid_mask]
+        populations = populations[valid_mask]
 
-        populations = calc_populations(signals)
+        populations = calc_populations(populations)
 
         if confusion_matrix is not None:  # readout correction
             populations = populations @ np.linalg.inv(confusion_matrix)
@@ -272,7 +271,7 @@ class T1WithToneOvernightExp(
             result = self.last_result
         assert result is not None, "no result found"
 
-        iters, Ts, signals = result
+        iters, Ts, populations = result
         _filepath = Path(filepath)
 
         save_data(
@@ -282,7 +281,7 @@ class T1WithToneOvernightExp(
             z_info={
                 "name": "Ground Populations",
                 "unit": "a.u.",
-                "values": signals[..., 0].T,
+                "values": populations[..., 0].T,
             },
             comment=comment,
             tag=tag,
@@ -295,7 +294,7 @@ class T1WithToneOvernightExp(
             z_info={
                 "name": "Excited Populations",
                 "unit": "a.u.",
-                "values": signals[..., 1].T,
+                "values": populations[..., 1].T,
             },
             comment=comment,
             tag=tag,
@@ -320,13 +319,13 @@ class T1WithToneOvernightExp(
         Ts = Ts * 1e6  # s -> us
 
         # Reconstruct signals shape: (gains, ts, 2)
-        signals = np.stack([g_pop, e_pop], axis=-1)
+        populations = np.stack([g_pop, e_pop], axis=-1)
 
         iters_g = iters_g.astype(np.int64)
         Ts = Ts.astype(np.float64)
-        signals = signals.astype(np.complex128)
+        populations = populations.astype(np.float64)
 
         self.last_cfg = None
-        self.last_result = (iters_g, Ts, signals)
+        self.last_result = (iters_g, Ts, populations)
 
-        return iters_g, Ts, signals
+        return iters_g, Ts, populations

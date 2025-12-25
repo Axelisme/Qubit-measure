@@ -12,10 +12,11 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
-    SoftTask,
     RepeatOverTime,
     ReTryIfFail,
+    SoftTask,
     TaskConfig,
+    TaskContextView,
     run_task,
 )
 from zcu_tools.liveplot import (
@@ -37,14 +38,11 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
+from .util import calc_populations
+
 MISTPowerDepOvernightResultType = Tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]
 ]
-
-
-def calc_populations(signals: NDArray[np.float64]) -> NDArray[np.float64]:
-    g_pops, e_pops = signals[..., 0], signals[..., 1]
-    return np.stack([g_pops, e_pops, 1 - g_pops - e_pops], axis=-1)
 
 
 class MISTPowerDepOvernightTaskConfig(TaskConfig, ModularProgramCfg):
@@ -153,7 +151,7 @@ class MISTPowerDepOvernightExp(
 
                 viewer.refresh()
 
-            signals = run_task(
+            populations = run_task(
                 task=RepeatOverTime(
                     name="Iteration",
                     num_times=num_times,
@@ -198,14 +196,14 @@ class MISTPowerDepOvernightExp(
                 init_cfg=cfg,
                 update_hook=plot_fn,
             )
-            signals = np.asarray(signals)
+            populations = np.asarray(populations)
         plt.close(fig)
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result = (iters, gains, signals)
+        self.last_result = (iters, gains, populations)
 
-        return iters, gains, signals
+        return iters, gains, populations
 
     def _run_soft(
         self,
@@ -260,7 +258,7 @@ class MISTPowerDepOvernightExp(
             ),
         ) as viewer:
 
-            def plot_fn(ctx) -> None:
+            def plot_fn(ctx: TaskContextView) -> None:
                 i = ctx.env_dict["repeat_idx"]
 
                 populations = calc_populations(np.asarray(ctx.data))
@@ -280,7 +278,7 @@ class MISTPowerDepOvernightExp(
 
                 viewer.refresh()
 
-            signals = run_task(
+            populations = run_task(
                 task=RepeatOverTime(
                     name="Iteration",
                     num_times=num_times,
@@ -332,14 +330,14 @@ class MISTPowerDepOvernightExp(
                 init_cfg=cfg,
                 update_hook=plot_fn,
             )
-            signals = np.asarray(signals)
+            populations = np.asarray(populations)
         plt.close(fig)
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result = (iters, gains, signals)
+        self.last_result = (iters, gains, populations)
 
-        return iters, gains, signals
+        return iters, gains, populations
 
     def analyze(
         self,
@@ -353,9 +351,9 @@ class MISTPowerDepOvernightExp(
             result = self.last_result
         assert result is not None, "no result found"
 
-        _, pdrs, signals = result
+        _, pdrs, populations = result
 
-        populations = calc_populations(signals)
+        populations = calc_populations(populations)
 
         if confusion_matrix is not None:  # readout correction
             populations = populations @ np.linalg.inv(confusion_matrix)
@@ -413,7 +411,7 @@ class MISTPowerDepOvernightExp(
             result = self.last_result
         assert result is not None, "no result found"
 
-        iters, pdrs, overnight_signals = result
+        iters, pdrs, populations = result
 
         _filepath = Path(filepath)
 
@@ -424,7 +422,7 @@ class MISTPowerDepOvernightExp(
             z_info={
                 "name": "Ground Population",
                 "unit": "a.u.",
-                "values": overnight_signals[..., 0].T,
+                "values": populations[..., 0].T,
             },
             comment=comment,
             tag=tag + "_g",
@@ -437,7 +435,7 @@ class MISTPowerDepOvernightExp(
             z_info={
                 "name": "Excited Population",
                 "unit": "a.u.",
-                "values": overnight_signals[..., 1].T,
+                "values": populations[..., 1].T,
             },
             comment=comment,
             tag=tag + "_e",
@@ -450,24 +448,24 @@ class MISTPowerDepOvernightExp(
         g_filepath = _filepath.with_name(_filepath.name + "_g")
         e_filepath = _filepath.with_name(_filepath.name + "_e")
 
-        g_signals, g_iters, g_pdrs = load_data(str(g_filepath), **kwargs)
-        e_signals, e_iters, e_pdrs = load_data(str(e_filepath), **kwargs)
+        g_populations, g_iters, g_pdrs = load_data(str(g_filepath), **kwargs)
+        e_populations, e_iters, e_pdrs = load_data(str(e_filepath), **kwargs)
 
         assert g_pdrs is not None and e_pdrs is not None
         assert len(g_pdrs.shape) == 1 and len(e_pdrs.shape) == 1
-        assert g_signals.shape == (len(g_iters), len(g_pdrs))
-        assert e_signals.shape == (len(e_iters), len(e_pdrs))
-        assert g_signals.shape == e_signals.shape
+        assert g_populations.shape == (len(g_iters), len(g_pdrs))
+        assert e_populations.shape == (len(e_iters), len(e_pdrs))
+        assert g_populations.shape == e_populations.shape
 
         iters = g_iters
         pdrs = g_pdrs
-        signals = np.stack([g_signals, e_signals], axis=-1)
+        populations = np.stack([g_populations, e_populations], axis=-1)
 
         iters = iters.astype(np.int64)
         pdrs = pdrs.astype(np.float64)
-        signals = signals.astype(np.float64)
+        populations = populations.astype(np.float64)
 
         self.last_cfg = None
-        self.last_result = (iters, pdrs, signals)
+        self.last_result = (iters, pdrs, populations)
 
-        return iters, pdrs, signals
+        return iters, pdrs, populations
