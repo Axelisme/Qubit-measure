@@ -2,6 +2,7 @@ import numpy as np
 from typing import Tuple, Optional
 from numpy.typing import NDArray
 from scipy.integrate import cumulative_trapezoid
+from scipy.optimize import nnls
 
 from .base import fit_func
 
@@ -38,31 +39,34 @@ def guess_initial_params(
     假設 populations 欄位順序為: [Ground (g), Excited (e), Other (o)]
     """
     # 1. 數值積分: \int P(dt)
-    X_integrated = cumulative_trapezoid(populations, times, axis=0, initial=0)
+    P_int = cumulative_trapezoid(populations, times, axis=0, initial=0)
 
     # 2. 差分矩陣: P(t) - P(0)
     # 為了減少雜訊影響，P0 也可以考慮用平均值或回歸預測，這裡維持邏輯簡潔
     P0 = populations[0]
-    Y_diff = populations - P0
+    delta_P = populations - P0
 
-    # 3. 求解線性系統: Y_diff = X_integrated @ M.T
-    # 解出的 solution (M.T) 形狀為 (3, 3)
-    M_T_estimated, *_ = np.linalg.lstsq(X_integrated, Y_diff, rcond=None)
-    M_estimated = M_T_estimated.T
-
-    # 4. 提取速率常數並應用物理約束 (速率必須 >= 0)
-    # 索引定義: M[to_index, from_index]
-    # 假設順序: 0:g, 1:e, 2:o
-    T_ge = max(0.0, M_estimated[1, 0])  # g -> e
-    T_eg = max(0.0, M_estimated[0, 1])  # e -> g
-    T_eo = max(0.0, M_estimated[2, 1])  # e -> o
-    T_oe = max(0.0, M_estimated[1, 2])  # o -> e
-    T_go = max(0.0, M_estimated[2, 0])  # g -> o
-    T_og = max(0.0, M_estimated[0, 2])  # o -> g
-
-    # 5. 初始機率分布 (直接從數據獲取)
+    # 初始機率分布 (直接從數據獲取)
     pg0 = max(0.0, min(1.0, P0[0]))
     pe0 = max(0.0, min(1.0, P0[1]))
+
+    # fit T_eg, T_og
+    dP_int_xg = np.stack(
+        [P_int[:, 1] - P_int[:, 0], P_int[:, 2] - P_int[:, 0]], axis=-1
+    )
+    (T_eg, T_og), *_ = nnls(dP_int_xg, delta_P[:, 0])
+
+    # fit T_ge, T_oe
+    dP_int_xe = np.stack(
+        [P_int[:, 0] - P_int[:, 1], P_int[:, 2] - P_int[:, 1]], axis=-1
+    )
+    (T_ge, T_oe), *_ = nnls(dP_int_xe, delta_P[:, 1])
+
+    # fit T_go, T_eo
+    dP_int_xo = np.stack(
+        [P_int[:, 0] - P_int[:, 2], P_int[:, 1] - P_int[:, 2]], axis=-1
+    )
+    (T_go, T_eo), *_ = nnls(dP_int_xo, delta_P[:, 2])
 
     return (T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0, pe0)
 

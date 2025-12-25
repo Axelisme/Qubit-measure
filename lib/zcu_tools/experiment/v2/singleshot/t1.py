@@ -543,6 +543,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
         assert result is not None, "no result found"
 
         gains, Ts, populations = result
+        populations = np.real(populations).astype(np.float64)
 
         valid_mask = np.all(np.isfinite(populations), axis=(1, 2))
         gains = gains[valid_mask]
@@ -558,6 +559,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
         min_rate = 0.1 / np.max(Ts)
 
         worst_loss = 0.0
+        worst_rates = None
         worst_pop = None
         worst_fit = None
 
@@ -570,8 +572,27 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
             loss = np.mean(np.abs(fit_pop - pop))
             if loss > worst_loss:
                 worst_loss = loss
+                worst_rates = rates
                 worst_pop = pop
                 worst_fit = fit_pop
+
+                fig, ax = plt.subplots(figsize=config.figsize)
+                assert isinstance(fig, Figure)
+
+                assert worst_pop is not None and worst_fit is not None
+                ax.scatter(Ts, worst_pop[:, 0], label="G", color="blue", s=1)
+                ax.scatter(Ts, worst_pop[:, 1], label="E", color="red", s=1)
+                ax.scatter(Ts, worst_pop[:, 2], label="O", color="green", s=1)
+                ax.plot(Ts, worst_fit[:, 0], color="blue", ls="--")
+                ax.plot(Ts, worst_fit[:, 1], color="red", ls="--")
+                ax.plot(Ts, worst_fit[:, 2], color="green", ls="--")
+                ax.grid(True)
+                ax.set_title(f"Worst fit loss: {worst_loss:.3e}")
+                ax.set_xlabel("Time (μs)")
+                ax.set_ylabel("Population")
+                plt.show(fig)
+                print(worst_rates)
+
         transition_rates[transition_rates < min_rate] = 0.0
 
         fig, ax = plt.subplots(figsize=config.figsize)
@@ -589,6 +610,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
         ax.set_xlabel("Time (μs)")
         ax.set_ylabel("Population")
         plt.show(fig)
+        print(worst_rates)
 
         if ac_coeff is None:
             xs = gains
