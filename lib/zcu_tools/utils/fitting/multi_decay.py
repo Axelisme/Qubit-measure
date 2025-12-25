@@ -41,32 +41,48 @@ def guess_initial_params(
     # 1. 數值積分: \int P(dt)
     P_int = cumulative_trapezoid(populations, times, axis=0, initial=0)
 
-    # 2. 差分矩陣: P(t) - P(0)
-    # 為了減少雜訊影響，P0 也可以考慮用平均值或回歸預測，這裡維持邏輯簡潔
+    # 2. 差分: P(t) - P(0)
     P0 = populations[0]
     delta_P = populations - P0
 
-    # 初始機率分布 (直接從數據獲取)
+    # 初始機率分布
     pg0 = max(0.0, min(1.0, P0[0]))
     pe0 = max(0.0, min(1.0, P0[1]))
 
-    # fit T_eg, T_og
-    dP_int_xg = np.stack(
-        [P_int[:, 1] - P_int[:, 0], P_int[:, 2] - P_int[:, 0]], axis=-1
-    )
-    (T_eg, T_og), *_ = nnls(dP_int_xg, delta_P[:, 0])
+    # Variable order in x: [T_ge, T_eg, T_eo, T_oe, T_go, T_og]
+    # Index mapping:        0     1     2     3     4     5
 
-    # fit T_ge, T_oe
-    dP_int_xe = np.stack(
-        [P_int[:, 0] - P_int[:, 1], P_int[:, 2] - P_int[:, 1]], axis=-1
-    )
-    (T_ge, T_oe), *_ = nnls(dP_int_xe, delta_P[:, 1])
+    Ig = P_int[:, 0]
+    Ie = P_int[:, 1]
+    Io = P_int[:, 2]
 
-    # fit T_go, T_eo
-    dP_int_xo = np.stack(
-        [P_int[:, 0] - P_int[:, 2], P_int[:, 1] - P_int[:, 2]], axis=-1
-    )
-    (T_go, T_eo), *_ = nnls(dP_int_xo, delta_P[:, 2])
+    # Zeros array for padding
+    Z = np.zeros_like(Ig)
+
+    # Construct Matrix A for Ax = b
+    # Equation for g: Pg - Pg0 = -Ig(T_ge + T_go) + Ie(T_eg) + Io(T_og)
+    # x coeffs: [-Ig, Ie, 0, 0, -Ig, Io]
+    A_g = np.stack([-Ig, Ie, Z, Z, -Ig, Io], axis=1)
+    b_g = delta_P[:, 0]
+
+    # Equation for e: Pe - Pe0 = Ig(T_ge) + Io(T_oe) - Ie(T_eg + T_eo)
+    # x coeffs: [Ig, -Ie, -Ie, Io, 0, 0]
+    A_e = np.stack([Ig, -Ie, -Ie, Io, Z, Z], axis=1)
+    b_e = delta_P[:, 1]
+
+    # Equation for o: Po - Po0 = Ig(T_go) + Ie(T_eo) - Io(T_og + T_oe)
+    # x coeffs: [Z, Z, Ie, -Io, Ig, -Io]
+    A_o = np.stack([Z, Z, Ie, -Io, Ig, -Io], axis=1)
+    b_o = delta_P[:, 2]
+
+    # Stack all equations
+    A = np.vstack([A_g, A_e, A_o])
+    b = np.concatenate([b_g, b_e, b_o])
+
+    # Solve Ax = b subject to x >= 0
+    x, _ = nnls(A, b)
+
+    T_ge, T_eg, T_eo, T_oe, T_go, T_og = x
 
     return (T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0, pe0)
 
@@ -89,14 +105,13 @@ def fit_transition_rates(
         [max_R, max_R, max_R, max_R, max_R, max_R, 1, 1],
     )
 
-    # pOpt, _ = fit_func(
-    #     times,
-    #     populations.flatten(),
-    #     lambda *args: model_func(*args).flatten(),
-    #     p0_guess,
-    #     bounds=bounds,
-    # )
-    pOpt = p0_guess
+    pOpt, _ = fit_func(
+        times,
+        populations.flatten(),
+        lambda *args: model_func(*args).flatten(),
+        p0_guess,
+        bounds=bounds,
+    )
 
     fit_populations = model_func(times, *pOpt)
 

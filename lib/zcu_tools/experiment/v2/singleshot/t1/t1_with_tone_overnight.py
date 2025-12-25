@@ -37,8 +37,9 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_transition_rates
+from zcu_tools.experiment.v2.utils import round_zcu_time
 
-from .util import calc_populations
+from ..util import calc_populations
 
 T1WithToneOvernightResultType = Tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]
@@ -58,6 +59,14 @@ class T1WithToneOvernightExp(
     AbsExperiment[T1WithToneOvernightResultType, T1WithToneOvernightTaskConfig]
 ):
     def run(
+        self, *args, unifrom: bool = False, **kwargs
+    ) -> T1WithToneOvernightResultType:
+        if unifrom:
+            return self._run_uniform(*args, **kwargs)
+        else:
+            return self._run_non_uniform(*args, **kwargs)
+
+    def _run_uniform(
         self,
         soc,
         soccfg,
@@ -171,6 +180,159 @@ class T1WithToneOvernightExp(
                                 )
                             ),
                             raw2signal_fn=lambda raw: raw[0][0],
+                            result_shape=(len(ts), 2),
+                            dtype=np.float64,
+                        ),
+                    ),
+                ),
+                init_cfg=cfg,
+                update_hook=plot_fn,
+            )
+        plt.close(fig)
+        populations = np.asarray(populations)  # (iters, shots, 2)
+
+        # record last cfg and result
+        self.last_cfg = cfg
+        self.last_result = (iters, ts, populations)
+
+        return iters, ts, populations
+
+    def _run_non_uniform(
+        self,
+        soc,
+        soccfg,
+        cfg: T1WithToneOvernightTaskConfig,
+        g_center: complex,
+        e_center: complex,
+        radius: float,
+        *,
+        num_times: int = 50,
+        fail_retry: int = 3,
+    ) -> T1WithToneOvernightResultType:
+        cfg = deepcopy(cfg)
+
+        assert "sweep" in cfg
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        len_sweep = cfg["sweep"]["length"]
+        del cfg["sweep"]
+
+        iters = np.arange(num_times)
+
+        if isinstance(len_sweep, dict):
+            ts = (
+                np.linspace(
+                    len_sweep["start"] ** (1 / 1.3),
+                    len_sweep["stop"] ** (1 / 1.3),
+                    len_sweep["expts"],
+                )
+                ** 1.3
+            )
+        else:
+            ts = np.asarray(len_sweep)
+        ts = round_zcu_time(ts, soccfg)
+        ts = np.unique(ts)
+
+        def measure_fn(ctx, update_hook):
+            rounds = ctx.cfg.pop("rounds", 1)
+            ctx.cfg["rounds"] = 1
+
+            acc_populations = np.zeros_like(ts, dtype=np.float64)
+            for ir in range(rounds):
+                for i, t1_delay in enumerate(ts):
+                    Pulse.set_param(ctx.cfg["test_pulse"], "length", t1_delay)
+                    raw_i = ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                            Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                            Pulse("test_pulse", ctx.cfg["test_pulse"]),
+                            Readout("readout", ctx.cfg["readout"]),
+                        ],
+                    ).acquire(
+                        soc,
+                        progress=False,
+                        callback=update_hook,
+                        g_center=g_center,
+                        e_center=e_center,
+                        population_radius=radius,
+                    )
+
+                    acc_populations[i] += raw_i[0][0]
+
+                update_hook(ir, acc_populations / (ir + 1))
+
+            return acc_populations / rounds
+
+        fig, axs = make_plot_frame(2, 2, figsize=(12, 6))
+
+        with MultiLivePlotter(
+            fig,
+            dict(
+                plot_2d_g=LivePlotter2D(
+                    "Readout Gain",
+                    "Time (us)",
+                    uniform=False,
+                    existed_axes=[[axs[0][0]]],
+                ),
+                plot_2d_e=LivePlotter2D(
+                    "Readout Gain",
+                    "Time (us)",
+                    uniform=False,
+                    existed_axes=[[axs[1][0]]],
+                ),
+                plot_2d_o=LivePlotter2D(
+                    "Readout Gain",
+                    "Time (us)",
+                    uniform=False,
+                    existed_axes=[[axs[1][1]]],
+                ),
+                plot_1d=LivePlotter1D(
+                    "Time (us)",
+                    "Population",
+                    existed_axes=[[axs[0][1]]],
+                    segment_kwargs=dict(
+                        num_lines=3,
+                        line_kwargs=[
+                            dict(label="Ground"),
+                            dict(label="Excited"),
+                            dict(label="Other"),
+                        ],
+                    ),
+                ),
+            ),
+        ) as viewer:
+
+            def plot_fn(ctx: TaskContextView) -> None:
+                i = ctx.env_dict["repeat_idx"]
+
+                populations = calc_populations(np.asarray(ctx.data))
+
+                viewer.get_plotter("plot_2d_g").update(
+                    iters, ts, populations[..., 0], refresh=False
+                )
+                viewer.get_plotter("plot_2d_e").update(
+                    iters, ts, populations[..., 1], refresh=False
+                )
+                viewer.get_plotter("plot_2d_o").update(
+                    iters, ts, populations[..., 2], refresh=False
+                )
+                viewer.get_plotter("plot_1d").update(
+                    ts, populations[i].T, refresh=False
+                )
+
+                viewer.refresh()
+
+            populations = run_task(
+                task=RepeatOverTime(
+                    name="Iteration",
+                    num_times=num_times,
+                    interval=cfg["interval"],
+                    task=ReTryIfFail(
+                        max_retries=fail_retry,
+                        task=HardTask(
+                            measure_fn=measure_fn,
+                            raw2signal_fn=lambda raw: raw,
                             result_shape=(len(ts), 2),
                             dtype=np.float64,
                         ),
