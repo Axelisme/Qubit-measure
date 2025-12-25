@@ -14,6 +14,7 @@ from zcu_tools.experiment.utils import make_ge_sweep
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
 from zcu_tools.experiment.v2.runner import (
     HardTask,
+    SoftTask,
     TaskConfig,
     TaskContextView,
     run_task,
@@ -28,6 +29,8 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
+
+from .util import plot_classified_result
 
 # (signals)
 GE_ResultType = NDArray[np.complex128]
@@ -52,25 +55,18 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
             warnings.warn("reps will be overwritten by singleshot measurement shots")
         cfg["reps"] = cfg["shots"]
 
-        if "sweep" in cfg:
-            warnings.warn("sweep will be overwritten by singleshot measurement")
-
-        # Create ge sweep: 0 (ground) and full gain (excited)
-        cfg["sweep"] = {"ge": make_ge_sweep()}
-
-        # Set qubit pulse gain from sweep parameter
-        Pulse.set_param(
-            cfg["probe_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
-        )
-
         def measure_fn(ctx: TaskContextView, _):
+            probe_cfg = None
+            if ctx.env_dict["with_probe"]:
+                probe_cfg = ctx.cfg["probe_pulse"]
+
             prog = ModularProgramV2(
                 soccfg,
                 ctx.cfg,
                 modules=[
                     Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                     Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                    Pulse("probe_pulse", ctx.cfg["probe_pulse"]),
+                    Pulse("probe_pulse", probe_cfg),
                     Readout("readout", ctx.cfg["readout"]),
                 ],
             )
@@ -80,27 +76,32 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
             assert acc_buf is not None
 
             length = cast(int, list(prog.ro_chs.values())[0]["length"])
-            avgiq = acc_buf[0] / length  # (reps, *sweep, 1, 2)
+            avgiq = acc_buf[0] / length  # (reps, 1, 2)
 
             return avgiq
 
         def raw2signal_fn(avgiq: NDArray[np.float64]) -> NDArray[np.complex128]:
-            i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, *sweep)
-            signals = np.array(i0 + 1j * q0)  # (reps, *sweep)
-
-            # Swap axes to (*sweep, reps) format: (ge, shots)
-            signals = np.swapaxes(signals, 0, -1)
+            i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, )
+            signals = np.array(i0 + 1j * q0)  # (reps, )
 
             return signals
 
         signals = run_task(
-            task=HardTask(
-                measure_fn=measure_fn,
-                raw2signal_fn=raw2signal_fn,
-                result_shape=(2, cfg["shots"]),
+            task=SoftTask(
+                sweep_name="w/o probe pulse",
+                sweep_values=[False, True],
+                update_cfg_fn=lambda _, ctx, with_probe: ctx.env_dict.update(
+                    with_probe=with_probe
+                ),
+                sub_task=HardTask(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=raw2signal_fn,
+                    result_shape=(cfg["shots"],),
+                ),
             ),
             init_cfg=cfg,
         )
+        signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = cfg
@@ -127,7 +128,7 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
         g_center: complex,
         e_center: complex,
         radius: float,
-        init_populations: NDArray[np.float64],
+        init_pops: NDArray[np.float64],
         result: Optional[GE_ResultType] = None,
     ) -> Tuple[NDArray[np.float64], Figure]:
         if result is None:
@@ -135,41 +136,41 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
         assert result is not None, "no result found"
 
         signals = result
-
         g_signals, e_signals = signals[0], signals[1]
 
-        p_gg = np.mean(np.abs(g_signals - g_center) <= radius)
-        p_ge = np.mean(np.abs(g_signals - e_center) <= radius)
-        p_eg = np.mean(np.abs(e_signals - g_center) <= radius)
-        p_ee = np.mean(np.abs(e_signals - e_center) <= radius)
-        p_go = 1.0 - p_gg - p_ge
-        p_eo = 1.0 - p_eg - p_ee
+        # 1. 取得初始化在 g, e 的群體 (2x2)
+        # init_populations = [[p_gg, p_ge], [p_eg, p_ee]]
+        p_go_init = 1.0 - np.sum(init_pops[0])
+        p_eo_init = 1.0 - np.sum(init_pops[1])
 
-        Q = np.array(
+        # 2. 構建完整的 3x3 初始化矩陣 A
+        A_init = np.array(
             [
-                [p_gg, p_ge, p_go],
-                [p_eg, p_ee, p_eo],
+                [init_pops[0, 0], init_pops[0, 1], p_go_init],
+                [init_pops[1, 0], init_pops[1, 1], p_eo_init],
+                [0.0, 0.0, 1.0],  # assume all initial to O
             ]
         )
 
-        C_ge = np.linalg.solve(init_populations, Q)
-
-        C_ge[C_ge < 0] = 0.0  # avoid negative values due to numerical errors
-        C_ge /= C_ge.sum(axis=1, keepdims=True)  # normalize
-
-        # assume always correctly identify 'O' state
-        confusion_matrix = np.concatenate([C_ge, np.array([[0.0, 0.0, 1.0]])], axis=0)
-
         # plot confusion matrix
-        fig, ax = plt.subplots(figsize=(6, 5))
+        fig, ((ax1, ax4), (ax2, ax3)) = plt.subplots(2, 2, figsize=(8, 8))
 
-        im = ax.imshow(confusion_matrix, cmap="Blues", vmin=0, vmax=1)
-        fig.colorbar(im, ax=ax)
+        n_gg, n_ge, n_go = plot_classified_result(
+            ax1, g_signals, g_center, e_center, radius
+        )
+        n_eg, n_ee, n_eo = plot_classified_result(
+            ax2, e_signals, g_center, e_center, radius
+        )
+        ax1.set_title(f"G: {n_gg:.1%}, E: {n_ge:.1%}, O: {n_go:.1%}")
+        ax2.set_title(f"G: {n_eg:.1%}, E: {n_ee:.1%}, O: {n_eo:.1%}")
 
-        for i in range(confusion_matrix.shape[0]):
-            for j in range(confusion_matrix.shape[1]):
-                val = confusion_matrix[i, j]
-                ax.text(
+        im = ax4.imshow(A_init, cmap="Blues", vmin=0, vmax=1)
+        fig.colorbar(im, ax=ax4)
+
+        for i in range(A_init.shape[0]):
+            for j in range(A_init.shape[1]):
+                val = A_init[i, j]
+                ax4.text(
                     j,
                     i,
                     f"{val:.2%}",
@@ -178,13 +179,52 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
                     color="white" if val > 0.5 else "black",
                 )
 
-        ax.set_xticks([0, 1, 2])
-        ax.set_yticks([0, 1, 2])
-        ax.set_xticklabels(["G", "E", "O"])
-        ax.set_yticklabels(["G", "E", "O"])
-        ax.set_xlabel("Measured State")
-        ax.set_ylabel("Prepared State")
-        ax.set_title("Confusion Matrix")
+        ax4.set_xticks([0, 1, 2])
+        ax4.set_yticks([0, 1, 2])
+        ax4.set_xticklabels(["G", "E", "O"])
+        ax4.set_yticklabels(["G", "E", "O"])
+        ax4.set_xlabel("Actual State")
+        ax4.set_ylabel("Prepared State")
+        ax4.set_title("Initial Populations")
+
+        Q = np.array(
+            [
+                [n_gg, n_ge, n_go],
+                [n_eg, n_ee, n_eo],
+                [0.0, 0.0, 1.0],  # assume all initial to O
+            ]
+        )
+
+        # 4. 求解 C (此時 A 是 3x3 方陣，可以使用 solve)
+        # 方程式：Q = A @ C  => C 代表「真實狀態轉移到測量狀態」的機率
+        confusion_matrix = np.linalg.solve(A_init, Q)
+
+        # 5. 數值修正與歸一化
+        confusion_matrix[confusion_matrix < 0] = 0.0
+        confusion_matrix /= confusion_matrix.sum(axis=1, keepdims=True)
+
+        im = ax3.imshow(confusion_matrix, cmap="Blues", vmin=0, vmax=1)
+        fig.colorbar(im, ax=ax3)
+
+        for i in range(confusion_matrix.shape[0]):
+            for j in range(confusion_matrix.shape[1]):
+                val = confusion_matrix[i, j]
+                ax3.text(
+                    j,
+                    i,
+                    f"{val:.2%}",
+                    ha="center",
+                    va="center",
+                    color="white" if val > 0.5 else "black",
+                )
+
+        ax3.set_xticks([0, 1, 2])
+        ax3.set_yticks([0, 1, 2])
+        ax3.set_xticklabels(["G", "E", "O"])
+        ax3.set_yticklabels(["G", "E", "O"])
+        ax3.set_xlabel("Measured State")
+        ax3.set_ylabel("Actual State")
+        ax3.set_title("Confusion Matrix")
 
         return confusion_matrix, fig
 

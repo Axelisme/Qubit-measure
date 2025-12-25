@@ -1,12 +1,15 @@
 from typing import List, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 import scipy.constants as sc
 from scipy.optimize import curve_fit
 
 
-def boltzmann_distribution(freq: float, eff_T: float) -> float:
-    exp_term = np.exp(-1e6 * sc.h * freq / (sc.k * 1e-3 * eff_T))
+def boltzmann_distribution(
+    freq_MHz: NDArray[np.float64], eff_T: float
+) -> NDArray[np.float64]:
+    exp_term = np.exp(-1e6 * sc.h * freq_MHz / (sc.k * 1e-3 * eff_T))
     return exp_term / np.sum(exp_term)
 
 

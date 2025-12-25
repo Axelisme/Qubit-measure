@@ -306,7 +306,7 @@ class T1WithToneExp(AbsExperiment):
         real_signals = t1_signal2real(signals)
 
         if dual_exp:
-            t1, t1err, t1b, t1berr, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
+            t1b, t1berr, t1, t1err, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
         else:
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
 
