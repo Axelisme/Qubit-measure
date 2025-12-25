@@ -29,6 +29,8 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
+from .util import plot_classified_result
+
 # (signals)
 CheckResultType = NDArray[np.complex128]
 
@@ -36,7 +38,7 @@ CheckResultType = NDArray[np.complex128]
 class CheckTaskConfig(TaskConfig, TwoToneProgramCfg):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
-    probe_pulse: PulseCfg
+    probe_pulse: NotRequired[PulseCfg]
     readout: ReadoutCfg
 
     shots: int
@@ -62,7 +64,7 @@ class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
                 modules=[
                     Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                     Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                    Pulse("probe_pulse", ctx.cfg["probe_pulse"]),
+                    Pulse("probe_pulse", ctx.cfg.get("probe_pulse")),
                     Readout("readout", ctx.cfg["readout"]),
                 ],
             )
@@ -108,88 +110,9 @@ class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
 
         signals = result
 
-        # Classify shots
-        dists_g = np.abs(signals - g_center)
-        dists_e = np.abs(signals - e_center)
-        mask_g = dists_g < radius
-        mask_e = dists_e < radius
-        mask_o = ~(mask_g | mask_e)
-
-        o_center_real = np.median(signals[mask_o].real)
-        o_center_imag = np.median(signals[mask_o].imag)
-        o_center = o_center_real + 1j * o_center_imag
-
-        ng = np.sum(mask_g) / signals.shape[0]
-        ne = np.sum(mask_e) / signals.shape[0]
-        no = np.sum(mask_o) / signals.shape[0]
-
         fig, ax = plt.subplots(figsize=(6, 6))
 
-        colors = np.full(signals.shape, "gray", dtype=object)
-        colors[mask_g] = "blue"
-        colors[mask_e] = "red"
-        colors[mask_o] = "green"
-
-        # plot shots
-        num_sample = signals.shape[0]
-        downsample_num = min(50000, num_sample)
-        downsample_mask = np.arange(0, num_sample, max(1, num_sample // downsample_num))
-        downsample_signals = signals[downsample_mask]
-        ax.scatter(
-            downsample_signals.real,
-            downsample_signals.imag,
-            c=colors[downsample_mask].tolist(),
-            s=1,
-            alpha=0.5,
-        )
-
-        # plot centers with circle
-        plt_params = dict(linestyle=":", color="k", marker="o", markersize=5)
-        ax.plot(
-            g_center.real,
-            g_center.imag,
-            markerfacecolor="b",
-            label="Ground",
-            **plt_params,  # type: ignore
-        )
-        ax.plot(
-            e_center.real,
-            e_center.imag,
-            markerfacecolor="r",
-            label="Excited",
-            **plt_params,  # type: ignore
-        )
-        ax.plot(
-            o_center.real,
-            o_center.imag,
-            markerfacecolor="g",
-            label="Other",
-            **plt_params,  # type: ignore
-        )
-        ax.add_patch(
-            Circle(
-                (g_center.real, g_center.imag),
-                radius,
-                color="b",
-                fill=False,
-                linestyle="--",
-            )
-        )
-        ax.add_patch(
-            Circle(
-                (e_center.real, e_center.imag),
-                radius,
-                color="r",
-                fill=False,
-                linestyle="--",
-            )
-        )
-
-        ax.grid(True)
-        ax.axis("equal")
-        ax.legend()
-        ax.set_xlabel("I value (a.u.)")
-        ax.set_ylabel("Q value (a.u.)")
+        ng, ne, no = plot_classified_result(ax, signals, g_center, e_center, radius)
 
         ax.set_title(
             f"Population: Ground: {ng:.1%}, Excited: {ne:.1%}, Other: {no:.1%}"

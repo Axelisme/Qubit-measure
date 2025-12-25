@@ -65,7 +65,6 @@ def fit_func(
     init_p: Optional[Sequence[Optional[float]]] = None,
     bounds: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
     fixedparams: Optional[Sequence[Optional[float]]] = None,
-    estimate_sigma: bool = True,
     **kwargs,
 ) -> Tuple[List[float], NDArray]:
     if fixedparams is not None and any([p is not None for p in fixedparams]):
@@ -77,12 +76,6 @@ def fit_func(
         fitfunc, init_p, bounds = with_fixed_params(
             fitfunc, init_p, bounds, fixedparams
         )
-
-    # estimate the sigma
-    if estimate_sigma:
-        sigma = np.std(np.diff(ydata)) / np.sqrt(2)
-        kwargs.setdefault("sigma", np.full_like(ydata, sigma))
-        kwargs.setdefault("absolute_sigma", True)
 
     try:
         pOpt, pCov = sp.optimize.curve_fit(

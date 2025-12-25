@@ -33,27 +33,36 @@ def model_func(t, T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0, pe0) -> NDArray[np.fl
 def guess_initial_params(
     populations: NDArray[np.float64], times: NDArray[np.float64]
 ) -> Tuple[float, ...]:
+    """
+    使用積分法最小平方估計三能階系統速率常數。
+    假設 populations 欄位順序為: [Ground (g), Excited (e), Other (o)]
+    """
+    # 1. 數值積分: \int P(dt)
     X_integrated = cumulative_trapezoid(populations, times, axis=0, initial=0)
+
+    # 2. 差分矩陣: P(t) - P(0)
+    # 為了減少雜訊影響，P0 也可以考慮用平均值或回歸預測，這裡維持邏輯簡潔
     P0 = populations[0]
     Y_diff = populations - P0
 
-    solution, *_ = np.linalg.lstsq(X_integrated, Y_diff, rcond=None)
-    M_estimated = solution.T
+    # 3. 求解線性系統: Y_diff = X_integrated @ M.T
+    # 解出的 solution (M.T) 形狀為 (3, 3)
+    M_T_estimated, *_ = np.linalg.lstsq(X_integrated, Y_diff, rcond=None)
+    M_estimated = M_T_estimated.T
 
-    diagonals = np.diag(M_estimated).copy()
-    M_estimated[M_estimated < 0] = 0
-    np.fill_diagonal(M_estimated, diagonals)
-    for i in range(3):
-        M_estimated[i, i] = -(np.sum(M_estimated[:, i]) - M_estimated[i, i])
+    # 4. 提取速率常數並應用物理約束 (速率必須 >= 0)
+    # 索引定義: M[to_index, from_index]
+    # 假設順序: 0:g, 1:e, 2:o
+    T_ge = max(0.0, M_estimated[1, 0])  # g -> e
+    T_eg = max(0.0, M_estimated[0, 1])  # e -> g
+    T_eo = max(0.0, M_estimated[2, 1])  # e -> o
+    T_oe = max(0.0, M_estimated[1, 2])  # o -> e
+    T_go = max(0.0, M_estimated[0, 2])  # o -> g
+    T_og = max(0.0, M_estimated[2, 0])  # g -> o
 
-    T_ge = M_estimated[1, 0]
-    T_eg = M_estimated[0, 1]
-    T_eo = M_estimated[2, 1]
-    T_oe = M_estimated[1, 2]
-    T_go = M_estimated[0, 2]
-    T_og = M_estimated[2, 0]
-    pg0 = P0[0]
-    pe0 = P0[1]
+    # 5. 初始機率分布 (直接從數據獲取)
+    pg0 = max(0.0, min(1.0, P0[0]))
+    pe0 = max(0.0, min(1.0, P0[1]))
 
     return (T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0, pe0)
 
@@ -76,13 +85,14 @@ def fit_transition_rates(
         [max_R, max_R, max_R, max_R, max_R, max_R, 1, 1],
     )
 
-    pOpt, _ = fit_func(
-        times,
-        populations.flatten(),
-        lambda *args: model_func(*args).flatten(),
-        p0_guess,
-        bounds=bounds,
-    )
+    # pOpt, _ = fit_func(
+    #     times,
+    #     populations.flatten(),
+    #     lambda *args: model_func(*args).flatten(),
+    #     p0_guess,
+    #     bounds=bounds,
+    # )
+    pOpt = p0_guess
 
     fit_populations = model_func(times, *pOpt)
 

@@ -56,10 +56,14 @@ class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
 
         lens = sweep2array(cfg["sweep"]["length"])  # predicted pulse lengths
 
-        # Attach length sweep parameter to both reset pulses
-        Reset.set_param(
-            cfg["tested_reset"], "length", sweep2param("length", cfg["sweep"]["length"])
-        )
+        pulse1_cfg = cfg["tested_reset"]["pulse1_cfg"]
+        pulse2_cfg = cfg["tested_reset"]["pulse2_cfg"]
+
+        len_diff = pulse2_cfg["waveform"]["length"] - pulse1_cfg["waveform"]["length"]
+        len1_span = sweep2param("length", cfg["sweep"]["length"])
+
+        Pulse.set_param(pulse1_cfg, "length", len1_span)
+        Pulse.set_param(pulse2_cfg, "length", len1_span + len_diff)
 
         with LivePlotter1D("Length (us)", "Amplitude") as viewer:
             signals = run_task(

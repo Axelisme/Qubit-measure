@@ -152,7 +152,8 @@ def fitting_ge_and_plot(
     numbins: Union[int, str] = "auto",
     logscale: bool = False,
     length_ratio: Optional[float] = None,
-    init_p0: Optional[float] = None,
+    init_p0_g: Optional[float] = None,
+    init_p0_e: Optional[float] = None,
     avg_p: Optional[float] = None,
     align_t1: bool = True,
 ) -> Tuple[float, NDArray, Dict, Figure]:
@@ -178,27 +179,28 @@ def fitting_ge_and_plot(
     axs[0, 1].hist(xs, bins=bins, weights=g_pdfs, color="b", alpha=0.5)
     axs[1, 1].hist(xs, bins=bins, weights=e_pdfs, color="r", alpha=0.5)
 
-    fixedparams = [None, None, None, init_p0, avg_p, length_ratio]
+    fixedparams = [None, None, None, init_p0_g, init_p0_e, avg_p, length_ratio]
     ge_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
-    sg, se, s, p0, p_avg, length_ratio = ge_params
-    (p0_g, l_ratio_g), _ = fit_singleshot_p0(
-        xs, g_pdfs, init_p0=p0, ge_params=ge_params, fit_length_ratio=not align_t1
+    sg, se, s, p0_gg, p0_ge, p_avg, length_ratio = ge_params
+    (p0_gg, p0_ge, l_ratio_g), _ = fit_singleshot_p0(
+        xs, g_pdfs, p0_gg, p0_ge, ge_params=ge_params, fit_length_ratio=not align_t1
     )
-    (p0_e, l_ratio_e), _ = fit_singleshot_p0(
-        xs, e_pdfs, init_p0=1.0 - p0, ge_params=ge_params, fit_length_ratio=not align_t1
+    (p0_eg, p0_ee, l_ratio_e), _ = fit_singleshot_p0(
+        xs, e_pdfs, p0_ge, p0_gg, ge_params=ge_params, fit_length_ratio=not align_t1
     )
-    fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_g, p_avg, l_ratio_g)
-    fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_e, p_avg, l_ratio_e)
 
-    n_gg = 1.0 - p0_g
-    n_ge = p0_g
-    n_ee = p0_e
-    n_eg = 1.0 - p0_e
+    p0_go = 1 - p0_gg - p0_ge
+    p0_eo = 1 - p0_eg - p0_ee
 
-    gg_fit = n_gg * gauss_func(xs, sg, s)
-    ge_fit = n_ge * gauss_func(xs, se, s)
-    eg_fit = n_eg * gauss_func(xs, sg, s)
-    ee_fit = n_ee * gauss_func(xs, se, s)
+    fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_gg, p0_ge, p_avg, l_ratio_g)
+    fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_eg, p0_ee, p_avg, l_ratio_e)
+    gg_fit = p0_gg * gauss_func(xs, sg, s)
+    ge_fit = p0_ge * gauss_func(xs, se, s)
+    eg_fit = p0_eg * gauss_func(xs, sg, s)
+    ee_fit = p0_ee * gauss_func(xs, se, s)
+
+    residual_g = np.clip(g_pdfs - fit_g_pdfs, 0.0, None)
+    residual_e = np.clip(e_pdfs - fit_e_pdfs, 0.0, None)
 
     rotated_g_center = sg + 1j * np.median(Qg)
     rotated_e_center = se + 1j * np.median(Qe)
@@ -222,17 +224,19 @@ def fitting_ge_and_plot(
 
     axs[0, 1].plot(xs, fit_g_pdfs, "k-", label="total")
     if length_ratio != 0.0:
-        axs[0, 1].plot(xs, gg_fit + ge_fit, "k--", alpha=0.3, label="ideal total")
-    axs[0, 1].plot(xs, gg_fit, "b-", alpha=0.3)
-    axs[0, 1].plot(xs, ge_fit, "r--", alpha=0.3)
-    axs[0, 1].set_title(f"{n_gg:.1%} / {n_ge:.1%}", fontsize=14)
+        axs[0, 1].plot(xs, gg_fit + ge_fit, "k--", alpha=0.5, label="ideal total")
+    axs[0, 1].plot(xs, gg_fit, "b-", alpha=0.4, label="ground")
+    axs[0, 1].plot(xs, ge_fit, "r--", alpha=0.4, label="excited")
+    axs[0, 1].plot(xs, residual_g, "g--", alpha=0.5, label="other")
+    axs[0, 1].set_title(f"{p0_gg:.1%} / {p0_ge:.1%} / {p0_go:.1%}", fontsize=14)
     axs[0, 1].legend()
     axs[1, 1].plot(xs, fit_e_pdfs, "k-", label="total")
     if length_ratio != 0.0:
-        axs[1, 1].plot(xs, eg_fit + ee_fit, "k--", alpha=0.3, label="ideal total")
-    axs[1, 1].plot(xs, ee_fit, "r-", alpha=0.3)
-    axs[1, 1].plot(xs, eg_fit, "b--", alpha=0.3)
-    axs[1, 1].set_title(f"{n_eg:.1%} / {n_ee:.1%}", fontsize=14)
+        axs[1, 1].plot(xs, eg_fit + ee_fit, "k--", alpha=0.5, label="ideal total")
+    axs[1, 1].plot(xs, ee_fit, "r-", alpha=0.4, label="excited")
+    axs[1, 1].plot(xs, eg_fit, "b--", alpha=0.4, label="ground")
+    axs[1, 1].plot(xs, residual_e, "g--", alpha=0.5, label="other")
+    axs[1, 1].set_title(f"{p0_eg:.1%} / {p0_ee:.1%} / {p0_eo:.1%}", fontsize=14)
     axs[1, 1].legend()
 
     axs[1, 0].plot(xs, fit_g_pdfs, "b-", label="g")
@@ -268,14 +272,16 @@ def fitting_ge_and_plot(
         fid,
         np.array(
             [
-                [n_gg, n_ge],
-                [n_eg, n_ee],
+                [p0_gg, p0_ge],
+                [p0_eg, p0_ee],
             ]
         ),
         {
             "ge_params": ge_params,
-            "p0_g": p0_g,
-            "p0_e": p0_e,
+            "p0_gg": p0_gg,
+            "p0_ge": p0_ge,
+            "p0_eg": p0_eg,
+            "p0_ee": p0_ee,
             "s": s,
             "length_ratio_g": l_ratio_g,
             "length_ratio_e": l_ratio_e,

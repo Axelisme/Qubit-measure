@@ -65,7 +65,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
         with LivePlotter2DwithLine(
             "Frequency1 (MHz)",
             "Frequency2 (MHz)",
-            line_axis=1,
+            line_axis=0,
         ) as viewer:
             signals = run_task(
                 task=SoftTask(
