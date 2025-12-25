@@ -57,8 +57,8 @@ def guess_initial_params(
     T_eg = max(0.0, M_estimated[0, 1])  # e -> g
     T_eo = max(0.0, M_estimated[2, 1])  # e -> o
     T_oe = max(0.0, M_estimated[1, 2])  # o -> e
-    T_go = max(0.0, M_estimated[0, 2])  # o -> g
-    T_og = max(0.0, M_estimated[2, 0])  # g -> o
+    T_go = max(0.0, M_estimated[2, 0])  # g -> o
+    T_og = max(0.0, M_estimated[0, 2])  # o -> g
 
     # 5. 初始機率分布 (直接從數據獲取)
     pg0 = max(0.0, min(1.0, P0[0]))
