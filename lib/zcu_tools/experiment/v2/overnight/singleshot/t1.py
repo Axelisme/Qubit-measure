@@ -345,6 +345,7 @@ class T1WithToneTask(
             measure_fn=measure_t1_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(len_sweep["expts"], 2),
+            dtype=np.float64,
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
