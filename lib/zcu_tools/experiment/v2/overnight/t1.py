@@ -170,8 +170,35 @@ class T1Task(
     def cleanup(self) -> None:
         self.task.cleanup()
 
-    def analyze(self, iters, result, fig: Figure, dual_exp: bool = False) -> None:
-        raise NotImplementedError("T1Task.analyze is not implemented yet.")
+    def analyze(self, iters, result, fig: Figure) -> None:
+        Ts = result["lengths"][0]  # (Ts, )
+        signals = np.real(result["signals"])  # (iters, Ts)
+
+        real_signals = rotate2real(signals).real
+
+        t1s = np.zeros((len(iters),), dtype=np.float64)
+        t1errs = np.zeros((len(iters),), dtype=np.float64)
+        for i, sig in enumerate(real_signals):
+            t1, t1err, *_ = fit_decay(Ts, sig)
+            t1s[i] = t1
+            t1errs[i] = t1err
+
+        ax1 = fig.add_subplot(1, 2, 1)
+        ax1.imshow(
+            real_signals.T,
+            aspect="auto",
+            interpolation="none",
+            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
+        )
+        ax1.set_xlabel("Iteration")
+        ax1.set_ylabel("Time (us)")
+
+        ax2 = fig.add_subplot(1, 2, 2)
+        ax2.errorbar(iters, t1s, yerr=t1errs, fmt="o")
+        ax2.set_xlabel("Iteration")
+        ax2.set_ylabel("T1 (us)")
+
+        fig.tight_layout()
 
 
 class T1WithToneCfg(TaskConfig, ModularProgramCfg):

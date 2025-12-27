@@ -93,7 +93,12 @@ def fit_transition_rates(
     populations: NDArray[np.float64],
     p0_guess: Optional[Tuple[float, ...]] = None,
 ) -> Tuple[Tuple[float, ...], NDArray[np.float64], Tuple[float, ...]]:
-    """fitted_rates: (T_ge, T_eg, T_eo, T_oe, T_go, T_og)"""
+    """
+    Returns:
+        fitted_rates: (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
+        fit_populations: Fitted populations over time
+        fitted_params: All fitted parameters including initial populations
+    """
 
     populations = gaussian_filter1d(populations, sigma=1, axis=0)
 
