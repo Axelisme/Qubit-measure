@@ -80,11 +80,11 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         if isinstance(len_sweep, dict):
             ts = (
                 np.linspace(
-                    len_sweep["start"] ** (1 / 1.3),
-                    len_sweep["stop"] ** (1 / 1.3),
+                    len_sweep["start"] ** (1 / 2),
+                    len_sweep["stop"] ** (1 / 2),
                     len_sweep["expts"],
                 )
-                ** 1.3
+                ** 2
             )
         else:
             ts = np.asarray(len_sweep)
@@ -95,7 +95,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
             rounds = ctx.cfg.pop("rounds", 1)
             ctx.cfg["rounds"] = 1
 
-            acc_populations = np.zeros_like(ts, dtype=np.float64)
+            acc_populations = np.zeros((len(ts), 2), dtype=np.float64)
             for ir in range(rounds):
                 for i, t1_delay in enumerate(ts):
                     Pulse.set_param(ctx.cfg["test_pulse"], "length", t1_delay)
@@ -111,7 +111,6 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
                     ).acquire(
                         soc,
                         progress=False,
-                        callback=update_hook,
                         g_center=g_center,
                         e_center=e_center,
                         population_radius=radius,
@@ -371,7 +370,6 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         min_rate = 0.1 / np.max(Ts)
 
         worst_loss = 0.0
-        worst_rates = None
         worst_pop = None
         worst_fit = None
 
@@ -384,26 +382,8 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
             loss = np.mean(np.abs(fit_pop - pop))
             if loss > worst_loss:
                 worst_loss = loss
-                worst_rates = rates
                 worst_pop = pop
                 worst_fit = fit_pop
-
-                fig, ax = plt.subplots(figsize=config.figsize)
-                assert isinstance(fig, Figure)
-
-                assert worst_pop is not None and worst_fit is not None
-                ax.scatter(Ts, worst_pop[:, 0], label="G", color="blue", s=1)
-                ax.scatter(Ts, worst_pop[:, 1], label="E", color="red", s=1)
-                ax.scatter(Ts, worst_pop[:, 2], label="O", color="green", s=1)
-                ax.plot(Ts, worst_fit[:, 0], color="blue", ls="--")
-                ax.plot(Ts, worst_fit[:, 1], color="red", ls="--")
-                ax.plot(Ts, worst_fit[:, 2], color="green", ls="--")
-                ax.grid(True)
-                ax.set_title(f"Worst fit loss: {worst_loss:.3e}")
-                ax.set_xlabel("Time (μs)")
-                ax.set_ylabel("Population")
-                plt.show(fig)
-                print(worst_rates)
 
         transition_rates[transition_rates < min_rate] = 0.0
 
@@ -422,7 +402,6 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         ax.set_xlabel("Time (μs)")
         ax.set_ylabel("Population")
         plt.show(fig)
-        print(worst_rates)
 
         if ac_coeff is None:
             xs = gains
@@ -534,7 +513,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
         gains = gains.astype(np.float64)
         Ts = Ts.astype(np.float64)
-        populations = populations.astype(np.float64)
+        populations = np.real(populations).astype(np.float64)
 
         self.last_cfg = None
         self.last_result = (gains, Ts, populations)

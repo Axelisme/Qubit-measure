@@ -47,6 +47,8 @@ class Plot2DSegment(AbsSegment):
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
         title: Optional[str] = None,
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None,
     ) -> None:
         if self.im is None:
             raise RuntimeError("Image not initialized.")
@@ -104,6 +106,8 @@ class PlotNonUniform2DSegment(AbsSegment):
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
         title: Optional[str] = None,
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None,
     ) -> None:
         if self.im is None:
             raise RuntimeError("Image not initialized.")

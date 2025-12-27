@@ -17,6 +17,7 @@ def plot_classified_result(
     g_center: complex,
     e_center: complex,
     radius: float,
+    max_point: int = 5000,
 ) -> Tuple[float, float, float]:
     # Classify shots
     dists_g = np.abs(signals - g_center)
@@ -32,7 +33,7 @@ def plot_classified_result(
 
     # plot shots
     num_sample = signals.shape[0]
-    downsample_num = min(5000, num_sample)
+    downsample_num = min(max_point, num_sample)
     downsample_mask = np.arange(0, num_sample, max(1, num_sample // downsample_num))
     downsample_signals = signals[downsample_mask]
     ax.scatter(

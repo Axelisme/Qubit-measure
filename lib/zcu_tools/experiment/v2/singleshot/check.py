@@ -103,6 +103,7 @@ class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
         e_center: complex,
         radius: float,
         result: Optional[CheckResultType] = None,
+        max_point: int = 5000,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -112,7 +113,9 @@ class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
 
         fig, ax = plt.subplots(figsize=(6, 6))
 
-        ng, ne, no = plot_classified_result(ax, signals, g_center, e_center, radius)
+        ng, ne, no = plot_classified_result(
+            ax, signals, g_center, e_center, radius, max_point=max_point
+        )
 
         ax.set_title(
             f"Population: Ground: {ng:.1%}, Excited: {ne:.1%}, Other: {no:.1%}"

@@ -35,6 +35,8 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         ys: NDArray[np.float64],
         signals: NDArray[np.float64],
         title: Optional[str] = None,
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None,
         refresh: bool = True,
     ) -> None:
         if self.disable:
@@ -44,7 +46,7 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         segment = self.get_segment()
 
         with self.update_lock:
-            segment.update(ax, xs, ys, signals, title)
+            segment.update(ax, xs, ys, signals, title, vmin, vmax)
             if refresh:
                 self._refresh_while_lock()
 

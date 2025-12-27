@@ -109,7 +109,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
             rounds = ctx.cfg.pop("rounds", 1)
             ctx.cfg["rounds"] = 1
 
-            acc_populations = np.zeros_like(ts, dtype=np.float64)
+            acc_populations = np.zeros((len(ts), 2), dtype=np.float64)
             for ir in range(rounds):
                 for i, t1_delay in enumerate(ts):
                     raw_i = ModularProgramV2(
@@ -118,13 +118,12 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
                         modules=[
                             Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
                             Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                            Delay(name="t1_delay", delay=t1_delay),
+                            Delay("t1_delay", delay=t1_delay),
                             Readout("readout", ctx.cfg["readout"]),
                         ],
                     ).acquire(
                         soc,
                         progress=False,
-                        callback=update_hook,
                         g_center=g_center,
                         e_center=e_center,
                         population_radius=radius,

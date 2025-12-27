@@ -164,7 +164,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
             rounds = ctx.cfg.pop("rounds", 1)
             ctx.cfg["rounds"] = 1
 
-            acc_populations = np.zeros_like(ts, dtype=np.float64)
+            acc_populations = np.zeros((len(ts), 2), dtype=np.float64)
             for ir in range(rounds):
                 for i, t1_delay in enumerate(ts):
                     Pulse.set_param(ctx.cfg["test_pulse"], "length", t1_delay)
@@ -180,7 +180,6 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
                     ).acquire(
                         soc,
                         progress=False,
-                        callback=update_hook,
                         g_center=g_center,
                         e_center=e_center,
                         population_radius=radius,
