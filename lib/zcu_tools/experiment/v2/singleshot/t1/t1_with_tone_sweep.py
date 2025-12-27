@@ -10,6 +10,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 from typing_extensions import NotRequired
+from scipy.ndimage import gaussian_filter
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
@@ -359,6 +360,8 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         valid_mask = np.all(np.isfinite(populations), axis=(1, 2))
         gains = gains[valid_mask]
         populations = populations[valid_mask]
+
+        populations = gaussian_filter(populations, sigma=0.5, axes=(0, 1))
 
         populations = calc_populations(populations)
 

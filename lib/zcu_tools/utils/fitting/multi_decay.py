@@ -3,7 +3,6 @@ from typing import Tuple, Optional
 from numpy.typing import NDArray
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import nnls
-from scipy.ndimage import gaussian_filter1d
 
 from .base import fit_func
 
@@ -94,8 +93,6 @@ def fit_transition_rates(
     p0_guess: Optional[Tuple[float, ...]] = None,
 ) -> Tuple[Tuple[float, ...], NDArray[np.float64], Tuple[float, ...]]:
     """fitted_rates: (T_ge, T_eg, T_eo, T_oe, T_go, T_og)"""
-
-    populations = gaussian_filter1d(populations, sigma=1, axis=0)
 
     if p0_guess is None:
         p0_guess = guess_initial_params(populations, times)

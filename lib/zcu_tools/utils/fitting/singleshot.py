@@ -66,7 +66,7 @@ def calc_population_pdf(
     norm_g_f = calc_noise_f((xs - sg) / (se - sg), rg, re, norm_s)
     norm_e_f = calc_noise_f((xs - se) / (sg - se), re, rg, norm_s)
     norm_f = p0_g * norm_g_f + p0_e * norm_e_f
-    return norm_f / np.sum(norm_f)
+    return norm_f / np.sum(norm_f) * (p0_g + p0_e)
 
 
 def gauss_func(xs: NDArray[np.float64], x_c: float, s: float) -> NDArray[np.float64]:
@@ -198,19 +198,14 @@ def fit_singleshot_p0(
 ):
     sg, se, s, _, _, p_avg, length_ratio = ge_params
 
-    init_p0_total = init_p0_g + init_p0_e
-
     def calc_pdf(xs, p0_g, p0_e, length_ratio):
-        p0_total = p0_g + p0_e
-        p0_g *= init_p0_total / p0_total
-        p0_e *= init_p0_total / p0_total
         return calc_population_pdf(xs, sg, se, s, p0_g, p0_e, p_avg, length_ratio)
 
     fixedparams: List[Optional[float]] = [None, None, None]
     if not fit_length_ratio:
         fixedparams[2] = length_ratio
 
-    weights = gauss_func(xs, sg, s) + gauss_func(xs, se, s)
+    weights = init_p0_g * gauss_func(xs, sg, s) + init_p0_e * gauss_func(xs, se, s)
     sigmas = 1 / np.sqrt(weights)
 
     pOpt, pCov = fit_func(
@@ -225,9 +220,5 @@ def fit_singleshot_p0(
     pOpt = cast(Tuple[float, float, float], pOpt)
 
     p0_g, p0_e, length_ratio = pOpt
-
-    p0_total = p0_g + p0_e
-    p0_g *= init_p0_total / p0_total
-    p0_e *= init_p0_total / p0_total
 
     return (p0_g, p0_e, length_ratio), pCov
