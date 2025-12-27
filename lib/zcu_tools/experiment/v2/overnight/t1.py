@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.figure import Figure
 from typing_extensions import Callable, Dict, List, NotRequired, TypedDict, cast
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -28,6 +29,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.process import rotate2real
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.fitting import fit_decay, fit_dual_decay, expfunc
 
 from .executor import MeasurementTask, T_RootResult
 
@@ -167,6 +169,9 @@ class T1Task(
 
     def cleanup(self) -> None:
         self.task.cleanup()
+
+    def analyze(self, iters, result, fig: Figure, dual_exp: bool = False) -> None:
+        raise NotImplementedError("T1Task.analyze is not implemented yet.")
 
 
 class T1WithToneCfg(TaskConfig, ModularProgramCfg):

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.figure import Figure
 from typing_extensions import NotRequired, List, Dict, Callable, TypedDict, cast
 
 from zcu_tools.program import SweepCfg
@@ -25,6 +26,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.fitting.multi_decay import fit_transition_rates
 
 from ..executor import MeasurementTask, T_RootResult
 from .util import calc_populations
@@ -230,6 +232,61 @@ class T1Task(
 
     def cleanup(self) -> None:
         self.task.cleanup()
+
+    def analyze(self, iters, result, fig: Figure) -> None:
+        Ts = result["lengths"][0]  # (Ts, )
+        populations = result["populations"]  # (iters, Ts, 2)
+
+        populations = populations.astype(np.float64)
+
+        populations = calc_populations(populations)  # (iters, Ts, 3)
+
+        rates = np.zeros((len(iters), 6), dtype=np.float64)
+        for i, pop in enumerate(populations):
+            rate, *_ = fit_transition_rates(Ts, pop)
+            rates[i] = rate
+
+        grid = fig.add_gridspec(1, 4)
+        ax_g = fig.add_subplot(grid[0, 0])
+        ax_e = fig.add_subplot(grid[0, 1])
+        ax_o = fig.add_subplot(grid[0, 2])
+        ax_t1 = fig.add_subplot(grid[0, 3])
+
+        ax_g.imshow(
+            populations[..., 0].T,
+            aspect="auto",
+            interpolation="none",
+            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
+        )
+        ax_g.set_title("Ground")
+        ax_g.set_xlabel("Iteration")
+        ax_g.set_ylabel("Time (us)")
+
+        ax_e.imshow(
+            populations[..., 1].T,
+            aspect="auto",
+            interpolation="none",
+            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
+        )
+        ax_e.set_title("Excited")
+        ax_e.set_xlabel("Iteration")
+        ax_e.set_ylabel("Time (us)")
+
+        ax_o.imshow(
+            populations[..., 2].T,
+            aspect="auto",
+            interpolation="none",
+            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
+        )
+        ax_o.set_title("Other")
+        ax_o.set_xlabel("Iteration")
+        ax_o.set_ylabel("Time (us)")
+
+        rate_names = ["T_ge", "T_eg", "T_eo", "T_oe", "T_go", "T_og"]
+        for i, name in enumerate(rate_names):
+            ax_t1.scatter(iters, rates[:, i], label=name, s=5)
+
+        fig.tight_layout()
 
 
 class T1WithToneCfg(TaskConfig, ModularProgramCfg):

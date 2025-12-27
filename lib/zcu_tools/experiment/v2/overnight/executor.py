@@ -24,7 +24,6 @@ from zcu_tools.experiment.v2.runner import (
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import AbsLivePlotter, MultiLivePlotter, make_plot_frame
-from zcu_tools.utils.func_tools import MinIntervalFunc
 
 T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlotter])
 
@@ -61,6 +60,8 @@ class MeasurementTask(
     ) -> None: ...
 
     def load(self, filepath: str, **kwargs) -> T_Result: ...
+
+    def analyze(self, iters: NDArray[np.int64], result: T_Result, **kwargs) -> None: ...
 
 
 class OvernightTaskConfig(TaskConfig): ...
@@ -227,8 +228,22 @@ class OvernightExecutor(AbsExperiment):
 
         return signals_dict
 
-    def analyze(self, result: Optional[Mapping[str, Result]] = None) -> None:
-        raise NotImplementedError("Not implemented")
+    def analyze(
+        self,
+        result: Optional[Mapping[str, Result]] = None,
+        task_kwargs: Optional[Dict[str, dict]] = None,
+    ) -> None:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        iters = np.arange(self.num_times)
+
+        if task_kwargs is None:
+            task_kwargs = {}
+
+        for ms_name, ms in self.measurements.items():
+            ms.analyze(iters, result[ms_name], **task_kwargs.get(ms_name, {}))
 
     def save(
         self,

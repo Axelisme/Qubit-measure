@@ -195,6 +195,8 @@ def calculate_chi_vs_flx(
 ) -> NDArray[np.float64]:
     """
     Calculate the dispersive shift of ground and excited state vs. flux
+    Returns:
+        chi: NDArray[np.float64], shape: (len(flxs), res_dim)
     """
 
     def update_hilbertspace(fluxonium: Fluxonium, flux: float) -> None:
