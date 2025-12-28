@@ -241,7 +241,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
             populations = populations @ np.linalg.inv(confusion_matrix)
             populations = np.clip(populations, 0.0, 1.0)
 
-        rates, fit_pops, _ = fit_transition_rates(lens, populations)
+        rates, _, fit_pops, _ = fit_transition_rates(lens, populations)
 
         T_g = rates[0] + rates[5]
         T_e = rates[1] + rates[2]
@@ -250,7 +250,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.set_title(f"T_1 = {t1:.1f} μs, Γ_ge={T_g:.3f} μs⁻¹, Γ_eg={T_e:.3f} μs⁻¹")
+        ax.set_title(f"T_1 = {t1:.1f} μs")
         ax.plot(lens, fit_pops[:, 0], color="blue", ls="--", label="Ground Fit")
         ax.plot(lens, fit_pops[:, 1], color="red", ls="--", label="Excited Fit")
         ax.plot(lens, fit_pops[:, 2], color="green", ls="--", label="Other Fit")

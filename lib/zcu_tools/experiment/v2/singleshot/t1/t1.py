@@ -33,27 +33,13 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting import fit_ge_decay, fit_transition_rates
+from zcu_tools.utils.fitting import fit_transition_rates
 from zcu_tools.experiment.v2.utils import round_zcu_time
 
 from ..util import calc_populations
 
 # (times, signals)
 T1ResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
-
-
-def calc_transition_rate(g_p: float, e_p: float, t1: float) -> Tuple[float, float]:
-    """Calculate transition rates from T1 times and steady populations."""
-    if np.isclose(t1, 0.0, atol=1e-1) or not np.isfinite(t1):
-        return np.nan, np.nan
-
-    # Using detailed balance: p_g * gamma_ge = p_e * gamma_eg
-    # And total rate: gamma_total = gamma_ge + gamma_eg = 1 / t1
-
-    gamma_ge = (e_p / (g_p + e_p)) / t1
-    gamma_eg = (g_p / (g_p + e_p)) / t1
-
-    return gamma_ge, gamma_eg
 
 
 class T1TaskConfig(TaskConfig, ModularProgramCfg):
@@ -254,21 +240,17 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
             populations = populations @ np.linalg.inv(confusion_matrix)
             populations = np.clip(populations, 0.0, 1.0)
 
-        (
-            (t1, _, g_fit_signals, g_params),
-            (_, _, e_fit_signals, e_params),
-        ) = fit_ge_decay(lens, populations[:, 0], populations[:, 1], share_t1=True)
+        rate, _, fit_populations, *_ = fit_transition_rates(lens, populations)
 
-        gamma_ge, gamma_eg = calc_transition_rate(g_params[0], e_params[0], t1)
+        t1 = 1 / (rate[0] + rate[1])
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.set_title(
-            f"T_1 = {t1:.1f} μs, Γ_ge={gamma_ge:.3f} μs⁻¹, Γ_eg={gamma_eg:.3f} μs⁻¹"
-        )
-        ax.plot(lens, g_fit_signals, color="blue", ls="--", label="Ground Fit")
-        ax.plot(lens, e_fit_signals, color="red", ls="--", label="Excited Fit")
+        ax.set_title(f"T_1 = {t1:.1f} μs")
+        ax.plot(lens, fit_populations[:, 0], color="blue", ls="--", label="Ground Fit")
+        ax.plot(lens, fit_populations[:, 1], color="red", ls="--", label="Excited Fit")
+        ax.plot(lens, fit_populations[:, 2], color="green", ls="--", label="Other Fit")
         plot_kwargs = dict(ls="-", marker=".", markersize=3)
         ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
         ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
@@ -416,7 +398,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
             populations = populations @ np.linalg.inv(confusion_matrix)
             populations = np.clip(populations, 0.0, 1.0)
 
-        rates, fit_pops, _ = fit_transition_rates(lens, populations)
+        rates, _, fit_pops, _ = fit_transition_rates(lens, populations)
 
         T_g = rates[0] + rates[5]
         T_e = rates[1] + rates[2]
@@ -664,7 +646,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResultType, T1WithToneSweepTaskCon
         # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
         transition_rates = np.zeros((num_gain, 6), dtype=np.float64)
         for i, pop in enumerate(tqdm(populations, desc="Fitting transition rates")):
-            rates, fit_pop, _ = fit_transition_rates(Ts, pop)
+            rates, _, fit_pop, _ = fit_transition_rates(Ts, pop)
             transition_rates[i] = rates
 
             loss = np.mean(np.abs(fit_pop - pop))

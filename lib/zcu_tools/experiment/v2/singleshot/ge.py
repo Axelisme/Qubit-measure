@@ -140,14 +140,18 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
 
         # 1. 取得初始化在 g, e 的群體 (2x2)
         # init_populations = [[p_gg, p_ge], [p_eg, p_ee]]
-        p_go_init = 1.0 - np.sum(init_pops[0])
-        p_eo_init = 1.0 - np.sum(init_pops[1])
+        p_gg_init = init_pops[0, 0]
+        p_ge_init = init_pops[0, 1]
+        p_eg_init = p_ge_init  # TODO: before fix singleshot fitting problem, assume use perfect pi pulse
+        p_ee_init = p_gg_init
+        p_go_init = 1.0 - p_gg_init - p_ge_init
+        p_eo_init = p_go_init
 
         # 2. 構建完整的 3x3 初始化矩陣 A
         A_init = np.array(
             [
-                [init_pops[0, 0], init_pops[0, 1], p_go_init],
-                [init_pops[1, 0], init_pops[1, 1], p_eo_init],
+                [p_gg_init, p_ge_init, p_go_init],
+                [p_eg_init, p_ee_init, p_eo_init],
                 [0.0, 0.0, 1.0],  # assume all initial to O
             ]
         )

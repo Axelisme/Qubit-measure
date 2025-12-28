@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 from typing_extensions import NotRequired
@@ -370,25 +371,24 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
             populations = np.clip(populations, 0.0, 1.0)
 
         num_gain = populations.shape[0]
-        min_rate = 0.1 / np.max(Ts)
 
         worst_loss = 0.0
         worst_pop = None
         worst_fit = None
 
         # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
-        transition_rates = np.zeros((num_gain, 6), dtype=np.float64)
+        rates = np.zeros((num_gain, 6), dtype=np.float64)
+        rate_Covs = np.zeros((num_gain, 6, 6), dtype=np.float64)
         for i, pop in enumerate(tqdm(populations, desc="Fitting transition rates")):
-            rates, fit_pop, _ = fit_transition_rates(Ts, pop)
-            transition_rates[i] = rates
+            rate, _, fit_pop, (_, pCov) = fit_transition_rates(Ts, pop)
+            rates[i] = rate
+            rate_Covs[i] = pCov[:6, :6]
 
             loss = np.mean(np.abs(fit_pop - pop))
             if loss > worst_loss:
                 worst_loss = loss
                 worst_pop = pop
                 worst_fit = fit_pop
-
-        transition_rates[transition_rates < min_rate] = 0.0
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
@@ -415,6 +415,8 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
         fig, axs = plt.subplots(3, 2, figsize=(12, 8), sharex=True)
 
+        axs = cast(List[List[Axes]], axs)
+
         def _plot_population(ax, pop, label):
             ax.scatter([], [], s=0, label=label)
             ax.imshow(pop.T, aspect="auto", extent=(xs[0], xs[-1], Ts[-1], Ts[0]))
@@ -426,10 +428,30 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         _plot_population(axs[2][0], populations[..., 2], "Other")
 
         # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
-        R_go = transition_rates[..., 4]
-        R_g = transition_rates[..., 0] + R_go
-        R_eo = transition_rates[..., 2]
-        R_e = transition_rates[..., 1] + R_eo
+        R_go = rates[..., 4]
+        R_g = rates[..., 0] + rates[..., 4]
+        R_eo = rates[..., 2]
+        R_e = rates[..., 1] + rates[..., 2]
+        # Rerr_go = np.sqrt(rate_Covs[..., 4, 4])
+        # Rerr_g = np.sqrt(
+        #     rate_Covs[..., 0, 0] + rate_Covs[..., 4, 4] + 2 * rate_Covs[..., 0, 4]
+        # )
+        # Rerr_eo = np.sqrt(rate_Covs[..., 2, 2])
+        # Rerr_e = np.sqrt(
+        #     rate_Covs[..., 1, 1] + rate_Covs[..., 2, 2] + 2 * rate_Covs[..., 1, 2]
+        # )
+
+        # g_kwargs = dict(capsize=2, color="blue")
+        # axs[0][1].errorbar(xs, R_g, Rerr_g, label="Γ_ge + Γ_go", **g_kwargs)  # type: ignore
+        # axs[0][1].errorbar(xs, R_go, Rerr_go, label="Γ_go", ls="--", **g_kwargs)  # type: ignore
+
+        # e_kwargs = dict(capsize=2, color="red")
+        # axs[1][1].errorbar(xs, R_e, Rerr_e, label="Γ_eg + Γ_eo", **e_kwargs)  # type: ignore
+        # axs[1][1].errorbar(xs, R_eo, Rerr_eo, label="Γ_eo", ls="--", **e_kwargs)  # type: ignore
+
+        # o_kwargs = dict(ls="--", capsize=2)
+        # axs[2][1].errorbar(xs, R_eo, Rerr_eo, label="Γ_eo", color="red", **o_kwargs)  # type: ignore
+        # axs[2][1].errorbar(xs, R_go, Rerr_go, label="Γ_go", color="blue", **o_kwargs)  # type: ignore
 
         axs[0][1].plot(xs, R_g, label="Γ_ge + Γ_go", color="blue")
         axs[0][1].plot(xs, R_go, label="Γ_go", color="blue", ls="--")
