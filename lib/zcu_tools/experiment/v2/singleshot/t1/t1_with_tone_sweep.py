@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Optional, Tuple, cast
+from typing import List, Optional, Tuple, cast, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,6 +13,7 @@ from tqdm.auto import tqdm
 from typing_extensions import NotRequired
 from scipy.ndimage import gaussian_filter
 
+from zcu_tools.program import SweepCfg
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
@@ -69,15 +70,14 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
-        gain_sweep = cfg["sweep"]["gain"]
-        len_sweep = cfg["sweep"]["length"]
+        sweep_cfg = cast(Dict[str, SweepCfg], cfg["sweep"])
         del cfg["sweep"]
 
-        gains = np.sqrt(
-            np.linspace(
-                gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
-            )
-        )
+        len_sweep = sweep_cfg.pop("length")
+        sweep_name = list(cfg["sweep"].keys())[0]
+        x_sweep = cfg["sweep"][sweep_name]
+
+        xs = sweep2array(x_sweep, allow_array=True)
 
         if isinstance(len_sweep, dict):
             ts = (
@@ -130,19 +130,19 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
             fig,
             dict(
                 plot_2d_g=LivePlotter2D(
-                    "Readout Gain",
+                    sweep_name,
                     "Time (us)",
                     uniform=False,
                     existed_axes=[[axs[0][0]]],
                 ),
                 plot_2d_e=LivePlotter2D(
-                    "Readout Gain",
+                    sweep_name,
                     "Time (us)",
                     uniform=False,
                     existed_axes=[[axs[1][0]]],
                 ),
                 plot_2d_o=LivePlotter2D(
-                    "Readout Gain",
+                    sweep_name,
                     "Time (us)",
                     uniform=False,
                     existed_axes=[[axs[1][1]]],
@@ -163,8 +163,8 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
             ),
         ) as viewer:
 
-            def update_fn(i, ctx, gain) -> None:
-                Pulse.set_param(ctx.cfg["test_pulse"], "gain", gain)
+            def update_fn(i, ctx, value) -> None:
+                Pulse.set_param(ctx.cfg["test_pulse"], sweep_name, value)
                 ctx.env_dict["idx"] = i
 
             def plot_fn(ctx) -> None:
@@ -173,13 +173,13 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
                 populations = calc_populations(np.asarray(ctx.data))
 
                 viewer.get_plotter("plot_2d_g").update(
-                    gains, ts, populations[..., 0], refresh=False
+                    xs, ts, populations[..., 0], refresh=False
                 )
                 viewer.get_plotter("plot_2d_e").update(
-                    gains, ts, populations[..., 1], refresh=False
+                    xs, ts, populations[..., 1], refresh=False
                 )
                 viewer.get_plotter("plot_2d_o").update(
-                    gains, ts, populations[..., 2], refresh=False
+                    xs, ts, populations[..., 2], refresh=False
                 )
                 viewer.get_plotter("plot_1d").update(
                     ts, populations[i].T, refresh=False
@@ -189,8 +189,8 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
             populations = run_task(
                 task=SoftTask(
-                    sweep_name="gain",
-                    sweep_values=gains.tolist(),
+                    sweep_name=sweep_name,
+                    sweep_values=xs.tolist(),
                     update_cfg_fn=update_fn,
                     sub_task=HardTask(
                         measure_fn=measure_fn,
@@ -207,9 +207,9 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (gains, ts, populations)
+        self.last_result = (xs, ts, populations)
 
-        return gains, ts, populations
+        return xs, ts, populations
 
     def _run_hard(
         self,
@@ -222,20 +222,21 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
     ) -> T1SweepResult:
         cfg = deepcopy(cfg)
 
+        # assert "sweep" in cfg
+        # gain_sweep = cfg["sweep"]["gain"]
+        # cfg["sweep"] = {"length": cfg["sweep"]["length"]}
         assert "sweep" in cfg
-        gain_sweep = cfg["sweep"]["gain"]
-        cfg["sweep"] = {"length": cfg["sweep"]["length"]}
+        sweep_cfg = cast(Dict[str, SweepCfg], cfg["sweep"])
+        del cfg["sweep"]
 
-        Pulse.set_param(
-            cfg["test_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
-        )
+        len_sweep = sweep_cfg.pop("length")
+        sweep_name = list(sweep_cfg.keys())[0]
+        x_sweep = sweep_cfg[sweep_name]
 
-        gains = np.sqrt(
-            np.linspace(
-                gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
-            )
-        )
-        ts = sweep2array(cfg["sweep"]["length"])  # predicted times
+        xs = sweep2array(x_sweep, allow_array=True)
+        ts = sweep2array(len_sweep)  # predicted times
+
+        Pulse.set_param(cfg["test_pulse"], "length", sweep2param("length", len_sweep))
 
         fig, axs = make_plot_frame(2, 2, figsize=(12, 6))
 
@@ -243,19 +244,19 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
             fig,
             dict(
                 plot_2d_g=LivePlotter2D(
-                    "Readout Gain",
+                    sweep_name,
                     "Time (us)",
                     uniform=False,
                     existed_axes=[[axs[0][0]]],
                 ),
                 plot_2d_e=LivePlotter2D(
-                    "Readout Gain",
+                    sweep_name,
                     "Time (us)",
                     uniform=False,
                     existed_axes=[[axs[1][0]]],
                 ),
                 plot_2d_o=LivePlotter2D(
-                    "Readout Gain",
+                    sweep_name,
                     "Time (us)",
                     uniform=False,
                     existed_axes=[[axs[1][1]]],
@@ -276,8 +277,8 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
             ),
         ) as viewer:
 
-            def update_fn(i, ctx, gain) -> None:
-                Pulse.set_param(ctx.cfg["test_pulse"], "gain", gain)
+            def update_fn(i, ctx, value) -> None:
+                Pulse.set_param(ctx.cfg["test_pulse"], sweep_name, value)
                 ctx.env_dict["idx"] = i
 
             def plot_fn(ctx) -> None:
@@ -286,13 +287,13 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
                 populations = calc_populations(np.asarray(ctx.data))
 
                 viewer.get_plotter("plot_2d_g").update(
-                    gains, ts, populations[..., 0], refresh=False
+                    xs, ts, populations[..., 0], refresh=False
                 )
                 viewer.get_plotter("plot_2d_e").update(
-                    gains, ts, populations[..., 1], refresh=False
+                    xs, ts, populations[..., 1], refresh=False
                 )
                 viewer.get_plotter("plot_2d_o").update(
-                    gains, ts, populations[..., 2], refresh=False
+                    xs, ts, populations[..., 2], refresh=False
                 )
                 viewer.get_plotter("plot_1d").update(
                     ts, populations[i].T, refresh=False
@@ -302,8 +303,8 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
             populations = run_task(
                 task=SoftTask(
-                    sweep_name="gain",
-                    sweep_values=gains.tolist(),
+                    sweep_name=sweep_name,
+                    sweep_values=xs.tolist(),
                     update_cfg_fn=update_fn,
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
@@ -315,7 +316,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
                                         "reset", ctx.cfg.get("reset", {"type": "none"})
                                     ),
                                     Pulse("pi_pulse", cfg=ctx.cfg.get("pi_pulse")),
-                                    Pulse(name="test_pulse", cfg=ctx.cfg["test_pulse"]),
+                                    Pulse("test_pulse", cfg=ctx.cfg["test_pulse"]),
                                     Readout("readout", cfg=ctx.cfg["readout"]),
                                 ],
                             ).acquire(
@@ -340,9 +341,9 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
         # record last cfg and result
         self.last_cfg = cfg
-        self.last_result = (gains, ts, populations)
+        self.last_result = (xs, ts, populations)
 
-        return gains, ts, populations
+        return xs, ts, populations
 
     def analyze(
         self,
@@ -350,16 +351,17 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         *,
         ac_coeff: Optional[float] = None,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
+        xlabel: str = "",
     ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, Ts, populations = result
+        xs, Ts, populations = result
         populations = np.real(populations).astype(np.float64)
 
         valid_mask = np.all(np.isfinite(populations), axis=(1, 2))
-        gains = gains[valid_mask]
+        xs = xs[valid_mask]
         populations = populations[valid_mask]
 
         populations = gaussian_filter(populations, sigma=0.5, axes=(0, 1))
@@ -407,11 +409,9 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         plt.show(fig)
 
         if ac_coeff is None:
-            xs = gains
-            xlabel = "probe gain (a.u.)"
+            xs = xs
         else:
-            xs = ac_coeff * gains**2
-            xlabel = r"$\bar n$"
+            xs = ac_coeff * xs**2
 
         fig, axs = plt.subplots(3, 2, figsize=(12, 8), sharex=True)
 
@@ -432,26 +432,6 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         R_g = rates[..., 0] + rates[..., 4]
         R_eo = rates[..., 2]
         R_e = rates[..., 1] + rates[..., 2]
-        # Rerr_go = np.sqrt(rate_Covs[..., 4, 4])
-        # Rerr_g = np.sqrt(
-        #     rate_Covs[..., 0, 0] + rate_Covs[..., 4, 4] + 2 * rate_Covs[..., 0, 4]
-        # )
-        # Rerr_eo = np.sqrt(rate_Covs[..., 2, 2])
-        # Rerr_e = np.sqrt(
-        #     rate_Covs[..., 1, 1] + rate_Covs[..., 2, 2] + 2 * rate_Covs[..., 1, 2]
-        # )
-
-        # g_kwargs = dict(capsize=2, color="blue")
-        # axs[0][1].errorbar(xs, R_g, Rerr_g, label="Γ_ge + Γ_go", **g_kwargs)  # type: ignore
-        # axs[0][1].errorbar(xs, R_go, Rerr_go, label="Γ_go", ls="--", **g_kwargs)  # type: ignore
-
-        # e_kwargs = dict(capsize=2, color="red")
-        # axs[1][1].errorbar(xs, R_e, Rerr_e, label="Γ_eg + Γ_eo", **e_kwargs)  # type: ignore
-        # axs[1][1].errorbar(xs, R_eo, Rerr_eo, label="Γ_eo", ls="--", **e_kwargs)  # type: ignore
-
-        # o_kwargs = dict(ls="--", capsize=2)
-        # axs[2][1].errorbar(xs, R_eo, Rerr_eo, label="Γ_eo", color="red", **o_kwargs)  # type: ignore
-        # axs[2][1].errorbar(xs, R_go, Rerr_go, label="Γ_go", color="blue", **o_kwargs)  # type: ignore
 
         axs[0][1].plot(xs, R_g, label="Γ_ge + Γ_go", color="blue")
         axs[0][1].plot(xs, R_go, label="Γ_go", color="blue", ls="--")
@@ -486,12 +466,12 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        gains, Ts, populations = result
+        xs, Ts, populations = result
         _filepath = Path(filepath)
 
         save_data(
             filepath=str(_filepath.with_name(_filepath.name + "_g_population")),
-            x_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
+            x_info={"name": "sweep value", "unit": "a.u.", "values": xs},
             y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
             z_info={
                 "name": "Ground Populations",
@@ -504,7 +484,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         )
         save_data(
             filepath=str(_filepath.with_name(_filepath.name + "_e_population")),
-            x_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
+            x_info={"name": "sweep value", "unit": "a.u.", "values": xs},
             y_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
             z_info={
                 "name": "Excited Populations",
@@ -520,27 +500,27 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         g_filepath, e_filepath = filepath
 
         # Load ground populations
-        g_pop, gains, Ts = load_data(g_filepath, **kwargs)
-        assert gains is not None and Ts is not None
-        assert len(gains.shape) == 1 and len(Ts.shape) == 1
-        assert g_pop.shape == (len(gains), len(Ts))
+        g_pop, xs, Ts = load_data(g_filepath, **kwargs)
+        assert Ts is not None
+        assert len(xs.shape) == 1 and len(Ts.shape) == 1
+        assert g_pop.shape == (len(xs), len(Ts))
 
         # Load excited populations
         e_pop, gains_e, Ts_e = load_data(e_filepath, **kwargs)
         assert gains_e is not None and Ts_e is not None
         assert e_pop.shape == (len(gains_e), len(Ts_e))
-        assert np.array_equal(gains, gains_e) and np.array_equal(Ts, Ts_e)
+        assert np.array_equal(xs, gains_e) and np.array_equal(Ts, Ts_e)
 
         Ts = Ts * 1e6  # s -> us
 
         # Reconstruct signals shape: (gains, ts, 2)
         populations = np.stack([g_pop, e_pop], axis=-1)
 
-        gains = gains.astype(np.float64)
+        xs = xs.astype(np.float64)
         Ts = Ts.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
         self.last_cfg = None
-        self.last_result = (gains, Ts, populations)
+        self.last_result = (xs, Ts, populations)
 
-        return gains, Ts, populations
+        return xs, Ts, populations
