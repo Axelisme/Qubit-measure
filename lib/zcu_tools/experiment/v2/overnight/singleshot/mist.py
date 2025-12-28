@@ -78,9 +78,7 @@ class MistOvernightTask(
         def measure_mist_fn(ctx: TaskContextView, update_hook: Callable):
             cfg = deepcopy(ctx.cfg)
             Pulse.set_param(
-                cfg["probe_pulse"],
-                "gain",
-                sweep2param("length", cfg["sweep"]["length"]),
+                cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
             )
             return ModularProgramV2(
                 ctx.env_dict["soccfg"],
@@ -183,8 +181,6 @@ class MistOvernightTask(
         ax.set_ylabel("Population")
         ax.legend()
         ax.grid(True)
-
-        fig.tight_layout()
 
     def num_axes(self) -> Dict[str, int]:
         return dict(populations_g=1, populations_e=1, populations_o=1, current=1)

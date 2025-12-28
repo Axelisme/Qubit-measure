@@ -149,11 +149,11 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
         if isinstance(len_sweep, dict):
             ts = (
                 np.linspace(
-                    len_sweep["start"] ** (1 / 1.3),
-                    len_sweep["stop"] ** (1 / 1.3),
+                    len_sweep["start"] ** (1 / 2),
+                    len_sweep["stop"] ** (1 / 2),
                     len_sweep["expts"],
                 )
-                ** 1.3
+                ** 2
             )
         else:
             ts = np.asarray(len_sweep)
@@ -242,6 +242,17 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
             populations = np.clip(populations, 0.0, 1.0)
 
         rates, _, fit_pops, _ = fit_transition_rates(lens, populations)
+
+        Rs = []
+        for i in range(30, len(lens)):
+            rate, *_ = fit_transition_rates(lens[:i], populations[:i])
+            Rs.append(rate)
+        Rs = np.array(Rs)
+
+        fig, ax = plt.subplots(figsize=config.figsize)
+        for i in range(Rs.shape[1]):
+            ax.plot(lens[30:], Rs[:, i])
+        plt.show(fig)
 
         T_g = rates[0] + rates[5]
         T_e = rates[1] + rates[2]
