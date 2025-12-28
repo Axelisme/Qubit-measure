@@ -6,7 +6,15 @@ from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from tqdm.auto import tqdm
 from matplotlib.figure import Figure
-from typing_extensions import NotRequired, List, Dict, Callable, TypedDict, cast
+from typing_extensions import (
+    NotRequired,
+    List,
+    Dict,
+    Callable,
+    TypedDict,
+    cast,
+    Optional,
+)
 
 from zcu_tools.program import SweepCfg
 from zcu_tools.notebook.utils import make_comment
@@ -48,17 +56,12 @@ class T1PlotterDict(TypedDict, closed=True):
 
 class T1_PlotAndSaveMixin:
     def num_axes(self) -> Dict[str, int]:
-        return dict(
-            populations_g=1,
-            populations_e=1,
-            populations_o=1,
-            current=1,
-        )
+        return dict(populations_g=1, populations_e=1, populations_o=1, current=1)
 
     def make_plotter(self, name, axs):
         return T1PlotterDict(
             populations_g=LivePlotter2D(
-                "Readout Gain",
+                "Iteration",
                 "Time (us)",
                 uniform=False,
                 existed_axes=[axs["populations_g"]],
@@ -67,7 +70,7 @@ class T1_PlotAndSaveMixin:
                 ),
             ),
             populations_e=LivePlotter2D(
-                "Readout Gain",
+                "Iteration",
                 "Time (us)",
                 uniform=False,
                 existed_axes=[axs["populations_e"]],
@@ -76,7 +79,7 @@ class T1_PlotAndSaveMixin:
                 ),
             ),
             populations_o=LivePlotter2D(
-                "Readout Gain",
+                "Iteration",
                 "Time (us)",
                 uniform=False,
                 existed_axes=[axs["populations_o"]],
@@ -156,7 +159,14 @@ class T1_PlotAndSaveMixin:
             tag=prefix_tag + "/e_populations",
         )
 
-    def analyze(self, name, iters, result, fig: Figure) -> None:
+    def analyze(
+        self,
+        name,
+        iters,
+        result,
+        fig: Figure,
+        confusion_matrix: Optional[NDArray[np.float64]] = None,
+    ) -> None:
         Ts = result["lengths"][0]  # (Ts, )
         populations = result["populations"]  # (iters, Ts, 2)
 
@@ -166,10 +176,14 @@ class T1_PlotAndSaveMixin:
 
         populations = calc_populations(populations)  # (iters, Ts, 3)
 
+        if confusion_matrix is not None:  # readout correction
+            populations = populations @ np.linalg.inv(confusion_matrix)
+            populations = np.clip(populations, 0.0, 1.0)
+
         rates = np.zeros((len(iters), 6), dtype=np.float64)
         rate_errs = np.zeros((len(iters), 6), dtype=np.float64)
         for i, pop in enumerate(tqdm(populations, desc=name, leave=False)):
-            rate, rate_err, *_, (_, pCov) = fit_transition_rates(Ts, pop)
+            rate, rate_err, *_ = fit_transition_rates(Ts, pop)
             rates[i] = rate
             rate_errs[i] = rate_err
 
