@@ -3,6 +3,8 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.ndimage import gaussian_filter
+from tqdm.auto import tqdm
 from matplotlib.figure import Figure
 from typing_extensions import NotRequired, List, Dict, Callable, TypedDict, cast
 
@@ -154,6 +156,59 @@ class T1_PlotAndSaveMixin:
             tag=prefix_tag + "/e_populations",
         )
 
+    def analyze(self, name, iters, result, fig: Figure) -> None:
+        Ts = result["lengths"][0]  # (Ts, )
+        populations = result["populations"]  # (iters, Ts, 2)
+
+        populations = np.real(populations).astype(np.float64)
+
+        populations = gaussian_filter(populations, sigma=0.5, axes=(0, 1))
+
+        populations = calc_populations(populations)  # (iters, Ts, 3)
+
+        rates = np.zeros((len(iters), 6), dtype=np.float64)
+        rate_errs = np.zeros((len(iters), 6), dtype=np.float64)
+        for i, pop in enumerate(tqdm(populations, desc=name, leave=False)):
+            rate, rate_err, *_, (_, pCov) = fit_transition_rates(Ts, pop)
+            rates[i] = rate
+            rate_errs[i] = rate_err
+
+        grid = fig.add_gridspec(1, 5)
+        ax_g = fig.add_subplot(grid[0, 0])
+        ax_e = fig.add_subplot(grid[0, 1])
+        ax_o = fig.add_subplot(grid[0, 2])
+        ax_t1 = fig.add_subplot(grid[0, 3:])
+
+        ax_g.imshow(
+            populations[..., 0].T,
+            aspect="auto",
+            interpolation="none",
+            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
+        )
+
+        ax_e.imshow(
+            populations[..., 1].T,
+            aspect="auto",
+            interpolation="none",
+            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
+        )
+
+        ax_o.imshow(
+            populations[..., 2].T,
+            aspect="auto",
+            interpolation="none",
+            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
+        )
+
+        show_idxs = [0, 1, 2, 4]
+        rate_names = ["T_ge", "T_eg", "T_eo", "T_oe", "T_go", "T_og"]
+        for i, name in enumerate(rate_names):
+            if i not in show_idxs:
+                continue
+            ax_t1.errorbar(iters, rates[:, i], rate_errs[:, i], capsize=1, label=name)
+        ax_t1.legend()
+        ax_t1.grid(True)
+
 
 class T1Cfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
@@ -232,61 +287,6 @@ class T1Task(
 
     def cleanup(self) -> None:
         self.task.cleanup()
-
-    def analyze(self, iters, result, fig: Figure) -> None:
-        Ts = result["lengths"][0]  # (Ts, )
-        populations = result["populations"]  # (iters, Ts, 2)
-
-        populations = populations.astype(np.float64)
-
-        populations = calc_populations(populations)  # (iters, Ts, 3)
-
-        rates = np.zeros((len(iters), 6), dtype=np.float64)
-        for i, pop in enumerate(populations):
-            rate, *_ = fit_transition_rates(Ts, pop)
-            rates[i] = rate
-
-        grid = fig.add_gridspec(1, 4)
-        ax_g = fig.add_subplot(grid[0, 0])
-        ax_e = fig.add_subplot(grid[0, 1])
-        ax_o = fig.add_subplot(grid[0, 2])
-        ax_t1 = fig.add_subplot(grid[0, 3])
-
-        ax_g.imshow(
-            populations[..., 0].T,
-            aspect="auto",
-            interpolation="none",
-            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
-        )
-        ax_g.set_title("Ground")
-        ax_g.set_xlabel("Iteration")
-        ax_g.set_ylabel("Time (us)")
-
-        ax_e.imshow(
-            populations[..., 1].T,
-            aspect="auto",
-            interpolation="none",
-            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
-        )
-        ax_e.set_title("Excited")
-        ax_e.set_xlabel("Iteration")
-        ax_e.set_ylabel("Time (us)")
-
-        ax_o.imshow(
-            populations[..., 2].T,
-            aspect="auto",
-            interpolation="none",
-            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
-        )
-        ax_o.set_title("Other")
-        ax_o.set_xlabel("Iteration")
-        ax_o.set_ylabel("Time (us)")
-
-        rate_names = ["T_ge", "T_eg", "T_eo", "T_oe", "T_go", "T_og"]
-        for i, name in enumerate(rate_names):
-            ax_t1.scatter(iters, rates[:, i], label=name, s=5)
-
-        fig.tight_layout()
 
 
 class T1WithToneCfg(TaskConfig, ModularProgramCfg):

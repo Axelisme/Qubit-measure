@@ -188,6 +188,10 @@ def fitting_ge_and_plot(
     (p0_eg, p0_ee, l_ratio_e), _ = fit_singleshot_p0(
         xs, e_pdfs, p0_ge, p0_gg, ge_params=ge_params, fit_length_ratio=not align_t1
     )
+    # p0_eg = p0_ge
+    # p0_ee = p0_gg
+    # l_ratio_g = length_ratio
+    # l_ratio_e = length_ratio
 
     p0_go = 1 - p0_gg - p0_ge
     p0_eo = 1 - p0_eg - p0_ee

@@ -61,7 +61,9 @@ class MeasurementTask(
 
     def load(self, filepath: str, **kwargs) -> T_Result: ...
 
-    def analyze(self, iters: NDArray[np.int64], result: T_Result, **kwargs) -> None: ...
+    def analyze(
+        self, name: str, iters: NDArray[np.int64], result: T_Result, **kwargs
+    ) -> None: ...
 
 
 class OvernightTaskConfig(TaskConfig): ...
@@ -243,7 +245,7 @@ class OvernightExecutor(AbsExperiment):
             task_kwargs = {}
 
         for ms_name, ms in self.measurements.items():
-            ms.analyze(iters, result[ms_name], **task_kwargs.get(ms_name, {}))
+            ms.analyze(ms_name, iters, result[ms_name], **task_kwargs.get(ms_name, {}))
 
     def save(
         self,

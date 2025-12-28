@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 from numpy.typing import NDArray
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import nnls
@@ -91,12 +91,17 @@ def fit_transition_rates(
     times: NDArray[np.float64],
     populations: NDArray[np.float64],
     p0_guess: Optional[Tuple[float, ...]] = None,
-) -> Tuple[Tuple[float, ...], NDArray[np.float64], Tuple[float, ...]]:
+) -> Tuple[
+    Tuple[float, ...],
+    Tuple[float, ...],
+    NDArray[np.float64],
+    Tuple[List[float], NDArray[np.float64]],
+]:
     """
     Returns:
         fitted_rates: (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
         fit_populations: Fitted populations over time
-        fitted_params: All fitted parameters including initial populations
+        (pOpt, pCov)
     """
 
     if p0_guess is None:
@@ -119,18 +124,21 @@ def fit_transition_rates(
         ],
     )
 
-    pOpt, _ = fit_func(
+    pOpt, pCov = fit_func(
         times,
         populations.flatten(),
         lambda *args: model_func(*args).flatten(),
         p0_guess,
         bounds=bounds,
     )
+    # pOpt = list(p0_guess)
+    # pCov = np.ones((len(pOpt), len(pOpt)))
 
     fit_populations = model_func(times, *pOpt)
 
     R_ge, R_eg, R_eo, R_oe, R_go, R_og, *_ = pOpt
 
-    fitted_rates = (R_ge, R_eg, R_eo, R_oe, R_go, R_og)
+    rates = (R_ge, R_eg, R_eo, R_oe, R_go, R_og)
+    rate_errs = tuple(np.sqrt(np.diag(pCov))[:6])
 
-    return fitted_rates, fit_populations, tuple(pOpt)
+    return rates, rate_errs, fit_populations, (pOpt, pCov)
