@@ -4,8 +4,8 @@ import warnings
 from copy import deepcopy
 from typing import Literal, Optional, Tuple, cast
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
@@ -262,6 +262,6 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
         signals, _, _ = load_data(filepath, **kwargs)
 
         self.last_cfg = None
-        self.last_result = signals
+        self.last_result = signals.T
 
         return signals
