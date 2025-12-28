@@ -362,7 +362,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         gains = gains[valid_mask]
         populations = populations[valid_mask]
 
-        populations = gaussian_filter(populations, sigma=0.5, axes=(0, 1))
+        # populations = gaussian_filter(populations, sigma=0.5, axes=(0, 1))
 
         populations = calc_populations(populations)
 
@@ -389,6 +389,22 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
                 worst_loss = loss
                 worst_pop = pop
                 worst_fit = fit_pop
+
+            if rate[4] > 1:
+                fig, ax = plt.subplots(figsize=config.figsize)
+                assert isinstance(fig, Figure)
+
+                ax.scatter(Ts, pop[:, 0], label="G", color="blue", s=1)
+                ax.scatter(Ts, pop[:, 1], label="E", color="red", s=1)
+                ax.scatter(Ts, pop[:, 2], label="O", color="green", s=1)
+                ax.plot(Ts, fit_pop[:, 0], color="blue", ls="--")
+                ax.plot(Ts, fit_pop[:, 1], color="red", ls="--")
+                ax.plot(Ts, fit_pop[:, 2], color="green", ls="--")
+                ax.grid(True)
+                ax.set_title(f"Worst fit loss: {worst_loss:.3e}")
+                ax.set_xlabel("Time (μs)")
+                ax.set_ylabel("Population")
+                plt.show(fig)
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
@@ -461,6 +477,8 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
         axs[2][1].plot(xs, R_eo, label="Γ_eo", color="red", ls="--")
         axs[2][1].plot(xs, R_go, label="Γ_go", color="blue", ls="--")
+
+        print(xs[np.argmax(R_go)], np.max(R_go))
 
         max_rate = np.nanmax([R_g, R_e])
         for ax in (axs[0][1], axs[1][1], axs[2][1]):
