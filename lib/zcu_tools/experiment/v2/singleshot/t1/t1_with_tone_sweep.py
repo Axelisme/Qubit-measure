@@ -54,7 +54,7 @@ class T1WithToneSweepCfg(TaskConfig, ModularProgramCfg):
 class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
     def run(self, *args, uniform: bool = False, **kwargs) -> T1SweepResult:
         if uniform:
-            return self._run_hard(*args, **kwargs)
+            return self._run_uniform(*args, **kwargs)
         else:
             return self._run_non_unifrom(*args, **kwargs)
 
@@ -71,23 +71,16 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
         assert "sweep" in cfg
         sweep_cfg = cast(Dict[str, SweepCfg], cfg["sweep"])
-        del cfg["sweep"]
 
         len_sweep = sweep_cfg.pop("length")
         sweep_name = list(cfg["sweep"].keys())[0]
         x_sweep = cfg["sweep"][sweep_name]
+        del cfg["sweep"]
 
         xs = sweep2array(x_sweep, allow_array=True)
 
         if isinstance(len_sweep, dict):
-            ts = (
-                np.linspace(
-                    len_sweep["start"] ** (1 / 2),
-                    len_sweep["stop"] ** (1 / 2),
-                    len_sweep["expts"],
-                )
-                ** 2
-            )
+            ts = np.geomspace(len_sweep["start"], len_sweep["stop"], len_sweep["expts"])
         else:
             ts = np.asarray(len_sweep)
         ts = round_zcu_time(ts, soccfg, gen_ch=cfg["test_pulse"]["ch"])
@@ -120,7 +113,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
                     acc_populations[i] += raw_i[0][0]
 
-                update_hook(ir, acc_populations / (ir + 1))
+                update_hook(ir + 1, acc_populations / (ir + 1))
 
             return acc_populations / rounds
 
@@ -211,7 +204,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
         return xs, ts, populations
 
-    def _run_hard(
+    def _run_uniform(
         self,
         soc,
         soccfg,
@@ -222,9 +215,6 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
     ) -> T1SweepResult:
         cfg = deepcopy(cfg)
 
-        # assert "sweep" in cfg
-        # gain_sweep = cfg["sweep"]["gain"]
-        # cfg["sweep"] = {"length": cfg["sweep"]["length"]}
         assert "sweep" in cfg
         sweep_cfg = cast(Dict[str, SweepCfg], cfg["sweep"])
         del cfg["sweep"]
@@ -232,6 +222,8 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         len_sweep = sweep_cfg.pop("length")
         sweep_name = list(sweep_cfg.keys())[0]
         x_sweep = sweep_cfg[sweep_name]
+
+        cfg["sweep"] = {"length": len_sweep}
 
         xs = sweep2array(x_sweep, allow_array=True)
         ts = sweep2array(len_sweep)  # predicted times
@@ -377,6 +369,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         worst_loss = 0.0
         worst_pop = None
         worst_fit = None
+        worst_i = None
 
         # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
         rates = np.zeros((num_gain, 6), dtype=np.float64)
@@ -391,22 +384,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
                 worst_loss = loss
                 worst_pop = pop
                 worst_fit = fit_pop
-
-            if rate[4] > 1:
-                fig, ax = plt.subplots(figsize=config.figsize)
-                assert isinstance(fig, Figure)
-
-                ax.scatter(Ts, pop[:, 0], label="G", color="blue", s=1)
-                ax.scatter(Ts, pop[:, 1], label="E", color="red", s=1)
-                ax.scatter(Ts, pop[:, 2], label="O", color="green", s=1)
-                ax.plot(Ts, fit_pop[:, 0], color="blue", ls="--")
-                ax.plot(Ts, fit_pop[:, 1], color="red", ls="--")
-                ax.plot(Ts, fit_pop[:, 2], color="green", ls="--")
-                ax.grid(True)
-                ax.set_title(f"Worst fit loss: {worst_loss:.3e}")
-                ax.set_xlabel("Time (μs)")
-                ax.set_ylabel("Population")
-                plt.show(fig)
+                worst_i = i
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
@@ -419,7 +397,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         ax.plot(Ts, worst_fit[:, 1], color="red", ls="--")
         ax.plot(Ts, worst_fit[:, 2], color="green", ls="--")
         ax.grid(True)
-        ax.set_title(f"Worst fit loss: {worst_loss:.3e}")
+        ax.set_title(f"Worst fit photon: {xs[worst_i]:.1f}")
         ax.set_xlabel("Time (μs)")
         ax.set_ylabel("Population")
         plt.show(fig)
@@ -457,8 +435,6 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
         axs[2][1].plot(xs, R_eo, label="Γ_eo", color="red", ls="--")
         axs[2][1].plot(xs, R_go, label="Γ_go", color="blue", ls="--")
-
-        print(xs[np.argmax(R_go)], np.max(R_go))
 
         max_rate = np.nanmax([R_g, R_e])
         for ax in (axs[0][1], axs[1][1], axs[2][1]):

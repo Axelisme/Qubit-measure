@@ -147,35 +147,29 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
         del cfg["sweep"]
 
         if isinstance(len_sweep, dict):
-            ts = (
-                np.linspace(
-                    len_sweep["start"] ** (1 / 2),
-                    len_sweep["stop"] ** (1 / 2),
-                    len_sweep["expts"],
-                )
-                ** 2
-            )
+            ts = np.geomspace(len_sweep["start"], len_sweep["stop"], len_sweep["expts"])
         else:
             ts = np.asarray(len_sweep)
         ts = round_zcu_time(ts, soccfg, gen_ch=cfg["test_pulse"]["ch"])
         ts = np.unique(ts)
 
         def measure_fn(ctx, update_hook):
-            rounds = ctx.cfg.pop("rounds", 1)
-            ctx.cfg["rounds"] = 1
+            cfg = deepcopy(ctx.cfg)
+            rounds = cfg.pop("rounds", 1)
+            cfg["rounds"] = 1
 
             acc_populations = np.zeros((len(ts), 2), dtype=np.float64)
             for ir in range(rounds):
                 for i, t1_delay in enumerate(ts):
-                    Pulse.set_param(ctx.cfg["test_pulse"], "length", t1_delay)
+                    Pulse.set_param(cfg["test_pulse"], "length", t1_delay)
                     raw_i = ModularProgramV2(
                         soccfg,
-                        ctx.cfg,
+                        cfg,
                         modules=[
-                            Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                            Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                            Pulse("test_pulse", ctx.cfg["test_pulse"]),
-                            Readout("readout", ctx.cfg["readout"]),
+                            Reset("reset", cfg.get("reset", {"type": "none"})),
+                            Pulse("pi_pulse", cfg["pi_pulse"]),
+                            Pulse("test_pulse", cfg["test_pulse"]),
+                            Readout("readout", cfg["readout"]),
                         ],
                     ).acquire(
                         soc,
@@ -187,7 +181,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
 
                     acc_populations[i] += raw_i[0][0]
 
-                update_hook(ir, acc_populations / (ir + 1))
+                update_hook(ir + 1, acc_populations / (ir + 1))
 
             return acc_populations / rounds
 
@@ -241,27 +235,27 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
             populations = populations @ np.linalg.inv(confusion_matrix)
             populations = np.clip(populations, 0.0, 1.0)
 
+        from zcu_tools.utils.fitting.multi_decay import fit_with_vadality
+
+        fit_with_vadality(lens, populations)
+
         rates, _, fit_pops, _ = fit_transition_rates(lens, populations)
 
-        Rs = []
-        for i in range(30, len(lens)):
-            rate, *_ = fit_transition_rates(lens[:i], populations[:i])
-            Rs.append(rate)
-        Rs = np.array(Rs)
+        T_ge, T_eg, T_eo, T_oe, T_go, T_og = rates
+        M = [
+            [-(T_ge + T_go), T_eg, T_og],
+            [T_ge, -(T_eg + T_eo), T_oe],
+            [T_go, T_eo, -(T_og + T_oe)],
+        ]
+        caraterization_rates = np.sort(np.abs(np.diagonal(M)))
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        for i in range(Rs.shape[1]):
-            ax.plot(lens[30:], Rs[:, i])
-        plt.show(fig)
-
-        T_g = rates[0] + rates[5]
-        T_e = rates[1] + rates[2]
-        t1 = 1.0 / (T_g + T_e)
+        t1 = 1.0 / caraterization_rates[2]
+        t1_b = 1.0 / caraterization_rates[1]
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.set_title(f"T_1 = {t1:.1f} μs")
+        ax.set_title(f"T_1 = {t1:.1f} μs, T_1b = {t1_b:.1f} μs")
         ax.plot(lens, fit_pops[:, 0], color="blue", ls="--", label="Ground Fit")
         ax.plot(lens, fit_pops[:, 1], color="red", ls="--", label="Excited Fit")
         ax.plot(lens, fit_pops[:, 2], color="green", ls="--", label="Other Fit")

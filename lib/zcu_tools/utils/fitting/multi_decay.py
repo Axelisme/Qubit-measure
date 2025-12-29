@@ -120,7 +120,7 @@ def fit_transition_rates(
             max_R,
             max_R,
             min(1, p0_g + 0.01),
-            max(1, p0_e + 0.01),
+            min(1, p0_e + 0.01),
         ],
     )
 
@@ -142,3 +142,105 @@ def fit_transition_rates(
     rate_errs = tuple(np.sqrt(np.diag(pCov))[:6])
 
     return rates, rate_errs, fit_populations, (pOpt, pCov)
+
+
+def fit_with_vadality(times: NDArray[np.float64], populations: NDArray[np.float64]):
+    import matplotlib.pyplot as plt
+    from tqdm.auto import trange
+
+    def calc_lambda(rate):
+        T_ge, T_eg, T_eo, T_oe, T_go, T_og = rate
+        M = [
+            [-(T_ge + T_go), T_eg, T_og],
+            [T_ge, -(T_eg + T_eo), T_oe],
+            [T_go, T_eo, -(T_og + T_oe)],
+        ]
+        fit_lambdas = np.sort(np.abs(np.diagonal(M)))
+        return fit_lambdas[1], fit_lambdas[2]
+
+    Rs = []
+    R_errs = []
+    fit_pps = []
+    fit_lambdas = []
+    time_idxs = list(range(len(times) // 2, len(times)))
+    for i in time_idxs:
+        rate, rate_err, *_, (pOpt, _) = fit_transition_rates(times[:i], populations[:i])
+        Rs.append(rate)
+        R_errs.append(rate_err)
+        fit_pps.append(model_func(times, *pOpt))
+        fit_lambdas.append(calc_lambda(rate))
+    Rs = np.array(Rs)
+    R_errs = np.array(R_errs)
+    fit_pps = np.array(fit_pps)
+    fit_lambdas = np.array(fit_lambdas)
+
+    fig, (ax, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 12))
+
+    plot_kwargs = dict(ls="-", marker=".", markersize=3)
+    ax.plot(times, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
+    ax.plot(times, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
+    ax.plot(times, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+
+    r_num = Rs.shape[0]
+    for i in trange(r_num):
+        ax.plot(times, fit_pps[i, :, 0], color="blue", alpha=i / r_num)  # type: ignore
+        ax.plot(times, fit_pps[i, :, 1], color="red", alpha=i / r_num)  # type: ignore
+        ax.plot(times, fit_pps[i, :, 2], color="green", alpha=i / r_num)  # type: ignore
+
+    ax.legend()
+    ax.grid(True)
+
+    names = ["T_ge", "T_eg", "T_eo", "T_oe", "T_go", "T_og"]
+    for i in range(Rs.shape[1]):
+        ax2.errorbar(
+            times[time_idxs],
+            Rs[:, i],
+            yerr=R_errs[:, i],
+            label=names[i],
+            fmt=".-",
+            markersize=4,
+            capsize=3,
+        )
+    ax2.set_ylim(0.0, 2 * np.max(Rs[-10:]))
+    ax2.legend()
+    ax2.grid(True)
+
+    ax3.plot(times[time_idxs], fit_lambdas[:, 0], "o-", label="Lambda 1", markersize=4)
+    ax3.plot(times[time_idxs], fit_lambdas[:, 1], "o-", label="Lambda 2", markersize=4)
+    ax3.legend()
+    ax3.grid(True)
+
+    plt.show(fig)
+
+    rate, rate_err, *_, (_, pCov) = fit_transition_rates(times, populations)
+    pCov = pCov[:6, :6]
+    for i, name in enumerate(names):
+        print(
+            f"{name}: {rate[i]:.4g} ± {rate_err[i]:.4g} 1/us (Rel. Error: {rate_err[i] / rate[i] * 100:.2f} %)"
+        )
+
+    fig, ax4 = plt.subplots(figsize=(8, 8))
+
+    max_pcov = np.max(pCov)
+    min_pcov = np.min(pCov)
+    im = ax4.imshow(pCov, cmap="Blues", vmin=min_pcov, vmax=max_pcov)
+    fig.colorbar(im, ax=ax4)
+
+    for i in range(pCov.shape[0]):
+        for j in range(pCov.shape[1]):
+            val = pCov[i, j]
+            ax4.text(
+                j,
+                i,
+                f"{val:.1g}",
+                ha="center",
+                va="center",
+                color="white" if val > 0.5 * (max_pcov + min_pcov) else "black",
+            )
+
+    ax4.set_xticks(list(range(pCov.shape[0])))
+    ax4.set_yticks(list(range(pCov.shape[0])))
+    ax4.set_xticklabels(names)
+    ax4.set_yticklabels(names)
+
+    plt.show(fig)
