@@ -24,28 +24,28 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from .util import calc_populations
+from ..util import calc_populations
 
-MISTPowerDepResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
+PowerDepResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class MISTPowerDepTaskConfig(TaskConfig, ModularProgramCfg):
+class PowerDepCfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     init_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConfig]):
+class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: MISTPowerDepTaskConfig,
+        cfg: PowerDepCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> MISTPowerDepResultType:
+    ) -> PowerDepResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -103,13 +103,13 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConf
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result: MISTPowerDepResultType = (pdrs, signals)
+        self.last_result: PowerDepResult = (pdrs, signals)
 
         return pdrs, signals
 
     def analyze(
         self,
-        result: Optional[MISTPowerDepResultType] = None,
+        result: Optional[PowerDepResult] = None,
         *,
         ac_coeff=None,
         log_scale=False,
@@ -153,7 +153,7 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConf
     def save(
         self,
         filepath: str,
-        result: Optional[MISTPowerDepResultType] = None,
+        result: Optional[PowerDepResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/pdr",
         **kwargs,
@@ -166,7 +166,7 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConf
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
+            x_info={"name": "Drive gain", "unit": "a.u.", "values": pdrs},
             y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
             z_info={"name": "Population", "unit": "a.u.", "values": populations.T},
             comment=comment,
@@ -174,7 +174,7 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConf
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> MISTPowerDepResultType:
+    def load(self, filepath: str, **kwargs) -> PowerDepResult:
         populations, pdrs, _ = load_data(filepath, **kwargs)
 
         self.last_cfg = None
