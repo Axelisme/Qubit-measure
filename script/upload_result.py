@@ -167,28 +167,27 @@ def list_files_in_folder(service, folder_id):
     return files_data
 
 
-def collect_upload_tasks(service, local_folder_path, parent_folder_id, tasks_list):
-    """Recursively traverses a local folder and collects upload tasks.
+def collect_upload_tasks(
+    service, local_folder_path, parent_folder_id, tasks_list, prune=False
+):
+    """Recursively traverses a local folder and collects upload/update/delete tasks.
 
     Args:
         service: Google Drive API service instance.
         local_folder_path: The local folder path to traverse.
         parent_folder_id: The Google Drive parent folder ID.
-        tasks_list: A list to append upload tasks to. Each task is a tuple of
-                    (task_type, local_path, filename, folder_id, remote_file_id).
-                    task_type is either "create" or "update".
+        tasks_list: A list to append tasks to.
+        prune: If True, delete remote files that do not exist locally.
     """
     if not os.path.isdir(local_folder_path):
         print(f"Error: Source folder '{local_folder_path}' not found.")
         return
 
     print(
-        f"Collecting upload tasks from '{local_folder_path}' to Drive folder ID '{parent_folder_id}'..."
+        f"Collecting tasks from '{local_folder_path}' to Drive folder ID '{parent_folder_id}'..."
     )
 
     # Cache for folder IDs to avoid redundant API calls
-    # Key: relative path from local_folder_path (e.g., "." or "subdir/subsubdir")
-    # Value: Google Drive Folder ID
     folder_id_cache = {".": parent_folder_id}
 
     for dirpath, dirnames, filenames in os.walk(local_folder_path):
@@ -206,7 +205,6 @@ def collect_upload_tasks(service, local_folder_path, parent_folder_id, tasks_lis
         if relative_dir == ".":
             current_parent_id = parent_folder_id
         else:
-            # os.walk is top-down, so the parent folder should already be in cache
             parent_rel = os.path.dirname(relative_dir)
             if parent_rel == "":
                 parent_rel = "."
@@ -230,8 +228,9 @@ def collect_upload_tasks(service, local_folder_path, parent_folder_id, tasks_lis
                 )
                 continue
 
-        # Get existing files in the target Drive folder to skip duplicates
+        # Get existing files in the target Drive folder
         existing_files = list_files_in_folder(service, current_parent_id)
+        processed_remote_files = set()
 
         for filename in filenames:
             local_path = os.path.join(dirpath, filename)
@@ -239,12 +238,12 @@ def collect_upload_tasks(service, local_folder_path, parent_folder_id, tasks_lis
             local_datetime = datetime.fromtimestamp(local_mtime, tz=timezone.utc)
 
             if filename in existing_files:
+                processed_remote_files.add(filename)
                 remote_file_info = existing_files[filename]
                 remote_file_id = remote_file_info["id"]
                 remote_modified_time_str = remote_file_info["modifiedTime"]
                 remote_datetime = parse_drive_timestamp(remote_modified_time_str)
 
-                # Compare local and remote modification times
                 if local_datetime > remote_datetime:
                     print(f"  - Queuing update for '{filename}' (local is newer).")
                     tasks_list.append(
@@ -260,15 +259,31 @@ def collect_upload_tasks(service, local_folder_path, parent_folder_id, tasks_lis
                     print(
                         f"  - Skipping '{filename}' (remote is up-to-date: {remote_datetime} vs local: {local_datetime})."
                     )
-                continue  # Move to the next file
+                continue
 
-            # If file does not exist remotely, queue it for upload
             print(f"  - Queuing new file '{filename}' for upload...")
             tasks_list.append(("create", local_path, filename, current_parent_id, None))
 
+        # Handle pruning of extraneous remote files
+        if prune:
+            for remote_filename, remote_info in existing_files.items():
+                if remote_filename not in processed_remote_files:
+                    print(
+                        f"  - Queuing deletion for '{remote_filename}' (not found locally)."
+                    )
+                    tasks_list.append(
+                        (
+                            "delete",
+                            None,
+                            remote_filename,
+                            current_parent_id,
+                            remote_info["id"],
+                        )
+                    )
+
 
 def process_upload_task(creds, task):
-    """Process a single upload task using a thread-local service.
+    """Process a single task using a thread-local service.
 
     Args:
         creds: Google OAuth2 credentials for creating thread-local services.
@@ -279,9 +294,14 @@ def process_upload_task(creds, task):
     # Get or create thread-local service
     service = get_thread_local_service(creds)
 
-    media = MediaFileUpload(local_path, resumable=True)
-
     try:
+        if task_type == "delete":
+            service.files().delete(fileId=remote_file_id, supportsAllDrives=True).execute()
+            print(f"    Deleted remote file: {filename}")
+            return
+
+        media = MediaFileUpload(local_path, resumable=True)
+
         if task_type == "update":
             service.files().update(
                 fileId=remote_file_id,
@@ -300,7 +320,8 @@ def process_upload_task(creds, task):
             ).execute()
             print(f"    Uploaded: {local_path}")
     except HttpError as e:
-        print(f"    Error uploading file '{filename}': {e}")
+        action = "deleting" if task_type == "delete" else "uploading"
+        print(f"    Error {action} file '{filename}': {e}")
 
 
 def main():
@@ -319,6 +340,13 @@ def main():
         type=int,
         default=4,
         help="Number of parallel upload threads (default: 4).",
+    )
+    parser.add_argument(
+        "--prune-remote",
+        "--delete-extraneous",
+        action="store_true",
+        dest="prune",
+        help="Delete files on the remote that do not exist locally.",
     )
     args = parser.parse_args()
 
@@ -349,15 +377,23 @@ def main():
         if qubit_folder_id:
             # Collect all upload tasks
             tasks = []
-            collect_upload_tasks(drive_service, source_folder, qubit_folder_id, tasks)
+            collect_upload_tasks(
+                drive_service,
+                source_folder,
+                qubit_folder_id,
+                tasks,
+                prune=args.prune,
+            )
 
             if tasks:
-                print(f"\nUploading {len(tasks)} file(s) using {args.jobs} threads...")
+                print(
+                    f"\nProcessing {len(tasks)} file(s) (upload/update/delete) using {args.jobs} threads..."
+                )
                 # Execute uploads in parallel using joblib
                 Parallel(n_jobs=args.jobs, backend="threading")(
                     delayed(process_upload_task)(creds, task) for task in tasks
                 )
-                print(f"Upload complete for {qubit_name}.")
+                print(f"Operation complete for {qubit_name}.")
             else:
                 print(f"No files to upload for {qubit_name}.")
 
