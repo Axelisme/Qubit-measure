@@ -252,7 +252,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         filepath: str,
         result: Optional[T1Result] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/ge/t1",
+        tag: str = "twotone/t1",
         **kwargs,
     ) -> None:
         if result is None:

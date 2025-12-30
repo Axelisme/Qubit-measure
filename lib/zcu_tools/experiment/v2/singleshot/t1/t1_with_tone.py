@@ -255,7 +255,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         filepath: str,
         result: Optional[T1WithToneResult] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/ge/t1_with_tone",
+        tag: str = "twotone/t1/t1_with_tone",
         **kwargs,
     ) -> None:
         if result is None:
