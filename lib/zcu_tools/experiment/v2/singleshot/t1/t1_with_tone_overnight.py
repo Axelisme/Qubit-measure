@@ -41,12 +41,12 @@ from zcu_tools.experiment.v2.utils import round_zcu_time
 
 from ..util import calc_populations
 
-T1WithToneOvernightResultType = Tuple[
+T1WithToneOvernightResult = Tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]
 ]
 
 
-class T1WithToneOvernightTaskConfig(TaskConfig, ModularProgramCfg):
+class T1WithToneOvernightCfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     test_pulse: PulseCfg
@@ -56,11 +56,9 @@ class T1WithToneOvernightTaskConfig(TaskConfig, ModularProgramCfg):
 
 
 class T1WithToneOvernightExp(
-    AbsExperiment[T1WithToneOvernightResultType, T1WithToneOvernightTaskConfig]
+    AbsExperiment[T1WithToneOvernightResult, T1WithToneOvernightCfg]
 ):
-    def run(
-        self, *args, unifrom: bool = False, **kwargs
-    ) -> T1WithToneOvernightResultType:
+    def run(self, *args, unifrom: bool = False, **kwargs) -> T1WithToneOvernightResult:
         if unifrom:
             return self._run_uniform(*args, **kwargs)
         else:
@@ -70,14 +68,14 @@ class T1WithToneOvernightExp(
         self,
         soc,
         soccfg,
-        cfg: T1WithToneOvernightTaskConfig,
+        cfg: T1WithToneOvernightCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
         *,
         num_times: int = 50,
         fail_retry: int = 3,
-    ) -> T1WithToneOvernightResultType:
+    ) -> T1WithToneOvernightResult:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -91,6 +89,7 @@ class T1WithToneOvernightExp(
         ts = sweep2array(cfg["sweep"]["length"])
 
         fig, axs = make_plot_frame(2, 2, figsize=(12, 6))
+        axs[0][1].set_ylim(0, 1)
 
         with MultiLivePlotter(
             fig,
@@ -200,14 +199,14 @@ class T1WithToneOvernightExp(
         self,
         soc,
         soccfg,
-        cfg: T1WithToneOvernightTaskConfig,
+        cfg: T1WithToneOvernightCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
         *,
         num_times: int = 50,
         fail_retry: int = 3,
-    ) -> T1WithToneOvernightResultType:
+    ) -> T1WithToneOvernightResult:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -351,7 +350,7 @@ class T1WithToneOvernightExp(
 
     def analyze(
         self,
-        result: Optional[T1WithToneOvernightResultType] = None,
+        result: Optional[T1WithToneOvernightResult] = None,
         *,
         ac_coeff: Optional[float] = None,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
@@ -421,7 +420,7 @@ class T1WithToneOvernightExp(
     def save(
         self,
         filepath: str,
-        result: Optional[T1WithToneOvernightResultType] = None,
+        result: Optional[T1WithToneOvernightResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/t1_overnight",
         **kwargs,
@@ -460,7 +459,7 @@ class T1WithToneOvernightExp(
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> T1WithToneOvernightResultType:
+    def load(self, filepath: List[str], **kwargs) -> T1WithToneOvernightResult:
         g_filepath, e_filepath = filepath
 
         # Load ground populations

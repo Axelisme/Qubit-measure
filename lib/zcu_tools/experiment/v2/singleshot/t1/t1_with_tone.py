@@ -155,6 +155,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 ],
             ),
         ) as viewer:
+            viewer.get_ax().set_ylim(0.0, 1.0)
 
             def make_prog(cfg: T1WithToneCfg, t1_delay: float) -> ModularProgramV2:
                 cfg = deepcopy(cfg)

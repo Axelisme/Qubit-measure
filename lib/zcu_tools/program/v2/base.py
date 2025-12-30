@@ -27,10 +27,10 @@ class MyProgramV2(MyProgram, AveragerProgramV2):
             **kwargs,
         )
 
-    def acquire(self, soc, **kwargs):
+    def acquire(self, *args, **kwargs):
         # v2 program need to pass rounds to acquire
-        return super().acquire(soc, rounds=self.cfg["rounds"], **kwargs)
+        return super().acquire(*args, rounds=self.cfg["rounds"], **kwargs)
 
-    def acquire_decimated(self, soc, **kwargs):
+    def acquire_decimated(self, *args, **kwargs):
         # v2 program need to pass rounds to acquire_decimated
-        return super().acquire_decimated(soc, rounds=self.cfg["rounds"], **kwargs)
+        return super().acquire_decimated(*args, rounds=self.cfg["rounds"], **kwargs)

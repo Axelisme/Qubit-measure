@@ -11,7 +11,6 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 from typing_extensions import NotRequired
-from scipy.ndimage import gaussian_filter
 
 from zcu_tools.program import SweepCfg
 from zcu_tools.experiment import AbsExperiment, config
@@ -41,7 +40,9 @@ from zcu_tools.experiment.v2.utils import round_zcu_time
 from ..util import calc_populations
 
 # (values, times, signals)
-T1SweepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+T1WithToneSweepResult = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
+]
 
 
 class T1WithToneSweepCfg(TaskConfig, ModularProgramCfg):
@@ -51,8 +52,8 @@ class T1WithToneSweepCfg(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
-    def run(self, *args, uniform: bool = False, **kwargs) -> T1SweepResult:
+class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
+    def run(self, *args, uniform: bool = False, **kwargs) -> T1WithToneSweepResult:
         if uniform:
             return self._run_uniform(*args, **kwargs)
         else:
@@ -66,7 +67,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> T1SweepResult:
+    ) -> T1WithToneSweepResult:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -118,6 +119,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
             return acc_populations / rounds
 
         fig, axs = make_plot_frame(2, 2, figsize=(12, 6))
+        axs[0][1].set_ylim(0.0, 1.0)
 
         with MultiLivePlotter(
             fig,
@@ -212,7 +214,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> T1SweepResult:
+    ) -> T1WithToneSweepResult:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -339,7 +341,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
 
     def analyze(
         self,
-        result: Optional[T1SweepResult] = None,
+        result: Optional[T1WithToneSweepResult] = None,
         *,
         ac_coeff: Optional[float] = None,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
@@ -451,7 +453,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[T1SweepResult] = None,
+        result: Optional[T1WithToneSweepResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/ge/t1_with_tone_sweep",
         **kwargs,
@@ -490,7 +492,7 @@ class T1WithToneSweepExp(AbsExperiment[T1SweepResult, T1WithToneSweepCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> T1SweepResult:
+    def load(self, filepath: List[str], **kwargs) -> T1WithToneSweepResult:
         g_filepath, e_filepath = filepath
 
         # Load ground populations
