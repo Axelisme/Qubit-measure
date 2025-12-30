@@ -373,13 +373,11 @@ class T1WithToneOvernightExp(
             populations = np.clip(populations, 0.0, 1.0)
 
         num_iter = iters.shape[0]
-        min_rate = 0.1 / np.max(Ts)
 
         # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
         transition_rates = np.zeros((num_iter, 6), dtype=np.float64)
         for i, pop in enumerate(tqdm(populations, desc="Fitting transition rates")):
             transition_rates[i] = fit_transition_rates(Ts, pop)[0]
-        transition_rates[transition_rates < min_rate] = 0.0
 
         fig, axs = plt.subplots(3, 2, figsize=(12, 8), sharex=True)
 

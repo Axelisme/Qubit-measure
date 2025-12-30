@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Optional, Tuple
 
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
@@ -25,37 +26,26 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting import fit_transition_rates
+from zcu_tools.utils.fitting.multi_decay import (
+    fit_transition_rates,
+    calc_lambda_and_amplitude,
+)
 from zcu_tools.experiment.v2.utils import round_zcu_time
 
 from ..util import calc_populations
 
 # (times, signals)
-T1ResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
+T1WithToneResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-def calc_transition_rate(g_p: float, e_p: float, t1: float) -> Tuple[float, float]:
-    """Calculate transition rates from T1 times and steady populations."""
-    if np.isclose(t1, 0.0, atol=1e-1) or not np.isfinite(t1):
-        return np.nan, np.nan
-
-    # Using detailed balance: p_g * gamma_ge = p_e * gamma_eg
-    # And total rate: gamma_total = gamma_ge + gamma_eg = 1 / t1
-
-    gamma_ge = (e_p / (g_p + e_p)) / t1
-    gamma_eg = (g_p / (g_p + e_p)) / t1
-
-    return gamma_ge, gamma_eg
-
-
-class T1WithToneTaskConfig(TaskConfig, ModularProgramCfg):
+class T1WithToneCfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     pi_pulse: NotRequired[PulseCfg]
     test_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
+class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
     def run(self, *args, uniform: bool = False, **kwargs):
         if uniform:
             return self._run_uniform(*args, **kwargs)
@@ -66,11 +56,11 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
         self,
         soc,
         soccfg,
-        cfg: T1WithToneTaskConfig,
+        cfg: T1WithToneCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> T1ResultType:
+    ) -> T1WithToneResult:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -134,11 +124,11 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
         self,
         soc,
         soccfg,
-        cfg: T1WithToneTaskConfig,
+        cfg: T1WithToneCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> T1ResultType:
+    ) -> T1WithToneResult:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -153,38 +143,6 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
         ts = round_zcu_time(ts, soccfg, gen_ch=cfg["test_pulse"]["ch"])
         ts = np.unique(ts)
 
-        def measure_fn(ctx, update_hook):
-            cfg = deepcopy(ctx.cfg)
-            rounds = cfg.pop("rounds", 1)
-            cfg["rounds"] = 1
-
-            acc_populations = np.zeros((len(ts), 2), dtype=np.float64)
-            for ir in range(rounds):
-                for i, t1_delay in enumerate(ts):
-                    Pulse.set_param(cfg["test_pulse"], "length", t1_delay)
-                    raw_i = ModularProgramV2(
-                        soccfg,
-                        cfg,
-                        modules=[
-                            Reset("reset", cfg.get("reset", {"type": "none"})),
-                            Pulse("pi_pulse", cfg["pi_pulse"]),
-                            Pulse("test_pulse", cfg["test_pulse"]),
-                            Readout("readout", cfg["readout"]),
-                        ],
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        g_center=g_center,
-                        e_center=e_center,
-                        population_radius=radius,
-                    )
-
-                    acc_populations[i] += raw_i[0][0]
-
-                update_hook(ir + 1, acc_populations / (ir + 1))
-
-            return acc_populations / rounds
-
         with LivePlotter1D(
             "Time (us)",
             "Amplitude",
@@ -197,6 +155,45 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
                 ],
             ),
         ) as viewer:
+
+            def make_prog(cfg: T1WithToneCfg, t1_delay: float) -> ModularProgramV2:
+                cfg = deepcopy(cfg)
+                Pulse.set_param(cfg["test_pulse"], "length", t1_delay)
+                return ModularProgramV2(
+                    soccfg,
+                    cfg,
+                    modules=[
+                        Reset("reset", cfg.get("reset", {"type": "none"})),
+                        Pulse("pi_pulse", cfg.get("pi_pulse")),
+                        Pulse("test_pulse", cfg["test_pulse"]),
+                        Readout("readout", cfg["readout"]),
+                    ],
+                )
+
+            def measure_fn(ctx, update_hook):
+                cfg = deepcopy(ctx.cfg)
+                rounds = cfg.pop("rounds", 1)
+                cfg["rounds"] = 1
+
+                progs = [make_prog(cfg, t1_delay) for t1_delay in ts]
+
+                acc_populations = np.zeros((len(ts), 2), dtype=np.float64)
+                for ir in range(rounds):
+                    for i, prog in enumerate(progs):
+                        raw_i = prog.acquire(
+                            soc,
+                            progress=False,
+                            g_center=g_center,
+                            e_center=e_center,
+                            population_radius=radius,
+                        )
+
+                        acc_populations[i] += raw_i[0][0]
+
+                    update_hook(ir + 1, acc_populations / (ir + 1))
+
+                return acc_populations / rounds
+
             populations = run_task(
                 task=HardTask(
                     measure_fn=measure_fn,
@@ -219,7 +216,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1WithToneResult] = None,
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
@@ -239,18 +236,12 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
 
         fit_with_vadality(lens, populations)
 
-        rates, _, fit_pops, _ = fit_transition_rates(lens, populations)
+        rates, _, fit_pops, (pOpt, _) = fit_transition_rates(lens, populations)
 
-        T_ge, T_eg, T_eo, T_oe, T_go, T_og = rates
-        M = [
-            [-(T_ge + T_go), T_eg, T_og],
-            [T_ge, -(T_eg + T_eo), T_oe],
-            [T_go, T_eo, -(T_og + T_oe)],
-        ]
-        caraterization_rates = np.sort(np.abs(np.diagonal(M)))
+        lambdas, _ = calc_lambda_and_amplitude(tuple(pOpt))
 
-        t1 = 1.0 / caraterization_rates[2]
-        t1_b = 1.0 / caraterization_rates[1]
+        t1 = 1.0 / lambdas[2]
+        t1_b = 1.0 / lambdas[1]
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
@@ -276,7 +267,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1WithToneResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1_with_tone",
         **kwargs,
@@ -296,7 +287,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1ResultType:
+    def load(self, filepath: str, **kwargs) -> T1WithToneResult:
         populations, Ts, y_values = load_data(filepath, **kwargs)
         assert Ts is not None and y_values is not None
         assert len(Ts.shape) == 1 and len(y_values.shape) == 1

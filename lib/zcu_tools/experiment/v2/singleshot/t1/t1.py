@@ -33,29 +33,33 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting import fit_transition_rates
+from zcu_tools.utils.fitting.multi_decay import (
+    fit_transition_rates,
+    calc_lambda_and_amplitude,
+)
 from zcu_tools.experiment.v2.utils import round_zcu_time
 
 from ..util import calc_populations
 
 # (times, signals)
-T1ResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
+T1Result = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class T1TaskConfig(TaskConfig, ModularProgramCfg):
+class T1Cfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
+    init_pulse: NotRequired[PulseCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
+class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     """T1 relaxation time measurement.
 
     Applies a π pulse and then waits for a variable time before readout
     to measure the qubit's energy relaxation.
     """
 
-    def run(self, *args, unifrom: bool = False, **kwargs) -> T1ResultType:
+    def run(self, *args, unifrom: bool = False, **kwargs) -> T1Result:
         if unifrom:
             return self._run_uniform(*args, **kwargs)
         else:
@@ -65,11 +69,11 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
         self,
         soc,
         soccfg,
-        cfg: T1TaskConfig,
+        cfg: T1Cfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> T1ResultType:
+    ) -> T1Result:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -78,48 +82,11 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
         del cfg["sweep"]
 
         if isinstance(len_sweep, dict):
-            ts = (
-                np.linspace(
-                    len_sweep["start"] ** (1 / 1.3),
-                    len_sweep["stop"] ** (1 / 1.3),
-                    len_sweep["expts"],
-                )
-                ** 1.3
-            )
+            ts = np.geomspace(len_sweep["start"], len_sweep["stop"], len_sweep["expts"])
         else:
             ts = np.asarray(len_sweep)
         ts = round_zcu_time(ts, soccfg)
         ts = np.unique(ts)
-
-        def measure_fn(ctx, update_hook):
-            rounds = ctx.cfg.pop("rounds", 1)
-            ctx.cfg["rounds"] = 1
-
-            acc_populations = np.zeros((len(ts), 2), dtype=np.float64)
-            for ir in range(rounds):
-                for i, t1_delay in enumerate(ts):
-                    raw_i = ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                            Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                            Delay("t1_delay", delay=t1_delay),
-                            Readout("readout", ctx.cfg["readout"]),
-                        ],
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        g_center=g_center,
-                        e_center=e_center,
-                        population_radius=radius,
-                    )
-
-                    acc_populations[i] += raw_i[0][0]
-
-                update_hook(ir, acc_populations / (ir + 1))
-
-            return acc_populations / rounds
 
         with LivePlotter1D(
             "Time (us)",
@@ -134,6 +101,44 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
             ),
         ) as viewer:
             viewer.get_ax().set_ylim(0.0, 1.0)
+
+            def make_prog(cfg: T1Cfg, t1_delay: float) -> ModularProgramV2:
+                cfg = deepcopy(cfg)
+                return ModularProgramV2(
+                    soccfg,
+                    cfg,
+                    modules=[
+                        Reset("reset", cfg.get("reset", {"type": "none"})),
+                        Pulse("init_pulse", cfg.get("init_pulse")),
+                        Pulse("pi_pulse", cfg["pi_pulse"]),
+                        Delay("t1_delay", delay=t1_delay),
+                        Readout("readout", cfg["readout"]),
+                    ],
+                )
+
+            def measure_fn(ctx, update_hook):
+                cfg = deepcopy(ctx.cfg)
+                rounds = cfg.pop("rounds", 1)
+                cfg["rounds"] = 1
+
+                progs = [make_prog(cfg, t1_delay) for t1_delay in ts]
+
+                acc_populations = np.zeros((len(ts), 2), dtype=np.float64)
+                for ir in range(rounds):
+                    for i, prog in enumerate(progs):
+                        raw_i = prog.acquire(
+                            soc,
+                            progress=False,
+                            g_center=g_center,
+                            e_center=e_center,
+                            population_radius=radius,
+                        )
+
+                        acc_populations[i] += raw_i[0][0]
+
+                    update_hook(ir + 1, acc_populations / (ir + 1))
+
+                return acc_populations / rounds
 
             populations = run_task(
                 task=HardTask(
@@ -156,11 +161,11 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
         self,
         soc,
         soccfg,
-        cfg: T1TaskConfig,
+        cfg: T1Cfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> T1ResultType:
+    ) -> T1Result:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -190,6 +195,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
                             ctx.cfg,
                             modules=[
                                 Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
                                 Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
                                 Delay(
                                     name="t1_delay",
@@ -224,7 +230,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
 
     def analyze(
         self,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1Result] = None,
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
@@ -240,17 +246,20 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
             populations = populations @ np.linalg.inv(confusion_matrix)
             populations = np.clip(populations, 0.0, 1.0)
 
-        rate, _, fit_populations, *_ = fit_transition_rates(lens, populations)
+        rates, _, fit_pops, (pOpt, _) = fit_transition_rates(lens, populations)
 
-        t1 = 1 / (rate[0] + rate[1])
+        lambdas, _ = calc_lambda_and_amplitude(tuple(pOpt))
+
+        t1 = 1.0 / lambdas[2]
+        t1_b = 1.0 / lambdas[1]
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.set_title(f"T_1 = {t1:.1f} μs")
-        ax.plot(lens, fit_populations[:, 0], color="blue", ls="--", label="Ground Fit")
-        ax.plot(lens, fit_populations[:, 1], color="red", ls="--", label="Excited Fit")
-        ax.plot(lens, fit_populations[:, 2], color="green", ls="--", label="Other Fit")
+        ax.set_title(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
+        ax.plot(lens, fit_pops[:, 0], color="blue", ls="--", label="Ground Fit")
+        ax.plot(lens, fit_pops[:, 1], color="red", ls="--", label="Excited Fit")
+        ax.plot(lens, fit_pops[:, 2], color="green", ls="--", label="Other Fit")
         plot_kwargs = dict(ls="-", marker=".", markersize=3)
         ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
         ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
@@ -267,7 +276,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1Result] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1",
         **kwargs,
@@ -287,7 +296,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1ResultType:
+    def load(self, filepath: str, **kwargs) -> T1Result:
         populations, Ts, y_values = load_data(filepath, **kwargs)
         assert Ts is not None and y_values is not None
         assert len(Ts.shape) == 1 and len(y_values.shape) == 1
@@ -312,7 +321,7 @@ class T1WithToneTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
+class T1WithToneExp(AbsExperiment[T1Result, T1WithToneTaskConfig]):
     def run(
         self,
         soc,
@@ -321,7 +330,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> T1ResultType:
+    ) -> T1Result:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -382,7 +391,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1Result] = None,
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
@@ -428,7 +437,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1Result] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1_with_tone",
         **kwargs,
@@ -448,7 +457,7 @@ class T1WithToneExp(AbsExperiment[T1ResultType, T1WithToneTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1ResultType:
+    def load(self, filepath: str, **kwargs) -> T1Result:
         populations, Ts, y_values = load_data(filepath, **kwargs)
         assert Ts is not None and y_values is not None
         assert len(Ts.shape) == 1 and len(y_values.shape) == 1

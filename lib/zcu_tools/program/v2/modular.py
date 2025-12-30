@@ -40,9 +40,12 @@ class ModularProgramV2(MyProgramV2):
             module.init(self)
 
     def _body(self, cfg: ModularProgramCfg) -> None:
+        from .utils import PrintTimeStamp
+
         t = 0.0
         for module in self.modules:
             t = module.run(self, t)
+            # self.append_macro(PrintTimeStamp(module.name, gen_chs=[0], ro_chs=[0]))
         self.delay(t=t + 0.03)
 
 

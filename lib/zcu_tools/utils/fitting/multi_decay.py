@@ -144,37 +144,52 @@ def fit_transition_rates(
     return rates, rate_errs, fit_populations, (pOpt, pCov)
 
 
+def calc_lambda_and_amplitude(
+    pOpt: Tuple[float, ...],
+) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+    T_ge, T_eg, T_eo, T_oe, T_go, T_og, p0_g, p0_e = pOpt
+    M = [
+        [-(T_ge + T_go), T_eg, T_og],
+        [T_ge, -(T_eg + T_eo), T_oe],
+        [T_go, T_eo, -(T_og + T_oe)],
+    ]
+    lambdas, vectors = np.linalg.eig(M)
+
+    P0 = np.array([p0_g, p0_e, 1.0 - p0_g - p0_e])  # (3,)
+    amplitudes = np.dot(np.linalg.inv(vectors), P0)  # (3,)
+
+    sort_idxs = np.argsort(np.abs(lambdas))
+    lambdas = lambdas[sort_idxs]
+    amplitudes = amplitudes[sort_idxs]
+
+    return np.abs(lambdas), np.abs(amplitudes)
+
+
 def fit_with_vadality(times: NDArray[np.float64], populations: NDArray[np.float64]):
     import matplotlib.pyplot as plt
     from tqdm.auto import trange
-
-    def calc_lambda(rate):
-        T_ge, T_eg, T_eo, T_oe, T_go, T_og = rate
-        M = [
-            [-(T_ge + T_go), T_eg, T_og],
-            [T_ge, -(T_eg + T_eo), T_oe],
-            [T_go, T_eo, -(T_og + T_oe)],
-        ]
-        fit_lambdas = np.sort(np.abs(np.diagonal(M)))
-        return fit_lambdas[1], fit_lambdas[2]
 
     Rs = []
     R_errs = []
     fit_pps = []
     fit_lambdas = []
+    fit_amplitudes = []
     time_idxs = list(range(len(times) // 2, len(times)))
     for i in time_idxs:
         rate, rate_err, *_, (pOpt, _) = fit_transition_rates(times[:i], populations[:i])
         Rs.append(rate)
         R_errs.append(rate_err)
         fit_pps.append(model_func(times, *pOpt))
-        fit_lambdas.append(calc_lambda(rate))
+        w, v = calc_lambda_and_amplitude(tuple(pOpt))
+        fit_lambdas.append(w)
+        fit_amplitudes.append(v)
     Rs = np.array(Rs)
     R_errs = np.array(R_errs)
     fit_pps = np.array(fit_pps)
-    fit_lambdas = np.array(fit_lambdas)
+    fit_lambdas = np.array(fit_lambdas)  # (N, 3)
+    fit_amplitudes = np.array(fit_amplitudes)  # (N, 3)
 
-    fig, (ax, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 12))
+    fig, (ax, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 12))
 
     plot_kwargs = dict(ls="-", marker=".", markersize=3)
     ax.plot(times, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
@@ -205,10 +220,17 @@ def fit_with_vadality(times: NDArray[np.float64], populations: NDArray[np.float6
     ax2.legend()
     ax2.grid(True)
 
-    ax3.plot(times[time_idxs], fit_lambdas[:, 0], "o-", label="Lambda 1", markersize=4)
-    ax3.plot(times[time_idxs], fit_lambdas[:, 1], "o-", label="Lambda 2", markersize=4)
+    ax3.plot(times[time_idxs], fit_lambdas[:, 0], "o-", label="Lambda 0", markersize=4)
+    ax3.plot(times[time_idxs], fit_lambdas[:, 1], "o-", label="Lambda 1", markersize=4)
+    ax3.plot(times[time_idxs], fit_lambdas[:, 2], "o-", label="Lambda 2", markersize=4)
     ax3.legend()
     ax3.grid(True)
+
+    ax4.plot(times[time_idxs], fit_amplitudes[:, 0], "o-", label="Amp 0", markersize=4)
+    ax4.plot(times[time_idxs], fit_amplitudes[:, 1], "o-", label="Amp 1", markersize=4)
+    ax4.plot(times[time_idxs], fit_amplitudes[:, 2], "o-", label="Amp 2", markersize=4)
+    ax4.legend()
+    ax4.grid(True)
 
     plt.show(fig)
 
@@ -219,17 +241,17 @@ def fit_with_vadality(times: NDArray[np.float64], populations: NDArray[np.float6
             f"{name}: {rate[i]:.4g} ± {rate_err[i]:.4g} 1/us (Rel. Error: {rate_err[i] / rate[i] * 100:.2f} %)"
         )
 
-    fig, ax4 = plt.subplots(figsize=(8, 8))
+    fig, ax5 = plt.subplots(figsize=(8, 8))
 
     max_pcov = np.max(pCov)
     min_pcov = np.min(pCov)
-    im = ax4.imshow(pCov, cmap="Blues", vmin=min_pcov, vmax=max_pcov)
-    fig.colorbar(im, ax=ax4)
+    im = ax5.imshow(pCov, cmap="Blues", vmin=min_pcov, vmax=max_pcov)
+    fig.colorbar(im, ax=ax5)
 
     for i in range(pCov.shape[0]):
         for j in range(pCov.shape[1]):
             val = pCov[i, j]
-            ax4.text(
+            ax5.text(
                 j,
                 i,
                 f"{val:.1g}",
@@ -238,9 +260,9 @@ def fit_with_vadality(times: NDArray[np.float64], populations: NDArray[np.float6
                 color="white" if val > 0.5 * (max_pcov + min_pcov) else "black",
             )
 
-    ax4.set_xticks(list(range(pCov.shape[0])))
-    ax4.set_yticks(list(range(pCov.shape[0])))
-    ax4.set_xticklabels(names)
-    ax4.set_yticklabels(names)
+    ax5.set_xticks(list(range(pCov.shape[0])))
+    ax5.set_yticks(list(range(pCov.shape[0])))
+    ax5.set_xticklabels(names)
+    ax5.set_yticklabels(names)
 
     plt.show(fig)

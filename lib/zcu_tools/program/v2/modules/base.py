@@ -8,15 +8,16 @@ from ..base import MyProgramV2
 
 
 class Module(ABC):
+    def __init__(self) -> None:
+        self.name = "UnnamedModule"
+
     @abstractmethod
-    def init(self, prog: MyProgramV2) -> None:
-        pass
+    def init(self, prog: MyProgramV2) -> None: ...
 
     @abstractmethod
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        pass
+    ) -> Union[float, QickParam]: ...
 
 
 class Delay(Module):
