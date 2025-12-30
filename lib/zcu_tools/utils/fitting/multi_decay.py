@@ -1,10 +1,10 @@
 import numpy as np
-from typing import Tuple, Optional, List
+from typing import Tuple, List
 from numpy.typing import NDArray
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import nnls
 
-from .base import fit_func
+from .base import fit_func, batch_fit_func
 
 
 def model_func(t, T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0, pe0) -> NDArray[np.float64]:
@@ -88,9 +88,7 @@ def guess_initial_params(
 
 
 def fit_transition_rates(
-    times: NDArray[np.float64],
-    populations: NDArray[np.float64],
-    p0_guess: Optional[Tuple[float, ...]] = None,
+    times: NDArray[np.float64], populations: NDArray[np.float64]
 ) -> Tuple[
     Tuple[float, ...],
     Tuple[float, ...],
@@ -104,35 +102,21 @@ def fit_transition_rates(
         (pOpt, pCov)
     """
 
-    if p0_guess is None:
-        p0_guess = guess_initial_params(populations, times)
+    p0_guess = guess_initial_params(populations, times)
 
     R_ge, R_eg, R_eo, R_oe, R_go, R_og, p0_g, p0_e = p0_guess
 
-    max_R = 2 * np.max([R_ge, R_eg, R_eo, R_oe, R_go, R_og])
-    bounds = (
-        [0, 0, 0, 0, 0, 0, max(0, p0_g - 0.1), max(0, p0_e - 0.1)],
-        [
-            max_R,
-            max_R,
-            max_R,
-            max_R,
-            max_R,
-            max_R,
-            min(1, p0_g + 0.01),
-            min(1, p0_e + 0.01),
-        ],
-    )
-
+    max_R = 2 * float(np.max([R_ge, R_eg, R_eo, R_oe, R_go, R_og]))
     pOpt, pCov = fit_func(
         times,
         populations.flatten(),
         lambda *args: model_func(*args).flatten(),
         p0_guess,
-        bounds=bounds,
+        bounds=(
+            [0.0] * 6 + [max(0, p0_g - 0.1), max(0, p0_e - 0.1)],
+            [max_R] * 6 + [min(1, p0_g + 0.1), min(1, p0_e + 0.1)],
+        ),
     )
-    # pOpt = list(p0_guess)
-    # pCov = np.ones((len(pOpt), len(pOpt)))
 
     fit_populations = model_func(times, *pOpt)
 
@@ -144,10 +128,70 @@ def fit_transition_rates(
     return rates, rate_errs, fit_populations, (pOpt, pCov)
 
 
-def calc_lambda_and_amplitude(
-    pOpt: Tuple[float, ...],
+def fit_dual_transition_rates(
+    times: NDArray[np.float64],
+    populations1: NDArray[np.float64],
+    populations2: NDArray[np.float64],
+) -> Tuple[
+    Tuple[float, ...],
+    Tuple[float, ...],
+    NDArray[np.float64],
+    NDArray[np.float64],
+    Tuple[List[float], NDArray[np.float64]],
+    Tuple[List[float], NDArray[np.float64]],
+]:
+    """
+    Returns:
+        fitted_rates: (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
+        rate_errs: Errors of the fitted rates
+        fit_populations1: Fitted populations1 over time
+        fit_populations2: Fitted populations2 over time
+        (pOpt_1, pCov_1)
+        (pOpt_2, pCov_2)
+    """
+
+    p0_guess1 = guess_initial_params(populations1, times)
+    p0_guess2 = guess_initial_params(populations2, times)
+
+    p0_g1, p0_e1 = p0_guess1[6], p0_guess1[7]
+    p0_g2, p0_e2 = p0_guess2[6], p0_guess2[7]
+    p0_guess_avg = 0.5 * (np.array(p0_guess1) + np.array(p0_guess2))
+
+    p0_init1 = tuple([*p0_guess_avg[:6], p0_g1, p0_e1])
+    p0_init2 = tuple([*p0_guess_avg[:6], p0_g2, p0_e2])
+
+    max_R = 2 * float(np.max(p0_guess_avg[:6]))
+    (pOpt1, pOpt2), (pCov1, pCov2) = batch_fit_func(
+        [times, times],
+        [populations1.flatten(), populations2.flatten()],
+        lambda *args: model_func(*args).flatten(),
+        [p0_init1, p0_init2],
+        shared_idxs=[0, 1, 2, 3, 4, 5],
+        list_bounds=[
+            (
+                [0.0] * 6 + [max(0.0, p0_g1 - 0.1), max(0.0, p0_e1 - 0.1)],
+                [max_R] * 6 + [min(1.0, p0_g1 + 0.1), min(1.0, p0_e1 + 0.1)],
+            ),
+            (
+                [0.0] * 6 + [max(0.0, p0_g2 - 0.1), max(0.0, p0_e2 - 0.1)],
+                [max_R] * 6 + [min(1.0, p0_g2 + 0.1), min(1.0, p0_e2 + 0.1)],
+            ),
+        ],
+    )
+
+    fit_pops1 = model_func(times, *pOpt1)
+    fit_pops2 = model_func(times, *pOpt2)
+
+    rates = tuple(pOpt1[:6])
+    rate_errs = tuple(np.sqrt(np.diag(pCov1))[:6])
+
+    return rates, rate_errs, fit_pops1, fit_pops2, (pOpt1, pCov1), (pOpt2, pCov2)
+
+
+def calc_lambdas(
+    rate: Tuple[float, ...],
 ) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
-    T_ge, T_eg, T_eo, T_oe, T_go, T_og, p0_g, p0_e = pOpt
+    T_ge, T_eg, T_eo, T_oe, T_go, T_og = rate
     M = [
         [-(T_ge + T_go), T_eg, T_og],
         [T_ge, -(T_eg + T_eo), T_oe],
@@ -155,19 +199,27 @@ def calc_lambda_and_amplitude(
     ]
     lambdas, vectors = np.linalg.eig(M)
 
-    P0 = np.array([p0_g, p0_e, 1.0 - p0_g - p0_e])  # (3,)
-    amplitudes = np.dot(np.linalg.inv(vectors), P0)  # (3,)
+    lambdas = -np.real(lambdas)
+    vectors = np.real(vectors)
 
-    sort_idxs = np.argsort(np.abs(lambdas))
+    sort_idxs = np.argsort(lambdas)
     lambdas = lambdas[sort_idxs]
-    amplitudes = amplitudes[sort_idxs]
+    vectors = vectors[:, sort_idxs]
 
-    return np.abs(lambdas), np.abs(amplitudes)
+    return lambdas, vectors
+
+
+def clac_amplitude(
+    vectors: NDArray[np.float64], p0g: float, p0e: float
+) -> Tuple[float, float, float]:
+    P0 = np.array([p0g, p0e, 1.0 - p0g - p0e])  # (3,)
+    amplitudes = np.abs(np.dot(np.linalg.inv(vectors), P0))  # (3,)
+    return tuple(amplitudes)
 
 
 def fit_with_vadality(times: NDArray[np.float64], populations: NDArray[np.float64]):
     import matplotlib.pyplot as plt
-    from tqdm.auto import trange
+    from tqdm.auto import tqdm
 
     Rs = []
     R_errs = []
@@ -175,14 +227,15 @@ def fit_with_vadality(times: NDArray[np.float64], populations: NDArray[np.float6
     fit_lambdas = []
     fit_amplitudes = []
     time_idxs = list(range(len(times) // 2, len(times)))
-    for i in time_idxs:
+    for i in tqdm(time_idxs):
         rate, rate_err, *_, (pOpt, _) = fit_transition_rates(times[:i], populations[:i])
         Rs.append(rate)
         R_errs.append(rate_err)
         fit_pps.append(model_func(times, *pOpt))
-        w, v = calc_lambda_and_amplitude(tuple(pOpt))
+        w, v = calc_lambdas(rate)
+        amp = clac_amplitude(v, pOpt[6], pOpt[7])
         fit_lambdas.append(w)
-        fit_amplitudes.append(v)
+        fit_amplitudes.append(amp)
     Rs = np.array(Rs)
     R_errs = np.array(R_errs)
     fit_pps = np.array(fit_pps)
@@ -197,7 +250,7 @@ def fit_with_vadality(times: NDArray[np.float64], populations: NDArray[np.float6
     ax.plot(times, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
 
     r_num = Rs.shape[0]
-    for i in trange(r_num):
+    for i in range(r_num):
         ax.plot(times, fit_pps[i, :, 0], color="blue", alpha=i / r_num)  # type: ignore
         ax.plot(times, fit_pps[i, :, 1], color="red", alpha=i / r_num)  # type: ignore
         ax.plot(times, fit_pps[i, :, 2], color="green", alpha=i / r_num)  # type: ignore
@@ -266,3 +319,119 @@ def fit_with_vadality(times: NDArray[np.float64], populations: NDArray[np.float6
     ax5.set_yticklabels(names)
 
     plt.show(fig)
+
+
+def fit_dual_with_vadality(
+    times: NDArray[np.float64],
+    populations1: NDArray[np.float64],
+    populations2: NDArray[np.float64],
+):
+    import matplotlib.pyplot as plt
+    from tqdm.auto import tqdm
+
+    time_idxs = list(range(len(times) // 2, len(times)))
+
+    Rs = []
+    R_errs = []
+    fit_lambdas = []
+    fit_pps1 = []
+    fit_pps2 = []
+    fit_amps1 = []
+    fit_amps2 = []
+    for i in tqdm(time_idxs):
+        rate, rate_err, *_, (pOpt1, _), (pOpt2, _) = fit_dual_transition_rates(
+            times[:i], populations1[:i], populations2[:i]
+        )
+        Rs.append(rate)
+        R_errs.append(rate_err)
+        w, v = calc_lambdas(rate)
+        fit_lambdas.append(w)
+        fit_pps1.append(model_func(times, *pOpt1))
+        fit_pps2.append(model_func(times, *pOpt2))
+        fit_amps1.append(clac_amplitude(v, pOpt1[6], pOpt1[7]))
+        fit_amps2.append(clac_amplitude(v, pOpt2[6], pOpt2[7]))
+    Rs = np.array(Rs)
+    R_errs = np.array(R_errs)
+    fit_lambdas = np.array(fit_lambdas)  # (N, 3)
+    fit_pps1 = np.array(fit_pps1)  # (N, times, 3)
+    fit_pps2 = np.array(fit_pps2)  # (N, times, 3)
+    fit_amps1 = np.array(fit_amps1)  # (N, 3)
+    fit_amps2 = np.array(fit_amps2)  # (N, 3)
+
+    fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize=(15, 8))
+
+    # ax1
+    plot_kwargs = dict(ls="-", marker=".", markersize=3)
+    ax1.plot(times, populations1[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
+    ax1.plot(times, populations1[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
+    ax1.plot(times, populations1[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+
+    r_num = Rs.shape[0]
+    for i in range(r_num):
+        ax1.plot(times, fit_pps1[i, :, 0], color="blue", alpha=i / r_num)  # type: ignore
+        ax1.plot(times, fit_pps1[i, :, 1], color="red", alpha=i / r_num)  # type: ignore
+        ax1.plot(times, fit_pps1[i, :, 2], color="green", alpha=i / r_num)  # type: ignore
+
+    ax1.legend()
+    ax1.grid(True)
+
+    # ax2
+    plot_kwargs = dict(ls="-", marker=".", markersize=3)
+    ax2.plot(times, populations2[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
+    ax2.plot(times, populations2[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
+    ax2.plot(times, populations2[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+
+    r_num = Rs.shape[0]
+    for i in range(r_num):
+        ax2.plot(times, fit_pps2[i, :, 0], color="blue", alpha=i / r_num)  # type: ignore
+        ax2.plot(times, fit_pps2[i, :, 1], color="red", alpha=i / r_num)  # type: ignore
+        ax2.plot(times, fit_pps2[i, :, 2], color="green", alpha=i / r_num)  # type: ignore
+
+    ax2.legend()
+    ax2.grid(True)
+
+    # ax3
+    names = ["T_ge", "T_eg", "T_eo", "T_oe", "T_go", "T_og"]
+    for i in range(Rs.shape[1]):
+        ax3.errorbar(
+            times[time_idxs],
+            Rs[:, i],
+            yerr=R_errs[:, i],
+            label=names[i],
+            fmt=".-",
+            markersize=4,
+            capsize=3,
+        )
+    ax3.set_ylim(0.0, 2 * np.max(Rs[-10:]))
+    ax3.legend()
+    ax3.grid(True)
+
+    # ax4
+    ax4.plot(times[time_idxs], fit_lambdas[:, 0], "o-", label="Lambda 0", markersize=4)
+    ax4.plot(times[time_idxs], fit_lambdas[:, 1], "o-", label="Lambda 1", markersize=4)
+    ax4.plot(times[time_idxs], fit_lambdas[:, 2], "o-", label="Lambda 2", markersize=4)
+    ax4.legend()
+    ax4.grid(True)
+
+    # ax5
+    ax5.plot(times[time_idxs], fit_amps1[:, 0], "o-", label="Amp 0", markersize=4)
+    ax5.plot(times[time_idxs], fit_amps1[:, 1], "o-", label="Amp 1", markersize=4)
+    ax5.plot(times[time_idxs], fit_amps1[:, 2], "o-", label="Amp 2", markersize=4)
+    ax5.legend()
+    ax5.grid(True)
+
+    # ax6
+    ax6.plot(times[time_idxs], fit_amps2[:, 0], "o-", label="Amp 0", markersize=4)
+    ax6.plot(times[time_idxs], fit_amps2[:, 1], "o-", label="Amp 1", markersize=4)
+    ax6.plot(times[time_idxs], fit_amps2[:, 2], "o-", label="Amp 2", markersize=4)
+    ax6.legend()
+    ax6.grid(True)
+
+    plt.show(fig)
+    plt.close(fig)
+
+    rate, rate_err, *_ = fit_dual_transition_rates(times, populations1, populations2)
+    for i, name in enumerate(names):
+        print(
+            f"{name}: {rate[i]:.4g} ± {rate_err[i]:.4g} 1/us (Rel. Error: {rate_err[i] / rate[i] * 100:.2f} %)"
+        )

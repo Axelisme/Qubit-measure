@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, Optional, Tuple, List
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array, make_ge_sweep
 from zcu_tools.experiment.v2.runner import (
     HardTask,
@@ -31,10 +31,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting.multi_decay import (
-    fit_transition_rates,
-    calc_lambda_and_amplitude,
-)
+from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_dual_transition_rates
 from zcu_tools.experiment.v2.utils import round_zcu_time
 
 from ..util import calc_populations
@@ -65,7 +62,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         g_center: complex,
         e_center: complex,
         radius: float,
-        unifrom: bool = False,
+        uniform: bool = False,
     ) -> T1Result:
         cfg = deepcopy(cfg)
 
@@ -73,7 +70,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         len_sweep = cfg["sweep"]["length"]
 
-        if unifrom:
+        if uniform:
             assert isinstance(len_sweep, dict)
             ts = sweep2array(len_sweep)
             ts = round_zcu_time(ts, soccfg)
@@ -89,7 +86,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             ts = np.unique(ts)
             cfg["sweep"] = {"ge": make_ge_sweep()}
 
-        fig, axs = make_plot_frame(2, 1, figsize=(12, 6))
+        fig, axs = make_plot_frame(1, 2, figsize=(8, 4))
         axs[0][0].set_ylim(0, 1)
         axs[0][1].set_ylim(0, 1)
 
@@ -99,7 +96,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 init_g=LivePlotter1D(
                     "Time (us)",
                     "Amplitude",
-                    ax=axs[0][0],
+                    existed_axes=[[axs[0][0]]],
                     segment_kwargs=dict(
                         num_lines=3,
                         line_kwargs=[
@@ -112,7 +109,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 init_e=LivePlotter1D(
                     "Time (us)",
                     "Amplitude",
-                    ax=axs[0][1],
+                    existed_axes=[[axs[0][1]]],
                     segment_kwargs=dict(
                         num_lines=3,
                         line_kwargs=[
@@ -164,7 +161,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     e_center=e_center,
                     population_radius=radius,
                 )
-                if unifrom:
+                if uniform:
                     len_param = sweep2param("length", cfg["sweep"]["length"])
                     return prog_maker(ctx.cfg, len_param).acquire(**acquire_kwargs)
                 else:
@@ -182,6 +179,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 init_cfg=cfg,
                 update_hook=plot_fn,
             )
+        plt.close(fig)
 
         # record last cfg and result
         self.last_cfg = cfg
@@ -201,34 +199,49 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         lens, populations = result
 
-        populations = calc_populations(populations)
+        populations = calc_populations(populations)  # (N, 2, 3)
 
         if confusion_matrix is not None:  # readout correction
             populations = populations @ np.linalg.inv(confusion_matrix)
             populations = np.clip(populations, 0.0, 1.0)
 
-        rates, _, fit_pops, (pOpt, _) = fit_transition_rates(lens, populations)
+        populations1 = populations[:, 0]  # init in g
+        populations2 = populations[:, 1]  # init in e
 
-        lambdas, _ = calc_lambda_and_amplitude(tuple(pOpt))
+        rate, _, fit_pops1, fit_pops2, *_ = fit_dual_transition_rates(
+            lens, populations1, populations2
+        )
+
+        lambdas, _ = calc_lambdas(rate)
 
         t1 = 1.0 / lambdas[2]
         t1_b = 1.0 / lambdas[1]
 
-        fig, ax = plt.subplots(figsize=config.figsize)
-        assert isinstance(fig, Figure)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
 
-        ax.set_title(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
-        ax.plot(lens, fit_pops[:, 0], color="blue", ls="--", label="Ground Fit")
-        ax.plot(lens, fit_pops[:, 1], color="red", ls="--", label="Excited Fit")
-        ax.plot(lens, fit_pops[:, 2], color="green", ls="--", label="Other Fit")
+        ax1.set_title(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
         plot_kwargs = dict(ls="-", marker=".", markersize=3)
-        ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-        ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-        ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
-        ax.set_xlabel("Time (μs)")
-        ax.set_ylabel("Population")
-        ax.legend(loc=4)
-        ax.grid(True)
+
+        ax1.plot(lens, fit_pops1[:, 0], color="blue", ls="--", label="Ground Fit")
+        ax1.plot(lens, fit_pops1[:, 1], color="red", ls="--", label="Excited Fit")
+        ax1.plot(lens, fit_pops1[:, 2], color="green", ls="--", label="Other Fit")
+        ax1.plot(lens, populations1[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
+        ax1.plot(lens, populations1[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
+        ax1.plot(lens, populations1[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+        ax1.set_ylabel("Population")
+        ax1.legend(loc=4)
+        ax1.grid(True)
+
+        ax2.plot(lens, fit_pops2[:, 0], color="blue", ls="--", label="Ground Fit")
+        ax2.plot(lens, fit_pops2[:, 1], color="red", ls="--", label="Excited Fit")
+        ax2.plot(lens, fit_pops2[:, 2], color="green", ls="--", label="Other Fit")
+        ax2.plot(lens, populations2[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
+        ax2.plot(lens, populations2[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
+        ax2.plot(lens, populations2[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+        ax2.set_xlabel("Time (μs)")
+        ax2.set_ylabel("Population")
+        ax2.legend(loc=4)
+        ax2.grid(True)
 
         fig.tight_layout()
 
@@ -246,25 +259,52 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        Ts, signals = result
+        Ts, populations = result
+
+        populations1 = populations[:, 0]  # init in g
+        populations2 = populations[:, 1]  # init in e
+
+        _filepath = Path(filepath)
+
+        # initial in g
         save_data(
-            filepath=filepath,
+            filepath=str(_filepath.with_name(_filepath.stem + "_initg")),
             x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
             y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
+            z_info={"name": "Signal", "unit": "a.u.", "values": populations1.T},
             comment=comment,
             tag=tag,
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1Result:
-        populations, Ts, y_values = load_data(filepath, **kwargs)
-        assert Ts is not None and y_values is not None
-        assert len(Ts.shape) == 1 and len(y_values.shape) == 1
-        assert populations.shape == (len(y_values), len(Ts))
+        # initial in e
+        save_data(
+            filepath=str(_filepath.with_name(_filepath.stem + "_inite")),
+            x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
+            y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
+            z_info={"name": "Signal", "unit": "a.u.", "values": populations2.T},
+            comment=comment,
+            tag=tag,
+            **kwargs,
+        )
 
-        Ts = Ts * 1e6  # s -> us
-        populations = populations.T  # transpose back
+    def load(self, filepath: List[str], **kwargs) -> T1Result:
+        g_filepath, e_filepath = filepath
+
+        # Load ground populations
+        g_pop, g_Ts, _ = load_data(g_filepath, **kwargs)
+        assert g_pop.shape == (len(g_Ts), 2)
+
+        # Load excited populations
+        e_pop, e_Ts, _ = load_data(e_filepath, **kwargs)
+        assert e_pop.shape == (len(e_Ts), 2)
+
+        assert np.allclose(g_Ts, e_Ts), "Time arrays do not match"
+
+        Ts = g_Ts * 1e6  # s -> us
+
+        # Reconstruct signals shape: (Ts, 2, 2)
+        populations = np.stack([g_pop, e_pop], axis=1)
 
         Ts = Ts.astype(np.float64)
         populations = populations.astype(np.float64)
