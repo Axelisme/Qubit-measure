@@ -86,7 +86,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             ts = np.unique(ts)
             cfg["sweep"] = {"ge": make_ge_sweep()}
 
-        fig, axs = make_plot_frame(1, 2, figsize=(8, 4))
+        fig, axs = make_plot_frame(1, 2, figsize=(12, 5))
         axs[0][0].set_ylim(0, 1)
         axs[0][1].set_ylim(0, 1)
 
