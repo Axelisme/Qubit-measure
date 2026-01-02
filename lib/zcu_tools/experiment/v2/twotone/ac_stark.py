@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
@@ -29,7 +30,6 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ..runner import HardTask, SoftTask, TaskConfig, run_task
 
 # (amps, freqs, signals2D)
 AcStarkResultType = Tuple[
@@ -267,7 +267,6 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         ax1.tick_params(axis="both", which="major", labelsize=12)
 
         fig.tight_layout()
-        plt.show(fig)
 
         return ac_coeff, fig
 

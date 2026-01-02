@@ -11,7 +11,6 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 from typing_extensions import NotRequired
-from scipy.ndimage import gaussian_filter
 
 from zcu_tools.program import SweepCfg
 from zcu_tools.experiment import AbsExperiment
