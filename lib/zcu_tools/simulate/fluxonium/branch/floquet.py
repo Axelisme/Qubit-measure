@@ -66,6 +66,15 @@ class FloquetBranchAnalysis:
 
         return branch_infos
 
+    def calc_branch_energies(
+        self, fbasis_n: List[qt.FloquetBasis], branch_infos: Dict[int, List[int]]
+    ) -> Dict[int, List[float]]:
+        branch_energies = {b: [] for b in branch_infos.keys()}
+        for b, b_list in branch_infos.items():
+            for n, b_idx in enumerate(b_list):
+                branch_energies[b].append(fbasis_n[n].e_quasi[b_idx])
+        return branch_energies
+
     def calc_branch_populations(
         self,
         fbasis_n: List[qt.FloquetBasis],

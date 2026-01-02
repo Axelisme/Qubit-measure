@@ -75,6 +75,36 @@ def plot_populations_over_photon(
     return fig
 
 
+def plot_energies_over_photon(
+    photons: np.ndarray,
+    branch_energies: Mapping[int, np.ndarray],
+    plot_transitions: List[Tuple[int, int]],
+) -> go.Figure:
+    fig = go.Figure()
+
+    for i, j in plot_transitions:
+        E_i = branch_energies[i]
+        E_j = branch_energies[j]
+        fig.add_trace(
+            go.Scatter(
+                x=photons,
+                y=E_j - E_i,
+                mode="lines",
+                name=f"{i} -> {j}",
+            )
+        )
+
+    fig.update_layout(
+        title="Branch Energies",
+        title_x=0.51,
+        xaxis_title="Photons",
+        yaxis_title="Energy",
+        showlegend=True,
+    )
+
+    return fig
+
+
 def calc_critical_photons(
     photons: np.ndarray,
     populations: np.ndarray,
