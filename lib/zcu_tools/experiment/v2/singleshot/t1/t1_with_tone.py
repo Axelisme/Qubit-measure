@@ -46,6 +46,7 @@ T1WithToneResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 class T1WithToneCfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
+    init_pulse: NotRequired[PulseCfg]
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
@@ -142,6 +143,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                         cfg,
                         modules=[
                             Reset("reset", cfg.get("reset", {"type": "none"})),
+                            Pulse("init_pulse", cfg.get("init_pulse")),
                             Pulse(
                                 "pi_pulse",
                                 Pulse.set_param(cfg["pi_pulse"], "on/off", ge_param),
@@ -220,7 +222,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         t1 = 1.0 / lambdas[2]
         t1_b = 1.0 / lambdas[1]
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6), sharex=True)
 
         ax1.set_title(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
         plot_kwargs = dict(ls="-", marker=".", markersize=3)

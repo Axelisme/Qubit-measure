@@ -11,6 +11,7 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 from typing_extensions import NotRequired
+from scipy.ndimage import gaussian_filter
 
 from zcu_tools.program import SweepCfg
 from zcu_tools.experiment import AbsExperiment
@@ -84,10 +85,16 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         Pulse.set_param(cfg["probe_pulse"], "length", len_param)
 
         fig, axs = make_plot_frame(4, 2, figsize=(12, 10))
+        axs[3][0].set_ylim(0.0, 1.0)
+        axs[3][1].set_ylim(0.0, 1.0)
 
         def make_plotter2d(ax: Axes) -> LivePlotter2D:
             return LivePlotter2D(
-                sweep_name, "Time (us)", uniform=False, existed_axes=[[ax]]
+                sweep_name,
+                "Time (us)",
+                uniform=False,
+                existed_axes=[[ax]],
+                segment_kwargs=dict(vmin=0.0, vmax=1.0),
             )
 
         def make_plotter1d(ax: Axes) -> LivePlotter1D:
@@ -109,12 +116,12 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             fig,
             dict(
                 gg_2d=make_plotter2d(axs[0][0]),
-                ge_2d=make_plotter2d(axs[0][1]),
-                go_2d=make_plotter2d(axs[1][0]),
-                g_1d=make_plotter1d(axs[1][1]),
-                eg_2d=make_plotter2d(axs[2][0]),
-                ee_2d=make_plotter2d(axs[2][1]),
-                eo_2d=make_plotter2d(axs[3][0]),
+                ge_2d=make_plotter2d(axs[1][0]),
+                go_2d=make_plotter2d(axs[2][0]),
+                g_1d=make_plotter1d(axs[3][0]),
+                eg_2d=make_plotter2d(axs[0][1]),
+                ee_2d=make_plotter2d(axs[1][1]),
+                eo_2d=make_plotter2d(axs[2][1]),
                 e_1d=make_plotter1d(axs[3][1]),
             ),
         ) as viewer:
@@ -213,9 +220,11 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
 
         xs, Ts, populations = result
 
-        valid_mask = np.all(np.isfinite(populations), axis=(1, 2))
+        valid_mask = np.all(np.isfinite(populations), axis=(1, 2, 3))
         xs = xs[valid_mask]
         populations = populations[valid_mask]
+
+        # populations = gaussian_filter(populations, sigma=0.5, axes=(0, 2))
 
         populations = calc_populations(populations)  # (xs, 2, Ts, 3)
 
@@ -263,25 +272,41 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
 
         # (T_ge, T_eg, T_eo, T_oe, T_go, T_og)
         R_go = rates[:, 4]
-        R_g = rates[:, 0] + rates[:, 4]
+        R_ge = rates[:, 0]
         R_eo = rates[:, 2]
-        R_e = rates[:, 1] + rates[:, 2]
+        R_eg = rates[:, 1]
+        Rerr_go = np.sqrt(rate_Covs[:, 4, 4])
+        Rerr_ge = np.sqrt(rate_Covs[:, 0, 0])
+        Rerr_eo = np.sqrt(rate_Covs[:, 2, 2])
+        Rerr_eg = np.sqrt(rate_Covs[:, 1, 1])
+        # R_go[R_go < 2 * Rerr_go] = np.nan
+        # R_ge[R_ge < 2 * Rerr_ge] = np.nan
+        # R_eo[R_eo < 2 * Rerr_eo] = np.nan
+        # R_eg[R_eg < 2 * Rerr_eg] = np.nan
+        for i in range(rates.shape[0]):
+            if i % 5 == 0:
+                continue
+            Rerr_go[i] = np.nan
+            Rerr_ge[i] = np.nan
+            Rerr_eo[i] = np.nan
+            Rerr_eg[i] = np.nan
 
-        ax_Tg.plot(xs, R_g, label="Γ_ge + Γ_go", color="blue")
-        ax_Tg.plot(xs, R_go, label="Γ_go", color="blue", ls="--")
+        ax_Tg.errorbar(xs, R_go, yerr=Rerr_go, label="Γ_go", color="dodgerblue")
+        ax_Tg.errorbar(xs, R_ge, yerr=Rerr_ge, label="Γ_ge", color="blue")
 
-        ax_Te.plot(xs, R_e, label="Γ_eg + Γ_eo", color="red")
-        ax_Te.plot(xs, R_eo, label="Γ_eo", color="red", ls="--")
+        ax_Te.errorbar(xs, R_eo, yerr=Rerr_eo, label="Γ_eo", color="darkorange")
+        ax_Te.errorbar(xs, R_eg, yerr=Rerr_eg, label="Γ_eg", color="red")
 
-        ax_To.plot(xs, R_eo, label="Γ_eo", color="red", ls="--")
-        ax_To.plot(xs, R_go, label="Γ_go", color="blue", ls="--")
+        ax_To.errorbar(xs, R_eo, yerr=Rerr_eo, label="Γ_eo", color="darkorange")
+        ax_To.errorbar(xs, R_go, yerr=Rerr_go, label="Γ_go", color="dodgerblue")
 
-        max_rate = np.nanmax([R_g, R_e]).item()
+        max_rate = np.nanmax([R_go, R_ge, R_eo, R_eg]).item()
         for ax in (ax_Tg, ax_Te, ax_To):
             ax.legend()
-            ax.set_ylim(0, max_rate * 1.1)
             ax.grid(True)
             ax.set_xlabel(xlabel)
+            ax.set_yscale("log")
+            ax.set_ylim(1e-3, 2 * max_rate)
 
         ax_gg.set_ylabel("Time (μs)")
         ax_eg.set_ylabel("Time (μs)")
