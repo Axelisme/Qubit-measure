@@ -1,5 +1,5 @@
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -175,9 +175,12 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PowerDepResult:
-        populations, pdrs, _ = load_data(filepath, **kwargs)
+        populations, pdrs, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
 
-        self.last_cfg = None
+        pdrs = pdrs.astype(np.float64)
+        populations = np.real(populations).astype(np.float64)
+
+        self.last_cfg = cast(PowerDepCfg, cfg)
         self.last_result = (pdrs, populations)
 
         return pdrs, populations

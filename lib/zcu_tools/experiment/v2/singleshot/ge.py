@@ -7,7 +7,9 @@ from typing import Literal, Optional, Tuple, cast
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
+from numba.core.analysis import CFGraph
 from numpy.typing import NDArray
+from sympy.sets.sets import true
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep
@@ -263,9 +265,9 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
         )
 
     def load(self, filepath: str, **kwargs) -> GE_ResultType:
-        signals, _, _ = load_data(filepath, **kwargs)
+        signals, _, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
 
-        self.last_cfg = None
+        self.last_cfg = cast(GE_TaskConfig, cfg)
         self.last_result = signals.T
 
         return signals

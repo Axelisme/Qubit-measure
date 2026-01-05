@@ -1,11 +1,20 @@
-from typing import Dict, List, Mapping, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from plotly.subplots import make_subplots
+
+
+def round_to_nearest(
+    E_01: NDArray[np.float64], E_ij: NDArray[np.float64], r_f: float
+) -> NDArray[np.float64]:
+    round_E_ij = (E_ij - E_01 + 0.5 * r_f) % r_f - 0.5 * r_f + E_01
+    round_E_ij[np.abs(np.diff(round_E_ij, prepend=round_E_ij[0])) > r_f / 2] = np.nan
+    return round_E_ij
 
 
 def plot_chi_and_snr_over_photon(
@@ -75,22 +84,55 @@ def plot_populations_over_photon(
     return fig
 
 
-def plot_energies_over_photon(
+def calc_transitions(
+    branch_energies: Mapping[int, NDArray[np.float64]],
+    transitions: Optional[List[Tuple[int, int]]] = None,
+    threshold: float = 50e-3,  # GHz
+) -> Dict[Tuple[int, int], NDArray[np.float64]]:
+    E_01 = branch_energies[1] - branch_energies[0]
+    all_transitions = list(branch_energies.keys())
+
+    if transitions is None:
+        transitions = []
+        for i in (0, 1):
+            for j in all_transitions:
+                if j <= i:
+                    continue
+                E_ij = branch_energies[j] - branch_energies[i]
+                if np.min(np.abs(E_ij - E_01)) < threshold:
+                    transitions.append((i, j))
+        if len(transitions) == 0:
+            raise ValueError("No transitions found")
+
+    E_ijs = {}
+    for i, j in transitions:
+        E_ij = branch_energies[j] - branch_energies[i]
+        E_ijs[(i, j)] = E_ij
+
+    return E_ijs
+
+
+def plot_transition_over_photon(
     photons: np.ndarray,
-    branch_energies: Mapping[int, np.ndarray],
-    plot_transitions: List[Tuple[int, int]],
+    transitions: Dict[str, NDArray[np.float64]],
+    threshold: float = 50e-3,  # GHz
 ) -> go.Figure:
     fig = go.Figure()
 
-    for i, j in plot_transitions:
-        E_i = branch_energies[i]
-        E_j = branch_energies[j]
+    E_01 = transitions["0 → 1"]
+
+    for name, E_ij in transitions.items():
+        opacity = np.clip(1.0 - np.nanmin(np.abs(E_ij - E_01)) / threshold, 0.1, 1)
         fig.add_trace(
             go.Scatter(
                 x=photons,
-                y=E_j - E_i,
+                y=E_ij,
                 mode="lines",
-                name=f"{i} -> {j}",
+                name=name,
+                line=dict(
+                    color=None, width=2, dash=None, shape="linear", simplify=True
+                ),
+                opacity=opacity,
             )
         )
 
@@ -100,6 +142,7 @@ def plot_energies_over_photon(
         xaxis_title="Photons",
         yaxis_title="Energy",
         showlegend=True,
+        yaxis_range=[E_01.min() - threshold, E_01.max() + threshold],
     )
 
     return fig

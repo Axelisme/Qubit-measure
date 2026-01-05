@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Mapping, Optional, Tuple
+from typing_extensions import Mapping, Optional, Tuple, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
@@ -151,19 +151,18 @@ class FreqFluxDepExp(AbsExperiment[FreqFluxDepResultType, FreqFluxDepTaskConfig]
         )
 
     def load(self, filepath: str, **kwargs) -> FreqFluxDepResultType:
-        signals2D, values, fpts = load_data(filepath, **kwargs)
+        signals2D, values, fpts, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert values is not None and fpts is not None
         assert len(values.shape) == 1 and len(fpts.shape) == 1
-        assert signals2D.shape == (len(fpts), len(values))
+        assert signals2D.shape == (len(values), len(fpts))
 
         fpts = fpts * 1e-6  # Hz -> MHz
-        signals2D = signals2D.T  # transpose back
 
         values = values.astype(np.float64)
         fpts = fpts.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = cast(FreqFluxDepTaskConfig, cfg)
         self.last_result = (values, fpts, signals2D)
 
         return values, fpts, signals2D

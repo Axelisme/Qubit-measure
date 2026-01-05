@@ -153,8 +153,10 @@ class LenRabiExp(AbsExperiment[LenRabiResultType, LenRabiTaskConfig]):
         populations, lens, _ = load_data(filepath, **kwargs)
         assert lens is not None
 
+        lens = lens.astype(np.float64)
+        populations = np.real(populations).astype(np.float64)
+
         lens = lens * 1e6  # s -> us
-        populations = populations.T  # transpose back
 
         self.last_cfg = None
         self.last_result = (lens, populations)

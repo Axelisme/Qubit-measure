@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
 from pathlib import Path
-from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Tuple, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -15,12 +26,12 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
-    run_with_retries,
-    Result,
     RepeatOverTime,
+    Result,
     TaskConfig,
     TaskContextView,
     run_task,
+    run_with_retries,
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import AbsLivePlotter, MultiLivePlotter, make_plot_frame
@@ -269,6 +280,3 @@ class OvernightExecutor(AbsExperiment):
                 comment,
                 prefix_tag + f"/{ms_name}",
             )
-
-    def load(self, filepath: str, **kwargs) -> Mapping[str, Result]:
-        raise NotImplementedError("Not implemented")

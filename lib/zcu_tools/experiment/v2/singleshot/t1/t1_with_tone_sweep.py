@@ -2,26 +2,27 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.figure import Figure
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 from typing_extensions import NotRequired
 
-from zcu_tools.program import SweepCfg
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import sweep2array, make_ge_sweep
+from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import (
     LivePlotter1D,
     LivePlotter2D,
     MultiLivePlotter,
     make_plot_frame,
 )
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -35,7 +36,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
-from zcu_tools.experiment.v2.utils import round_zcu_time
 
 from ..util import calc_populations
 
@@ -259,7 +259,12 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
 
         def _plot_population(ax, pop, label):
             ax.scatter([], [], s=0, label=label)
-            ax.imshow(pop.T, aspect="auto", extent=(xs[0], xs[-1], Ts[-1], Ts[0]))
+            ax.imshow(
+                pop.T,
+                aspect="auto",
+                cmap="RdBu_r",
+                extent=(xs[0], xs[-1], Ts[-1], Ts[0]),
+            )
             ax.legend()
 
         _plot_population(ax_gg, populations[:, 0, :, 0], "Ground")
@@ -411,7 +416,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         assert ee_pop.shape == (len(xs), len(Ts))
 
         # Reconstruct signals shape: (gains, ts, 2)
-        populations = np.zeros((len(xs), 2, len(Ts), 3), dtype=np.float64)
+        populations = np.zeros((len(xs), 2, len(Ts), 3), dtype=np.complex128)
         populations[:, 0, :, 0] = gg_pop
         populations[:, 0, :, 1] = ge_pop
         populations[:, 1, :, 0] = eg_pop

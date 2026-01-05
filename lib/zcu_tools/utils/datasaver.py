@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Literal, Optional, Tuple, overload
 
 import numpy as np
 from numpy.typing import NDArray
@@ -228,6 +228,24 @@ def load_local_data(
     return z_data, x_data, y_data
 
 
+def load_local_cfg(filepath: str) -> dict:
+    import json
+
+    import h5py
+
+    filepath = format_ext(filepath)
+
+    if config.DATA_DRY_RUN:
+        print("DRY RUN: Load data from ", filepath)
+        return {}
+
+    with h5py.File(filepath, "r") as file:
+        cfg = json.loads(file.attrs["comment"])  # type: ignore
+    assert isinstance(cfg, dict)
+
+    return cfg
+
+
 def upload_to_server(filepath: str, server_ip: str, port: int) -> bool:
     """
     Upload a file to a remote server.
@@ -323,11 +341,30 @@ def save_data(
     print("Successfully saved data to ", filepath)
 
 
+@overload
 def load_data(
     filepath: str,
     server_ip: Optional[str] = None,
     port: int = 4999,
-) -> Tuple[NDArray, NDArray, Optional[NDArray]]:
+    return_cfg: Literal[True] = True,
+) -> Tuple[NDArray, NDArray, Optional[NDArray], dict]: ...
+
+
+@overload
+def load_data(
+    filepath: str,
+    server_ip: Optional[str] = None,
+    port: int = 4999,
+    return_cfg: Literal[False] = False,
+) -> Tuple[NDArray, NDArray, Optional[NDArray]]: ...
+
+
+def load_data(
+    filepath: str,
+    server_ip: Optional[str] = None,
+    port: int = 4999,
+    return_cfg: bool = False,
+):
     """
     Load data either locally or from a remote server.
 
@@ -343,4 +380,8 @@ def load_data(
         if not os.path.exists(filepath):
             download_from_server(filepath, server_ip, port)
     z_data, x_data, y_data = load_local_data(filepath)
+    if return_cfg:
+        cfg = load_local_cfg(filepath)
+        return z_data, x_data, y_data, cfg
+
     return z_data, x_data, y_data

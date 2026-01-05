@@ -292,6 +292,8 @@ def plot_dispersive_with_onetone(
         kwargs = [dict()] * len(rf_list)  # too many states, use default color
 
     for i, rf in enumerate(rf_list):
+        rf = rf.copy()
+        rf[np.abs(np.diff(rf, prepend=rf[0])) > 0.5 * np.ptp(sp_fpts)] = np.nan
         fig.add_trace(
             go.Scatter(x=mAs, y=rf, mode="lines", name=f"state {i}", **kwargs[i])
         )

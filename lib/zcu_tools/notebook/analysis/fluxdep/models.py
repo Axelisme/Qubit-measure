@@ -68,15 +68,18 @@ def energy2linearform(
         Cs[:, idx] = 2 * allows["sample_f"] - allows["r_f"]
         idx += 1
 
-    for i, j in allows.get("transitions2", []):  # E = 0.5 * E_ji
-        Bs[:, idx] = 0.5 * (energies[:, j] - energies[:, i])
-        Cs[:, idx] = 0.0
-        idx += 1
+    for n in range(2, M):
+        # Transition N
+        for i, j in allows.get(f"transitions{n}", []):  # E = E_ji / n
+            Bs[:, idx] = (energies[:, j] - energies[:, i]) / n
+            Cs[:, idx] = 0.0
+            idx += 1
 
-    for i, j in allows.get("mirror2", []):  # E = 2 * sample_f - 0.5 * E_ji
-        Bs[:, idx] = -0.5 * (energies[:, j] - energies[:, i])
-        Cs[:, idx] = 2 * allows["sample_f"]
-        idx += 1
+        # Mirror N
+        for i, j in allows.get(f"mirror{n}", []):  # E = 2 * sample_f - E_ji / n
+            Bs[:, idx] = -(energies[:, j] - energies[:, i]) / n
+            Cs[:, idx] = 2 * allows["sample_f"]
+            idx += 1
 
     return Bs, Cs
 
@@ -112,9 +115,10 @@ def energy2transition(
         names.append(f"{i} -> {j} mirror blue")
     for i, j in allows.get("mirror red", []):  # E = 2 * sample_f - r_f + E_ji
         names.append(f"{i} -> {j} mirror red")
-    for i, j in allows.get("transitions2", []):  # E = 0.5 * E_ji
-        names.append(f"2 {i} -> {j}")
-    for i, j in allows.get("mirror2", []):  # E = sample_f - 0.5 * E_ji
-        names.append(f"2 {i} -> {j} mirror")
+    for n in range(2, M):
+        for i, j in allows.get(f"transitions{n}", []):  # E = E_ji / n
+            names.append(f"{n} {i} -> {j}")
+        for i, j in allows.get(f"mirror{n}", []):  # E = 2 * sample_f - E_ji / n
+            names.append(f"{n} {i} -> {j} mirror")
 
     return fs, names

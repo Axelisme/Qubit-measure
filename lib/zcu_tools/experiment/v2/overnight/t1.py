@@ -4,8 +4,8 @@ from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from typing_extensions import Callable, Dict, List, NotRequired, TypedDict, cast
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -27,9 +27,9 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.process import rotate2real
+from zcu_tools.utils.fitting import expfunc, fit_decay, fit_dual_decay
 from zcu_tools.utils.func_tools import MinIntervalFunc
-from zcu_tools.utils.fitting import fit_decay, fit_dual_decay, expfunc
+from zcu_tools.utils.process import rotate2real
 
 from .executor import MeasurementTask, T_RootResult
 
@@ -104,6 +104,38 @@ class T1PlotAndSaveMixin:
             tag=prefix_tag + "/signals",
         )
 
+    def analyze(
+        self, name: str, iters: NDArray[np.int64], result: T1Result, fig: Figure
+    ) -> None:
+        Ts = result["lengths"][0]  # (Ts, )
+        signals = result["signals"]  # (iters, Ts)
+
+        real_signals = t1_overnight_signal2real(signals)
+
+        t1s = np.zeros((len(iters),), dtype=np.float64)
+        t1errs = np.zeros((len(iters),), dtype=np.float64)
+        for i, sig in enumerate(real_signals):
+            t1, t1err, *_ = fit_decay(Ts, sig)
+            t1s[i] = t1
+            t1errs[i] = t1err
+
+        ax1 = fig.add_subplot(1, 2, 1)
+        ax1.imshow(
+            real_signals.T,
+            aspect="auto",
+            interpolation="none",
+            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
+        )
+        ax1.set_xlabel("Iteration")
+        ax1.set_ylabel("Time (us)")
+
+        ax2 = fig.add_subplot(1, 2, 2)
+        ax2.errorbar(iters, t1s, yerr=t1errs, fmt="o")
+        ax2.set_xlabel("Iteration")
+        ax2.set_ylabel("T1 (us)")
+
+        fig.tight_layout()
+
 
 class T1Cfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
@@ -169,36 +201,6 @@ class T1Task(
 
     def cleanup(self) -> None:
         self.task.cleanup()
-
-    def analyze(self, iters, result, fig: Figure) -> None:
-        Ts = result["lengths"][0]  # (Ts, )
-        signals = np.real(result["signals"])  # (iters, Ts)
-
-        real_signals = rotate2real(signals).real
-
-        t1s = np.zeros((len(iters),), dtype=np.float64)
-        t1errs = np.zeros((len(iters),), dtype=np.float64)
-        for i, sig in enumerate(real_signals):
-            t1, t1err, *_ = fit_decay(Ts, sig)
-            t1s[i] = t1
-            t1errs[i] = t1err
-
-        ax1 = fig.add_subplot(1, 2, 1)
-        ax1.imshow(
-            real_signals.T,
-            aspect="auto",
-            interpolation="none",
-            extent=(iters[0], iters[-1], Ts[-1], Ts[0]),
-        )
-        ax1.set_xlabel("Iteration")
-        ax1.set_ylabel("Time (us)")
-
-        ax2 = fig.add_subplot(1, 2, 2)
-        ax2.errorbar(iters, t1s, yerr=t1errs, fmt="o")
-        ax2.set_xlabel("Iteration")
-        ax2.set_ylabel("T1 (us)")
-
-        fig.tight_layout()
 
 
 class T1WithToneCfg(TaskConfig, ModularProgramCfg):

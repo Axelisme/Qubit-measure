@@ -1,25 +1,25 @@
 from __future__ import annotations
 
-from pathlib import Path
 from copy import deepcopy
-from typing import Optional, Tuple, List
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
-from matplotlib.axes import Axes
 from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.liveplot import (
     LivePlotter1D,
     LivePlotter2D,
     MultiLivePlotter,
     make_plot_frame,
 )
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -210,38 +210,39 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         photons = ac_coeff * gains2
 
         # fig, ax1 = plt.subplots(figsize=config.figsize)
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 5))
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
 
         # Use NonUniformImage for better visualization with pdr^2 as x-axis
-        im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
+        im = NonUniformImage(ax1, cmap="RdBu_r", interpolation="nearest")
         im.set_data(photons, freqs, populations[..., 0].T)
         im.set_extent((photons[0], photons[-1], freqs[0], freqs[-1]))
         ax1.add_image(im)
         ax1.set_xlim(photons[0], photons[-1])
         ax1.set_ylim(freqs[0], freqs[-1])
+        ax1.set_aspect("auto")
         ax1.set_title("Ground")
         ax1.set_xlabel(r"$\bar n$", fontsize=14)
         ax1.set_ylabel("Frequency (MHz)", fontsize=14)
 
-        im = NonUniformImage(ax2, cmap="viridis", interpolation="nearest")
+        im = NonUniformImage(ax2, cmap="RdBu_r", interpolation="nearest")
         im.set_data(photons, freqs, populations[..., 1].T)
         im.set_extent((photons[0], photons[-1], freqs[0], freqs[-1]))
         ax2.add_image(im)
         ax2.set_xlim(photons[0], photons[-1])
         ax2.set_ylim(freqs[0], freqs[-1])
+        ax2.set_aspect("auto")
         ax2.set_title("Excited")
         ax2.set_xlabel(r"$\bar n$", fontsize=14)
-        ax2.set_ylabel("Frequency (MHz)", fontsize=14)
 
-        im = NonUniformImage(ax3, cmap="viridis", interpolation="nearest")
+        im = NonUniformImage(ax3, cmap="RdBu_r", interpolation="nearest")
         im.set_data(photons, freqs, populations[..., 2].T)
         im.set_extent((photons[0], photons[-1], freqs[0], freqs[-1]))
         ax3.add_image(im)
         ax3.set_xlim(photons[0], photons[-1])
         ax3.set_ylim(freqs[0], freqs[-1])
+        ax3.set_aspect("auto")
         ax3.set_title("Other")
         ax3.set_xlabel(r"$\bar n$", fontsize=14)
-        ax3.set_ylabel("Frequency (MHz)", fontsize=14)
 
         fig.tight_layout()
 
@@ -303,7 +304,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
 
         populations = np.stack((g_pop, e_pop), axis=-1)
 
-        freqs = freqs * 1e6  # s -> us
+        freqs = freqs * 1e-6  # Hz -> MHz
 
         gains = gains.astype(np.float64)
         freqs = freqs.astype(np.float64)

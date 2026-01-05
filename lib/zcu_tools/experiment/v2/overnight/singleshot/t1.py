@@ -2,27 +2,28 @@ from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.axes import Axes
-from tqdm.auto import tqdm
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
+from tqdm.auto import tqdm
 from typing_extensions import (
-    NotRequired,
-    List,
-    Dict,
     Callable,
+    Dict,
+    List,
+    NotRequired,
+    Optional,
     TypedDict,
     cast,
-    Optional,
 )
 
-from zcu_tools.program import SweepCfg
-from zcu_tools.notebook.utils import make_comment
-from zcu_tools.experiment.utils import format_sweep1D, sweep2array, make_ge_sweep
+from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.experiment.v2.utils import round_zcu_time
-from zcu_tools.liveplot import LivePlotter2D, LivePlotter1D
+from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
+from zcu_tools.notebook.utils import make_comment
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Delay,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -30,13 +31,12 @@ from zcu_tools.program.v2 import (
     Readout,
     ReadoutCfg,
     Reset,
-    Delay,
     ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
+from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from ..executor import MeasurementTask, T_RootResult
 from .util import calc_populations

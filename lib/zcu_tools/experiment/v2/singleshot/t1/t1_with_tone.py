@@ -7,16 +7,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, Optional, Tuple, List
+from typing_extensions import List, NotRequired, Optional, Tuple
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D, sweep2array, make_ge_sweep
+from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     TaskConfig,
-    run_task,
     TaskContextView,
+    run_task,
 )
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -35,7 +36,6 @@ from zcu_tools.utils.fitting.multi_decay import (
     fit_dual_transition_rates,
     fit_dual_with_vadality,
 )
-from zcu_tools.experiment.v2.utils import round_zcu_time
 
 from ..util import calc_populations
 from .util import measure_with_sweep
@@ -211,7 +211,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         populations1 = populations[:, 0]  # init in g
         populations2 = populations[:, 1]  # init in e
 
-        fit_dual_with_vadality(lens, populations1, populations2)
+        # fit_dual_with_vadality(lens, populations1, populations2)
 
         rate, _, fit_pops1, fit_pops2, *_ = fit_dual_transition_rates(
             lens, populations1, populations2
@@ -224,15 +224,14 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6), sharex=True)
 
-        ax1.set_title(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
-        plot_kwargs = dict(ls="-", marker=".", markersize=3)
+        fig.suptitle(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
 
         ax1.plot(lens, fit_pops1[:, 0], color="blue", ls="--", label="Ground Fit")
         ax1.plot(lens, fit_pops1[:, 1], color="red", ls="--", label="Excited Fit")
         ax1.plot(lens, fit_pops1[:, 2], color="green", ls="--", label="Other Fit")
-        ax1.plot(lens, populations1[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-        ax1.plot(lens, populations1[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-        ax1.plot(lens, populations1[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+        ax1.scatter(lens, populations1[:, 0], color="blue", label="Ground", s=20)
+        ax1.scatter(lens, populations1[:, 1], color="red", label="Excited", s=20)
+        ax1.scatter(lens, populations1[:, 2], color="green", label="Other", s=20)
         ax1.set_ylabel("Population")
         ax1.legend(loc=4)
         ax1.grid(True)
@@ -240,9 +239,9 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         ax2.plot(lens, fit_pops2[:, 0], color="blue", ls="--", label="Ground Fit")
         ax2.plot(lens, fit_pops2[:, 1], color="red", ls="--", label="Excited Fit")
         ax2.plot(lens, fit_pops2[:, 2], color="green", ls="--", label="Other Fit")
-        ax2.plot(lens, populations2[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-        ax2.plot(lens, populations2[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-        ax2.plot(lens, populations2[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+        ax2.scatter(lens, populations2[:, 0], color="blue", label="Ground", s=20)
+        ax2.scatter(lens, populations2[:, 1], color="red", label="Excited", s=20)
+        ax2.scatter(lens, populations2[:, 2], color="green", label="Other", s=20)
         ax2.set_xlabel("Time (μs)")
         ax2.set_ylabel("Population")
         ax2.legend(loc=4)
@@ -312,7 +311,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         populations = np.stack([g_pop, e_pop], axis=1)
 
         Ts = Ts.astype(np.float64)
-        populations = populations.astype(np.float64)
+        populations = np.real(populations).astype(np.float64)
 
         self.last_cfg = None
         self.last_result = (Ts, populations)

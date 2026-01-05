@@ -6,20 +6,20 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typing_extensions import (
-    NotRequired,
-    TypedDict,
-    Optional,
-    List,
-    cast,
-    Dict,
     Callable,
+    Dict,
+    List,
+    NotRequired,
+    Optional,
+    TypedDict,
+    cast,
 )
 
-from zcu_tools.program import SweepCfg
-from zcu_tools.notebook.utils import make_comment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
+from zcu_tools.notebook.utils import make_comment
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -31,7 +31,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from ..executor import MeasurementTask, T_RootResult
@@ -57,6 +57,129 @@ class MistOvernightCfg(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
     sweep: Dict[str, SweepCfg]
+
+
+class MistOvernightAnalyzer:
+    def __init__(self) -> None:
+        self.cfg: Optional[MistOvernightCfg] = None
+        self.result: Optional[MistOvernightResult] = None
+
+    def analyze(
+        self,
+        fig: Figure,
+        result: Optional[MistOvernightResult] = None,
+        ac_coeff: Optional[float] = None,
+        confusion_matrix: Optional[NDArray[np.float64]] = None,
+    ) -> None:
+        if result is None:
+            result = self.result
+        assert result is not None, "no result found"
+
+        gains = result["gains"][0]  # (Ts, )
+        populations = result["populations"]  # (iters, Ts, 2)
+
+        populations = np.real(populations).astype(np.float64)
+
+        populations = gaussian_filter(populations, sigma=0.5, axes=(0, 1))
+
+        populations = calc_populations(populations)  # (iters, Ts, 3)
+        if confusion_matrix is not None:  # readout correction
+            populations = populations @ np.linalg.inv(confusion_matrix)
+            populations = np.clip(populations, 0.0, 1.0)
+
+        max_populations = np.nanmax(populations, axis=0)
+        min_populations = np.nanmin(populations, axis=0)
+        med_populations = np.nanmedian(populations, axis=0)
+
+        if ac_coeff is None:
+            xs = gains
+            xlabel = "probe gain (a.u.)"
+        else:
+            xs = ac_coeff * gains**2
+            xlabel = r"$\bar n$"
+
+        ax = fig.add_subplot(1, 1, 1)
+
+        med_kwargs = dict(marker=".", linestyle="-", markersize=4)
+        side_kwargs = dict(linestyle="--", alpha=0.3)
+        ax.plot(xs, max_populations[:, 0], color="b", **side_kwargs)  # type: ignore
+        ax.plot(xs, med_populations[:, 0], color="b", label="Ground", **med_kwargs)  # type: ignore
+        ax.plot(xs, min_populations[:, 0], color="b", **side_kwargs)  # type: ignore
+
+        ax.plot(xs, max_populations[:, 1], color="r", **side_kwargs)  # type: ignore
+        ax.plot(xs, med_populations[:, 1], color="r", label="Excited", **med_kwargs)  # type: ignore
+        ax.plot(xs, min_populations[:, 1], color="r", **side_kwargs)  # type: ignore
+
+        ax.plot(xs, max_populations[:, 2], color="g", **side_kwargs)  # type: ignore
+        ax.plot(xs, med_populations[:, 2], color="g", label="Other", **med_kwargs)  # type: ignore
+        ax.plot(xs, min_populations[:, 2], color="g", **side_kwargs)  # type: ignore
+
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("Population")
+        ax.legend()
+        ax.grid(True)
+
+    @classmethod
+    def save(cls, filepath: str, iters, result, comment, prefix_tag) -> None:
+        _filepath = Path(filepath)
+
+        x_info = {"name": "Iteration", "unit": "a.u.", "values": iters}
+
+        gains = result["gains"][0]
+        populations = result["populations"]
+
+        # g_populations
+        save_data(
+            filepath=str(_filepath.with_name(_filepath.name + "_g_populations")),
+            x_info=x_info,
+            y_info={"name": "Readout gain", "unit": "a.u.", "values": gains},
+            z_info={
+                "name": "Populations",
+                "unit": "a.u.",
+                "values": populations[..., 0].T,
+            },
+            comment=comment,
+            tag=prefix_tag + "/g_populations",
+        )
+
+        # g_populations
+        save_data(
+            filepath=str(_filepath.with_name(_filepath.name + "_e_populations")),
+            x_info=x_info,
+            y_info={"name": "Readout gain", "unit": "a.u.", "values": gains},
+            z_info={
+                "name": "Populations",
+                "unit": "a.u.",
+                "values": populations[..., 1].T,
+            },
+            comment=comment,
+            tag=prefix_tag + "/e_populations",
+        )
+
+    def load(self, filepath: List[str], **kwargs) -> MistOvernightResult:
+        g_filepath, e_filepath = filepath
+
+        g_pops, iters, gains, cfg = load_data(g_filepath, return_cfg=True, **kwargs)
+        assert gains is not None
+        assert g_pops.shape == (len(iters), len(gains))
+
+        g_pops = np.real(g_pops).astype(np.float64)
+        gains = gains.astype(np.float64)
+
+        e_pops, iters, gains = load_data(e_filepath, **kwargs)
+        assert gains is not None
+        assert e_pops.shape == (len(iters), len(gains))
+
+        e_pops = np.real(e_pops).astype(np.float64)
+        gains = gains.astype(np.float64)
+
+        populations = np.stack([g_pops, e_pops], axis=-1)  # (iters, gains, 2)
+        gains = np.tile(gains, reps=(len(iters), 1))
+
+        self.cfg = cast(MistOvernightCfg, cfg)
+        self.result = MistOvernightResult(gains=gains, populations=populations)
+
+        return self.result
 
 
 class MistOvernightTask(
@@ -129,59 +252,6 @@ class MistOvernightTask(
     def cleanup(self) -> None:
         self.task.cleanup()
 
-    def analyze(
-        self,
-        name,
-        iters,
-        result,
-        fig: Figure,
-        ac_coeff: Optional[float] = None,
-        confusion_matrix: Optional[NDArray[np.float64]] = None,
-    ) -> None:
-        gains = result["gains"][0]  # (Ts, )
-        populations = result["populations"]  # (iters, Ts, 2)
-
-        populations = np.real(populations).astype(np.float64)
-
-        populations = gaussian_filter(populations, sigma=0.5, axes=(0, 1))
-
-        populations = calc_populations(populations)  # (iters, Ts, 3)
-        if confusion_matrix is not None:  # readout correction
-            populations = populations @ np.linalg.inv(confusion_matrix)
-            populations = np.clip(populations, 0.0, 1.0)
-
-        max_populations = np.nanmax(populations, axis=0)
-        min_populations = np.nanmin(populations, axis=0)
-        med_populations = np.nanmedian(populations, axis=0)
-
-        if ac_coeff is None:
-            xs = gains
-            xlabel = "probe gain (a.u.)"
-        else:
-            xs = ac_coeff * gains**2
-            xlabel = r"$\bar n$"
-
-        ax = fig.add_subplot(1, 1, 1)
-
-        med_kwargs = dict(marker=".", linestyle="-", markersize=4)
-        side_kwargs = dict(linestyle="--", alpha=0.3)
-        ax.plot(xs, max_populations[:, 0], color="b", **side_kwargs)  # type: ignore
-        ax.plot(xs, med_populations[:, 0], color="b", label="Ground", **med_kwargs)  # type: ignore
-        ax.plot(xs, min_populations[:, 0], color="b", **side_kwargs)  # type: ignore
-
-        ax.plot(xs, max_populations[:, 1], color="r", **side_kwargs)  # type: ignore
-        ax.plot(xs, med_populations[:, 1], color="r", label="Excited", **med_kwargs)  # type: ignore
-        ax.plot(xs, min_populations[:, 1], color="r", **side_kwargs)  # type: ignore
-
-        ax.plot(xs, max_populations[:, 2], color="g", **side_kwargs)  # type: ignore
-        ax.plot(xs, med_populations[:, 2], color="g", label="Other", **med_kwargs)  # type: ignore
-        ax.plot(xs, min_populations[:, 2], color="g", **side_kwargs)  # type: ignore
-
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel("Population")
-        ax.legend()
-        ax.grid(True)
-
     def num_axes(self) -> Dict[str, int]:
         return dict(populations_g=1, populations_e=1, populations_o=1, current=1)
 
@@ -248,40 +318,11 @@ class MistOvernightTask(
         )
         plotters["current"].update(gains, populations[i].T, refresh=False)
 
+    def analyze(
+        self, name: str, iters: NDArray[np.int64], result: MistOvernightResult, **kwargs
+    ) -> None:
+        MistOvernightAnalyzer().analyze(result=result, **kwargs)
+
     def save(self, filepath, iters, result, comment, prefix_tag) -> None:
-        filepath = Path(filepath)
-
-        x_info = {"name": "Iteration", "unit": "a.u.", "values": iters}
-
-        gains = result["gains"][0]
-        populations = result["populations"]
-
         comment = make_comment(self.cfg, comment)  # type: ignore
-
-        # g_populations
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_g_populations")),
-            x_info=x_info,
-            y_info={"name": "Readout gain", "unit": "a.u.", "values": gains},
-            z_info={
-                "name": "Populations",
-                "unit": "a.u.",
-                "values": populations[..., 0].T,
-            },
-            comment=comment,
-            tag=prefix_tag + "/g_populations",
-        )
-
-        # g_populations
-        save_data(
-            filepath=str(filepath.with_name(filepath.name + "_e_populations")),
-            x_info=x_info,
-            y_info={"name": "Readout gain", "unit": "a.u.", "values": gains},
-            z_info={
-                "name": "Populations",
-                "unit": "a.u.",
-                "values": populations[..., 1].T,
-            },
-            comment=comment,
-            tag=prefix_tag + "/e_populations",
-        )
+        MistOvernightAnalyzer.save(filepath, iters, result, comment, prefix_tag)
