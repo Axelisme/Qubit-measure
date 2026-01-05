@@ -74,9 +74,8 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         freq_param = sweep2param("freq", cfg["sweep"]["freq"])
         Pulse.set_param(cfg["stark_pulse2"], "freq", freq_param)
 
-        fig, axs = make_plot_frame(4, 2, figsize=(12, 10))
-        axs[3][0].set_ylim(0.0, 1.0)
-        axs[3][1].set_ylim(0.0, 1.0)
+        fig, axs = make_plot_frame(2, 2, figsize=(8, 6))
+        axs[1][1].set_ylim(0.0, 1.0)
 
         def make_plotter2d(ax: Axes) -> LivePlotter2D:
             return LivePlotter2D(
@@ -84,7 +83,6 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
                 "Probe Frequency (MHz)",
                 uniform=False,
                 existed_axes=[[ax]],
-                segment_kwargs=dict(vmin=0.0, vmax=1.0),
             )
 
         def make_plotter1d(ax: Axes) -> LivePlotter1D:
@@ -106,9 +104,9 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
             fig,
             dict(
                 g_2d=make_plotter2d(axs[0][0]),
-                e_2d=make_plotter2d(axs[1][0]),
-                o_2d=make_plotter2d(axs[2][0]),
-                cur_1d=make_plotter1d(axs[3][0]),
+                e_2d=make_plotter2d(axs[0][1]),
+                o_2d=make_plotter2d(axs[1][0]),
+                cur_1d=make_plotter1d(axs[1][1]),
             ),
         ) as viewer:
 
@@ -171,6 +169,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
                 update_hook=plot_fn,
             )
             signals = np.asarray(signals)
+        plt.close(fig)
 
         # Cache results
         self.last_cfg = cfg
