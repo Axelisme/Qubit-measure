@@ -14,11 +14,10 @@ client = [
     "numpy==1.23.5",
     "matplotlib==3.9",
     "pyyaml",
-    "dill",
     "pyvisa",
     "pyro4",
 ]
-server = ["dill", "numpy==1.23.5"]
+server = ["numpy==1.23.5"]
 fit = [
     "h5py",
     "ipykernel",
@@ -70,4 +69,5 @@ cell_metadata_filter = "-all"
 environments = [
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
     "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
