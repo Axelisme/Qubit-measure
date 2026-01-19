@@ -26,10 +26,13 @@ from IPython.display import display
 
 %autoreload 2
 from zcu_tools.notebook.persistance import load_result
+from zcu_tools.table import MetaDict
+from zcu_tools.simulate import mA2flx
 from zcu_tools.notebook.analysis.mist.branch import (
     plot_cn_over_flx,
     plot_populations_over_photon,
     calc_critical_photons,
+    plot_transition_over_photon,
 )
 from zcu_tools.simulate.fluxonium.branch.floquet import (
     FloquetBranchAnalysis,
@@ -63,22 +66,91 @@ elif "r_f" in allows:
     r_f = allows["r_f"]
     print(f"r_f: {r_f} GHz")
 
-# g = 100e-3  # GHz
-rf_w = 6.1e-3  # GHz
+
+# g = 70e-3  # GHz
+# rf_w = 6.1e-3  # GHz
+```
+
+```python
+md = MetaDict(json_path=f"{result_dir}/meta_info.json", read_only=True)
 ```
 
 # Single
 
 ```python
-flx = 0.8
+# flx = 0.8
+flx = mA2flx(md.cur_A, md.mA_c, 2 * abs(md.mA_e - md.mA_c))
+flx
+```
+
+```python
+qub_dim = 30
+qub_cutoff = 50
+max_photon = 400
+
+amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), 1e-3 * md.rf_w)
+photons = (amps / (2 * g)) ** 2
+
+
+def calc_energies(branchs: List[int]) -> Dict[int, np.ndarray]:
+    avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
+
+    fb_analysis = FloquetBranchAnalysis(
+        params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
+    )
+
+    fbasis_n = Parallel(n_jobs=-1)(
+        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
+        for photon in tqdm(photons, desc="Computing Floquet basis")
+    )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
+
+    branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs)
+    branch_energies = fb_analysis.calc_branch_energies(fbasis_n, branch_infos)
+
+    return {k: np.asarray(v) for k, v in branch_energies.items()}
+```
+
+```python
+branchs = list(range(15))
+branch_energies = calc_energies(branchs)
+```
+
+```python
+from matplotlib.colors import to_rgb
+from zcu_tools.notebook.analysis.mist.branch import round_to_nearest
+from scqubits.core.fluxonium import Fluxonium
+
+fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
+
+E_n0 = fluxonium.eigenvals(evals_count=15)
+
+transitions = {}
+E_01 = branch_energies[1] - branch_energies[0]
+E_01 += (E_n0[1] - E_n0[0]) - E_01[0]
+for i in (0, 1):
+    for j in range(i + 1, 15):
+        E_ij = branch_energies[j] - branch_energies[i]
+        E_ij += (E_n0[j] - E_n0[i]) - E_ij[0]
+
+        transitions[f"{i} → {j}"] = round_to_nearest(E_01, E_ij, r_f)
+
+        for k in [2]:
+            transitions[f"{i} → {j} half"] = E_ij / k
+
+```
+
+```python
+fig = plot_transition_over_photon(photons, transitions, threshold=g)
+fig.show()
 ```
 
 ```python
 qub_dim = 40
 qub_cutoff = 60
-max_photon = 120
+max_photon = 500
 
-amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
+amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), 1e-3 * md.rf_w)
 photons = (amps / (2 * g)) ** 2
 
 

@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.18.1
   kernelspec:
-    display_name: axelenv13
+    display_name: .venv
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.5
+    version: 3.9.23
 ---
 
 ```python
@@ -39,7 +39,7 @@ from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 ```
 
 ```python
-qub_name = "Q12_2D[4]/Q4"
+qub_name = "Q12_2D[5]/Q1"
 
 os.makedirs(f"../../result/{qub_name}/image/design", exist_ok=True)
 os.makedirs(f"../../result/{qub_name}/web/design", exist_ok=True)
@@ -67,7 +67,7 @@ if "sample_f" in allows:
     sample_f = allows["sample_f"]
 
 
-flxs = np.linspace(0.0, 1.0, 1000)
+flxs = np.linspace(0.842 - 0.01, 0.842 + 0.01, 1000)
 mAs = flx2mA(flxs, mA_c, period)
 ```
 
@@ -82,10 +82,10 @@ spectrum_data = None
 loadpath = f"../../result/{qub_name}/samples.csv"
 
 freqs_df = pd.read_csv(loadpath)
-s_mAs = freqs_df["calibrated mA"].values  # mA
-s_fpts = freqs_df["Freq (MHz)"].values * 1e-3  # GHz
-s_T1s = freqs_df["T1 (us)"].values
-s_T1errs = freqs_df["T1err (us)"].values
+s_mAs = np.array(freqs_df["calibrated mA"].values)  # mA
+s_fpts = np.array(freqs_df["Freq (MHz)"].values) * 1e-3  # GHz
+s_T1s = np.array(freqs_df["T1 (us)"].values)
+s_T1errs = np.array(freqs_df["T1err (us)"].values)
 
 # sort by flux
 s_mAs, s_fpts, s_T1s, s_T1errs = tuple(
@@ -127,7 +127,7 @@ fig.show()
 
 ```python
 _, energies = calculate_energy_vs_flx(
-    params, flxs, spectrum_data=spectrum_data, evals_count=70, cutoff=120
+    params, flxs, spectrum_data=spectrum_data, evals_count=30, cutoff=60
 )
 ```
 
@@ -141,11 +141,16 @@ fig.show()
 v_allows = {
     # **allows,
     "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
-    # "transitions2": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
+    # "transitions2": [(i, j) for i in (0, 1) for j in range(i + 1, 20)],
+    # "transitions3": [(i, j) for i in (0, 1) for j in range(i + 1, 25)],
+    # "transitions4": [(i, j) for i in (0, 1) for j in range(i + 1, 30)],
     # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 4)],
     # "blue side": [(i, j) for i in (0, 1) for j in range(i + 1, 4)],
     # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
-    # "mirror": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 15)],
+    "mirror": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 15)],
+    # "mirror2": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 20)],
+    # "mirror3": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 25)],
+    # "mirror4": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 30)],
     # "mirror red": [(i, j) for i in (0, 1, 2, 3) for j in range(i + 1, 15)],
     # "r_f": 7.520,
     "sample_f": 9.58464 / 2,
@@ -158,7 +163,8 @@ fig = (
     .plot_simulation_lines(flxs, energies, v_allows)
     .add_constant_freq(v_allows["r_f"], "r_f")
     .add_constant_freq(v_allows["sample_f"], "sample_f")
-    .plot_sample_points(freqs_df, lambda x: mA2flx(x, mA_c, period))
+    .add_constant_freq(2 * v_allows["sample_f"] - v_allows["r_f"], "mirror r_f")
+    # .plot_sample_points(freqs_df, lambda x: mA2flx(x, mA_c, period))
     .add_secondary_xaxis(flxs, mAs)
     .get_figure()
 )
@@ -166,7 +172,7 @@ fig.update_layout(
     title=f"EJ/EC/EL = ({params[0]:.2f}, {params[1]:.2f}, {params[2]:.2f})",
     title_x=0.501,
 )
-fig.update_yaxes(range=[0.0, 8.0])
+fig.update_yaxes(range=[3.7, 4.6])
 fig.update_layout(height=1000)
 fig.show()
 ```

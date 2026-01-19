@@ -7,7 +7,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 %autoreload 2
+from zcu_tools.table import MetaDict
 from zcu_tools.notebook.persistance import load_result
+from zcu_tools.simulate import mA2flx
 from zcu_tools.notebook.analysis.mist.branch import (
     plot_cn_over_flx,
     plot_populations_over_photon,
@@ -45,14 +47,19 @@ elif "r_f" in allows:
 ```
 
 ```python
+md = MetaDict(json_path=f"{result_dir}/meta_info.json", read_only=True)
+md
+```
+
+```python
 # params = (7.0, 1.1, 1.4)
 # r_f = 5.9
 # g = 0.1
 
 
 qub_dim = 20
-qub_cutoff = 60
-res_dim = 110
+qub_cutoff = 50
+res_dim = 310
 
 photons = np.arange(0, res_dim - 10)
 ```
@@ -60,7 +67,12 @@ photons = np.arange(0, res_dim - 10)
 # Single
 
 ```python
-flx = 0.8312
+# flx = 0.8312
+flx = mA2flx(md.cur_A, md.mA_c, 2 * abs(md.mA_e - md.mA_c))
+flx
+```
+
+```python
 branchs = list(range(15))
 
 hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g, flx=flx)

@@ -31,7 +31,8 @@ from pathlib import Path
 import numpy as np
 
 %autoreload 2
-from zcu_tools.experiment.v2.onetone import FluxDepExperiment
+from zcu_tools.experiment.v2.onetone import FluxDepExp
+from zcu_tools.table import MetaDict
 import zcu_tools.notebook.persistance as zp
 import zcu_tools.notebook.analysis.dispersive as zd
 from zcu_tools.simulate import mA2flx, flx2mA
@@ -64,13 +65,17 @@ if "r_f" in allows:
     print(f"r_f = {r_f}")
 ```
 
+```python
+md = MetaDict(json_path=f"{result_dir}/meta_info.json", read_only=True)
+```
+
 # Plot with Onetone
 
 ```python
 onetone_path = r"../../Database/Q12_2D[5]/Q1/R1_flux_1.hdf5"
 
 
-exp = FluxDepExperiment()
+exp = FluxDepExp()
 sp_As, sp_fpts, signals = exp.load(onetone_path)
 sp_fpts *= 1e-3  # MHz to GHz
 
@@ -109,6 +114,7 @@ edelay = np.median(edelays).item()
 
 rot_signals = remove_edelay(sp_fpts, signals, edelay)
 rot_signals = gaussian_filter1d(rot_signals, len(sp_fpts) // 30, axis=1)
+rot_signals = np.asarray(rot_signals, dtype=np.complex128)
 
 circle_param = np.median(
     [fit_circle_params(rot_signal.real, rot_signal.imag) for rot_signal in rot_signals],
@@ -147,8 +153,8 @@ plt.close(fig)
 ```
 
 ```python
-# r_f = 5.345
-best_g = 0.1
+r_f = 1e-3 * md.r_f
+best_g = 0.06
 ```
 
 ```python
@@ -187,7 +193,7 @@ mAs = flx2mA(flxs, mA_c, period)
 ```python
 rf_list = calculate_dispersive_vs_flx(params, flxs, r_f=r_f, g=best_g, return_dim=3)
 fig = zd.plot_dispersive_with_onetone(
-    r_f, best_g, mAs, flxs, rf_list, sp_As, sp_flxs, sp_fpts, norm_phases
+    r_f, best_g, mAs, flxs, rf_list, sp_As, sp_flxs, sp_fpts, np.abs(signals)
 )
 fig.show()
 ```

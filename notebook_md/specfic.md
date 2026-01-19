@@ -86,7 +86,7 @@ from zcu_tools.device.yoko import YOKOGS200
 
 
 flux_yoko = YOKOGS200(
-    VISAaddress="USB0::0x0B21::0x0039::91S522309::INSTR", rm=resource_manager
+    address="USB0::0x0B21::0x0039::91S522309::INSTR", rm=resource_manager
 )
 GlobalDeviceManager.register_device("flux_yoko", flux_yoko)
 
@@ -111,7 +111,7 @@ flux_yoko.set_current(current=cur_A)
 # Predictor
 
 ```python
-preditor = FluxoniumPredictor(f"../result/{chip_name}/params.json")
+preditor = FluxoniumPredictor.from_file(f"../result/{chip_name}/params.json")
 # preditor = FluxoniumPredictor("../result/SF008/params.json")
 ```
 
@@ -130,14 +130,14 @@ exp_cfg = {
                 # "style": "const",
                 "style": "padding",
                 "length": 0.8,
-                "pre_length": 0.05*0.2,
+                "pre_length": 0.05 * 0.2,
                 "pre_gain": 1.0,
-                "post_length": 0.03*0.2,
+                "post_length": 0.03 * 0.2,
                 "post_gain": -1.0,
             },
             "ch": res_ch,
             "nqz": 2,
-            "gain": 0.5*0.2,
+            "gain": 0.5 * 0.2,
             # "freq": 5934,
             "freq": r_f,
         },
@@ -320,17 +320,21 @@ exp_cfg = {
         "gain": make_sweep(0.0, 1.0, 101),
     },
     "relax_delay": 10.0,  # us
-    "interval": 300, # s
+    "interval": 300,  # s
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=20)
 
 mist_overnight_exp = ze.twotone.mist.MISTPowerDepOvernight()
-iters, gains, signals = mist_overnight_exp.run(soc, soccfg, cfg, num_times=120, fail_retry=2)
+iters, gains, signals = mist_overnight_exp.run(
+    soc, soccfg, cfg, num_times=120, fail_retry=2
+)
 ```
 
 ```python
 mist_overnight_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_mist_overnight@{cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(
+        database_path, f"{qub_name}_mist_overnight@{cur_A * 1e3:.3f}mA"
+    ),
     # filepath=os.path.join(database_path, f"{qub_name}_mist_overnight@{cur_V:.3f}V"),
     comment=make_comment(cfg),
 )
