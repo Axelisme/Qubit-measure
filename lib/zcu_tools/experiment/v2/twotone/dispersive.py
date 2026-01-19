@@ -110,33 +110,36 @@ class DispersiveExp(AbsExperiment[DispersiveResultType, DispersiveTaskConfig]):
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
         avg_kappa = (g_kappa + e_kappa) / 2  # average linewidth κ/2π
 
-        fig = plt.figure(figsize=(10, 4))
-        spec = fig.add_gridspec(2, 3)
+        fig = plt.figure(figsize=(8, 4))
+        spec = fig.add_gridspec(2, 3, wspace=0.2)
         ax_main = fig.add_subplot(spec[:, :2])
         ax_g = fig.add_subplot(spec[0, 2])
         ax_e = fig.add_subplot(spec[1, 2])
 
-        # Plot data and fits
-        ax_main.plot(fpts, g_amps, marker=".", c="b", label="Ground state")
-        ax_main.plot(fpts, e_amps, marker=".", c="r", label="Excited state")
-        ax_main.plot(fpts, g_fit, "b-", alpha=0.7)
-        ax_main.plot(fpts, e_fit, "r-", alpha=0.7)
-
-        # Mark resonance frequencies
-        label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_kappa:.1f} MHz"
-        label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_kappa:.1f} MHz"
-        ax_main.axvline(g_freq, color="b", ls="--", alpha=0.7, label=label_g)
-        ax_main.axvline(e_freq, color="r", ls="--", alpha=0.7, label=label_e)
-
-        ax_main.set_xlabel("Frequency (MHz)")
-        ax_main.set_ylabel("Amplitude (a.u.)")
-        ax_main.set_title(
+        fig.suptitle(
             f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {avg_kappa:.1f} MHz"
         )
-        ax_main.legend()
+
+        # Plot data and fits
+        label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_kappa:.1f} MHz"
+        label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_kappa:.1f} MHz"
+        ax_main.scatter(fpts, g_amps, marker=".", c="b")
+        ax_main.scatter(fpts, e_amps, marker=".", c="r")
+        ax_main.plot(fpts, g_fit, "b-", alpha=0.7, label=label_g)
+        ax_main.plot(fpts, e_fit, "r-", alpha=0.7, label=label_e)
+
+        # Mark resonance frequencies
+        ax_main.axvline(g_freq, color="b", ls="--", alpha=0.7)
+        ax_main.axvline(e_freq, color="r", ls="--", alpha=0.7)
+        ax_main.set_xlabel("Frequency (MHz)", fontsize=14)
+        ax_main.set_ylabel("Signal Amplitude (a.u.)", fontsize=14)
+
+        ax_main.legend(loc="upper right")
         ax_main.grid(True)
 
-        def _plot_circle_fit(ax: Axes, signals: NDArray, params_dict: dict, color: str):
+        def _plot_circle_fit(
+            ax: Axes, signals: NDArray, params_dict: dict, color: str, label: str
+        ) -> None:
             rot_signals = remove_edelay(fpts, signals, edelay)
             norm_signals, norm_circle_params = normalize_signal(
                 rot_signals, params_dict["circle_params"], params_dict["a0"]
@@ -149,22 +152,24 @@ class DispersiveExp(AbsExperiment[DispersiveResultType, DispersiveTaskConfig]):
                 color=color,
                 marker=".",
                 markersize=1,
+                label=label,
             )
             ax.add_patch(Circle((norm_xc, norm_yc), norm_r0, fill=False, color=color))
             ax.plot([norm_xc, 1], [norm_yc, 0], "kx--")
             ax.axhline(0, color="k", linestyle="--")
             ax.set_aspect("equal")
             ax.grid(True)
-            ax.set_xlabel(r"$Re(S_{21})$")
-            ax.set_ylabel(r"$Im(S_{21})$")
+            # ax.set_xlabel(r"$Re[S_{21}]$", fontsize=14)
+            ax.set_ylabel(r"$Im[S_{21}]$", fontsize=14)
+            ax.yaxis.set_label_position("right")
+            ax.legend()
 
         # Plot individual circle fit
-        _plot_circle_fit(ax_g, g_signals, dict(g_params), "b")
-        _plot_circle_fit(ax_e, e_signals, dict(e_params), "r")
-        ax_g.set_title("Circle fit (Ground)")
-        ax_e.set_title("Circle fit (Excited)")
+        _plot_circle_fit(ax_g, g_signals, dict(g_params), "b", "Ground")
+        _plot_circle_fit(ax_e, e_signals, dict(e_params), "r", "Excited")
+        ax_e.set_xlabel(r"$Re[S_{21}]$", fontsize=14)
 
-        fig.tight_layout()
+        # fig.tight_layout()
 
         return chi, avg_kappa, fig
 

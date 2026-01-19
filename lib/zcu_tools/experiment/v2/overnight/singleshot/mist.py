@@ -103,19 +103,19 @@ class MistOvernightAnalyzer:
         med_kwargs = dict(marker=".", linestyle="-", markersize=4)
         side_kwargs = dict(linestyle="--", alpha=0.3)
         ax.plot(xs, max_populations[:, 0], color="b", **side_kwargs)  # type: ignore
-        ax.plot(xs, med_populations[:, 0], color="b", label="Ground", **med_kwargs)  # type: ignore
+        ax.plot(xs, med_populations[:, 0], color="b", label=r"$|0\rangle$", **med_kwargs)  # type: ignore
         ax.plot(xs, min_populations[:, 0], color="b", **side_kwargs)  # type: ignore
 
         ax.plot(xs, max_populations[:, 1], color="r", **side_kwargs)  # type: ignore
-        ax.plot(xs, med_populations[:, 1], color="r", label="Excited", **med_kwargs)  # type: ignore
+        ax.plot(xs, med_populations[:, 1], color="r", label=r"$|1\rangle$", **med_kwargs)  # type: ignore
         ax.plot(xs, min_populations[:, 1], color="r", **side_kwargs)  # type: ignore
 
         ax.plot(xs, max_populations[:, 2], color="g", **side_kwargs)  # type: ignore
-        ax.plot(xs, med_populations[:, 2], color="g", label="Other", **med_kwargs)  # type: ignore
+        ax.plot(xs, med_populations[:, 2], color="g", label=r"$|L\rangle$", **med_kwargs)  # type: ignore
         ax.plot(xs, min_populations[:, 2], color="g", **side_kwargs)  # type: ignore
 
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel("Population")
+        ax.set_xlabel(xlabel, fontsize=14)
+        ax.set_ylabel("Population", fontsize=14)
         ax.legend()
         ax.grid(True)
 

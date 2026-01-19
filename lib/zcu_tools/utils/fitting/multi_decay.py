@@ -1,13 +1,13 @@
-from typing import Tuple, List, Optional
+from typing import List, Optional, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from scipy.integrate import cumulative_trapezoid
 from scipy.optimize import nnls
-import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 
-from .base import fit_func, batch_fit_func
+from .base import batch_fit_func, fit_func
 
 
 def model_func(t, T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0, pe0) -> NDArray[np.float64]:
@@ -112,8 +112,8 @@ def fit_transition_rates(
         lambda *args: model_func(*args).flatten(),
         p0_guess,
         bounds=(
-            [0.0] * 6 + [max(0, p0_g - 0.01), max(0, p0_e - 0.01)],
-            [max_R] * 6 + [min(1, p0_g + 0.01), min(1, p0_e + 0.01)],
+            [0.0] * 6 + [max(0, p0_g - 0.001), max(0, p0_e - 0.001)],
+            [max_R] * 6 + [min(1, p0_g + 0.001), min(1, p0_e + 0.001)],
         ),
     )
     # pOpt = list(p0_guess)
@@ -127,6 +127,71 @@ def fit_transition_rates(
     rate_errs = tuple(np.sqrt(np.diag(pCov))[:6])
 
     return rates, rate_errs, fit_populations, (pOpt, pCov)
+
+
+def guess_dual_initial_params(
+    populations1: NDArray[np.float64],
+    populations2: NDArray[np.float64],
+    times: NDArray[np.float64],
+) -> Tuple[float, ...]:
+    """
+    使用積分法最小平方估計三能階系統速率常數。
+    假設 populations 欄位順序為: [Ground (g), Excited (e), Other (o)]
+    """
+    # 1. 數值積分: \int P(dt)
+    P1_int = cumulative_trapezoid(populations1, times, axis=0, initial=0)
+    P2_int = cumulative_trapezoid(populations2, times, axis=0, initial=0)
+    P_int = np.concatenate([P1_int, P2_int], axis=0)
+
+    # 2. 差分: P(t) - P(0)
+    P0_1 = populations1[0]
+    P0_2 = populations2[0]
+    delta_P1 = populations1 - P0_1
+    delta_P2 = populations2 - P0_2
+    delta_P = np.concatenate([delta_P1, delta_P2], axis=0)
+
+    # 初始機率分布
+    pg0_1 = max(0.0, min(1.0, P0_1[0]))
+    pe0_1 = max(0.0, min(1.0, P0_1[1]))
+    pg0_2 = max(0.0, min(1.0, P0_2[0]))
+    pe0_2 = max(0.0, min(1.0, P0_2[1]))
+
+    # Variable order in x: [T_ge, T_eg, T_eo, T_oe, T_go, T_og]
+    # Index mapping:        0     1     2     3     4     5
+
+    Ig = P_int[:, 0]
+    Ie = P_int[:, 1]
+    Io = P_int[:, 2]
+
+    # Zeros array for padding
+    Z = np.zeros_like(Ig)
+
+    # Construct Matrix A for Ax = b
+    # Equation for g: Pg - Pg0 = -Ig(T_ge + T_go) + Ie(T_eg) + Io(T_og)
+    # x coeffs: [-Ig, Ie, 0, 0, -Ig, Io]
+    A_g = np.stack([-Ig, Ie, Z, Z, -Ig, Io], axis=1)
+    b_g = delta_P[:, 0]
+
+    # Equation for e: Pe - Pe0 = Ig(T_ge) + Io(T_oe) - Ie(T_eg + T_eo)
+    # x coeffs: [Ig, -Ie, -Ie, Io, 0, 0]
+    A_e = np.stack([Ig, -Ie, -Ie, Io, Z, Z], axis=1)
+    b_e = delta_P[:, 1]
+
+    # Equation for o: Po - Po0 = Ig(T_go) + Ie(T_eo) - Io(T_og + T_oe)
+    # x coeffs: [Z, Z, Ie, -Io, Ig, -Io]
+    A_o = np.stack([Z, Z, Ie, -Io, Ig, -Io], axis=1)
+    b_o = delta_P[:, 2]
+
+    # Stack all equations
+    A = np.vstack([A_g, A_e, A_o])
+    b = np.concatenate([b_g, b_e, b_o])
+
+    # Solve Ax = b subject to x >= 0
+    x, _ = nnls(A, b)
+
+    T_ge, T_eg, T_eo, T_oe, T_go, T_og = x
+
+    return (T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0_1, pe0_1, pg0_2, pe0_2)
 
 
 def fit_dual_transition_rates(
@@ -153,17 +218,15 @@ def fit_dual_transition_rates(
 
     pass_times = times - times[0]
 
-    p0_guess1 = guess_initial_params(populations1, pass_times)
-    p0_guess2 = guess_initial_params(populations2, pass_times)
+    p0_guess = guess_dual_initial_params(populations1, populations2, pass_times)
 
-    p0_g1, p0_e1 = p0_guess1[6], p0_guess1[7]
-    p0_g2, p0_e2 = p0_guess2[6], p0_guess2[7]
-    p0_guess_avg = 0.5 * (np.array(p0_guess1) + np.array(p0_guess2))
+    p0_g1, p0_e1 = p0_guess[6], p0_guess[7]
+    p0_g2, p0_e2 = p0_guess[8], p0_guess[9]
 
-    p0_init1 = tuple([*p0_guess_avg[:6], p0_g1, p0_e1])
-    p0_init2 = tuple([*p0_guess_avg[:6], p0_g2, p0_e2])
+    p0_init1 = tuple([*p0_guess[:6], p0_g1, p0_e1])
+    p0_init2 = tuple([*p0_guess[:6], p0_g2, p0_e2])
 
-    max_R = 5 * float(np.max(p0_guess_avg[:6]))
+    max_R = 5 * float(np.max(p0_guess[:6]))
     (pOpt1, pOpt2), (pCov1, pCov2) = batch_fit_func(
         [pass_times, pass_times],
         [populations1.flatten(), populations2.flatten()],
@@ -181,8 +244,8 @@ def fit_dual_transition_rates(
             ),
         ],
     )
-    # pOpt1 = list(p0_guess1)
-    # pOpt2 = list(p0_guess2)
+    # pOpt1 = list(p0_init1)
+    # pOpt2 = list(p0_init2)
     # pCov1 = np.eye(len(pOpt1)) * 0.01
     # pCov2 = np.eye(len(pOpt2)) * 0.01
 

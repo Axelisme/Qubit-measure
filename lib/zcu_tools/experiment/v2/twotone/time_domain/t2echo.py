@@ -110,6 +110,9 @@ class T2EchoExp(AbsExperiment[T2EchoResultType, T2EchoTaskConfig]):
 
         xs, signals = result
 
+        xs = xs[1:]
+        signals = signals[1:]
+
         real_signals = rotate2real(signals).real
 
         if fit_method == "fringe":
@@ -126,21 +129,24 @@ class T2EchoExp(AbsExperiment[T2EchoResultType, T2EchoTaskConfig]):
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-        ax.plot(xs, y_fit, label="fit")
+        ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
+        ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
 
         t2e_str = f"{t2e:.2f}us ± {t2eerr:.2f}us"
         if fit_method == "fringe":
             detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
-            ax.set_title(f"T2 fringe = {t2e_str}, detune = {detune_str}", fontsize=15)
+            title = r"$T_{2echo}$ fringe = " + f"{t2e_str}, detune = {detune_str}"
+
         elif fit_method == "decay":
-            ax.set_title(f"T2 decay = {t2e_str}", fontsize=15)
+            title = r"$T_{2echo}$ decay = {t2e_str}"
+
         else:
             raise ValueError(f"Unknown fit_method: {fit_method}")
 
-        ax.set_xlabel("Time (us)")
-        ax.set_ylabel("Signal Real (a.u.)")
-        ax.legend()
+        ax.set_title(title, fontsize=14)
+        ax.set_xlabel("Time (us)", fontsize=14)
+        ax.set_ylabel("Signal (a.u.)", fontsize=14)
+        ax.legend(loc="upper right")
         ax.grid(True)
 
         fig.tight_layout()

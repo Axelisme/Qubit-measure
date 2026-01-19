@@ -23,7 +23,7 @@ from .models import count_max_evals, energy2linearform
 
 def search_in_database(
     flxs, fpts, datapath, allows, EJb, ECb, ELb, n_jobs=-1, fuzzy=True
-) -> Tuple[np.ndarray, Figure]:
+) -> Tuple[Tuple[float, float, float], Figure]:
     # Load data from database
     with File(datapath, "r") as file:
         f_flxs = file["flxs"][:]  # (f_flxs, ) # type: ignore[index]
@@ -307,7 +307,7 @@ def search_in_database(
 
     plt.show()
 
-    return best_params, fig
+    return tuple(best_params), fig
 
 
 def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000) -> np.ndarray:

@@ -188,18 +188,20 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-        ax.plot(xs, y_fit, label="fit")
+        ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
+        ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
+
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
         if dual_exp:
             t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
             ax.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
-            ax.set_title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
+            title = f"$T_1$ = {t1_str}, " + r"$T_{1b}$ = " + f"{t1b_str}"
         else:
-            ax.set_title(f"T1 = {t1_str}", fontsize=15)
-        ax.set_xlabel("Time (us)")
-        ax.set_ylabel("Signal Real (a.u.)")
-        ax.legend()
+            title = f"$T_1$ = {t1_str}"
+        ax.set_title(title, fontsize=14)
+        ax.set_xlabel("Time (us)", fontsize=14)
+        ax.set_ylabel("Signal (a.u.)", fontsize=14)
+        ax.legend(loc="upper right")
         ax.grid(True)
 
         fig.tight_layout()

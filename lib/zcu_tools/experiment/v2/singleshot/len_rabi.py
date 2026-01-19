@@ -113,9 +113,9 @@ class LenRabiExp(AbsExperiment[LenRabiResultType, LenRabiTaskConfig]):
         assert isinstance(fig, Figure)
 
         plot_kwargs = dict(ls="-", marker="o", markersize=3)
-        ax.plot(lens, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-        ax.plot(lens, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-        ax.plot(lens, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+        ax.plot(lens, populations[:, 0], color="blue", label="$|0\\rangle$", **plot_kwargs)  # type: ignore
+        ax.plot(lens, populations[:, 1], color="red", label="$|1\\rangle$", **plot_kwargs)  # type: ignore
+        ax.plot(lens, populations[:, 2], color="green", label="$|L\\rangle$", **plot_kwargs)  # type: ignore
         ax.set_xlabel("Pulse length (μs)")
         ax.set_ylabel("Population (a.u.)")
         ax.set_ylim(0.0, 1.0)

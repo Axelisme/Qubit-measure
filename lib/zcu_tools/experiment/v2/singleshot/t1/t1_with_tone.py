@@ -202,6 +202,9 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
         lens, populations = result
 
+        lens = lens[1:]
+        populations = populations[1:]
+
         populations = calc_populations(populations)  # (N, 2, 3)
 
         if confusion_matrix is not None:  # readout correction
@@ -229,9 +232,9 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         ax1.plot(lens, fit_pops1[:, 0], color="blue", ls="--", label="Ground Fit")
         ax1.plot(lens, fit_pops1[:, 1], color="red", ls="--", label="Excited Fit")
         ax1.plot(lens, fit_pops1[:, 2], color="green", ls="--", label="Other Fit")
-        ax1.scatter(lens, populations1[:, 0], color="blue", label="Ground", s=20)
-        ax1.scatter(lens, populations1[:, 1], color="red", label="Excited", s=20)
-        ax1.scatter(lens, populations1[:, 2], color="green", label="Other", s=20)
+        ax1.scatter(lens, populations1[:, 0], color="blue", label="Ground", s=1)
+        ax1.scatter(lens, populations1[:, 1], color="red", label="Excited", s=1)
+        ax1.scatter(lens, populations1[:, 2], color="green", label="Other", s=1)
         ax1.set_ylabel("Population")
         ax1.legend(loc=4)
         ax1.grid(True)
@@ -239,9 +242,9 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         ax2.plot(lens, fit_pops2[:, 0], color="blue", ls="--", label="Ground Fit")
         ax2.plot(lens, fit_pops2[:, 1], color="red", ls="--", label="Excited Fit")
         ax2.plot(lens, fit_pops2[:, 2], color="green", ls="--", label="Other Fit")
-        ax2.scatter(lens, populations2[:, 0], color="blue", label="Ground", s=20)
-        ax2.scatter(lens, populations2[:, 1], color="red", label="Excited", s=20)
-        ax2.scatter(lens, populations2[:, 2], color="green", label="Other", s=20)
+        ax2.scatter(lens, populations2[:, 0], color="blue", label="Ground", s=1)
+        ax2.scatter(lens, populations2[:, 1], color="red", label="Excited", s=1)
+        ax2.scatter(lens, populations2[:, 2], color="green", label="Other", s=1)
         ax2.set_xlabel("Time (μs)")
         ax2.set_ylabel("Population")
         ax2.legend(loc=4)

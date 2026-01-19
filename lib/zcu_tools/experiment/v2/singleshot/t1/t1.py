@@ -7,16 +7,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, Optional, Tuple, List
+from typing_extensions import List, NotRequired, Optional, Tuple
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D, sweep2array, make_ge_sweep
+from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     TaskConfig,
-    run_task,
     TaskContextView,
+    run_task,
 )
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program.v2 import (
     Delay,
@@ -32,7 +33,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_dual_transition_rates
-from zcu_tools.experiment.v2.utils import round_zcu_time
 
 from ..util import calc_populations
 from .util import measure_with_sweep
@@ -217,9 +217,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         t1 = 1.0 / lambdas[2]
         t1_b = 1.0 / lambdas[1]
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6), sharey=True)
 
-        ax1.set_title(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
+        fig.suptitle(f"T_1 = {t1:.1f} μs, T_1_b = {t1_b:.1f} μs")
         plot_kwargs = dict(ls="-", marker=".", markersize=3)
 
         ax1.plot(lens, fit_pops1[:, 0], color="blue", ls="--", label="Ground Fit")
@@ -228,7 +228,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         ax1.plot(lens, populations1[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
         ax1.plot(lens, populations1[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
         ax1.plot(lens, populations1[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
-        ax1.set_ylabel("Population")
+        ax1.set_xlabel("Time (μs)")
         ax1.legend(loc=4)
         ax1.grid(True)
 
@@ -307,7 +307,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         populations = np.stack([g_pop, e_pop], axis=1)
 
         Ts = Ts.astype(np.float64)
-        populations = populations.astype(np.float64)
+        populations = np.real(populations).astype(np.float64)
 
         self.last_cfg = None
         self.last_result = (Ts, populations)
