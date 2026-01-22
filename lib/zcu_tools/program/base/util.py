@@ -1,8 +1,11 @@
 from typing import List, Optional, Tuple
 
 import numpy as np
-from numpy.typing import NDArray
 
+try:
+    from numpy.typing import NDArray
+except:
+    NDArray = List
 
 class OnlineStatisticTracker:
     """

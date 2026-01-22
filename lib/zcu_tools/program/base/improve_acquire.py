@@ -1,12 +1,15 @@
 from typing import Callable, List, Optional, Tuple, Union, cast
 
 import numpy as np
-from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 from typing_extensions import TypeAlias
 
 from .util import OnlineStatisticTracker
 
+try:
+    from numpy.typing import NDArray
+except:
+    NDArray = List
 
 class TypedAcquireMixin(AcquireMixin):
     """

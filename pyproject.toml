@@ -18,7 +18,7 @@ client = [
     "pyvisa",
     "pyro4",
 ]
-server = ["qick", "dill", "numpy==1.23.5"]
+server = ["dill", "numpy==1.23.5"]
 fit = [
     "h5py",
     "ipykernel",
