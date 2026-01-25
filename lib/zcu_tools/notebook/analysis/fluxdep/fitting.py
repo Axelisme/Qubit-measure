@@ -310,7 +310,9 @@ def search_in_database(
     return tuple(best_params), fig
 
 
-def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000) -> np.ndarray:
+def fit_spectrum(
+    flxs, fpts, init_params, allows, param_b, maxfun=1000
+) -> Tuple[float, float, float]:
     evals_count = count_max_evals(allows)
 
     pbar = tqdm(desc="Distance: nan", total=maxfun)
@@ -360,4 +362,4 @@ def fit_spectrum(flxs, fpts, init_params, allows, param_b, maxfun=1000) -> np.nd
     else:
         best_params = res.x
 
-    return best_params
+    return tuple(best_params)

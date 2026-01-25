@@ -114,6 +114,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
             last_snr = None
             if i > 0:
                 last_snr = np.abs(ctx.data[i - 1])
+                last_snr /= np.sqrt(params[i - 1, 2])
             cur_params = optimizer.next_params(i, last_snr)
 
             if cur_params is None:
@@ -238,7 +239,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
         params, signals = result
         snrs = np.abs(signals)
 
-        max_id = np.nanargmax(snrs)
+        max_id = np.nanargmax(snrs / np.sqrt(params[:, 2]))
         max_snr = float(snrs[max_id])
         best_params = params[max_id, :]
 
@@ -322,11 +323,13 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
         _filepath = Path(filepath)
 
         params_data, _, _ = load_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_params"))
+            filepath=str(_filepath.with_name(_filepath.name + "_params")),
+            return_cfg=False,
         )
 
         signals_data, _, _ = load_data(
-            filepath=str(_filepath.with_name(_filepath.name + "_signals"))
+            filepath=str(_filepath.with_name(_filepath.name + "_signals")),
+            return_cfg=False,
         )
 
         params = params_data.astype(np.float64)

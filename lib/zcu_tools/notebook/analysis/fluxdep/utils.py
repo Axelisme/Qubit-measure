@@ -65,7 +65,7 @@ class FluxDependVisualizer:
 
     def add_secondary_xaxis(
         self, flxs: NDArray[np.float64], mAs: NDArray[np.float64]
-    ) -> "FluxDependVisualizer":
+    ) -> Self:
         add_secondary_xaxis(self.fig, flxs, mAs)
         return self
 

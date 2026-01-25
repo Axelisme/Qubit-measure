@@ -347,7 +347,9 @@ def load_data(
     server_ip: Optional[str] = None,
     port: int = 4999,
     return_cfg: Literal[True] = True,
-) -> Tuple[NDArray, NDArray, Optional[NDArray], dict]: ...
+) -> Tuple[
+    NDArray[np.float64], NDArray[np.float64], Optional[NDArray[np.float64]], dict
+]: ...
 
 
 @overload
@@ -356,7 +358,7 @@ def load_data(
     server_ip: Optional[str] = None,
     port: int = 4999,
     return_cfg: Literal[False] = False,
-) -> Tuple[NDArray, NDArray, Optional[NDArray]]: ...
+) -> Tuple[NDArray[np.float64], NDArray[np.float64], Optional[NDArray[np.float64]]]: ...
 
 
 def load_data(

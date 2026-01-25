@@ -58,10 +58,7 @@ class JPAFluxByOneToneExp(
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
                             OneToneProgram(soccfg, ctx.cfg).acquire(
-                                soc,
-                                progress=False,
-                                callback=update_hook,
-                                record_stderr=True,
+                                soc, progress=False, callback=update_hook
                             )
                         ),
                         result_shape=(len(fpts),),

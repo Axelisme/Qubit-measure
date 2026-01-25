@@ -290,7 +290,7 @@ class ModuleLibrary:
     @auto_sync("before")
     def get_module(
         self, name: str, override_cfg: Optional[Dict[str, Any]] = None
-    ) -> Union[PulseCfg, ReadoutCfg, ResetCfg]:
+    ) -> Dict[str, Any]:
         module = deepcopy(self.modules[name])
         if override_cfg is not None:
             deepupdate(module, override_cfg, behavior="force")
