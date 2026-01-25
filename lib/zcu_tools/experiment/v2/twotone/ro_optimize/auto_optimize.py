@@ -58,7 +58,7 @@ class ReadoutOptimizer:
                 Real(name="gain", low=pdrs.min(), high=pdrs.max()),
                 Real(name="length", low=lens.min(), high=lens.max()),
             ],
-            n_initial_points=num_points // 3,
+            n_initial_points=num_points // 2,
             initial_point_generator="lhs",
             base_estimator="ET",
             acq_func="EI",
@@ -114,7 +114,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
             last_snr = None
             if i > 0:
                 last_snr = np.abs(ctx.data[i - 1])
-                last_snr /= np.sqrt(params[i - 1, 2])
+                # last_snr /= np.sqrt(params[i - 1, 2])
             cur_params = optimizer.next_params(i, last_snr)
 
             if cur_params is None:
@@ -239,7 +239,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
         params, signals = result
         snrs = np.abs(signals)
 
-        max_id = np.nanargmax(snrs / np.sqrt(params[:, 2]))
+        max_id = np.nanargmax(snrs)
         max_snr = float(snrs[max_id])
         best_params = params[max_id, :]
 

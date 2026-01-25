@@ -47,24 +47,30 @@ def snr_as_signal(
     ],
     ge_axis: int = 0,
 ) -> NDArray[np.complex128]:
-    _, cov_d, med_d = raw
+    avg_d, cov_d, med_d = raw
     assert cov_d is not None  # (ge, *sweep, 2, 2)
+    assert avg_d is not None  # (ge, *sweep, 2)
     assert med_d is not None  # (ge, *sweep, 2)
 
+    avg_d = avg_d[0][0]
     cov_d = cov_d[0][0]
     med_d = med_d[0][0]
+    assert avg_d.shape[ge_axis] == 2
     assert cov_d.shape[ge_axis] == 2
     assert med_d.shape[ge_axis] == 2
 
-    # (ge, *sweep)
-    contrast = (np.take(med_d, 1, axis=ge_axis) - np.take(med_d, 0, axis=ge_axis)).dot(
-        [1, 1j]
-    )
-    noise = np.mean(
-        np.max(np.sqrt(np.diagonal(cov_d, axis1=-2, axis2=-1)), axis=-1), axis=ge_axis
-    )
+    from scipy.special import erf
 
-    return contrast / (noise + 1e-12)
+    # (ge, *sweep)
+    peak_contrast = np.abs(
+        (np.take(med_d, 1, axis=ge_axis) - np.take(med_d, 0, axis=ge_axis)).dot([1, 1j])
+    ).real
+
+    noise = np.max(np.sqrt(np.diagonal(cov_d, axis1=-2, axis2=-1)), axis=ge_axis)
+    noise_max = np.clip(np.max(noise, axis=-1), 1e-12, None)
+    noise_min = np.clip(np.min(noise, axis=-1), 1e-12, None)
+
+    return erf(peak_contrast / (np.sqrt(8) * noise_min)) * (noise_min / noise_max)
 
 
 T_RawResult = TypeVar("T_RawResult")
