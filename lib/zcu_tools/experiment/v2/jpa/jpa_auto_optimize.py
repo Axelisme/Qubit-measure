@@ -26,6 +26,7 @@ from zcu_tools.experiment.v2.runner import (
     TaskContextView,
     run_task,
 )
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot
 from zcu_tools.program.v2 import (
@@ -44,7 +45,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from .jpa_optimizer import JPAOptimizer
 
 JPAOptimizeResultType = Tuple[
-    NDArray[np.float64], NDArray[np.int32], NDArray[np.complex128]
+    NDArray[np.float64], NDArray[np.int32], NDArray[np.float64]
 ]
 
 
@@ -153,38 +154,35 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
                 )
                 viewer.refresh()
 
+            def measure_fn(ctx, update_hook):
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset(
+                            "reset",
+                            ctx.cfg.get("reset", {"type": "none"}),
+                        ),
+                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                        Readout("readout", ctx.cfg["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
             results = run_task(
                 task=SoftTask(
                     sweep_name="Iteration",
                     sweep_values=list(range(num_points)),
                     update_cfg_fn=update_fn,
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                )
-                            )
-                            and (
-                                prog.acquire(
-                                    soc,
-                                    progress=False,
-                                    callback=update_hook,
-                                    record_statistic=True,
-                                ),
-                                prog.get_covariance(),
-                                prog.get_median(),
-                            )
-                        ),
+                        measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     ),
                 ),
@@ -336,7 +334,9 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
 
         # Load params (iterations x 3)
         params_data, iters, param_types = load_data(
-            str(_filepath.with_name(_filepath.name + "_params")), **kwargs
+            str(_filepath.with_name(_filepath.name + "_params")),
+            **kwargs,
+            return_cfg=False,
         )
         assert iters is not None and param_types is not None
         assert len(iters.shape) == 1 and len(param_types.shape) == 1
@@ -345,7 +345,9 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
         params = params_data.T  # transpose back (num_points, 3)
 
         phases, iters_ph, _ = load_data(
-            str(_filepath.with_name(_filepath.name + "_phases")), **kwargs
+            str(_filepath.with_name(_filepath.name + "_phases")),
+            **kwargs,
+            return_cfg=False,
         )
         assert iters_ph is not None
         assert len(iters_ph.shape) == 1
@@ -353,14 +355,17 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
 
         # Load signals
         signals, iters_sig, _ = load_data(
-            str(_filepath.with_name(_filepath.name + "_signals")), **kwargs
+            str(_filepath.with_name(_filepath.name + "_signals")),
+            **kwargs,
+            return_cfg=False,
         )
         assert iters_sig is not None
         assert len(signals.shape) == 1
         assert signals.shape[0] == params.shape[0]
 
+        phases = phases.astype(np.int32)
         params = params.astype(np.float64)
-        signals = signals.astype(np.complex128)
+        signals = signals.astype(np.float64)
 
         self.last_cfg = None
         self.last_result = (params, phases, signals)

@@ -19,6 +19,7 @@ from zcu_tools.experiment.utils import (
     sweep2array,
 )
 from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
@@ -34,7 +35,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAFluxResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+JPAFluxResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class JPAFluxTaskConfig(TaskConfig, ModularProgramCfg):
@@ -60,6 +61,29 @@ class JPAFluxExp(AbsExperiment[JPAFluxResultType, JPAFluxTaskConfig]):
         )
 
         with LivePlotter1D("JPA Flux value (a.u.)", "Signal Difference") as viewer:
+
+            def measure_fn(ctx, update_hook):
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset(
+                            "reset",
+                            ctx.cfg.get("reset", {"type": "none"}),
+                        ),
+                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                        Readout("readout", ctx.cfg["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
             signals = run_task(
                 task=SoftTask(
                     sweep_name="JPA Flux value",
@@ -68,32 +92,7 @@ class JPAFluxExp(AbsExperiment[JPAFluxResultType, JPAFluxTaskConfig]):
                         ctx.cfg["dev"], flx, label="jpa_flux_dev"
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                )
-                            )
-                            and (
-                                prog.acquire(
-                                    soc,
-                                    progress=False,
-                                    callback=update_hook,
-                                    record_statistic=True,
-                                ),
-                                prog.get_covariance(),
-                                prog.get_median(),
-                            )
-                        ),
+                        measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     ),
                 ),

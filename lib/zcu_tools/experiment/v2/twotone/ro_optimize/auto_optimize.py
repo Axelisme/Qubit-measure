@@ -19,6 +19,7 @@ from zcu_tools.experiment.v2.runner import (
     TaskContextView,
     run_task,
 )
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot
 from zcu_tools.program import SweepCfg
@@ -35,7 +36,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-AutoResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+AutoResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class ReadoutOptimizer:
@@ -113,7 +114,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
 
             last_snr = None
             if i > 0:
-                last_snr = np.abs(ctx.data[i - 1])
+                last_snr = ctx.data[i - 1]
                 # last_snr /= np.sqrt(params[i - 1, 2])
             cur_params = optimizer.next_params(i, last_snr)
 
@@ -160,7 +161,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
 
             def plot_fn(ctx: TaskContextView) -> None:
                 idx: int = ctx.env_dict["index"]
-                snrs = np.abs(ctx.data)  # (num_points, )
+                snrs = ctx.data  # (num_points, )
 
                 cur_freq, cur_gain, cur_len = params[idx, :]
 
@@ -182,38 +183,32 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
                 )
                 viewer.refresh()
 
+            def measure_fn(ctx, update_hook):
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                        Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
+                        Readout("readout", ctx.cfg["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
             results = run_task(
                 task=SoftTask(
                     sweep_name="Iteration",
                     sweep_values=list(range(num_points)),
                     update_cfg_fn=update_fn,
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                )
-                            )
-                            and (
-                                prog.acquire(
-                                    soc,
-                                    progress=False,
-                                    callback=update_hook,
-                                    record_statistic=True,
-                                ),
-                                prog.get_covariance(),
-                                prog.get_median(),
-                            )
-                        ),
+                        measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     ),
                 ),
@@ -333,7 +328,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
         )
 
         params = params_data.astype(np.float64)
-        signals = signals_data.astype(np.complex128)
+        signals = signals_data.astype(np.float64)
 
         self.last_result = (params, signals)
         return params, signals

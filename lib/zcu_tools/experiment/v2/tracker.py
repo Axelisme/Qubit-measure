@@ -3,19 +3,17 @@ from typing import List, Optional, Tuple
 import numpy as np
 from numpy.typing import NDArray
 
+from zcu_tools.program.base import AbsStatisticTracker
 
-class OnlineStatisticTracker:
+
+class PCATracker(AbsStatisticTracker):
     """
-    Online statistics tracker for 2D IQ data with support for leading batch dimensions.
+    Online tracker for 2D IQ data with support for leading batch dimensions.
 
     Input shape: (..., m, 2) where:
         - ... : leading dimensions (treated as independent channels)
         - m   : number of samples per update
         - 2   : IQ dimensions (I, Q)
-
-    Example:
-        - (100, 2): single channel, 100 samples
-        - (2, 100, 2): two independent channels (e.g., G and E), 100 samples each
     """
 
     def __init__(self) -> None:
@@ -146,7 +144,7 @@ if __name__ == "__main__":
     all_points_E = []
 
     # Single tracker for both G and E (using leading dimension)
-    tracker = OnlineStatisticTracker()
+    tracker = PCATracker()
 
     for i in range(n_batches):
         # Generate G batch (weight 0.7, 0.3)
@@ -405,7 +403,7 @@ if __name__ == "__main__":
     ax2 = axes[1]
 
     # Track statistics over cumulative updates using leading dimension
-    tracker_conv = OnlineStatisticTracker()
+    tracker_conv = PCATracker()
     means_history_G = []
     means_history_E = []
     medians_history_G = []

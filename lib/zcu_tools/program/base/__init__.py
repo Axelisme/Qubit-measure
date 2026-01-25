@@ -2,7 +2,7 @@ from typing import Any, Dict
 
 from typing_extensions import TypedDict
 
-from .improve_acquire import ImproveAcquireMixin
+from .improve_acquire import AbsStatisticTracker, ImproveAcquireMixin
 
 
 class SweepCfg(TypedDict):
@@ -28,4 +28,4 @@ class MyProgram(ImproveAcquireMixin):
         self.cfg = cfg
 
 
-__all__ = ["MyProgram", "SweepCfg"]
+__all__ = ["MyProgram", "SweepCfg", "AbsStatisticTracker"]

@@ -11,6 +11,7 @@ from typing_extensions import NotRequired
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
@@ -26,7 +27,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-PowerResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+PowerResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class PowerTaskConfig(TaskConfig, ModularProgramCfg):
@@ -53,39 +54,34 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
         )
 
         with LivePlotter1D("Readout Power", "SNR") as viewer:
+
+            def measure_fn(ctx, update_hook):
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                        Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
+                        Readout("readout", ctx.cfg["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        (
-                            prog := ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset",
-                                        ctx.cfg.get("reset", {"type": "none"}),
-                                    ),
-                                    Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                                    Readout("readout", ctx.cfg["readout"]),
-                                ],
-                            )
-                        )
-                        and (
-                            prog.acquire(
-                                soc,
-                                progress=False,
-                                callback=update_hook,
-                                record_statistic=True,
-                            ),
-                            prog.get_covariance(),
-                            prog.get_median(),
-                        )
-                    ),
+                    measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     result_shape=(len(gains),),
                 ),
                 init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(gains, np.abs(ctx.data)),
+                update_hook=lambda ctx: viewer.update(gains, ctx.data),
             )
 
         # record the last cfg and result
@@ -101,9 +97,7 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        powers, signals = result
-
-        snrs = np.abs(signals)
+        powers, snrs = result
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0

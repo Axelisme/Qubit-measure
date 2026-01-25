@@ -42,15 +42,12 @@ def set_pulse_freq(pulse_cfg: PulseCfg, freq: float) -> PulseCfg:
 def snr_as_signal(
     raw: Tuple[
         Sequence[NDArray[np.float64]],
-        Optional[Sequence[NDArray[np.float64]]],
-        Optional[Sequence[NDArray[np.float64]]],
+        Sequence[NDArray[np.float64]],
+        Sequence[NDArray[np.float64]],
     ],
     ge_axis: int = 0,
-) -> NDArray[np.complex128]:
+) -> NDArray[np.float64]:
     avg_d, cov_d, med_d = raw
-    assert cov_d is not None  # (ge, *sweep, 2, 2)
-    assert avg_d is not None  # (ge, *sweep, 2)
-    assert med_d is not None  # (ge, *sweep, 2)
 
     avg_d = avg_d[0][0]
     cov_d = cov_d[0][0]
