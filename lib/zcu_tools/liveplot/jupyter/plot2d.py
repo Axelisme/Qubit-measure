@@ -17,7 +17,9 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         *,
         uniform: bool = True,
         segment_kwargs: Optional[dict] = None,
-        **kwargs,
+        existed_axes: Optional[List[List[Axes]]] = None,
+        auto_close: bool = True,
+        disable: bool = False,
     ) -> None:
         if segment_kwargs is None:
             segment_kwargs = {}
@@ -27,7 +29,12 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         else:
             segment = PlotNonUniform2DSegment(xlabel, ylabel, **segment_kwargs)
 
-        super().__init__([[segment]], **kwargs)
+        super().__init__(
+            [[segment]],
+            existed_axes=existed_axes,
+            auto_close=auto_close,
+            disable=disable,
+        )
 
     def update(
         self,

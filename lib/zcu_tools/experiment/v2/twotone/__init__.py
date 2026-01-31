@@ -1,5 +1,6 @@
 from . import reset, ro_optimize, time_domain, rabi
 from .ac_stark import AcStarkExp, AcStarkRamseyExp
+from .ckp import CKP_Exp
 from .allxy import AllXY_Exp
 from .dispersive import DispersiveExp
 from .fluxdep import FreqFluxDepExp

@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, Tuple, Union
+from typing import Optional, Sequence, Tuple, Union, List
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -16,12 +16,19 @@ class LivePlotterScatter(JupyterPlotMixin, AbsLivePlotter):
         ylabel: str,
         *,
         segment_kwargs: Optional[dict] = None,
-        **kwargs,
+        existed_axes: Optional[List[List[Axes]]] = None,
+        auto_close: bool = True,
+        disable: bool = False,
     ) -> None:
         if segment_kwargs is None:
             segment_kwargs = {}
         segment = ScatterSegment(xlabel, ylabel, **segment_kwargs)
-        super().__init__([[segment]], **kwargs)
+        super().__init__(
+            [[segment]],
+            existed_axes=existed_axes,
+            auto_close=auto_close,
+            disable=disable,
+        )
 
     def update(
         self,

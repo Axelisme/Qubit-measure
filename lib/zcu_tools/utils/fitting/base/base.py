@@ -1,18 +1,20 @@
 from functools import wraps
-from typing import Callable, List, Optional, Sequence, Tuple, cast
+from typing import Callable, List, Optional, Sequence, Tuple, cast, TypeVar
 
 import numpy as np
 import scipy as sp
 from numpy.typing import NDArray
 
+Y_DataType = TypeVar("Y_DataType", bound=np.generic)
+
 
 def with_fixed_params(
-    fitfunc: Callable[..., NDArray],
+    fitfunc: Callable[..., NDArray[Y_DataType]],
     init_p: Sequence[Optional[float]],
     bounds: Optional[Tuple[Sequence[float], Sequence[float]]],
     fixedparams: Sequence[Optional[float]],
 ) -> Tuple[
-    Callable[..., NDArray],
+    Callable[..., NDArray[Y_DataType]],
     Sequence[Optional[float]],
     Optional[Tuple[Sequence[float], Sequence[float]]],
 ]:
@@ -44,8 +46,8 @@ def with_fixed_params(
 
 
 def add_fixed_params_back(
-    pOpt: List[float], pCov: NDArray, fixedparams: Sequence[Optional[float]]
-) -> Tuple[List[float], NDArray]:
+    pOpt: List[float], pCov: NDArray[np.float64], fixedparams: Sequence[Optional[float]]
+) -> Tuple[List[float], NDArray[np.float64]]:
     _fixedparams = np.asarray(fixedparams, dtype=float)
     non_fixed_idxs = np.isnan(_fixedparams)
 
@@ -60,13 +62,13 @@ def add_fixed_params_back(
 
 def fit_func(
     xdata: NDArray,
-    ydata: NDArray,
-    fitfunc: Callable[..., NDArray],
+    ydata: NDArray[Y_DataType],
+    fitfunc: Callable[..., NDArray[Y_DataType]],
     init_p: Optional[Sequence[Optional[float]]] = None,
     bounds: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
     fixedparams: Optional[Sequence[Optional[float]]] = None,
     **kwargs,
-) -> Tuple[List[float], NDArray]:
+) -> Tuple[List[float], NDArray[np.float64]]:
     if fixedparams is not None and any([p is not None for p in fixedparams]):
         if init_p is None:
             raise ValueError(
@@ -95,14 +97,14 @@ def fit_func(
 
 def batch_fit_func(
     list_xdata: List[NDArray],
-    list_ydata: List[NDArray],
-    fitfunc: Callable[..., NDArray],
+    list_ydata: List[NDArray[Y_DataType]],
+    fitfunc: Callable[..., NDArray[Y_DataType]],
     list_init_p: List[Sequence[float]],
     shared_idxs: List[int],
     list_bounds: Optional[List[Tuple[List[float], List[float]]]] = None,
     fixedparams: Optional[List[Optional[float]]] = None,
     **kwargs,
-) -> Tuple[List[List[float]], List[NDArray]]:
+) -> Tuple[List[List[float]], List[NDArray[Y_DataType]]]:
     n_groups = len(list_xdata)
     n_params_total = len(list_init_p[0])  # 總參數個數（以第一組為準）
 
@@ -228,7 +230,9 @@ def assign_init_p(
     return fitparams
 
 
-def fit_line(xdata: NDArray, ydata: NDArray) -> Tuple[float, float]:
+def fit_line(
+    xdata: NDArray[np.float64], ydata: NDArray[np.float64]
+) -> Tuple[float, float]:
     """params: [a, b] -> y = a * x + b"""
     a, b, *_ = sp.stats.linregress(xdata, ydata)
 

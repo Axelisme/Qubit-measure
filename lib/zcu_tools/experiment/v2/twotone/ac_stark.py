@@ -99,7 +99,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         if cfg["stark_pulse1"].get("block_mode", True):
-            raise ValueError("Stark pulse 1 must be in block mode")
+            raise ValueError("Stark pulse 1 must not in block mode")
 
         assert "sweep" in cfg
         assert isinstance(cfg["sweep"], dict)

@@ -1,22 +1,24 @@
-from typing import Any, List, Optional, Sequence, Tuple, cast
+from typing import List, Optional, Sequence, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .base import assign_init_p, fit_func
 
 
 # lorentzian function
-def lorfunc(x: np.ndarray, *p) -> np.ndarray:
+def lorfunc(x: NDArray[np.float64], *p) -> NDArray[np.float64]:
     """p = [y0, slope, yscale, x0, gamma]"""
     y0, slope, yscale, x0, gamma = p
     return y0 + slope * (x - x0) + yscale / (1 + ((x - x0) / gamma) ** 2)
 
 
 def fitlor(
-    xdata: np.ndarray,
-    ydata: np.ndarray,
+    xdata: NDArray[np.float64],
+    ydata: NDArray[np.float64],
     fitparams: Optional[Sequence[Optional[float]]] = None,
-) -> Tuple[List[float], Any]:
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
+):
     if fitparams is None:
         fitparams = [None] * 5
     fitparams = list(fitparams)
@@ -45,11 +47,11 @@ def fitlor(
         [np.max(ydata), max_slope, 2 * np.abs(yscale), xdata.max(), np.inf],
     )
 
-    return fit_func(xdata, ydata, lorfunc, fitparams, bounds)
+    return fit_func(xdata, ydata, lorfunc, fitparams, bounds, fixedparams=fixedparams)
 
 
 # asymmtric lorentzian function
-def asym_lorfunc(x: np.ndarray, *p) -> np.ndarray:
+def asym_lorfunc(x: NDArray[np.float64], *p) -> NDArray[np.float64]:
     """p = [y0, slope, yscale, x0, gamma, alpha]"""
     y0, slope, yscale, x0, gamma, alpha = p
     return (
@@ -63,7 +65,8 @@ def fit_asym_lor(
     xdata: np.ndarray,
     ydata: np.ndarray,
     fitparams: Optional[Sequence[Optional[float]]] = None,
-) -> Tuple[List[float], Any]:
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
+):
     if fitparams is None:
         fitparams = [None] * 6
     fitparams = list(fitparams)
@@ -93,4 +96,6 @@ def fit_asym_lor(
         [np.inf, np.inf, 2 * np.abs(yscale), np.inf, np.inf, np.inf],
     )
 
-    return fit_func(xdata, ydata, asym_lorfunc, fitparams, bounds)
+    return fit_func(
+        xdata, ydata, asym_lorfunc, fitparams, bounds, fixedparams=fixedparams
+    )
