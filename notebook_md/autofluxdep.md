@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.18.1
   kernelspec:
-    display_name: axelenv
+    display_name: zcu-tools
     language: python
     name: python3
 ---
@@ -30,7 +30,7 @@ from zcu_tools.notebook.utils import make_sweep
 ```
 
 ```python
-chip_name = "Q12_2D[5]"
+chip_name = "Q12_2D[6]"
 res_name = "R1"
 qub_name = "Q1"
 
@@ -48,7 +48,7 @@ md = MetaDict(f"{result_dir}/meta_info.json")
 ```python
 from zcu_tools.remote import make_proxy
 
-soc, soccfg = make_proxy("192.168.10.63", 8887)
+soc, soccfg = make_proxy("192.168.10.179", 8887)
 print(soccfg)
 ```
 
@@ -56,9 +56,9 @@ print(soccfg)
 
 ```python
 res_ch = 0
-# qub_0_1_ch = 11
+qub_0_1_ch = 11
 qub_1_4_ch = 2
-qub_4_5_ch = 5
+# qub_4_5_ch = 5
 # qub_5_6_ch = 5
 # lo_flux_ch = 14
 
@@ -81,7 +81,7 @@ from zcu_tools.device.yoko import YOKOGS200
 
 
 flux_yoko = YOKOGS200(
-    address="USB0::0x0B21::0x0039::91WB18859::INSTR", rm=resource_manager
+    address="USB0::0x0B21::0x0039::90ZB35281::INSTR", rm=resource_manager
 )
 GlobalDeviceManager.register_device("flux_yoko", flux_yoko)
 
@@ -95,12 +95,13 @@ flux_yoko.set_mode("current", rampstep=1e-6)
 preditor = FluxoniumPredictor.from_file(f"{result_dir}/params.json")
 preditor.A_c = md.mA_c
 preditor.period = 2 * abs(md.mA_e - md.mA_c)
+preditor.update_bias(md.bias)
 ```
 
 # Start Measurement
 
 ```python
-flux_yoko.set_current(-2.8e-3)
+flux_yoko.set_current(1.20e-3)  # Set to initial flux bias
 ```
 
 ```python
@@ -113,7 +114,7 @@ gc.collect()
 
 ```python
 %matplotlib widget
-flx_values = np.linspace(-2.8e-3, -2.2e-3, 251)
+flx_values = np.linspace(1.20e-3, 2.18e-3, 251)
 
 filename = f"{qub_name}_autofluxdep_animation"
 
@@ -123,7 +124,7 @@ executor = (
     zefd.FluxDepExecutor(flx_values=flx_values)
     .add_measurement(
         "qubit_freq",
-        zefd.QubitFreqMeasurementTask(
+        zefd.QubitFreqTask(
             detune_sweep=make_sweep(-5, 5, step=0.025),
             cfg_maker=lambda ctx, ml: (cur_qf := ctx.env_dict["info"]["predict_freq"])
             and zefd.QubitFreqCfgTemplate(
@@ -145,8 +146,8 @@ executor = (
                     },
                     "readout": "readout_dpm",
                     "relax_delay": 0.1,
-                    "reps": 200,
-                    "rounds": 50,
+                    "reps": 1000,
+                    "rounds": 10,
                 }
             ),
             earlystop_snr=50,
@@ -154,7 +155,7 @@ executor = (
     )
     .add_measurement(
         "lenrabi",
-        zefd.LenRabiMeasurementTask(
+        zefd.LenRabiTask(
             length_sweep=make_sweep(0.03, 1.0, 201),
             ref_pi_product=3
             * init_pi_pulse["waveform"]["length"]
@@ -170,7 +171,7 @@ executor = (
                         "freq": cur_qf,
                         "gain": min(
                             1.0,
-                            0.4
+                            0.9
                             * pi_pulse["gain"]
                             * ctx.env_dict["info"].last.get("gain_factor", 1.0)
                             / ctx.env_dict["info"]["m_ratio"]
@@ -190,7 +191,7 @@ executor = (
     )
     # .add_measurement(
     #     "t1",
-    #     zefd.T1MeasurementTask(
+    #     zefd.T1Task(
     #         num_expts=151,
     #         cfg_maker=lambda ctx, ml: (
     #             cur_t1 := ctx.env_dict["info"].last.get("smooth_t1", md.t1)
@@ -211,7 +212,7 @@ executor = (
     # )
     # .add_measurement(
     #     "t2ramsey",
-    #     zefd.T2RamseyMeasurementTask(
+    #     zefd.T2RamseyTask(
     #         num_expts=151,
     #         detune_ratio=0.05,
     #         cfg_maker=lambda ctx, ml: (
@@ -234,7 +235,7 @@ executor = (
     # )
     # .add_measurement(
     #     "t2echo",
-    #     zefd.T2EchoMeasurementTask(
+    #     zefd.T2EchoTask(
     #         num_expts=151,
     #         detune_ratio=0.05,
     #         cfg_maker=lambda ctx, ml: (
@@ -259,8 +260,8 @@ executor = (
     # )
     .add_measurement(
         "mist_g",
-        zefd.Mist_G_MeasurementTask(
-            gain_sweep=make_sweep(0.0, 0.1, 71),
+        zefd.Mist_G_Task(
+            gain_sweep=make_sweep(0.0, 0.2, 301),
             cfg_maker=lambda ctx, ml: (
                 cur_t1 := ctx.env_dict["info"].get("smooth_t1", md.t1)
             )
@@ -283,8 +284,8 @@ executor = (
     )
     .add_measurement(
         "mist_e",
-        zefd.Mist_E_MeasurementTask(
-            gain_sweep=make_sweep(0.0, 0.1, 71),
+        zefd.Mist_E_Task(
+            gain_sweep=make_sweep(0.0, 0.2, 301),
             cfg_maker=lambda ctx, ml: (
                 cur_t1 := ctx.env_dict["info"].get("smooth_t1", md.t1)
             )

@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.18.1
   kernelspec:
-    display_name: axelenv13
+    display_name: zcu-tools
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.5
+    version: 3.9.25
 ---
 
 ```python
@@ -41,7 +41,7 @@ from zcu_tools.simulate import mA2flx
 ```
 
 ```python
-qub_name = "Q12_2D[5]/Q1"
+qub_name = "Q12_2D[6]/Q1"
 
 mA_c = None
 mA_e = None
@@ -66,8 +66,9 @@ pprint(allows)
 ```python
 # spect_path = r"..\..\Database\Si001\2025\10\Data_1028\Si001_flux_1.hdf5"
 # spect_path = r"..\..\Database\Si001\2025\10\Data_1028\Si001_flux_2.hdf5"
-spect_path = r"..\..\Database\Q12_2D[5]\Q1\2025\12\Data_1206\Q1_flux_1.hdf5"
-spectrum, _As, _fpts = load_data(spect_path)
+spect_path = r"..\..\Database\Q12_2D[6]\Q1\2026\01\Data_0122\Q1_flux_1.hdf5"
+spectrum, _As, _fpts = load_data(spect_path, return_cfg=False)
+assert _fpts is not None
 mAs, fpts, spectrum = zp.format_rawdata(_As, _fpts, spectrum)
 ```
 
@@ -119,7 +120,7 @@ s_spects.keys()
 
 ```python
 processed_spect_path = f"{result_dir}/data/fluxdep/spectrums.hdf5"
-zp.dump_spects(processed_spect_path, s_spects, mode="w")
+zp.dump_spects(processed_spect_path, s_spects, mode="x")
 ```
 
 ```python
@@ -182,9 +183,9 @@ ELb = (0.1, 2.0)
 
 ```python
 allows = {
-    "transitions": [(0, 1), (0, 2), (1, 2), (1, 3)],
-    "red side": [(0, 1)],
-    "mirror": [(0, 2), (0, 3), (1, 3)],
+    "transitions": [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2), (1, 3)],
+    # "red side": [(0, 1)],
+    "mirror": [(0, 1), (0, 2), (0, 4), (1, 2), (1, 3)],
     "r_f": 5.352,
     "sample_f": 9.584640 / 2,
     # "sample_f": 6.881280 / 2,
@@ -232,6 +233,7 @@ fig = (
     .plot_points(s_flxs, s_fpts, marker_color="blue", opacity=0.5)
     .add_constant_freq(v_allows["r_f"], "r_f")
     .add_constant_freq(v_allows["sample_f"], "sample_f")
+    .add_constant_freq(2 * v_allows["sample_f"] - v_allows["r_f"], "mirror r_f")
     .add_secondary_xaxis(s_flxs, s_mAs)
     .auto_derive_limits()
     .get_figure()
@@ -272,6 +274,7 @@ fig = (
     .plot_points(s_flxs, s_fpts, marker_color="blue", opacity=0.5)
     .add_constant_freq(v_allows["r_f"], "r_f")
     .add_constant_freq(v_allows["sample_f"], "sample_f")
+    .add_constant_freq(2 * v_allows["sample_f"] - v_allows["r_f"], "mirror r_f")
     .add_secondary_xaxis(s_flxs, s_mAs)
     .auto_derive_limits()
     .get_figure()
