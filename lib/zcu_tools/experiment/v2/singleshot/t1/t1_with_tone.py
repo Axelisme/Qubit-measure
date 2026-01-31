@@ -237,6 +237,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         ax1.scatter(lens, populations1[:, 2], color="green", label="Other", s=1)
         ax1.set_ylabel("Population")
         ax1.legend(loc=4)
+        ax1.set_ylim(0, 1)
         ax1.grid(True)
 
         ax2.plot(lens, fit_pops2[:, 0], color="blue", ls="--", label="Ground Fit")
@@ -248,6 +249,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         ax2.set_xlabel("Time (μs)")
         ax2.set_ylabel("Population")
         ax2.legend(loc=4)
+        ax2.set_ylim(0, 1)
         ax2.grid(True)
 
         fig.tight_layout()

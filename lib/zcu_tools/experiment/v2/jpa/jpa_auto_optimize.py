@@ -171,7 +171,9 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
                 avg_d = prog.acquire(
                     soc,
                     progress=False,
-                    callback=update_hook,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                    ),
                     statistic_trackers=[tracker],
                 )
                 return avg_d, [tracker.covariance], [tracker.rough_median]

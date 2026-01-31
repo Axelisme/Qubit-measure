@@ -114,7 +114,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
 
             last_snr = None
             if i > 0:
-                last_snr = ctx.data[i - 1]
+                last_snr = np.abs(ctx.data[i - 1])
                 # last_snr /= np.sqrt(params[i - 1, 2])
             cur_params = optimizer.next_params(i, last_snr)
 
@@ -161,7 +161,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
 
             def plot_fn(ctx: TaskContextView) -> None:
                 idx: int = ctx.env_dict["index"]
-                snrs = ctx.data  # (num_points, )
+                snrs = np.abs(ctx.data)  # (num_points, )
 
                 cur_freq, cur_gain, cur_len = params[idx, :]
 
@@ -197,7 +197,9 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
                 avg_d = prog.acquire(
                     soc,
                     progress=False,
-                    callback=update_hook,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                    ),
                     statistic_trackers=[tracker],
                 )
                 return avg_d, [tracker.covariance], [tracker.rough_median]

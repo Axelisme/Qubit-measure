@@ -206,8 +206,10 @@ def fitting_ge_and_plot(
     residual_g = np.clip(g_pdfs - fit_g_pdfs, 0.0, None)
     residual_e = np.clip(e_pdfs - fit_e_pdfs, 0.0, None)
 
-    rotated_g_center = sg + 1j * np.median(Qg)
-    rotated_e_center = se + 1j * np.median(Qe)
+    Qg_mask = (Ig > sg - 2 * s) & (Ig < sg + 2 * s)
+    Qe_mask = (Ie > se - 2 * s) & (Ie < se + 2 * s)
+    rotated_g_center = sg + 1j * np.median(Qg[Qg_mask])
+    rotated_e_center = se + 1j * np.median(Qe[Qe_mask])
 
     plt_params = dict(linestyle=":", marker="o", markersize=5)
     axs[0, 0].plot(

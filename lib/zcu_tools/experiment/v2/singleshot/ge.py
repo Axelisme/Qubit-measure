@@ -7,12 +7,9 @@ from typing import Literal, Optional, Tuple, cast
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
-from numba.core.analysis import CFGraph
 from numpy.typing import NDArray
-from sympy.sets.sets import true
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import make_ge_sweep
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
 from zcu_tools.experiment.v2.runner import (
     HardTask,
@@ -28,7 +25,6 @@ from zcu_tools.program.v2 import (
     Readout,
     Reset,
     TwoToneProgramCfg,
-    sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
@@ -171,8 +167,13 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
         n_eg, n_ee, n_eo = plot_classified_result(
             ax2, e_signals, g_center, e_center, radius
         )
-        ax1.set_title(f"{g_label}: {n_gg:.1%}, {e_label}: {n_ge:.1%}, {l_label}: {n_go:.1%}")
-        ax2.set_title(f"{g_label}: {n_eg:.1%}, {e_label}: {n_ee:.1%}, {l_label}: {n_eo:.1%}")
+        ax1.set_title(
+            f"{g_label}: {n_gg:.1%}, {e_label}: {n_ge:.1%}, {l_label}: {n_go:.1%}"
+        )
+        ax2.set_title(
+            f"{g_label}: {n_eg:.1%}, {e_label}: {n_ee:.1%}, {l_label}: {n_eo:.1%}"
+        )
+        ax1.set_xlabel("")
 
         im = ax4.imshow(A_init, cmap="Blues", vmin=0, vmax=1)
         fig.colorbar(im, ax=ax4)
@@ -270,6 +271,8 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
 
     def load(self, filepath: str, **kwargs) -> GE_ResultType:
         signals, _, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+
+        signals = signals.astype(np.complex128)
 
         self.last_cfg = cast(GE_TaskConfig, cfg)
         self.last_result = signals.T

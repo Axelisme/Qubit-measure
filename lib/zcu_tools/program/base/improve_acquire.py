@@ -65,7 +65,7 @@ class StatisticMixin(TypedAcquireMixin):
         assert self.acc_buf is not None
         assert self.acquire_params is not None
 
-        trackers = self.acquire_params.get("statistic_tracker")
+        trackers = self.acquire_params.get("statistic_trackers")
         if trackers is not None:
             trackers = cast(List[AbsStatisticTracker], trackers)
             if self.acquire_params["type"] != "accumulated":

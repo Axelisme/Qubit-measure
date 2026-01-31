@@ -69,7 +69,9 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
                 avg_d = prog.acquire(
                     soc,
                     progress=False,
-                    callback=update_hook,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                    ),
                     statistic_trackers=[tracker],
                 )
                 return avg_d, [tracker.covariance], [tracker.rough_median]
@@ -81,7 +83,7 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
                     result_shape=(len(gains),),
                 ),
                 init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(gains, ctx.data),
+                update_hook=lambda ctx: viewer.update(gains, np.abs(ctx.data)),
             )
 
         # record the last cfg and result
@@ -98,6 +100,7 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
         assert result is not None, "no result found"
 
         powers, snrs = result
+        snrs = np.abs(snrs)
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0

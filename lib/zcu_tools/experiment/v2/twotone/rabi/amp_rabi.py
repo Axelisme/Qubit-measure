@@ -59,13 +59,16 @@ class AmpRabiExp(AbsExperiment[AmpRabiResultType, AmpRabiTaskConfig]):
         return amps, signals
 
     def analyze(
-        self, result: Optional[AmpRabiResultType] = None
+        self, result: Optional[AmpRabiResultType] = None, skip: int = 0
     ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         pdrs, signals = result
+        pdrs = pdrs[skip:]
+        signals = signals[skip:]
+
         real_signals = rabi_signal2real(signals)
 
         if real_signals[0] > 0.5 * (np.max(real_signals) + np.min(real_signals)):

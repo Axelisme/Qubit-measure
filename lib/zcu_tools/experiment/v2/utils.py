@@ -63,11 +63,11 @@ def snr_as_signal(
         (np.take(med_d, 1, axis=ge_axis) - np.take(med_d, 0, axis=ge_axis)).dot([1, 1j])
     ).real
 
-    noise = np.max(np.sqrt(np.diagonal(cov_d, axis1=-2, axis2=-1)), axis=ge_axis)
+    noise = np.mean(np.sqrt(np.diagonal(cov_d, axis1=-2, axis2=-1)), axis=ge_axis)
     noise_max = np.clip(np.max(noise, axis=-1), 1e-12, None)
     noise_min = np.clip(np.min(noise, axis=-1), 1e-12, None)
 
-    return erf(peak_contrast / (np.sqrt(8) * noise_min)) * (noise_min / noise_max)
+    return erf(peak_contrast / (np.sqrt(32) * noise_min)) * (noise_min / noise_max)
 
 
 T_RawResult = TypeVar("T_RawResult")

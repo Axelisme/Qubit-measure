@@ -79,7 +79,9 @@ class JPAFreqExp(AbsExperiment[JPAFreqResultType, JPAFreqTaskConfig]):
                 avg_d = prog.acquire(
                     soc,
                     progress=False,
-                    callback=update_hook,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                    ),
                     statistic_trackers=[tracker],
                 )
                 return avg_d, [tracker.covariance], [tracker.rough_median]
@@ -97,9 +99,7 @@ class JPAFreqExp(AbsExperiment[JPAFreqResultType, JPAFreqTaskConfig]):
                     ),
                 ),
                 init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    jpa_freqs, np.abs(np.asarray(ctx.data))
-                ),
+                update_hook=lambda ctx: viewer.update(jpa_freqs, np.abs(ctx.data)),
             )
             signals = np.asarray(signals)
 

@@ -76,7 +76,9 @@ class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
                 avg_d = prog.acquire(
                     soc,
                     progress=False,
-                    callback=update_hook,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                    ),
                     statistic_trackers=[tracker],
                 )
                 return avg_d, [tracker.covariance], [tracker.rough_median]
@@ -94,9 +96,7 @@ class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
                     ),
                 ),
                 init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    lengths, np.abs(np.asarray(ctx.data))
-                ),
+                update_hook=lambda ctx: viewer.update(lengths, np.abs(ctx.data)),
             )
             signals = np.asarray(signals)
 

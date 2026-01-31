@@ -78,26 +78,27 @@ class CPMGExp(AbsExperiment[CPMGResultType, CPMGTaskConfig]):
             raise ValueError("times should be larger than 0")
 
         def measure_fn(ctx: TaskContextView, update_hook: Callable[[int, Any], None]):
-            interval = cpmg_spans / ctx.cfg["time"]
+            cfg = ctx.cfg
+            interval = cpmg_spans / ctx.env_dict["time"]
             return ModularProgramV2(
                 soccfg,
-                ctx.cfg,
+                cfg,
                 modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"], pulse_name="pi2_pulse"),
+                    Reset("reset", cfg.get("reset", {"type": "none"})),
+                    Pulse("pi2_pulse1", cfg["pi2_pulse"], pulse_name="pi2_pulse"),
                     Delay("initial_cpmg_delay", delay=0.5 * interval),
                     Repeat(
                         name="cpmg_pi_loop",
-                        n=ctx.cfg["time"] - 1,
+                        n=ctx.env_dict["time"] - 1,
                         sub_module=[
-                            Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                            Pulse("pi_pulse", cfg["pi_pulse"]),
                             Delay("interval_cpmg_delay", delay=interval),
                         ],
                     ),
-                    Pulse("last_pi_pulse", ctx.cfg["pi_pulse"], pulse_name="pi_pulse"),
+                    Pulse("last_pi_pulse", cfg["pi_pulse"], pulse_name="pi_pulse"),
                     Delay("final_cpmg_delay", delay=0.5 * interval),
-                    Pulse("pi2_pulse2", ctx.cfg["pi2_pulse"], pulse_name="pi2_pulse"),
-                    Readout("readout", ctx.cfg["readout"]),
+                    Pulse("pi2_pulse2", cfg["pi2_pulse"], pulse_name="pi2_pulse"),
+                    Readout("readout", cfg["readout"]),
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 

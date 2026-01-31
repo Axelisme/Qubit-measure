@@ -79,7 +79,9 @@ class JPAFluxExp(AbsExperiment[JPAFluxResultType, JPAFluxTaskConfig]):
                 avg_d = prog.acquire(
                     soc,
                     progress=False,
-                    callback=update_hook,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                    ),
                     statistic_trackers=[tracker],
                 )
                 return avg_d, [tracker.covariance], [tracker.rough_median]
@@ -97,9 +99,7 @@ class JPAFluxExp(AbsExperiment[JPAFluxResultType, JPAFluxTaskConfig]):
                     ),
                 ),
                 init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    jpa_flxs, np.abs(np.asarray(ctx.data))
-                ),
+                update_hook=lambda ctx: viewer.update(jpa_flxs, np.abs(ctx.data)),
             )
             signals = np.asarray(signals)
 

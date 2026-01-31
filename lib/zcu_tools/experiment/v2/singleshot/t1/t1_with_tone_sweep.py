@@ -87,19 +87,19 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         axs[3][0].set_ylim(0.0, 1.0)
         axs[3][1].set_ylim(0.0, 1.0)
 
-        def make_plotter2d(ax: Axes) -> LivePlotter2D:
+        def make_plotter2d(ax: Axes, show_ylabel=True) -> LivePlotter2D:
             return LivePlotter2D(
                 sweep_name,
-                "Time (us)",
+                "Time (us)" if show_ylabel else "",
                 uniform=False,
                 existed_axes=[[ax]],
                 segment_kwargs=dict(vmin=0.0, vmax=1.0),
             )
 
-        def make_plotter1d(ax: Axes) -> LivePlotter1D:
+        def make_plotter1d(ax: Axes, show_ylabel=True) -> LivePlotter1D:
             return LivePlotter1D(
                 "Time (us)",
-                "Population",
+                "Population" if show_ylabel else "",
                 existed_axes=[[ax]],
                 segment_kwargs=dict(
                     num_lines=3,
@@ -118,10 +118,10 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 ge_2d=make_plotter2d(axs[1][0]),
                 go_2d=make_plotter2d(axs[2][0]),
                 g_1d=make_plotter1d(axs[3][0]),
-                eg_2d=make_plotter2d(axs[0][1]),
-                ee_2d=make_plotter2d(axs[1][1]),
-                eo_2d=make_plotter2d(axs[2][1]),
-                e_1d=make_plotter1d(axs[3][1]),
+                eg_2d=make_plotter2d(axs[0][1], show_ylabel=False),
+                ee_2d=make_plotter2d(axs[1][1], show_ylabel=False),
+                eo_2d=make_plotter2d(axs[2][1], show_ylabel=False),
+                e_1d=make_plotter1d(axs[3][1], show_ylabel=False),
             ),
         ) as viewer:
 

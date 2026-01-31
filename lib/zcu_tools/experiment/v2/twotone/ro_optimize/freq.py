@@ -69,7 +69,9 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
                 avg_d = prog.acquire(
                     soc,
                     progress=False,
-                    callback=update_hook,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                    ),
                     statistic_trackers=[tracker],
                 )
                 return avg_d, [tracker.covariance], [tracker.rough_median]
@@ -81,7 +83,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
                     result_shape=(len(fpts),),
                 ),
                 init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(fpts, ctx.data),
+                update_hook=lambda ctx: viewer.update(fpts, np.abs(ctx.data)),
             )
 
         # record the last cfg and result
