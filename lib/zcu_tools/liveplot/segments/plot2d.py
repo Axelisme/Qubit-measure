@@ -51,6 +51,7 @@ class Plot2DSegment(AbsSegment):
             interpolation="nearest",
             vmin=self.vmin,
             vmax=self.vmax,
+            cmap="RdBu_r",
         )
 
     def update(
@@ -113,7 +114,7 @@ class PlotNonUniform2DSegment(AbsSegment):
         if self.title is not None:
             ax.set_title(self.title)
 
-        self.im = NonUniformImage(ax, cmap="viridis", interpolation="nearest")
+        self.im = NonUniformImage(ax, cmap="RdBu_r", interpolation="nearest")
         self.im.set_extent((0, 1, 0, 1))
         self.im.set_data([0, 1], [0, 1], [[0, 1e-6], [0, 1e-6]])
         self.im.set_clim(vmin=self.vmin, vmax=self.vmax)

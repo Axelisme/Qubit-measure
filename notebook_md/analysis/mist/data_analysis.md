@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.18.1
   kernelspec:
-    display_name: .venv
+    display_name: zcu-tools
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.9.23
+    version: 3.9.25
 ---
 
 ```python
@@ -40,7 +40,7 @@ from zcu_tools.simulate import mA2flx, flx2mA
 ```
 
 ```python
-qub_name = "Q12_2D[5]/Q1"
+qub_name = "Q12_2D[6]/Q1"
 
 result_dir = Path(f"../../../result/{qub_name}")
 image_dir = result_dir / "image" / "mist_data_analysis" / "-4.000mA"
@@ -66,7 +66,7 @@ if "sample_f" in allows:
 filepath = (
     r"../../../Database/Q12_2D[5]/Q1/Q1_dispersive_shift_gain0.050@-2.600mA_3.hdf5"
 )
-exp = ze.twotone.dispersive.DispersiveExperiment()
+exp = ze.twotone.dispersive.DispersiveExp()
 exp.load(filepath)
 
 chi, kappa, fig = exp.analyze()
@@ -75,14 +75,32 @@ fig.savefig(image_dir / "dispersive_shift.png")
 plt.close(fig)
 ```
 
+# CKP
+
+```python
+filepath = [
+    r"../../../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ckp@1.800mA_ground_2.hdf5",
+    r"../../../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ckp@1.800mA_excited_2.hdf5",
+]
+exp = ze.twotone.ckp.CKP_Exp()
+exp.load(filepath)
+
+chi, kappa, readout_f, fig = exp.analyze()
+plt.show(fig)
+fig.savefig(image_dir / "dispersive_shift.png")
+plt.close(fig)
+```
+
 # AC stark shift
 
 ```python
-filepath = r"../../../Database/Q12_2D[5]/Q1/Q1_ac_stark@-2.600mA_1.hdf5"
+filepath = (
+    r"../../../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ac_stark@1.800mA_1.hdf5"
+)
 
-exp = ze.twotone.ac_stark.AcStarkExperiment()
+exp = ze.twotone.ac_stark.AcStarkExp()
 exp.load(filepath)
-ac_coeff, fig = exp.analyze(chi=chi, kappa=kappa, cutoff=0.01)
+ac_coeff, fig = exp.analyze(chi=chi, kappa=kappa, cutoff=0.1)
 
 plt.show(fig)
 fig.savefig(image_dir / "ac_stark.png")
@@ -100,7 +118,7 @@ filepath = (
     # "../../../Database/Q12_2D[5]/Q4/Q4_mist_e_singleshot_short@-0.650mA_2.hdf5"
 )
 
-exp = ze.twotone.singleshot.mist.MISTPowerDepSingleShot()
+exp = ze.singleshot.mist.PowerDepExp()
 exp.load(filepath)
 fig = exp.analyze(
     ac_coeff=ac_coeff,
@@ -110,22 +128,6 @@ fig = exp.analyze(
 
 plt.show(fig)
 fig.savefig(image_dir / (filepath.split("/")[-1].split("@")[0] + ".png"))
-plt.close(fig)
-```
-
-## overnight
-
-```python
-filepath = "../../../Database/Q12_2D[5]/Q4/Q4_mist_overnight@-4.000mA_6.hdf5"
-
-exp = ze.twotone.singleshot.mist_overnight.MISTPowerDepOvernight()
-exp.load(filepath)
-fig = exp.analyze(
-    ac_coeff=ac_coeff,
-)
-
-plt.show(fig)
-fig.savefig(f"{image_dir}/mist_overnight.png")
 plt.close(fig)
 ```
 
@@ -161,7 +163,7 @@ from zcu_tools.notebook.analysis.mist.branch import plot_cn_with_mist
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 from plotly.subplots import make_subplots
 
-exp = ze.twotone.mist.flux_dep.MistFluxDepExperiment()
+exp = ze.mist.flux_dep.MistFluxDepExp()
 
 # fig = go.Figure()
 fig = make_subplots(rows=2, cols=1, vertical_spacing=0.1)

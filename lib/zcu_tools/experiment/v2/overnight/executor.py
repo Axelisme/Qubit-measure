@@ -280,3 +280,6 @@ class OvernightExecutor(AbsExperiment):
                 comment,
                 prefix_tag + f"/{ms_name}",
             )
+
+    def load(self, filepath: str, **kwargs):
+        raise NotImplementedError("Load method is not implemented yet.")

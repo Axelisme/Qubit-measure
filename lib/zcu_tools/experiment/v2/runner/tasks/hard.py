@@ -70,7 +70,8 @@ class HardTask(
             assert self.avg_pbar is not None
             self.avg_pbar.reset()
 
-        GlobalDeviceManager.setup_devices(ctx.cfg["dev"], progress=False)
+        if dev_cfg := ctx.cfg.get("dev"):
+            GlobalDeviceManager.setup_devices(dev_cfg, progress=False)
 
         def update_hook(ir: int, raw) -> None:
             assert self.avg_pbar is not None

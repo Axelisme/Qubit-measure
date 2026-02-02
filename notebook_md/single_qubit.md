@@ -163,8 +163,8 @@ GlobalDeviceManager.register_device("jpa_sgs", jpa_sgs)
 ```python
 # jpa_sgs.set_power(-20)  # dBm
 # jpa_sgs.IQ_off()
-# jpa_sgs.output_on()
-jpa_sgs.output_off()
+jpa_sgs.output_on()
+# jpa_sgs.output_off()
 ```
 
 ```python
@@ -630,7 +630,7 @@ gc.collect()
 exp_cfg = {
     # "reset": "reset_bath",
     "pi_pulse": "pi_amp",
-    "readout": "readout_rf",
+    "readout": "readout_dpm",
     "dev": {
         "jpa_sgs": {"label": "jpa_rf_dev", "output": "on"},
         "jpa_yoko": {
@@ -675,6 +675,10 @@ md.cur_jpa_A = jpa_yoko.set_current(md.best_jpa_flux)
 ```
 
 ```python
+jpa_sgs.output_on()
+```
+
+```python
 jpa_sgs.output_off()
 ```
 
@@ -683,7 +687,7 @@ jpa_sgs.output_off()
 ```python
 %matplotlib widget
 exp_cfg = {
-    "readout": "readout_rf",
+    "readout": "readout_dpm",
     "dev": {"jpa_sgs": {"label": "jpa_rf_dev"}},
     "sweep": make_sweep(md.r_f - 20, md.r_f + 20, 101),
     "relax_delay": 0.5,  # us
@@ -739,6 +743,7 @@ sample_table = SampleTable(f"{result_dir}/samples.csv")
 preditor = FluxoniumPredictor.from_file(f"{result_dir}/params.json")
 preditor.A_c = md.mA_c
 preditor.period = 2 * abs(md.mA_e - md.mA_c)
+preditor.update_bias(md.bias)
 ```
 
 ## Twotone Frequency
@@ -749,7 +754,7 @@ md.dump_json(f"../result/{qub_name}/exp_image/{md.cur_A * 1e3:.3f}mA/metadata.js
 
 ```python
 # print(preditor.predict_freq(preditor.flx_to_A(0.53)))
-# md.cur_A = -2.5e-3
+md.cur_A = 1.8e-3
 # md.cur_A = preditor.flx_to_A(0.84)
 # md.cur_A = flux_yoko.get_current()
 1e3 * flux_yoko.set_current(md.cur_A)
@@ -1649,13 +1654,88 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
 
-qub_pdr_exp = ze.twotone.PowerDepExperiment()
-fpts, pdrs, signals2D = qub_pdr_exp.run(soc, soccfg, cfg)
+qub_pdr_exp = ze.twotone.PowerDepExp()
+_ = qub_pdr_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
 qub_pdr_exp.save(
     filepath=os.path.join(database_path, f"{qub_name}_pdr@{md.cur_A * 1e3:.3f}mA"),
+    comment=make_comment(cfg),
+)
+```
+
+### CKP
+
+```python
+import gc
+
+plt.close("all")
+gc.collect()
+```
+
+```python
+%matplotlib widget
+ckp_res_gain = 0.01
+ckp_qub_len = 0.25
+exp_cfg = {
+    # "reset": "reset_bath",
+    "pi_pulse": "pi_amp",
+    "res_pulse": ml.get_module(
+        "readout_dpm",
+        {
+            "pulse_cfg": {
+                "waveform": {"length": 5.1 / (2 * np.pi * md.rf_w) + ckp_qub_len},
+                "gain": ckp_res_gain,
+                "block_mode": False,
+            }
+        },
+    )["pulse_cfg"],
+    "qub_pulse": {
+        "waveform": ml.get_waveform("qub_flat", {"length": ckp_qub_len}),
+        "ch": qub_1_4_ch,
+        "nqz": 2,
+        "gain": 0.4,
+        "pre_delay": 5.0 / (2 * np.pi * md.rf_w),
+        "post_delay": 3.1 / (2 * np.pi * md.rf_w),
+    },
+    # "readout": "readout_rf",
+    "readout": "readout_dpm",
+    "sweep": {
+        "res_freq": make_sweep(md.r_f - 1.5 * md.rf_w, md.r_f + 1.5 * md.rf_w, 101),
+        "qub_freq": make_sweep(md.q_f - 10, md.q_f + 5, 101),
+    },
+    "relax_delay": 10.1,  # us
+}
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
+
+ckp_exp = ze.twotone.CKP_Exp()
+_ = ckp_exp.run(soc, soccfg, cfg)
+```
+
+```python
+%matplotlib inline
+chi, kappa, center_freq, ac_coeff, fig = ckp_exp.analyze(
+    res_gain=ckp_res_gain,
+    # kappa=md.rf_w,
+)
+```
+
+```python
+md.chi = chi
+md.rf_w = kappa
+md.readout_f = center_freq
+md.ac_stark_coeff = ac_coeff
+```
+
+```python
+filename = f"{qub_name}_ckp"
+savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+plt.close(fig)
+ckp_exp.save(
+    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
+    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    # comment=make_comment(cfg, f"ac_stark_coeff = {md.ac_stark_coeff:.3g} MHz"),
     comment=make_comment(cfg),
 )
 ```
@@ -1690,11 +1770,6 @@ fpts, signals = dispersive_shift_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
-plt.close("all")
-gc.collect()
-```
-
-```python
 %matplotlib inline
 md.chi, rf_w, fig = dispersive_shift_exp.analyze()
 ```
@@ -1714,7 +1789,7 @@ dispersive_shift_exp.save(
 
 ```python
 %matplotlib widget
-ac_qub_len = 10.0  # us
+ac_qub_len = 5.0  # us
 exp_cfg = {
     # "reset": "reset_bath",
     "stark_pulse1": {
@@ -1723,11 +1798,11 @@ exp_cfg = {
         ),
         "ch": res_ch,
         "nqz": 2,
-        "freq": md.r_f,
+        "freq": md.readout_f,
         "block_mode": False,
     },
     "stark_pulse2": {
-        "waveform": ml.get_waveform("qub_flat", override_cfg={"length": ac_qub_len}),
+        "waveform": ml.get_waveform("qub_flat", {"length": ac_qub_len}),
         "ch": qub_1_4_ch,
         "nqz": 2,
         "gain": 0.01,
@@ -1740,11 +1815,11 @@ exp_cfg = {
     "readout": "readout_dpm",
     "sweep": {
         "gain": make_sweep(0.0, 0.01, 101),
-        "freq": make_sweep(md.q_f - 7.0, md.q_f + 1.0, step=0.05),
+        "freq": make_sweep(md.q_f - 5.0, md.q_f + 1.0, step=0.05),
     },
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=30)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
 ac_stark_exp = ze.twotone.AcStarkExp()
 pdrs, fpts, signals2D = ac_stark_exp.run(soc, soccfg, cfg, earlystop_snr=50)
@@ -1753,7 +1828,7 @@ pdrs, fpts, signals2D = ac_stark_exp.run(soc, soccfg, cfg, earlystop_snr=50)
 ```python
 %matplotlib inline
 md.ac_stark_coeff, fig = ac_stark_exp.analyze(
-    chi=md.chi, kappa=md.rf_w, deg=1, cutoff=0.006
+    chi=md.chi, kappa=md.rf_w, deg=1, cutoff=0.01
 )
 ```
 
@@ -2091,7 +2166,8 @@ opt_ro_freq_exp.save(
 ```
 
 ```python
-md.best_ro_freq = md.r_f
+# md.best_ro_freq = md.r_f
+md.best_ro_freq = md.readout_f
 ```
 
 ## Power tuning
@@ -2115,7 +2191,7 @@ exp_cfg = {
     ),
     "relax_delay": 30.5,  # us
     # "relax_delay": 3 * t1,  # us
-    "sweep": make_sweep(0.01, 0.2, 151),
+    "sweep": make_sweep(0.01, 0.3, 151),
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
 
@@ -2125,7 +2201,7 @@ pdrs, snrs = opt_ro_pdr_exp.run(soc, soccfg, cfg)
 
 ```python
 %matplotlib inline
-md.best_ro_gain, fig = opt_ro_pdr_exp.analyze(penalty_ratio=1.0)
+md.best_ro_gain, fig = opt_ro_pdr_exp.analyze(penalty_ratio=0.2)
 md.best_ro_gain
 ```
 
@@ -2656,7 +2732,7 @@ md.g_center, md.e_center, md.ge_s
 %matplotlib widget
 exp_cfg = {
     # "reset": "reset_10",
-    "probe_pulse": "pi_amp",
+    # "probe_pulse": "pi_amp",
     # "probe_pulse": {
     #     "waveform": ml.get_waveform(
     #         "mist_waveform",
@@ -2686,7 +2762,7 @@ fig = check_sh_exp.analyze(md.g_center, md.e_center, md.ge_radius, max_point=100
 ```
 
 ```python
-filename = f"{qub_name}_singleshot_e"
+filename = f"{qub_name}_singleshot_g"
 savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
 plt.close(fig)
 ge_sh_exp.save(
@@ -2819,9 +2895,13 @@ _ = t1_with_tone_sh_exp.run(
 
 ```python
 %matplotlib inline
-fig = t1_with_tone_sh_exp.analyze(
+t1, t1_b, fig = t1_with_tone_sh_exp.analyze(
     confusion_matrix=md.confusion_matrix,
 )
+```
+
+```python
+md.t1_with_tone = t1
 ```
 
 ```python
@@ -2853,18 +2933,18 @@ exp_cfg = {
         "waveform": ml.get_waveform("mist_waveform"),
         "ch": res_ch,
         "nqz": 2,
-        "freq": md.r_f,
+        "freq": md.readout_f,
         "post_delay": 10 / (2 * np.pi * md.rf_w),
     },
     "readout": "readout_dpm",
-    "relax_delay": 30.5,  # us
+    "relax_delay": 40.5,  # us
     # "relax_delay": 5 * t1,  # us
     "sweep": {
-        "gain": np.linspace(0.0**2, 0.2**2, 151) ** 0.5,
+        "gain": np.sqrt(np.linspace(0.0**2, 0.06**2, 151)),
         "length": make_sweep(0.01, 15, 501),
     },
 }
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=5)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1)
 
 t1_with_tone_sweep_sh_exp = ze.singleshot.t1.T1WithToneSweepExp()
 _ = t1_with_tone_sweep_sh_exp.run(
@@ -2896,23 +2976,23 @@ t1_with_tone_sweep_sh_exp.save(
 %matplotlib widget
 exp_cfg = {
     # "reset": "reset_10",
-    "init_pulse": "pi_amp",
+    # "init_pulse": "pi_amp",
     "probe_pulse": {
         "waveform": ml.get_waveform(
             "mist_waveform",
             {
-                # "length": 5.0 / (2 * np.pi * md.rf_w) + 50.0,
-                "length": 5.0 / (2 * np.pi * md.rf_w) + 0.3,
+                "length": 5.0 / (2 * np.pi * md.rf_w) + 50.0,
+                # "length": 5.0 / (2 * np.pi * md.rf_w) + 0.3,
             },
         ),
         "ch": res_ch,
         "nqz": 2,
-        "freq": md.r_f,
+        "freq": md.readout_f,
         "post_delay": 10 / (2 * np.pi * md.rf_w),
     },
     "readout": "readout_dpm",
     "sweep": {
-        "gain": make_sweep(0.0, 0.03, 301),
+        "gain": make_sweep(0.0, 0.05, 301),
     },
     "relax_delay": 50.5,  # us
 }
@@ -2930,8 +3010,8 @@ fig = mist_sh_exp.analyze(
 ```
 
 ```python
-filename = f"{qub_name}_mist_e_singleshot_short_{time.strftime('%Y%m%d_%H%M%S')}"
-# filename = f"{qub_name}_mist_singleshot_steady_{time.strftime('%Y%m%d_%H%M%S')}"
+# filename = f"{qub_name}_mist_g_singleshot_short_{time.strftime('%Y%m%d_%H%M%S')}"
+filename = f"{qub_name}_mist_singleshot_steady_{time.strftime('%Y%m%d_%H%M%S')}"
 savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
 plt.close(fig)
 mist_sh_exp.save(
@@ -2999,21 +3079,23 @@ gc.collect()
 
 ```python
 %matplotlib widget
-pi_amp_len = ml.get_module("pi_amp")["waveform"]["length"]
+probe_len = 5 * ml.get_module("pi_amp")["waveform"]["length"]
 exp_cfg = {
     # "reset": "reset_bath",
     "stark_pulse1": {
         "waveform": ml.get_waveform(
-            "mist_waveform", {"length": 5.1 / (2 * np.pi * md.rf_w) + pi_amp_len}
+            "mist_waveform", {"length": 5.1 / (2 * np.pi * md.rf_w) + probe_len}
         ),
         "ch": res_ch,
         "nqz": 2,
-        "freq": md.r_f,
+        "freq": md.readout_f,
         "block_mode": False,
     },
     "stark_pulse2": ml.get_module(
         "pi_amp",
         {
+            "waveform": {"length": probe_len},
+            "gain": 1.0,
             "pre_delay": 5.0 / (2 * np.pi * md.rf_w),
             "post_delay": 3.1 / (2 * np.pi * md.rf_w),
         },
@@ -3021,12 +3103,12 @@ exp_cfg = {
     # "readout": "readout_rf",
     "readout": "readout_dpm",
     "sweep": {
-        "gain": make_sweep(0.0, 0.05, 301),
-        "freq": make_sweep(md.q_f - 150.0, md.q_f + 50.0, step=0.025),
+        "gain": make_sweep(0.0, 0.06, 301),
+        "freq": make_sweep(md.q_f - 200.0, md.q_f + 50.0, step=0.1),
     },
     "relax_delay": 0.5,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=3000, rounds=1)
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1)
 
 ac_stark_sh_exp = ze.singleshot.AcStarkExp()
 _ = ac_stark_sh_exp.run(soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius)
@@ -3040,7 +3122,7 @@ fig = ac_stark_sh_exp.analyze(
 ```
 
 ```python
-filename = f"{qub_name}_ac_stark_pop"
+filename = f"{qub_name}_ac_stark_pop_2"
 savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
 plt.close(fig)
 ac_stark_sh_exp.save(
@@ -3059,14 +3141,6 @@ ml.register_waveform(
         "style": "const",
         "length": mist_pulse_len,  # us
     },
-    # mist_padding_waveform={
-    #     "style": "padding",
-    #     "length": mist_pulse_len,
-    #     "pre_length": 0.02,
-    #     "post_length": 0.01,
-    #     "pre_gain": 1.0,
-    #     "post_gain": -1.0,
-    # },
 )
 ```
 

@@ -16,6 +16,7 @@ from scqubits.core.oscillator import Oscillator
 from scqubits.core.hilbert_space import HilbertSpace
 
 %autoreload 2
+from zcu_tools.notebook.utils import savefig
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.notebook.analysis.mist.branch import round_to_nearest
 from zcu_tools.table import MetaDict
@@ -25,13 +26,9 @@ from zcu_tools.simulate.fluxonium.branch.floquet import FloquetBranchAnalysis
 ```
 
 ```python
-qub_name = "Q12_2D[5]/Q1"
+qub_name = "Q12_2D[6]/Q1"
 
 result_dir = f"../result/{qub_name}"
-
-os.makedirs(f"{result_dir}/image/branch_floquet", exist_ok=True)
-os.makedirs(f"{result_dir}/web/branch_floquet", exist_ok=True)
-os.makedirs(f"{result_dir}/data/branch_floquet", exist_ok=True)
 ```
 
 ```python
@@ -143,7 +140,7 @@ ax.set_ylim(fpts[0], fpts[-1])
 
 
 plt.show(fig)
-fig.savefig("../post_images/twotone_fluxdep.png", dpi=300)
+savefig(fig, f"{result_dir}/post_images/twotone_fluxdep.png", dpi=300)
 plt.close(fig)
 ```
 
@@ -218,7 +215,7 @@ from zcu_tools.utils.fitting.resonance import (
     remove_edelay,
 )
 
-filepath = r"../Database/Q12_2D[5]/Q1/Q1_dispersive_shift_gain0.050@-2.600mA_3.hdf5"
+filepath = r"../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_dispersive_shift_gain0.010@1.800mA_1.hdf5"
 
 
 fpts, signals = DispersiveExp().load(filepath)
@@ -241,7 +238,7 @@ e_fit = np.abs(model.calc_signals(fpts, **e_params))  # type: ignore
 
 # Calculate dispersive shift and average linewidth
 chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
-avg_kappa = (g_kappa + e_kappa) / 2  # average linewidth κ/2π
+kappa = (g_kappa + e_kappa) / 2  # average linewidth κ/2π
 
 fig = plt.figure(figsize=(8, 4))
 spec = fig.add_gridspec(2, 3, wspace=0.2)
@@ -249,7 +246,7 @@ ax_main = fig.add_subplot(spec[:, :2])
 ax_g = fig.add_subplot(spec[0, 2])
 ax_e = fig.add_subplot(spec[1, 2])
 
-fig.suptitle(f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {avg_kappa:.1f} MHz")
+fig.suptitle(f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {kappa:.1f} MHz")
 
 g_label = r"$|0\rangle$"
 e_label = r"$|1\rangle$"
@@ -318,8 +315,33 @@ ax_main.scatter([fpts[fpt_idx]], [e_amps[fpt_idx]], color="r", marker="*", s=150
 
 fig.set_size_inches(8, 5)
 
+readout_f = r_f
+
 plt.show(fig)
-fig.savefig("../post_images/dispersive_shift.png", pad_inches=0.5, dpi=300)
+savefig(fig, f"{result_dir}/post_images/dispersive_shift.png", dpi=300, pad_inches=0.5)
+plt.close(fig)
+```
+
+# CKP
+
+```python
+%matplotlib inline
+from zcu_tools.experiment.v2.twotone.ckp import CKP_Exp
+
+filepath = [
+    r"../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ckp@1.800mA_ground_2.hdf5",
+    r"../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ckp@1.800mA_excited_2.hdf5",
+]
+
+exp = CKP_Exp()
+exp.load(filepath)
+
+chi, kappa, readout_f, fig = exp.analyze()
+
+readout_f /= 1e3  # convert to GHz
+
+plt.show(fig)
+savefig(fig, f"{result_dir}/post_images/ckp.png", dpi=300)
 plt.close(fig)
 ```
 
@@ -329,14 +351,14 @@ plt.close(fig)
 %matplotlib inline
 from zcu_tools.experiment.v2.twotone.ac_stark import AcStarkExp
 
-filepath = r"../Database/Q12_2D[5]/Q1/Q1_ac_stark@-2.500mA_1.hdf5"
+filepath = r"../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ac_stark@1.800mA_1.hdf5"
 
 exp = AcStarkExp()
 _ = exp.load(filepath)
 
-*_, fig = exp.analyze(chi=chi, kappa=avg_kappa)
+ac_coeff, fig = exp.analyze(chi=chi, kappa=kappa)
 plt.show(fig)
-fig.savefig("../post_images/ac_stark.png", dpi=300)
+savefig(fig, f"{result_dir}/post_images/ac_stark.png", dpi=300)
 plt.close(fig)
 ```
 
@@ -470,13 +492,7 @@ plt.close(fig)
 %matplotlib inline
 from zcu_tools.experiment.v2.singleshot.t1 import T1WithToneExp
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
-from zcu_tools.utils.fitting.multi_decay import (
-    calc_lambdas,
-    fit_with_vadality,
-    fit_dual_with_vadality,
-    fit_dual_transition_rates,
-    fit_transition_rates,
-)
+from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_transition_rates
 
 filepaths = [
     r"../Database/Q12_2D[5]/Q1/T1/Q1_t1_with_tone_0.03_pop_corr@-2_initg_1.hdf5",
@@ -727,15 +743,15 @@ qub_dim = 30
 qub_cutoff = 50
 max_photon = 400
 
-amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), 1e-3 * md.rf_w)
+amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), 1e-3 * kappa)
 photons = (amps / (2 * g)) ** 2
 
 
 def calc_energies(branchs: List[int]) -> Dict[int, np.ndarray]:
-    avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
+    avg_times = np.linspace(0.0, 2 * np.pi / readout_f, 100)
 
     fb_analysis = FloquetBranchAnalysis(
-        params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
+        params, readout_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
     )
 
     fbasis_n = Parallel(n_jobs=-1)(
@@ -756,7 +772,7 @@ branch_energies = calc_energies(branchs)
 # fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
 # E_n0 = fluxonium.eigenvals(evals_count=15)
 
-resonator = Oscillator(r_f, truncated_dim=30)
+resonator = Oscillator(readout_f, truncated_dim=30)
 fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
 hilbertspace = HilbertSpace([fluxonium, resonator])
 hilbertspace.add_interaction(
@@ -784,7 +800,7 @@ for i in (0, 1):
         # E_ij += (E_n0[j] - E_n0[i]) - E_ij[0]
         E_ij += calc_E_n0_ij(i, j) - E_ij[0]
 
-        transitions[f"{i} → {j}"] = round_to_nearest(E_01, E_ij, r_f)
+        transitions[f"{i} → {j}"] = round_to_nearest(E_01, E_ij, readout_f)
         transitions[f"{i} → {j} image"] = (
             2 * allows["sample_f"] - transitions[f"{i} → {j}"]
         )
@@ -804,23 +820,23 @@ for i in (0, 1):
         # E_ij += (E_n0[j] - E_n0[i]) - E_ij[0]
         E_ij += calc_E_n0_ij(i, j) - E_ij[0]
 
-        E_ij_mod = round_to_nearest(E_01, E_ij, r_f)
+        E_ij_mod = round_to_nearest(E_01, E_ij, readout_f)
         E_ij_image = 2 * allows["sample_f"] - E_ij_mod
         transitions[f"{i} → {j}"] = E_ij_mod
         transitions[f"{i} → {j} image"] = E_ij_image
 
-        if (i, j) == (0, 4) or (i, j) == (0, 7):
-            mean_E_ij = np.mean(E_ij)
-            mean_E_ij_mod = np.mean(E_ij_mod)
-            mean_E_ij_image = np.mean(transitions[f"{i} → {j} image"])
-            print((i, j), " : ")
-            print(f"\tE_ij = {mean_E_ij:.2f} GHz")
-            print(f"\tE_ij (mod) = {mean_E_ij_mod:.2f} GHz")
-            print(f"\tE_ij (image) = {mean_E_ij_image:.2f} GHz")
-            print(f"\tphoton: {(mean_E_ij - mean_E_ij_image) / r_f:.2f}")
+        # if (i, j) == (0, 4) or (i, j) == (0, 7):
+        #     mean_E_ij = np.mean(E_ij)
+        #     mean_E_ij_mod = np.mean(E_ij_mod)
+        #     mean_E_ij_image = np.mean(transitions[f"{i} → {j} image"])
+        #     print((i, j), " : ")
+        #     print(f"\tE_ij = {mean_E_ij:.2f} GHz")
+        #     print(f"\tE_ij (mod) = {mean_E_ij_mod:.2f} GHz")
+        #     print(f"\tE_ij (image) = {mean_E_ij_image:.2f} GHz")
+        #     print(f"\tphoton: {(mean_E_ij - mean_E_ij_image) / r_f:.2f}")
 
-        for k in [2, 3]:
-            transitions[f"{i} → {j} ({k} photon)"] = E_ij / k
+        # for k in [2, 3]:
+        #     transitions[f"{i} → {j} ({k} photon)"] = E_ij / k
 ```
 
 ```python
@@ -828,23 +844,23 @@ for i in (0, 1):
 from zcu_tools.experiment.v2.singleshot.ac_stark import AcStarkExp
 
 filepaths = [
-    r"../Database/Q12_2D[5]/Q1/Q1_ac_stark_pop/Q1_ac_stark_pop@-2.500mA_g_pop_2.hdf5",
-    r"../Database/Q12_2D[5]/Q1/Q1_ac_stark_pop/Q1_ac_stark_pop@-2.500mA_e_pop_2.hdf5",
+    r"../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ac_stark_pop@1.800mA_g_pop_3.hdf5",
+    r"../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ac_stark_pop@1.800mA_e_pop_3.hdf5",
 ]
 exp = AcStarkExp()
 _ = exp.load(filepaths)
-fig = exp.analyze(ac_coeff=md.ac_stark_coeff)
+fig = exp.analyze(ac_coeff=ac_coeff)
 
 
 ax1, ax2, ax3 = fig.get_axes()
 
 
 line_positions = {
-    "0 → 1": (100, 4350),
-    "0 → 9": (80, 4150),
-    "0 → 3 (2 photon)": (240, 3890),
-    "0 → 4 image": (30, 4530),
-    "0 → 7 image": (70, 4460),
+    # "0 → 1": (100, 4350),
+    # "0 → 9": (80, 4150),
+    # "0 → 3 (2 photon)": (240, 3890),
+    # "0 → 4 image": (30, 4530),
+    # "0 → 7 image": (70, 4460),
 }
 
 
@@ -869,8 +885,8 @@ for ax in [ax1, ax2, ax3]:
     for name, E_ij in transitions.items():
         E_ij = 1e3 * E_ij
 
-        if name not in line_positions:
-            continue
+        # if name not in line_positions:
+        #     continue
 
         mask = np.bitwise_and(E_ij > ylim[0], E_ij < ylim[1])
         if np.any(mask):
@@ -891,7 +907,7 @@ for ax in [ax1, ax2, ax3]:
                     ec="none",
                 ),
             )
-    mirror_rf = 1e3 * (2 * allows["sample_f"] - r_f)
+    mirror_rf = 1e3 * (2 * allows["sample_f"] - readout_f)
     ax.axhline(mirror_rf, color="red", linestyle="--", alpha=0.7)
     ax.annotate(
         "resonator image",
@@ -903,12 +919,12 @@ for ax in [ax1, ax2, ax3]:
         color="k",
     )
 
-for ax in fig.get_axes():
-    for n in mist_ns:
-        ax.axvline(n, color="k", linestyle="--", alpha=0.5, zorder=10)
+# for ax in fig.get_axes():
+#     for n in mist_ns:
+#         ax.axvline(n, color="k", linestyle="--", alpha=0.5, zorder=10)
 
 plt.show(fig)
-fig.savefig("../post_images/ac_stark_populations.png", dpi=300)
+savefig(fig, f"{result_dir}/post_images/ac_stark_populations.png", dpi=300)
 plt.close(fig)
 ```
 
@@ -983,7 +999,7 @@ for name, E_ij in transitions.items():
                 ec="none",
             ),
         )
-mirror_rf = 1e3 * (2 * allows["sample_f"] - r_f)
+mirror_rf = 1e3 * (2 * allows["sample_f"] - readout_f)
 ax1.axhline(mirror_rf, color="k", linestyle="--", alpha=0.5)
 ax1.annotate(
     "resonator image",
@@ -1047,10 +1063,10 @@ def _calc_esys(
     esys = fluxonium.eigensys(evals_count=qub_dim)
     H = qt.Qobj(fluxonium.hamiltonian(energy_esys=esys))
     n_op = qt.Qobj(fluxonium.n_operator(energy_esys=esys))
-    H_with_drive = [H, [n_op, lambda t, amp: amp * np.cos(r_f * t)]]
+    H_with_drive = [H, [n_op, lambda t, amp: amp * np.cos(readout_f * t)]]
 
     basis = qt.FloquetBasis(
-        H_with_drive, 2 * np.pi / r_f, args=dict(amp=2 * g * np.sqrt(photon))
+        H_with_drive, 2 * np.pi / readout_f, args=dict(amp=2 * g * np.sqrt(photon))
     )
 
     return basis.e_quasi, basis.state(t=0)  # type: ignore
@@ -1110,7 +1126,7 @@ for i in (0, 1):
             branch_n0_energies[j] - branch_n0_energies[i]
         )
 
-        transitions[f"{i} → {j}"] = round_to_nearest(E_01, E_ij, r_f)
+        transitions[f"{i} → {j}"] = round_to_nearest(E_01, E_ij, readout_f)
         transitions[f"{i} → {j} image"] = (
             2 * allows["sample_f"] - transitions[f"{i} → {j}"]
         )

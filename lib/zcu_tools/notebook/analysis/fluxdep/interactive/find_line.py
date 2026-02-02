@@ -18,8 +18,8 @@ class InteractiveLines:
 
     def __init__(self, spectrum, mAs, fpts, mA_c=None, mA_e=None) -> None:
         plt.ioff()  # 避免立即顯示圖表
-        self.fig_main, self.ax_main = plt.subplots()
-        self.fig_zoom, self.ax_zoom = plt.subplots()
+        self.fig_main, self.ax_main = plt.subplots(figsize=(4, 3))
+        self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(4, 3))
         self.fig_main.tight_layout()
         self.fig_zoom.tight_layout()
         plt.ion()
@@ -87,9 +87,7 @@ class InteractiveLines:
                             self.only_use_magnitude_checkbox,
                         ]
                     ),
-                    widgets.HBox(
-                        [self.fig_main.canvas, self.fig_zoom.canvas],
-                    ),
+                    widgets.HBox([self.fig_main.canvas, self.fig_zoom.canvas]),
                 ]
             )
         )

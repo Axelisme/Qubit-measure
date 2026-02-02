@@ -89,7 +89,7 @@ def get_ip_address(iface: str) -> str:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             return socket.inet_ntoa(
-                fcntl.ioctl(
+                fcntl.ioctl(  # type: ignore
                     s.fileno(),
                     0x8915,  # SIOCGIFADDR
                     struct.pack("256s", bytes(iface[:15], "utf-8")),
@@ -118,6 +118,6 @@ def make_comment(cfg: Mapping[str, Any], comment: Optional[str] = None) -> str:
     return json.dumps(cfg, indent=2)
 
 
-def savefig(fig: Figure, filepath: str) -> None:
+def savefig(fig: Figure, filepath: str, **kwargs) -> None:
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    fig.savefig(filepath)
+    fig.savefig(filepath, **kwargs)

@@ -38,7 +38,7 @@ from ..executor import MeasurementTask, T_RootResult
 from .util import calc_populations
 
 
-class MistOvernightResult(TypedDict, closed=True):
+class MistResult(TypedDict, closed=True):
     gains: NDArray[np.float64]  # (N,)
     populations: NDArray[np.float64]  # (N, 2)
 
@@ -50,7 +50,7 @@ class MistPlotterDict(TypedDict, closed=True):
     current: LivePlotter1D
 
 
-class MistOvernightCfg(TaskConfig, ModularProgramCfg):
+class MistCfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
@@ -61,13 +61,13 @@ class MistOvernightCfg(TaskConfig, ModularProgramCfg):
 
 class MistOvernightAnalyzer:
     def __init__(self) -> None:
-        self.cfg: Optional[MistOvernightCfg] = None
-        self.result: Optional[MistOvernightResult] = None
+        self.cfg: Optional[MistCfg] = None
+        self.result: Optional[MistResult] = None
 
     def analyze(
         self,
         fig: Figure,
-        result: Optional[MistOvernightResult] = None,
+        result: Optional[MistResult] = None,
         ac_coeff: Optional[float] = None,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> None:
@@ -103,15 +103,33 @@ class MistOvernightAnalyzer:
         med_kwargs = dict(marker=".", linestyle="-", markersize=4)
         side_kwargs = dict(linestyle="--", alpha=0.3)
         ax.plot(xs, max_populations[:, 0], color="b", **side_kwargs)  # type: ignore
-        ax.plot(xs, med_populations[:, 0], color="b", label=r"$|0\rangle$", **med_kwargs)  # type: ignore
+        ax.plot(
+            xs,
+            med_populations[:, 0],
+            color="b",
+            label=r"$|0\rangle$",
+            **med_kwargs,  # type: ignore
+        )
         ax.plot(xs, min_populations[:, 0], color="b", **side_kwargs)  # type: ignore
 
         ax.plot(xs, max_populations[:, 1], color="r", **side_kwargs)  # type: ignore
-        ax.plot(xs, med_populations[:, 1], color="r", label=r"$|1\rangle$", **med_kwargs)  # type: ignore
+        ax.plot(
+            xs,
+            med_populations[:, 1],
+            color="r",
+            label=r"$|1\rangle$",
+            **med_kwargs,  # type: ignore
+        )
         ax.plot(xs, min_populations[:, 1], color="r", **side_kwargs)  # type: ignore
 
         ax.plot(xs, max_populations[:, 2], color="g", **side_kwargs)  # type: ignore
-        ax.plot(xs, med_populations[:, 2], color="g", label=r"$|L\rangle$", **med_kwargs)  # type: ignore
+        ax.plot(
+            xs,
+            med_populations[:, 2],
+            color="g",
+            label=r"$|L\rangle$",
+            **med_kwargs,  # type: ignore
+        )
         ax.plot(xs, min_populations[:, 2], color="g", **side_kwargs)  # type: ignore
 
         ax.set_xlabel(xlabel, fontsize=14)
@@ -156,7 +174,7 @@ class MistOvernightAnalyzer:
             tag=prefix_tag + "/e_populations",
         )
 
-    def load(self, filepath: List[str], **kwargs) -> MistOvernightResult:
+    def load(self, filepath: List[str], **kwargs) -> MistResult:
         g_filepath, e_filepath = filepath
 
         g_pops, iters, gains, cfg = load_data(g_filepath, return_cfg=True, **kwargs)
@@ -176,21 +194,17 @@ class MistOvernightAnalyzer:
         populations = np.stack([g_pops, e_pops], axis=-1)  # (iters, gains, 2)
         gains = np.tile(gains, reps=(len(iters), 1))
 
-        self.cfg = cast(MistOvernightCfg, cfg)
-        self.result = MistOvernightResult(gains=gains, populations=populations)
+        self.cfg = cast(MistCfg, cfg)
+        self.result = MistResult(gains=gains, populations=populations)
 
         return self.result
 
 
-class MistOvernightTask(
-    MeasurementTask[
-        MistOvernightResult, T_RootResult, MistOvernightCfg, MistPlotterDict
-    ]
-):
+class MistTask(MeasurementTask[MistResult, T_RootResult, MistCfg, MistPlotterDict]):
     def __init__(
         self, cfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
-        cfg = cast(MistOvernightCfg, deepcopy(cfg))
+        cfg = cast(MistCfg, deepcopy(cfg))
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
@@ -222,7 +236,7 @@ class MistOvernightTask(
             )
 
         self.task = HardTask[
-            np.float64, T_RootResult, MistOvernightCfg, List[NDArray[np.float64]]
+            np.float64, T_RootResult, MistCfg, List[NDArray[np.float64]]
         ](
             measure_fn=measure_mist_fn,
             raw2signal_fn=lambda raw: raw[0][0],
@@ -237,14 +251,14 @@ class MistOvernightTask(
 
         with MinIntervalFunc.force_execute():
             ctx.set_data(
-                MistOvernightResult(
+                MistResult(
                     gains=self.gains,
                     populations=ctx.get_data()["populations"],
                 )
             )
 
-    def get_default_result(self) -> MistOvernightResult:
-        return MistOvernightResult(
+    def get_default_result(self) -> MistResult:
+        return MistResult(
             gains=self.gains,
             populations=self.task.get_default_result(),
         )
@@ -319,7 +333,7 @@ class MistOvernightTask(
         plotters["current"].update(gains, populations[i].T, refresh=False)
 
     def analyze(
-        self, name: str, iters: NDArray[np.int64], result: MistOvernightResult, **kwargs
+        self, name: str, iters: NDArray[np.int64], result: MistResult, **kwargs
     ) -> None:
         MistOvernightAnalyzer().analyze(result=result, **kwargs)
 

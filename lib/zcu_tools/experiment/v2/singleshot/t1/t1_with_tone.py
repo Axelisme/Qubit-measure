@@ -195,7 +195,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         result: Optional[T1WithToneResult] = None,
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
-    ) -> Figure:
+    ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -254,7 +254,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
         fig.tight_layout()
 
-        return fig
+        return t1, t1_b, fig
 
     def save(
         self,

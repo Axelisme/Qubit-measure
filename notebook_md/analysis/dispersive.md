@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.18.1
   kernelspec:
-    display_name: .venv
+    display_name: zcu-tools
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.9.23
+    version: 3.9.25
 ---
 
 ```python
@@ -29,6 +29,10 @@ jupyter:
 from pathlib import Path
 
 import numpy as np
+from joblib import Parallel, delayed
+import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
+from scipy.ndimage import gaussian_filter1d
 
 %autoreload 2
 from zcu_tools.experiment.v2.onetone import FluxDepExp
@@ -39,21 +43,24 @@ from zcu_tools.simulate import mA2flx, flx2mA
 from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flx
 from zcu_tools.notebook.analysis.plot import plot_dispersive_shift
 from zcu_tools.notebook.analysis.fluxdep import InteractiveLines
+from zcu_tools.utils.fitting.resonance import (
+    fit_edelay,
+    remove_edelay,
+    fit_circle_params,
+    calc_phase,
+)
 ```
 
 ```python
-chip_name = "Q12_2D[5]"
-qub_name = "Q1"
+qub_name = "Q12_2D[6]/Q1"
 
-result_dir = Path(f"../../result/{chip_name}/{qub_name}")
+result_dir = Path(f"../../result/{qub_name}")
 param_path = result_dir / "params.json"
 ```
 
 ```python
 _, params, mA_c, period, allows, _ = zp.load_result(str(param_path))
 
-# mA_c = 4.46
-# mA_c, _, period = (4.395142504148789, -0.3432768475307726, 9.476838703359125)
 
 mA_e = mA_c + period / 2
 
@@ -72,7 +79,7 @@ md = MetaDict(json_path=f"{result_dir}/meta_info.json", read_only=True)
 # Plot with Onetone
 
 ```python
-onetone_path = r"../../Database/Q12_2D[5]/Q1/R1_flux_1.hdf5"
+onetone_path = r"../../Database/Q12_2D[6]/Q1/2026/01/Data_0130/R1_flux_2.hdf5"
 
 
 exp = FluxDepExp()
@@ -95,17 +102,6 @@ mA_c, mA_e, period
 ```
 
 ```python
-from zcu_tools.utils.fitting.resonance import (
-    fit_edelay,
-    remove_edelay,
-    fit_circle_params,
-    calc_phase,
-)
-from joblib import Parallel, delayed
-import matplotlib.pyplot as plt
-from tqdm.auto import tqdm
-from scipy.ndimage import gaussian_filter1d
-
 edelays = Parallel(n_jobs=-1)(
     delayed(fit_edelay)(sp_fpts, signal) for signal in tqdm(signals)
 )
@@ -130,24 +126,32 @@ phases = calc_phase(rot_signals, circle_param[0], circle_param[1], axis=1)
 norm_phases = (phases - np.min(phases, axis=1, keepdims=True)) / np.ptp(
     phases, axis=1, keepdims=True
 )
-
 norm_phases = np.diff(norm_phases, axis=1, prepend=norm_phases[0, 0])
-norm_phases = np.clip(norm_phases, -1 * np.std(norm_phases), 1 * np.std(norm_phases))
+norm_phases = norm_phases / np.std(norm_phases, axis=1, keepdims=True)
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4))
 ax1.imshow(
-    np.abs(signals.T),
+    np.abs(signals).T,
     aspect="auto",
-    extent=[sp_flxs.min(), sp_flxs.max(), sp_fpts.min(), sp_fpts.max()],
+    extent=[sp_flxs[0], sp_flxs[-1], sp_fpts[0], sp_fpts[-1]],
+    interpolation="none",
 )
+ax1.axvline(1.0, color="b", linestyle="--")
+ax1.axvline(0.5, color="r", linestyle="--")
 ax2.plot(sp_flxs, edelays)
 ax2.axhline(edelay, color="k", linestyle="--")
+ax2.axvline(1.0, color="b", linestyle="--")
+ax2.axvline(0.5, color="r", linestyle="--")
+ax2.set_xlim(sp_flxs[0], sp_flxs[-1])
 ax2.grid()
 ax3.imshow(
     np.abs(norm_phases).T,
     aspect="auto",
-    extent=[sp_flxs.min(), sp_flxs.max(), sp_fpts.min(), sp_fpts.max()],
+    extent=[sp_flxs[0], sp_flxs[-1], sp_fpts[0], sp_fpts[-1]],
+    interpolation="none",
 )
+ax3.axvline(1.0, color="b", linestyle="--")
+ax3.axvline(0.5, color="r", linestyle="--")
 plt.show()
 plt.close(fig)
 ```
@@ -193,7 +197,7 @@ mAs = flx2mA(flxs, mA_c, period)
 ```python
 rf_list = calculate_dispersive_vs_flx(params, flxs, r_f=r_f, g=best_g, return_dim=3)
 fig = zd.plot_dispersive_with_onetone(
-    r_f, best_g, mAs, flxs, rf_list, sp_As, sp_flxs, sp_fpts, np.abs(signals)
+    r_f, best_g, mAs, flxs, rf_list, sp_As, sp_flxs, sp_fpts, norm_phases
 )
 fig.show()
 ```

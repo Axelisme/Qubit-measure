@@ -311,6 +311,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             ax.set_xlabel(xlabel)
             ax.set_yscale("log")
             ax.set_ylim(1e-3, 2 * max_rate)
+            ax.set_xlim(xs[0], xs[-1])
 
         ax_gg.set_ylabel("Time (μs)")
         ax_eg.set_ylabel("Time (μs)")

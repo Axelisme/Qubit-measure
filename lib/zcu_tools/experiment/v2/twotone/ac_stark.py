@@ -28,7 +28,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
-from zcu_tools.utils.process import minus_background, rotate2real
+from zcu_tools.utils.process import rotate2real
 
 
 # (amps, freqs, signals2D)
@@ -38,7 +38,7 @@ AcStarkResultType = Tuple[
 
 
 def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    real_signals = rotate2real(minus_background(signals, axis=1)).real
+    real_signals = rotate2real(signals).real
 
     valid_mask = np.any(~np.isnan(real_signals), axis=1)
 

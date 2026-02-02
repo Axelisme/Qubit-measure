@@ -25,7 +25,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor, lorfunc
-from zcu_tools.utils.process import minus_background
+from zcu_tools.utils.process import rotate2real
 
 
 # (res_freqs, qub_freqs, signals2D)
@@ -33,7 +33,10 @@ CKP_Result = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex1
 
 
 def ckp_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(minus_background(signals, axis=(1, 2)))
+    amps = rotate2real(signals).real
+    max_amp = np.nanmax(amps, axis=2, keepdims=True)
+    min_amp = np.nanmin(amps, axis=2, keepdims=True)
+    return (amps - min_amp) / np.clip(max_amp - min_amp, 1e-12, None)
 
 
 def get_resonance_freq(
@@ -97,7 +100,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             cfg["qub_pulse"], "freq", sweep2param("qub_freq", cfg["sweep"]["qub_freq"])
         )
 
-        fig, axs = make_plot_frame(2, 1, figsize=(12, 8))
+        fig, axs = make_plot_frame(1, 2, figsize=(10, 4))
 
         with MultiLivePlotter(
             fig,
@@ -106,13 +109,13 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                     "Resonator Drive Frequency (MHz)",
                     "Qubit Probe Frequency (MHz)",
                     segment_kwargs=dict(title="Ground State"),
-                    existed_axes=[axs[0]],
+                    existed_axes=[[axs[0][0]]],
                 ),
                 excited=LivePlotter2D(
                     "Resonator Drive Frequency (MHz)",
                     "Qubit Probe Frequency (MHz)",
                     segment_kwargs=dict(title="Excited State"),
-                    existed_axes=[axs[1]],
+                    existed_axes=[[axs[0][1]]],
                 ),
             ),
         ) as viewer:
@@ -144,13 +147,14 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                                 Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
                                 Readout("readout", ctx.cfg["readout"]),
                             ],
-                        ).acquire(soc, progress=False, update_hook=update_hook)
+                        ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(2, len(res_freqs), len(qub_freqs)),
                 ),
                 init_cfg=cfg,
                 update_hook=plot_fn,
             )
+        plt.close(fig)
 
         # Cache results
         self.last_cfg = cfg
@@ -159,12 +163,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         return res_freqs, qub_freqs, signals
 
     def analyze(
-        self,
-        *,
-        res_freq: float,
-        res_gain: float,
-        result: Optional[CKP_Result] = None,
-        kappa: Optional[float] = None,
+        self, *, result: Optional[CKP_Result] = None, kappa: Optional[float] = None
     ) -> Tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -187,21 +186,22 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
 
         g_freq = g_params[3]
         e_freq = e_params[3]
-        chi = abs(e_freq - g_freq)
+        chi = abs(e_freq - g_freq) / 2
         kappa = e_params[4] + g_params[4]
 
-        g_delta = lorfunc(np.array(res_freq), *g_params).item() - g_params[0]
-        e_delta = lorfunc(np.array(res_freq), *e_params).item() - e_params[0]
-        delta_slope = (e_delta - g_delta) / res_gain**2
-
-        # Calculate the Stark shift
-        eta = kappa**2 / (kappa**2 + chi**2)
-        ac_coeff = abs(delta_slope) / (2 * eta * chi)
+        res_freq = (g_freq + e_freq) / 2
+        if kappa < 2 * chi:
+            res_freq += np.sqrt(chi**2 - (kappa / 2) ** 2) * np.sign(e_freq - g_freq)
 
         g_fit_freqs = lorfunc(res_freqs, *g_params)
         e_fit_freqs = lorfunc(res_freqs, *e_params)
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharey=True)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+
+        fig.suptitle(
+            rf"$\chi/(2\pi): {chi:.3f}\ MHz,\ \ \kappa/(2\pi): {kappa:.3f}\ MHz$",
+            fontsize=14,
+        )
 
         ax1.imshow(
             amps[0].T,
@@ -216,8 +216,9 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         ax1.axvline(g_freq, color="b")
         ax1.axvline(e_freq, color="r", linestyle="--")
         ax1.axvline(res_freq, color="k", linestyle=":")
-        ax1.set_xlabel("Resonator Drive Frequency (MHz)")
+        # ax1.set_xlabel("Resonator Drive Frequency (MHz)")
         ax1.set_ylabel("Qubit Probe Frequency (MHz)")
+        ax1.legend()
 
         ax2.imshow(
             amps[1].T,
@@ -233,11 +234,12 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         ax2.axvline(g_freq, color="b", linestyle="--")
         ax2.axvline(res_freq, color="k", linestyle=":")
         ax2.set_xlabel("Resonator Drive Frequency (MHz)")
-        # ax2.set_ylabel("Qubit Probe Frequency (MHz)")
+        ax2.set_ylabel("Qubit Probe Frequency (MHz)")
+        ax2.legend()
 
         fig.tight_layout()
 
-        return chi, kappa, ac_coeff, fig
+        return chi, kappa, res_freq, fig
 
     def save(
         self,
@@ -267,7 +269,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             y_info={"name": "Qubit Frequency", "unit": "Hz", "values": 1e6 * qub_freqs},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals[0].T},
             comment=comment,
-            tag=tag + "_g",
+            tag=tag,
             **kwargs,
         )
         # excited
@@ -281,7 +283,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             y_info={"name": "Qubit Frequency", "unit": "Hz", "values": 1e6 * qub_freqs},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals[1].T},
             comment=comment,
-            tag=tag + "_e",
+            tag=tag,
             **kwargs,
         )
 
