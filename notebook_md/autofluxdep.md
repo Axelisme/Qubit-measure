@@ -32,7 +32,7 @@ from zcu_tools.notebook.utils import make_sweep
 ```python
 chip_name = "Q12_2D[6]"
 res_name = "R1"
-qub_name = "Q1"
+qub_name = "Q1_fs6881"
 
 result_dir = f"../result/{chip_name}/{qub_name}"
 
@@ -50,6 +50,11 @@ from zcu_tools.remote import make_proxy
 
 soc, soccfg = make_proxy("192.168.10.179", 8887)
 print(soccfg)
+```
+
+```python
+soc.get_sample_rates()
+# soc.valid_sample_rates(tiletype='dac', tile=2)
 ```
 
 # Predefine Parameters
@@ -114,7 +119,7 @@ gc.collect()
 
 ```python
 %matplotlib widget
-flx_values = np.linspace(1.20e-3, 2.18e-3, 251)
+flx_values = np.linspace(1.5e-3, 1.8e-3, 151)
 
 filename = f"{qub_name}_autofluxdep_animation"
 
@@ -125,19 +130,19 @@ executor = (
     .add_measurement(
         "qubit_freq",
         zefd.QubitFreqTask(
-            detune_sweep=make_sweep(-5, 5, step=0.025),
+            detune_sweep=make_sweep(-2.5, 2.5, step=0.025),
             cfg_maker=lambda ctx, ml: (cur_qf := ctx.env_dict["info"]["predict_freq"])
             and zefd.QubitFreqCfgTemplate(
                 {
                     "qub_pulse": {
                         "waveform": ml.get_waveform(
-                            "qub_flat", override_cfg={"length": 3}
+                            "qub_flat", override_cfg={"length": 6}
                         ),
                         "ch": qub_1_4_ch,
                         "nqz": 2 if cur_qf > 2000 else 1,
                         "gain": min(
                             1.0,
-                            0.01
+                            0.003
                             * ctx.env_dict["info"].last.get("gain_factor", 1.0)
                             / ctx.env_dict["info"]["m_ratio"],
                         ),
@@ -171,12 +176,11 @@ executor = (
                         "freq": cur_qf,
                         "gain": min(
                             1.0,
-                            0.9
-                            * pi_pulse["gain"]
-                            * ctx.env_dict["info"].last.get("gain_factor", 1.0)
-                            / ctx.env_dict["info"]["m_ratio"]
-                            * ctx.env_dict["info"].first["fit_kappa"]
-                            / ctx.env_dict["info"]["fit_kappa"],
+                            pi_pulse["gain"]
+                            # * ctx.env_dict["info"].last.get("gain_factor", 1.0)
+                            / ctx.env_dict["info"]["m_ratio"],
+                            # * ctx.env_dict["info"].first["fit_kappa"]
+                            # / ctx.env_dict["info"]["fit_kappa"],
                         ),
                         # "mixer_freq": cur_qf,
                     },
@@ -259,50 +263,30 @@ executor = (
     #     ),
     # )
     .add_measurement(
-        "mist_g",
-        zefd.Mist_G_Task(
-            gain_sweep=make_sweep(0.0, 0.2, 301),
-            cfg_maker=lambda ctx, ml: (
-                cur_t1 := ctx.env_dict["info"].get("smooth_t1", md.t1)
-            )
-            and zefd.Mist_G_CfgTemplate(
-                {
-                    "mist_pulse": {
-                        "waveform": ml.get_waveform("mist_waveform"),
-                        "ch": res_ch,
-                        "nqz": 2,
-                        "freq": md.r_f,
-                        "post_delay": 10 / (2 * np.pi * md.rf_w),
-                    },
-                    "readout": "readout_dpm",
-                    "relax_delay": max(1.0, 3 * cur_t1),
-                    "reps": 1000,
-                    "rounds": 10,
-                }
-            ),
-        ),
-    )
-    .add_measurement(
         "mist_e",
-        zefd.Mist_E_Task(
-            gain_sweep=make_sweep(0.0, 0.2, 301),
+        zefd.Mist_Task(
+            # gain_sweep=make_sweep(0.0, 0.075, 101),
+            gain_sweep=make_sweep(0.0, (100 / md.ac_stark_coeff) ** 0.5, 151),
             cfg_maker=lambda ctx, ml: (
                 cur_t1 := ctx.env_dict["info"].get("smooth_t1", md.t1)
             )
             and (cur_pi_pulse := ctx.env_dict["info"].get("pi_pulse"))
-            and zefd.Mist_E_CfgTemplate(
+            and zefd.Mist_CfgTemplate(
                 {
                     "mist_pulse": {
-                        "waveform": ml.get_waveform("mist_waveform"),
+                        "waveform": ml.get_waveform(
+                            "mist_waveform",
+                            {"length": 5.0 / (2 * np.pi * md.rf_w) + 0.3},
+                        ),
                         "ch": res_ch,
                         "nqz": 2,
-                        "freq": md.r_f,
+                        "freq": md.readout_f,
                         "post_delay": 10 / (2 * np.pi * md.rf_w),
                     },
                     "pi_pulse": cur_pi_pulse,
                     "readout": "readout_dpm",
                     "relax_delay": max(1.0, 3 * cur_t1),
-                    "reps": 1000,
+                    "reps": 2000,
                     "rounds": 10,
                 }
             ),

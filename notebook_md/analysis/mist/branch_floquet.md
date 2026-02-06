@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.18.1
   kernelspec:
-    display_name: .venv
+    display_name: zcu-tools
     language: python
     name: python3
 ---
@@ -43,7 +43,7 @@ from zcu_tools.simulate.fluxonium.branch.floquet import (
 # Load Parameters
 
 ```python
-qub_name = "Q12_2D[5]/Q1"
+qub_name = "Q12_2D[6]/Q1"
 
 result_dir = f"../../../result/{qub_name}"
 
@@ -117,7 +117,6 @@ branch_energies = calc_energies(branchs)
 ```
 
 ```python
-from matplotlib.colors import to_rgb
 from zcu_tools.notebook.analysis.mist.branch import round_to_nearest
 from scqubits.core.fluxonium import Fluxonium
 
