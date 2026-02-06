@@ -152,7 +152,7 @@ def optimize_ge_radius(
         return np.linalg.cond(confusion_matrix)
 
     result = minimize(loss_fn, x0=ge_dist / 4, bounds=[(0.0, ge_dist / 2)])
-    return result.x
+    return float(result.x)
 
 
 # ------------------------------------------------------------
