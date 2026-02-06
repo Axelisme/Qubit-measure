@@ -192,12 +192,16 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         result: Optional[T1Result] = None,
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
+        skip: int = 0,
     ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         lens, populations = result
+
+        lens = lens[skip:]
+        populations = populations[skip:]
 
         populations = calc_populations(populations)  # (N, 2, 3)
 

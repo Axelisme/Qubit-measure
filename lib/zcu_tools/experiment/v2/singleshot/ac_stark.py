@@ -102,17 +102,18 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         Pulse.set_param(cfg["stark_pulse2"], "freq", freq_param)
 
         fig, axs = make_plot_frame(2, 2, figsize=(8, 6))
-        axs[1][1].set_ylim(0.0, 1.0)
 
         def make_plotter2d(ax: Axes) -> LivePlotter2D:
             return LivePlotter2D(
                 "Stark Pulse Gain (a.u.)",
                 "Probe Frequency (MHz)",
                 uniform=False,
+                segment_kwargs=dict(vmin=0.0, vmax=1.0),
                 existed_axes=[[ax]],
             )
 
         def make_plotter1d(ax: Axes) -> LivePlotter1D:
+            ax.set_ylim(0.0, 1.0)
             return LivePlotter1D(
                 "Probe Frequency (MHz)",
                 "Population",
@@ -167,6 +168,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
                     ctx.cfg,
                     modules=[
                         Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
+                        Pulse("init_pulse", ctx.cfg.get("init_pulse")),
                         Pulse("stark_pulse1", ctx.cfg["stark_pulse1"]),
                         Pulse("stark_pulse2", ctx.cfg["stark_pulse2"]),
                         Readout("readout", ctx.cfg["readout"]),
@@ -334,10 +336,13 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         # fig, ax1 = plt.subplots(figsize=config.figsize)
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12, 4), sharey=True)
 
+        max_p = np.max(populations).item()
+
         # Use NonUniformImage for better visualization with pdr^2 as x-axis
         im = NonUniformImage(ax1, cmap="RdBu_r", interpolation="nearest")
         im.set_data(photons, freqs, populations[..., 0].T)
         im.set_extent((photons[0], photons[-1], freqs[0], freqs[-1]))
+        im.set_clim(0.0, max_p)
         ax1.add_image(im)
         ax1.set_xlim(photons[0], photons[-1])
         ax1.set_ylim(freqs[0], freqs[-1])
@@ -349,6 +354,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         im = NonUniformImage(ax2, cmap="RdBu_r", interpolation="nearest")
         im.set_data(photons, freqs, populations[..., 1].T)
         im.set_extent((photons[0], photons[-1], freqs[0], freqs[-1]))
+        im.set_clim(0.0, max_p)
         ax2.add_image(im)
         ax2.set_xlim(photons[0], photons[-1])
         ax2.set_ylim(freqs[0], freqs[-1])
@@ -359,6 +365,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         im = NonUniformImage(ax3, cmap="RdBu_r", interpolation="nearest")
         im.set_data(photons, freqs, populations[..., 2].T)
         im.set_extent((photons[0], photons[-1], freqs[0], freqs[-1]))
+        im.set_clim(0.0, max_p)
         ax3.add_image(im)
         ax3.set_xlim(photons[0], photons[-1])
         ax3.set_ylim(freqs[0], freqs[-1])

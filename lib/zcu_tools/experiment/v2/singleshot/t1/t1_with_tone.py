@@ -195,6 +195,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         result: Optional[T1WithToneResult] = None,
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
+        skip: int = 0,
     ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -202,8 +203,8 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
         lens, populations = result
 
-        lens = lens[1:]
-        populations = populations[1:]
+        lens = lens[skip:]
+        populations = populations[skip:]
 
         populations = calc_populations(populations)  # (N, 2, 3)
 
