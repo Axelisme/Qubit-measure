@@ -1,9 +1,9 @@
 from typing import Tuple
 
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.axes import Axes
 from matplotlib.patches import Circle
+from numpy.typing import NDArray
 
 
 def calc_populations(signals: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -11,20 +11,31 @@ def calc_populations(signals: NDArray[np.float64]) -> NDArray[np.float64]:
     return np.stack([g_pop, e_pop, 1 - g_pop - e_pop], axis=-1)
 
 
-def plot_classified_result(
+def classify_result(
+    signals: NDArray[np.complex128],
+    g_center: complex,
+    e_center: complex,
+    radius: float,
+) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    """Classify shots into ground, excited, and other."""
+    dists_g = np.abs(signals - g_center)
+    dists_e = np.abs(signals - e_center)
+    mask_g = dists_g < radius
+    mask_e = dists_e < radius
+    mask_o = ~(mask_g | mask_e)
+    return mask_g, mask_e, mask_o
+
+
+def plot_with_classified(
     ax: Axes,
     signals: NDArray[np.complex128],
     g_center: complex,
     e_center: complex,
     radius: float,
     max_point: int = 5000,
-) -> Tuple[float, float, float]:
+) -> None:
     # Classify shots
-    dists_g = np.abs(signals - g_center)
-    dists_e = np.abs(signals - e_center)
-    mask_g = dists_g < radius
-    mask_e = dists_e < radius
-    mask_o = ~(mask_g | mask_e)
+    mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
 
     colors = np.full(signals.shape, "gray", dtype=object)
     colors[mask_g] = "blue"
@@ -83,9 +94,3 @@ def plot_classified_result(
     ax.legend()
     ax.set_xlabel("I value (a.u.)")
     ax.set_ylabel("Q value (a.u.)")
-
-    ng = np.sum(mask_g).item() / signals.shape[0]
-    ne = np.sum(mask_e).item() / signals.shape[0]
-    no = np.sum(mask_o).item() / signals.shape[0]
-
-    return ng, ne, no

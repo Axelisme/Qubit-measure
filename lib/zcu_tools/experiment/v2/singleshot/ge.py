@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Literal, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typing_extensions import Literal, NotRequired, Optional, Tuple, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
@@ -23,25 +23,157 @@ from zcu_tools.program.v2 import (
     Pulse,
     PulseCfg,
     Readout,
+    ReadoutCfg,
     Reset,
-    TwoToneProgramCfg,
+    ResetCfg,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from .util import plot_classified_result
+from .util import classify_result, plot_with_classified
+
+# ------------------------------------------------------------
+# Helper Functions
+# ------------------------------------------------------------
+
+
+def make_init_matrix(init_pops: NDArray[np.float64]) -> NDArray[np.float64]:
+    p_gg_init = init_pops[0, 0]
+    p_ge_init = init_pops[0, 1]
+    p_eg_init = p_ge_init  # TODO: before fix singleshot fitting problem, assume use perfect pi pulse
+    p_ee_init = p_gg_init
+    p_go_init = 1.0 - p_gg_init - p_ge_init
+    p_eo_init = p_go_init
+
+    return np.array(
+        [
+            [p_gg_init, p_ge_init, p_go_init],
+            [p_eg_init, p_ee_init, p_eo_init],
+            [0.0, 0.0, 1.0],  # assume all initial to O
+        ]
+    )
+
+
+def make_result_matrix(
+    n_gg: float,
+    n_ge: float,
+    n_go: float,
+    n_eg: float,
+    n_ee: float,
+    n_eo: float,
+    n_og: float = 0.0,
+    n_oe: float = 0.0,
+    n_oo: float = 1.0,  # TODO: assume one can perfectly identify other state
+) -> NDArray[np.float64]:
+    return np.array(
+        [
+            [n_gg, n_ge, n_go],
+            [n_eg, n_ee, n_eo],
+            [n_og, n_oe, n_oo],
+        ]
+    )
+
+
+def solve_confusion_matrix(
+    A_init: NDArray[np.float64],
+    Q: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    confusion_matrix = np.linalg.solve(A_init, Q)
+    confusion_matrix = np.clip(confusion_matrix, 0.0, None)
+    confusion_matrix /= confusion_matrix.sum(axis=1, keepdims=True)
+
+    return confusion_matrix
+
+
+def calc_overlay(s: float, x: float, r: float) -> float:
+    """計算二維高斯分佈在指定偏心圓內的比例"""
+    from scipy.stats import ncx2
+
+    if s <= 0:
+        raise ValueError("標準差 s 必須大於 0")
+    if r < 0:
+        return 0.0
+
+    # 自由度 k = 2 (對應二維空間)
+    df = 2
+
+    # 非中心參數 lambda = (dist_center / s)^2
+    # 這裡圓心距離原點的距離為 x
+    nc = (x / s) ** 2
+
+    # 積分上限需歸一化： (r / s)^2
+    limit = (r / s) ** 2
+
+    # 使用非中心卡方分佈的累積分佈函數 (CDF)
+    return ncx2.cdf(limit, df, nc).item()
+
+
+def optimize_ge_radius(
+    g_signals: NDArray[np.complex128],
+    e_signals: NDArray[np.complex128],
+    g_center: complex,
+    e_center: complex,
+    init_pops: NDArray[np.float64],
+) -> float:
+    from scipy.optimize import minimize
+
+    # use pca to retrive minimum radius
+    ge_signals = np.concatenate([g_signals, e_signals])
+    cov = np.cov(ge_signals.real, ge_signals.imag)
+    eigenvalues, _ = np.linalg.eig(cov)
+    sigma = np.sqrt(np.sort(eigenvalues)[0])  # minimum eigenvalue as sigma
+
+    ge_dist = abs(g_center - e_center)
+    A_init = make_init_matrix(init_pops)
+
+    def loss_fn(radius: float) -> float:
+        gg_mask, ge_mask, go_mask = classify_result(
+            g_signals, g_center, e_center, radius
+        )
+        n_gg = gg_mask.sum() / gg_mask.shape[0]
+        n_ge = ge_mask.sum() / ge_mask.shape[0]
+        n_go = go_mask.sum() / go_mask.shape[0]
+
+        eg_mask, ee_mask, eo_mask = classify_result(
+            e_signals, g_center, e_center, radius
+        )
+        n_eg = eg_mask.sum() / eg_mask.shape[0]
+        n_ee = ee_mask.sum() / ee_mask.shape[0]
+        n_eo = eo_mask.sum() / eo_mask.shape[0]
+
+        # assume other state is in the middle of g and e, calculate effective population
+        n_og = calc_overlay(sigma, ge_dist / 2, radius)
+        n_oe = n_og
+        n_oo = 1.0 - n_og - n_oe
+
+        Q = make_result_matrix(n_gg, n_ge, n_go, n_eg, n_ee, n_eo, n_og, n_oe, n_oo)
+        confusion_matrix = solve_confusion_matrix(A_init, Q)
+
+        # calculate condision number of confusion matrix as loss
+        return np.linalg.cond(confusion_matrix)
+
+    result = minimize(loss_fn, x0=ge_dist / 4, bounds=[(0.0, ge_dist / 2)])
+    return result.x
+
+
+# ------------------------------------------------------------
+# Experiment
+# ------------------------------------------------------------
 
 # (signals)
-GE_ResultType = NDArray[np.complex128]
+GE_Result = NDArray[np.complex128]
 
 
-class GE_TaskConfig(TaskConfig, TwoToneProgramCfg):
+class GE_Cfg(TaskConfig):
+    reset: NotRequired[ResetCfg]
+    init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
+    readout: ReadoutCfg
 
     shots: int
 
 
-class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
-    def run(self, soc, soccfg, cfg: GE_TaskConfig) -> GE_ResultType:
+class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
+    def run(self, soc, soccfg, cfg: GE_Cfg) -> GE_Result:
         cfg = deepcopy(cfg)  # avoid in-place modification
 
         # Validate and setup configuration
@@ -109,7 +241,7 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
 
     def analyze(
         self,
-        result: Optional[GE_ResultType] = None,
+        result: Optional[GE_Result] = None,
         backend: Literal["center", "regression", "pca"] = "pca",
         **kwargs,
     ) -> Tuple[float, np.ndarray, dict, Figure]:
@@ -123,12 +255,12 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
 
     def calc_confusion_matrix(
         self,
+        init_pops: NDArray[np.float64],
         g_center: complex,
         e_center: complex,
-        radius: float,
-        init_pops: NDArray[np.float64],
-        result: Optional[GE_ResultType] = None,
-    ) -> Tuple[NDArray[np.float64], Figure]:
+        radius: Optional[float] = None,
+        result: Optional[GE_Result] = None,
+    ) -> Tuple[NDArray[np.float64], float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -136,23 +268,31 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
         signals = result
         g_signals, e_signals = signals[0], signals[1]
 
-        # 1. 取得初始化在 g, e 的群體 (2x2)
-        # init_populations = [[p_gg, p_ge], [p_eg, p_ee]]
-        p_gg_init = init_pops[0, 0]
-        p_ge_init = init_pops[0, 1]
-        p_eg_init = p_ge_init  # TODO: before fix singleshot fitting problem, assume use perfect pi pulse
-        p_ee_init = p_gg_init
-        p_go_init = 1.0 - p_gg_init - p_ge_init
-        p_eo_init = p_go_init
+        A_init = make_init_matrix(init_pops)
 
-        # 2. 構建完整的 3x3 初始化矩陣 A
-        A_init = np.array(
-            [
-                [p_gg_init, p_ge_init, p_go_init],
-                [p_eg_init, p_ee_init, p_eo_init],
-                [0.0, 0.0, 1.0],  # assume all initial to O
-            ]
+        if radius is None:
+            radius = optimize_ge_radius(
+                g_signals, e_signals, g_center, e_center, init_pops
+            )
+
+        gg_mask, ge_mask, go_mask = classify_result(
+            g_signals, g_center, e_center, radius
         )
+        n_gg = gg_mask.sum() / gg_mask.shape[0]
+        n_ge = ge_mask.sum() / ge_mask.shape[0]
+        n_go = go_mask.sum() / go_mask.shape[0]
+
+        eg_mask, ee_mask, eo_mask = classify_result(
+            e_signals, g_center, e_center, radius
+        )
+        n_eg = eg_mask.sum() / eg_mask.shape[0]
+        n_ee = ee_mask.sum() / ee_mask.shape[0]
+        n_eo = eo_mask.sum() / eo_mask.shape[0]
+
+        Q = make_result_matrix(n_gg, n_ge, n_go, n_eg, n_ee, n_eo)
+        confusion_matrix = solve_confusion_matrix(A_init, Q)
+
+        cond_number = np.linalg.cond(confusion_matrix)
 
         # plot confusion matrix
         fig, ((ax1, ax4), (ax2, ax3)) = plt.subplots(2, 2, figsize=(8, 8))
@@ -161,12 +301,9 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
         e_label = r"$|1\rangle$"
         l_label = r"$|L\rangle$"
 
-        n_gg, n_ge, n_go = plot_classified_result(
-            ax1, g_signals, g_center, e_center, radius
-        )
-        n_eg, n_ee, n_eo = plot_classified_result(
-            ax2, e_signals, g_center, e_center, radius
-        )
+        plot_with_classified(ax1, g_signals, g_center, e_center, radius)
+        plot_with_classified(ax2, e_signals, g_center, e_center, radius)
+
         ax1.set_title(
             f"{g_label}: {n_gg:.1%}, {e_label}: {n_ge:.1%}, {l_label}: {n_go:.1%}"
         )
@@ -198,22 +335,6 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
         ax4.set_ylabel("Prepared State")
         ax4.set_title("Initial Populations")
 
-        Q = np.array(
-            [
-                [n_gg, n_ge, n_go],
-                [n_eg, n_ee, n_eo],
-                [0.0, 0.0, 1.0],  # assume all initial to O
-            ]
-        )
-
-        # 4. 求解 C (此時 A 是 3x3 方陣，可以使用 solve)
-        # 方程式：Q = A @ C  => C 代表「真實狀態轉移到測量狀態」的機率
-        confusion_matrix = np.linalg.solve(A_init, Q)
-
-        # 5. 數值修正與歸一化
-        confusion_matrix[confusion_matrix < 0] = 0.0
-        confusion_matrix /= confusion_matrix.sum(axis=1, keepdims=True)
-
         im = ax3.imshow(confusion_matrix, cmap="Blues", vmin=0, vmax=1)
         fig.colorbar(im, ax=ax3)
 
@@ -235,14 +356,14 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
         ax3.set_yticklabels([g_label, e_label, l_label])
         ax3.set_xlabel("Measured State")
         ax3.set_ylabel("Actual State")
-        ax3.set_title("Confusion Matrix")
+        ax3.set_title(f"Confusion Matrix (cond: {cond_number:.1f})")
 
-        return confusion_matrix, fig
+        return confusion_matrix, radius, fig
 
     def save(
         self,
         filepath: str,
-        result: Optional[GE_ResultType] = None,
+        result: Optional[GE_Result] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/ge",
         **kwargs,
@@ -269,12 +390,12 @@ class GE_Exp(AbsExperiment[GE_ResultType, GE_TaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> GE_ResultType:
+    def load(self, filepath: str, **kwargs) -> GE_Result:
         signals, _, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
 
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = cast(GE_TaskConfig, cfg)
+        self.last_cfg = cast(GE_Cfg, cfg)
         self.last_result = signals.T
 
         return signals

@@ -29,7 +29,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from .util import plot_classified_result
+from .util import classify_result, plot_with_classified
 
 # (signals)
 CheckResultType = NDArray[np.complex128]
@@ -113,7 +113,12 @@ class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
 
         fig, ax = plt.subplots(figsize=(6, 6))
 
-        ng, ne, no = plot_classified_result(
+        mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
+        ng = mask_g.sum() / signals.shape[0]
+        ne = mask_e.sum() / signals.shape[0]
+        no = mask_o.sum() / signals.shape[0]
+
+        plot_with_classified(
             ax, signals, g_center, e_center, radius, max_point=max_point
         )
 
