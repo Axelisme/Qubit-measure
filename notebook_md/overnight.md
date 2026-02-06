@@ -32,7 +32,7 @@ from zcu_tools.notebook.utils import make_sweep
 ```python
 chip_name = "Q12_2D[6]"
 res_name = "R1"
-qub_name = "Q1"
+qub_name = "Q1_fs6881"
 
 result_dir = f"../result/{chip_name}/{qub_name}"
 
@@ -63,30 +63,6 @@ qub_1_4_ch = 2
 # lo_flux_ch = 14
 
 ro_ch = 0
-```
-
-# Connect Instruments
-
-```python
-import pyvisa
-from zcu_tools.device import GlobalDeviceManager
-
-resource_manager = pyvisa.ResourceManager()
-```
-
-## Flux Yoko
-
-```python
-from zcu_tools.device.yoko import YOKOGS200
-
-
-flux_yoko = YOKOGS200(
-    address="USB0::0x0B21::0x0039::90ZB35281::INSTR", rm=resource_manager
-)
-GlobalDeviceManager.register_device("flux_yoko", flux_yoko)
-
-flux_yoko.set_mode("current", rampstep=1e-6)
-# flux_yoko.set_mode("voltage", rampstep=1e-3)
 ```
 
 # Start Measurement
