@@ -55,39 +55,39 @@ def mist_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
     return mist_signals
 
 
-class Mist_E_CfgTemplate(TypedDict, closed=False):
+class Mist_CfgTemplate(TypedDict, closed=False):
     reset: NotRequired[Union[ResetCfg, str]]
-    pi_pulse: Union[PulseCfg, str]
+    pi_pulse: NotRequired[Union[PulseCfg, str]]
     mist_pulse: Union[PulseCfg, str]
     readout: Union[ReadoutCfg, str]
 
 
-class Mist_E_Cfg(TaskConfig, ModularProgramCfg):
+class Mist_Cfg(TaskConfig, ModularProgramCfg):
     reset: NotRequired[ResetCfg]
-    pi_pulse: PulseCfg
+    pi_pulse: NotRequired[PulseCfg]
     mist_pulse: PulseCfg
     readout: ReadoutCfg
 
     sweep: Dict[str, SweepCfg]
 
 
-class Mist_E_Result(TypedDict, closed=True):
+class Mist_Result(TypedDict, closed=True):
     raw_signals: NDArray[np.complex128]
     success: NDArray[np.bool_]
 
 
-class Mist_E_PlotterDict(TypedDict, closed=True):
-    e_mist: LivePlotter2DwithLine
+class Mist_PlotterDict(TypedDict, closed=True):
+    mist: LivePlotter2DwithLine
 
 
-class Mist_E_Task(
-    MeasurementTask[Mist_E_Result, T_RootResultType, TaskConfig, Mist_E_PlotterDict]
+class Mist_Task(
+    MeasurementTask[Mist_Result, T_RootResultType, TaskConfig, Mist_PlotterDict]
 ):
     def __init__(
         self,
         gain_sweep: SweepCfg,
         cfg_maker: Callable[
-            [TaskContextView, ModuleLibrary], Optional[Mist_E_CfgTemplate]
+            [TaskContextView, ModuleLibrary], Optional[Mist_CfgTemplate]
         ],
     ) -> None:
         self.gain_sweep = gain_sweep
@@ -104,27 +104,27 @@ class Mist_E_Task(
                 ctx.cfg,
                 modules=[
                     Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse(name="pi_pulse", cfg=ctx.cfg["pi_pulse"]),
+                    Pulse(name="pi_pulse", cfg=ctx.cfg.get("pi_pulse")),
                     Pulse(name="mist_pulse", cfg=ctx.cfg["mist_pulse"]),
                     Readout("readout", cfg=ctx.cfg["readout"]),
                 ],
             ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook)
 
         self.task = HardTask[
-            np.complex128, T_RootResultType, Mist_E_Cfg, List[NDArray[np.float64]]
+            np.complex128, T_RootResultType, Mist_Cfg, List[NDArray[np.float64]]
         ](measure_fn=measure_fn, result_shape=(self.gain_sweep["expts"],))
 
     def num_axes(self) -> Dict[str, int]:
-        return dict(e_mist=2)
+        return dict(mist=2)
 
-    def make_plotter(self, name, axs) -> Mist_E_PlotterDict:
-        return Mist_E_PlotterDict(
-            e_mist=LivePlotter2DwithLine(
+    def make_plotter(self, name, axs) -> Mist_PlotterDict:
+        return Mist_PlotterDict(
+            mist=LivePlotter2DwithLine(
                 "Flux device value",
                 "Readout Gain (a.u.)",
                 line_axis=1,
                 title=name,
-                existed_axes=[axs["e_mist"]],
+                existed_axes=[axs["mist"]],
             ),
         )
 
@@ -135,7 +135,7 @@ class Mist_E_Task(
         # shape: (flx, gains)
         mist_signals = mist_fluxdep_signal2real(signals["raw_signals"])
 
-        plotters["e_mist"].update(flx_values, gains, mist_signals, refresh=False)
+        plotters["mist"].update(flx_values, gains, mist_signals, refresh=False)
 
     def save(self, filepath, flx_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
@@ -147,7 +147,7 @@ class Mist_E_Task(
 
         # raw_signals: (flx, gains)
         save_data(
-            filepath=str(filepath.with_name(filepath.name + "_signals_e")),
+            filepath=str(filepath.with_name(filepath.name + "_signals")),
             x_info=x_info,
             y_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
             z_info={
@@ -156,10 +156,10 @@ class Mist_E_Task(
                 "values": result["raw_signals"].T,
             },
             comment=make_comment(self.init_cfg, comment),
-            tag=prefix_tag + "/signals_e",
+            tag=prefix_tag + "/signals",
         )
 
-    def load(self, filepath: str, **kwargs) -> Mist_E_Result:
+    def load(self, filepath: str, **kwargs) -> Mist_Result:
         data = np.load(filepath)
 
         flx_values = data["flx_values"]
@@ -173,7 +173,7 @@ class Mist_E_Task(
         raw_signals = raw_signals.astype(np.complex128)
         success = np.asarray(success, dtype=np.bool_)
 
-        return Mist_E_Result(raw_signals=raw_signals, success=success)
+        return Mist_Result(raw_signals=raw_signals, success=success)
 
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.init_cfg = deepcopy(ctx.cfg)
@@ -192,7 +192,7 @@ class Mist_E_Task(
             cfg_temp,
             {"dev": ctx.cfg.get("dev", {}), "sweep": {"gain": self.gain_sweep}},
         )
-        cfg = cast(Mist_E_Cfg, ml.make_cfg(cfg_temp))
+        cfg = cast(Mist_Cfg, ml.make_cfg(cfg_temp))
 
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 
@@ -201,14 +201,14 @@ class Mist_E_Task(
 
         with MinIntervalFunc.force_execute():
             ctx.set_data(
-                Mist_E_Result(
+                Mist_Result(
                     raw_signals=raw_signals,
                     success=np.array(True),
                 )
             )
 
-    def get_default_result(self) -> Mist_E_Result:
-        return Mist_E_Result(
+    def get_default_result(self) -> Mist_Result:
+        return Mist_Result(
             raw_signals=self.task.get_default_result(),
             success=np.array(True),
         )
