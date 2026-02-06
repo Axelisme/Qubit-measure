@@ -31,11 +31,38 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.fitting import fitlor
+from zcu_tools.utils.process import minus_background
 
 from .util import calc_populations
 
 # (gains, freqs, populations)
 AcStarkResultType = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+
+
+def get_resonance_freq(
+    xs: NDArray[np.float64], fpts: NDArray[np.float64], populations: NDArray[np.float64]
+) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+    s_xs = []
+    s_fpts = []
+
+    prev_freq = np.nan
+    for x, pop in zip(xs, populations):
+        if np.any(np.isnan(pop)):
+            continue
+
+        param, _ = fitlor(fpts, pop)
+        curr_freq = param[3]
+
+        if abs(curr_freq - prev_freq) > 0.1 * (fpts[-1] - fpts[0]):
+            continue
+
+        prev_freq = curr_freq
+
+        s_xs.append(x)
+        s_fpts.append(curr_freq)
+
+    return np.array(s_xs), np.array(s_fpts)
 
 
 class AcStarkTaskConfig(TaskConfig, ModularProgramCfg):
@@ -178,6 +205,102 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         return gains, freqs, signals
 
     def analyze(
+        self,
+        chi: float,
+        kappa: float,
+        result: Optional[AcStarkResultType] = None,
+        *,
+        confusion_matrix: Optional[NDArray[np.float64]] = None,
+        cutoff: Optional[float] = None,
+    ) -> Tuple[float, Figure]:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "No result found"
+
+        gains, freqs, populations = result
+
+        # apply cutoff if provided
+        if cutoff is not None:
+            valid_indices = np.where(gains < cutoff)[0]
+            gains = gains[valid_indices]
+            populations = populations[valid_indices]
+
+        populations = calc_populations(populations)  # (xs, 2, Ts, 3)
+
+        if confusion_matrix is not None:  # readout correction
+            populations = populations @ np.linalg.inv(confusion_matrix)
+            populations = np.clip(populations, 0.0, 1.0)
+
+        # merge two populations into one
+        populations = (
+            np.abs(minus_background(populations[..., 0]))
+            + np.abs(minus_background(populations[..., 1]))
+        ) / 2
+
+        s_gains, s_freqs = get_resonance_freq(gains, freqs, populations)
+
+        gains2 = gains**2
+        s_gains2 = s_gains**2
+
+        # fitting max_freqs with ax2 + bx + c
+        x2_fit = np.linspace(min(gains2), max(gains2), 100)
+        b, c = np.polyfit(s_gains2, s_freqs, 1)
+        y_fit = b * x2_fit + c
+
+        # Calculate the Stark shift
+        eta = kappa**2 / (kappa**2 + chi**2)
+        ac_coeff = abs(b) / (2 * eta * chi)
+
+        # plot the data and the fitted polynomial
+        avg_n = ac_coeff * gains2
+
+        fig, ax1 = plt.subplots()
+        assert isinstance(fig, Figure)
+
+        # Use NonUniformImage for better visualization with pdr^2 as x-axis
+        im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
+        im.set_data(avg_n, freqs, populations.T)
+        im.set_extent((avg_n[0], avg_n[-1], freqs[0], freqs[-1]))
+        ax1.add_image(im)
+
+        # Set proper limits for the plot
+        ax1.set_xlim(avg_n[0], avg_n[-1])
+        ax1.set_ylim(freqs[0], freqs[-1])
+
+        # Plot the resonance frequencies and fitted curve
+        ax1.plot(ac_coeff * s_gains2, s_freqs, ".", c="k")
+
+        # Fit curve in terms of pdr^2
+        label = r"$\bar n$" + f" = {ac_coeff:.2g} " + r"$gain^2$"
+        gain_fit = ac_coeff * x2_fit
+        ax1.plot(gain_fit, y_fit, "-", label=label)
+
+        # Create secondary x-axis for pdr^2 (Readout Gain²)
+        ax2 = ax1.twiny()
+
+        # main x-axis: avg_n, secondary x-axis: pdr^2
+        # avg_n = ac_coeff * gains^2
+        ax1.set_xticks(ax1.get_xticks())
+        # ax1.set_xticklabels([f"{avg_n:.1f}" for avg_n in ax1.get_xticks()])
+        ax1.set_xlabel(r"Average Photon Number ($\bar n$)", fontsize=14)
+
+        # 上方次 x 軸顯示 gain
+        avgn_ticks = ax1.get_xticks()
+        gain_ticks = np.sqrt(avgn_ticks / ac_coeff)
+        ax2.set_xlim(ax1.get_xlim())
+        ax2.set_xticks(avgn_ticks)
+        ax2.set_xticklabels([f"{gain:.2g}" for gain in gain_ticks])
+        ax2.set_xlabel("Readout Gain (a.u.)", fontsize=14)
+
+        ax1.set_ylabel("Qubit Frequency (MHz)", fontsize=14)
+        ax1.legend(fontsize="x-large")
+        ax1.tick_params(axis="both", which="major", labelsize=12)
+
+        fig.tight_layout()
+
+        return ac_coeff, fig
+
+    def plot(
         self,
         result: Optional[AcStarkResultType] = None,
         *,
