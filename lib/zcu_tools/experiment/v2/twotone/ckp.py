@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting import fitlor, lorfunc
+from zcu_tools.utils.fitting import fitlor, lorfunc, batch_fit_func
 from zcu_tools.utils.process import rotate2real
 
 
@@ -133,22 +133,20 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
 
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset(
-                                    "reset",
-                                    ctx.cfg.get("reset", {"type": "none"}),
-                                ),
-                                Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                Pulse("res_pulse", ctx.cfg["res_pulse"]),
-                                Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset(
+                                "reset",
+                                ctx.cfg.get("reset", {"type": "none"}),
+                            ),
+                            Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                            Pulse("res_pulse", ctx.cfg["res_pulse"]),
+                            Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
+                            Readout("readout", ctx.cfg["readout"]),
+                        ],
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(2, len(res_freqs), len(qub_freqs)),
                 ),
                 init_cfg=cfg,
@@ -163,7 +161,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         return res_freqs, qub_freqs, signals
 
     def analyze(
-        self, *, result: Optional[CKP_Result] = None, kappa: Optional[float] = None
+        self, result: Optional[CKP_Result] = None
     ) -> Tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -178,11 +176,25 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         # y0, slope, yscale, x0, gamma
         fixedparams: List[Optional[float]] = [None] * 5
         fixedparams[1] = 0.0  # fix slope to 0
-        if kappa is not None:
-            fixedparams[4] = kappa / 2  # kappa = 2 * gamma
 
         g_params, _ = fitlor(g_res_freqs, g_qub_freqs, fixedparams=fixedparams)
         e_params, _ = fitlor(e_res_freqs, e_qub_freqs, fixedparams=fixedparams)
+
+        y0 = 0.5 * (e_params[0] + g_params[0])
+        yscale = 0.5 * (e_params[2] + g_params[2])
+        gamma = 0.5 * (e_params[4] + g_params[4])
+
+        (g_params, e_params), _ = batch_fit_func(
+            [g_res_freqs, e_res_freqs],
+            [g_qub_freqs, e_qub_freqs],
+            lorfunc,
+            list_init_p=[
+                (y0, 0.0, yscale, g_params[3], gamma),
+                (y0, 0.0, yscale, e_params[3], gamma),
+            ],
+            shared_idxs=[0, 2, 4],
+            fixedparams=[None, 0.0, None, None, None],
+        )
 
         g_freq = g_params[3]
         e_freq = e_params[3]
@@ -203,14 +215,19 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             fontsize=14,
         )
 
+        factor = 1.0
+        if np.max(amps[0]) + np.min(amps[0]) < 2 * np.median(amps[0]):
+            factor = -1.0
+
         ax1.imshow(
-            amps[0].T,
+            factor * amps[0].T,
             extent=[res_freqs[0], res_freqs[-1], qub_freqs[0], qub_freqs[-1]],
             aspect="auto",
             origin="lower",
             interpolation="none",
+            cmap="RdBu_r",
         )
-        ax1.scatter(g_res_freqs, g_qub_freqs, color="b", s=2)
+        ax1.scatter(g_res_freqs, g_qub_freqs, color="b", s=5)
         ax1.plot(res_freqs, g_fit_freqs, color="b", label="Ground")
         ax1.plot(res_freqs, e_fit_freqs, color="r", label="Excited", linestyle="--")
         ax1.axvline(g_freq, color="b")
@@ -221,13 +238,14 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         ax1.legend()
 
         ax2.imshow(
-            amps[1].T,
+            factor * amps[1].T,
             extent=[res_freqs[0], res_freqs[-1], qub_freqs[0], qub_freqs[-1]],
             aspect="auto",
             origin="lower",
             interpolation="none",
+            cmap="RdBu_r",
         )
-        ax2.scatter(e_res_freqs, e_qub_freqs, color="r", s=2)
+        ax2.scatter(e_res_freqs, e_qub_freqs, color="r", s=5)
         ax2.plot(res_freqs, e_fit_freqs, color="r", label="Excited")
         ax2.plot(res_freqs, g_fit_freqs, color="b", label="Ground", linestyle="--")
         ax2.axvline(e_freq, color="r")
