@@ -53,9 +53,9 @@ def fit_rabi(
         pi_x = (1.0 - phase / 360) / freq
         pi2_x = (0.75 - phase / 360) / freq
 
-    while pi2_x < min_length:
-        pi2_x += 0.5 / freq
-        pi_x += 0.5 / freq
+    # while pi2_x < min_length:
+    #     pi2_x += 1.0 / freq
+    #     pi_x += 1.0 / freq
 
     pOpt = cast(Tuple[float, float, float, float, float], tuple(pOpt))
 

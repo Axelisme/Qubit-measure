@@ -79,6 +79,9 @@ def fit_func(
             fitfunc, init_p, bounds, fixedparams
         )
 
+    if bounds is None:
+        bounds = (-np.inf, np.inf)  # type: ignore
+
     try:
         pOpt, pCov = sp.optimize.curve_fit(
             fitfunc, xdata, ydata, p0=init_p, bounds=bounds, **kwargs
@@ -104,7 +107,7 @@ def batch_fit_func(
     list_bounds: Optional[List[Tuple[List[float], List[float]]]] = None,
     fixedparams: Optional[List[Optional[float]]] = None,
     **kwargs,
-) -> Tuple[List[List[float]], List[NDArray[Y_DataType]]]:
+) -> Tuple[List[List[float]], List[NDArray[np.float64]]]:
     n_groups = len(list_xdata)
     n_params_total = len(list_init_p[0])  # 總參數個數（以第一組為準）
 

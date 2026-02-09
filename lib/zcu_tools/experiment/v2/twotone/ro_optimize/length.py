@@ -58,7 +58,7 @@ class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
         Readout.set_param(
             cfg["readout"], "ro_length", sweep2param("length", length_sweep)
         )
-        Readout.set_param(cfg["readout"], "length", lengths.max() + 0.1)
+        Readout.set_param(cfg["readout"], "length", lengths.max() + 0.11)
 
         with LivePlotter1D("Readout Length (us)", "SNR") as viewer:
 
