@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Literal, NotRequired, Optional, Tuple, cast
+from typing_extensions import Literal, NotRequired, Optional, Tuple, cast, List
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
@@ -113,8 +113,9 @@ def optimize_ge_radius(
     g_center: complex,
     e_center: complex,
     init_pops: NDArray[np.float64],
+    consider_other: bool = True,
 ) -> float:
-    from scipy.optimize import minimize
+    from scipy.optimize import minimize_scalar
 
     # use pca to retrive minimum radius
     ge_signals = np.concatenate([g_signals, e_signals])
@@ -126,6 +127,7 @@ def optimize_ge_radius(
     A_init = make_init_matrix(init_pops)
 
     def loss_fn(radius: float) -> float:
+
         gg_mask, ge_mask, go_mask = classify_result(
             g_signals, g_center, e_center, radius
         )
@@ -141,7 +143,7 @@ def optimize_ge_radius(
         n_eo = eo_mask.sum() / eo_mask.shape[0]
 
         # assume other state is in the middle of g and e, calculate effective population
-        n_og = calc_overlay(sigma, ge_dist / 2, radius)
+        n_og = calc_overlay(sigma, ge_dist / 2, radius) if consider_other else 0.0
         n_oe = n_og
         n_oo = 1.0 - n_og - n_oe
 
@@ -151,7 +153,7 @@ def optimize_ge_radius(
         # calculate condision number of confusion matrix as loss
         return np.linalg.cond(confusion_matrix)
 
-    result = minimize(loss_fn, x0=ge_dist / 4, bounds=[(0.0, ge_dist / 2)])
+    result = minimize_scalar(loss_fn, bounds=(0.0, ge_dist / 2))
     return float(result.x)
 
 
@@ -170,6 +172,8 @@ class GE_Cfg(TaskConfig):
     readout: ReadoutCfg
 
     shots: int
+    rounds: NotRequired[int]  # will be overwritten to 1
+    reps: NotRequired[int]  # will be overwritten by shots
 
 
 class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
@@ -260,6 +264,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         e_center: complex,
         radius: Optional[float] = None,
         result: Optional[GE_Result] = None,
+        consider_other: bool = True,
     ) -> Tuple[NDArray[np.float64], float, Figure]:
         if result is None:
             result = self.last_result
@@ -272,7 +277,12 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
 
         if radius is None:
             radius = optimize_ge_radius(
-                g_signals, e_signals, g_center, e_center, init_pops
+                g_signals,
+                e_signals,
+                g_center,
+                e_center,
+                init_pops,
+                consider_other=consider_other,
             )
 
         gg_mask, ge_mask, go_mask = classify_result(
