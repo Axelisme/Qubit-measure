@@ -127,7 +127,7 @@ class SampleTable(SyncFile):
 
 
 class MetaDictView:
-    PROTECTED_KEYS = ["declare_subdict", "dump"]
+    _PROTECTED_KEYS = ["declare_subdict", "dump_json"]
 
     def __init__(self, data: dict, table: MetaDict, read_only: bool = False) -> None:
         self._data = data
@@ -136,11 +136,7 @@ class MetaDictView:
 
     @classmethod
     def _is_protected(cls, name: str) -> bool:
-        return (
-            name.startswith("_")
-            or name == "PROTECTED_KEYS"
-            or name in cls.PROTECTED_KEYS
-        )
+        return name.startswith("_") or name in cls._PROTECTED_KEYS
 
     def __getattr__(self, name: str, /) -> Any:
         if MetaDictView._is_protected(name):
@@ -202,7 +198,7 @@ class MetaDictView:
 
 
 class MetaDict(SyncFile):
-    PROTECTED_KEYS = ["dump", "load", "sync", "clone"]
+    _PROTECTED_KEYS = ["dump", "load", "sync", "clone", "update_modify_time"]
 
     def __init__(
         self, json_path: Optional[str] = None, read_only: bool = False
@@ -259,11 +255,7 @@ class MetaDict(SyncFile):
 
     @classmethod
     def _is_protected(cls, name: str) -> bool:
-        return (
-            name.startswith("_")
-            or name == "PROTECTED_KEYS"
-            or name in cls.PROTECTED_KEYS
-        )
+        return name.startswith("_") or name in cls._PROTECTED_KEYS
 
     def __getattr__(self, name: str) -> Any:
         if MetaDict._is_protected(name):
