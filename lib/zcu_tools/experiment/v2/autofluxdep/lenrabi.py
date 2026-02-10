@@ -231,7 +231,8 @@ class LenRabiTask(
             tag=prefix_tag + "/success",
         )
 
-    def load(self, filepath: str, **kwargs) -> LenRabiResult:
+    @classmethod
+    def load(cls, filepath: str, **kwargs) -> dict:
         # main container (has pi2_length and rabi_freq)
         data = np.load(filepath)
         pi2_length = data["pi2_length"]
@@ -274,13 +275,15 @@ class LenRabiTask(
         rabi_freq = rabi_freq.astype(np.float64)
         success = success_data.astype(np.bool_) & success_main.astype(np.bool_)
 
-        return LenRabiResult(
-            raw_signals=raw_signals,
-            pi_length=pi_length,
-            pi2_length=pi2_length,
-            rabi_freq=rabi_freq,
-            success=success,
-        )
+        return {
+            "raw_signals": raw_signals,
+            "pi_length": pi_length,
+            "pi2_length": pi2_length,
+            "rabi_freq": rabi_freq,
+            "success": success,
+            "flx_values": flx_values,
+            "lengths": lengths,
+        }
 
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.init_cfg = deepcopy(ctx.cfg)

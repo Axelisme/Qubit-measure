@@ -214,7 +214,8 @@ class QubitFreqTask(
             tag=prefix_tag + "/success",
         )
 
-    def load(self, filepath: str, **kwargs) -> QubitFreqResult:
+    @classmethod
+    def load(cls, filepath: str, **kwargs) -> dict:
         data = np.load(filepath)
 
         flx_values: NDArray[np.float64] = data["flx_values"]
@@ -265,16 +266,16 @@ class QubitFreqTask(
         fit_kappa_err = np.asarray(fit_kappa_err, dtype=np.float64)
         success = success_data.astype(np.bool_)
 
-        return QubitFreqResult(
-            raw_signals=raw_signals,
-            predict_freq=predict_freq,
-            fit_detune=fit_detune,
-            fit_freq=fit_freq,
-            fit_freq_err=fit_freq_err,
-            fit_kappa=fit_kappa,
-            fit_kappa_err=fit_kappa_err,
-            success=success,
-        )
+        return {
+            "raw_signals": raw_signals,
+            "predict_freq": predict_freq,
+            "fit_detune": fit_detune,
+            "fit_freq": fit_freq,
+            "fit_freq_err": fit_freq_err,
+            "fit_kappa": fit_kappa,
+            "fit_kappa_err": fit_kappa_err,
+            "success": success,
+        }
 
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.init_cfg = deepcopy(ctx.cfg)

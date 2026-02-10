@@ -218,7 +218,8 @@ class T1Task(MeasurementTask[T1Result, T_RootResultType, TaskConfig, T1PlotterDi
             tag=prefix_tag + "/t1",
         )
 
-    def load(self, filepath: str, **kwargs) -> T1Result:
+    @classmethod
+    def load(cls, filepath: str, **kwargs) -> dict:
         data = np.load(filepath)
 
         flx_values = data["flx_values"]
@@ -251,13 +252,15 @@ class T1Task(MeasurementTask[T1Result, T_RootResultType, TaskConfig, T1PlotterDi
         t1_err = data["t1_err"].astype(np.float64)
         success = success.astype(np.bool_)
 
-        return T1Result(
-            raw_signals=raw_signals,
-            length=length,
-            t1=t1,
-            t1_err=t1_err,
-            success=success,
-        )
+        return {
+            "raw_signals": raw_signals,
+            "length": length,
+            "t1": t1,
+            "t1_err": t1_err,
+            "success": success,
+            "flx_values": flx_values,
+            "lengths": length_stored[0],
+        }
 
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.init_cfg = deepcopy(ctx.cfg)

@@ -243,7 +243,8 @@ class T2RamseyTask(
             tag=prefix_tag + "/t2r",
         )
 
-    def load(self, filepath: str, **kwargs) -> T2RamseyResult:
+    @classmethod
+    def load(cls, filepath: str, **kwargs) -> dict:
         data = np.load(filepath)
 
         flx_values = data["flx_values"]
@@ -280,15 +281,17 @@ class T2RamseyTask(
         t2r_detune_err = t2r_detune_err.astype(np.float64)
         success = success.astype(np.bool_)
 
-        return T2RamseyResult(
-            raw_signals=raw_signals,
-            length=length,
-            t2r=t2r,
-            t2r_err=t2r_err,
-            t2r_detune=t2r_detune,
-            t2r_detune_err=t2r_detune_err,
-            success=success,
-        )
+        return {
+            "raw_signals": raw_signals,
+            "length": length,
+            "t2r": t2r,
+            "t2r_err": t2r_err,
+            "t2r_detune": t2r_detune,
+            "t2r_detune_err": t2r_detune_err,
+            "success": success,
+            "flx_values": flx_values,
+            "lengths": length_stored[0],
+        }
 
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.init_cfg = deepcopy(ctx.cfg)

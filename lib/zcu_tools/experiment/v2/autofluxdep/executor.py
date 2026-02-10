@@ -75,9 +75,6 @@ class MeasurementTask(
         prefix_tag: str,
     ) -> None: ...
 
-    @abstractmethod
-    def load(self, filepath: str, **kwargs) -> T_ResultType: ...
-
 
 class FluxDepTaskConfig(TaskConfig):
     dev: Mapping[str, DeviceInfo]
@@ -134,7 +131,7 @@ class FluxDepBatchTask(BatchTask):
             self.task_pbar = None
 
 
-class FluxDepExecutor(AbsExperiment[Mapping[str, Result], FluxDepTaskConfig]):
+class FluxDepExecutor:
     def __init__(self, flx_values: NDArray[np.float64]) -> None:
         super().__init__()
 
@@ -347,14 +344,4 @@ class FluxDepExecutor(AbsExperiment[Mapping[str, Result], FluxDepTaskConfig]):
             )
 
     def load(self, filepath: str, **kwargs) -> Mapping[str, Result]:
-        _filepath = Path(filepath)
-
-        loaded: Dict[str, Result] = {}
-        for ms_name, ms in self.measurements.items():
-            ms_filepath = str(_filepath.with_name(_filepath.name + f"_{ms_name}"))
-            loaded[ms_name] = ms.load(ms_filepath, **kwargs)
-
-        self.last_cfg = None
-        self.last_result = loaded
-
-        return loaded
+        raise NotImplementedError("Not implemented")

@@ -89,7 +89,8 @@ class MistOvernightAnalyzer:
 
         max_populations = np.nanmax(populations, axis=0)
         min_populations = np.nanmin(populations, axis=0)
-        med_populations = np.nanmedian(populations, axis=0)
+        med_populations = np.nanmean(populations, axis=0)
+        std_populations = np.nanstd(populations, axis=0)
 
         if ac_coeff is None:
             xs = gains
@@ -100,41 +101,49 @@ class MistOvernightAnalyzer:
 
         ax = fig.add_subplot(1, 1, 1)
 
-        med_kwargs = dict(marker=".", linestyle="-", markersize=4)
+        avg_kwargs = dict(marker=".", linestyle="-", markersize=4)
         side_kwargs = dict(linestyle="--", alpha=0.3)
+        ax.fill_between(
+            xs, min_populations[:, 0], max_populations[:, 0], color="b", alpha=0.1
+        )
         ax.plot(xs, max_populations[:, 0], color="b", **side_kwargs)  # type: ignore
-        ax.plot(
+        ax.errorbar(
             xs,
             med_populations[:, 0],
+            yerr=std_populations[:, 0],
             color="b",
-            label=r"$|0\rangle$",
-            **med_kwargs,  # type: ignore
+            **avg_kwargs,  # type: ignore
         )
         ax.plot(xs, min_populations[:, 0], color="b", **side_kwargs)  # type: ignore
 
+        ax.fill_between(
+            xs, min_populations[:, 1], max_populations[:, 1], color="r", alpha=0.1
+        )
         ax.plot(xs, max_populations[:, 1], color="r", **side_kwargs)  # type: ignore
-        ax.plot(
+        ax.errorbar(
             xs,
             med_populations[:, 1],
+            yerr=std_populations[:, 1],
             color="r",
-            label=r"$|1\rangle$",
-            **med_kwargs,  # type: ignore
+            **avg_kwargs,  # type: ignore
         )
         ax.plot(xs, min_populations[:, 1], color="r", **side_kwargs)  # type: ignore
 
+        ax.fill_between(
+            xs, min_populations[:, 2], max_populations[:, 2], color="g", alpha=0.1
+        )
         ax.plot(xs, max_populations[:, 2], color="g", **side_kwargs)  # type: ignore
-        ax.plot(
+        ax.errorbar(
             xs,
             med_populations[:, 2],
+            yerr=std_populations[:, 2],
             color="g",
-            label=r"$|L\rangle$",
-            **med_kwargs,  # type: ignore
+            **avg_kwargs,  # type: ignore
         )
         ax.plot(xs, min_populations[:, 2], color="g", **side_kwargs)  # type: ignore
 
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel("Population", fontsize=14)
-        ax.legend()
         ax.grid(True)
 
     @classmethod

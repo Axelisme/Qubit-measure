@@ -260,7 +260,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         assert isinstance(fig, Figure)
 
         # Use NonUniformImage for better visualization with pdr^2 as x-axis
-        im = NonUniformImage(ax1, cmap="viridis", interpolation="nearest")
+        im = NonUniformImage(ax1, cmap="RdBu_r", interpolation="nearest")
         im.set_data(avg_n, freqs, populations.T)
         im.set_extent((avg_n[0], avg_n[-1], freqs[0], freqs[-1]))
         ax1.add_image(im)
@@ -275,7 +275,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         # Fit curve in terms of pdr^2
         label = r"$\bar n$" + f" = {ac_coeff:.2g} " + r"$gain^2$"
         gain_fit = ac_coeff * x2_fit
-        ax1.plot(gain_fit, y_fit, "-", label=label)
+        ax1.plot(gain_fit, y_fit, "-", label=label, color="y")
 
         # Create secondary x-axis for pdr^2 (Readout Gain²)
         ax2 = ax1.twiny()

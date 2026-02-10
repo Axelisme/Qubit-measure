@@ -41,16 +41,12 @@ from .executor import MeasurementTask, T_RootResultType
 
 
 def mist_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    avg_len = max(int(0.05 * signals.shape[1]), 1)
-
-    mist_signals = np.abs(
-        signals - np.mean(signals[:, :avg_len], axis=1, keepdims=True)
-    )
+    mist_signals = np.abs(signals - np.mean(signals, axis=1, keepdims=True))
     if np.all(np.isnan(mist_signals)):
         return mist_signals
 
-    ref_signals = np.sort(mist_signals.flatten())[: int(0.5 * mist_signals.size)]
-    mist_signals = np.clip(mist_signals, 0, 5 * np.nanmedian(ref_signals))
+    mist_signals /= np.nanstd(mist_signals, axis=1, keepdims=True)
+    mist_signals = np.clip(mist_signals, 0, 3 * np.nanstd(mist_signals))
 
     return mist_signals
 
@@ -159,7 +155,8 @@ class Mist_Task(
             tag=prefix_tag + "/signals",
         )
 
-    def load(self, filepath: str, **kwargs) -> Mist_Result:
+    @classmethod
+    def load(cls, filepath: str, **kwargs) -> dict:
         data = np.load(filepath)
 
         flx_values = data["flx_values"]
@@ -168,12 +165,17 @@ class Mist_Task(
         success = data["success"]
 
         assert raw_signals.shape == (len(flx_values), len(gains))
-        assert success.shape == ()
+        assert success.shape == (len(flx_values),)
 
         raw_signals = raw_signals.astype(np.complex128)
         success = np.asarray(success, dtype=np.bool_)
 
-        return Mist_Result(raw_signals=raw_signals, success=success)
+        return {
+            "raw_signals": raw_signals,
+            "success": success,
+            "flx_values": flx_values,
+            "gains": gains,
+        }
 
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.init_cfg = deepcopy(ctx.cfg)
