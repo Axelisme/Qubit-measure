@@ -174,7 +174,7 @@ class MetaDictView:
         del self._data[name]
         self._table.sync()
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         return f"MetaTableView({pformat(self._data)})"
 
     def declare_subdict(self, name: str) -> MetaDictView:
@@ -277,7 +277,7 @@ class MetaDict(SyncFile):
 
         delattr(self._view, name)
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         return f"MetaTable({pformat(self._data)})"
 
 

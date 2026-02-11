@@ -40,14 +40,23 @@ from zcu_tools.utils.func_tools import MinIntervalFunc
 from .executor import MeasurementTask, T_RootResultType
 
 
-def mist_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    mist_signals = np.abs(signals - np.mean(signals, axis=1, keepdims=True))
-    if np.all(np.isnan(mist_signals)):
-        return mist_signals
+def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    if np.all(np.isnan(signals)):
+        return np.abs(signals)
 
-    mist_signals /= np.nanstd(mist_signals, axis=1, keepdims=True)
-    mist_signals = np.clip(mist_signals, 0, 3 * np.nanstd(mist_signals))
+    mist_signals = np.abs(signals - np.mean(signals))
+    mist_signals /= np.std(mist_signals)
 
+    return mist_signals
+
+
+def mist_fluxdep_signal2real(
+    signals: NDArray[np.complex128],
+) -> NDArray[np.float64]:
+    mist_signals = np.array(list(map(mist_signal2real, signals)), dtype=np.float64)
+    if not np.all(np.isnan(mist_signals)):
+        mist_signals = np.abs(mist_signals - np.nanmedian(mist_signals))
+        mist_signals = np.clip(mist_signals, 0, 3 * np.nanstd(mist_signals))
     return mist_signals
 
 

@@ -6,7 +6,6 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
-from matplotlib.patches import Circle
 from numpy.typing import NDArray
 from typing_extensions import NotRequired, Optional, cast
 
@@ -32,10 +31,10 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from .util import classify_result, plot_with_classified
 
 # (signals)
-CheckResultType = NDArray[np.complex128]
+CheckResult = NDArray[np.complex128]
 
 
-class CheckTaskConfig(TaskConfig, TwoToneProgramCfg):
+class CheckCfg(TaskConfig, TwoToneProgramCfg):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: NotRequired[PulseCfg]
@@ -44,18 +43,18 @@ class CheckTaskConfig(TaskConfig, TwoToneProgramCfg):
     shots: int
 
 
-class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
-    def run(self, soc, soccfg, cfg: CheckTaskConfig) -> CheckResultType:
-        cfg = deepcopy(cfg)  # avoid in-place modification
+class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
+    def run(self, soc, soccfg, cfg: dict) -> CheckResult:
+        _cfg = cast(CheckCfg, deepcopy(cfg))  # avoid in-place modification
 
         # Validate and setup configuration
-        if cfg.setdefault("rounds", 1) != 1:
+        if _cfg.setdefault("rounds", 1) != 1:
             warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
-            cfg["rounds"] = 1
+            _cfg["rounds"] = 1
 
-        if "reps" in cfg:
+        if "reps" in _cfg:
             warnings.warn("reps will be overwritten by singleshot measurement shots")
-        cfg["reps"] = cfg["shots"]
+        _cfg["reps"] = _cfg["shots"]
 
         def measure_fn(ctx: TaskContextView, _):
             prog = ModularProgramV2(
@@ -86,13 +85,13 @@ class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
             task=HardTask(
                 measure_fn=measure_fn,
                 raw2signal_fn=raw2signal_fn,
-                result_shape=(cfg["shots"],),
+                result_shape=(_cfg["shots"],),
             ),
-            init_cfg=cfg,
+            init_cfg=_cfg,
         )
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = signals
 
         return signals
@@ -102,7 +101,7 @@ class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
         g_center: complex,
         e_center: complex,
         radius: float,
-        result: Optional[CheckResultType] = None,
+        result: Optional[CheckResult] = None,
         max_point: int = 5000,
     ) -> Figure:
         if result is None:
@@ -131,7 +130,7 @@ class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[CheckResultType] = None,
+        result: Optional[CheckResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/check",
         **kwargs,
@@ -155,9 +154,9 @@ class CheckExp(AbsExperiment[CheckResultType, CheckTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> CheckResultType:
+    def load(self, filepath: str, **kwargs) -> CheckResult:
         signals, _, _ = load_data(filepath, **kwargs)
-        signals = cast(CheckResultType, signals)
+        signals = cast(CheckResult, signals)
 
         self.last_cfg = None
         self.last_result = signals
