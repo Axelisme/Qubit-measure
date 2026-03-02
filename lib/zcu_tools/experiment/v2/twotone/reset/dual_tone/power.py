@@ -8,11 +8,11 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, run_task
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -28,24 +28,27 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 
 # (pdrs1, pdrs2, signals_2d)
-PowerResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
-class PowerTaskConfig(TaskConfig, ModularProgramCfg):
+class PowerModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    init_pulse: PulseCfg
+    init_pulse: NotRequired[PulseCfg]
     tested_reset: ResetCfg
     readout: ReadoutCfg
 
 
-class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
-    def run(self, soc, soccfg, cfg: PowerTaskConfig) -> PowerResultType:
+class PowerCfg(ModularProgramCfg):
+    modules: PowerModuleCfg
+
+
+class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
+    def run(self, soc, soccfg, cfg: PowerCfg) -> PowerResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Check that reset pulse is dual pulse type
-        if cfg["tested_reset"]["type"] != "two_pulse":
+        modules = cfg["modules"]
+        if modules["tested_reset"]["type"] != "two_pulse":
             raise ValueError("This experiment only supports dual-tone reset")
 
         # Ensure gain1 is the outer loop for better visualization
@@ -59,10 +62,14 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
         pdrs2 = sweep2array(cfg["sweep"]["gain2"])  # predicted amplitudes
 
         Reset.set_param(
-            cfg["tested_reset"], "gain1", sweep2param("gain1", cfg["sweep"]["gain1"])
+            modules["tested_reset"],
+            "gain1",
+            sweep2param("gain1", cfg["sweep"]["gain1"]),
         )
         Reset.set_param(
-            cfg["tested_reset"], "gain2", sweep2param("gain2", cfg["sweep"]["gain2"])
+            modules["tested_reset"],
+            "gain2",
+            sweep2param("gain2", cfg["sweep"]["gain2"]),
         )
 
         def dual_reset_pdr_signal2real(signals: np.ndarray) -> np.ndarray:
@@ -74,18 +81,21 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
         with LivePlotter2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                Reset("tested_reset", ctx.cfg["tested_reset"]),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset(
+                                "reset",
+                                (modules := ctx.cfg["modules"]).get(
+                                    "reset", {"type": "none"}
+                                ),
+                            ),
+                            Pulse("init_pulse", modules.get("init_pulse")),
+                            Reset("tested_reset", modules["tested_reset"]),
+                            Readout("readout", modules["readout"]),
+                        ],
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(pdrs1), len(pdrs2)),
                 ),
                 init_cfg=cfg,
@@ -102,7 +112,7 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[PowerResultType] = None,
+        result: Optional[PowerResult] = None,
         *,
         smooth: float = 1.0,
         xname: Optional[str] = None,
@@ -156,7 +166,7 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[PowerResultType] = None,
+        result: Optional[PowerResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/dual_tone/power",
         **kwargs,
@@ -177,7 +187,7 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> PowerResultType:
+    def load(self, filepath: str, **kwargs) -> PowerResult:
         signals, pdrs1, pdrs2 = load_data(filepath, **kwargs)
         assert pdrs1 is not None and pdrs2 is not None
         assert len(pdrs1.shape) == 1 and len(pdrs2.shape) == 1

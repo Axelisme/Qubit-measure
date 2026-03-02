@@ -1,14 +1,22 @@
 from __future__ import annotations
 
-
 import numpy as np
-from numpy.typing import DTypeLike, NDArray
+from numpy.typing import NDArray
 from tqdm.auto import tqdm
-from typing_extensions import Any, Callable, Tuple, TypeVar, Optional, Generic, Sequence
+from typing_extensions import (
+    Any,
+    Callable,
+    Generic,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    TypeVar,
+)
 
 from zcu_tools.device import GlobalDeviceManager
 
-from .base import AbsTask, Result, TaskConfig, TaskContextView
+from .base import AbsTask, Result, TaskContextView
 
 
 def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
@@ -16,27 +24,26 @@ def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.comp
 
 
 T_Raw = TypeVar("T_Raw")
-T_DType = TypeVar("T_DType", bound=np.number)
+T_DType = TypeVar("T_DType", bound=np.number, default=np.complex128)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
-T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
 class HardTask(
-    AbsTask[NDArray[T_DType], T_RootResult, T_TaskConfig],
-    Generic[T_DType, T_RootResult, T_TaskConfig, T_Raw],
+    AbsTask[NDArray[T_DType], T_RootResult],
+    Generic[T_RootResult, T_Raw, T_DType],
 ):
     def __init__(
         self,
         measure_fn: Callable[
             [
-                TaskContextView[NDArray[T_DType], T_RootResult, T_TaskConfig],
+                TaskContextView[NDArray[T_DType], T_RootResult],
                 Callable[[int, T_Raw], Any],
             ],
             T_Raw,
         ],
         raw2signal_fn: Callable[[T_Raw], NDArray[T_DType]] = default_raw2signal_fn,
         result_shape: Tuple[int, ...] = (),
-        dtype: DTypeLike = complex,
+        dtype: Type[T_DType] = np.complex128,
     ) -> None:
         self.measure_fn = measure_fn
         self.raw2signal_fn = raw2signal_fn

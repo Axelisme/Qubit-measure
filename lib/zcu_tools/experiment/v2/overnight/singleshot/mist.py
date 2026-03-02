@@ -17,7 +17,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
@@ -51,12 +51,15 @@ class MistPlotterDict(TypedDict, closed=True):
     current: LivePlotter1D
 
 
-class MistCfg(TaskConfig, ModularProgramCfg):
+class MistModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
+
+class MistCfg(ModularProgramCfg):
+    modules: MistModuleCfg
     sweep: Dict[str, SweepCfg]
 
 
@@ -300,7 +303,7 @@ class MistOvernightAnalyzer:
         return self.result
 
 
-class MistTask(MeasurementTask[MistResult, T_RootResult, MistCfg, MistPlotterDict]):
+class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
     def __init__(
         self, cfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
@@ -314,17 +317,20 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistCfg, MistPlotterDic
 
         def measure_mist_fn(ctx: TaskContextView, update_hook: Callable):
             cfg = deepcopy(ctx.cfg)
+            modules = cfg["modules"]
             Pulse.set_param(
-                cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+                modules["probe_pulse"],
+                "gain",
+                sweep2param("gain", cfg["sweep"]["gain"]),
             )
             return ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 cfg,
                 modules=[
-                    Reset("reset", cfg.get("reset", {"type": "none"})),
-                    Pulse("init_pulse", cfg=cfg.get("init_pulse")),
-                    Pulse("probe_pulse", cfg=cfg["probe_pulse"]),
-                    Readout("readout", cfg["readout"]),
+                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Pulse("init_pulse", cfg=modules.get("init_pulse")),
+                    Pulse("probe_pulse", cfg=modules["probe_pulse"]),
+                    Readout("readout", modules["readout"]),
                 ],
             ).acquire(
                 ctx.env_dict["soc"],
@@ -335,12 +341,11 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistCfg, MistPlotterDic
                 population_radius=radius,
             )
 
-        self.task = HardTask[
-            np.float64, T_RootResult, MistCfg, List[NDArray[np.float64]]
-        ](
+        self.task = HardTask[T_RootResult, List[NDArray[np.float64]], np.float64](
             measure_fn=measure_mist_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(pdr_sweep["expts"], 2),
+            dtype=np.float64,
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:

@@ -1,8 +1,8 @@
 from copy import deepcopy
-from typing import Callable, Sequence, Tuple, List
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Any, Callable, List, Mapping, Sequence, Tuple
 
 from zcu_tools.experiment.v2.runner import TaskContextView
 from zcu_tools.program.v2 import MyProgramV2
@@ -10,7 +10,7 @@ from zcu_tools.program.v2 import MyProgramV2
 
 def measure_with_sweep(
     ctx: TaskContextView,
-    prog_maker: Callable[[dict, float], MyProgramV2],
+    prog_maker: Callable[[Mapping[str, Any], float], MyProgramV2],
     values: Sequence[float],
     sweep_shape: Tuple[int, ...],
     **acquire_kwargs,

@@ -12,41 +12,46 @@ from scipy.ndimage import gaussian_filter1d
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg
+from zcu_tools.program.v2 import OneToneCfg, OneToneProgram
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from .runner import HardTask, TaskConfig, run_task
+from .runner import HardTask, run_task
 
-LookbackResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+LookbackResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class LookbackTaskConfig(TaskConfig, OneToneProgramCfg): ...
+class LookbackCfg(OneToneCfg): ...
 
 
 def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class LookbackExp(AbsExperiment[LookbackResultType, LookbackTaskConfig]):
-    def run(self, soc, soccfg, cfg: LookbackTaskConfig) -> LookbackResultType:
+class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
+    def run(self, soc, soccfg, cfg: LookbackCfg) -> LookbackResult:
         cfg = deepcopy(cfg)
 
         if cfg.setdefault("reps", 1) != 1:
             warnings.warn("reps is not 1 in config, this will be ignored.")
             cfg["reps"] = 1
 
+        modules = cfg["modules"]
         prog = OneToneProgram(soccfg, cfg)
-        Ts = prog.get_time_axis(ro_index=0) + cfg["readout"]["ro_cfg"]["trig_offset"]
+        Ts = (
+            prog.get_time_axis(ro_index=0) + modules["readout"]["ro_cfg"]["trig_offset"]
+        )
         assert isinstance(Ts, np.ndarray)
 
         with LivePlotter1D("Time (us)", "Amplitude") as viewer:
+
+            def measure_fn(ctx, update_hook):
+                return OneToneProgram(soccfg, ctx.cfg).acquire_decimated(
+                    soc, progress=False, callback=update_hook
+                )
+
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        OneToneProgram(soccfg, ctx.cfg).acquire_decimated(
-                            soc, progress=False, callback=update_hook
-                        )
-                    ),
+                    measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0].dot([1, 1j]),
                     result_shape=(len(Ts),),
                 ),
@@ -64,7 +69,7 @@ class LookbackExp(AbsExperiment[LookbackResultType, LookbackTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[LookbackResultType] = None,
+        result: Optional[LookbackResult] = None,
         *,
         ratio: float = 0.3,
         smooth: Optional[float] = None,
@@ -115,7 +120,7 @@ class LookbackExp(AbsExperiment[LookbackResultType, LookbackTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[LookbackResultType] = None,
+        result: Optional[LookbackResult] = None,
         comment: Optional[str] = None,
         tag: str = "lookback",
         **kwargs,
@@ -135,7 +140,7 @@ class LookbackExp(AbsExperiment[LookbackResultType, LookbackTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> LookbackResultType:
+    def load(self, filepath: str, **kwargs) -> LookbackResult:
         signals, Ts, _ = load_data(filepath, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1

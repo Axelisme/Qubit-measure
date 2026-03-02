@@ -9,34 +9,27 @@ from numpy.typing import NDArray
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
+from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background, rescale
 
-from ..runner import HardTask, SoftTask, TaskConfig, run_task
+from ..runner import HardTask, SoftTask, run_task
 from ..utils import wrap_earlystop_check
 
-PowerDepResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+PowerDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
 def pdrdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rescale(minus_background(np.abs(signals), axis=1), axis=1)
 
 
-class PowerDepTaskConfig(TaskConfig, OneToneProgramCfg): ...
+class PowerDepCfg(OneToneCfg): ...
 
 
-class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
+class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: PowerDepTaskConfig,
-        *,
-        earlystop_snr: Optional[float] = None,
-    ) -> PowerDepResultType:
+        self, soc, soccfg, cfg: PowerDepCfg, *, earlystop_snr: Optional[float] = None
+    ) -> PowerDepResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -46,8 +39,9 @@ class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
         pdrs = sweep2array(pdr_sweep, allow_array=True)
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
+        modules = cfg["modules"]
         Readout.set_param(
-            cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
         # run experiment
@@ -60,8 +54,8 @@ class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
                 task=SoftTask(
                     sweep_name="gain",
                     sweep_values=pdrs.tolist(),
-                    update_cfg_fn=lambda _, ctx, pdr: (
-                        Readout.set_param(ctx.cfg["readout"], "gain", pdr)
+                    update_cfg_fn=lambda _, ctx, pdr: Readout.set_param(
+                        ctx.cfg["modules"]["readout"], "gain", pdr
                     ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
@@ -95,14 +89,14 @@ class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[PowerDepResultType] = None,
+        result: Optional[PowerDepResult] = None,
     ) -> None:
         raise NotImplementedError("Not implemented")
 
     def save(
         self,
         filepath: str,
-        result: Optional[PowerDepResultType] = None,
+        result: Optional[PowerDepResult] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/power_dep",
         **kwargs,
@@ -123,7 +117,7 @@ class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> PowerDepResultType:
+    def load(self, filepath: str, **kwargs) -> PowerDepResult:
         signals2D, fpts, pdrs = load_data(filepath, **kwargs)
         assert fpts is not None and pdrs is not None
         assert len(fpts.shape) == 1 and len(pdrs.shape) == 1

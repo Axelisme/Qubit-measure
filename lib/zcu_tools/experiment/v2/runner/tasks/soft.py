@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 from tqdm.auto import tqdm
-from typing_extensions import Any, Callable, List, Sequence, TypeVar, Union, Optional
+from typing_extensions import Any, Callable, List, Optional, Sequence, TypeVar, Union
 
-from .base import AbsTask, Result, TaskConfig, TaskContextView
+from .base import AbsTask, Result, TaskContextView
 
 T_ValueType = TypeVar("T_ValueType", bound=Union[int, float, complex])
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
-T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
-class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult, T_TaskConfig]):
+class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult]):
     def __init__(
         self,
         sweep_name: str,
@@ -19,12 +18,12 @@ class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult, T_TaskConfig]):
         update_cfg_fn: Callable[
             [
                 int,
-                TaskContextView[Sequence[T_ChildResult], T_RootResult, T_TaskConfig],
+                TaskContextView[Sequence[T_ChildResult], T_RootResult],
                 T_ValueType,
             ],
             Any,
         ],
-        sub_task: AbsTask[T_ChildResult, T_RootResult, T_TaskConfig],
+        sub_task: AbsTask[T_ChildResult, T_RootResult],
     ) -> None:
         self.sweep_values = sweep_values
         self.sweep_name = sweep_name

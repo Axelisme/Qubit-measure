@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -13,7 +13,6 @@ from zcu_tools.experiment.v2.runner import (
     HardTask,
     RepeatOverTime,
     ReTryIfFail,
-    TaskConfig,
     run_task,
 )
 from zcu_tools.liveplot import LivePlotter2DwithLine
@@ -30,7 +29,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-MISTPowerDepOvernightResultType = Tuple[
+MISTPowerDepOvernightResult = Tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -43,27 +42,32 @@ def mist_overnight_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
     return np.abs(mist_signals)
 
 
-class MISTPowerDepOvernightTaskConfig(TaskConfig, ModularProgramCfg):
+class MISTPowerDepOvernightModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    init_pulse: PulseCfg
+    init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
+
+
+class MISTPowerDepOvernightCfg(ModularProgramCfg):
+    modules: MISTPowerDepOvernightModuleCfg
     interval: float
 
 
 class MISTPowerDepOvernightExp(
-    AbsExperiment[MISTPowerDepOvernightResultType, MISTPowerDepOvernightTaskConfig]
+    AbsExperiment[MISTPowerDepOvernightResult, MISTPowerDepOvernightCfg]
 ):
     def run(
         self,
         soc,
         soccfg,
-        cfg: MISTPowerDepOvernightTaskConfig,
+        cfg: MISTPowerDepOvernightCfg,
         *,
         num_times=50,
         fail_retry=3,
-    ) -> MISTPowerDepOvernightResultType:
+    ) -> MISTPowerDepOvernightResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
+        modules = cfg["modules"]
 
         assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
@@ -72,7 +76,7 @@ class MISTPowerDepOvernightExp(
         pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
         Pulse.set_param(
-            cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+            modules["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
         )
 
         with LivePlotter2DwithLine(
@@ -86,25 +90,27 @@ class MISTPowerDepOvernightExp(
                     task=ReTryIfFail(
                         max_retries=fail_retry,
                         task=HardTask(
-                            measure_fn=lambda ctx, update_hook: (
-                                ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
+                            measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset(
+                                        "reset",
+                                        ctx.cfg["modules"].get(
+                                            "reset", {"type": "none"}
                                         ),
-                                        Pulse(
-                                            "init_pulse", cfg=ctx.cfg.get("init_pulse")
-                                        ),
-                                        Pulse(
-                                            "probe_pulse", cfg=ctx.cfg["probe_pulse"]
-                                        ),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                ).acquire(soc, progress=False, callback=update_hook)
-                            ),
+                                    ),
+                                    Pulse(
+                                        "init_pulse",
+                                        cfg=ctx.cfg["modules"].get("init_pulse"),
+                                    ),
+                                    Pulse(
+                                        "probe_pulse",
+                                        cfg=ctx.cfg["modules"]["probe_pulse"],
+                                    ),
+                                    Readout("readout", ctx.cfg["modules"]["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook),
                             result_shape=(len(pdrs),),
                         ),
                     ),
@@ -126,7 +132,7 @@ class MISTPowerDepOvernightExp(
 
     def analyze(
         self,
-        result: Optional[MISTPowerDepOvernightResultType] = None,
+        result: Optional[MISTPowerDepOvernightResult] = None,
         *,
         g0=None,
         e0=None,
@@ -169,7 +175,7 @@ class MISTPowerDepOvernightExp(
     def save(
         self,
         filepath: str,
-        result: Optional[MISTPowerDepOvernightResultType] = None,
+        result: Optional[MISTPowerDepOvernightResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/mist/pdr_overnight",
         **kwargs,
@@ -190,7 +196,7 @@ class MISTPowerDepOvernightExp(
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> MISTPowerDepOvernightResultType:
+    def load(self, filepath: str, **kwargs) -> MISTPowerDepOvernightResult:
         overnight_signals, pdrs, iters = load_data(filepath, **kwargs)
         assert pdrs is not None and iters is not None
         assert len(pdrs.shape) == 1 and len(iters.shape) == 1

@@ -10,25 +10,25 @@ from numpy.typing import NDArray
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
+from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 
-from ..runner import HardTask, TaskConfig, run_task
+from ..runner import HardTask, run_task
 
 # (fpts, signals)
-FreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+FreqResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class FreqTaskConfig(TaskConfig, OneToneProgramCfg): ...
+class FreqCfg(OneToneCfg): ...
 
 
 def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
-    def run(self, soc, soccfg, cfg: FreqTaskConfig) -> FreqResultType:
+class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
+    def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
         cfg = deepcopy(cfg)
 
         # Ensure the sweep section is in canonical single-axis form.
@@ -39,19 +39,18 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
         fpts: NDArray[np.float64] = sweep2array(cfg["sweep"]["freq"])  # MHz
 
         # set readout frequency as sweep param
+        modules = cfg["modules"]
         Readout.set_param(
-            cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
         # run experiment
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        OneToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
-                        )
-                    ),
+                    measure_fn=lambda ctx, update_hook: OneToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(fpts),),
                 ),
                 init_cfg=cfg,
@@ -66,7 +65,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqResult] = None,
         *,
         model_type: Literal["hm", "t", "auto"] = "auto",
         edelay: Optional[float] = None,
@@ -108,7 +107,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/freq",
         **kwargs,
@@ -128,7 +127,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> FreqResultType:
+    def load(self, filepath: str, **kwargs) -> FreqResult:
         signals, fpts, _ = load_data(filepath, **kwargs)
         assert len(fpts.shape) == 1 and len(signals.shape) == 1
         assert fpts.shape == signals.shape

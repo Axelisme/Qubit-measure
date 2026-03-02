@@ -3,28 +3,36 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from copy import deepcopy
 
-from typing_extensions import Any, Callable, Generic, MutableMapping, Optional, TypeVar
+from typing_extensions import (
+    Any,
+    Callable,
+    Generic,
+    Mapping,
+    MutableMapping,
+    Optional,
+    TypeVar,
+    cast,
+)
 
 from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import min_interval
 
-from ..context import Result, TaskConfig, TaskContext, TaskContextView
+from ..context import Result, TaskContext, TaskContextView
 
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
-T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
-class AbsTask(ABC, Generic[T_Result, T_RootResult, T_TaskConfig]):
+class AbsTask(ABC, Generic[T_Result, T_RootResult]):
     def init(
         self,
-        ctx: TaskContextView[T_Result, T_RootResult, T_TaskConfig],
+        ctx: TaskContextView[T_Result, T_RootResult],
         dynamic_pbar: bool = False,
     ) -> None:
         """Initialize the task with the current context. If dynamic_pbar is True, the pbar will only show up in the run() method."""
 
     @abstractmethod
-    def run(self, ctx: TaskContextView[T_Result, T_RootResult, T_TaskConfig]) -> None:
+    def run(self, ctx: TaskContextView[T_Result, T_RootResult]) -> None:
         """Run the task with the current context."""
 
     def cleanup(self) -> None: ...
@@ -34,15 +42,13 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult, T_TaskConfig]):
 
 
 def run_task(
-    task: AbsTask[T_Result, T_Result, T_TaskConfig],
-    init_cfg: T_TaskConfig,
+    task: AbsTask[T_Result, T_Result],
+    init_cfg: Mapping[str, Any],
     env_dict: Optional[MutableMapping[str, Any]] = None,
-    update_hook: Optional[
-        Callable[[TaskContextView[Result, T_Result, TaskConfig]], Any]
-    ] = None,
+    update_hook: Optional[Callable[[TaskContextView[Result, T_Result]], Any]] = None,
     update_interval: Optional[float] = 0.1,
 ) -> T_Result:
-    cfg = deepcopy(init_cfg)
+    cfg = cast(MutableMapping[str, Any], deepcopy(init_cfg))
     init_result = task.get_default_result()
 
     if env_dict is None:

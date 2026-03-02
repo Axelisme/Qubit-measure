@@ -15,28 +15,26 @@ from zcu_tools.experiment.utils import (
     set_output_in_dev_cfg,
     sweep2array,
 )
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
+from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPACheckResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+JPACheckResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
 def jpa_check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class JPACheckTaskConfig(TaskConfig, OneToneProgramCfg):
+class JPACheckCfg(OneToneCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class JPACheckExp(AbsExperiment[JPACheckResultType, JPACheckTaskConfig]):
+class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
     OUTPUT_MAP = {0: "off", 1: "on"}
 
-    def run(self, soc, soccfg, cfg: JPACheckTaskConfig) -> JPACheckResultType:
+    def run(self, soc, soccfg, cfg: JPACheckCfg) -> JPACheckResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -44,8 +42,9 @@ class JPACheckExp(AbsExperiment[JPACheckResultType, JPACheckTaskConfig]):
 
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
+        modules = cfg["modules"]
         Readout.set_param(
-            cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
         outputs = np.array([0, 1])
@@ -63,11 +62,9 @@ class JPACheckExp(AbsExperiment[JPACheckResultType, JPACheckTaskConfig]):
                         label="jpa_rf_dev",
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            OneToneProgram(soccfg, ctx.cfg).acquire(
-                                soc, progress=False, callback=update_hook
-                            )
-                        ),
+                        measure_fn=lambda ctx, update_hook: OneToneProgram(
+                            soccfg, ctx.cfg
+                        ).acquire(soc, progress=False, callback=update_hook),
                         result_shape=(len(fpts),),
                     ),
                 ),
@@ -84,7 +81,7 @@ class JPACheckExp(AbsExperiment[JPACheckResultType, JPACheckTaskConfig]):
 
         return outputs, fpts, signals
 
-    def analyze(self, result: Optional[JPACheckResultType] = None) -> Figure:
+    def analyze(self, result: Optional[JPACheckResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -114,7 +111,7 @@ class JPACheckExp(AbsExperiment[JPACheckResultType, JPACheckTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[JPACheckResultType] = None,
+        result: Optional[JPACheckResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/check",
         **kwargs,
@@ -135,7 +132,7 @@ class JPACheckExp(AbsExperiment[JPACheckResultType, JPACheckTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPACheckResultType:
+    def load(self, filepath: str, **kwargs) -> JPACheckResult:
         signals2D, fpts, outputs = load_data(filepath, **kwargs)
         assert fpts is not None and outputs is not None
         assert len(fpts.shape) == 1 and len(outputs.shape) == 1

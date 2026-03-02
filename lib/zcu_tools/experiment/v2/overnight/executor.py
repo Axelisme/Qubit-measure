@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
 from pathlib import Path
-from typing import (
+
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
+from typing_extensions import (
     Any,
     Callable,
     Dict,
@@ -11,16 +18,9 @@ from typing import (
     Mapping,
     Optional,
     Tuple,
+    TypedDict,
     TypeVar,
-    Union,
 )
-
-import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
-from matplotlib.axes import Axes
-from matplotlib.figure import Figure
-from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import (
@@ -28,7 +28,6 @@ from zcu_tools.experiment.v2.runner import (
     BatchTask,
     RepeatOverTime,
     Result,
-    TaskConfig,
     TaskContextView,
     run_task,
     run_with_retries,
@@ -41,12 +40,11 @@ T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlott
 
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
-T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
 class MeasurementTask(
-    AbsTask[T_Result, T_RootResult, T_TaskConfig],
-    Generic[T_Result, T_RootResult, T_TaskConfig, T_PlotterDictType],
+    AbsTask[T_Result, T_RootResult],
+    Generic[T_Result, T_RootResult, T_PlotterDictType],
 ):
     def num_axes(self) -> Dict[str, int]: ...
 
@@ -77,7 +75,7 @@ class MeasurementTask(
     ) -> None: ...
 
 
-class OvernightTaskConfig(TaskConfig): ...
+class OvernightCfg(TypedDict): ...
 
 
 class OvernightBatchTask(BatchTask):
@@ -210,7 +208,7 @@ class OvernightExecutor(AbsExperiment):
 
         env_dict.update(iters=np.arange(self.num_times))
 
-        cfg = OvernightTaskConfig()
+        cfg = OvernightCfg()
 
         with matplotlib.rc_context(
             {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}

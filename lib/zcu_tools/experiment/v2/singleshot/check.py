@@ -7,16 +7,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, Optional, cast
+from typing_extensions import List, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import (
     HardTask,
-    TaskConfig,
     TaskContextView,
     run_task,
 )
 from zcu_tools.program.v2 import (
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
     PulseCfg,
@@ -24,7 +24,6 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
-    TwoToneProgramCfg,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
@@ -34,12 +33,15 @@ from .util import classify_result, plot_with_classified
 CheckResult = NDArray[np.complex128]
 
 
-class CheckCfg(TaskConfig, TwoToneProgramCfg):
+class CheckModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: NotRequired[PulseCfg]
     readout: ReadoutCfg
 
+
+class CheckCfg(ModularProgramCfg):
+    modules: CheckModuleCfg
     shots: int
 
 
@@ -56,15 +58,16 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
             warnings.warn("reps will be overwritten by singleshot measurement shots")
         _cfg["reps"] = _cfg["shots"]
 
-        def measure_fn(ctx: TaskContextView, _):
+        def measure_fn(ctx: TaskContextView, _) -> NDArray[np.float64]:
+            modules = ctx.cfg["modules"]
             prog = ModularProgramV2(
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                    Pulse("probe_pulse", ctx.cfg.get("probe_pulse")),
-                    Readout("readout", ctx.cfg["readout"]),
+                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Pulse("init_pulse", modules.get("init_pulse")),
+                    Pulse("probe_pulse", modules.get("probe_pulse")),
+                    Readout("readout", modules["readout"]),
                 ],
             )
             prog.acquire(soc, progress=True)

@@ -1,32 +1,32 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, ClassVar, Dict, Literal, Type, TypedDict, Union
+from typing import Any, Callable, ClassVar, Dict, Literal, Type, Union
 
 from qick.asm_v2 import QickParam
 
 from ..base import MyProgramV2
-from .base import Module
+from .base import Module, ModuleCfg
 from .pulse import Pulse, PulseCfg, check_block_mode
 from .util import calc_max_length
 
 
-class NoneResetCfg(TypedDict):
+class NoneResetCfg(ModuleCfg):
     type: Literal["none"]
 
 
-class PulseResetCfg(TypedDict):
+class PulseResetCfg(ModuleCfg):
     type: Literal["pulse"]
     pulse_cfg: PulseCfg
 
 
-class TwoPulseResetCfg(TypedDict):
+class TwoPulseResetCfg(ModuleCfg):
     type: Literal["two_pulse"]
     pulse1_cfg: PulseCfg
     pulse2_cfg: PulseCfg
 
 
-class BathResetCfg(TypedDict):
+class BathResetCfg(ModuleCfg):
     type: Literal["bath"]
     qubit_tone_cfg: PulseCfg
     cavity_tone_cfg: PulseCfg

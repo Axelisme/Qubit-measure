@@ -3,7 +3,6 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from numbers import Number
-from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -18,7 +17,6 @@ from typing_extensions import (
     Optional,
     Sequence,
     TypeAlias,
-    TypedDict,
     TypeVar,
     Union,
     cast,
@@ -33,13 +31,6 @@ T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
 
 
-class TaskConfig(TypedDict, total=False): ...
-
-
-T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
-T_NewTaskConfig = TypeVar("T_NewTaskConfig", bound=TaskConfig)
-
-
 @dataclass(frozen=True)
 class TaskContext(Generic[T_Result]):
     data: T_Result
@@ -47,11 +38,11 @@ class TaskContext(Generic[T_Result]):
 
     def view(
         self,
-        cfg: T_TaskConfig,
+        cfg: MutableMapping[str, Any],
         update_hook: Optional[
-            Callable[[TaskContextView[Result, T_Result, TaskConfig]], Any]
+            Callable[[TaskContextView[Result, T_Result]], Any]
         ] = None,
-    ) -> TaskContextView[T_Result, T_Result, T_TaskConfig]:
+    ) -> TaskContextView[T_Result, T_Result]:
         return TaskContextView(self, cfg, update_hook)
 
     def set_data(
@@ -95,55 +86,39 @@ class TaskContext(Generic[T_Result]):
 
 
 @dataclass(frozen=True)
-class TaskContextView(Generic[T_Result, T_RootResult, T_TaskConfig]):
+class TaskContextView(Generic[T_Result, T_RootResult]):
     context: TaskContext[T_RootResult]
-    cfg: T_TaskConfig
-    update_hook: Optional[
-        Callable[[TaskContextView[Result, T_RootResult, TaskConfig]], Any]
-    ] = None
+    cfg: MutableMapping[str, Any]
+    update_hook: Optional[Callable[[TaskContextView[Result, T_RootResult]], Any]] = None
 
     _addr_stack: List[Union[int, Hashable]] = field(default_factory=list)
-    _root: Optional[TaskContextView[T_RootResult, T_RootResult, TaskConfig]] = field(
-        default=None
-    )
+    _root: Optional[TaskContextView[T_RootResult, T_RootResult]] = field(default=None)
 
     @overload
     def __call__(
-        self: TaskContextView[Sequence[T_ChildResult], T_RootResult, T_TaskConfig],
+        self: TaskContextView[Sequence[T_ChildResult], T_RootResult],
         addr: int,
-        new_cfg: Literal[None] = None,
-    ) -> TaskContextView[T_ChildResult, T_RootResult, T_TaskConfig]: ...
+        new_cfg: Optional[MutableMapping[str, Any]] = None,
+    ) -> TaskContextView[T_ChildResult, T_RootResult]: ...
 
     @overload
     def __call__(
-        self: TaskContextView[Mapping[Any, T_ChildResult], T_RootResult, T_TaskConfig],
+        self: TaskContextView[Mapping[Any, T_ChildResult], T_RootResult],
         addr: Hashable,
-        new_cfg: Literal[None] = None,
-    ) -> TaskContextView[T_ChildResult, T_RootResult, T_TaskConfig]: ...
-
-    @overload
-    def __call__(
-        self: TaskContextView[Sequence[T_ChildResult], T_RootResult, T_TaskConfig],
-        addr: int,
-        new_cfg: T_NewTaskConfig,
-    ) -> TaskContextView[T_ChildResult, T_RootResult, T_NewTaskConfig]: ...
-
-    @overload
-    def __call__(
-        self: TaskContextView[Mapping[Any, T_ChildResult], T_RootResult, T_TaskConfig],
-        addr: Hashable,
-        new_cfg: T_NewTaskConfig,
-    ) -> TaskContextView[T_ChildResult, T_RootResult, T_NewTaskConfig]: ...
+        new_cfg: Optional[MutableMapping[str, Any]] = None,
+    ) -> TaskContextView[T_ChildResult, T_RootResult]: ...
 
     def __call__(
-        self, addr: Union[int, Hashable], new_cfg: Optional[T_NewTaskConfig] = None
+        self,
+        addr: Union[int, Hashable],
+        new_cfg: Optional[MutableMapping[str, Any]] = None,
     ) -> TaskContextView:
         actual_cfg = deepcopy(self.cfg) if new_cfg is None else new_cfg
 
         root = self._root
         if root is None:
             root = self
-        root = cast(TaskContextView[T_RootResult, T_RootResult, TaskConfig], root)
+        root = cast(TaskContextView[T_RootResult, T_RootResult], root)
 
         return TaskContextView(
             self.context,
@@ -154,9 +129,9 @@ class TaskContextView(Generic[T_Result, T_RootResult, T_TaskConfig]):
         )
 
     @property
-    def root(self) -> TaskContextView[T_RootResult, T_RootResult, TaskConfig]:
+    def root(self) -> TaskContextView[T_RootResult, T_RootResult]:
         if self._root is None:
-            return cast(TaskContextView[T_RootResult, T_RootResult, TaskConfig], self)
+            return cast(TaskContextView[T_RootResult, T_RootResult], self)
         return self._root
 
     def trigger_hook(self) -> None:

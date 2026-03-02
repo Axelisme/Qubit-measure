@@ -18,7 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
 from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D
@@ -72,7 +72,7 @@ class T2EchoCfgTemplate(ModularProgramCfg):
     sweep_range: Tuple[float, float]
 
 
-class T2EchoCfg(TaskConfig, ModularProgramCfg):
+class T2EchoCfg(ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     pi2_pulse: PulseCfg
@@ -96,7 +96,7 @@ class T2EchoPlotterDict(TypedDict, closed=True):
 
 
 class T2EchoTask(
-    MeasurementTask[T2EchoResult, T_RootResultType, TaskConfig, T2EchoPlotterDict]
+    MeasurementTask[T2EchoResult, T_RootResultType, T2EchoPlotterDict]
 ):
     def __init__(
         self,

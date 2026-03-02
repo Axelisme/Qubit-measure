@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -28,22 +28,27 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (pdrs, signals_2d)  # signals shape: (2, len(pdrs)) for [w/o reset, w/ reset]
-RabiCheckResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+RabiCheckResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class RabiCheckTaskConfig(TaskConfig, ModularProgramCfg):
+class RabiCheckModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     rabi_pulse: PulseCfg
     tested_reset: ResetCfg
+    post_pulse: NotRequired[PulseCfg]
     readout: ReadoutCfg
 
 
-class RabiCheckExp(AbsExperiment[RabiCheckResultType, RabiCheckTaskConfig]):
-    def run(self, soc, soccfg, cfg: RabiCheckTaskConfig) -> RabiCheckResultType:
+class RabiCheckCfg(ModularProgramCfg):
+    modules: RabiCheckModuleCfg
+
+
+class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
+    def run(self, soc, soccfg, cfg: RabiCheckCfg) -> RabiCheckResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -56,26 +61,28 @@ class RabiCheckExp(AbsExperiment[RabiCheckResultType, RabiCheckTaskConfig]):
         pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
         # Attach gain sweep to initialization pulse
+        modules = cfg["modules"]
         Pulse.set_param(
-            cfg["rabi_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+            modules["rabi_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
         )
         Reset.set_param(
-            cfg["tested_reset"],
+            modules["tested_reset"],
             "on/off",
             sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"]),
         )
 
         def measure_fn(ctx, update_hook):
             nonlocal pdrs
+            modules = ctx.cfg["modules"]
             prog = ModularProgramV2(
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse("rabi_pulse", ctx.cfg["rabi_pulse"]),
-                    Reset("tested_reset", ctx.cfg["tested_reset"]),
-                    Pulse("post_pulse", ctx.cfg.get("post_pulse")),
-                    Readout("readout", ctx.cfg["readout"]),
+                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Pulse("rabi_pulse", modules["rabi_pulse"]),
+                    Reset("tested_reset", modules["tested_reset"]),
+                    Pulse("post_pulse", modules.get("post_pulse")),
+                    Readout("readout", modules["readout"]),
                 ],
             )
             _pdrs = prog.get_pulse_param("rabi_pulse", "gain", as_array=True)
@@ -102,7 +109,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResultType, RabiCheckTaskConfig]):
 
         return pdrs, signals
 
-    def analyze(self, result: Optional[RabiCheckResultType] = None) -> Figure:
+    def analyze(self, result: Optional[RabiCheckResult] = None) -> Figure:
         """Analyze reset rabi check results. (No specific analysis implemented)"""
         if result is None:
             result = self.last_result
@@ -125,7 +132,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResultType, RabiCheckTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[RabiCheckResultType] = None,
+        result: Optional[RabiCheckResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/rabi_check",
         **kwargs,
@@ -146,7 +153,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResultType, RabiCheckTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> RabiCheckResultType:
+    def load(self, filepath: str, **kwargs) -> RabiCheckResult:
         signals, pdrs, y_values = load_data(filepath, **kwargs)
         assert pdrs is not None and y_values is not None
         assert len(pdrs.shape) == 1 and len(y_values.shape) == 1

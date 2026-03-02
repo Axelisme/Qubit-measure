@@ -17,7 +17,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
@@ -28,8 +28,8 @@ from zcu_tools.program.v2 import (
     PulseCfg,
     ReadoutCfg,
     ResetCfg,
+    TwoToneCfg,
     TwoToneProgram,
-    TwoToneProgramCfg,
     sweep2param,
 )
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
@@ -68,7 +68,7 @@ class QubitFreqCfgTemplate(TypedDict):
     readout: Union[ReadoutCfg, str]
 
 
-class QubitFreqCfg(TaskConfig, TwoToneProgramCfg): ...
+class QubitFreqCfg(TwoToneCfg): ...
 
 
 class QubitFreqResult(TypedDict, closed=True):
@@ -88,7 +88,7 @@ class FreqPlotterDict(TypedDict, closed=True):
 
 
 class QubitFreqTask(
-    MeasurementTask[QubitFreqResult, T_RootResultType, TaskConfig, FreqPlotterDict]
+    MeasurementTask[QubitFreqResult, T_RootResultType, FreqPlotterDict]
 ):
     def __init__(
         self,
@@ -105,7 +105,7 @@ class QubitFreqTask(
         self.task = HardTask[
             np.complex128,
             T_RootResultType,
-            TwoToneProgramCfg,
+            TwoToneCfg,
             List[NDArray[np.float64]],
         ](
             measure_fn=lambda ctx, update_hook: (

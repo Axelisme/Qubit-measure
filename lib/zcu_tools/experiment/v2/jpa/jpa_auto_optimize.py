@@ -10,7 +10,7 @@ from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
@@ -22,7 +22,6 @@ from zcu_tools.experiment.utils import (
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
-    TaskConfig,
     TaskContextView,
     run_task,
 )
@@ -44,21 +43,21 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from .jpa_optimizer import JPAOptimizer
 
-JPAOptimizeResultType = Tuple[
-    NDArray[np.float64], NDArray[np.int32], NDArray[np.float64]
-]
+JPAOptimizeResult = Tuple[NDArray[np.float64], NDArray[np.int32], NDArray[np.float64]]
 
 
-class JPAOptTaskConfig(TaskConfig, ModularProgramCfg):
+class JPAOptModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig]):
-    def run(
-        self, soc, soccfg, cfg: JPAOptTaskConfig, num_points: int
-    ) -> JPAOptimizeResultType:
+class JPAOptCfg(ModularProgramCfg):
+    modules: JPAOptModuleCfg
+
+
+class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
+    def run(self, soc, soccfg, cfg: JPAOptCfg, num_points: int) -> JPAOptimizeResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -66,9 +65,10 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
         fpt_sweep = cfg["sweep"]["jpa_freq"]
         pdr_sweep = cfg["sweep"]["jpa_power"]
 
+        modules = cfg["modules"]
         cfg["sweep"] = {"ge": make_ge_sweep()}
         Pulse.set_param(
-            cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
 
         optimizer = JPAOptimizer(flx_sweep, fpt_sweep, pdr_sweep, num_points)
@@ -155,16 +155,17 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
                 viewer.refresh()
 
             def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
                 prog = ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
                         Reset(
                             "reset",
-                            ctx.cfg.get("reset", {"type": "none"}),
+                            modules.get("reset", {"type": "none"}),
                         ),
-                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                        Readout("readout", ctx.cfg["readout"]),
+                        Pulse("pi_pulse", modules["pi_pulse"]),
+                        Readout("readout", modules["readout"]),
                     ],
                 )
                 tracker = PCATracker()
@@ -186,6 +187,7 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
                     sub_task=HardTask(
                         measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                        dtype=np.float64,
                     ),
                 ),
                 init_cfg=cfg,
@@ -201,7 +203,7 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
         return params, phases, signals
 
     def analyze(
-        self, result: Optional[JPAOptimizeResultType] = None
+        self, result: Optional[JPAOptimizeResult] = None
     ) -> Tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -251,9 +253,7 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
 
         return float(best_params[0]), float(best_params[1]), float(best_params[2]), fig
 
-    def plot_sample_params(
-        self, result: Optional[JPAOptimizeResultType] = None
-    ) -> Figure:
+    def plot_sample_params(self, result: Optional[JPAOptimizeResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -284,7 +284,7 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
     def save(
         self,
         filepath: str,
-        result: Optional[JPAOptimizeResultType] = None,
+        result: Optional[JPAOptimizeResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/auto_optimize",
         **kwargs,
@@ -331,7 +331,7 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResultType, JPAOptTaskConfig])
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAOptimizeResultType:
+    def load(self, filepath: str, **kwargs) -> JPAOptimizeResult:
         _filepath = Path(filepath)
 
         # Load params (iterations x 3)

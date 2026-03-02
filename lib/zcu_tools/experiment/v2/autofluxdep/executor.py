@@ -22,9 +22,7 @@ from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
     Result,
-    SoftTask,
-    TaskConfig,
-    TaskContextView,
+    SoftTask, TaskContextView,
     run_task,
     run_with_retries,
 )
@@ -42,7 +40,7 @@ T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlott
 
 T_ResultType = TypeVar("T_ResultType", bound=Result)
 T_RootResultType = TypeVar("T_RootResultType", bound=Result)
-T_TaskConfigType = TypeVar("T_TaskConfigType", bound=TaskConfig)
+T_TaskConfigType = TypeVar("T_TaskConfigType", bound=dict)
 
 
 class MeasurementTask(
@@ -76,7 +74,7 @@ class MeasurementTask(
     ) -> None: ...
 
 
-class FluxDepTaskConfig(TaskConfig):
+class FluxDepTaskConfig(TypedDict):
     dev: Mapping[str, DeviceInfo]
 
 

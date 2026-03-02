@@ -6,12 +6,12 @@ from typing import Mapping, Optional, Tuple
 import numpy as np
 import plotly.graph_objects as go
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 from zcu_tools.program.v2 import (
@@ -48,18 +48,22 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return mist_signals
 
 
-class MistFluxDepTaskConfig(TaskConfig, ModularProgramCfg):
+class MistFluxDepModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    init_pulse: PulseCfg
+    init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
+
+class MistFluxDepCfg(ModularProgramCfg):
+    modules: MistFluxDepModuleCfg
     dev: Mapping[str, DeviceInfo]
 
 
-class MistFluxDepExp(AbsExperiment[MistFluxDepResultType, MistFluxDepTaskConfig]):
-    def run(self, soc, soccfg, cfg: MistFluxDepTaskConfig) -> MistFluxDepResultType:
+class MistFluxDepExp(AbsExperiment[MistFluxDepResultType, MistFluxDepCfg]):
+    def run(self, soc, soccfg, cfg: MistFluxDepCfg) -> MistFluxDepResultType:
         cfg = deepcopy(cfg)  # prevent in-place modification
+        modules = cfg["modules"]
 
         assert "sweep" in cfg
         flx_sweep = cfg["sweep"]["flux"]
@@ -70,7 +74,7 @@ class MistFluxDepExp(AbsExperiment[MistFluxDepResultType, MistFluxDepTaskConfig]
         gains = sweep2array(cfg["sweep"]["gain"])
 
         Pulse.set_param(
-            cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+            modules["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
         )
 
         with LivePlotter2DwithLine(
@@ -88,20 +92,21 @@ class MistFluxDepExp(AbsExperiment[MistFluxDepResultType, MistFluxDepTaskConfig]
                         ctx.cfg["dev"], value
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset", ctx.cfg.get("reset", {"type": "none"})
-                                    ),
-                                    Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                    Pulse("probe_pulse", ctx.cfg["probe_pulse"]),
-                                    Readout("readout", ctx.cfg["readout"]),
-                                ],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        ),
+                        measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                Reset(
+                                    "reset",
+                                    ctx.cfg["modules"].get("reset", {"type": "none"}),
+                                ),
+                                Pulse(
+                                    "init_pulse", ctx.cfg["modules"].get("init_pulse")
+                                ),
+                                Pulse("probe_pulse", ctx.cfg["modules"]["probe_pulse"]),
+                                Readout("readout", ctx.cfg["modules"]["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook),
                         result_shape=(len(gains),),
                     ),
                 ),

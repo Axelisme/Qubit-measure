@@ -9,37 +9,34 @@ from numpy.typing import NDArray
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
-from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
+from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAFluxByOneToneResultType = Tuple[
+JPAFluxByOneToneResult = Tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
 
-class JPAFluxByOneToneTaskConfig(TaskConfig, OneToneProgramCfg):
+class JPAFluxByOneToneCfg(OneToneCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class JPAFluxByOneToneExp(
-    AbsExperiment[JPAFluxByOneToneResultType, JPAFluxByOneToneTaskConfig]
-):
-    def run(
-        self, soc, soccfg, cfg: JPAFluxByOneToneTaskConfig
-    ) -> JPAFluxByOneToneResultType:
+class JPAFluxByOneToneExp(AbsExperiment[JPAFluxByOneToneResult, JPAFluxByOneToneCfg]):
+    def run(self, soc, soccfg, cfg: JPAFluxByOneToneCfg) -> JPAFluxByOneToneResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
         jpa_flux_sweep = cfg["sweep"]["jpa_flux"]
         cfg["sweep"] = {"freq": cfg["sweep"]["freq"]}
 
+        modules = cfg["modules"]
         jpa_flxs = sweep2array(jpa_flux_sweep, allow_array=True)
         fpts = sweep2array(cfg["sweep"]["freq"], allow_array=True)
 
         Readout.set_param(
-            cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
         with LivePlotter2DwithLine(
@@ -56,11 +53,9 @@ class JPAFluxByOneToneExp(
                         ctx.cfg["dev"], flx, label="jpa_flux_dev"
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            OneToneProgram(soccfg, ctx.cfg).acquire(
-                                soc, progress=False, callback=update_hook
-                            )
-                        ),
+                        measure_fn=lambda ctx, update_hook: OneToneProgram(
+                            soccfg, ctx.cfg
+                        ).acquire(soc, progress=False, callback=update_hook),
                         result_shape=(len(fpts),),
                     ),
                 ),
@@ -77,7 +72,7 @@ class JPAFluxByOneToneExp(
 
         return jpa_flxs, fpts, signals
 
-    def analyze(self, result: Optional[JPAFluxByOneToneResultType] = None) -> None:
+    def analyze(self, result: Optional[JPAFluxByOneToneResult] = None) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -89,7 +84,7 @@ class JPAFluxByOneToneExp(
     def save(
         self,
         filepath: str,
-        result: Optional[JPAFluxByOneToneResultType] = None,
+        result: Optional[JPAFluxByOneToneResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/flux_onetone",
         **kwargs,
@@ -110,7 +105,7 @@ class JPAFluxByOneToneExp(
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAFluxByOneToneResultType:
+    def load(self, filepath: str, **kwargs) -> JPAFluxByOneToneResult:
         signals, jpa_flxs, fpts = load_data(filepath, **kwargs)
         assert jpa_flxs is not None and fpts is not None
         assert len(jpa_flxs.shape) == 1 and len(fpts.shape) == 1

@@ -11,25 +11,25 @@ from numpy.typing import NDArray
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, TwoToneProgramCfg, sweep2param
+from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
-from zcu_tools.utils.process import rotate2real, minus_background
+from zcu_tools.utils.process import minus_background, rotate2real
 
-from ..runner import HardTask, TaskConfig, run_task
+from ..runner import HardTask, run_task
 
-FreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+FreqResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals))
 
 
-class FreqTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+class FreqCfg(TwoToneCfg): ...
 
 
-class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
-    def run(self, soc, soccfg, cfg: FreqTaskConfig) -> FreqResultType:
+class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
+    def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # canonicalise sweep section to single-axis form «{'freq': ...}»
@@ -40,16 +40,15 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
         fpts = sweep2array(cfg["sweep"]["freq"])  # MHz
 
         # bind sweep parameter as *QickParam* so it is executed by FPGA
-        cfg["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
+        modules = cfg["modules"]
+        modules["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
-                        )
-                    ),
+                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(fpts),),
                 ),
                 init_cfg=cfg,
@@ -66,7 +65,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqResult] = None,
         *,
         model_type: Literal["lor", "sinc"] = "lor",
         plot_fit: bool = True,
@@ -106,7 +105,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/freq",
         **kwargs,
@@ -126,7 +125,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> FreqResultType:
+    def load(self, filepath: str, **kwargs) -> FreqResult:
         signals, fpts, _ = load_data(filepath, **kwargs)
         assert fpts is not None
         assert len(fpts.shape) == 1 and len(signals.shape) == 1

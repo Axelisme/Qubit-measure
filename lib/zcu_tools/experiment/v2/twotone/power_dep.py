@@ -9,26 +9,24 @@ from numpy.typing import NDArray
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
-from zcu_tools.program.v2 import TwoToneProgram, TwoToneProgramCfg, sweep2param
+from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
-from ..runner import HardTask, TaskConfig, run_task
+from ..runner import HardTask, run_task
 
-PowerDepResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+PowerDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
 def pdrdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class PowerDepTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+class PowerDepCfg(TwoToneCfg): ...
 
 
-class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
-    def run(self, soc, soccfg, cfg: PowerDepTaskConfig) -> PowerDepResultType:
+class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
+    def run(self, soc, soccfg, cfg: PowerDepCfg) -> PowerDepResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Ensure gain is the outer loop for better visualization
@@ -42,17 +40,16 @@ class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
         # Attach both sweep parameters to the qubit pulse
-        cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
-        cfg["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
+        modules = cfg["modules"]
+        modules["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+        modules["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
 
         with LivePlotter2D("Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
-                        )
-                    ),
+                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(pdrs), len(fpts)),
                 ),
                 init_cfg=cfg,
@@ -69,7 +66,7 @@ class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[PowerDepResultType] = None,
+        result: Optional[PowerDepResult] = None,
     ) -> None:
         raise NotImplementedError(
             "Analysis not implemented for two-tone power dependence"
@@ -78,7 +75,7 @@ class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[PowerDepResultType] = None,
+        result: Optional[PowerDepResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/power_dep",
         **kwargs,
@@ -99,7 +96,7 @@ class PowerDepExp(AbsExperiment[PowerDepResultType, PowerDepTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> PowerDepResultType:
+    def load(self, filepath: str, **kwargs) -> PowerDepResult:
         signals2D, fpts, pdrs = load_data(filepath, **kwargs)
         assert fpts is not None and pdrs is not None
         assert len(fpts.shape) == 1 and len(pdrs.shape) == 1

@@ -9,11 +9,13 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
+from numpy import float64
 from numpy.typing import NDArray
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
 from zcu_tools.liveplot import (
     LivePlotter1D,
     LivePlotter2D,
@@ -28,6 +30,7 @@ from zcu_tools.program.v2 import (
     Readout,
     ReadoutCfg,
     Reset,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -37,7 +40,7 @@ from zcu_tools.utils.process import minus_background
 from .util import calc_populations
 
 # (gains, freqs, populations)
-AcStarkResultType = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+AcStarkResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
 
 
 def get_resonance_freq(
@@ -65,25 +68,32 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_fpts)
 
 
-class AcStarkTaskConfig(TaskConfig, ModularProgramCfg):
+class AcStarkModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
+    init_pulse: NotRequired[PulseCfg]
     stark_pulse1: PulseCfg
     stark_pulse2: PulseCfg
     readout: ReadoutCfg
 
 
-class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
+class AcStarkCfg(ModularProgramCfg):
+    modules: AcStarkModuleCfg
+
+
+class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: AcStarkTaskConfig,
+        cfg: AcStarkCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> AcStarkResultType:
+    ) -> AcStarkResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
+        modules = cfg["modules"]
 
-        if cfg["stark_pulse1"].get("block_mode", True):
+        if modules["stark_pulse1"].get("block_mode", True):
             raise ValueError("Stark pulse 1 must be in block mode")
 
         assert "sweep" in cfg
@@ -99,7 +109,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         )
 
         freq_param = sweep2param("freq", cfg["sweep"]["freq"])
-        Pulse.set_param(cfg["stark_pulse2"], "freq", freq_param)
+        Pulse.set_param(modules["stark_pulse2"], "freq", freq_param)
 
         fig, axs = make_plot_frame(2, 2, figsize=(8, 6))
 
@@ -139,7 +149,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         ) as viewer:
 
             def update_fn(i, ctx, gain) -> None:
-                Pulse.set_param(ctx.cfg["stark_pulse1"], "gain", gain)
+                Pulse.set_param(ctx.cfg["modules"]["stark_pulse1"], "gain", gain)
                 ctx.env_dict["idx"] = i
 
             def plot_fn(ctx) -> None:
@@ -162,16 +172,17 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
 
                 viewer.refresh()
 
-            def measure_fn(ctx, update_hook):
+            def measure_fn(ctx, update_hook) -> List[NDArray[float64]]:
+                modules = ctx.cfg["modules"]
                 return ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                        Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                        Pulse("stark_pulse1", ctx.cfg["stark_pulse1"]),
-                        Pulse("stark_pulse2", ctx.cfg["stark_pulse2"]),
-                        Readout("readout", ctx.cfg["readout"]),
+                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Pulse("init_pulse", modules.get("init_pulse")),
+                        Pulse("stark_pulse1", modules["stark_pulse1"]),
+                        Pulse("stark_pulse2", modules["stark_pulse2"]),
+                        Readout("readout", modules["readout"]),
                     ],
                 ).acquire(
                     soc,
@@ -209,7 +220,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
     def analyze(
         self,
         chi: float,
-        result: Optional[AcStarkResultType] = None,
+        result: Optional[AcStarkResult] = None,
         *,
         eta: float = 1.0,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
@@ -303,7 +314,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
 
     def plot(
         self,
-        result: Optional[AcStarkResultType] = None,
+        result: Optional[AcStarkResult] = None,
         *,
         ac_coeff: float,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
@@ -379,7 +390,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[AcStarkResultType] = None,
+        result: Optional[AcStarkResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/ac_stark",
         **kwargs,
@@ -415,7 +426,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> AcStarkResultType:
+    def load(self, filepath: List[str], **kwargs) -> AcStarkResult:
         g_filepath, e_filepath = filepath
 
         # Load ground populations

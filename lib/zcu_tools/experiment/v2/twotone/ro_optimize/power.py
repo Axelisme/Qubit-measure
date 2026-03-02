@@ -6,11 +6,11 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
@@ -27,17 +27,21 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-PowerResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
+PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class PowerTaskConfig(TaskConfig, ModularProgramCfg):
+class PowerModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
-    def run(self, soc, soccfg, cfg: PowerTaskConfig) -> PowerResultType:
+class PowerCfg(ModularProgramCfg):
+    modules: PowerModuleCfg
+
+
+class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
+    def run(self, soc, soccfg, cfg: PowerCfg) -> PowerResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -46,23 +50,25 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
 
         gains = sweep2array(cfg["sweep"]["power"])  # predicted power points
 
+        modules = cfg["modules"]
         Pulse.set_param(
-            cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
         Readout.set_param(
-            cfg["readout"], "gain", sweep2param("power", cfg["sweep"]["power"])
+            modules["readout"], "gain", sweep2param("power", cfg["sweep"]["power"])
         )
 
         with LivePlotter1D("Readout Power", "SNR") as viewer:
 
             def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
                 prog = ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                        Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                        Readout("readout", ctx.cfg["readout"]),
+                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Readout("readout", modules["readout"]),
                     ],
                 )
                 tracker = PCATracker()
@@ -81,6 +87,7 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     result_shape=(len(gains),),
+                    dtype=np.float64,
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(gains, np.abs(ctx.data)),
@@ -93,7 +100,7 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
         return gains, signals
 
     def analyze(
-        self, result: Optional[PowerResultType] = None, penalty_ratio: float = 0.0
+        self, result: Optional[PowerResult] = None, penalty_ratio: float = 0.0
     ) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
@@ -126,7 +133,7 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[PowerResultType] = None,
+        result: Optional[PowerResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/gain",
         **kwargs,
@@ -146,7 +153,7 @@ class PowerExp(AbsExperiment[PowerResultType, PowerTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> PowerResultType:
+    def load(self, filepath: str, **kwargs) -> PowerResult:
         signals, pdrs, _ = load_data(filepath, **kwargs)
         assert pdrs is not None
         assert len(pdrs.shape) == 1 and len(signals.shape) == 1

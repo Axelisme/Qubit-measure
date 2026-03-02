@@ -6,11 +6,11 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
@@ -27,17 +27,21 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-LengthResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
+LengthResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class LengthTaskConfig(TaskConfig, ModularProgramCfg):
+class LengthModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
-    def run(self, soc, soccfg, cfg: LengthTaskConfig) -> LengthResultType:
+class LengthCfg(ModularProgramCfg):
+    modules: LengthModuleCfg
+
+
+class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
+    def run(self, soc, soccfg, cfg: LengthCfg) -> LengthResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -48,28 +52,30 @@ class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
         cfg["sweep"] = {"ge": make_ge_sweep()}
 
         # set with / without pi gain for qubit pulse
+        modules = cfg["modules"]
         Pulse.set_param(
-            cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
 
         lengths = sweep2array(length_sweep)  # predicted readout lengths
 
         # set initial readout length and adjust pulse length
         Readout.set_param(
-            cfg["readout"], "ro_length", sweep2param("length", length_sweep)
+            modules["readout"], "ro_length", sweep2param("length", length_sweep)
         )
-        Readout.set_param(cfg["readout"], "length", lengths.max() + 0.11)
+        Readout.set_param(modules["readout"], "length", lengths.max() + 0.11)
 
         with LivePlotter1D("Readout Length (us)", "SNR") as viewer:
 
             def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
                 prog = ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                        Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                        Readout("readout", ctx.cfg["readout"]),
+                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Readout("readout", modules["readout"]),
                     ],
                 )
                 tracker = PCATracker()
@@ -88,11 +94,12 @@ class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
                     sweep_name="length",
                     sweep_values=lengths.tolist(),
                     update_cfg_fn=lambda _, ctx, length: Readout.set_param(
-                        ctx.cfg["readout"], "ro_length", length
+                        ctx.cfg["modules"]["readout"], "ro_length", length
                     ),
                     sub_task=HardTask(
                         measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                        dtype=np.float64,
                     ),
                 ),
                 init_cfg=cfg,
@@ -107,7 +114,7 @@ class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
         return lengths, signals
 
     def analyze(
-        self, result: Optional[LengthResultType] = None, *, t0: Optional[float] = None
+        self, result: Optional[LengthResult] = None, *, t0: Optional[float] = None
     ) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
@@ -144,7 +151,7 @@ class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[LengthResultType] = None,
+        result: Optional[LengthResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/length",
         **kwargs,
@@ -164,7 +171,7 @@ class LengthExp(AbsExperiment[LengthResultType, LengthTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> LengthResultType:
+    def load(self, filepath: str, **kwargs) -> LengthResult:
         signals, lengths, _ = load_data(filepath, **kwargs)
         assert lengths is not None
         assert len(lengths.shape) == 1 and len(signals.shape) == 1

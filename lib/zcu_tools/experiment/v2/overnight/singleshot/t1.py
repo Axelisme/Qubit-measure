@@ -17,7 +17,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_comment
@@ -211,11 +211,17 @@ class T1_PlotAndSaveMixin:
         ax.grid(True)
 
 
-class T1Cfg(TaskConfig, ModularProgramCfg):
+class OvernightSingleshotT1ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
+
+class OvernightSingleshotT1ProgramCfg(ModularProgramCfg):
+    modules: OvernightSingleshotT1ModuleCfg
+
+
+class T1Cfg(OvernightSingleshotT1ProgramCfg):
     sweep: Dict[str, SweepCfg]
 
 
@@ -235,18 +241,19 @@ class T1Task(
 
         def measure_t1_fn(ctx: TaskContextView, update_hook: Callable):
             cfg = deepcopy(ctx.cfg)
+            modules = cfg["modules"]
 
             ge_param = sweep2param("ge", cfg["sweep"]["ge"])
             len_param = sweep2param("length", cfg["sweep"]["length"])
-            Pulse.set_param(cfg["pi_pulse"], "on/off", ge_param)
+            Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
             return ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 cfg,
                 modules=[
-                    Reset("reset", cfg.get("reset", {"type": "none"})),
-                    Pulse("pi_pulse", cfg["pi_pulse"]),
+                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Pulse("pi_pulse", modules["pi_pulse"]),
                     Delay("t1_delay", len_param),
-                    Readout("readout", cfg["readout"]),
+                    Readout("readout", modules["readout"]),
                 ],
             ).acquire(
                 ctx.env_dict["soc"],
@@ -292,12 +299,18 @@ class T1Task(
         self.task.cleanup()
 
 
-class T1WithToneCfg(TaskConfig, ModularProgramCfg):
+class OvernightSingleshotT1WithToneModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
-    test_pulse: PulseCfg
+    probe_pulse: PulseCfg
     readout: ReadoutCfg
 
+
+class OvernightSingleshotT1WithToneProgramCfg(ModularProgramCfg):
+    modules: OvernightSingleshotT1WithToneModuleCfg
+
+
+class T1WithToneCfg(OvernightSingleshotT1WithToneProgramCfg):
     sweep: Dict[str, SweepCfg]
 
 
@@ -318,20 +331,21 @@ class T1WithToneTask(
 
         def measure_t1_fn(ctx: TaskContextView, update_hook: Callable):
             cfg = deepcopy(ctx.cfg)
+            modules = cfg["modules"]
 
             ge_param = sweep2param("ge", cfg["sweep"]["ge"])
             len_param = sweep2param("length", cfg["sweep"]["length"])
 
-            Pulse.set_param(cfg["pi_pulse"], "on/off", ge_param)
-            Pulse.set_param(cfg["probe_pulse"], "length", len_param)
+            Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
+            Pulse.set_param(modules["probe_pulse"], "length", len_param)
             return ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 cfg,
                 modules=[
-                    Reset("reset", cfg.get("reset", {"type": "none"})),
-                    Pulse("pi_pulse", cfg["pi_pulse"]),
-                    Pulse("probe_pulse", cfg["probe_pulse"]),
-                    Readout("readout", cfg["readout"]),
+                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Pulse("probe_pulse", modules["probe_pulse"]),
+                    Readout("readout", modules["readout"]),
                 ],
             ).acquire(
                 ctx.env_dict["soc"],

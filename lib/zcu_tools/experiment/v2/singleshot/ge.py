@@ -7,18 +7,26 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Literal, NotRequired, Optional, Tuple, cast, List
+from typing_extensions import (
+    List,
+    Literal,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
-    TaskConfig,
     TaskContextView,
     run_task,
 )
 from zcu_tools.program.v2 import (
+    ModularProgramCfg,
     ModularProgramV2,
     Pulse,
     PulseCfg,
@@ -165,12 +173,15 @@ def optimize_ge_radius(
 GE_Result = NDArray[np.complex128]
 
 
-class GE_Cfg(TaskConfig):
+class GEModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
+
+class GE_Cfg(ModularProgramCfg):
+    modules: GEModuleCfg
     shots: int
     rounds: NotRequired[int]  # will be overwritten to 1
     reps: NotRequired[int]  # will be overwritten by shots
@@ -190,18 +201,19 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         cfg["reps"] = cfg["shots"]
 
         def measure_fn(ctx: TaskContextView, _):
+            modules = ctx.cfg["modules"]
             probe_cfg = None
             if ctx.env_dict["with_probe"]:
-                probe_cfg = ctx.cfg["probe_pulse"]
+                probe_cfg = modules["probe_pulse"]
 
             prog = ModularProgramV2(
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse("init_pulse", ctx.cfg.get("init_pulse")),
+                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Pulse("init_pulse", modules.get("init_pulse")),
                     Pulse("probe_pulse", probe_cfg),
-                    Readout("readout", ctx.cfg["readout"]),
+                    Readout("readout", modules["readout"]),
                 ],
             )
             prog.acquire(soc, progress=True)

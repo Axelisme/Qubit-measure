@@ -7,18 +7,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import List, NotRequired, Optional, Tuple
+from typing_extensions import Dict, List, NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    TaskConfig,
-    TaskContextView,
-    run_task,
-)
+from zcu_tools.experiment.v2.runner import HardTask, TaskContextView, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, MultiLivePlotter, make_plot_frame
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -31,11 +27,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting.multi_decay import (
-    calc_lambdas,
-    fit_dual_transition_rates,
-    fit_dual_with_vadality,
-)
+from zcu_tools.utils.fitting.multi_decay import calc_lambdas, fit_dual_transition_rates
 
 from ..util import calc_populations
 from .util import measure_with_sweep
@@ -44,12 +36,17 @@ from .util import measure_with_sweep
 T1WithToneResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class T1WithToneCfg(TaskConfig, ModularProgramCfg):
+class T1WithToneModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
+
+
+class T1WithToneCfg(ModularProgramCfg):
+    modules: T1WithToneModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
@@ -138,21 +135,26 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
                 def prog_maker(cfg, t1_param):
                     cfg = deepcopy(cfg)
+                    modules = cfg["modules"]
                     return ModularProgramV2(
                         soccfg,
                         cfg,
                         modules=[
-                            Reset("reset", cfg.get("reset", {"type": "none"})),
-                            Pulse("init_pulse", cfg.get("init_pulse")),
+                            Reset("reset", modules.get("reset", {"type": "none"})),
+                            Pulse("init_pulse", modules.get("init_pulse")),
                             Pulse(
                                 "pi_pulse",
-                                Pulse.set_param(cfg["pi_pulse"], "on/off", ge_param),
+                                Pulse.set_param(
+                                    modules["pi_pulse"], "on/off", ge_param
+                                ),
                             ),
                             Pulse(
                                 "probe_pulse",
-                                Pulse.set_param(cfg["probe_pulse"], "length", t1_param),
+                                Pulse.set_param(
+                                    modules["probe_pulse"], "length", t1_param
+                                ),
                             ),
-                            Readout("readout", cfg["readout"]),
+                            Readout("readout", modules["readout"]),
                         ],
                     )
 

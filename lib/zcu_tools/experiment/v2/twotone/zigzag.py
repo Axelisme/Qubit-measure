@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -21,39 +22,46 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Repeat,
     Reset,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..runner import HardTask, SoftTask, TaskConfig, TaskContextView, run_task
+from ..runner import HardTask, SoftTask, TaskContextView, run_task
 
 # (times, signals)
-ZigZagResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+ZigZagResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # type: ignore
 
 
-class ZigZagTaskConfig(TaskConfig, ModularProgramCfg):
+class ZigZagModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
     X90_pulse: PulseCfg
     X180_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class ZigZagExp(AbsExperiment[ZigZagResultType, ZigZagTaskConfig]):
+class ZigZagCfg(ModularProgramCfg):
+    modules: ZigZagModuleCfg
+
+
+class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: ZigZagTaskConfig,
+        cfg: ZigZagCfg,
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
-    ) -> ZigZagResultType:
+    ) -> ZigZagResult:
         cfg = deepcopy(cfg)  # avoid in-place modification
+        modules = cfg["modules"]
 
-        X90_pulse = deepcopy(cfg["X90_pulse"])
+        X90_pulse = deepcopy(modules["X90_pulse"])
 
         assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "times")
@@ -66,6 +74,7 @@ class ZigZagExp(AbsExperiment[ZigZagResultType, ZigZagTaskConfig]):
         ) as viewer:
 
             def measure_fn(ctx: TaskContextView, update_hook):
+                modules = ctx.cfg["modules"]
                 zigzag_time = ctx.env_dict["zigzag_time"]
                 if repeat_on == "X90_pulse":
                     repeat_time = 2 * zigzag_time
@@ -78,7 +87,7 @@ class ZigZagExp(AbsExperiment[ZigZagResultType, ZigZagTaskConfig]):
                     modules=[
                         Reset(
                             "reset",
-                            ctx.cfg.get("reset", {"type": "none"}),
+                            modules.get("reset", {"type": "none"}),
                         ),
                         Pulse(name="X90_pulse", cfg=X90_pulse),
                         Repeat(
@@ -86,10 +95,10 @@ class ZigZagExp(AbsExperiment[ZigZagResultType, ZigZagTaskConfig]):
                             n=repeat_time,
                             sub_module=Pulse(
                                 name=f"loop_{repeat_on}",
-                                cfg=ctx.cfg[repeat_on],
+                                cfg=modules[repeat_on],
                             ),
                         ),
-                        Readout("readout", ctx.cfg["readout"]),
+                        Readout("readout", modules["readout"]),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
 
@@ -97,8 +106,8 @@ class ZigZagExp(AbsExperiment[ZigZagResultType, ZigZagTaskConfig]):
                 task=SoftTask(
                     sweep_name="times",
                     sweep_values=times.tolist(),
-                    update_cfg_fn=lambda _, ctx, time: (
-                        ctx.env_dict.update(zigzag_time=time)
+                    update_cfg_fn=lambda _, ctx, time: ctx.env_dict.update(
+                        zigzag_time=time
                     ),
                     sub_task=HardTask(measure_fn=measure_fn),
                 ),
@@ -117,14 +126,14 @@ class ZigZagExp(AbsExperiment[ZigZagResultType, ZigZagTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[ZigZagResultType] = None,
+        result: Optional[ZigZagResult] = None,
     ) -> Tuple[float, float]:
         raise NotImplementedError("Not implemented")
 
     def save(
         self,
         filepath: str,
-        result: Optional[ZigZagResultType] = None,
+        result: Optional[ZigZagResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/zigzag",
         **kwargs,
@@ -143,7 +152,7 @@ class ZigZagExp(AbsExperiment[ZigZagResultType, ZigZagTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> ZigZagResultType:
+    def load(self, filepath: str, **kwargs) -> ZigZagResult:
         signals, times, _ = load_data(filepath, **kwargs)
         assert times is not None
         assert len(times.shape) == 1 and len(signals.shape) == 1
@@ -164,7 +173,7 @@ ZigZagSweepResultType = Tuple[
 ]
 
 
-class ZigZagSweepExp(AbsExperiment[ZigZagSweepResultType, ZigZagTaskConfig]):
+class ZigZagSweepExp(AbsExperiment[ZigZagSweepResultType, ZigZagCfg]):
     SWEEP_MAP = {
         "gain": {"name": "Gain (a.u.)", "param_key": "gain"},
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},
@@ -174,13 +183,14 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResultType, ZigZagTaskConfig]):
         self,
         soc,
         soccfg,
-        cfg: ZigZagTaskConfig,
+        cfg: ZigZagCfg,
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
     ) -> ZigZagSweepResultType:
         cfg = deepcopy(cfg)  # avoid in-place modification
+        modules = cfg["modules"]
 
-        X90_pulse = deepcopy(cfg["X90_pulse"])
+        X90_pulse = deepcopy(modules["X90_pulse"])
 
         assert "sweep" in cfg
         assert isinstance(cfg["sweep"], dict)
@@ -195,7 +205,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResultType, ZigZagTaskConfig]):
         values: NDArray[np.float64] = sweep2array(cfg["sweep"][x_key])  # predicted
 
         Pulse.set_param(
-            cfg[repeat_on],
+            modules[repeat_on],
             x_info["param_key"],
             sweep2param(x_info["param_key"], cfg["sweep"][x_key]),
         )
@@ -205,6 +215,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResultType, ZigZagTaskConfig]):
         ) as viewer:
 
             def measure_fn(ctx: TaskContextView, update_hook):
+                modules = ctx.cfg["modules"]
                 zigzag_time = ctx.env_dict["zigzag_time"]
                 if repeat_on == "X90_pulse":
                     repeat_time = 2 * zigzag_time
@@ -217,7 +228,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResultType, ZigZagTaskConfig]):
                     modules=[
                         Reset(
                             "reset",
-                            ctx.cfg.get("reset", {"type": "none"}),
+                            modules.get("reset", {"type": "none"}),
                         ),
                         Pulse(name="X90_pulse", cfg=X90_pulse),
                         Repeat(
@@ -225,10 +236,10 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResultType, ZigZagTaskConfig]):
                             n=repeat_time,
                             sub_module=Pulse(
                                 name=f"loop_{repeat_on}",
-                                cfg=ctx.cfg[repeat_on],
+                                cfg=modules[repeat_on],
                             ),
                         ),
-                        Readout("readout", ctx.cfg["readout"]),
+                        Readout("readout", modules["readout"]),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
 

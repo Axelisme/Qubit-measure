@@ -7,13 +7,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import List, NotRequired, Optional, Tuple
+from typing_extensions import List, NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
-    TaskConfig,
     TaskContextView,
     run_task,
 )
@@ -41,10 +40,14 @@ from .util import measure_with_sweep
 T1Result = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class T1Cfg(TaskConfig, ModularProgramCfg):
+class T1ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
+
+
+class T1Cfg(ModularProgramCfg):
+    modules: T1ModuleCfg
 
 
 class T1Exp(AbsExperiment[T1Result, T1Cfg]):
@@ -139,17 +142,20 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
                 def prog_maker(cfg, t1_delay):
                     cfg = deepcopy(cfg)
+                    modules = cfg["modules"]
                     return ModularProgramV2(
                         soccfg,
                         cfg,
                         modules=[
-                            Reset("reset", cfg.get("reset", {"type": "none"})),
+                            Reset("reset", modules.get("reset", {"type": "none"})),
                             Pulse(
                                 "pi_pulse",
-                                Pulse.set_param(cfg["pi_pulse"], "on/off", ge_param),
+                                Pulse.set_param(
+                                    modules["pi_pulse"], "on/off", ge_param
+                                ),
                             ),
                             Delay("t1_delay", delay=t1_delay),
-                            Readout("readout", cfg["readout"]),
+                            Readout("readout", modules["readout"]),
                         ],
                     )
 

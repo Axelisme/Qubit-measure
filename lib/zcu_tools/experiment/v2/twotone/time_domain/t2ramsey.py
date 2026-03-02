@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
@@ -35,19 +35,23 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return rotate2real(signals).real
 
 
-T2RamseyResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T2RamseyResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class T2RamseyTaskConfig(TaskConfig, ModularProgramCfg):
+class T2RamseyModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T2RamseyExp(AbsExperiment[T2RamseyResultType, T2RamseyTaskConfig]):
+class T2RamseyCfg(ModularProgramCfg):
+    modules: T2RamseyModuleCfg
+
+
+class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
     def run(
-        self, soc, soccfg, cfg: T2RamseyTaskConfig, *, detune: float = 0.0
-    ) -> T2RamseyResultType:
+        self, soc, soccfg, cfg: T2RamseyCfg, *, detune: float = 0.0
+    ) -> T2RamseyResult:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -63,26 +67,27 @@ class T2RamseyExp(AbsExperiment[T2RamseyResultType, T2RamseyTaskConfig]):
         ) as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
-                                Delay("t2_delay", delay=t2r_spans),
-                                Pulse(
-                                    name="pi2_pulse2",
-                                    cfg={
-                                        **ctx.cfg["pi2_pulse"],
-                                        "phase": ctx.cfg["pi2_pulse"]["phase"]
-                                        + 360 * detune * t2r_spans,
-                                    },
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset(
+                                "reset",
+                                ctx.cfg["modules"].get("reset", {"type": "none"}),
+                            ),
+                            Pulse("pi2_pulse1", ctx.cfg["modules"]["pi2_pulse"]),
+                            Delay("t2_delay", delay=t2r_spans),
+                            Pulse(
+                                name="pi2_pulse2",
+                                cfg=PulseCfg(
+                                    **ctx.cfg["modules"]["pi2_pulse"],
+                                    phase=ctx.cfg["modules"]["pi2_pulse"]["phase"]
+                                    + 360 * detune * t2r_spans,
                                 ),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                            ),
+                            Readout("readout", ctx.cfg["modules"]["readout"]),
+                        ],
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(ts),),
                 ),
                 init_cfg=cfg,
@@ -98,7 +103,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResultType, T2RamseyTaskConfig]):
         return ts, signals
 
     def analyze(
-        self, result: Optional[T2RamseyResultType] = None, *, fit_fringe: bool = True
+        self, result: Optional[T2RamseyResult] = None, *, fit_fringe: bool = True
     ) -> Tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -140,7 +145,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResultType, T2RamseyTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[T2RamseyResultType] = None,
+        result: Optional[T2RamseyResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t2ramsey",
         **kwargs,
@@ -159,7 +164,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResultType, T2RamseyTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T2RamseyResultType:
+    def load(self, filepath: str, **kwargs) -> T2RamseyResult:
         signals, Ts, _ = load_data(filepath, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1

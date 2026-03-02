@@ -10,11 +10,11 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import (
     LivePlotter1D,
@@ -45,12 +45,15 @@ T1WithToneSweepResult = Tuple[
 ]
 
 
-class T1WithToneSweepCfg(TaskConfig, ModularProgramCfg):
+class T1WithToneSweepModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
+
+class T1WithToneSweepCfg(ModularProgramCfg):
+    modules: T1WithToneSweepModuleCfg
     sweep: NotRequired[Dict[str, SweepCfg]]
 
 
@@ -65,6 +68,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         radius: float,
     ) -> T1WithToneSweepResult:
         cfg = deepcopy(cfg)
+        modules = cfg["modules"]
 
         assert "sweep" in cfg
 
@@ -76,12 +80,12 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
 
         xs = sweep2array(x_sweep, allow_array=True)
         ts = sweep2array(len_sweep)  # predicted times
-        ts = round_zcu_time(ts, soccfg, gen_ch=cfg["probe_pulse"]["ch"])
+        ts = round_zcu_time(ts, soccfg, gen_ch=modules["probe_pulse"]["ch"])
 
         ge_param = sweep2param("ge", cfg["sweep"]["ge"])
         len_param = sweep2param("length", len_sweep)
-        Pulse.set_param(cfg["pi_pulse"], "on/off", ge_param)
-        Pulse.set_param(cfg["probe_pulse"], "length", len_param)
+        Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
+        Pulse.set_param(modules["probe_pulse"], "length", len_param)
 
         fig, axs = make_plot_frame(4, 2, figsize=(12, 10))
         axs[3][0].set_ylim(0.0, 1.0)
@@ -126,7 +130,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         ) as viewer:
 
             def update_fn(i, ctx, value) -> None:
-                Pulse.set_param(ctx.cfg["probe_pulse"], sweep_name, value)
+                Pulse.set_param(ctx.cfg["modules"]["probe_pulse"], sweep_name, value)
                 ctx.env_dict["idx"] = i
 
             def plot_fn(ctx) -> None:
@@ -163,14 +167,15 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
 
             def measure_fn(ctx, update_hook):
                 cfg = deepcopy(ctx.cfg)
+                modules = cfg["modules"]
                 return ModularProgramV2(
                     soccfg,
                     cfg,
                     modules=[
-                        Reset("reset", cfg.get("reset", {"type": "none"})),
-                        Pulse("pi_pulse", cfg["pi_pulse"]),
-                        Pulse("test_pulse", cfg["probe_pulse"]),
-                        Readout("readout", cfg["readout"]),
+                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Pulse("pi_pulse", modules["pi_pulse"]),
+                        Pulse("test_pulse", modules["probe_pulse"]),
+                        Readout("readout", modules["readout"]),
                     ],
                 ).acquire(
                     soc,

@@ -5,11 +5,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -26,10 +26,10 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-PreFreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
+MIST_PreFreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class PreFreqCfg(TaskConfig, ModularProgramCfg):
+class MIST_PreFreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: PulseCfg
     pi_pulse: NotRequired[PulseCfg]
@@ -37,24 +37,29 @@ class PreFreqCfg(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
+class MIST_PreFreqCfg(ModularProgramCfg):
+    modules: MIST_PreFreqModuleCfg
+
+
+class PreFreqExp(AbsExperiment[MIST_PreFreqResult, MIST_PreFreqCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: PreFreqCfg,
+        cfg: MIST_PreFreqCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> PreFreqResult:
+    ) -> MIST_PreFreqResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
+        modules = cfg["modules"]
 
         assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted amplitudes
 
         Pulse.set_param(
-            cfg["init_pulse"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["init_pulse"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
         with LivePlotter1D(
@@ -71,28 +76,30 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         ) as viewer:
             viewer.get_ax().set_ylim(0.0, 1.0)
 
+            def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Pulse(name="init_pulse", cfg=modules["init_pulse"]),
+                        Pulse(name="pi_pulse", cfg=modules.get("pi_pulse")),
+                        Pulse(name="probe_pulse", cfg=modules["probe_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                ).acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    g_center=g_center,
+                    e_center=e_center,
+                    population_radius=radius,
+                )
+
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse(name="init_pulse", cfg=ctx.cfg["init_pulse"]),
-                                Pulse(name="pi_pulse", cfg=ctx.cfg.get("pi_pulse")),
-                                Pulse(name="probe_pulse", cfg=ctx.cfg["probe_pulse"]),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(
-                            soc,
-                            progress=False,
-                            callback=update_hook,
-                            g_center=g_center,
-                            e_center=e_center,
-                            population_radius=radius,
-                        )
-                    ),
+                    measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(fpts), 2),
                     dtype=np.float64,
@@ -105,13 +112,13 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result: PreFreqResult = (fpts, signals)
+        self.last_result: MIST_PreFreqResult = (fpts, signals)
 
         return fpts, signals
 
     def analyze(
         self,
-        result: Optional[PreFreqResult] = None,
+        result: Optional[MIST_PreFreqResult] = None,
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
@@ -144,7 +151,7 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[PreFreqResult] = None,
+        result: Optional[MIST_PreFreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/pdr",
         **kwargs,
@@ -165,7 +172,7 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> PreFreqResult:
+    def load(self, filepath: str, **kwargs) -> MIST_PreFreqResult:
         populations, fpts, _ = load_data(filepath, **kwargs)
 
         fpts = fpts / 1e6  # convert to MHz

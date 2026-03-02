@@ -11,26 +11,24 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
-from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg, Readout, sweep2param
+from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from ..runner import HardTask, SoftTask, TaskConfig, run_task
+from ..runner import HardTask, SoftTask, run_task
 
-FluxDepResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+FluxDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
 def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class FluxDepTaskConfig(TaskConfig, OneToneProgramCfg):
+class FluxDepCfg(OneToneCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class FluxDepExp(AbsExperiment[FluxDepResultType, FluxDepTaskConfig]):
-    def run(self, soc, soccfg, cfg: FluxDepTaskConfig) -> FluxDepResultType:
+class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
+    def run(self, soc, soccfg, cfg: FluxDepCfg) -> FluxDepResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -43,7 +41,8 @@ class FluxDepExp(AbsExperiment[FluxDepResultType, FluxDepTaskConfig]):
         dev_values: NDArray[np.float64] = sweep2array(flx_sweep, allow_array=True)
         fpts = sweep2array(fpt_sweep)  # predicted frequency points
 
-        Readout.set_param(cfg["readout"], "freq", sweep2param("freq", fpt_sweep))
+        modules = cfg["modules"]
+        Readout.set_param(modules["readout"], "freq", sweep2param("freq", fpt_sweep))
 
         with LivePlotter2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=10
@@ -56,11 +55,9 @@ class FluxDepExp(AbsExperiment[FluxDepResultType, FluxDepTaskConfig]):
                         ctx.cfg["dev"], flx
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            OneToneProgram(soccfg, ctx.cfg).acquire(
-                                soc, progress=False, callback=update_hook
-                            )
-                        ),
+                        measure_fn=lambda ctx, update_hook: OneToneProgram(
+                            soccfg, ctx.cfg
+                        ).acquire(soc, progress=False, callback=update_hook),
                         result_shape=(len(fpts),),
                     ),
                 ),
@@ -81,7 +78,7 @@ class FluxDepExp(AbsExperiment[FluxDepResultType, FluxDepTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[FluxDepResultType] = None,
+        result: Optional[FluxDepResult] = None,
         mA_c: Optional[float] = None,
         mA_e: Optional[float] = None,
     ) -> InteractiveLines:
@@ -104,7 +101,7 @@ class FluxDepExp(AbsExperiment[FluxDepResultType, FluxDepTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[FluxDepResultType] = None,
+        result: Optional[FluxDepResult] = None,
         comment: Optional[str] = None,
         tag: str = "onetone/flux_dep",
         **kwargs,
@@ -125,7 +122,7 @@ class FluxDepExp(AbsExperiment[FluxDepResultType, FluxDepTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> FluxDepResultType:
+    def load(self, filepath: str, **kwargs) -> FluxDepResult:
         signals2D, fpts, values = load_data(filepath, **kwargs)
         assert fpts is not None and values is not None
         assert len(fpts.shape) == 1 and len(values.shape) == 1

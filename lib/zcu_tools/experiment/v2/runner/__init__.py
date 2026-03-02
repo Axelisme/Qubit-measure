@@ -1,4 +1,4 @@
-from .context import Result, TaskConfig, TaskContext, TaskContextView
+from .context import Result, TaskContext, TaskContextView
 from .tasks import (
     AbsTask,
     BatchTask,

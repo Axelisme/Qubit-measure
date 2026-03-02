@@ -16,7 +16,7 @@ def classify_result(
     g_center: complex,
     e_center: complex,
     radius: float,
-) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+) -> Tuple[NDArray[np.bool_], NDArray[np.bool_], NDArray[np.bool_]]:
     """Classify shots into ground, excited, and other."""
     dists_g = np.abs(signals - g_center)
     dists_e = np.abs(signals - e_center)

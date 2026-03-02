@@ -18,7 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
 from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D
@@ -73,7 +73,7 @@ class T2RamseyCfgTemplate(ModularProgramCfg):
     sweep_range: Tuple[float, float]
 
 
-class T2RamseyCfg(TaskConfig, ModularProgramCfg):
+class T2RamseyCfg(ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
@@ -98,7 +98,7 @@ class T2RamseyPlotterDict(TypedDict, closed=True):
 
 
 class T2RamseyTask(
-    MeasurementTask[T2RamseyResult, T_RootResultType, TaskConfig, T2RamseyPlotterDict]
+    MeasurementTask[T2RamseyResult, T_RootResultType, T2RamseyPlotterDict]
 ):
     def __init__(
         self,

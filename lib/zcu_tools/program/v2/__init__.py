@@ -16,6 +16,6 @@ from .modules import (
     WaveformCfg,
     check_block_mode,
 )
-from .onetone import OneToneProgram, OneToneProgramCfg
-from .twotone import TwoToneProgram, TwoToneProgramCfg
+from .onetone import OneToneCfg, OneToneProgram
+from .twotone import TwoToneCfg, TwoToneProgram
 from .utils import sweep2param

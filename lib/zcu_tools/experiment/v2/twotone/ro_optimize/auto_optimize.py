@@ -8,14 +8,13 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from skopt import Optimizer
 from skopt.space import Real
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
-    TaskConfig,
     TaskContextView,
     run_task,
 )
@@ -36,7 +35,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-AutoResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
+AutoOptResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class ReadoutOptimizer:
@@ -84,14 +83,18 @@ class ReadoutOptimizer:
         return param
 
 
-class AutoTaskConfig(TaskConfig, ModularProgramCfg):
+class AutoOptModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
-    def run(self, soc, soccfg, cfg: AutoTaskConfig, num_points: int) -> AutoResultType:
+class AutoOptCfg(ModularProgramCfg):
+    modules: AutoOptModuleCfg
+
+
+class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
+    def run(self, soc, soccfg, cfg: AutoOptCfg, num_points: int) -> AutoOptResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -100,8 +103,9 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
         len_sweep = cfg["sweep"]["length"]
         cfg["sweep"] = {"ge": make_ge_sweep()}
 
+        modules = cfg["modules"]
         Pulse.set_param(
-            cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
 
         optimizer = ReadoutOptimizer(fpt_sweep, pdr_sweep, len_sweep, num_points)
@@ -123,9 +127,10 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
                 raise KeyboardInterrupt("No more parameters to optimize.")
 
             params[i, :] = cur_params
-            Readout.set_param(ctx.cfg["readout"], "freq", cur_params[0])
-            Readout.set_param(ctx.cfg["readout"], "gain", cur_params[1])
-            Readout.set_param(ctx.cfg["readout"], "length", cur_params[2])
+            modules = ctx.cfg["modules"]
+            Readout.set_param(modules["readout"], "freq", cur_params[0])
+            Readout.set_param(modules["readout"], "gain", cur_params[1])
+            Readout.set_param(modules["readout"], "length", cur_params[2])
 
         # initialize figure and axes
         figsize = (8, 5)
@@ -184,13 +189,14 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
                 viewer.refresh()
 
             def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
                 prog = ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                        Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                        Readout("readout", ctx.cfg["readout"]),
+                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Readout("readout", modules["readout"]),
                     ],
                 )
                 tracker = PCATracker()
@@ -212,6 +218,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
                     sub_task=HardTask(
                         measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                        dtype=np.float64,
                     ),
                 ),
                 init_cfg=cfg,
@@ -227,7 +234,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
         return params, signals
 
     def analyze(
-        self, result: Optional[AutoResultType] = None
+        self, result: Optional[AutoOptResult] = None
     ) -> Tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -278,7 +285,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[AutoResultType] = None,
+        result: Optional[AutoOptResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/auto",
         **kwargs,
@@ -316,7 +323,7 @@ class AutoExp(AbsExperiment[AutoResultType, AutoTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str) -> AutoResultType:
+    def load(self, filepath: str) -> AutoOptResult:
         _filepath = Path(filepath)
 
         params_data, _, _ = load_data(

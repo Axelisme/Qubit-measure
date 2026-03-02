@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
@@ -17,7 +17,7 @@ from zcu_tools.experiment.utils import (
     set_freq_in_dev_cfg,
     sweep2array,
 )
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter
@@ -34,19 +34,21 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAFreqResultType = Tuple[NDArray[np.float64], NDArray[np.float64]]
+JPAFreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class JPAFreqTaskConfig(TaskConfig, ModularProgramCfg):
+class JPAFreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
-    dev: Mapping[str, DeviceInfo]
+
+class JPAFreqCfg(ModularProgramCfg):
+    modules: JPAFreqModuleCfg
 
 
-class JPAFreqExp(AbsExperiment[JPAFreqResultType, JPAFreqTaskConfig]):
-    def run(self, soc, soccfg, cfg: JPAFreqTaskConfig) -> JPAFreqResultType:
+class JPAFreqExp(AbsExperiment[JPAFreqResult, JPAFreqCfg]):
+    def run(self, soc, soccfg, cfg: JPAFreqCfg) -> JPAFreqResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -55,24 +57,26 @@ class JPAFreqExp(AbsExperiment[JPAFreqResultType, JPAFreqTaskConfig]):
         jpa_freqs = sweep2array(cfg["sweep"]["jpa_freq"], allow_array=True)
         np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
 
+        modules = cfg["modules"]
         cfg["sweep"] = {"ge": make_ge_sweep()}
         Pulse.set_param(
-            cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
 
         with LivePlotterScatter("JPA Frequency (MHz)", "Signal Difference") as viewer:
 
             def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
                 prog = ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
                         Reset(
                             "reset",
-                            ctx.cfg.get("reset", {"type": "none"}),
+                            modules.get("reset", {"type": "none"}),
                         ),
-                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                        Readout("readout", ctx.cfg["readout"]),
+                        Pulse("pi_pulse", modules["pi_pulse"]),
+                        Readout("readout", modules["readout"]),
                     ],
                 )
                 tracker = PCATracker()
@@ -96,6 +100,7 @@ class JPAFreqExp(AbsExperiment[JPAFreqResultType, JPAFreqTaskConfig]):
                     sub_task=HardTask(
                         measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                        dtype=np.float64,
                     ),
                 ),
                 init_cfg=cfg,
@@ -109,9 +114,7 @@ class JPAFreqExp(AbsExperiment[JPAFreqResultType, JPAFreqTaskConfig]):
 
         return jpa_freqs, signals
 
-    def analyze(
-        self, result: Optional[JPAFreqResultType] = None
-    ) -> Tuple[float, Figure]:
+    def analyze(self, result: Optional[JPAFreqResult] = None) -> Tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -142,7 +145,7 @@ class JPAFreqExp(AbsExperiment[JPAFreqResultType, JPAFreqTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[JPAFreqResultType] = None,
+        result: Optional[JPAFreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/freq",
         **kwargs,
@@ -162,7 +165,7 @@ class JPAFreqExp(AbsExperiment[JPAFreqResultType, JPAFreqTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAFreqResultType:
+    def load(self, filepath: str, **kwargs) -> JPAFreqResult:
         signals, jpa_freqs, _ = load_data(filepath, **kwargs)
         assert jpa_freqs is not None
         assert len(jpa_freqs.shape) == 1 and len(signals.shape) == 1

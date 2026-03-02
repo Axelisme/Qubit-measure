@@ -1,17 +1,17 @@
 import warnings
 from copy import deepcopy
-from typing import List, Optional, Type, TypedDict, Union
+from typing import List, Optional, Type, Union
 
 from qick.asm_v2 import QickParam
 from typing_extensions import NotRequired
 
 from ..base import MyProgramV2
-from .base import Module
+from .base import Module, ModuleCfg
 from .util import round_timestamp
 from .waveform import Waveform, WaveformCfg
 
 
-class PulseCfg(TypedDict):
+class PulseCfg(ModuleCfg):
     waveform: WaveformCfg
     ch: int
     nqz: int

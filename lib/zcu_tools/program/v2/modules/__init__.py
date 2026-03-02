@@ -1,6 +1,6 @@
 import qick.asm_v2 as qick_asm_v2
 
-from .base import Delay, Module, NonBlocking
+from .base import Delay, Module, ModuleCfg, NonBlocking
 from .loop import Repeat
 from .pulse import Pulse, PulseCfg, check_block_mode
 from .readout import (

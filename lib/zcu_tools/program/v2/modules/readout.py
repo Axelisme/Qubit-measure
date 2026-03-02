@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Callable, ClassVar, Dict, Optional, Type, TypedDict, Union
+from typing import Callable, ClassVar, Dict, Optional, Type, Union
 
 from qick.asm_v2 import QickParam
 
 from ..base import MyProgramV2
-from .base import Module
+from .base import Module, ModuleCfg
 from .pulse import Pulse, PulseCfg, check_block_mode
 from .util import calc_max_length
 
 
-class TriggerCfg(TypedDict):
+class TriggerCfg(ModuleCfg):
     ro_ch: int
     ro_length: Union[float, QickParam]
     ro_freq: Union[float, QickParam]
@@ -61,7 +61,7 @@ class TriggerReadout(Module):
         return t  # always non-blocking
 
 
-class BaseReadoutCfg(TypedDict):
+class BaseReadoutCfg(ModuleCfg):
     type: str
     pulse_cfg: PulseCfg
     ro_cfg: TriggerCfg

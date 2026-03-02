@@ -9,12 +9,12 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
@@ -34,29 +34,31 @@ from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-T1ResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T1Result = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # (times, signals)
 
 
-class T1TaskConfig(TaskConfig, ModularProgramCfg):
+class T1ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
-    t1_delay: NotRequired[float]
+
+class T1Cfg(ModularProgramCfg):
+    modules: T1ModuleCfg
 
 
-class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
+class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     """T1 relaxation time measurement.
 
     Applies a π pulse and then waits for a variable time before readout
     to measure the qubit's energy relaxation.
     """
 
-    def _run_non_uniform(self, soc, soccfg, cfg: T1TaskConfig) -> T1ResultType:
+    def _run_non_uniform(self, soc, soccfg, cfg: T1Cfg) -> T1Result:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -81,6 +83,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
         def measure_fn(ctx, update_hook):
             rounds = ctx.cfg.pop("rounds", 1)
             ctx.cfg["rounds"] = 1
+            modules = ctx.cfg["modules"]
 
             acc_signals = np.zeros_like(ts, dtype=np.complex128)
             for ir in range(rounds):
@@ -89,10 +92,10 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
                         soccfg,
                         ctx.cfg,
                         modules=[
-                            Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                            Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                            Reset("reset", modules.get("reset", {"type": "none"})),
+                            Pulse("pi_pulse", modules["pi_pulse"]),
                             Delay("t1_delay", delay=t1_delay),
-                            Readout("readout", ctx.cfg["readout"]),
+                            Readout("readout", modules["readout"]),
                         ],
                     ).acquire(soc, progress=False)
 
@@ -121,7 +124,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
 
         return ts, signals
 
-    def _run_uniform(self, soc, soccfg, cfg: T1TaskConfig) -> T1ResultType:
+    def _run_uniform(self, soc, soccfg, cfg: T1Cfg) -> T1Result:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -134,23 +137,22 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
         ) as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                Delay(
-                                    name="t1_delay",
-                                    delay=sweep2param(
-                                        "length", ctx.cfg["sweep"]["length"]
-                                    ),
-                                ),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset(
+                                "reset",
+                                ctx.cfg["modules"].get("reset", {"type": "none"}),
+                            ),
+                            Pulse("pi_pulse", ctx.cfg["modules"]["pi_pulse"]),
+                            Delay(
+                                name="t1_delay",
+                                delay=sweep2param("length", ctx.cfg["sweep"]["length"]),
+                            ),
+                            Readout("readout", ctx.cfg["modules"]["readout"]),
+                        ],
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(ts),),
                 ),
                 init_cfg=cfg,
@@ -163,14 +165,14 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
 
         return ts, signals
 
-    def run(self, soc, soccfg, cfg: T1TaskConfig, uniform: bool = True) -> T1ResultType:
+    def run(self, soc, soccfg, cfg: T1Cfg, uniform: bool = True) -> T1Result:
         if uniform:
             return self._run_uniform(soc, soccfg, cfg)
         else:
             return self._run_non_uniform(soc, soccfg, cfg)
 
     def analyze(
-        self, result: Optional[T1ResultType] = None, *, dual_exp: bool = False
+        self, result: Optional[T1Result] = None, *, dual_exp: bool = False
     ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -211,7 +213,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1Result] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1",
         **kwargs,
@@ -230,7 +232,7 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1ResultType:
+    def load(self, filepath: str, **kwargs) -> T1Result:
         signals, Ts, _ = load_data(filepath, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1
@@ -247,22 +249,32 @@ class T1Exp(AbsExperiment[T1ResultType, T1TaskConfig]):
         return Ts, signals
 
 
-class T1WithToneTaskConfig(TaskConfig, ModularProgramCfg):
+class T1WithToneModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     test_pulse: PulseCfg
     readout: ReadoutCfg
 
 
+class T1WithToneProgramCfg(ModularProgramCfg):
+    modules: T1WithToneModuleCfg
+
+
+class T1WithToneTaskConfig(T1WithToneProgramCfg): ...
+
+
 class T1WithToneExp(AbsExperiment):
-    def run(self, soc, soccfg, cfg: T1WithToneTaskConfig) -> T1ResultType:
+    def run(self, soc, soccfg, cfg: T1WithToneTaskConfig) -> T1Result:
         cfg = deepcopy(cfg)
+        modules = cfg["modules"]
 
         assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
         Pulse.set_param(
-            cfg["test_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
+            modules["test_pulse"],
+            "length",
+            sweep2param("length", cfg["sweep"]["length"]),
         )
 
         ts = sweep2array(cfg["sweep"]["length"])
@@ -272,18 +284,16 @@ class T1WithToneExp(AbsExperiment):
         ) as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", cfg.get("reset", {"type": "none"})),
-                                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                                Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
-                                Readout("readout", cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset("reset", modules.get("reset", {"type": "none"})),
+                            Pulse(name="pi_pulse", cfg=modules["pi_pulse"]),
+                            Pulse(name="test_pulse", cfg=modules["test_pulse"]),
+                            Readout("readout", modules["readout"]),
+                        ],
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(ts),),
                 ),
                 init_cfg=cfg,
@@ -297,7 +307,7 @@ class T1WithToneExp(AbsExperiment):
         return ts, signals
 
     def analyze(
-        self, result: Optional[T1ResultType] = None, *, dual_exp: bool = False
+        self, result: Optional[T1Result] = None, *, dual_exp: bool = False
     ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -338,7 +348,7 @@ class T1WithToneExp(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1Result] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1_with_tone",
         **kwargs,
@@ -357,7 +367,7 @@ class T1WithToneExp(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1ResultType:
+    def load(self, filepath: str, **kwargs) -> T1Result:
         signals, Ts, _ = load_data(filepath, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1
@@ -384,23 +394,26 @@ def t1_sweep_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.flo
     return rotate2real(signals).real
 
 
-class T1WithToneSweepTaskConfig(TaskConfig, ModularProgramCfg):
-    reset: NotRequired[ResetCfg]
-    pi_pulse: PulseCfg
-    test_pulse: PulseCfg
-    readout: ReadoutCfg
+class T1WithToneSweepProgramCfg(ModularProgramCfg):
+    modules: T1WithToneModuleCfg
+
+
+class T1WithToneSweepTaskConfig(T1WithToneSweepProgramCfg): ...
 
 
 class T1WithToneSweepExp(AbsExperiment):
     def run(self, soc, soccfg, cfg: T1WithToneSweepTaskConfig) -> T1SweepResultType:
         cfg = deepcopy(cfg)
+        modules = cfg["modules"]
 
         assert "sweep" in cfg
         gain_sweep = cfg["sweep"]["gain"]
         cfg["sweep"] = {"length": cfg["sweep"]["length"]}
 
         Pulse.set_param(
-            cfg["test_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
+            modules["test_pulse"],
+            "length",
+            sweep2param("length", cfg["sweep"]["length"]),
         )
 
         gains = sweep2array(gain_sweep, allow_array=True)  # predicted
@@ -414,23 +427,27 @@ class T1WithToneSweepExp(AbsExperiment):
                     sweep_name="gain",
                     sweep_values=gains.tolist(),
                     update_cfg_fn=lambda _, ctx, gain: Pulse.set_param(
-                        ctx.cfg["test_pulse"], "gain", gain
+                        ctx.cfg["modules"]["test_pulse"], "gain", gain
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset", ctx.cfg.get("reset", {"type": "none"})
-                                    ),
-                                    Pulse(name="pi_pulse", cfg=ctx.cfg["pi_pulse"]),
-                                    Pulse(name="test_pulse", cfg=ctx.cfg["test_pulse"]),
-                                    Readout("readout", cfg=ctx.cfg["readout"]),
-                                ],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        ),
+                        measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                Reset(
+                                    "reset",
+                                    ctx.cfg["modules"].get("reset", {"type": "none"}),
+                                ),
+                                Pulse(
+                                    name="pi_pulse", cfg=ctx.cfg["modules"]["pi_pulse"]
+                                ),
+                                Pulse(
+                                    name="test_pulse",
+                                    cfg=ctx.cfg["modules"]["test_pulse"],
+                                ),
+                                Readout("readout", cfg=ctx.cfg["modules"]["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook),
                         result_shape=(len(ts),),
                     ),
                 ),

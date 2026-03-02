@@ -5,11 +5,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-MISTPowerDepResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+MISTPowerDepResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -35,40 +35,52 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(mist_signals)
 
 
-class MISTPowerDepTaskConfig(TaskConfig, ModularProgramCfg):
+class MISTPowerDepModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    init_pulse: PulseCfg
+    init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConfig]):
-    def run(self, soc, soccfg, cfg: MISTPowerDepTaskConfig) -> MISTPowerDepResultType:
+class MISTPowerDepCfg(ModularProgramCfg):
+    modules: MISTPowerDepModuleCfg
+
+
+class MISTPowerDepExp(AbsExperiment[MISTPowerDepResult, MISTPowerDepCfg]):
+    def run(self, soc, soccfg, cfg: MISTPowerDepCfg) -> MISTPowerDepResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
+        modules = cfg["modules"]
 
         assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
 
         Pulse.set_param(
-            cfg["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+            modules["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
         )
 
         with LivePlotter1D("Pulse gain", "MIST") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse(name="init_pulse", cfg=ctx.cfg.get("init_pulse")),
-                                Pulse(name="probe_pulse", cfg=ctx.cfg["probe_pulse"]),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset(
+                                "reset",
+                                ctx.cfg["modules"].get("reset", {"type": "none"}),
+                            ),
+                            Pulse(
+                                name="init_pulse",
+                                cfg=ctx.cfg["modules"].get("init_pulse"),
+                            ),
+                            Pulse(
+                                name="probe_pulse",
+                                cfg=ctx.cfg["modules"]["probe_pulse"],
+                            ),
+                            Readout("readout", ctx.cfg["modules"]["readout"]),
+                        ],
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(pdrs),),
                 ),
                 init_cfg=cfg,
@@ -83,7 +95,7 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConf
 
     def analyze(
         self,
-        result: Optional[MISTPowerDepResultType] = None,
+        result: Optional[MISTPowerDepResult] = None,
         *,
         g0=None,
         e0=None,
@@ -121,7 +133,7 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConf
     def save(
         self,
         filepath: str,
-        result: Optional[MISTPowerDepResultType] = None,
+        result: Optional[MISTPowerDepResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/mist/pdr",
         **kwargs,
@@ -141,7 +153,7 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResultType, MISTPowerDepTaskConf
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> MISTPowerDepResultType:
+    def load(self, filepath: str, **kwargs) -> MISTPowerDepResult:
         signals, pdrs, _ = load_data(filepath, **kwargs)
         assert pdrs is not None
         assert len(pdrs.shape) == 1 and len(signals.shape) == 1

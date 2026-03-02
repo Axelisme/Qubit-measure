@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, List, Optional, Tuple
+from typing_extensions import List, NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task, SoftTask
-from zcu_tools.liveplot import LivePlotter2D, make_plot_frame, MultiLivePlotter
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -26,36 +26,39 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-FreqPowerDepResult = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
-]
+Freq_PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
 
 
-class FreqPowerDepCfg(TaskConfig, ModularProgramCfg):
+class MIST_FreqPowerModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    init_pulse: PulseCfg
+    init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class FreqPowerDepExp(AbsExperiment[FreqPowerDepResult, FreqPowerDepCfg]):
+class MIST_FreqPowerCfg(ModularProgramCfg):
+    modules: MIST_FreqPowerModuleCfg
+
+
+class FreqPowerDepExp(AbsExperiment[Freq_PowerResult, MIST_FreqPowerCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: FreqPowerDepCfg,
+        cfg: MIST_FreqPowerCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> FreqPowerDepResult:
+    ) -> Freq_PowerResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
+        modules = cfg["modules"]
 
         assert "sweep" in cfg
         freq_sweep = cfg["sweep"]["freq"]
         gain_sweep = cfg["sweep"]["gain"]
         cfg["sweep"] = {"freq": freq_sweep}
 
-        Pulse.set_param(cfg["probe_pulse"], "freq", sweep2param("freq", freq_sweep))
+        Pulse.set_param(modules["probe_pulse"], "freq", sweep2param("freq", freq_sweep))
 
         gains = sweep2array(gain_sweep, allow_array=True)
         freqs = sweep2array(freq_sweep)
@@ -101,35 +104,35 @@ class FreqPowerDepExp(AbsExperiment[FreqPowerDepResult, FreqPowerDepCfg]):
 
                 viewer.refresh()
 
+            def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Pulse("init_pulse", modules.get("init_pulse")),
+                        Pulse("probe_pulse", modules["probe_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                ).acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    g_center=g_center,
+                    e_center=e_center,
+                    population_radius=radius,
+                )
+
             signals = run_task(
                 task=SoftTask(
                     sweep_name="gain",
                     sweep_values=gains.tolist(),
                     update_cfg_fn=lambda i, ctx, gain: Pulse.set_param(
-                        ctx.cfg["probe_pulse"], "gain", gain
+                        ctx.cfg["modules"]["probe_pulse"], "gain", gain
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset", ctx.cfg.get("reset", {"type": "none"})
-                                    ),
-                                    Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                    Pulse("probe_pulse", ctx.cfg["probe_pulse"]),
-                                    Readout("readout", ctx.cfg["readout"]),
-                                ],
-                            ).acquire(
-                                soc,
-                                progress=False,
-                                callback=update_hook,
-                                g_center=g_center,
-                                e_center=e_center,
-                                population_radius=radius,
-                            )
-                        ),
+                        measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: raw[0][0],
                         result_shape=(len(freqs), 2),
                         dtype=np.float64,
@@ -142,13 +145,13 @@ class FreqPowerDepExp(AbsExperiment[FreqPowerDepResult, FreqPowerDepCfg]):
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result: FreqPowerDepResult = (gains, freqs, signals)
+        self.last_result: Freq_PowerResult = (gains, freqs, signals)
 
         return self.last_result
 
     def analyze(
         self,
-        result: Optional[FreqPowerDepResult] = None,
+        result: Optional[Freq_PowerResult] = None,
         *,
         ac_coeff=None,
         log_scale=False,
@@ -208,7 +211,7 @@ class FreqPowerDepExp(AbsExperiment[FreqPowerDepResult, FreqPowerDepCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqPowerDepResult] = None,
+        result: Optional[Freq_PowerResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/pdr_freq",
         **kwargs,
@@ -249,7 +252,7 @@ class FreqPowerDepExp(AbsExperiment[FreqPowerDepResult, FreqPowerDepCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> FreqPowerDepResult:
+    def load(self, filepath: List[str], **kwargs) -> Freq_PowerResult:
         g_filepath, e_filepath = filepath
 
         # Load ground populations

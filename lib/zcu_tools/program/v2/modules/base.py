@@ -2,9 +2,12 @@ import warnings
 from abc import ABC, abstractmethod
 
 from qick.asm_v2 import QickParam
-from typing_extensions import Sequence, Union
+from typing_extensions import Sequence, TypedDict, Union
 
 from ..base import MyProgramV2
+
+
+class ModuleCfg(TypedDict, closed=False): ...
 
 
 class Module(ABC):

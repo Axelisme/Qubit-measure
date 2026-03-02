@@ -8,10 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, run_task
 from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -21,6 +22,7 @@ from zcu_tools.program.v2 import (
     Readout,
     ReadoutCfg,
     Reset,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -63,18 +65,24 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_fpts)
 
 
-class CKP_Cfg(TaskConfig, ModularProgramCfg):
+class CKP_ModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     res_pulse: PulseCfg
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
+class CKP_Cfg(ModularProgramCfg):
+    modules: CKP_ModuleCfg
+
+
 class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
     def run(self, soc, soccfg, cfg: CKP_Cfg) -> CKP_Result:
         cfg = deepcopy(cfg)  # prevent in-place modification
+        modules = cfg["modules"]
 
-        if cfg["res_pulse"].get("block_mode", True):
+        if modules["res_pulse"].get("block_mode", True):
             raise ValueError("Resonator pulse must not in block mode")
 
         assert "sweep" in cfg
@@ -90,13 +98,17 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         qub_freqs = sweep2array(cfg["sweep"]["qub_freq"])
 
         Pulse.set_param(
-            cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
         Pulse.set_param(
-            cfg["res_pulse"], "freq", sweep2param("res_freq", cfg["sweep"]["res_freq"])
+            modules["res_pulse"],
+            "freq",
+            sweep2param("res_freq", cfg["sweep"]["res_freq"]),
         )
         Pulse.set_param(
-            cfg["qub_pulse"], "freq", sweep2param("qub_freq", cfg["sweep"]["qub_freq"])
+            modules["qub_pulse"],
+            "freq",
+            sweep2param("qub_freq", cfg["sweep"]["qub_freq"]),
         )
 
         fig, axs = make_plot_frame(1, 2, figsize=(10, 4))
@@ -130,22 +142,23 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                 )
                 viewer.refresh()
 
+            def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Pulse("pi_pulse", modules["pi_pulse"]),
+                        Pulse("res_pulse", modules["res_pulse"]),
+                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                ).acquire(soc, progress=False, callback=update_hook)
+
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                ctx.cfg.get("reset", {"type": "none"}),
-                            ),
-                            Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                            Pulse("res_pulse", ctx.cfg["res_pulse"]),
-                            Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                            Readout("readout", ctx.cfg["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    measure_fn=measure_fn,
                     result_shape=(2, len(res_freqs), len(qub_freqs)),
                 ),
                 init_cfg=cfg,

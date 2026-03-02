@@ -14,8 +14,8 @@ from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     Pulse,
     Readout,
+    TwoToneCfg,
     TwoToneProgram,
-    TwoToneProgramCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -26,20 +26,20 @@ from zcu_tools.utils.fitting.resonance import (
     remove_edelay,
 )
 
-from ..runner import HardTask, TaskConfig, run_task
+from ..runner import HardTask, run_task
 
-DispersiveResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+DispersiveResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class DispersiveTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+class DispersiveCfg(TwoToneCfg): ...
 
 
-class DispersiveExp(AbsExperiment[DispersiveResultType, DispersiveTaskConfig]):
-    def run(self, soc, soccfg, cfg: DispersiveTaskConfig) -> DispersiveResultType:
+class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
+    def run(self, soc, soccfg, cfg: DispersiveCfg) -> DispersiveResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Canonicalise sweep section to single-axis form
@@ -50,11 +50,12 @@ class DispersiveExp(AbsExperiment[DispersiveResultType, DispersiveTaskConfig]):
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
         # Set with/without π gain for qubit pulse
+        modules = cfg["modules"]
         Pulse.set_param(
-            cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
         )
         Readout.set_param(
-            cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
         with LivePlotter1D(
@@ -62,11 +63,9 @@ class DispersiveExp(AbsExperiment[DispersiveResultType, DispersiveTaskConfig]):
         ) as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
-                        )
-                    ),
+                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(2, len(fpts)),
                 ),
                 init_cfg=cfg,
@@ -82,7 +81,7 @@ class DispersiveExp(AbsExperiment[DispersiveResultType, DispersiveTaskConfig]):
         return fpts, signals
 
     def analyze(
-        self, result: Optional[DispersiveResultType] = None
+        self, result: Optional[DispersiveResult] = None
     ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -176,7 +175,7 @@ class DispersiveExp(AbsExperiment[DispersiveResultType, DispersiveTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[DispersiveResultType] = None,
+        result: Optional[DispersiveResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/dispersive",
         **kwargs,
@@ -197,7 +196,7 @@ class DispersiveExp(AbsExperiment[DispersiveResultType, DispersiveTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> DispersiveResultType:
+    def load(self, filepath: str, **kwargs) -> DispersiveResult:
         signals, fpts, _ = load_data(filepath, **kwargs)
         assert len(fpts.shape) == 1
         assert signals.shape == (len(fpts), 2)

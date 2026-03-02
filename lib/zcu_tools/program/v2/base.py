@@ -1,6 +1,6 @@
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
-from typing_extensions import TypedDict
+from typing_extensions import Any, Mapping, TypedDict, cast
 
 from zcu_tools.program.base import MyProgram
 
@@ -14,16 +14,18 @@ class ProgramV2Cfg(TypedDict):
 
 
 class MyProgramV2(MyProgram, AveragerProgramV2):
-    def __init__(self, soccfg: QickConfig, cfg: ProgramV2Cfg, **kwargs) -> None:
+    def __init__(self, soccfg: QickConfig, cfg: Mapping[str, Any], **kwargs) -> None:
+        _cfg = cast(ProgramV2Cfg, cfg)
+
         # v2 program need to pass reps and final_delay to init
         self.pulse_registry = PulseRegistry()
         super().__init__(
             soccfg,
-            cfg=dict(cfg),
-            reps=cfg["reps"],
+            cfg=dict(_cfg),
+            reps=_cfg["reps"],
             initial_delay=0.0,
-            final_wait=cfg.get("final_wait", 0.0),
-            final_delay=cfg["relax_delay"],
+            final_wait=_cfg.get("final_wait", 0.0),
+            final_delay=_cfg["relax_delay"],
             **kwargs,
         )
 

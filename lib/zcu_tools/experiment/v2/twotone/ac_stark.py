@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from turtle import mode
 from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
@@ -8,10 +9,11 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program.v2 import (
@@ -24,17 +26,15 @@ from zcu_tools.program.v2 import (
     Readout,
     ReadoutCfg,
     Reset,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import rotate2real
 
-
 # (amps, freqs, signals2D)
-AcStarkResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+AcStarkResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
 def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -81,24 +81,25 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_fpts)
 
 
-class AcStarkTaskConfig(TaskConfig, ModularProgramCfg):
+class AcStarkModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
     stark_pulse1: PulseCfg
     stark_pulse2: PulseCfg
     readout: ReadoutCfg
 
 
-class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
-    def run(
-        self,
-        soc,
-        soccfg,
-        cfg: AcStarkTaskConfig,
-        *,
-        earlystop_snr: Optional[float] = None,
-    ) -> AcStarkResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class AcStarkCfg(ModularProgramCfg):
+    modules: AcStarkModuleCfg
 
-        if cfg["stark_pulse1"].get("block_mode", True):
+
+class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
+    def run(
+        self, soc, soccfg, cfg: AcStarkCfg, *, earlystop_snr: Optional[float] = None
+    ) -> AcStarkResult:
+        cfg = deepcopy(cfg)  # prevent in-place modification
+        modules = cfg["modules"]
+
+        if modules["stark_pulse1"].get("block_mode", True):
             raise ValueError("Stark pulse 1 must not in block mode")
 
         assert "sweep" in cfg
@@ -114,7 +115,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         )
 
         Pulse.set_param(
-            cfg["stark_pulse2"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["stark_pulse2"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
         with LivePlotter2DwithLine(
@@ -131,37 +132,41 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
                     sweep_name="resonator gain",
                     sweep_values=pdrs.tolist(),
                     update_cfg_fn=lambda _, ctx, pdr: Pulse.set_param(
-                        ctx.cfg["stark_pulse1"], "gain", pdr
+                        ctx.cfg["modules"]["stark_pulse1"], "gain", pdr
                     ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
-                            (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
+                            prog := ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset(
+                                        "reset",
+                                        ctx.cfg["modules"].get(
+                                            "reset", {"type": "none"}
                                         ),
-                                        Pulse("stark_pulse1", ctx.cfg["stark_pulse1"]),
-                                        Pulse("stark_pulse2", ctx.cfg["stark_pulse2"]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                )
-                            ).acquire(
-                                soc,
-                                progress=False,
-                                callback=wrap_earlystop_check(
-                                    prog,
-                                    update_hook,
-                                    earlystop_snr,
-                                    signal2real_fn=np.abs,
-                                    snr_hook=lambda snr: ax1d.set_title(
-                                        f"snr = {snr:.1f}"
                                     ),
-                                ),
+                                    Pulse(
+                                        "stark_pulse1",
+                                        ctx.cfg["modules"]["stark_pulse1"],
+                                    ),
+                                    Pulse(
+                                        "stark_pulse2",
+                                        ctx.cfg["modules"]["stark_pulse2"],
+                                    ),
+                                    Readout("readout", ctx.cfg["modules"]["readout"]),
+                                ],
                             )
+                        ).acquire(
+                            soc,
+                            progress=False,
+                            callback=wrap_earlystop_check(
+                                prog,
+                                update_hook,
+                                earlystop_snr,
+                                signal2real_fn=np.abs,
+                                snr_hook=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
+                            ),
                         ),
                         result_shape=(len(fpts),),
                     ),
@@ -181,7 +186,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[AcStarkResultType] = None,
+        result: Optional[AcStarkResult] = None,
         *,
         chi: float,
         kappa: float,
@@ -273,7 +278,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[AcStarkResultType] = None,
+        result: Optional[AcStarkResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ac_stark",
         **kwargs,
@@ -295,7 +300,7 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> AcStarkResultType:
+    def load(self, filepath: str, **kwargs) -> AcStarkResult:
         signals2D, pdrs, fpts = load_data(filepath, **kwargs)
         assert fpts is not None
         assert len(pdrs.shape) == 1 and len(fpts.shape) == 1
@@ -317,19 +322,25 @@ def acstark_ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
     return rotate2real(signals).real
 
 
-class AcStarkRamseyTaskConfig(TaskConfig, ModularProgramCfg):
-    stark_pulse: PulseCfg
-    pi_pulse: PulseCfg
+class AcStarkRamseyModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
     pi2_pulse: PulseCfg
+    stark_pulse: PulseCfg
     readout: ReadoutCfg
 
+
+class AcStarkRamseyProgramCfg(ModularProgramCfg):
+    modules: AcStarkRamseyModuleCfg
+
+
+class AcStarkRamseyTaskConfig(AcStarkRamseyProgramCfg):
     wait_delay: float
 
 
 class AcStarkRamseyExp(AbsExperiment):
     def run(
         self, soc, soccfg, cfg: AcStarkRamseyTaskConfig, *, detune: float = 0.0
-    ) -> AcStarkResultType:
+    ) -> AcStarkResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -353,53 +364,47 @@ class AcStarkRamseyExp(AbsExperiment):
             num_lines=2,
             uniform=False,
         ) as viewer:
+
+            def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        NonBlocking(
+                            [
+                                Delay(
+                                    "wait_delay",
+                                    delay=ctx.cfg["wait_delay"],
+                                    hard_delay=False,
+                                ),
+                                Pulse("pi2_pulse1", modules["pi2_pulse"]),
+                                Delay("t2_delay", delay=t2r_spans, hard_delay=False),
+                                Pulse(
+                                    name="pi2_pulse2",
+                                    cfg=PulseCfg(
+                                        **modules["pi2_pulse"],
+                                        phase=modules["pi2_pulse"]["phase"]
+                                        + 360 * detune * t2r_spans,
+                                    ),
+                                ),
+                            ]
+                        ),
+                        Pulse("stark_pulse", modules["stark_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                ).acquire(soc, progress=False, callback=update_hook)
+
             signals = run_task(
                 task=SoftTask(
                     sweep_name="resonator gain",
                     sweep_values=pdrs.tolist(),
                     update_cfg_fn=lambda _, ctx, pdr: Pulse.set_param(
-                        ctx.cfg["stark_pulse"], "gain", pdr
+                        ctx.cfg["modules"]["stark_pulse"], "gain", pdr
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset",
-                                        ctx.cfg.get("reset", {"type": "none"}),
-                                    ),
-                                    NonBlocking(
-                                        [
-                                            Delay(
-                                                "wait_delay",
-                                                delay=ctx.cfg["wait_delay"],
-                                                hard_delay=False,
-                                            ),
-                                            Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
-                                            Delay(
-                                                "t2_delay",
-                                                delay=t2r_spans,
-                                                hard_delay=False,
-                                            ),
-                                            Pulse(
-                                                name="pi2_pulse2",
-                                                cfg={
-                                                    **ctx.cfg["pi2_pulse"],
-                                                    "phase": ctx.cfg["pi2_pulse"][
-                                                        "phase"
-                                                    ]
-                                                    + 360 * detune * t2r_spans,
-                                                },
-                                            ),
-                                        ]
-                                    ),
-                                    Pulse("stark_pulse", ctx.cfg["stark_pulse"]),
-                                    Readout("readout", ctx.cfg["readout"]),
-                                ],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        ),
+                        measure_fn=measure_fn,
                         result_shape=(len(lens),),
                     ),
                 ),
@@ -418,7 +423,7 @@ class AcStarkRamseyExp(AbsExperiment):
 
     def analyze(
         self,
-        result: Optional[AcStarkResultType] = None,
+        result: Optional[AcStarkResult] = None,
         *,
         detune: float = 0.0,
         cutoff: Optional[float] = None,
@@ -480,7 +485,7 @@ class AcStarkRamseyExp(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[AcStarkResultType] = None,
+        result: Optional[AcStarkResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ac_stark_ramsey",
         **kwargs,
@@ -502,7 +507,7 @@ class AcStarkRamseyExp(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> AcStarkResultType:
+    def load(self, filepath: str, **kwargs) -> AcStarkResult:
         signals2D, pdrs, lens = load_data(filepath, **kwargs)
         assert pdrs is not None and lens is not None
         assert len(pdrs.shape) == 1 and len(lens.shape) == 1

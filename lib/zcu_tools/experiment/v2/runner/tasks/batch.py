@@ -1,21 +1,20 @@
 from __future__ import annotations
 
 from tqdm.auto import tqdm
-from typing_extensions import Hashable, Mapping, TypeVar, Optional
+from typing_extensions import Hashable, Mapping, Optional, TypeVar
 
-from .base import AbsTask, Result, TaskConfig
+from .base import AbsTask, Result
 
 T_Key = TypeVar("T_Key", bound=Hashable)
 
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
-T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
-class BatchTask(AbsTask[Mapping[T_Key, T_ChildResult], T_RootResult, T_TaskConfig]):
+class BatchTask(AbsTask[Mapping[T_Key, T_ChildResult], T_RootResult]):
     def __init__(
         self,
-        tasks: Mapping[T_Key, AbsTask[T_ChildResult, T_RootResult, T_TaskConfig]],
+        tasks: Mapping[T_Key, AbsTask[T_ChildResult, T_RootResult]],
     ) -> None:
         self.tasks = tasks
 

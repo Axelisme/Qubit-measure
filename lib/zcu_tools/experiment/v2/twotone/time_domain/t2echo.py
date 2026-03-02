@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
@@ -31,24 +31,26 @@ from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-T2EchoResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T2EchoResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class T2EchoTaskConfig(TaskConfig, ModularProgramCfg):
+class T2EchoModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi2_pulse: PulseCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T2EchoExp(AbsExperiment[T2EchoResultType, T2EchoTaskConfig]):
-    def run(
-        self, soc, soccfg, cfg: T2EchoTaskConfig, *, detune: float = 0.0
-    ) -> T2EchoResultType:
+class T2EchoCfg(ModularProgramCfg):
+    modules: T2EchoModuleCfg
+
+
+class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
+    def run(self, soc, soccfg, cfg: T2EchoCfg, *, detune: float = 0.0) -> T2EchoResult:
         cfg = deepcopy(cfg)
 
         assert "sweep" in cfg
@@ -64,28 +66,29 @@ class T2EchoExp(AbsExperiment[T2EchoResultType, T2EchoTaskConfig]):
         ) as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
-                                Delay("t2e_delay1", delay=0.5 * t2e_spans),
-                                Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                Delay("t2e_delay2", delay=0.5 * t2e_spans),
-                                Pulse(
-                                    name="pi2_pulse2",
-                                    cfg={
-                                        **ctx.cfg["pi2_pulse"],
-                                        "phase": ctx.cfg["pi2_pulse"]["phase"]
-                                        + 360 * detune * t2e_spans,
-                                    },
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset(
+                                "reset",
+                                ctx.cfg["modules"].get("reset", {"type": "none"}),
+                            ),
+                            Pulse("pi2_pulse1", ctx.cfg["modules"]["pi2_pulse"]),
+                            Delay("t2e_delay1", delay=0.5 * t2e_spans),
+                            Pulse("pi_pulse", ctx.cfg["modules"]["pi_pulse"]),
+                            Delay("t2e_delay2", delay=0.5 * t2e_spans),
+                            Pulse(
+                                name="pi2_pulse2",
+                                cfg=PulseCfg(
+                                    **ctx.cfg["modules"]["pi2_pulse"],
+                                    phase=ctx.cfg["modules"]["pi2_pulse"]["phase"]
+                                    + 360 * detune * t2e_spans,
                                 ),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                            ),
+                            Readout("readout", ctx.cfg["modules"]["readout"]),
+                        ],
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(ts),),
                 ),
                 init_cfg=cfg,
@@ -100,7 +103,7 @@ class T2EchoExp(AbsExperiment[T2EchoResultType, T2EchoTaskConfig]):
 
     def analyze(
         self,
-        result: Optional[T2EchoResultType] = None,
+        result: Optional[T2EchoResult] = None,
         *,
         fit_method: Literal["fringe", "decay"] = "decay",
     ) -> Tuple[float, float, float, float, Figure]:
@@ -156,7 +159,7 @@ class T2EchoExp(AbsExperiment[T2EchoResultType, T2EchoTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[T2EchoResultType] = None,
+        result: Optional[T2EchoResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t2echo",
         **kwargs,
@@ -175,7 +178,7 @@ class T2EchoExp(AbsExperiment[T2EchoResultType, T2EchoTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T2EchoResultType:
+    def load(self, filepath: str, **kwargs) -> T2EchoResult:
         signals, Ts, _ = load_data(filepath, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1

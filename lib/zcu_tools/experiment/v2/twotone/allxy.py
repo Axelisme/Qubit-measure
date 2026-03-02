@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
@@ -24,10 +24,10 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..runner import BatchTask, HardTask, TaskConfig, run_task
+from ..runner import BatchTask, HardTask, run_task
 
 # (sequence, signals)
-AllXYResultType = Dict[Tuple[str, str], NDArray[np.complex128]]
+AllXY_Result = Dict[Tuple[str, str], NDArray[np.complex128]]
 
 # Standard AllXY sequence of 21 gate pairs
 ALLXY_SEQUENCE = [
@@ -106,8 +106,9 @@ def allxy_signal2real(
 # ------------------------------------------------------------------------------
 
 
-class AllXYTaskConfig(TaskConfig, ModularProgramCfg):
+class AllXY_ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
+    I_pulse: NotRequired[PulseCfg]
     X180_pulse: PulseCfg
     Y180_pulse: PulseCfg
     X90_pulse: PulseCfg
@@ -115,9 +116,14 @@ class AllXYTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class AllXY_Exp(AbsExperiment[AllXYResultType, AllXYTaskConfig]):
-    def run(self, soc, soccfg, cfg: AllXYTaskConfig) -> AllXYResultType:
+class AllXY_Cfg(ModularProgramCfg):
+    modules: AllXY_ModuleCfg
+
+
+class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
+    def run(self, soc, soccfg, cfg: AllXY_Cfg) -> AllXY_Result:
         cfg = deepcopy(cfg)  # prevent in-place modification
+        modules = cfg["modules"]
 
         assert cfg.get("sweep", dict()) == {}, (
             "AllXY experiment does not support sweep configurations. "
@@ -126,11 +132,11 @@ class AllXY_Exp(AbsExperiment[AllXYResultType, AllXYTaskConfig]):
 
         # Create gate-to-pulse mapping from configuration
         gate2pulse_map = {
-            "I": cfg.get("I_pulse"),
-            "X180": cfg["X180_pulse"],
-            "Y180": cfg["Y180_pulse"],
-            "X90": cfg["X90_pulse"],
-            "Y90": cfg["Y90_pulse"],
+            "I": modules.get("I_pulse"),
+            "X180": modules["X180_pulse"],
+            "Y180": modules["Y180_pulse"],
+            "X90": modules["X90_pulse"],
+            "Y90": modules["Y90_pulse"],
         }
 
         # Validate that all required gates are defined
@@ -162,21 +168,21 @@ class AllXY_Exp(AbsExperiment[AllXYResultType, AllXYTaskConfig]):
                 task=BatchTask(
                     tasks={
                         (gate1, gate2): HardTask(
-                            measure_fn=lambda ctx, update_hook: (
-                                ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
+                            measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset(
+                                        "reset",
+                                        ctx.cfg["modules"].get(
+                                            "reset", {"type": "none"}
                                         ),
-                                        Pulse("first_pulse", gate2pulse_map[gate1]),
-                                        Pulse("second_pulse", gate2pulse_map[gate2]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                ).acquire(soc, progress=False, callback=update_hook)
-                            )
+                                    ),
+                                    Pulse("first_pulse", gate2pulse_map[gate1]),
+                                    Pulse("second_pulse", gate2pulse_map[gate2]),
+                                    Readout("readout", ctx.cfg["modules"]["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
                         )
                         for gate1, gate2 in ALLXY_SEQUENCE
                     }
@@ -196,7 +202,7 @@ class AllXY_Exp(AbsExperiment[AllXYResultType, AllXYTaskConfig]):
         return signals_dict
 
     def analyze(
-        self, result: Optional[AllXYResultType] = None, fit_ge: bool = False
+        self, result: Optional[AllXY_Result] = None, fit_ge: bool = False
     ) -> None:
         if result is None:
             result = self.last_result
@@ -307,7 +313,7 @@ class AllXY_Exp(AbsExperiment[AllXYResultType, AllXYTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[AllXYResultType] = None,
+        result: Optional[AllXY_Result] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/allxy",
         **kwargs,
@@ -334,7 +340,7 @@ class AllXY_Exp(AbsExperiment[AllXYResultType, AllXYTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> AllXYResultType:
+    def load(self, filepath: str, **kwargs) -> AllXY_Result:
         signals, gate_indices, _ = load_data(filepath, **kwargs)
         assert gate_indices is not None
         assert len(gate_indices.shape) == 1 and len(signals.shape) == 1
@@ -344,7 +350,7 @@ class AllXY_Exp(AbsExperiment[AllXYResultType, AllXYTaskConfig]):
         signals = signals.astype(np.complex128)
 
         # Reconstruct signals_dict from flat signals array
-        signals_dict: AllXYResultType = {}
+        signals_dict: AllXY_Result = {}
         for i, seq in enumerate(ALLXY_SEQUENCE):
             signals_dict[seq] = signals[i : i + 1]
 

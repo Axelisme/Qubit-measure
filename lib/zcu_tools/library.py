@@ -26,7 +26,7 @@ from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.utils import deepupdate, numpy2number
 
 if TYPE_CHECKING:
-    from zcu_tools.program.v2 import PulseCfg, ReadoutCfg, ResetCfg, WaveformCfg
+    from zcu_tools.program.v2 import WaveformCfg
 
 try:  # pragma: no cover - platform specific
     import fcntl
@@ -197,9 +197,9 @@ class ModuleLibrary:
         deepupdate(dev_cfg, exp_cfg.get("dev", {}), behavior="force")
         exp_cfg["dev"] = dev_cfg
 
-        for name, sub_cfg in exp_cfg.items():
-            if is_module_cfg(name, sub_cfg):
-                exp_cfg[name] = auto_derive_module(self, name, sub_cfg)
+        modules = exp_cfg.get("modules", {})
+        for name, sub_cfg in modules.items():
+            modules[name] = auto_derive_module(self, name, sub_cfg)
 
         return numpy2number(exp_cfg)
 

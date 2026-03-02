@@ -7,11 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -29,47 +29,55 @@ from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 # (fpts, signals)
-FreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+FreqResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class FreqTaskConfig(TaskConfig, ModularProgramCfg):
+class FreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    init_pulse: PulseCfg
+    init_pulse: NotRequired[PulseCfg]
     tested_reset: ResetCfg
     readout: ReadoutCfg
 
 
-class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
-    def run(self, soc, soccfg, cfg: FreqTaskConfig) -> FreqResultType:
+class FreqCfg(ModularProgramCfg):
+    modules: FreqModuleCfg
+
+
+class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
+    def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
 
+        modules = cfg["modules"]
         Reset.set_param(
-            cfg["tested_reset"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["tested_reset"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                Reset("tested_reset", ctx.cfg["tested_reset"]),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset(
+                                "reset",
+                                (modules := ctx.cfg["modules"]).get(
+                                    "reset", {"type": "none"}
+                                ),
+                            ),
+                            Pulse("init_pulse", modules.get("init_pulse")),
+                            Reset("tested_reset", modules["tested_reset"]),
+                            Readout("readout", modules["readout"]),
+                        ],
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(fpts),),
                 ),
                 init_cfg=cfg,
@@ -85,7 +93,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
         return fpts, signals
 
     def analyze(
-        self, result: Optional[FreqResultType] = None
+        self, result: Optional[FreqResult] = None
     ) -> Tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -123,7 +131,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/single_tone/freq",
         **kwargs,
@@ -143,7 +151,7 @@ class FreqExp(AbsExperiment[FreqResultType, FreqTaskConfig]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> FreqResultType:
+    def load(self, filepath: str, **kwargs) -> FreqResult:
         signals, fpts, _ = load_data(filepath, **kwargs)
         assert fpts is not None
         assert len(fpts.shape) == 1 and len(signals.shape) == 1

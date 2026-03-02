@@ -5,11 +5,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import HardTask, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -26,34 +26,39 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-FreqDepResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
+MIST_FreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class FreqDepCfg(TaskConfig, ModularProgramCfg):
+class MIST_FreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    init_pulse: PulseCfg
+    init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class FreqDepExp(AbsExperiment[FreqDepResult, FreqDepCfg]):
+class MIST_FreqCfg(ModularProgramCfg):
+    modules: MIST_FreqModuleCfg
+
+
+class FreqDepExp(AbsExperiment[MIST_FreqResult, MIST_FreqCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: FreqDepCfg,
+        cfg: MIST_FreqCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> FreqDepResult:
+    ) -> MIST_FreqResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
+        modules = cfg["modules"]
 
         assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         freqs = sweep2array(cfg["sweep"]["freq"])  # predicted amplitudes
 
         Pulse.set_param(
-            cfg["probe_pulse"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["probe_pulse"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
         )
 
         with LivePlotter1D(
@@ -70,27 +75,29 @@ class FreqDepExp(AbsExperiment[FreqDepResult, FreqDepCfg]):
         ) as viewer:
             viewer.get_ax().set_ylim(0.0, 1.0)
 
+            def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Pulse("init_pulse", modules.get("init_pulse")),
+                        Pulse("probe_pulse", modules["probe_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                ).acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    g_center=g_center,
+                    e_center=e_center,
+                    population_radius=radius,
+                )
+
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("init_pulse", cfg=ctx.cfg.get("init_pulse")),
-                                Pulse("probe_pulse", cfg=ctx.cfg["probe_pulse"]),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(
-                            soc,
-                            progress=False,
-                            callback=update_hook,
-                            g_center=g_center,
-                            e_center=e_center,
-                            population_radius=radius,
-                        )
-                    ),
+                    measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(freqs), 2),
                     dtype=np.float64,
@@ -109,7 +116,7 @@ class FreqDepExp(AbsExperiment[FreqDepResult, FreqDepCfg]):
 
     def analyze(
         self,
-        result: Optional[FreqDepResult] = None,
+        result: Optional[MIST_FreqResult] = None,
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
@@ -142,7 +149,7 @@ class FreqDepExp(AbsExperiment[FreqDepResult, FreqDepCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqDepResult] = None,
+        result: Optional[MIST_FreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/freq",
         **kwargs,
@@ -163,7 +170,7 @@ class FreqDepExp(AbsExperiment[FreqDepResult, FreqDepCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> FreqDepResult:
+    def load(self, filepath: str, **kwargs) -> MIST_FreqResult:
         populations, freqs, _ = load_data(filepath, **kwargs)
 
         freqs = 1e-6 * freqs  # Hz to MHz

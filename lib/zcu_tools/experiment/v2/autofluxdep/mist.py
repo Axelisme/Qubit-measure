@@ -17,7 +17,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
 from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.utils import make_comment
@@ -67,7 +67,7 @@ class Mist_CfgTemplate(TypedDict, closed=False):
     readout: Union[ReadoutCfg, str]
 
 
-class Mist_Cfg(TaskConfig, ModularProgramCfg):
+class Mist_Cfg(ModularProgramCfg):
     reset: NotRequired[ResetCfg]
     pi_pulse: NotRequired[PulseCfg]
     mist_pulse: PulseCfg
@@ -86,7 +86,7 @@ class Mist_PlotterDict(TypedDict, closed=True):
 
 
 class Mist_Task(
-    MeasurementTask[Mist_Result, T_RootResultType, TaskConfig, Mist_PlotterDict]
+    MeasurementTask[Mist_Result, T_RootResultType, Mist_PlotterDict]
 ):
     def __init__(
         self,

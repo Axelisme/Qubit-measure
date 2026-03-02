@@ -3,16 +3,15 @@ from __future__ import annotations
 import time
 
 from tqdm.auto import tqdm
-from typing_extensions import List, TypeVar, Tuple, Optional, Sequence
+from typing_extensions import List, Optional, Sequence, Tuple, TypeVar
 
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from .base import AbsTask, Result, TaskConfig
+from .base import AbsTask, Result
 
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
 T_Result = TypeVar("T_Result", bound=Result)
-T_TaskConfig = TypeVar("T_TaskConfig", bound=TaskConfig)
 
 
 def run_with_retries(
@@ -38,10 +37,8 @@ def run_with_retries(
         break
 
 
-class ReTryIfFail(AbsTask[T_Result, T_RootResult, T_TaskConfig]):
-    def __init__(
-        self, task: AbsTask[T_Result, T_RootResult, T_TaskConfig], max_retries: int
-    ) -> None:
+class ReTryIfFail(AbsTask[T_Result, T_RootResult]):
+    def __init__(self, task: AbsTask[T_Result, T_RootResult], max_retries: int) -> None:
         self.task = task
         self.max_retries = max_retries
 
@@ -61,13 +58,13 @@ class ReTryIfFail(AbsTask[T_Result, T_RootResult, T_TaskConfig]):
         return self.task.get_default_result()
 
 
-class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult, T_TaskConfig]):
+class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult]):
     def __init__(
         self,
         name: str,
         num_times: int,
         interval: float,
-        task: AbsTask[T_ChildResult, T_RootResult, T_TaskConfig],
+        task: AbsTask[T_ChildResult, T_RootResult],
     ) -> None:
         self.name = name
         self.num_times = num_times
