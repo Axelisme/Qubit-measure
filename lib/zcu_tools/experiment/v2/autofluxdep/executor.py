@@ -5,7 +5,6 @@ from abc import abstractmethod
 from collections import OrderedDict, UserDict, defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Tuple, TypeVar
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -14,15 +13,27 @@ from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typing_extensions import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    TypedDict,
+    TypeVar,
+)
 
 from zcu_tools.device import DeviceInfo, GlobalDeviceManager
-from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
     Result,
-    SoftTask, TaskContextView,
+    SoftTask,
+    TaskContextView,
     run_task,
     run_with_retries,
 )
@@ -35,32 +46,28 @@ from zcu_tools.liveplot import (
 )
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
-T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlotter])
+T_PlotterDict = TypeVar("T_PlotterDict", bound=Mapping[str, AbsLivePlotter])
 
 
-T_ResultType = TypeVar("T_ResultType", bound=Result)
-T_RootResultType = TypeVar("T_RootResultType", bound=Result)
-T_TaskConfigType = TypeVar("T_TaskConfigType", bound=dict)
+T_Result = TypeVar("T_Result", bound=Result)
+T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
 class MeasurementTask(
-    AbsTask[T_ResultType, T_RootResultType, T_TaskConfigType],
-    Generic[T_ResultType, T_RootResultType, T_TaskConfigType, T_PlotterDictType],
+    AbsTask[T_Result, T_RootResult], Generic[T_Result, T_RootResult, T_PlotterDict]
 ):
     @abstractmethod
     def num_axes(self) -> Dict[str, int]: ...
 
     @abstractmethod
-    def make_plotter(
-        self, name: str, axs: Dict[str, List[Axes]]
-    ) -> T_PlotterDictType: ...
+    def make_plotter(self, name: str, axs: Dict[str, List[Axes]]) -> T_PlotterDict: ...
 
     @abstractmethod
     def update_plotter(
         self,
-        plotters: T_PlotterDictType,
+        plotters: T_PlotterDict,
         ctx: TaskContextView,
-        signals: T_ResultType,
+        signals: T_Result,
     ) -> None: ...
 
     @abstractmethod
@@ -68,13 +75,13 @@ class MeasurementTask(
         self,
         filepath: str,
         flx_values: NDArray[np.float64],
-        result: T_ResultType,
+        result: T_Result,
         comment: Optional[str],
         prefix_tag: str,
     ) -> None: ...
 
 
-class FluxDepTaskConfig(TypedDict):
+class FluxDepCfg(TypedDict):
     dev: Mapping[str, DeviceInfo]
 
 
@@ -255,7 +262,7 @@ class FluxDepExecutor:
         if env_dict is None:
             env_dict = {}
 
-        cfg = FluxDepTaskConfig(dev=dev_cfg)
+        cfg = FluxDepCfg(dev=dev_cfg)
 
         env_dict.update(
             flx_values=self.flx_values,

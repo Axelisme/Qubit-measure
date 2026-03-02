@@ -17,6 +17,7 @@ from typing_extensions import (
     cast,
 )
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
 from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
@@ -42,7 +43,7 @@ from zcu_tools.utils.fitting import fit_decay_fringe
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
-from .executor import FluxDepInfoDict, MeasurementTask, T_RootResultType
+from .executor import FluxDepInfoDict, MeasurementTask, T_RootResult
 
 
 def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -65,21 +66,23 @@ def t2ramsey_fluxdep_signal2real(
     return np.array(list(map(t2ramsey_signal2real, signals)), dtype=np.float64)
 
 
-class T2RamseyCfgTemplate(ModularProgramCfg):
-    reset: NotRequired[Union[ResetCfg, str]]
-    pi2_pulse: Union[PulseCfg, str]
-    readout: Union[ReadoutCfg, str]
+class T2RamseyModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
+    pi2_pulse: PulseCfg
+    readout: ReadoutCfg
 
+
+class T2RamseyCfgTemplate(ModularProgramCfg):
+    modules: T2RamseyModuleCfg
+    dev: NotRequired[Dict[str, DeviceInfo]]
     sweep_range: Tuple[float, float]
 
 
 class T2RamseyCfg(ModularProgramCfg):
-    reset: NotRequired[ResetCfg]
-    pi2_pulse: PulseCfg
-    readout: ReadoutCfg
-    activate_detune: float
-
+    modules: T2RamseyModuleCfg
+    dev: Dict[str, DeviceInfo]
     sweep: Dict[str, SweepCfg]
+    activate_detune: float
 
 
 class T2RamseyResult(TypedDict, closed=True):
@@ -97,9 +100,7 @@ class T2RamseyPlotterDict(TypedDict, closed=True):
     t2r_curve: LivePlotter1D
 
 
-class T2RamseyTask(
-    MeasurementTask[T2RamseyResult, T_RootResultType, T2RamseyPlotterDict]
-):
+class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotterDict]):
     def __init__(
         self,
         num_expts: int,
@@ -116,6 +117,7 @@ class T2RamseyTask(
 
         def measure_ramsey_fn(ctx: TaskContextView, update_hook: Callable):
             len_sweep = ctx.cfg["sweep"]["length"]
+            modules = ctx.cfg["modules"]
 
             assert len_sweep["expts"] == self.num_expts
 
@@ -125,19 +127,19 @@ class T2RamseyTask(
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse(name="pi2_pulse1", cfg=ctx.cfg["pi2_pulse"]),
+                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Pulse(name="pi2_pulse1", cfg=modules["pi2_pulse"]),
                     Delay(name="t2r_delay", delay=t2r_params),
                     Pulse(
                         name="pi2_pulse2",
                         cfg=Pulse.set_param(
-                            ctx.cfg["pi2_pulse"],
+                            modules["pi2_pulse"],
                             "phase",
-                            ctx.cfg["pi2_pulse"]["phase"]
+                            modules["pi2_pulse"]["phase"]
                             + 360 * ctx.cfg["activate_detune"] * t2r_params,
                         ),
                     ),
-                    Readout("readout", ctx.cfg["readout"]),
+                    Readout("readout", modules["readout"]),
                 ],
             )
             return prog.acquire(
@@ -152,12 +154,85 @@ class T2RamseyTask(
             )
 
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = HardTask[
-            np.complex128, T_RootResultType, T2RamseyCfg, List[NDArray[np.float64]]
-        ](
+        self.task = HardTask[T_RootResult, List[NDArray[np.float64]]](
             measure_fn=measure_ramsey_fn,
             result_shape=(num_expts,),
         )
+
+    def init(self, ctx, dynamic_pbar=False) -> None:
+        self.init_cfg = deepcopy(ctx.cfg)
+        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+
+    def run(self, ctx) -> None:
+        info: FluxDepInfoDict = ctx.env_dict["info"]
+
+        cfg_temp = self.cfg_maker(ctx, ctx.env_dict["ml"])
+
+        if cfg_temp is None:
+            return  # skip this task
+
+        len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
+        self.lengths = sweep2array(len_sweep)
+        self.lengths = round_zcu_time(self.lengths, ctx.env_dict["soccfg"])
+
+        cfg_temp = dict(cfg_temp)
+        del cfg_temp["sweep_range"]  # type: ignore
+        deepupdate(cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}})
+        cfg_temp["activate_detune"] = self.detune_ratio / len_sweep["step"]
+        cfg = cast(T2RamseyCfg, cfg_temp)
+
+        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
+
+        raw_signals = ctx.get_data()["raw_signals"]
+        assert isinstance(raw_signals, np.ndarray)
+
+        real_signals = t2ramsey_signal2real(raw_signals)
+
+        t2r, t2r_err, t2r_detune, t2r_detune_err, fit_signals, _ = fit_decay_fringe(
+            self.lengths, real_signals
+        )
+        t2r_detune = t2r_detune - cfg["activate_detune"]
+
+        success = True
+        mean_err = np.mean(np.abs(real_signals - fit_signals))
+        if t2r > 2 * np.max(self.lengths) or mean_err > 0.1 * np.ptp(fit_signals):
+            t2r = np.nan
+            t2r_err = np.nan
+            t2r_detune = np.nan
+            t2r_detune_err = np.nan
+            success = False
+
+        if success:
+            info["t2r"] = t2r
+            info["t2r_detune"] = t2r_detune
+            info["smooth_t2r"] = 0.5 * (info.last.get("smooth_t2r", t2r) + t2r)
+
+        with MinIntervalFunc.force_execute():
+            ctx.set_data(
+                T2RamseyResult(
+                    raw_signals=raw_signals,
+                    length=self.lengths.copy(),
+                    t2r=np.array(t2r),
+                    t2r_err=np.array(t2r_err),
+                    t2r_detune=np.array(t2r_detune),
+                    t2r_detune_err=np.array(t2r_detune_err),
+                    success=np.array(success),
+                )
+            )
+
+    def get_default_result(self) -> T2RamseyResult:
+        return T2RamseyResult(
+            raw_signals=self.task.get_default_result(),
+            length=self.lengths.copy(),
+            t2r=np.array(np.nan),
+            t2r_err=np.array(np.nan),
+            t2r_detune=np.array(np.nan),
+            t2r_detune_err=np.array(np.nan),
+            success=np.array(False),
+        )
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
 
     def num_axes(self) -> Dict[str, int]:
         return dict(t2r=1, t2r_curve=1)
@@ -292,81 +367,3 @@ class T2RamseyTask(
             "flx_values": flx_values,
             "lengths": length_stored[0],
         }
-
-    def init(self, ctx, dynamic_pbar=False) -> None:
-        self.init_cfg = deepcopy(ctx.cfg)
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
-
-    def run(self, ctx) -> None:
-        ml: ModuleLibrary = ctx.env_dict["ml"]
-        info: FluxDepInfoDict = ctx.env_dict["info"]
-
-        cfg_temp = self.cfg_maker(ctx, ml)
-
-        if cfg_temp is None:
-            return  # skip this task
-
-        len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
-        self.lengths = sweep2array(len_sweep)
-        self.lengths = round_zcu_time(self.lengths, ctx.env_dict["soccfg"])
-
-        cfg_temp = dict(cfg_temp)
-        deepupdate(
-            cfg_temp, {"dev": ctx.cfg.get("dev", {}), "sweep": {"length": len_sweep}}
-        )
-        cfg_temp = ml.make_cfg(cfg_temp)
-        cfg_temp["activate_detune"] = self.detune_ratio / len_sweep["step"]
-
-        cfg = cast(T2RamseyCfg, cfg_temp)
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
-
-        raw_signals = ctx.get_data()["raw_signals"]
-        assert isinstance(raw_signals, np.ndarray)
-
-        real_signals = t2ramsey_signal2real(raw_signals)
-
-        t2r, t2r_err, t2r_detune, t2r_detune_err, fit_signals, _ = fit_decay_fringe(
-            self.lengths, real_signals
-        )
-        t2r_detune = t2r_detune - cfg["activate_detune"]
-
-        success = True
-        mean_err = np.mean(np.abs(real_signals - fit_signals))
-        if t2r > 2 * np.max(self.lengths) or mean_err > 0.1 * np.ptp(fit_signals):
-            t2r = np.nan
-            t2r_err = np.nan
-            t2r_detune = np.nan
-            t2r_detune_err = np.nan
-            success = False
-
-        if success:
-            info["t2r"] = t2r
-            info["t2r_detune"] = t2r_detune
-            info["smooth_t2r"] = 0.5 * (info.last.get("smooth_t2r", t2r) + t2r)
-
-        with MinIntervalFunc.force_execute():
-            ctx.set_data(
-                T2RamseyResult(
-                    raw_signals=raw_signals,
-                    length=self.lengths.copy(),
-                    t2r=np.array(t2r),
-                    t2r_err=np.array(t2r_err),
-                    t2r_detune=np.array(t2r_detune),
-                    t2r_detune_err=np.array(t2r_detune_err),
-                    success=np.array(success),
-                )
-            )
-
-    def get_default_result(self) -> T2RamseyResult:
-        return T2RamseyResult(
-            raw_signals=self.task.get_default_result(),
-            length=self.lengths.copy(),
-            t2r=np.array(np.nan),
-            t2r_err=np.array(np.nan),
-            t2r_detune=np.array(np.nan),
-            t2r_detune_err=np.array(np.nan),
-            success=np.array(False),
-        )
-
-    def cleanup(self) -> None:
-        self.task.cleanup()

@@ -13,10 +13,10 @@ from typing_extensions import (
     Optional,
     Tuple,
     TypedDict,
-    Union,
     cast,
 )
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
 from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
@@ -41,7 +41,7 @@ from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
-from .executor import FluxDepInfoDict, MeasurementTask, T_RootResultType
+from .executor import FluxDepInfoDict, MeasurementTask, T_RootResult
 
 
 def lenrabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -83,17 +83,20 @@ def auto_fit_lenrabi(
     return pi_len, pi2_len, rabi_freq, fit_loss, fit_signals
 
 
-class LenRabiCfgTemplate(TypedDict):
-    reset: NotRequired[Union[ResetCfg, str]]
-    rabi_pulse: Union[PulseCfg, str]
-    readout: Union[ReadoutCfg, str]
-
-
-class LenRabiCfg(ModularProgramCfg):
+class LenRabiModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     rabi_pulse: PulseCfg
     readout: ReadoutCfg
 
+
+class LenRabiCfgTemplate(ModularProgramCfg):
+    modules: LenRabiModuleCfg
+    dev: NotRequired[Dict[str, DeviceInfo]]
+
+
+class LenRabiCfg(ModularProgramCfg):
+    modules: LenRabiModuleCfg
+    dev: Dict[str, DeviceInfo]
     sweep: Dict[str, SweepCfg]
 
 
@@ -109,18 +112,13 @@ class LenRabiPlotterDict(TypedDict, closed=True):
     rabi_curve: LivePlotter2DwithLine
 
 
-class LenRabiTask(
-    MeasurementTask[LenRabiResult, T_RootResultType, LenRabiPlotterDict]
-):
+class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDict]):
     def __init__(
         self,
         length_sweep: SweepCfg,
         ref_pi_product: float,
         cfg_maker: Callable[
-            [
-                TaskContextView[LenRabiResult, T_RootResultType, dict],
-                ModuleLibrary,
-            ],
+            [TaskContextView[LenRabiResult, T_RootResult], ModuleLibrary],
             Optional[LenRabiCfgTemplate],
         ],
         earlystop_snr: Optional[float] = None,
@@ -131,18 +129,19 @@ class LenRabiTask(
         self.earlystop_snr = earlystop_snr
 
         def measure_fn(ctx: TaskContextView, update_hook: Callable):
+            modules = ctx.cfg["modules"]
             Pulse.set_param(
-                ctx.cfg["rabi_pulse"],
+                modules["rabi_pulse"],
                 "length",
-                sweep2param("length", self.length_sweep),
+                sweep2param("length", ctx.cfg["sweep"]["length"]),
             )
             prog = ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse("rabi_pulse", ctx.cfg["rabi_pulse"]),
-                    Readout("readout", ctx.cfg["readout"]),
+                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Pulse("rabi_pulse", modules["rabi_pulse"]),
+                    Readout("readout", modules["readout"]),
                 ],
             )
             return prog.acquire(
@@ -156,9 +155,93 @@ class LenRabiTask(
                 ),
             )
 
-        self.task = HardTask[
-            np.complex128, T_RootResultType, LenRabiCfg, List[NDArray[np.float64]]
-        ](measure_fn=measure_fn, result_shape=(self.length_sweep["expts"],))
+        self.task = HardTask[T_RootResult, List[NDArray[np.float64]]](
+            measure_fn=measure_fn, result_shape=(self.length_sweep["expts"],)
+        )
+
+    def init(self, ctx, dynamic_pbar=False) -> None:
+        self.init_cfg = deepcopy(ctx.cfg)
+        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+
+    def run(self, ctx) -> None:
+        cfg_temp = self.cfg_maker(ctx, ctx.env_dict["ml"])
+
+        if cfg_temp is None:
+            return  # skip this task
+
+        deepupdate(
+            cast(dict, cfg_temp),
+            {"dev": ctx.cfg["dev"], "sweep": {"length": self.length_sweep}},
+        )
+        cfg = cast(LenRabiCfg, cfg_temp)
+
+        rabi_pulse = cfg["modules"]["rabi_pulse"]
+        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
+
+        raw_signals = ctx.get_data()["raw_signals"]
+        assert isinstance(raw_signals, np.ndarray)
+
+        real_signals = lenrabi_signal2real(raw_signals)
+
+        lengths = sweep2array(self.length_sweep)
+        lengths = round_zcu_time(
+            lengths, ctx.env_dict["soccfg"], gen_ch=rabi_pulse["ch"]
+        )
+
+        pi_len, pi2_len, rabi_freq, mean_err, fit_signals = auto_fit_lenrabi(
+            lengths, real_signals
+        )
+
+        success = True
+        if (
+            pi2_len < 0.03
+            or mean_err > 0.1 * np.ptp(fit_signals)
+            or pi_len > 0.5 * np.max(lengths)
+        ):
+            pi_len, pi2_len, rabi_freq = np.nan, np.nan, np.nan
+            success = False
+
+        if success:
+            info: FluxDepInfoDict = ctx.env_dict["info"]
+            info["pi_product"] = pi_len * rabi_pulse["gain"]
+            new_gain_factor = (
+                info["m_ratio"] * info["pi_product"] / info.first["pi_product"]
+            )
+
+            info.update(
+                pi_length=pi_len,
+                pi2_length=pi2_len,
+                gain_factor=np.sqrt(
+                    info.last.get("gain_factor", 1.0) * new_gain_factor
+                ),
+            )
+            info["pi_pulse"] = deepcopy(rabi_pulse)
+            info["pi_pulse"]["waveform"]["length"] = pi_len
+            info["pi2_pulse"] = deepcopy(rabi_pulse)
+            info["pi2_pulse"]["waveform"]["length"] = pi2_len
+
+        with MinIntervalFunc.force_execute():
+            ctx.set_data(
+                LenRabiResult(
+                    raw_signals=raw_signals,
+                    pi_length=np.array(pi_len),
+                    pi2_length=np.array(pi2_len),
+                    rabi_freq=np.array(rabi_freq),
+                    success=np.array(success),
+                )
+            )
+
+    def get_default_result(self) -> LenRabiResult:
+        return LenRabiResult(
+            raw_signals=self.task.get_default_result(),
+            pi_length=np.array(np.nan),
+            pi2_length=np.array(np.nan),
+            rabi_freq=np.array(np.nan),
+            success=np.array(False),
+        )
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
 
     def num_axes(self) -> Dict[str, int]:
         return dict(rabi_curve=2)
@@ -284,90 +367,3 @@ class LenRabiTask(
             "flx_values": flx_values,
             "lengths": lengths,
         }
-
-    def init(self, ctx, dynamic_pbar=False) -> None:
-        self.init_cfg = deepcopy(ctx.cfg)
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
-
-    def run(self, ctx) -> None:
-        ml: ModuleLibrary = ctx.env_dict["ml"]
-
-        cfg_temp = self.cfg_maker(ctx, ml)
-
-        if cfg_temp is None:
-            return  # skip this task
-
-        cfg_temp = dict(cfg_temp)
-        deepupdate(
-            cfg_temp,
-            {"dev": ctx.cfg.get("dev", {}), "sweep": {"length": self.length_sweep}},
-        )
-        cfg = cast(LenRabiCfg, ml.make_cfg(cfg_temp))
-
-        rabi_pulse = cfg["rabi_pulse"]
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
-
-        raw_signals = ctx.get_data()["raw_signals"]
-        assert isinstance(raw_signals, np.ndarray)
-
-        real_signals = lenrabi_signal2real(raw_signals)
-
-        lengths = sweep2array(self.length_sweep)
-        lengths = round_zcu_time(
-            lengths, ctx.env_dict["soccfg"], gen_ch=rabi_pulse["ch"]
-        )
-
-        pi_len, pi2_len, rabi_freq, mean_err, fit_signals = auto_fit_lenrabi(
-            lengths, real_signals
-        )
-
-        success = True
-        if (
-            pi2_len < 0.03
-            or mean_err > 0.1 * np.ptp(fit_signals)
-            or pi_len > 0.5 * np.max(lengths)
-        ):
-            pi_len, pi2_len, rabi_freq = np.nan, np.nan, np.nan
-            success = False
-
-        if success:
-            info: FluxDepInfoDict = ctx.env_dict["info"]
-            info["pi_product"] = pi_len * rabi_pulse["gain"]
-            new_gain_factor = (
-                info["m_ratio"] * info["pi_product"] / info.first["pi_product"]
-            )
-
-            info.update(
-                pi_length=pi_len,
-                pi2_length=pi2_len,
-                gain_factor=np.sqrt(
-                    info.last.get("gain_factor", 1.0) * new_gain_factor
-                ),
-            )
-            info["pi_pulse"] = deepcopy(rabi_pulse)
-            info["pi_pulse"]["waveform"]["length"] = pi_len
-            info["pi2_pulse"] = deepcopy(rabi_pulse)
-            info["pi2_pulse"]["waveform"]["length"] = pi2_len
-
-        with MinIntervalFunc.force_execute():
-            ctx.set_data(
-                LenRabiResult(
-                    raw_signals=raw_signals,
-                    pi_length=np.array(pi_len),
-                    pi2_length=np.array(pi2_len),
-                    rabi_freq=np.array(rabi_freq),
-                    success=np.array(success),
-                )
-            )
-
-    def get_default_result(self) -> LenRabiResult:
-        return LenRabiResult(
-            raw_signals=self.task.get_default_result(),
-            pi_length=np.array(np.nan),
-            pi2_length=np.array(np.nan),
-            rabi_freq=np.array(np.nan),
-            success=np.array(False),
-        )
-
-    def cleanup(self) -> None:
-        self.task.cleanup()

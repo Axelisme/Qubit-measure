@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
+from numpy import float64
 from numpy.typing import NDArray
 from typing_extensions import (
     Callable,
@@ -16,6 +17,7 @@ from typing_extensions import (
     cast,
 )
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
 from zcu_tools.library import ModuleLibrary
@@ -37,7 +39,7 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from .executor import MeasurementTask, T_RootResultType
+from .executor import MeasurementTask, T_RootResult
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -60,19 +62,21 @@ def mist_fluxdep_signal2real(
     return mist_signals
 
 
-class Mist_CfgTemplate(TypedDict, closed=False):
-    reset: NotRequired[Union[ResetCfg, str]]
-    pi_pulse: NotRequired[Union[PulseCfg, str]]
-    mist_pulse: Union[PulseCfg, str]
-    readout: Union[ReadoutCfg, str]
-
-
-class Mist_Cfg(ModularProgramCfg):
+class Mist_ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    pi_pulse: NotRequired[PulseCfg]
+    pi_pulse: PulseCfg
     mist_pulse: PulseCfg
     readout: ReadoutCfg
 
+
+class Mist_CfgTemplate(ModularProgramCfg):
+    modules: Mist_ModuleCfg
+    dev: NotRequired[Dict[str, DeviceInfo]]
+
+
+class Mist_Cfg(ModularProgramCfg):
+    modules: Mist_ModuleCfg
+    dev: Dict[str, DeviceInfo]
     sweep: Dict[str, SweepCfg]
 
 
@@ -85,9 +89,7 @@ class Mist_PlotterDict(TypedDict, closed=True):
     mist: LivePlotter2DwithLine
 
 
-class Mist_Task(
-    MeasurementTask[Mist_Result, T_RootResultType, Mist_PlotterDict]
-):
+class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
     def __init__(
         self,
         gain_sweep: SweepCfg,
@@ -98,26 +100,63 @@ class Mist_Task(
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
 
-        def measure_fn(ctx: TaskContextView, update_hook: Optional[Callable]):
-            Pulse.set_param(
-                ctx.cfg["mist_pulse"],
-                "gain",
-                sweep2param("gain", ctx.cfg["sweep"]["gain"]),
-            )
+        def measure_fn(
+            ctx: TaskContextView, update_hook: Optional[Callable]
+        ) -> List[NDArray[float64]]:
+            modules = ctx.cfg["modules"]
+            Pulse.set_param(modules["mist_pulse"], "gain", ctx.cfg["sweep"]["gain"])
             return ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse(name="pi_pulse", cfg=ctx.cfg.get("pi_pulse")),
-                    Pulse(name="mist_pulse", cfg=ctx.cfg["mist_pulse"]),
-                    Readout("readout", cfg=ctx.cfg["readout"]),
+                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Pulse(name="pi_pulse", cfg=modules.get("pi_pulse")),
+                    Pulse(name="mist_pulse", cfg=modules["mist_pulse"]),
+                    Readout("readout", cfg=modules["readout"]),
                 ],
             ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook)
 
-        self.task = HardTask[
-            np.complex128, T_RootResultType, Mist_Cfg, List[NDArray[np.float64]]
-        ](measure_fn=measure_fn, result_shape=(self.gain_sweep["expts"],))
+        self.task = HardTask[T_RootResult, List[NDArray[np.float64]]](
+            measure_fn=measure_fn, result_shape=(self.gain_sweep["expts"],)
+        )
+
+    def init(self, ctx, dynamic_pbar=False) -> None:
+        self.init_cfg = deepcopy(ctx.cfg)
+        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+
+    def run(self, ctx) -> None:
+        cfg_temp = self.cfg_maker(ctx, ctx.env_dict["ml"])
+
+        if cfg_temp is None:
+            return  # skip this task
+
+        deepupdate(
+            cast(dict, cfg_temp),
+            {"dev": ctx.cfg["dev"], "sweep": {"gain": self.gain_sweep}},
+        )
+        cfg = cast(Mist_Cfg, cfg_temp)
+
+        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
+
+        raw_signals = ctx.get_data()["raw_signals"]
+        assert isinstance(raw_signals, np.ndarray)
+
+        with MinIntervalFunc.force_execute():
+            ctx.set_data(
+                Mist_Result(
+                    raw_signals=raw_signals,
+                    success=np.array(True),
+                )
+            )
+
+    def get_default_result(self) -> Mist_Result:
+        return Mist_Result(
+            raw_signals=self.task.get_default_result(),
+            success=np.array(True),
+        )
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
 
     def num_axes(self) -> Dict[str, int]:
         return dict(mist=2)
@@ -185,44 +224,3 @@ class Mist_Task(
             "flx_values": flx_values,
             "gains": gains,
         }
-
-    def init(self, ctx, dynamic_pbar=False) -> None:
-        self.init_cfg = deepcopy(ctx.cfg)
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
-
-    def run(self, ctx) -> None:
-        ml: ModuleLibrary = ctx.env_dict["ml"]
-
-        cfg_temp = self.cfg_maker(ctx, ml)
-
-        if cfg_temp is None:
-            return  # skip this task
-
-        cfg_temp = dict(cfg_temp)
-        deepupdate(
-            cfg_temp,
-            {"dev": ctx.cfg.get("dev", {}), "sweep": {"gain": self.gain_sweep}},
-        )
-        cfg = cast(Mist_Cfg, ml.make_cfg(cfg_temp))
-
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
-
-        raw_signals = ctx.get_data()["raw_signals"]
-        assert isinstance(raw_signals, np.ndarray)
-
-        with MinIntervalFunc.force_execute():
-            ctx.set_data(
-                Mist_Result(
-                    raw_signals=raw_signals,
-                    success=np.array(True),
-                )
-            )
-
-    def get_default_result(self) -> Mist_Result:
-        return Mist_Result(
-            raw_signals=self.task.get_default_result(),
-            success=np.array(True),
-        )
-
-    def cleanup(self) -> None:
-        self.task.cleanup()
