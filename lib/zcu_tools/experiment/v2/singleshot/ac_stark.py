@@ -209,9 +209,9 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
     def analyze(
         self,
         chi: float,
-        kappa: float,
         result: Optional[AcStarkResultType] = None,
         *,
+        eta: float = 1.0,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
         cutoff: Optional[float] = None,
     ) -> Tuple[float, Figure]:
@@ -250,7 +250,6 @@ class AcStarkExp(AbsExperiment[AcStarkResultType, AcStarkTaskConfig]):
         y_fit = b * x2_fit + c
 
         # Calculate the Stark shift
-        eta = kappa**2 / (kappa**2 + chi**2)
         ac_coeff = abs(b) / (2 * eta * chi)
 
         # plot the data and the fitted polynomial

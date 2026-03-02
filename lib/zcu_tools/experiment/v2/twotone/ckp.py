@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple, List
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +10,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import sweep2array, make_ge_sweep
+from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
 from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program.v2 import (
@@ -24,9 +24,8 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting import fitlor, lorfunc, batch_fit_func
+from zcu_tools.utils.fitting import batch_fit_func, fitlor, lorfunc
 from zcu_tools.utils.process import rotate2real
-
 
 # (res_freqs, qub_freqs, signals2D)
 CKP_Result = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
@@ -184,7 +183,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         yscale = 0.5 * (e_params[2] + g_params[2])
         gamma = 0.5 * (e_params[4] + g_params[4])
 
-        (g_params, e_params), _ = batch_fit_func(
+        (g_params, e_params), (g_Cov, e_Cov) = batch_fit_func(
             [g_res_freqs, e_res_freqs],
             [g_qub_freqs, e_qub_freqs],
             lorfunc,
@@ -205,13 +204,16 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         if kappa < 2 * chi:
             res_freq += np.sqrt(chi**2 - (kappa / 2) ** 2) * np.sign(e_freq - g_freq)
 
+        kappa_err = np.sqrt(g_Cov[4, 4] + e_Cov[4, 4])
+        chi_err = np.sqrt(g_Cov[3, 3] + e_Cov[3, 3]) / 2
+
         g_fit_freqs = lorfunc(res_freqs, *g_params)
         e_fit_freqs = lorfunc(res_freqs, *e_params)
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
 
         fig.suptitle(
-            rf"$\chi/(2\pi): {chi:.3f}\ MHz,\ \ \kappa/(2\pi): {kappa:.3f}\ MHz$",
+            rf"$\chi/(2\pi): {chi:.3f}\pm {chi_err:.3f}\ MHz,\ \ \kappa/(2\pi): {kappa:.3f}\pm {kappa_err:.3f}\ MHz$",
             fontsize=14,
         )
 

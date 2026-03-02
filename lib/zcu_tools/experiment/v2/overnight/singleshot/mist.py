@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 from matplotlib.figure import Figure
+from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typing_extensions import (
@@ -70,6 +71,8 @@ class MistOvernightAnalyzer:
         result: Optional[MistResult] = None,
         ac_coeff: Optional[float] = None,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
+        drop_extreme_num: int = 0,
+        cutoff: Optional[float] = None,
     ) -> None:
         if result is None:
             result = self.result
@@ -77,6 +80,16 @@ class MistOvernightAnalyzer:
 
         gains = result["gains"][0]  # (Ts, )
         populations = result["populations"]  # (iters, Ts, 2)
+
+        valid_mask = np.all(np.isfinite(populations), axis=(1, 2))
+        populations = populations[valid_mask]
+
+        if cutoff is not None:
+            cutoff_idx = np.argmin(np.abs(gains - cutoff))
+            gains = gains[:cutoff_idx]
+            populations = populations[:, :cutoff_idx]
+
+        iter = populations.shape[0]
 
         populations = np.real(populations).astype(np.float64)
 
@@ -87,10 +100,15 @@ class MistOvernightAnalyzer:
             populations = populations @ np.linalg.inv(confusion_matrix)
             populations = np.clip(populations, 0.0, 1.0)
 
-        max_populations = np.nanmax(populations, axis=0)
-        min_populations = np.nanmin(populations, axis=0)
-        med_populations = np.nanmean(populations, axis=0)
-        std_populations = np.nanstd(populations, axis=0)
+        sort_populations = np.sort(populations, axis=0)
+        max_populations = sort_populations[iter - drop_extreme_num - 1]
+        min_populations = sort_populations[drop_extreme_num]
+        med_populations = np.mean(
+            sort_populations[drop_extreme_num : iter - drop_extreme_num], axis=0
+        )
+        std_populations = np.std(
+            sort_populations[drop_extreme_num : iter - drop_extreme_num], axis=0
+        )
 
         if ac_coeff is None:
             xs = gains
@@ -144,7 +162,80 @@ class MistOvernightAnalyzer:
 
         ax.set_xlabel(xlabel, fontsize=14)
         ax.set_ylabel("Population", fontsize=14)
+        ax.set_xlim(xs[0], xs[-1])
+        ax.set_ylim(0, 1)
         ax.grid(True)
+
+    def plot(
+        self,
+        fig: Figure,
+        result: Optional[MistResult] = None,
+        ac_coeff: Optional[float] = None,
+        confusion_matrix: Optional[NDArray[np.float64]] = None,
+        cutoff: Optional[float] = None,
+    ) -> None:
+        if result is None:
+            result = self.result
+        assert result is not None, "no result found"
+
+        gains = result["gains"][0]  # (Ts, )
+        populations = result["populations"]  # (iters, Ts, 2)
+
+        valid_mask = np.all(np.isfinite(populations), axis=(1, 2))
+        populations = populations[valid_mask]
+
+        if cutoff is not None:
+            cutoff_idx = np.argmin(np.abs(gains - cutoff))
+            gains = gains[:cutoff_idx]
+            populations = populations[:, :cutoff_idx]
+
+        iterations = np.arange(populations.shape[0])
+
+        populations = np.real(populations).astype(np.float64)
+
+        populations = gaussian_filter(populations, sigma=0.5, axes=(0, 1))
+
+        populations = calc_populations(populations)  # (iters, Ts, 3)
+        if confusion_matrix is not None:  # readout correction
+            populations = populations @ np.linalg.inv(confusion_matrix)
+            populations = np.clip(populations, 0.0, 1.0)
+
+        if ac_coeff is None:
+            xs = gains
+            xlabel = "probe gain (a.u.)"
+        else:
+            xs = ac_coeff * gains**2
+            xlabel = r"$\bar n$"
+
+        ax_g, ax_e, ax_o = fig.subplots(3, 1, sharex=True)  # type: ignore
+
+        im_g = NonUniformImage(ax_g, cmap="RdBu_r")
+        im_g.set_data(xs, iterations, populations[..., 0])
+        im_g.set_extent((xs[0], xs[-1], iterations[0], iterations[-1]))
+        ax_g.add_image(im_g)
+        ax_g.scatter([], [], color="b", marker=".", s=1, label="Ground")
+        ax_g.set_ylabel("Iteration", fontsize=14)
+        ax_g.set_aspect("auto")
+        ax_g.legend(fontsize=8)
+
+        im_e = NonUniformImage(ax_e, cmap="RdBu_r")
+        im_e.set_data(xs, iterations, populations[..., 1])
+        im_e.set_extent((xs[0], xs[-1], iterations[0], iterations[-1]))
+        ax_e.add_image(im_e)
+        ax_e.scatter([], [], color="r", marker=".", s=1, label="Excited")
+        ax_e.set_ylabel("Iteration", fontsize=14)
+        ax_e.set_aspect("auto")
+        ax_e.legend(fontsize=8)
+
+        im_o = NonUniformImage(ax_o, cmap="RdBu_r")
+        im_o.set_data(xs, iterations, populations[..., 2])
+        im_o.set_extent((xs[0], xs[-1], iterations[0], iterations[-1]))
+        ax_o.add_image(im_o)
+        ax_o.scatter([], [], color="g", marker=".", s=1, label="Other")
+        ax_o.set_xlabel(xlabel, fontsize=14)
+        ax_o.set_ylabel("Iteration", fontsize=14)
+        ax_o.set_aspect("auto")
+        ax_o.legend(fontsize=8)
 
     @classmethod
     def save(cls, filepath: str, iters, result, comment, prefix_tag) -> None:

@@ -357,3 +357,125 @@ def calc_branch_infos_with_tls(
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     return branch_infos, fbasis_n
+
+
+class FloquetDualCouplingBranchAnalysis:
+    def __init__(
+        self,
+        params: Tuple[float, float, float],
+        r_f: float,
+        g1: float,
+        g2: float,
+        flx: float = 0.5,
+        qub_dim: int = 40,
+        qub_cutoff: int = 60,
+        esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+    ) -> None:
+        self.r_f = r_f
+        self.g1 = g1
+        self.g2 = g2
+
+        from scqubits.core.fluxonium import Fluxonium  # lazy import
+
+        fluxonium = Fluxonium(
+            *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
+        )
+        if esys is None:
+            esys = fluxonium.eigensys(evals_count=qub_dim)
+        H = qt.Qobj(fluxonium.hamiltonian(energy_esys=esys))
+        n_op = qt.Qobj(fluxonium.n_operator(energy_esys=esys))
+        phi_op = qt.Qobj(fluxonium.phi_operator(energy_esys=esys))
+        self.H_with_drive = [
+            H,
+            [n_op, lambda t, amp1, amp2: amp1 * np.cos(r_f * t)],
+            [phi_op, lambda t, amp1, amp2: amp2 * np.sin(r_f * t)],
+        ]
+
+    def make_floquet_basis(
+        self, photon: float, precompute: Optional[np.ndarray] = None
+    ) -> qt.FloquetBasis:
+        return qt.FloquetBasis(
+            self.H_with_drive,
+            2 * np.pi / self.r_f,
+            args=dict(
+                amp1=2 * self.g1 * np.sqrt(photon),
+                amp2=2 * self.g2 * np.sqrt(photon),
+            ),
+            precompute=precompute,
+        )
+
+    def calc_branch_infos(
+        self,
+        fbasis_n: Sequence[qt.FloquetBasis],
+        branchs: List[int],
+        progress: bool = True,
+    ) -> Dict[int, List[int]]:
+        branch_infos = {b: [] for b in branchs}
+        fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]
+        qub_dim = len(fstate_n[0])
+
+        for n in tqdm(
+            range(len(fstate_n)), desc="Computing branch infos", disable=not progress
+        ):
+            for b, b_list in branch_infos.items():
+                if n == 0:
+                    # the first element is always the bare label state
+                    last_state = qt.basis(qub_dim, b)
+                else:
+                    last_state = fstate_n[n - 1][b_list[n - 1]]
+                # the next state is the one with the largest overlap with the last state
+                dists = [np.abs(last_state.dag() @ fstate) for fstate in fstate_n[n]]
+                b_list.append(np.argmax(dists))
+
+        return branch_infos
+
+    def calc_branch_energies(
+        self, fbasis_n: List[qt.FloquetBasis], branch_infos: Dict[int, List[int]]
+    ) -> Dict[int, List[float]]:
+        branch_energies = {b: [] for b in branch_infos.keys()}
+        for b, b_list in branch_infos.items():
+            for n, b_idx in enumerate(b_list):
+                branch_energies[b].append(fbasis_n[n].e_quasi[b_idx])
+        return branch_energies
+
+    def calc_branch_populations(
+        self,
+        fbasis_n: List[qt.FloquetBasis],
+        branch_infos: Dict[int, List[int]],
+        avg_times: np.ndarray,
+        progress: bool = True,
+    ) -> Dict[int, List[float]]:
+        fstates_t_n = [
+            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])  # type: ignore
+            for fbasis in tqdm(
+                fbasis_n, desc="Computing time dependent states", disable=not progress
+            )
+        ]
+        qub_dim = len(fstates_t_n[0][0])
+
+        # time average over one period on the expectation value of population
+        dag_weighted_bare_states = np.array(
+            [np.sqrt(j) * qt.basis(qub_dim, j).dag().full() for j in range(qub_dim)]
+        )
+
+        def calc_pop(fstates_t, i) -> float:
+            return np.sum(
+                np.abs(np.dot(dag_weighted_bare_states, fstates_t[..., i].T)) ** 2
+            ) / len(fstates_t)
+
+        branch_populations = Parallel(n_jobs=-1)(
+            delayed(
+                lambda b: (
+                    b,
+                    [
+                        calc_pop(fstates_t, i)
+                        for fstates_t, i in zip(fstates_t_n, branch_infos[b])
+                    ],
+                )
+            )(b)
+            for b in branch_infos.keys()
+        )
+        branch_populations = dict(branch_populations)  # type: ignore
+        branch_populations = cast(Dict[int, List[float]], branch_populations)
+
+        return branch_populations

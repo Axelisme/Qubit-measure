@@ -12,7 +12,7 @@ from plotly.subplots import make_subplots
 def round_to_nearest(
     E_01: NDArray[np.float64], E_ij: NDArray[np.float64], r_f: float
 ) -> NDArray[np.float64]:
-    round_E_ij = (E_ij - E_01 + 0.5 * r_f) % r_f - 0.5 * r_f + E_01
+    round_E_ij = (E_ij - E_01[0] + 0.5 * r_f) % r_f - 0.5 * r_f + E_01[0]
     round_E_ij[np.abs(np.diff(round_E_ij, prepend=round_E_ij[0])) > r_f / 2] = np.nan
     return round_E_ij
 

@@ -1,5 +1,5 @@
 from functools import wraps
-from typing import Callable, List, Optional, Sequence, Tuple, cast, TypeVar
+from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, cast
 
 import numpy as np
 import scipy as sp
@@ -54,8 +54,11 @@ def add_fixed_params_back(
     pOpt_full = _fixedparams.copy()
     pOpt_full[non_fixed_idxs] = pOpt
 
-    pCov_full = np.zeros((len(_fixedparams), len(_fixedparams)))
-    pCov_full[:, non_fixed_idxs][non_fixed_idxs] = pCov
+    pCov_full = np.zeros((_fixedparams.size, _fixedparams.size))
+    idx = np.where(non_fixed_idxs)[0]
+    for i, row in enumerate(idx):
+        for j, col in enumerate(idx):
+            pCov_full[row, col] = pCov[i, j]
 
     return list(pOpt_full), pCov_full
 
