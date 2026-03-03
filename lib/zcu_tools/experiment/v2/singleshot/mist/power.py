@@ -26,30 +26,30 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-MIST_PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
+PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class MIST_PowerModuleCfg(TypedDict, closed=True):
+class PowerModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MIST_PowerCfg(ModularProgramCfg):
-    modules: MIST_PowerModuleCfg
+class PowerCfg(ModularProgramCfg):
+    modules: PowerModuleCfg
 
 
-class PowerDepExp(AbsExperiment[MIST_PowerResult, MIST_PowerCfg]):
+class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: MIST_PowerCfg,
+        cfg: PowerCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> MIST_PowerResult:
+    ) -> PowerResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
         modules = cfg["modules"]
 
@@ -110,13 +110,13 @@ class PowerDepExp(AbsExperiment[MIST_PowerResult, MIST_PowerCfg]):
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result: MIST_PowerResult = (pdrs, signals)
+        self.last_result: PowerResult = (pdrs, signals)
 
         return pdrs, signals
 
     def analyze(
         self,
-        result: Optional[MIST_PowerResult] = None,
+        result: Optional[PowerResult] = None,
         *,
         ac_coeff=None,
         log_scale=False,
@@ -160,7 +160,7 @@ class PowerDepExp(AbsExperiment[MIST_PowerResult, MIST_PowerCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[MIST_PowerResult] = None,
+        result: Optional[PowerResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/pdr",
         **kwargs,
@@ -181,13 +181,13 @@ class PowerDepExp(AbsExperiment[MIST_PowerResult, MIST_PowerCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> MIST_PowerResult:
+    def load(self, filepath: str, **kwargs) -> PowerResult:
         populations, pdrs, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
 
         pdrs = pdrs.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = cast(MIST_PowerCfg, cfg)
+        self.last_cfg = cast(PowerCfg, cfg)
         self.last_result = (pdrs, populations)
 
         return pdrs, populations

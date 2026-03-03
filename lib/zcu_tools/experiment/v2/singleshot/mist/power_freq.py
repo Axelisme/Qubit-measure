@@ -26,30 +26,30 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-Freq_PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+FreqPowerResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
 
 
-class MIST_FreqPowerModuleCfg(TypedDict, closed=True):
+class FreqPowerModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MIST_FreqPowerCfg(ModularProgramCfg):
-    modules: MIST_FreqPowerModuleCfg
+class FreqPowerCfg(ModularProgramCfg):
+    modules: FreqPowerModuleCfg
 
 
-class FreqPowerDepExp(AbsExperiment[Freq_PowerResult, MIST_FreqPowerCfg]):
+class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: MIST_FreqPowerCfg,
+        cfg: FreqPowerCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> Freq_PowerResult:
+    ) -> FreqPowerResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
         modules = cfg["modules"]
 
@@ -145,13 +145,13 @@ class FreqPowerDepExp(AbsExperiment[Freq_PowerResult, MIST_FreqPowerCfg]):
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result: Freq_PowerResult = (gains, freqs, signals)
+        self.last_result: FreqPowerResult = (gains, freqs, signals)
 
         return self.last_result
 
     def analyze(
         self,
-        result: Optional[Freq_PowerResult] = None,
+        result: Optional[FreqPowerResult] = None,
         *,
         ac_coeff=None,
         log_scale=False,
@@ -211,7 +211,7 @@ class FreqPowerDepExp(AbsExperiment[Freq_PowerResult, MIST_FreqPowerCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[Freq_PowerResult] = None,
+        result: Optional[FreqPowerResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/pdr_freq",
         **kwargs,
@@ -252,7 +252,7 @@ class FreqPowerDepExp(AbsExperiment[Freq_PowerResult, MIST_FreqPowerCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> Freq_PowerResult:
+    def load(self, filepath: List[str], **kwargs) -> FreqPowerResult:
         g_filepath, e_filepath = filepath
 
         # Load ground populations

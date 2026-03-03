@@ -11,13 +11,7 @@ from numpy.typing import NDArray
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import (
-    Pulse,
-    Readout,
-    TwoToneCfg,
-    TwoToneProgram,
-    sweep2param,
-)
+from zcu_tools.program.v2 import Pulse, Readout, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.resonance import (
     fit_edelay,

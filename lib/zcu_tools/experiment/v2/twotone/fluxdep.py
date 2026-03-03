@@ -9,12 +9,7 @@ from typing_extensions import Mapping, Optional, Tuple, cast
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    ReTryIfFail,
-    SoftTask,
-    run_task,
-)
+from zcu_tools.experiment.v2.runner import HardTask, ReTryIfFail, SoftTask, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveFindPoints,
@@ -24,23 +19,19 @@ from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
-FreqFluxDepResult = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+FreqFluxResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
-def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class FreqFluxDepCfg(TwoToneCfg):
+class FreqFluxCfg(TwoToneCfg):
     dev: Mapping[str, DeviceInfo]
 
 
-class FreqFluxDepExp(AbsExperiment[FreqFluxDepResult, FreqFluxDepCfg]):
-    def run(
-        self, soc, soccfg, cfg: FreqFluxDepCfg, fail_retry: int = 0
-    ) -> FreqFluxDepResult:
+class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
+    def run(self, soc, soccfg, cfg: FreqFluxCfg, fail_retry: int = 0) -> FreqFluxResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         assert "sweep" in cfg
@@ -79,7 +70,7 @@ class FreqFluxDepExp(AbsExperiment[FreqFluxDepResult, FreqFluxDepCfg]):
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    dev_values, fpts, freq_signal2real(np.asarray(ctx.data))
+                    dev_values, fpts, freqflux_signal2real(np.asarray(ctx.data))
                 ),
             )
             signals = np.asarray(signals)
@@ -92,7 +83,7 @@ class FreqFluxDepExp(AbsExperiment[FreqFluxDepResult, FreqFluxDepCfg]):
 
     def analyze(
         self,
-        result: Optional[FreqFluxDepResult] = None,
+        result: Optional[FreqFluxResult] = None,
         mA_c: Optional[float] = None,
         mA_e: Optional[float] = None,
     ) -> InteractiveLines:
@@ -112,7 +103,7 @@ class FreqFluxDepExp(AbsExperiment[FreqFluxDepResult, FreqFluxDepCfg]):
 
     def extract_points(
         self,
-        result: Optional[FreqFluxDepResult] = None,
+        result: Optional[FreqFluxResult] = None,
     ) -> InteractiveFindPoints:
         if result is None:
             result = self.last_result
@@ -127,7 +118,7 @@ class FreqFluxDepExp(AbsExperiment[FreqFluxDepResult, FreqFluxDepCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqFluxDepResult] = None,
+        result: Optional[FreqFluxResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/flux_dep/freq",
         **kwargs,
@@ -148,7 +139,7 @@ class FreqFluxDepExp(AbsExperiment[FreqFluxDepResult, FreqFluxDepCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> FreqFluxDepResult:
+    def load(self, filepath: str, **kwargs) -> FreqFluxResult:
         signals2D, values, fpts, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert values is not None and fpts is not None
         assert len(values.shape) == 1 and len(fpts.shape) == 1
@@ -160,7 +151,7 @@ class FreqFluxDepExp(AbsExperiment[FreqFluxDepResult, FreqFluxDepCfg]):
         fpts = fpts.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = cast(FreqFluxDepCfg, cfg)
+        self.last_cfg = cast(FreqFluxCfg, cfg)
         self.last_result = (values, fpts, signals2D)
 
         return values, fpts, signals2D

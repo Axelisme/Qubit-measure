@@ -1,9 +1,9 @@
-from . import reset, ro_optimize, time_domain, rabi
+from . import rabi, reset, ro_optimize, time_domain
 from .ac_stark import AcStarkExp, AcStarkRamseyExp
-from .ckp import CKP_Exp
 from .allxy import AllXY_Exp
+from .ckp import CKP_Exp
 from .dispersive import DispersiveExp
-from .fluxdep import FreqFluxDepExp
+from .fluxdep import FreqFluxExp
 from .freq import FreqExp
-from .power_dep import PowerDepExp
+from .power_dep import PowerExp
 from .zigzag import ZigZagExp, ZigZagSweepExp

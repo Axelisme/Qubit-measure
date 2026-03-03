@@ -28,9 +28,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.simulate import mA2flx
 from zcu_tools.utils.datasaver import load_data, save_data
 
-MistFluxDepResultType = Tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
-]
+FluxDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -48,20 +46,20 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return mist_signals
 
 
-class MistFluxDepModuleCfg(TypedDict, closed=True):
+class FluxDepModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MistFluxDepCfg(ModularProgramCfg):
-    modules: MistFluxDepModuleCfg
+class FluxDepCfg(ModularProgramCfg):
+    modules: FluxDepModuleCfg
     dev: Mapping[str, DeviceInfo]
 
 
-class MistFluxDepExp(AbsExperiment[MistFluxDepResultType, MistFluxDepCfg]):
-    def run(self, soc, soccfg, cfg: MistFluxDepCfg) -> MistFluxDepResultType:
+class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
+    def run(self, soc, soccfg, cfg: FluxDepCfg) -> FluxDepResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
         modules = cfg["modules"]
 
@@ -125,7 +123,7 @@ class MistFluxDepExp(AbsExperiment[MistFluxDepResultType, MistFluxDepCfg]):
 
     def analyze(
         self,
-        result: Optional[MistFluxDepResultType] = None,
+        result: Optional[FluxDepResult] = None,
         *,
         mA_c: Optional[float] = None,
         period: Optional[float] = None,
@@ -183,7 +181,7 @@ class MistFluxDepExp(AbsExperiment[MistFluxDepResultType, MistFluxDepCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[MistFluxDepResultType] = None,
+        result: Optional[FluxDepResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/flux_dep/mist",
         **kwargs,
@@ -204,7 +202,7 @@ class MistFluxDepExp(AbsExperiment[MistFluxDepResultType, MistFluxDepCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> MistFluxDepResultType:
+    def load(self, filepath: str, **kwargs) -> FluxDepResult:
         signals, values, gains = load_data(filepath, **kwargs)
         assert values is not None and gains is not None
         assert len(values.shape) == 1 and len(gains.shape) == 1

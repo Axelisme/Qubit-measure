@@ -15,18 +15,18 @@ from zcu_tools.utils.process import minus_background
 
 from ..runner import HardTask, run_task
 
-PowerDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
 
-def pdrdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+def pdr_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class PowerDepCfg(TwoToneCfg): ...
+class PowerCfg(TwoToneCfg): ...
 
 
-class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
-    def run(self, soc, soccfg, cfg: PowerDepCfg) -> PowerDepResult:
+class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
+    def run(self, soc, soccfg, cfg: PowerCfg) -> PowerResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
 
         # Ensure gain is the outer loop for better visualization
@@ -54,7 +54,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                 ),
                 init_cfg=cfg,
                 update_hook=lambda ctx: viewer.update(
-                    pdrs, fpts, pdrdep_signal2real(ctx.data)
+                    pdrs, fpts, pdr_signal2real(ctx.data)
                 ),
             )
 
@@ -66,7 +66,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
     def analyze(
         self,
-        result: Optional[PowerDepResult] = None,
+        result: Optional[PowerResult] = None,
     ) -> None:
         raise NotImplementedError(
             "Analysis not implemented for two-tone power dependence"
@@ -75,7 +75,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[PowerDepResult] = None,
+        result: Optional[PowerResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/power_dep",
         **kwargs,
@@ -96,7 +96,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> PowerDepResult:
+    def load(self, filepath: str, **kwargs) -> PowerResult:
         signals2D, fpts, pdrs = load_data(filepath, **kwargs)
         assert fpts is not None and pdrs is not None
         assert len(fpts.shape) == 1 and len(pdrs.shape) == 1

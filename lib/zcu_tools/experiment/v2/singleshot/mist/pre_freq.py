@@ -26,10 +26,10 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-MIST_PreFreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
+PreFreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class MIST_PreFreqModuleCfg(TypedDict, closed=True):
+class PreFreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: PulseCfg
     pi_pulse: NotRequired[PulseCfg]
@@ -37,20 +37,20 @@ class MIST_PreFreqModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class MIST_PreFreqCfg(ModularProgramCfg):
-    modules: MIST_PreFreqModuleCfg
+class PreFreqCfg(ModularProgramCfg):
+    modules: PreFreqModuleCfg
 
 
-class PreFreqExp(AbsExperiment[MIST_PreFreqResult, MIST_PreFreqCfg]):
+class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: MIST_PreFreqCfg,
+        cfg: PreFreqCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> MIST_PreFreqResult:
+    ) -> PreFreqResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
         modules = cfg["modules"]
 
@@ -112,13 +112,13 @@ class PreFreqExp(AbsExperiment[MIST_PreFreqResult, MIST_PreFreqCfg]):
 
         # record the last result
         self.last_cfg = cfg
-        self.last_result: MIST_PreFreqResult = (fpts, signals)
+        self.last_result: PreFreqResult = (fpts, signals)
 
         return fpts, signals
 
     def analyze(
         self,
-        result: Optional[MIST_PreFreqResult] = None,
+        result: Optional[PreFreqResult] = None,
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
@@ -151,7 +151,7 @@ class PreFreqExp(AbsExperiment[MIST_PreFreqResult, MIST_PreFreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[MIST_PreFreqResult] = None,
+        result: Optional[PreFreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/pdr",
         **kwargs,
@@ -172,7 +172,7 @@ class PreFreqExp(AbsExperiment[MIST_PreFreqResult, MIST_PreFreqCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> MIST_PreFreqResult:
+    def load(self, filepath: str, **kwargs) -> PreFreqResult:
         populations, fpts, _ = load_data(filepath, **kwargs)
 
         fpts = fpts / 1e6  # convert to MHz

@@ -26,30 +26,30 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-MIST_FreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
+FreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class MIST_FreqModuleCfg(TypedDict, closed=True):
+class FreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MIST_FreqCfg(ModularProgramCfg):
-    modules: MIST_FreqModuleCfg
+class FreqCfg(ModularProgramCfg):
+    modules: FreqModuleCfg
 
 
-class FreqDepExp(AbsExperiment[MIST_FreqResult, MIST_FreqCfg]):
+class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: MIST_FreqCfg,
+        cfg: FreqCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
-    ) -> MIST_FreqResult:
+    ) -> FreqResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
         modules = cfg["modules"]
 
@@ -116,7 +116,7 @@ class FreqDepExp(AbsExperiment[MIST_FreqResult, MIST_FreqCfg]):
 
     def analyze(
         self,
-        result: Optional[MIST_FreqResult] = None,
+        result: Optional[FreqResult] = None,
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
     ) -> Figure:
@@ -149,7 +149,7 @@ class FreqDepExp(AbsExperiment[MIST_FreqResult, MIST_FreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[MIST_FreqResult] = None,
+        result: Optional[FreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "singleshot/mist/freq",
         **kwargs,
@@ -170,7 +170,7 @@ class FreqDepExp(AbsExperiment[MIST_FreqResult, MIST_FreqCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> MIST_FreqResult:
+    def load(self, filepath: str, **kwargs) -> FreqResult:
         populations, freqs, _ = load_data(filepath, **kwargs)
 
         freqs = 1e-6 * freqs  # Hz to MHz

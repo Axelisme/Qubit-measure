@@ -1,2 +1,2 @@
-from .flux_dep import MistFluxDepExp
-from .power_dep import MISTPowerDepExp, MISTPowerDepOvernightExp
+from .flux_dep import FluxDepExp
+from .power_dep import PowerDepExp, PowerDepOvernightExp

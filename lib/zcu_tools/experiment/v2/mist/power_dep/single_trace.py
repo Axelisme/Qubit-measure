@@ -24,7 +24,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-MISTPowerDepResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+PowerDepResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -35,19 +35,19 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(mist_signals)
 
 
-class MISTPowerDepModuleCfg(TypedDict, closed=True):
+class PowerDepModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MISTPowerDepCfg(ModularProgramCfg):
-    modules: MISTPowerDepModuleCfg
+class PowerDepCfg(ModularProgramCfg):
+    modules: PowerDepModuleCfg
 
 
-class MISTPowerDepExp(AbsExperiment[MISTPowerDepResult, MISTPowerDepCfg]):
-    def run(self, soc, soccfg, cfg: MISTPowerDepCfg) -> MISTPowerDepResult:
+class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
+    def run(self, soc, soccfg, cfg: PowerDepCfg) -> PowerDepResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
         modules = cfg["modules"]
 
@@ -95,7 +95,7 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResult, MISTPowerDepCfg]):
 
     def analyze(
         self,
-        result: Optional[MISTPowerDepResult] = None,
+        result: Optional[PowerDepResult] = None,
         *,
         g0=None,
         e0=None,
@@ -133,7 +133,7 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResult, MISTPowerDepCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[MISTPowerDepResult] = None,
+        result: Optional[PowerDepResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/mist/pdr",
         **kwargs,
@@ -153,7 +153,7 @@ class MISTPowerDepExp(AbsExperiment[MISTPowerDepResult, MISTPowerDepCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> MISTPowerDepResult:
+    def load(self, filepath: str, **kwargs) -> PowerDepResult:
         signals, pdrs, _ = load_data(filepath, **kwargs)
         assert pdrs is not None
         assert len(pdrs.shape) == 1 and len(signals.shape) == 1

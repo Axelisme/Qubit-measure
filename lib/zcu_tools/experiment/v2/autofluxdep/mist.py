@@ -104,7 +104,11 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
             ctx: TaskContextView, update_hook: Optional[Callable]
         ) -> List[NDArray[float64]]:
             modules = ctx.cfg["modules"]
-            Pulse.set_param(modules["mist_pulse"], "gain", ctx.cfg["sweep"]["gain"])
+            Pulse.set_param(
+                modules["mist_pulse"],
+                "gain",
+                sweep2param("gain", ctx.cfg["sweep"]["gain"]),
+            )
             return ModularProgramV2(
                 ctx.env_dict["soccfg"],
                 ctx.cfg,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Mapping, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +9,6 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import NotRequired, TypedDict
 
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
     format_sweep1D,

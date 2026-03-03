@@ -1,7 +1,7 @@
 from .executor import FluxDepExecutor
-from .lenrabi import LenRabiTask, LenRabiCfgTemplate
-from .mist import Mist_Task, Mist_CfgTemplate
-from .qubit_freq import QubitFreqTask, QubitFreqCfgTemplate
-from .t1 import T1Task, T1CfgTemplate
-from .t2echo import T2EchoTask, T2EchoCfgTemplate
-from .t2ramsey import T2RamseyTask, T2RamseyCfgTemplate
+from .lenrabi import LenRabiCfgTemplate, LenRabiTask
+from .mist import Mist_CfgTemplate, Mist_Task
+from .qubit_freq import QubitFreqCfgTemplate, QubitFreqTask
+from .t1 import T1CfgTemplate, T1Task
+from .t2echo import T2EchoCfgTemplate, T2EchoTask
+from .t2ramsey import T2RamseyCfgTemplate, T2RamseyTask

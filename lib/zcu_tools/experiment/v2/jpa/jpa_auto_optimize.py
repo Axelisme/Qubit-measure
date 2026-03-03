@@ -19,12 +19,7 @@ from zcu_tools.experiment.utils import (
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
 )
-from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    SoftTask,
-    TaskContextView,
-    run_task,
-)
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskContextView, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot

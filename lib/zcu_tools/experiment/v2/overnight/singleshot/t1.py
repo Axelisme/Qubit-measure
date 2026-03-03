@@ -226,7 +226,7 @@ class T1Cfg(OvernightSingleshotT1ProgramCfg):
 
 
 class T1Task(
-    T1_PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1Cfg, T1PlotterDict]
+    T1_PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotterDict]
 ):
     def __init__(
         self, cfg, g_center: complex, e_center: complex, radius: float
@@ -264,9 +264,7 @@ class T1Task(
                 population_radius=radius,
             )
 
-        self.task = HardTask[
-            np.float64, T_RootResult, T1WithToneCfg, List[NDArray[np.float64]]
-        ](
+        self.task = HardTask[T_RootResult, List[NDArray[np.float64]], np.float64](
             measure_fn=measure_t1_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(2, len(self.lengths), 2),
@@ -315,8 +313,7 @@ class T1WithToneCfg(OvernightSingleshotT1WithToneProgramCfg):
 
 
 class T1WithToneTask(
-    T1_PlotAndSaveMixin,
-    MeasurementTask[T1Result, T_RootResult, T1WithToneCfg, T1PlotterDict],
+    T1_PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotterDict]
 ):
     def __init__(
         self, cfg, g_center: complex, e_center: complex, radius: float
@@ -356,9 +353,7 @@ class T1WithToneTask(
                 population_radius=radius,
             )
 
-        self.task = HardTask[
-            np.float64, T_RootResult, T1WithToneCfg, List[NDArray[np.float64]]
-        ](
+        self.task = HardTask[T_RootResult, List[NDArray[np.float64]], np.float64](
             measure_fn=measure_t1_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(2, len(self.lengths), 2),

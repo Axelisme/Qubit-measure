@@ -29,7 +29,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-MISTPowerDepOvernightResult = Tuple[
+PowerDepOvernightResult = Tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -42,30 +42,24 @@ def mist_overnight_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
     return np.abs(mist_signals)
 
 
-class MISTPowerDepOvernightModuleCfg(TypedDict, closed=True):
+class PowerDepOvernightModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MISTPowerDepOvernightCfg(ModularProgramCfg):
-    modules: MISTPowerDepOvernightModuleCfg
+class PowerDepOvernightCfg(ModularProgramCfg):
+    modules: PowerDepOvernightModuleCfg
     interval: float
 
 
-class MISTPowerDepOvernightExp(
-    AbsExperiment[MISTPowerDepOvernightResult, MISTPowerDepOvernightCfg]
+class PowerDepOvernightExp(
+    AbsExperiment[PowerDepOvernightResult, PowerDepOvernightCfg]
 ):
     def run(
-        self,
-        soc,
-        soccfg,
-        cfg: MISTPowerDepOvernightCfg,
-        *,
-        num_times=50,
-        fail_retry=3,
-    ) -> MISTPowerDepOvernightResult:
+        self, soc, soccfg, cfg: PowerDepOvernightCfg, *, num_times=50, fail_retry=3
+    ) -> PowerDepOvernightResult:
         cfg = deepcopy(cfg)  # prevent in-place modification
         modules = cfg["modules"]
 
@@ -132,7 +126,7 @@ class MISTPowerDepOvernightExp(
 
     def analyze(
         self,
-        result: Optional[MISTPowerDepOvernightResult] = None,
+        result: Optional[PowerDepOvernightResult] = None,
         *,
         g0=None,
         e0=None,
@@ -175,7 +169,7 @@ class MISTPowerDepOvernightExp(
     def save(
         self,
         filepath: str,
-        result: Optional[MISTPowerDepOvernightResult] = None,
+        result: Optional[PowerDepOvernightResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/mist/pdr_overnight",
         **kwargs,
@@ -196,7 +190,7 @@ class MISTPowerDepOvernightExp(
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> MISTPowerDepOvernightResult:
+    def load(self, filepath: str, **kwargs) -> PowerDepOvernightResult:
         overnight_signals, pdrs, iters = load_data(filepath, **kwargs)
         assert pdrs is not None and iters is not None
         assert len(pdrs.shape) == 1 and len(iters.shape) == 1

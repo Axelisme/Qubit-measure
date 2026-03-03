@@ -13,7 +13,6 @@ from typing_extensions import (
     Optional,
     Tuple,
     TypedDict,
-    Union,
     cast,
 )
 
