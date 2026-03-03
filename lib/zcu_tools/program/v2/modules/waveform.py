@@ -9,8 +9,8 @@ from typing_extensions import NotRequired, TypedDict
 from ..base import MyProgramV2
 
 
-class WaveformCfg(TypedDict):
-    style: Literal["const", "cosine", "gauss", "drag", "flat_top", "padding"]
+class WaveformCfg(TypedDict, closed=True):
+    style: Literal["const", "cosine", "gauss", "drag", "flat_top"]
     length: Union[float, QickParam]
 
     name: NotRequired[str]  # waveform name
@@ -19,12 +19,6 @@ class WaveformCfg(TypedDict):
     delta: NotRequired[float]  # drag delta
     alpha: NotRequired[float]  # drag alpha
     raise_waveform: NotRequired[WaveformCfg]  # flat top
-
-    # for padding pulse
-    pre_length: NotRequired[Union[float, QickParam]]
-    post_length: NotRequired[Union[float, QickParam]]
-    pre_gain: NotRequired[Union[float, QickParam]]
-    post_gain: NotRequired[Union[float, QickParam]]
 
 
 class QickWaveformKwargs(TypedDict):

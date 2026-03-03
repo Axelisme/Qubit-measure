@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,6 +13,7 @@ from scipy.ndimage import gaussian_filter1d
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram
+from zcu_tools.program.v2.modules import PulseReadoutCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
 from .runner import HardTask, run_task
@@ -36,10 +37,10 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
             cfg["reps"] = 1
 
         modules = cfg["modules"]
+        readout_cfg = cast(PulseReadoutCfg, modules["readout"])
+
         prog = OneToneProgram(soccfg, cfg)
-        Ts = (
-            prog.get_time_axis(ro_index=0) + modules["readout"]["ro_cfg"]["trig_offset"]
-        )
+        Ts = prog.get_time_axis(ro_index=0) + readout_cfg["ro_cfg"]["trig_offset"]
         assert isinstance(Ts, np.ndarray)
 
         with LivePlotter1D("Time (us)", "Amplitude") as viewer:

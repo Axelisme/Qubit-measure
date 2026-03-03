@@ -1,18 +1,68 @@
+from __future__ import annotations
+
 import warnings
 from abc import ABC, abstractmethod
 
 from qick.asm_v2 import QickParam
-from typing_extensions import Sequence, TypedDict, Union
+from typing_extensions import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Optional,
+    Sequence,
+    Type,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from ..base import MyProgramV2
 
+if TYPE_CHECKING:
+    from zcu_tools.meta_manager import ModuleLibrary
 
-class ModuleCfg(TypedDict, closed=False): ...
+
+class ModuleCfg(TypedDict, closed=False):
+    type: str
 
 
 class Module(ABC):
-    def __init__(self) -> None:
-        self.name = "UnnamedModule"
+    @classmethod
+    def declare_submodule(cls) -> None:
+        # lazy declaration to avoid overwriting submodule dict when reload the module
+        if not hasattr(cls, "_submodule"):
+            cls._submodule = {}
+
+    def __init_subclass__(cls, tag: Optional[str] = None, **kwargs) -> None:
+        super().__init_subclass__(**kwargs)
+
+        cls._submodule = {}  # use separate submodule dict for each subclass
+
+        if tag is None:
+            return
+
+        for base in cls.__bases__:
+            if issubclass(base, Module):
+                base.declare_submodule()
+                base._submodule[tag] = cls
+
+    @staticmethod
+    def parse(type: str) -> Type["Module"]:
+        Module.declare_submodule()
+
+        cur_cls = Module
+        for label in type.split("/"):
+            if label not in cur_cls._submodule:
+                raise ValueError(f"Invalid module type: {type}")
+            cur_cls = cur_cls._submodule[label]
+
+        return cur_cls
+
+    @staticmethod
+    def auto_fill(module_cfg: Dict[str, Any], ml: ModuleLibrary) -> ModuleCfg:
+        return cast(ModuleCfg, module_cfg)
+
+    def __init__(self, *args, **kwargs) -> None: ...
 
     @abstractmethod
     def init(self, prog: MyProgramV2) -> None: ...

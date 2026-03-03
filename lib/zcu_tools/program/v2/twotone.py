@@ -19,7 +19,7 @@ class TwoToneProgram(BaseCustomProgramV2):
     def make_modules(self, cfg: TwoToneCfg) -> Sequence[Module]:
         modules = cfg["modules"]
         return [
-            Reset("reset", cfg=modules.get("reset", {"type": "none"})),
+            Reset("reset", cfg=modules.get("reset")),
             Pulse("init_pulse", cfg=modules.get("init_pulse")),
             Pulse("qubit_pulse", cfg=modules["qub_pulse"]),
             Readout("readout", cfg=modules["readout"]),

@@ -4,7 +4,7 @@ from typing import Optional, Union, cast, overload
 import numpy as np
 from numpy.typing import NDArray
 
-from zcu_tools.library import ModuleLibrary
+from zcu_tools.meta_manager import ModuleLibrary
 from zcu_tools.program.v2 import PulseCfg
 
 

@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from pyvisa import ResourceManager
 
 
-class DeviceInfo(TypedDict):
+class DeviceInfo(TypedDict, closed=False):
     type: str
     address: str
 

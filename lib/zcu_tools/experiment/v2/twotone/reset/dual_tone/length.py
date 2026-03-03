@@ -61,8 +61,8 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
 
         lens = sweep2array(cfg["sweep"]["length"])  # predicted pulse lengths
 
-        pulse1_cfg = modules["tested_reset"]["pulse1_cfg"]
-        pulse2_cfg = modules["tested_reset"]["pulse2_cfg"]
+        pulse1_cfg = modules["tested_reset"]["pulse1_cfg"]  # type: ignore
+        pulse2_cfg = modules["tested_reset"]["pulse2_cfg"]  # type: ignore
 
         len_diff = pulse2_cfg["waveform"]["length"] - pulse1_cfg["waveform"]["length"]
         len1_span = sweep2param("length", cfg["sweep"]["length"])

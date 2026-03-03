@@ -18,7 +18,7 @@ class OneToneProgram(BaseCustomProgramV2):
     def make_modules(self, cfg: OneToneCfg) -> Sequence[Module]:
         modules = cfg["modules"]
         return [
-            Reset("reset", cfg=modules.get("reset", {"type": "none"})),
+            Reset("reset", cfg=modules.get("reset")),
             Pulse("init_pulse", cfg=modules.get("init_pulse")),
             Readout("readout", cfg=modules["readout"]),
         ]

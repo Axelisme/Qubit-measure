@@ -2,150 +2,114 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Callable, ClassVar, Dict, Optional, Type, Union
 
 from qick.asm_v2 import QickParam
+from typing_extensions import TYPE_CHECKING, Any, Dict, NotRequired, Type, Union, cast
 
 from ..base import MyProgramV2
 from .base import Module, ModuleCfg
 from .pulse import Pulse, PulseCfg, check_block_mode
 from .util import calc_max_length
 
-
-class TriggerCfg(ModuleCfg):
-    ro_ch: int
-    ro_length: Union[float, QickParam]
-    ro_freq: Union[float, QickParam]
-    trig_offset: Union[float, QickParam]
+if TYPE_CHECKING:
+    from zcu_tools.meta_manager import ModuleLibrary
 
 
-class TriggerReadout(Module):
-    def __init__(
-        self,
-        name: str,
-        ro_cfg: TriggerCfg,
-        gen_ch: int,
-        gen_freq: Optional[Union[float, QickParam]] = None,
-    ) -> None:
-        self.name = name
-        self.ro_cfg = ro_cfg
-        self.gen_ch = gen_ch
-        self.gen_freq = gen_freq
-
-    def init(self, prog: MyProgramV2) -> None:
-        prog.declare_readout(ch=self.ro_cfg["ro_ch"], length=self.ro_cfg["ro_length"])
-
-        ro_freq = self.ro_cfg.get("ro_freq", self.gen_freq)
-        if ro_freq is None:
-            raise ValueError("ro_freq is not set in ro_cfg or gen_freq is not set")
-
-        prog.add_readoutconfig(
-            ch=self.ro_cfg["ro_ch"],
-            name=self.name,
-            freq=ro_freq,
-            gen_ch=self.gen_ch,
-        )
-
-    def total_length(self) -> Union[float, QickParam]:
-        return self.ro_cfg["trig_offset"] + self.ro_cfg["ro_length"]
-
-    def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        ro_ch = self.ro_cfg["ro_ch"]
-        trig_offset = self.ro_cfg["trig_offset"]
-
-        prog.send_readoutconfig(ro_ch, self.name, t=t)  # type: ignore
-        prog.trigger([ro_ch], t=t + trig_offset)
-
-        return t  # always non-blocking
-
-
-class BaseReadoutCfg(ModuleCfg):
-    type: str
-    pulse_cfg: PulseCfg
-    ro_cfg: TriggerCfg
-
-
-ReadoutCfg = Union[BaseReadoutCfg]
-
-
-class AbsReadout(Module):
-    def __init__(self, name: str, cfg: ReadoutCfg) -> None: ...
-
-    @classmethod
-    def set_param(
-        cls,
-        readout_cfg: ReadoutCfg,
-        param_name: str,
-        param_value: Union[float, QickParam],
-    ) -> ReadoutCfg:
-        raise NotImplementedError(
-            f"{cls.__name__} does not support set {param_name} params with {param_value}"
-        )
-
-    def total_length(self) -> Union[float, QickParam]:
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support total_length"
-        )
-
-
-class Readout(AbsReadout):
-    SUPPORTED_TYPES: ClassVar[Dict[str, Type[AbsReadout]]] = {}
-
-    @classmethod
-    def register_readout(
-        cls, ro_type: str
-    ) -> Callable[[Type[AbsReadout]], Type[AbsReadout]]:
-        if ro_type in cls.SUPPORTED_TYPES:
-            raise ValueError(
-                f"Readout type {ro_type} already registered by {cls.SUPPORTED_TYPES[ro_type].__name__}"
-            )
-
-        def decorator(cls: Type[AbsReadout]) -> Type[AbsReadout]:
-            Readout.SUPPORTED_TYPES[ro_type] = cls
-            return cls
-
-        return decorator
-
-    @classmethod
-    def get_readout_cls(cls, readout_cfg: ReadoutCfg) -> Type[AbsReadout]:
-        if readout_cfg["type"] not in cls.SUPPORTED_TYPES:
-            raise ValueError(f"Unknown readout type: {readout_cfg['type']}")
-        return cls.SUPPORTED_TYPES[readout_cfg["type"]]
-
-    @classmethod
-    def set_param(
-        cls,
-        readout_cfg: ReadoutCfg,
-        param_name: str,
-        param_value: Union[float, QickParam],
-    ) -> ReadoutCfg:
-        return cls.get_readout_cls(readout_cfg).set_param(
-            readout_cfg, param_name, param_value
-        )
-
+class Readout(Module, tag="readout"):
     def __init__(self, name: str, cfg: ReadoutCfg) -> None:
         self.name = name
-        self.cfg = deepcopy(cfg)
-        readout_cls = self.get_readout_cls(cfg)
-        self.readout = readout_cls(name, cfg)
+        self.readout = cast(Readout, Module.parse(cfg["type"])(name, cfg))
 
     def init(self, prog: MyProgramV2) -> None:
         self.readout.init(prog)
+
+    def total_length(self) -> Union[float, QickParam]:
+        return self.readout.total_length()
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         return self.readout.run(prog, t)
 
+    @staticmethod
+    def set_param(
+        readout_cfg: ReadoutCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
+    ) -> ReadoutCfg:
+        return cast(Type[Readout], Module.parse(readout_cfg["type"])).set_param(
+            readout_cfg, param_name, param_value
+        )
+
+    @staticmethod
+    def auto_fill(
+        readout_cfg: Union[str, Dict[str, Any]], ml: ModuleLibrary
+    ) -> ReadoutCfg:
+        if isinstance(readout_cfg, str):
+            readout_cfg = ml.get_module(readout_cfg)
+
+        return cast(Type[Readout], Module.parse(readout_cfg["type"])).auto_fill(
+            readout_cfg, ml
+        )
+
+
+class DirectReadoutCfg(ModuleCfg, closed=True):
+    ro_ch: int
+    ro_length: Union[float, QickParam]
+    ro_freq: Union[float, QickParam]
+    trig_offset: Union[float, QickParam]
+
+    gen_ch: NotRequired[int]
+
+
+class DirectReadout(Readout, tag="direct"):
+    def __init__(self, name: str, cfg: DirectReadoutCfg) -> None:
+        self.name = name
+        self.cfg = cfg
+
+    def init(self, prog: MyProgramV2) -> None:
+        prog.declare_readout(ch=self.cfg["ro_ch"], length=self.cfg["ro_length"])
+
+        prog.add_readoutconfig(
+            ch=self.cfg["ro_ch"],
+            name=self.name,
+            freq=self.cfg["ro_freq"],
+            gen_ch=self.cfg.get("gen_ch"),
+        )
+
     def total_length(self) -> Union[float, QickParam]:
-        return self.readout.total_length()
+        return self.cfg["trig_offset"] + self.cfg["ro_length"]
+
+    def run(
+        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+    ) -> Union[float, QickParam]:
+        ro_ch = self.cfg["ro_ch"]
+        trig_offset = self.cfg["trig_offset"]
+
+        prog.send_readoutconfig(ro_ch, self.name, t=t)  # type: ignore
+        prog.trigger([ro_ch], t=t + trig_offset)
+
+        return t  # always non-blocking
+
+    @classmethod
+    def auto_fill(
+        cls, readout_cfg: Union[str, Dict[str, Any]], ml: ModuleLibrary
+    ) -> DirectReadoutCfg:
+        if isinstance(readout_cfg, str):
+            readout_cfg = ml.get_module(readout_cfg)
+
+        readout_cfg.setdefault("trig_offset", 0.0)
+
+        return cast(DirectReadoutCfg, readout_cfg)
 
 
-@Readout.register_readout("base")
-class BaseReadout(AbsReadout):
-    def __init__(self, name: str, cfg: BaseReadoutCfg) -> None:
+class PulseReadoutCfg(ModuleCfg, closed=True):
+    pulse_cfg: PulseCfg
+    ro_cfg: DirectReadoutCfg
+
+
+class PulseReadout(Readout, tag="pulse"):
+    def __init__(self, name: str, cfg: PulseReadoutCfg) -> None:
         self.name = name
         self.pulse_cfg = deepcopy(cfg["pulse_cfg"])
         self.ro_cfg = deepcopy(cfg["ro_cfg"])
@@ -157,22 +121,17 @@ class BaseReadout(AbsReadout):
             )
 
         self.pulse = Pulse(name=f"{name}_pulse", cfg=self.pulse_cfg)
-        self.ro_trigger = TriggerReadout(
-            name=f"{name}_adc",
-            ro_cfg=self.ro_cfg,
-            gen_ch=self.pulse_cfg["ch"],
-            gen_freq=self.pulse_cfg["freq"],
-        )
+        self.ro_window = DirectReadout(name=f"{name}_adc", cfg=self.ro_cfg)
 
         check_block_mode(self.pulse.name, self.pulse_cfg, want_block=True)
 
     @classmethod
     def set_param(
         cls,
-        readout_cfg: BaseReadoutCfg,
+        readout_cfg: PulseReadoutCfg,
         param_name: str,
         param_value: Union[float, QickParam],
-    ) -> BaseReadoutCfg:
+    ) -> PulseReadoutCfg:
         if param_name == "gain":
             readout_cfg["pulse_cfg"]["gain"] = param_value
         elif param_name == "freq":
@@ -189,17 +148,33 @@ class BaseReadout(AbsReadout):
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse.init(prog)
-        self.ro_trigger.init(prog)
+        self.ro_window.init(prog)
 
     def total_length(self) -> Union[float, QickParam]:
-        return calc_max_length(
-            self.ro_trigger.total_length(), self.pulse.total_length()
-        )
+        return calc_max_length(self.ro_window.total_length(), self.pulse.total_length())
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        t = self.ro_trigger.run(prog, t)
+        t = self.ro_window.run(prog, t)
         t = self.pulse.run(prog, t)
 
         return t + self.total_length()
+
+    @classmethod
+    def auto_fill(
+        cls, readout_cfg: Union[str, Dict[str, Any]], ml: ModuleLibrary
+    ) -> PulseReadoutCfg:
+        if isinstance(readout_cfg, str):
+            readout_cfg = ml.get_module(readout_cfg)
+
+        readout_cfg["pulse_cfg"] = Pulse.auto_fill(readout_cfg["pulse_cfg"], ml)
+        readout_cfg["ro_cfg"] = DirectReadout.auto_fill(readout_cfg["ro_cfg"], ml)
+        if freq := readout_cfg["pulse_cfg"].get("freq"):
+            readout_cfg["ro_cfg"].setdefault("ro_freq", freq)
+        readout_cfg["ro_cfg"].setdefault("gen_ch", readout_cfg["pulse_cfg"]["ch"])
+
+        return cast(PulseReadoutCfg, readout_cfg)
+
+
+ReadoutCfg = Union[PulseReadoutCfg, DirectReadoutCfg]

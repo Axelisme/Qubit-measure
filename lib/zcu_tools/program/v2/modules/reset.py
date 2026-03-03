@@ -1,115 +1,59 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from typing import Any, Callable, ClassVar, Dict, Literal, Type, Union
-
 from qick.asm_v2 import QickParam
+from typing_extensions import TYPE_CHECKING, Any, Dict, Optional, Type, Union, cast
 
 from ..base import MyProgramV2
 from .base import Module, ModuleCfg
 from .pulse import Pulse, PulseCfg, check_block_mode
 from .util import calc_max_length
 
-
-class NoneResetCfg(ModuleCfg):
-    type: Literal["none"]
-
-
-class PulseResetCfg(ModuleCfg):
-    type: Literal["pulse"]
-    pulse_cfg: PulseCfg
+if TYPE_CHECKING:
+    from zcu_tools.meta_manager import ModuleLibrary
 
 
-class TwoPulseResetCfg(ModuleCfg):
-    type: Literal["two_pulse"]
-    pulse1_cfg: PulseCfg
-    pulse2_cfg: PulseCfg
-
-
-class BathResetCfg(ModuleCfg):
-    type: Literal["bath"]
-    qubit_tone_cfg: PulseCfg
-    cavity_tone_cfg: PulseCfg
-    pi2_cfg: PulseCfg
-
-
-ResetCfg = Union[NoneResetCfg, PulseResetCfg, TwoPulseResetCfg, BathResetCfg]
-
-
-class AbsReset(Module):
-    def __init__(self, name: str, cfg: ResetCfg) -> None: ...
-
-    @classmethod
-    def set_param(
-        cls,
-        reset_cfg: ResetCfg,
-        param_name: str,
-        param_value: Union[float, QickParam],
-    ) -> ResetCfg:
-        raise NotImplementedError(
-            f"{cls.__name__} does not support set {param_name} params with {param_value}"
-        )
-
-    def total_length(self) -> Union[float, QickParam]:
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support total_length"
-        )
-
-
-class Reset(Module):
-    SUPPORTED_TYPES: ClassVar[Dict[str, Type[AbsReset]]] = {}
-
-    @classmethod
-    def register_reset(
-        cls, reset_type: str
-    ) -> Callable[[Type[AbsReset]], Type[AbsReset]]:
-        if reset_type in cls.SUPPORTED_TYPES:
-            raise ValueError(
-                f"Reset type {reset_type} already registered by {cls.SUPPORTED_TYPES[reset_type].__name__}"
-            )
-
-        def decorator(cls: Type[AbsReset]) -> Type[AbsReset]:
-            Reset.SUPPORTED_TYPES[reset_type] = cls
-            return cls
-
-        return decorator
-
-    @classmethod
-    def get_reset_cls(cls, reset_cfg: ResetCfg) -> Type[AbsReset]:
-        if reset_cfg["type"] not in cls.SUPPORTED_TYPES:
-            raise ValueError(f"Unknown reset type: {reset_cfg['type']}")
-        return cls.SUPPORTED_TYPES[reset_cfg["type"]]
-
-    @classmethod
-    def set_param(
-        cls,
-        reset_cfg: ResetCfg,
-        param_name: str,
-        param_value: Union[float, QickParam],
-    ) -> ResetCfg:
-        return cls.get_reset_cls(reset_cfg).set_param(
-            reset_cfg, param_name, param_value
-        )
-
-    def __init__(self, name: str, cfg: ResetCfg) -> None:
+class Reset(Module, tag="reset"):
+    def __init__(self, name: str, cfg: Optional[ResetCfg]) -> None:
         self.name = name
-        self.cfg = deepcopy(cfg)
-        self.reset = self.get_reset_cls(cfg)(name, cfg)
+
+        if cfg is None:
+            cfg = {"type": "reset/none"}
+
+        self.reset = cast(Reset, Module.parse(cfg["type"])(name, cfg))
 
     def init(self, prog: MyProgramV2) -> None:
         self.reset.init(prog)
+
+    def total_length(self) -> Union[float, QickParam]:
+        return self.reset.total_length()
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         return self.reset.run(prog, t)
 
-    def total_length(self) -> Union[float, QickParam]:
-        return self.reset.total_length()
+    @staticmethod
+    def set_param(
+        reset_cfg: ResetCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
+    ) -> ResetCfg:
+        cls = cast(Type[Reset], Module.parse(reset_cfg["type"]))
+        return cls.set_param(reset_cfg, param_name, param_value)
+
+    @staticmethod
+    def auto_fill(reset_cfg: Union[str, Dict[str, Any]], ml: ModuleLibrary) -> ResetCfg:
+        if isinstance(reset_cfg, str):
+            reset_cfg = ml.get_module(reset_cfg)
+
+        cls = cast(Type[Reset], Module.parse(reset_cfg["type"]))
+        return cls.auto_fill(reset_cfg, ml)
 
 
-@Reset.register_reset("none")
-class NoneReset(AbsReset):
+class NoneResetCfg(ModuleCfg): ...
+
+
+class NoneReset(Reset, tag="none"):
     def __init__(self, name: str, cfg: NoneResetCfg) -> None:
         self.name = name
 
@@ -123,9 +67,27 @@ class NoneReset(AbsReset):
     ) -> Union[float, QickParam]:
         return t
 
+    @staticmethod
+    def set_param(
+        reset_cfg: NoneResetCfg, param_name: str, param_value: Union[float, QickParam]
+    ) -> NoneResetCfg:
+        raise ValueError("NoneReset does not support set_param")
 
-@Reset.register_reset("pulse")
-class PulseReset(AbsReset):
+    @staticmethod
+    def auto_fill(
+        reset_cfg: Union[str, Dict[str, Any]], ml: ModuleLibrary
+    ) -> NoneResetCfg:
+        if isinstance(reset_cfg, str):
+            reset_cfg = ml.get_module(reset_cfg)
+
+        return cast(NoneResetCfg, reset_cfg)
+
+
+class PulseResetCfg(ModuleCfg):
+    pulse_cfg: PulseCfg
+
+
+class PulseReset(Reset, tag="pulse"):
     def __init__(self, name: str, cfg: PulseResetCfg) -> None:
         self.name = name
         pulse_cfg = cfg["pulse_cfg"]
@@ -151,9 +113,24 @@ class PulseReset(AbsReset):
 
         return reset_cfg
 
+    @staticmethod
+    def auto_fill(
+        reset_cfg: Union[str, Dict[str, Any]], ml: ModuleLibrary
+    ) -> PulseResetCfg:
+        if isinstance(reset_cfg, str):
+            reset_cfg = ml.get_module(reset_cfg)
 
-@Reset.register_reset("two_pulse")
-class TwoPulseReset(AbsReset):
+        reset_cfg["pulse_cfg"] = Pulse.auto_fill(reset_cfg["pulse_cfg"], ml)
+
+        return cast(PulseResetCfg, reset_cfg)
+
+
+class TwoPulseResetCfg(ModuleCfg):
+    pulse1_cfg: PulseCfg
+    pulse2_cfg: PulseCfg
+
+
+class TwoPulseReset(Reset, tag="two_pulse"):
     def __init__(self, name: str, cfg: Dict[str, Any]) -> None:
         self.name = name
         pulse1_cfg = cfg["pulse1_cfg"]
@@ -206,9 +183,26 @@ class TwoPulseReset(AbsReset):
 
         return reset_cfg
 
+    @staticmethod
+    def auto_fill(
+        reset_cfg: Union[str, Dict[str, Any]], ml: ModuleLibrary
+    ) -> TwoPulseResetCfg:
+        if isinstance(reset_cfg, str):
+            reset_cfg = ml.get_module(reset_cfg)
 
-@Reset.register_reset("bath")
-class BathReset(AbsReset):
+        reset_cfg["pulse1_cfg"] = Pulse.auto_fill(reset_cfg["pulse1_cfg"], ml)
+        reset_cfg["pulse2_cfg"] = Pulse.auto_fill(reset_cfg["pulse2_cfg"], ml)
+
+        return cast(TwoPulseResetCfg, reset_cfg)
+
+
+class BathResetCfg(ModuleCfg):
+    qubit_tone_cfg: PulseCfg
+    cavity_tone_cfg: PulseCfg
+    pi2_cfg: PulseCfg
+
+
+class BathReset(Reset, tag="bath"):
     def __init__(self, name: str, cfg: Dict[str, Any]) -> None:
         self.name = name
         qubit_tone_cfg = cfg["qubit_tone_cfg"]
@@ -271,3 +265,19 @@ class BathReset(AbsReset):
             raise ValueError(f"Unknown parameter: {param_name}")
 
         return reset_cfg
+
+    @staticmethod
+    def auto_fill(
+        reset_cfg: Union[str, Dict[str, Any]], ml: ModuleLibrary
+    ) -> BathResetCfg:
+        if isinstance(reset_cfg, str):
+            reset_cfg = ml.get_module(reset_cfg)
+
+        reset_cfg["qubit_tone_cfg"] = Pulse.auto_fill(reset_cfg["qubit_tone_cfg"], ml)
+        reset_cfg["cavity_tone_cfg"] = Pulse.auto_fill(reset_cfg["cavity_tone_cfg"], ml)
+        reset_cfg["pi2_cfg"] = Pulse.auto_fill(reset_cfg["pi2_cfg"], ml)
+
+        return cast(BathResetCfg, reset_cfg)
+
+
+ResetCfg = Union[NoneResetCfg, PulseResetCfg, TwoPulseResetCfg, BathResetCfg]

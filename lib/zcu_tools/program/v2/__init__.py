@@ -3,6 +3,9 @@ from .base import MyProgramV2, ProgramV2Cfg
 from .modular import ModularProgramCfg, ModularProgramV2
 from .modules import (
     Delay,
+    DirectReadout,
+    DirectReadoutCfg,
+    Module,
     NonBlocking,
     Pulse,
     PulseCfg,
@@ -11,8 +14,6 @@ from .modules import (
     Repeat,
     Reset,
     ResetCfg,
-    TriggerCfg,
-    TriggerReadout,
     WaveformCfg,
     check_block_mode,
 )
