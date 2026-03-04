@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from turtle import mode
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +13,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
@@ -129,13 +128,13 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             ax1d = viewer.get_ax("1d")
 
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="resonator gain",
-                    sweep_values=pdrs.tolist(),
-                    update_cfg_fn=lambda _, ctx, pdr: Pulse.set_param(
+                task=Scan(
+                    name="resonator gain",
+                    values=pdrs.tolist(),
+                    before_each=lambda _, ctx, pdr: Pulse.set_param(
                         ctx.cfg["modules"]["stark_pulse1"], "gain", pdr
                     ),
-                    sub_task=HardTask(
+                    task=Task(
                         measure_fn=lambda ctx, update_hook: (
                             (modules := ctx.cfg["modules"])
                             and (
@@ -168,7 +167,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    pdrs, fpts, acstark_signal2real(np.asarray(ctx.data))
+                    pdrs, fpts, acstark_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)
@@ -359,7 +358,7 @@ class AcStarkRamseyExp(AbsExperiment):
             uniform=False,
         ) as viewer:
 
-            def measure_fn(ctx, update_hook):
+            def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
                 modules = ctx.cfg["modules"]
                 return ModularProgramV2(
                     soccfg,
@@ -391,20 +390,20 @@ class AcStarkRamseyExp(AbsExperiment):
                 ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="resonator gain",
-                    sweep_values=pdrs.tolist(),
-                    update_cfg_fn=lambda _, ctx, pdr: Pulse.set_param(
+                task=Scan(
+                    name="resonator gain",
+                    values=pdrs.tolist(),
+                    before_each=lambda _, ctx, pdr: Pulse.set_param(
                         ctx.cfg["modules"]["stark_pulse"], "gain", pdr
                     ),
-                    sub_task=HardTask(
+                    task=Task(
                         measure_fn=measure_fn,
                         result_shape=(len(lens),),
                     ),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    pdrs, lens, acstark_ramsey_signal2real(np.asarray(ctx.data))
+                    pdrs, lens, acstark_ramsey_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)

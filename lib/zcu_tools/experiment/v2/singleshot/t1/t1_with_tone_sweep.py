@@ -24,7 +24,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import (
     LivePlotter1D,
@@ -149,7 +149,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             def plot_fn(ctx) -> None:
                 i = ctx.env_dict["idx"]
 
-                populations = calc_populations(np.asarray(ctx.data))
+                populations = calc_populations(np.asarray(ctx.root_data))
 
                 viewer.get_plotter("gg_2d").update(
                     xs, ts, populations[:, 0, :, 0], refresh=False
@@ -200,11 +200,11 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 )
 
             populations = run_task(
-                task=SoftTask(
-                    sweep_name=sweep_name,
-                    sweep_values=xs.tolist(),
-                    update_cfg_fn=update_fn,
-                    sub_task=HardTask(
+                task=Scan(
+                    name=sweep_name,
+                    values=xs.tolist(),
+                    before_each=update_fn,
+                    task=Task(
                         measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: raw[0][0],
                         result_shape=(2, len(ts), 2),

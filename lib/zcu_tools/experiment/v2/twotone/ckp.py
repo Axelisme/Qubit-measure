@@ -2,18 +2,26 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypedDict,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -132,8 +140,8 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             ),
         ) as viewer:
 
-            def plot_fn(ctx):
-                amps = ckp_signal2real(ctx.data)
+            def plot_fn(ctx: TaskState):
+                amps = ckp_signal2real(ctx.root_data)
 
                 viewer.get_plotter("ground").update(
                     res_freqs, qub_freqs, amps[0], refresh=False
@@ -143,7 +151,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                 )
                 viewer.refresh()
 
-            def measure_fn(ctx, update_hook):
+            def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
                 modules = ctx.cfg["modules"]
                 return ModularProgramV2(
                     soccfg,
@@ -158,7 +166,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                 ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=measure_fn,
                     result_shape=(2, len(res_freqs), len(qub_freqs)),
                 ),

@@ -12,12 +12,7 @@ from typeguard import check_type
 from typing_extensions import NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    TaskCfg,
-    TaskContextView,
-    run_task,
-)
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -61,7 +56,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
 
         _cfg = check_type(deepcopy(cfg), CheckCfg)  # avoid in-place modification
 
-        def measure_fn(ctx: TaskContextView, _) -> NDArray[np.float64]:
+        def measure_fn(ctx: TaskState, _) -> NDArray[np.float64]:
             modules = ctx.cfg["modules"]
             prog = ModularProgramV2(
                 soccfg,
@@ -88,7 +83,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
             return np.array(i0 + 1j * q0)  # (reps, )
 
         signals = run_task(
-            task=HardTask(
+            task=Task(
                 measure_fn=measure_fn,
                 raw2signal_fn=raw2signal_fn,
                 result_shape=(_cfg["shots"],),

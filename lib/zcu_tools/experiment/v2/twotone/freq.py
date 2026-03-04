@@ -18,7 +18,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ..runner import HardTask, TaskCfg, run_task
+from ..runner import Task, TaskCfg, run_task
 
 FreqResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -45,7 +45,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
                         soccfg, ctx.cfg
                     ).acquire(soc, progress=False, callback=update_hook),
@@ -53,7 +53,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    fpts, qubfreq_signal2real(ctx.data)
+                    fpts, qubfreq_signal2real(ctx.root_data)
                 ),
             )
 

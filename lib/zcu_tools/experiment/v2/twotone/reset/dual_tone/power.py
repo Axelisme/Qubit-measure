@@ -13,7 +13,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -81,7 +81,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         with LivePlotter2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: (
                         (modules := ctx.cfg["modules"])
                         and (
@@ -101,7 +101,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    pdrs1, pdrs2, dual_reset_pdr_signal2real(ctx.data)
+                    pdrs1, pdrs2, dual_reset_pdr_signal2real(ctx.root_data)
                 ),
             )
 

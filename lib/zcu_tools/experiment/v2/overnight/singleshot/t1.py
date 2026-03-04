@@ -17,7 +17,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_comment
@@ -239,7 +239,7 @@ class T1Task(
 
         self.lengths = sweep2array(cfg["sweep"]["length"])
 
-        def measure_t1_fn(ctx: TaskContextView, update_hook: Callable):
+        def measure_t1_fn(ctx: TaskState, update_hook: Callable):
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
 
@@ -247,7 +247,7 @@ class T1Task(
             len_param = sweep2param("length", cfg["sweep"]["length"])
             Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
             return ModularProgramV2(
-                ctx.env_dict["soccfg"],
+                ctx.env["soccfg"],
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
@@ -256,7 +256,7 @@ class T1Task(
                     Readout("readout", modules["readout"]),
                 ],
             ).acquire(
-                ctx.env_dict["soc"],
+                ctx.env["soc"],
                 progress=False,
                 callback=update_hook,
                 g_center=g_center,
@@ -264,26 +264,28 @@ class T1Task(
                 population_radius=radius,
             )
 
-        self.task = HardTask[T_RootResult, List[NDArray[np.float64]], np.float64](
+        self.task = Task[T_RootResult, List[NDArray[np.float64]], np.float64](
             measure_fn=measure_t1_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(2, len(self.lengths), 2),
             dtype=np.float64,
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
-        self.lengths = round_zcu_time(self.lengths, ctx.env_dict["soccfg"])
+    def init(
+        self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar: bool = False
+    ) -> None:
+        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
 
-        self.task.init(ctx(addr="populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
+        self.task.init(ctx.child("populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx) -> None:
-        self.task.run(ctx(addr="populations", new_cfg=self.cfg))  # type: ignore
+    def run(self, ctx: TaskState[T1Result, T_RootResult]) -> None:
+        self.task.run(ctx.child("populations", new_cfg=self.cfg))  # type: ignore
 
         with MinIntervalFunc.force_execute():
-            ctx.set_data(
+            ctx.set_value(
                 T1Result(
                     lengths=self.lengths,
-                    populations=ctx.get_data()["populations"],
+                    populations=ctx.value["populations"],
                 )
             )
 
@@ -326,7 +328,7 @@ class T1WithToneTask(
 
         self.lengths = sweep2array(cfg["sweep"]["length"])
 
-        def measure_t1_fn(ctx: TaskContextView, update_hook: Callable):
+        def measure_t1_fn(ctx: TaskState, update_hook: Callable):
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
 
@@ -336,7 +338,7 @@ class T1WithToneTask(
             Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
             Pulse.set_param(modules["probe_pulse"], "length", len_param)
             return ModularProgramV2(
-                ctx.env_dict["soccfg"],
+                ctx.env["soccfg"],
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
@@ -345,7 +347,7 @@ class T1WithToneTask(
                     Readout("readout", modules["readout"]),
                 ],
             ).acquire(
-                ctx.env_dict["soc"],
+                ctx.env["soc"],
                 progress=False,
                 callback=update_hook,
                 g_center=g_center,
@@ -353,26 +355,28 @@ class T1WithToneTask(
                 population_radius=radius,
             )
 
-        self.task = HardTask[T_RootResult, List[NDArray[np.float64]], np.float64](
+        self.task = Task[T_RootResult, List[NDArray[np.float64]], np.float64](
             measure_fn=measure_t1_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(2, len(self.lengths), 2),
             dtype=np.float64,
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
-        self.lengths = round_zcu_time(self.lengths, ctx.env_dict["soccfg"])
+    def init(
+        self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar: bool = False
+    ) -> None:
+        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
 
-        self.task.init(ctx(addr="populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
+        self.task.init(ctx.child("populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx) -> None:
-        self.task.run(ctx(addr="populations", new_cfg=self.cfg))  # type: ignore
+    def run(self, ctx: TaskState[T1Result, T_RootResult]) -> None:
+        self.task.run(ctx.child("populations", new_cfg=self.cfg))  # type: ignore
 
         with MinIntervalFunc.force_execute():
-            ctx.set_data(
+            ctx.set_value(
                 T1Result(
                     lengths=self.lengths,
-                    populations=ctx.get_data()["populations"],
+                    populations=ctx.value["populations"],
                 )
             )
 

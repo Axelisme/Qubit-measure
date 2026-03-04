@@ -11,7 +11,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
@@ -85,14 +85,14 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 return avg_d, [tracker.covariance], [tracker.rough_median]
 
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     result_shape=(len(fpts),),
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(fpts, np.abs(ctx.data)),
+                on_update=lambda ctx: viewer.update(fpts, np.abs(ctx.root_data)),
             )
 
         # record the last cfg and result

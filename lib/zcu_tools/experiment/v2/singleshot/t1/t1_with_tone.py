@@ -13,7 +13,7 @@ from typing_extensions import Dict, List, NotRequired, Optional, Tuple, TypedDic
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program import SweepCfg
@@ -119,8 +119,8 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
             ),
         ) as viewer:
 
-            def plot_fn(ctx: TaskContextView) -> None:
-                populations = calc_populations(np.asarray(ctx.data))  # (N, 2, 3)
+            def plot_fn(ctx: TaskState) -> None:
+                populations = calc_populations(np.asarray(ctx.root_data))  # (N, 2, 3)
 
                 viewer.get_plotter("init_g").update(
                     ts, populations[:, 0].T, refresh=False
@@ -131,7 +131,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
                 viewer.refresh()
 
-            def measure_fn(ctx: TaskContextView, update_hook):
+            def measure_fn(ctx: TaskState, update_hook):
                 ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
 
                 def prog_maker(cfg, t1_param):
@@ -176,7 +176,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                     )
 
             populations = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(ts), 2, 2),

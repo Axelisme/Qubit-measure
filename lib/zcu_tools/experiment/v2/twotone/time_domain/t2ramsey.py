@@ -12,7 +12,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
@@ -67,7 +67,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Ramsey"}
         ) as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: (
                         (modules := ctx.cfg["modules"])
                         and ModularProgramV2(
@@ -92,7 +92,9 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                     result_shape=(len(ts),),
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(ts, t2ramsey_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(
+                    ts, t2ramsey_signal2real(ctx.root_data)
+                ),
             )
 
         # record last cfg and result

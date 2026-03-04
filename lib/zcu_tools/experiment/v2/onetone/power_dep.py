@@ -15,7 +15,7 @@ from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2para
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background, rescale
 
-from ..runner import HardTask, SoftTask, TaskCfg, run_task
+from ..runner import Scan, Task, TaskCfg, run_task
 from ..utils import wrap_earlystop_check
 
 PowerDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
@@ -52,13 +52,13 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             ax1d = viewer.get_ax("1d")
 
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="gain",
-                    sweep_values=pdrs.tolist(),
-                    update_cfg_fn=lambda _, ctx, pdr: Readout.set_param(
+                task=Scan(
+                    name="gain",
+                    values=pdrs.tolist(),
+                    before_each=lambda _, ctx, pdr: Readout.set_param(
                         ctx.cfg["modules"]["readout"], "gain", pdr
                     ),
-                    sub_task=HardTask(
+                    task=Task(
                         measure_fn=lambda ctx, update_hook: (
                             prog := OneToneProgram(soccfg, ctx.cfg)
                         ).acquire(
@@ -77,7 +77,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    pdrs, fpts, pdrdep_signal2real(np.asarray(ctx.data))
+                    pdrs, fpts, pdrdep_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)

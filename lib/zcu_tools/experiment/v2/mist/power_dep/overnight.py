@@ -11,9 +11,9 @@ from typing_extensions import NotRequired, TypedDict
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import (
-    HardTask,
     RepeatOverTime,
     ReTryIfFail,
+    Task,
     TaskCfg,
     run_task,
 )
@@ -86,7 +86,7 @@ class PowerDepOvernightExp(
                     interval=_cfg["interval"],
                     task=ReTryIfFail(
                         max_retries=fail_retry,
-                        task=HardTask(
+                        task=Task(
                             measure_fn=lambda ctx, update_hook: (
                                 (modules := ctx.cfg["modules"])
                                 and ModularProgramV2(
@@ -108,7 +108,7 @@ class PowerDepOvernightExp(
                 on_update=lambda ctx: viewer.update(
                     iters.astype(np.float64),
                     pdrs,
-                    mist_overnight_signal2real(np.asarray(ctx.data)),
+                    mist_overnight_signal2real(np.asarray(ctx.root_data)),
                 ),
             )
             signals = np.asarray(signals)

@@ -32,8 +32,8 @@ from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
     Result,
-    SoftTask,
-    TaskContextView,
+    Scan,
+    TaskState,
     run_task,
     run_with_retries,
 )
@@ -64,10 +64,7 @@ class MeasurementTask(
 
     @abstractmethod
     def update_plotter(
-        self,
-        plotters: T_PlotterDict,
-        ctx: TaskContextView,
-        signals: T_Result,
+        self, plotters: T_PlotterDict, ctx: TaskState, signals: T_Result
     ) -> None: ...
 
     @abstractmethod
@@ -198,7 +195,7 @@ class FluxDepExecutor:
     ) -> Tuple[
         Figure,
         MultiLivePlotter[Tuple[str, str]],
-        Callable[[TaskContextView], None],
+        Callable[[TaskState], None],
         Optional[FFMpegWriter],
     ]:
         fig, axs_map = self.make_ax_layout()
@@ -226,14 +223,14 @@ class FluxDepExecutor:
 
         plotter = MultiLivePlotter(fig, flatten_dict(plotters_map))
 
-        def plot_fn(ctx: TaskContextView) -> None:
-            if len(ctx._addr_stack) < 2:
+        def plot_fn(ctx: TaskState) -> None:
+            if len(ctx.path) < 2:
                 cur_tasks = list(self.measurements.keys())
             else:
-                assert isinstance(ctx._addr_stack[1], str)
-                cur_tasks = [ctx._addr_stack[1]]
+                assert isinstance(ctx.path[1], str)
+                cur_tasks = [ctx.path[1]]
 
-            results = merge_result_list(ctx.data)
+            results = merge_result_list(ctx.root_data)
 
             assert isinstance(results, dict)
             for cur_task in cur_tasks:
@@ -270,9 +267,9 @@ class FluxDepExecutor:
             info=FluxDepInfoDict(),
         )
 
-        def update_fn(i: int, ctx: TaskContextView, flx: float) -> None:
-            info: FluxDepInfoDict = ctx.env_dict["info"]
-            predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
+        def update_fn(i: int, ctx: TaskState, flx: float) -> None:
+            info: FluxDepInfoDict = ctx.env["info"]
+            predictor: FluxoniumPredictor = ctx.env["predictor"]
 
             info.clear()  # clear current info dict
 
@@ -295,11 +292,11 @@ class FluxDepExecutor:
             with plotter:
                 try:
                     results = run_task(
-                        task=SoftTask(
-                            sweep_name="flux",
-                            sweep_values=self.flx_values.tolist(),
-                            update_cfg_fn=update_fn,
-                            sub_task=FluxDepBatchTask(
+                        task=Scan(
+                            name="flux",
+                            values=self.flx_values.tolist(),
+                            before_each=update_fn,
+                            task=FluxDepBatchTask(
                                 self.measurements,
                                 retry_time=retry_time,
                             ),

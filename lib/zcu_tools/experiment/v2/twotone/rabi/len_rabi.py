@@ -11,7 +11,7 @@ from typeguard import check_type
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
@@ -52,14 +52,16 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         with LivePlotter1D("Length (us)", "Signal") as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
                         soccfg, ctx.cfg
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(lens),),
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(lens, rabi_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(
+                    lens, rabi_signal2real(ctx.root_data)
+                ),
             )
 
         # record last cfg and result
@@ -80,13 +82,13 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         with LivePlotter1D("Length (us)", "Signal") as viewer:
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="length",
-                    sweep_values=lens.tolist(),
-                    update_cfg_fn=lambda _, ctx, length: Pulse.set_param(
+                task=Scan(
+                    name="length",
+                    values=lens.tolist(),
+                    before_each=lambda _, ctx, length: Pulse.set_param(
                         ctx.cfg["modules"]["qub_pulse"], "length", length
                     ),
-                    sub_task=HardTask(
+                    task=Task(
                         measure_fn=lambda ctx, update_hook: TwoToneProgram(
                             soccfg, ctx.cfg
                         ).acquire(soc, progress=False, callback=update_hook),
@@ -94,7 +96,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    lens, rabi_signal2real(np.asarray(ctx.data))
+                    lens, rabi_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)

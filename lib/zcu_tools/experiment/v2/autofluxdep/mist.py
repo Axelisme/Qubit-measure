@@ -19,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.meta_manager import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment
@@ -93,14 +93,15 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
         self,
         gain_sweep: SweepCfg,
         cfg_maker: Callable[
-            [TaskContextView, ModuleLibrary], Optional[Mist_CfgTemplate]
+            [TaskState[Mist_Result, T_RootResult], ModuleLibrary],
+            Optional[Mist_CfgTemplate],
         ],
     ) -> None:
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
 
         def measure_fn(
-            ctx: TaskContextView, update_hook: Optional[Callable]
+            ctx: TaskState, update_hook: Optional[Callable]
         ) -> List[NDArray[float64]]:
             modules = ctx.cfg["modules"]
             Pulse.set_param(
@@ -109,7 +110,7 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
                 sweep2param("gain", ctx.cfg["sweep"]["gain"]),
             )
             return ModularProgramV2(
-                ctx.env_dict["soccfg"],
+                ctx.env["soccfg"],
                 ctx.cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
@@ -117,18 +118,20 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
                     Pulse(name="mist_pulse", cfg=modules["mist_pulse"]),
                     Readout("readout", cfg=modules["readout"]),
                 ],
-            ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook)
+            ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
-        self.task = HardTask[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
             measure_fn=measure_fn, result_shape=(self.gain_sweep["expts"],)
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
+    def init(
+        self, ctx: TaskState[Mist_Result, T_RootResult], dynamic_pbar=False
+    ) -> None:
         self.init_cfg = deepcopy(ctx.cfg)
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+        self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx) -> None:
-        cfg_temp = self.cfg_maker(ctx, ctx.env_dict["ml"])
+    def run(self, ctx: TaskState[Mist_Result, T_RootResult]) -> None:
+        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
 
         if cfg_temp is None:
             return  # skip this task
@@ -141,11 +144,11 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
 
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 
-        raw_signals = ctx.get_data()["raw_signals"]
+        raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         with MinIntervalFunc.force_execute():
-            ctx.set_data(
+            ctx.set_value(
                 Mist_Result(
                     raw_signals=raw_signals,
                     success=np.array(True),
@@ -175,8 +178,8 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
             ),
         )
 
-    def update_plotter(self, plotters, ctx, signals) -> None:
-        flx_values: np.ndarray = ctx.env_dict["flx_values"]
+    def update_plotter(self, plotters, ctx: TaskState, signals: Mist_Result) -> None:
+        flx_values: np.ndarray = ctx.env["flx_values"]
         gains: np.ndarray = sweep2array(self.gain_sweep)
 
         # shape: (flx, gains)

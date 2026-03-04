@@ -12,7 +12,7 @@ from typing_extensions import NotRequired, TypedDict
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 from zcu_tools.program import SweepCfg
@@ -85,13 +85,13 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             title="MIST over FLux",
         ) as viewer:
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="flux",
-                    sweep_values=values.tolist(),
-                    update_cfg_fn=lambda _, ctx, value: set_flux_in_dev_cfg(
+                task=Scan(
+                    name="flux",
+                    values=values.tolist(),
+                    before_each=lambda _, ctx, value: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], value
                     ),
-                    sub_task=HardTask(
+                    task=Task(
                         measure_fn=lambda ctx, update_hook: (
                             (modules := ctx.cfg["modules"])
                             and ModularProgramV2(
@@ -110,7 +110,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    values, gains, mist_signal2real(np.asarray(ctx.data))
+                    values, gains, mist_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)

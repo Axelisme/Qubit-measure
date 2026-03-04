@@ -10,7 +10,7 @@ from typeguard import check_type
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
@@ -48,13 +48,13 @@ class JPAFluxByOneToneExp(AbsExperiment[JPAFluxByOneToneResult, JPAFluxByOneTone
             num_lines=5,
         ) as viewer:
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="JPA Flux value",
-                    sweep_values=jpa_flxs.tolist(),
-                    update_cfg_fn=lambda i, ctx, flx: set_flux_in_dev_cfg(
+                task=Scan(
+                    name="JPA Flux value",
+                    values=jpa_flxs.tolist(),
+                    before_each=lambda i, ctx, flx: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], flx, label="jpa_flux_dev"
                     ),
-                    sub_task=HardTask(
+                    task=Task(
                         measure_fn=lambda ctx, update_hook: OneToneProgram(
                             soccfg, ctx.cfg
                         ).acquire(soc, progress=False, callback=update_hook),
@@ -63,7 +63,7 @@ class JPAFluxByOneToneExp(AbsExperiment[JPAFluxByOneToneResult, JPAFluxByOneTone
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    jpa_flxs, fpts, np.abs(np.asarray(ctx.data))
+                    jpa_flxs, fpts, np.abs(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)

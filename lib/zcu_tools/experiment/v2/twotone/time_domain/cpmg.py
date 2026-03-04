@@ -23,10 +23,10 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    SoftTask,
+    Scan,
+    Task,
     TaskCfg,
-    TaskContextView,
+    TaskState,
     run_task,
 )
 from zcu_tools.experiment.v2.utils import round_zcu_time
@@ -94,10 +94,10 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
 
-        def measure_fn(ctx: TaskContextView, update_hook: Callable[[int, Any], None]):
+        def measure_fn(ctx: TaskState, update_hook: Callable[[int, Any], None]):
             cfg = ctx.cfg
             modules = cfg["modules"]
-            interval = cpmg_spans / ctx.env_dict["time"]
+            interval = cpmg_spans / ctx.env["time"]
             return ModularProgramV2(
                 soccfg,
                 cfg,
@@ -107,7 +107,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     Delay("initial_cpmg_delay", delay=0.5 * interval),
                     Repeat(
                         name="cpmg_pi_loop",
-                        n=ctx.env_dict["time"] - 1,
+                        n=ctx.env["time"] - 1,
                         sub_module=[
                             Pulse("pi_pulse", modules["pi_pulse"]),
                             Delay("interval_cpmg_delay", delay=interval),
@@ -124,15 +124,15 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             "Number of Pi", "Time (us)", line_axis=1, num_lines=2, title="CPMG"
         ) as viewer:
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="times",
-                    sweep_values=times.tolist(),
-                    update_cfg_fn=lambda _, ctx, time: ctx.env_dict.update(time=time),
-                    sub_task=HardTask(measure_fn=measure_fn, result_shape=(len(ts),)),
+                task=Scan(
+                    name="times",
+                    values=times.tolist(),
+                    before_each=lambda _, ctx, time: ctx.env.update(time=time),
+                    task=Task(measure_fn=measure_fn, result_shape=(len(ts),)),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    times, ts, cpmg_signal2real(np.asarray(ctx.data))
+                    times, ts, cpmg_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)

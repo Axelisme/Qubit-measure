@@ -13,9 +13,9 @@ from typing_extensions import NotRequired, TypedDict
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import (
     BatchTask,
-    HardTask,
+    Task,
     TaskCfg,
-    TaskContextView,
+    TaskState,
     run_task,
 )
 from zcu_tools.liveplot import LivePlotter1D
@@ -171,8 +171,8 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
 
         with liveplotter as viewer:
 
-            def make_task(gate1: str, gate2: str) -> HardTask:
-                return HardTask(
+            def make_task(gate1: str, gate2: str) -> Task:
+                return Task(
                     measure_fn=lambda ctx, update_hook: (
                         (modules := ctx.cfg["modules"])
                         and (
@@ -200,7 +200,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
-                    allxy_signal2real(ctx.data),
+                    allxy_signal2real(ctx.root_data),
                 ),
             )
         signals_dict = dict(signals_dict)

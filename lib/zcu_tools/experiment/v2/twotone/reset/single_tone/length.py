@@ -12,7 +12,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -67,7 +67,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
 
         with LivePlotter1D("Length (us)", "Amplitude") as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: (
                         (modules := ctx.cfg["modules"])
                         and (
@@ -87,7 +87,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    lens, reset_length_signal2real(ctx.data)
+                    lens, reset_length_signal2real(ctx.root_data)
                 ),
             )
 

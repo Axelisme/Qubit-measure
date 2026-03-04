@@ -19,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.meta_manager import ModuleLibrary
@@ -118,7 +118,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         length_sweep: SweepCfg,
         ref_pi_product: float,
         cfg_maker: Callable[
-            [TaskContextView[LenRabiResult, T_RootResult], ModuleLibrary],
+            [TaskState[LenRabiResult, T_RootResult], ModuleLibrary],
             Optional[LenRabiCfgTemplate],
         ],
         earlystop_snr: Optional[float] = None,
@@ -128,7 +128,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_fn(ctx: TaskContextView, update_hook: Callable):
+        def measure_fn(ctx: TaskState, update_hook: Callable):
             modules = ctx.cfg["modules"]
             Pulse.set_param(
                 modules["rabi_pulse"],
@@ -136,7 +136,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
                 sweep2param("length", ctx.cfg["sweep"]["length"]),
             )
             prog = ModularProgramV2(
-                ctx.env_dict["soccfg"],
+                ctx.env["soccfg"],
                 ctx.cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
@@ -145,7 +145,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
                 ],
             )
             return prog.acquire(
-                ctx.env_dict["soc"],
+                ctx.env["soc"],
                 progress=False,
                 callback=wrap_earlystop_check(
                     prog,
@@ -155,7 +155,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
                 ),
             )
 
-        self.task = HardTask[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
             measure_fn=measure_fn, result_shape=(self.length_sweep["expts"],)
         )
 
@@ -163,8 +163,8 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         self.init_cfg = deepcopy(ctx.cfg)
         self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx) -> None:
-        cfg_temp = self.cfg_maker(ctx, ctx.env_dict["ml"])
+    def run(self, ctx: TaskState[LenRabiResult, T_RootResult]) -> None:
+        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
 
         if cfg_temp is None:
             return  # skip this task
@@ -178,15 +178,13 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         rabi_pulse = cfg["modules"]["rabi_pulse"]
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 
-        raw_signals = ctx.get_data()["raw_signals"]
+        raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         real_signals = lenrabi_signal2real(raw_signals)
 
         lengths = sweep2array(self.length_sweep)
-        lengths = round_zcu_time(
-            lengths, ctx.env_dict["soccfg"], gen_ch=rabi_pulse["ch"]
-        )
+        lengths = round_zcu_time(lengths, ctx.env["soccfg"], gen_ch=rabi_pulse["ch"])
 
         pi_len, pi2_len, rabi_freq, mean_err, fit_signals = auto_fit_lenrabi(
             lengths, real_signals
@@ -202,7 +200,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
             success = False
 
         if success:
-            info: FluxDepInfoDict = ctx.env_dict["info"]
+            info: FluxDepInfoDict = ctx.env["info"]
             info["pi_product"] = pi_len * rabi_pulse["gain"]
             new_gain_factor = (
                 info["m_ratio"] * info["pi_product"] / info.first["pi_product"]
@@ -221,7 +219,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
             info["pi2_pulse"]["waveform"]["length"] = pi2_len
 
         with MinIntervalFunc.force_execute():
-            ctx.set_data(
+            ctx.set_value(
                 LenRabiResult(
                     raw_signals=raw_signals,
                     pi_length=np.array(pi_len),
@@ -259,10 +257,10 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
             ),
         )
 
-    def update_plotter(self, plotters, ctx, signals) -> None:
-        flx_values = ctx.env_dict["flx_values"]
+    def update_plotter(self, plotters, ctx: TaskState, signals) -> None:
+        flx_values = ctx.env["flx_values"]
 
-        self.pi_line.set_xdata([ctx.env_dict["info"].get("pi_length", np.nan)])
+        self.pi_line.set_xdata([ctx.env["info"].get("pi_length", np.nan)])
         plotters["rabi_curve"].update(
             flx_values,
             sweep2array(self.length_sweep),

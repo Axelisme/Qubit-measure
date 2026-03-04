@@ -15,7 +15,7 @@ from typing_extensions import NotRequired, TypedDict
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
@@ -110,13 +110,13 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw,
                     result_shape=(len(ts),),
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.root_data)),
             )
 
         # record last cfg and result
@@ -134,7 +134,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: (
                         (modules := ctx.cfg["modules"])
                         and (
@@ -158,7 +158,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     result_shape=(len(ts),),
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.root_data)),
             )
 
         # record last cfg and result
@@ -285,7 +285,7 @@ class T1WithToneExp(AbsExperiment):
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: ModularProgramV2(
                         soccfg,
                         ctx.cfg,
@@ -299,7 +299,7 @@ class T1WithToneExp(AbsExperiment):
                     result_shape=(len(ts),),
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.root_data)),
             )
 
         # record last cfg and result
@@ -425,13 +425,13 @@ class T1WithToneSweepExp(AbsExperiment):
             "gain", "Time (us)", line_axis=1, num_lines=5
         ) as viewer:
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="gain",
-                    sweep_values=gains.tolist(),
-                    update_cfg_fn=lambda _, ctx, gain: Pulse.set_param(
+                task=Scan(
+                    name="gain",
+                    values=gains.tolist(),
+                    before_each=lambda _, ctx, gain: Pulse.set_param(
                         ctx.cfg["modules"]["test_pulse"], "gain", gain
                     ),
-                    sub_task=HardTask(
+                    task=Task(
                         measure_fn=lambda ctx, update_hook: ModularProgramV2(
                             soccfg,
                             ctx.cfg,
@@ -455,7 +455,7 @@ class T1WithToneSweepExp(AbsExperiment):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    gains, ts, t1_sweep_tone_signal2real(np.asarray(ctx.data))
+                    gains, ts, t1_sweep_tone_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)

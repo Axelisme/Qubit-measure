@@ -28,7 +28,7 @@ from zcu_tools.utils.fitting.resonance import (
     remove_edelay,
 )
 
-from ..runner import HardTask, TaskCfg, run_task
+from ..runner import Task, TaskCfg, run_task
 
 DispersiveResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -63,7 +63,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
                         soccfg, ctx.cfg
                     ).acquire(soc, progress=False, callback=update_hook),
@@ -71,7 +71,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    fpts, dispersive_signal2real(ctx.data)
+                    fpts, dispersive_signal2real(ctx.root_data)
                 ),
             )
 

@@ -3,34 +3,36 @@ from __future__ import annotations
 from tqdm.auto import tqdm
 from typing_extensions import Any, Callable, List, Optional, Sequence, TypeVar, Union
 
-from .base import AbsTask, Result, TaskContextView
+from .base import AbsTask
+from .state import Result, TaskState
 
 T_ValueType = TypeVar("T_ValueType", bound=Union[int, float, complex])
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
 
 
-class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult]):
+class Scan(AbsTask[Sequence[T_ChildResult], T_RootResult]):
     def __init__(
         self,
-        sweep_name: str,
-        sweep_values: Sequence[T_ValueType],
-        update_cfg_fn: Callable[
+        name: str,
+        values: Sequence[T_ValueType],
+        before_each: Callable[
             [
                 int,
-                TaskContextView[Sequence[T_ChildResult], T_RootResult],
+                TaskState[Sequence[T_ChildResult], T_RootResult],
                 T_ValueType,
             ],
             Any,
         ],
-        sub_task: AbsTask[T_ChildResult, T_RootResult],
+        task: AbsTask[T_ChildResult, T_RootResult],
     ) -> None:
-        self.sweep_values = sweep_values
-        self.sweep_name = sweep_name
-        self.update_cfg_fn = update_cfg_fn
-        self.sub_task = sub_task
+        self.sweep_values = values
+        self.sweep_name = name
+        self.update_cfg_fn = before_each
+        self.sub_task = task
 
         self.sweep_pbar: Optional[tqdm] = None
+        self.dynamic_pbar: bool = False
 
     def make_pbar(self, leave: bool) -> tqdm:
         return tqdm(
@@ -40,18 +42,23 @@ class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult]):
             leave=leave,
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
+    def init(
+        self,
+        state: TaskState[Sequence[T_ChildResult], T_RootResult],
+        dynamic_pbar: bool = False,
+    ) -> None:
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
             self.sweep_pbar = self.make_pbar(leave=True)
 
-        # TODO: should we pre-update the cfg in init?
-        self.update_cfg_fn(0, ctx, self.sweep_values[0])
+        # Pre-update cfg for the first value
+        if len(self.sweep_values) > 0:
+            self.update_cfg_fn(0, state, self.sweep_values[0])
 
-        self.sub_task.init(ctx(addr=0), dynamic_pbar=dynamic_pbar)
+        self.sub_task.init(state.child(0), dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx) -> None:
+    def run(self, state: TaskState[Sequence[T_ChildResult], T_RootResult]) -> None:
         if self.dynamic_pbar:
             self.sweep_pbar = self.make_pbar(leave=False)
         else:
@@ -59,9 +66,9 @@ class SoftTask(AbsTask[Sequence[T_ChildResult], T_RootResult]):
             self.sweep_pbar.reset()
 
         for i, v in enumerate(self.sweep_values):
-            self.update_cfg_fn(i, ctx, v)
+            self.update_cfg_fn(i, state, v)
 
-            self.sub_task.run(ctx(addr=i))
+            self.sub_task.run(state.child(i))
 
             self.sweep_pbar.update()
 

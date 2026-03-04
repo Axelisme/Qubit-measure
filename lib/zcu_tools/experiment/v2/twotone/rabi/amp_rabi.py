@@ -11,7 +11,7 @@ from typeguard import check_type
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
@@ -43,14 +43,16 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
 
         with LivePlotter1D("Pulse gain", "Amplitude") as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
                         soccfg, ctx.cfg
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(amps),),
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(amps, rabi_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(
+                    amps, rabi_signal2real(ctx.root_data)
+                ),
             )
 
         self.last_cfg = _cfg

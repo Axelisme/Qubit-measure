@@ -16,7 +16,8 @@ from typing_extensions import (
 
 from zcu_tools.device import GlobalDeviceManager
 
-from .base import AbsTask, Result, TaskContextView
+from .base import AbsTask
+from .state import Result, TaskState
 
 
 def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
@@ -28,7 +29,7 @@ T_DType = TypeVar("T_DType", bound=np.number, default=np.complex128)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
-class HardTask(
+class Task(
     AbsTask[NDArray[T_DType], T_RootResult],
     Generic[T_RootResult, T_Raw, T_DType],
 ):
@@ -36,7 +37,7 @@ class HardTask(
         self,
         measure_fn: Callable[
             [
-                TaskContextView[NDArray[T_DType], T_RootResult],
+                TaskState[NDArray[T_DType], T_RootResult],
                 Callable[[int, T_Raw], Any],
             ],
             T_Raw,
@@ -51,9 +52,12 @@ class HardTask(
         self.dtype = dtype
 
         self.avg_pbar: Optional[tqdm] = None
+        self.dynamic_pbar: bool = False
 
-    def make_pbar(self, ctx, leave: bool) -> tqdm:
-        total = ctx.cfg.get("rounds")
+    def make_pbar(
+        self, state: TaskState[NDArray[T_DType], T_RootResult], leave: bool
+    ) -> tqdm:
+        total = state.cfg.get("rounds")
         return tqdm(
             total=total,
             smoothing=0,
@@ -62,35 +66,39 @@ class HardTask(
             disable=total == 1,
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
+    def init(
+        self,
+        state: TaskState[NDArray[T_DType], T_RootResult],
+        dynamic_pbar: bool = False,
+    ) -> None:
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
-            self.avg_pbar = self.make_pbar(ctx, leave=True)
+            self.avg_pbar = self.make_pbar(state, leave=True)
 
-    def run(self, ctx) -> None:
-        assert "rounds" in ctx.cfg
+    def run(self, state: TaskState[NDArray[T_DType], T_RootResult]) -> None:
+        assert "rounds" in state.cfg
 
         if self.dynamic_pbar:
-            self.avg_pbar = self.make_pbar(ctx, leave=False)
+            self.avg_pbar = self.make_pbar(state, leave=False)
         else:
             assert self.avg_pbar is not None
             self.avg_pbar.reset()
 
-        if dev_cfg := ctx.cfg.get("dev"):
+        if dev_cfg := state.cfg.get("dev"):
             GlobalDeviceManager.setup_devices(dev_cfg, progress=False)
 
-        def update_hook(ir: int, raw) -> None:
+        def update_hook(ir: int, raw: T_Raw) -> None:
             assert self.avg_pbar is not None
             self.avg_pbar.update(ir - self.avg_pbar.n)
 
-            ctx.set_data(self.raw2signal_fn(raw))
+            state.set_value(self.raw2signal_fn(raw))
 
-        signal = self.raw2signal_fn(self.measure_fn(ctx, update_hook))
+        signal = self.raw2signal_fn(self.measure_fn(state, update_hook))
 
-        self.avg_pbar.update(ctx.cfg["rounds"] - self.avg_pbar.n)
+        self.avg_pbar.update(state.cfg["rounds"] - self.avg_pbar.n)  # type: ignore[arg-type]
 
-        ctx.set_data(signal)
+        state.set_value(signal)
 
         if self.dynamic_pbar:
             self.avg_pbar.close()

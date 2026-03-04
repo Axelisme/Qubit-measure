@@ -12,7 +12,7 @@ from typing_extensions import NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -68,7 +68,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
 
         with LivePlotter1D("Phase (deg)", "Signal (a.u.)") as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: (
                         (modules := ctx.cfg["modules"])
                         and ModularProgramV2(
@@ -86,7 +86,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    phases, bathreset_signal2real(ctx.data)
+                    phases, bathreset_signal2real(ctx.root_data)
                 ),
             )
 

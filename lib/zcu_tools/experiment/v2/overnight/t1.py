@@ -7,10 +7,10 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Callable, Dict, List, NotRequired, TypedDict
+from typing_extensions import Any, Callable, Dict, List, NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.utils import make_comment
@@ -161,11 +161,11 @@ class T1Task(
 
         self.lengths = sweep2array(len_sweep)
 
-        def measure_t1_fn(ctx: TaskContextView, update_hook: Callable):
+        def measure_t1_fn(ctx: TaskState, update_hook: Callable):
             modules = ctx.cfg["modules"]
             t1_span = sweep2param("length", ctx.cfg["sweep"]["length"])
             return ModularProgramV2(
-                ctx.env_dict["soccfg"],
+                ctx.env["soccfg"],
                 ctx.cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
@@ -173,26 +173,26 @@ class T1Task(
                     Delay("t1_delay", delay=t1_span),
                     Readout("readout", modules["readout"]),
                 ],
-            ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook)
+            ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
-        self.task = HardTask[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
             measure_fn=measure_t1_fn,
             result_shape=(len_sweep["expts"],),
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
-        self.lengths = round_zcu_time(self.lengths, ctx.env_dict["soccfg"])
+        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
 
         self.task.init(ctx(addr="signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx) -> None:
+    def run(self, ctx: TaskState[T1Result, T_RootResult]) -> None:
         self.task.run(ctx(addr="signals", new_cfg=self.cfg))  # type: ignore
 
         with MinIntervalFunc.force_execute():
-            ctx.set_data(
+            ctx.set_value(
                 T1Result(
                     lengths=self.lengths,
-                    signals=ctx.get_data()["signals"],
+                    signals=ctx.value["signals"],
                 )
             )
 
@@ -231,7 +231,7 @@ class T1WithToneTask(
 
         self.lengths = sweep2array(len_sweep)
 
-        def measure_t1_fn(ctx: TaskContextView, update_hook: Callable):
+        def measure_t1_fn(ctx: TaskState, update_hook: Callable):
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
 
@@ -241,7 +241,7 @@ class T1WithToneTask(
                 sweep2param("length", cfg["sweep"]["length"]),
             )
             return ModularProgramV2(
-                ctx.env_dict["soccfg"],
+                ctx.env["soccfg"],
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
@@ -249,25 +249,25 @@ class T1WithToneTask(
                     Pulse("probe_pulse", modules["probe_pulse"]),
                     Readout("readout", modules["readout"]),
                 ],
-            ).acquire(ctx.env_dict["soc"], progress=False, callback=update_hook)
+            ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
-        self.task = HardTask[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
             measure_fn=measure_t1_fn,
             result_shape=(len_sweep["expts"],),
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
-        self.lengths = round_zcu_time(self.lengths, ctx.env_dict["soccfg"])
+    def init(self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar=False) -> None:
+        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
 
-        self.task.init(ctx(addr="signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+        self.task.init(ctx.child("signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx) -> None:
-        self.task.run(ctx(addr="signals", new_cfg=self.cfg))  # type: ignore
+    def run(self, ctx: TaskState[T1Result, T_RootResult]) -> None:
+        self.task.run(ctx.child("signals", new_cfg=self.cfg))  # type: ignore
 
-        ctx.set_data(
+        ctx.set_value(
             T1Result(
                 lengths=self.lengths,
-                signals=ctx.get_data()["signals"],
+                signals=ctx.value["signals"],
             )
         )
 

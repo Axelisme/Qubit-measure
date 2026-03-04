@@ -11,7 +11,7 @@ from typing_extensions import List, NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -93,7 +93,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         ) as viewer:
 
             def plot_fn(ctx) -> None:
-                populations = calc_populations(np.asarray(ctx.data))
+                populations = calc_populations(np.asarray(ctx.root_data))
 
                 viewer.get_plotter("plot_2d_g").update(
                     gains, freqs, populations[..., 0], refresh=False
@@ -128,13 +128,13 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
                 )
 
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="gain",
-                    sweep_values=gains.tolist(),
-                    update_cfg_fn=lambda i, ctx, gain: Pulse.set_param(
+                task=Scan(
+                    name="gain",
+                    values=gains.tolist(),
+                    before_each=lambda i, ctx, gain: Pulse.set_param(
                         ctx.cfg["modules"]["probe_pulse"], "gain", gain
                     ),
-                    sub_task=HardTask(
+                    task=Task(
                         measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: raw[0][0],
                         result_shape=(len(freqs), 2),

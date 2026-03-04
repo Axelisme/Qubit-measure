@@ -16,7 +16,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
 from zcu_tools.liveplot import (
     LivePlotter1D,
     LivePlotter2D,
@@ -156,7 +156,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             def plot_fn(ctx) -> None:
                 i = ctx.env_dict["idx"]
 
-                populations = calc_populations(np.asarray(ctx.data))
+                populations = calc_populations(np.asarray(ctx.root_data))
 
                 viewer.get_plotter("g_2d").update(
                     gains, freqs, populations[..., 0], refresh=False
@@ -195,11 +195,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                 )
 
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="resonator gain",
-                    sweep_values=gains.tolist(),
-                    update_cfg_fn=update_fn,
-                    sub_task=HardTask(
+                task=Scan(
+                    name="resonator gain",
+                    values=gains.tolist(),
+                    before_each=update_fn,
+                    task=Task(
                         measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: raw[0][0],
                         result_shape=(len(freqs), 2),

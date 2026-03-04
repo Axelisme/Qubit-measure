@@ -10,7 +10,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -100,14 +100,16 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
                 )
 
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(fpts), 2),
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(fpts, calc_populations(ctx.data).T),
+                on_update=lambda ctx: viewer.update(
+                    fpts, calc_populations(ctx.root_data).T
+                ),
             )
 
         # record the last result

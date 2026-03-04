@@ -7,7 +7,8 @@ from typing_extensions import List, Optional, Sequence, Tuple, TypeVar
 
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from .base import AbsTask, Result
+from .base import AbsTask
+from .state import Result, TaskState
 
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
@@ -16,14 +17,14 @@ T_Result = TypeVar("T_Result", bound=Result)
 
 def run_with_retries(
     task: AbsTask,
-    ctx,
+    state,
     retry_time: int,
     dynamic_pbar: bool = False,
     raise_error: bool = True,
 ) -> None:
     for attempt in range(retry_time + 1):
         try:
-            task.run(ctx)
+            task.run(state)
         except Exception as e:
             if attempt == retry_time:
                 if raise_error:
@@ -32,7 +33,7 @@ def run_with_retries(
             else:
                 print(f"Failed to run task, retrying... ({attempt + 1}/{retry_time})")
                 task.cleanup()  # cleanup and re-init
-                task.init(ctx, dynamic_pbar=dynamic_pbar)
+                task.init(state, dynamic_pbar=dynamic_pbar)
                 continue
         break
 
@@ -41,14 +42,18 @@ class ReTryIfFail(AbsTask[T_Result, T_RootResult]):
     def __init__(self, task: AbsTask[T_Result, T_RootResult], max_retries: int) -> None:
         self.task = task
         self.max_retries = max_retries
+        self.dynamic_pbar: bool = False
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
+    def init(self, state, dynamic_pbar: bool = False) -> None:
         self.dynamic_pbar = dynamic_pbar
-        self.task.init(ctx, dynamic_pbar=dynamic_pbar)
+        self.task.init(state, dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx) -> None:
+    def run(self, state) -> None:
         run_with_retries(
-            self.task, ctx, retry_time=self.max_retries, dynamic_pbar=self.dynamic_pbar
+            self.task,
+            state,
+            retry_time=self.max_retries,
+            dynamic_pbar=self.dynamic_pbar,
         )
 
     def cleanup(self) -> None:
@@ -73,6 +78,7 @@ class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult]):
 
         self.iter_pbar: Optional[tqdm] = None
         self.time_pbar: Optional[tqdm] = None
+        self.dynamic_pbar: bool = False
 
     def make_pbar(self, leave: bool) -> Tuple[tqdm, tqdm]:
         return (
@@ -87,17 +93,21 @@ class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult]):
             ),
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
+    def init(
+        self,
+        state: TaskState[Sequence[T_ChildResult], T_RootResult],
+        dynamic_pbar: bool = False,
+    ) -> None:
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
             self.iter_pbar, self.time_pbar = self.make_pbar(leave=True)
 
-        ctx.env_dict["repeat_idx"] = 0
+        state.env["repeat_idx"] = 0
 
-        self.task.init(ctx(addr=0), dynamic_pbar=dynamic_pbar)
+        self.task.init(state.child(0), dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx) -> None:
+    def run(self, state: TaskState[Sequence[T_ChildResult], T_RootResult]) -> None:
         if self.dynamic_pbar:
             self.iter_pbar, self.time_pbar = self.make_pbar(leave=False)
         else:
@@ -111,23 +121,23 @@ class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult]):
         for i in range(self.num_times):
             while time.time() - start_t < self.interval:
                 pass_time = round(time.time() - start_t, 1)
-                self.time_pbar.update(pass_time - self.time_pbar.n)
+                self.time_pbar.update(pass_time - self.time_pbar.n)  # type: ignore[arg-type]
 
                 time.sleep(0.1)
             self.time_pbar.reset()
 
             start_t = time.time()
 
-            ctx.env_dict["repeat_idx"] = i
+            state.env["repeat_idx"] = i
 
-            self.task.run(ctx(addr=i))
+            self.task.run(state.child(i))
 
             self.iter_pbar.update()
 
             # If have time left, force trigger hooks
             if time.time() - start_t < self.interval:
                 with MinIntervalFunc.force_execute():
-                    ctx.trigger_hook()
+                    state.root._trigger_update()
 
         if self.dynamic_pbar:
             self.iter_pbar.close()

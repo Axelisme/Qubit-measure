@@ -11,7 +11,7 @@ from typeguard import check_type
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
@@ -78,14 +78,16 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 )
 
             populations = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(lens), 2),
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(lens, calc_populations(ctx.data).T),
+                on_update=lambda ctx: viewer.update(
+                    lens, calc_populations(ctx.root_data).T
+                ),
             )
 
         # record last cfg and result

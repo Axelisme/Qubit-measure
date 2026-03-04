@@ -3,7 +3,8 @@ from __future__ import annotations
 from tqdm.auto import tqdm
 from typing_extensions import Hashable, Mapping, Optional, TypeVar
 
-from .base import AbsTask, Result
+from .base import AbsTask
+from .state import Result
 
 T_Key = TypeVar("T_Key", bound=Hashable)
 
@@ -19,11 +20,12 @@ class BatchTask(AbsTask[Mapping[T_Key, T_ChildResult], T_RootResult]):
         self.tasks = tasks
 
         self.task_pbar: Optional[tqdm] = None
+        self.dynamic_pbar: bool = False
 
     def make_pbar(self, leave: bool) -> tqdm:
         return tqdm(total=len(self.tasks), smoothing=0, leave=leave)
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
+    def init(self, state, dynamic_pbar: bool = False) -> None:
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
@@ -31,9 +33,9 @@ class BatchTask(AbsTask[Mapping[T_Key, T_ChildResult], T_RootResult]):
 
         # force dynamic pbar for each task
         for name, task in self.tasks.items():
-            task.init(ctx(addr=name), dynamic_pbar=True)
+            task.init(state.child(name), dynamic_pbar=True)
 
-    def run(self, ctx) -> None:
+    def run(self, state) -> None:
         if self.dynamic_pbar:
             self.task_pbar = self.make_pbar(leave=False)
         else:
@@ -43,7 +45,7 @@ class BatchTask(AbsTask[Mapping[T_Key, T_ChildResult], T_RootResult]):
         for name, task in self.tasks.items():
             self.task_pbar.set_description(desc=f"Task [{str(name)}]")
 
-            task.run(ctx(addr=name))
+            task.run(state.child(name))
 
             self.task_pbar.update()
 

@@ -16,7 +16,7 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from ..runner import HardTask, SoftTask, TaskCfg, run_task
+from ..runner import Scan, Task, TaskCfg, run_task
 
 FluxDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
@@ -50,13 +50,13 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="flux",
-                    sweep_values=dev_values.tolist(),
-                    update_cfg_fn=lambda i, ctx, flx: set_flux_in_dev_cfg(
+                task=Scan(
+                    name="flux",
+                    values=dev_values.tolist(),
+                    before_each=lambda i, ctx, flx: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], flx
                     ),
-                    sub_task=HardTask(
+                    task=Task(
                         measure_fn=lambda ctx, update_hook: OneToneProgram(
                             soccfg, ctx.cfg
                         ).acquire(soc, progress=False, callback=update_hook),
@@ -67,7 +67,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                 on_update=lambda ctx: viewer.update(
                     dev_values,
                     fpts,
-                    fluxdep_signal2real(np.asarray(ctx.data)),
+                    fluxdep_signal2real(np.asarray(ctx.root_data)),
                 ),
             )
             signals = np.asarray(signals)

@@ -10,7 +10,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -63,7 +63,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
         with LivePlotter1D("Pulse gain", "MIST") as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: (
                         (modules := ctx.cfg["modules"])
                         and (
@@ -82,7 +82,9 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                     result_shape=(len(pdrs),),
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(pdrs, mist_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(
+                    pdrs, mist_signal2real(ctx.root_data)
+                ),
             )
 
         # record the last result

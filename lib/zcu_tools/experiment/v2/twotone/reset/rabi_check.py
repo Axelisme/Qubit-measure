@@ -12,7 +12,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -95,13 +95,13 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
             "Pulse gain", "Amplitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=measure_fn,
                     result_shape=(2, len(pdrs)),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    pdrs, reset_rabi_signal2real(ctx.data)
+                    pdrs, reset_rabi_signal2real(ctx.root_data)
                 ),
             )
 

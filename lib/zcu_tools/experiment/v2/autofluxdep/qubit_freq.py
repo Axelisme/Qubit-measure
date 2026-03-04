@@ -17,7 +17,7 @@ from typing_extensions import (
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.meta_manager import ModuleLibrary
@@ -83,7 +83,8 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         self,
         detune_sweep: SweepCfg,
         cfg_maker: Callable[
-            [TaskContextView, ModuleLibrary], Optional[QubitFreqCfgTemplate]
+            [TaskState[QubitFreqResult, T_RootResult], ModuleLibrary],
+            Optional[QubitFreqCfgTemplate],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -91,11 +92,11 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        self.task = HardTask[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
             measure_fn=lambda ctx, update_hook: (
-                prog := TwoToneProgram(ctx.env_dict["soccfg"], ctx.cfg)
+                prog := TwoToneProgram(ctx.env["soccfg"], ctx.cfg)
             ).acquire(
-                ctx.env_dict["soc"],
+                ctx.env["soc"],
                 progress=False,
                 callback=wrap_earlystop_check(
                     prog,
@@ -107,13 +108,15 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
             result_shape=(self.detune_sweep["expts"],),
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
+    def init(
+        self, ctx: TaskState[QubitFreqResult, T_RootResult], dynamic_pbar=False
+    ) -> None:
         self.init_cfg = deepcopy(ctx.cfg)
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+        self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx) -> None:
-        predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
-        info: FluxDepInfoDict = ctx.env_dict["info"]
+    def run(self, ctx: TaskState[QubitFreqResult, T_RootResult]) -> None:
+        predictor: FluxoniumPredictor = ctx.env["predictor"]
+        info: FluxDepInfoDict = ctx.env["info"]
 
         detunes = sweep2array(self.detune_sweep)
 
@@ -121,7 +124,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         predict_freq = predictor.predict_freq(flx)
         info["predict_freq"] = predict_freq
 
-        cfg_temp = self.cfg_maker(ctx, ctx.env_dict["ml"])
+        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
 
         if cfg_temp is None:
             return  # skip this task
@@ -138,9 +141,9 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         )
         cfg = check_type(cfg_temp, QubitFreqCfg)
 
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
+        self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
 
-        raw_signals = ctx.get_data()["raw_signals"]
+        raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         real_signals = qubitfreq_signal2real(raw_signals)
@@ -175,7 +178,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
             )
 
         with MinIntervalFunc.force_execute():
-            ctx.set_data(
+            ctx.set_value(
                 QubitFreqResult(
                     raw_signals=raw_signals,
                     predict_freq=np.array(center_freq),
@@ -225,10 +228,12 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
             ),
         )
 
-    def update_plotter(self, plotters, ctx, signals) -> None:
-        flx_values = ctx.env_dict["flx_values"]
+    def update_plotter(
+        self, plotters, ctx: TaskState, signals: QubitFreqResult
+    ) -> None:
+        flx_values = ctx.env["flx_values"]
 
-        self.freq_line.set_xdata([ctx.env_dict["info"].get("fit_detune", np.nan)])
+        self.freq_line.set_xdata([ctx.env["info"].get("fit_detune", np.nan)])
         plotters["fit_freq"].update(flx_values, signals["fit_freq"], refresh=False)
         plotters["detune"].update(
             flx_values,

@@ -15,7 +15,7 @@ from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
-from ..runner import HardTask, TaskCfg, run_task
+from ..runner import Task, TaskCfg, run_task
 
 PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
@@ -48,7 +48,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         with LivePlotter2D("Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
                         soccfg, ctx.cfg
                     ).acquire(soc, progress=False, callback=update_hook),
@@ -56,7 +56,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    pdrs, fpts, pdr_signal2real(ctx.data)
+                    pdrs, fpts, pdr_signal2real(ctx.root_data)
                 ),
             )
 

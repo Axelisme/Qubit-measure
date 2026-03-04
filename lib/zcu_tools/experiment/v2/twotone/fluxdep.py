@@ -12,9 +12,9 @@ from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
 from zcu_tools.experiment.v2.runner import (
-    HardTask,
     ReTryIfFail,
-    SoftTask,
+    Scan,
+    Task,
     TaskCfg,
     run_task,
 )
@@ -63,15 +63,15 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2
         ) as viewer:
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="flux",
-                    sweep_values=dev_values.tolist(),
-                    update_cfg_fn=lambda _, ctx, flx: set_flux_in_dev_cfg(
+                task=Scan(
+                    name="flux",
+                    values=dev_values.tolist(),
+                    before_each=lambda _, ctx, flx: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], flx
                     ),
-                    sub_task=ReTryIfFail(
+                    task=ReTryIfFail(
                         max_retries=fail_retry,
-                        task=HardTask(
+                        task=Task(
                             measure_fn=lambda ctx, update_hook: TwoToneProgram(
                                 soccfg, ctx.cfg
                             ).acquire(soc, progress=False, callback=update_hook),
@@ -81,7 +81,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    dev_values, fpts, freqflux_signal2real(np.asarray(ctx.data))
+                    dev_values, fpts, freqflux_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)

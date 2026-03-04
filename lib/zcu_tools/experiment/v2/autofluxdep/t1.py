@@ -14,12 +14,11 @@ from typing_extensions import (
     Optional,
     Tuple,
     TypedDict,
-    cast,
 )
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.meta_manager import ModuleLibrary
@@ -98,18 +97,21 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
     def __init__(
         self,
         num_expts: int,
-        cfg_maker: Callable[[TaskContextView, ModuleLibrary], Optional[T1CfgTemplate]],
+        cfg_maker: Callable[
+            [TaskState[T1Result, T_RootResult], ModuleLibrary],
+            Optional[T1CfgTemplate],
+        ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.num_expts = num_expts
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_t1_fn(ctx: TaskContextView, update_hook: Callable):
+        def measure_t1_fn(ctx: TaskState, update_hook: Callable):
             modules = ctx.cfg["modules"]
             t1_span = sweep2param("length", ctx.cfg["sweep"]["length"])
             prog = ModularProgramV2(
-                ctx.env_dict["soccfg"],
+                ctx.env["soccfg"],
                 ctx.cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
@@ -119,7 +121,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
                 ],
             )
             return prog.acquire(
-                ctx.env_dict["soc"],
+                ctx.env["soc"],
                 progress=False,
                 callback=wrap_earlystop_check(
                     prog,
@@ -130,35 +132,35 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
             )
 
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = HardTask[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
             measure_fn=measure_t1_fn,
             result_shape=(num_expts,),
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
+    def init(self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar=False) -> None:
         self.init_cfg = deepcopy(ctx.cfg)
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+        self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx) -> None:
-        info: FluxDepInfoDict = ctx.env_dict["info"]
+    def run(self, ctx: TaskState[T1Result, T_RootResult]) -> None:
+        info: FluxDepInfoDict = ctx.env["info"]
 
-        cfg_temp = self.cfg_maker(ctx, ctx.env_dict["ml"])
+        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
 
         if cfg_temp is None:
             return  # skip this task
 
         len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
         self.lengths = sweep2array(len_sweep)
-        self.lengths = round_zcu_time(self.lengths, ctx.env_dict["soccfg"])
+        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
 
         cfg_temp = dict(cfg_temp)
         del cfg_temp["sweep_range"]
         deepupdate(cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}})
         cfg = check_type(cfg_temp, T1Cfg)
 
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
+        self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
 
-        raw_signals = ctx.get_data()["raw_signals"]
+        raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
 
         real_signals = t1_signal2real(raw_signals)
@@ -176,7 +178,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
             info["smooth_t1"] = 0.5 * (info.last.get("smooth_t1", t1) + t1)
 
         with MinIntervalFunc.force_execute():
-            ctx.set_data(
+            ctx.set_value(
                 T1Result(
                     raw_signals=raw_signals,
                     length=self.lengths.copy(),
@@ -219,9 +221,9 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
             ),
         )
 
-    def update_plotter(self, plotters, ctx, signals) -> None:
-        flx_values = ctx.env_dict["flx_values"]
-        info: FluxDepInfoDict = ctx.env_dict["info"]
+    def update_plotter(self, plotters, ctx: TaskState, signals: T1Result) -> None:
+        flx_values = ctx.env["flx_values"]
+        info: FluxDepInfoDict = ctx.env["info"]
 
         real_signals = t1_fluxdep_signal2real(signals["raw_signals"])
 

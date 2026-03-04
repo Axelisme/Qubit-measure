@@ -10,7 +10,16 @@ from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Dict, NotRequired, Optional, Tuple, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypedDict,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
@@ -20,10 +29,10 @@ from zcu_tools.experiment.utils import (
     set_power_in_dev_cfg,
 )
 from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    SoftTask,
+    Scan,
+    Task,
     TaskCfg,
-    TaskContextView,
+    TaskState,
     run_task,
 )
 from zcu_tools.experiment.v2.tracker import PCATracker
@@ -81,12 +90,12 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
 
-        def update_fn(i, ctx: TaskContextView, _) -> None:
-            ctx.env_dict["index"] = i
+        def update_fn(i, ctx: TaskState, _) -> None:
+            ctx.env["index"] = i
 
             last_snr = None
             if i > 0:
-                last_snr = np.abs(ctx.data[i - 1])
+                last_snr = np.abs(ctx.root_data[i - 1])
             cur_params = optimizer.next_params(i, last_snr)
 
             if cur_params is None:
@@ -132,9 +141,9 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             ),
         ) as viewer:
 
-            def plot_fn(ctx: TaskContextView) -> None:
-                idx: int = ctx.env_dict["index"]
-                snrs = np.abs(ctx.data)  # (num_points, )
+            def plot_fn(ctx: TaskState) -> None:
+                idx: int = ctx.env["index"]
+                snrs = np.abs(ctx.root_data)  # (num_points, )
 
                 cur_flx, cur_fpt, cur_pdr = params[idx, :]
 
@@ -158,7 +167,13 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 )
                 viewer.refresh()
 
-            def measure_fn(ctx, update_hook):
+            def measure_fn(
+                ctx: TaskState, update_hook: Callable
+            ) -> Tuple[
+                List[NDArray[np.float64]],
+                List[NDArray[np.float64]],
+                List[NDArray[np.float64]],
+            ]:
                 modules = ctx.cfg["modules"]
                 prog = ModularProgramV2(
                     soccfg,
@@ -181,11 +196,11 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 return avg_d, [tracker.covariance], [tracker.rough_median]
 
             results = run_task(
-                task=SoftTask(
-                    sweep_name="Iteration",
-                    sweep_values=list(range(num_points)),
-                    update_cfg_fn=update_fn,
-                    sub_task=HardTask(
+                task=Scan(
+                    name="Iteration",
+                    values=list(range(num_points)),
+                    before_each=update_fn,
+                    task=Task(
                         measure_fn=measure_fn,
                         raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                         dtype=np.float64,

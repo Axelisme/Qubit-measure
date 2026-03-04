@@ -17,7 +17,7 @@ from zcu_tools.program.v2 import ModularProgramCfg, OneToneProgram
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from .runner import HardTask, TaskCfg, run_task
+from .runner import Task, TaskCfg, run_task
 
 LookbackResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -59,13 +59,15 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
                 )
 
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0].dot([1, 1j]),
                     result_shape=(len(Ts),),
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(Ts, lookback_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(
+                    Ts, lookback_signal2real(ctx.root_data)
+                ),
             )
 
         # record last cfg and result

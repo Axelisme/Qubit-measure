@@ -35,7 +35,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..runner import HardTask, SoftTask, TaskCfg, TaskContextView, run_task
+from ..runner import Scan, Task, TaskCfg, TaskState, run_task
 
 # (times, signals)
 ZigZagResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
@@ -84,9 +84,9 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
             "Times", "Signal", segment_kwargs=dict(show_grid=True)
         ) as viewer:
 
-            def measure_fn(ctx: TaskContextView, update_hook):
+            def measure_fn(ctx: TaskState, update_hook):
                 modules = ctx.cfg["modules"]
-                zigzag_time = ctx.env_dict["zigzag_time"]
+                zigzag_time = ctx.env["zigzag_time"]
                 if repeat_on == "X90_pulse":
                     repeat_time = 2 * zigzag_time
                 else:
@@ -111,17 +111,15 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
                 ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="times",
-                    sweep_values=times.tolist(),
-                    update_cfg_fn=lambda _, ctx, time: ctx.env_dict.update(
-                        zigzag_time=time
-                    ),
-                    sub_task=HardTask(measure_fn=measure_fn),
+                task=Scan(
+                    name="times",
+                    values=times.tolist(),
+                    before_each=lambda _, ctx, time: ctx.env.update(zigzag_time=time),
+                    task=Task(measure_fn=measure_fn),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    times, zigzag_signal2real(np.asarray(ctx.data))
+                    times, zigzag_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)

@@ -28,7 +28,7 @@ from zcu_tools.experiment.v2.runner import (
     BatchTask,
     RepeatOverTime,
     Result,
-    TaskContextView,
+    TaskState,
     run_task,
     run_with_retries,
 )
@@ -55,7 +55,7 @@ class MeasurementTask(
     def update_plotter(
         self,
         plotters: T_PlotterDictType,
-        ctx: TaskContextView,
+        ctx: TaskState,
         signals: T_Result,
     ) -> None: ...
 
@@ -84,7 +84,7 @@ class OvernightBatchTask(BatchTask):
 
         super().__init__(tasks)
 
-    def run(self, ctx: TaskContextView) -> None:
+    def run(self, ctx: TaskState[T_Result, T_RootResult]) -> None:
         if self.dynamic_pbar:
             self.task_pbar = self.make_pbar(leave=False)
         else:
@@ -96,7 +96,7 @@ class OvernightBatchTask(BatchTask):
 
             run_with_retries(
                 task,
-                ctx(addr=name),
+                ctx.child(name),
                 self.retry_time,
                 dynamic_pbar=True,
                 # raise_error=False,
@@ -161,9 +161,7 @@ class OvernightExecutor(AbsExperiment):
 
     def make_plotter(
         self,
-    ) -> Tuple[
-        Figure, MultiLivePlotter[Tuple[str, str]], Callable[[TaskContextView], None]
-    ]:
+    ) -> Tuple[Figure, MultiLivePlotter[Tuple[str, str]], Callable[[TaskState], None]]:
         fig, axs_map = self.make_ax_layout()
 
         plotters_map = {
@@ -178,14 +176,14 @@ class OvernightExecutor(AbsExperiment):
 
         plotter = MultiLivePlotter(fig, flatten_dict(plotters_map))
 
-        def plot_fn(ctx: TaskContextView) -> None:
-            if len(ctx._addr_stack) < 2:
+        def plot_fn(ctx: TaskState) -> None:
+            if len(ctx.path) < 2:
                 cur_tasks = list(self.measurements.keys())
             else:
-                assert isinstance(ctx._addr_stack[1], str)
-                cur_tasks = [ctx._addr_stack[1]]
+                assert isinstance(ctx.path[1], str)
+                cur_tasks = [ctx.path[1]]
 
-            results = merge_result_list(ctx.data)
+            results = merge_result_list(ctx.root_data)
 
             assert isinstance(results, dict)
             for cur_task in cur_tasks:

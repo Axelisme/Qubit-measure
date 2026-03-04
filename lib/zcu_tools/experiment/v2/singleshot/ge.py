@@ -14,10 +14,10 @@ from typing_extensions import Literal, NotRequired, Optional, Tuple, TypedDict, 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
 from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    SoftTask,
+    Scan,
+    Task,
     TaskCfg,
-    TaskContextView,
+    TaskState,
     run_task,
 )
 from zcu_tools.program.v2 import (
@@ -157,7 +157,7 @@ def optimize_ge_radius(
         return np.linalg.cond(confusion_matrix)
 
     result = minimize_scalar(loss_fn, bounds=(0.0, ge_dist / 2))
-    return float(result.x)
+    return float(result.x)  # type: ignore
 
 
 # ------------------------------------------------------------
@@ -195,10 +195,10 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
             warnings.warn("reps will be overwritten by singleshot measurement shots")
         _cfg["reps"] = _cfg["shots"]
 
-        def measure_fn(ctx: TaskContextView, _):
+        def measure_fn(ctx: TaskState, _):
             modules = ctx.cfg["modules"]
             probe_cfg = None
-            if ctx.env_dict["with_probe"]:
+            if ctx.env["with_probe"]:
                 probe_cfg = modules["probe_pulse"]
 
             prog = ModularProgramV2(
@@ -228,13 +228,13 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
             return signals
 
         signals = run_task(
-            task=SoftTask(
-                sweep_name="w/o probe pulse",
-                sweep_values=[False, True],
-                update_cfg_fn=lambda _, ctx, with_probe: ctx.env_dict.update(
+            task=Scan(
+                name="w/o probe pulse",
+                values=[False, True],
+                before_each=lambda _, ctx, with_probe: ctx.env.update(
                     with_probe=with_probe
                 ),
-                sub_task=HardTask(
+                task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=raw2signal_fn,
                     result_shape=(_cfg["shots"],),

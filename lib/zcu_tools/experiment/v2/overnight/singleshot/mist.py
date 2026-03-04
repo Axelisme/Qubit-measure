@@ -2,6 +2,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
@@ -18,7 +19,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
@@ -316,7 +317,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
 
         self.gains = sweep2array(pdr_sweep)
 
-        def measure_mist_fn(ctx: TaskContextView, update_hook: Callable):
+        def measure_mist_fn(ctx: TaskState, update_hook: Callable):
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
             Pulse.set_param(
@@ -325,7 +326,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
                 sweep2param("gain", cfg["sweep"]["gain"]),
             )
             return ModularProgramV2(
-                ctx.env_dict["soccfg"],
+                ctx.env["soccfg"],
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
@@ -334,7 +335,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
                     Readout("readout", modules["readout"]),
                 ],
             ).acquire(
-                ctx.env_dict["soc"],
+                ctx.env["soc"],
                 progress=False,
                 callback=update_hook,
                 g_center=g_center,
@@ -342,24 +343,26 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
                 population_radius=radius,
             )
 
-        self.task = HardTask[T_RootResult, List[NDArray[np.float64]], np.float64](
+        self.task = Task[T_RootResult, List[NDArray[np.float64]], np.float64](
             measure_fn=measure_mist_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(pdr_sweep["expts"], 2),
             dtype=np.float64,
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
-        self.task.init(ctx(addr="populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
+    def init(
+        self, ctx: TaskState[MistResult, T_RootResult], dynamic_pbar: bool = False
+    ) -> None:
+        self.task.init(ctx.child("populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx) -> None:
-        self.task.run(ctx(addr="populations", new_cfg=self.cfg))  # type: ignore
+    def run(self, ctx: TaskState[MistResult, T_RootResult]) -> None:
+        self.task.run(ctx.child("populations", new_cfg=self.cfg))  # type: ignore
 
         with MinIntervalFunc.force_execute():
-            ctx.set_data(
+            ctx.set_value(
                 MistResult(
                     gains=self.gains,
-                    populations=ctx.get_data()["populations"],
+                    populations=ctx.value["populations"],
                 )
             )
 
@@ -375,7 +378,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
     def num_axes(self) -> Dict[str, int]:
         return dict(populations_g=1, populations_e=1, populations_o=1, current=1)
 
-    def make_plotter(self, name, axs):
+    def make_plotter(self, name: str, axs: Dict[str, List[Axes]]) -> MistPlotterDict:
         return MistPlotterDict(
             populations_g=LivePlotter2D(
                 "Iteration",
@@ -420,9 +423,9 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
             ),
         )
 
-    def update_plotter(self, plotters, ctx, results) -> None:
-        iters = ctx.env_dict["iters"]
-        i = ctx.env_dict["repeat_idx"]
+    def update_plotter(self, plotters, ctx: TaskState, results: MistResult) -> None:
+        iters = ctx.env["iters"]
+        i = ctx.env["repeat_idx"]
 
         gains = results["gains"][0]
         populations = calc_populations(results["populations"])  # (iters, times, 3)
