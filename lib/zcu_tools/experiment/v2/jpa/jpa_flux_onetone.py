@@ -62,7 +62,7 @@ class JPAFluxByOneToneExp(AbsExperiment[JPAFluxByOneToneResult, JPAFluxByOneTone
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     jpa_flxs, fpts, np.abs(np.asarray(ctx.data))
                 ),
             )

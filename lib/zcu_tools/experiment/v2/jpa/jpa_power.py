@@ -102,7 +102,7 @@ class JPAPowerExp(AbsExperiment[JPAPowerResult, JPAPowerCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(jpa_powers, np.abs(ctx.data)),
+                on_update=lambda ctx: viewer.update(jpa_powers, np.abs(ctx.data)),
             )
             signals = np.asarray(signals)
 

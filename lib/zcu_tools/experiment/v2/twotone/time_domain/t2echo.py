@@ -97,7 +97,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
                     result_shape=(len(ts),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(ts, t2echo_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(ts, t2echo_signal2real(ctx.data)),
             )
 
         # record last cfg and result

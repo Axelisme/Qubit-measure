@@ -76,7 +76,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     pdrs, fpts, pdrdep_signal2real(np.asarray(ctx.data))
                 ),
             )

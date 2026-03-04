@@ -167,7 +167,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     pdrs, fpts, acstark_signal2real(np.asarray(ctx.data))
                 ),
             )
@@ -403,7 +403,7 @@ class AcStarkRamseyExp(AbsExperiment):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     pdrs, lens, acstark_ramsey_signal2real(np.asarray(ctx.data))
                 ),
             )

@@ -105,7 +105,7 @@ class PowerDepOvernightExp(
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     iters.astype(np.float64),
                     pdrs,
                     mist_overnight_signal2real(np.asarray(ctx.data)),

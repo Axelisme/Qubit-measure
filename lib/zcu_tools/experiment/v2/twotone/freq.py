@@ -52,7 +52,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     result_shape=(len(fpts),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     fpts, qubfreq_signal2real(ctx.data)
                 ),
             )

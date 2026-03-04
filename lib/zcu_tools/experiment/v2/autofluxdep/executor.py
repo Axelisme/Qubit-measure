@@ -306,7 +306,7 @@ class FluxDepExecutor:
                         ),
                         init_cfg=cfg,
                         env_dict=env_dict,
-                        update_hook=plot_fn,
+                        on_update=plot_fn,
                     )
 
                 finally:

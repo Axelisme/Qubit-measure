@@ -149,7 +149,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     times.astype(np.float64),
                     values,
                     zigzag_signal2real(np.asarray(ctx.data)),

@@ -163,7 +163,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                     result_shape=(2, len(res_freqs), len(qub_freqs)),
                 ),
                 init_cfg=_cfg,
-                update_hook=plot_fn,
+                on_update=plot_fn,
             )
         plt.close(fig)
 

@@ -82,7 +82,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                     result_shape=(len(pdrs),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(pdrs, mist_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(pdrs, mist_signal2real(ctx.data)),
             )
 
         # record the last result

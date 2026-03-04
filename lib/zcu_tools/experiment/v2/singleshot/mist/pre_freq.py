@@ -107,9 +107,7 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
-                    fpts, calc_populations(ctx.data).T
-                ),
+                on_update=lambda ctx: viewer.update(fpts, calc_populations(ctx.data).T),
             )
 
         # record the last result

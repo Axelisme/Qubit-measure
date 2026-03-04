@@ -59,7 +59,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                     result_shape=(len(lens),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(lens, rabi_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(lens, rabi_signal2real(ctx.data)),
             )
 
         # record last cfg and result
@@ -93,7 +93,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     lens, rabi_signal2real(np.asarray(ctx.data))
                 ),
             )

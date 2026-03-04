@@ -39,11 +39,9 @@ class TaskContext(Generic[T_Result]):
     def view(
         self,
         cfg: MutableMapping[str, Any],
-        update_hook: Optional[
-            Callable[[TaskContextView[Result, T_Result]], Any]
-        ] = None,
+        on_update: Optional[Callable[[TaskContextView[Result, T_Result]], Any]] = None,
     ) -> TaskContextView[T_Result, T_Result]:
-        return TaskContextView(self, cfg, update_hook)
+        return TaskContextView(self, cfg, on_update)
 
     def set_data(
         self, value: Result, addr_stack: Optional[List[Union[int, Hashable]]] = None
@@ -89,7 +87,7 @@ class TaskContext(Generic[T_Result]):
 class TaskContextView(Generic[T_Result, T_RootResult]):
     context: TaskContext[T_RootResult]
     cfg: MutableMapping[str, Any]
-    update_hook: Optional[Callable[[TaskContextView[Result, T_RootResult]], Any]] = None
+    on_update: Optional[Callable[[TaskContextView[Result, T_RootResult]], Any]] = None
 
     _addr_stack: List[Union[int, Hashable]] = field(default_factory=list)
     _root: Optional[TaskContextView[T_RootResult, T_RootResult]] = field(default=None)
@@ -123,7 +121,7 @@ class TaskContextView(Generic[T_Result, T_RootResult]):
         return TaskContextView(
             self.context,
             actual_cfg,
-            update_hook=self.update_hook,
+            on_update=self.on_update,
             _addr_stack=self._addr_stack + [addr],
             _root=root,
         )
@@ -135,8 +133,8 @@ class TaskContextView(Generic[T_Result, T_RootResult]):
         return self._root
 
     def trigger_hook(self) -> None:
-        if self.update_hook is not None:
-            self.update_hook(self)  # type: ignore[arg-type]
+        if self.on_update is not None:
+            self.on_update(self)  # type: ignore[arg-type]
 
     def set_data(self, value: T_Result) -> None:
         self.context.set_data(value, self._addr_stack)

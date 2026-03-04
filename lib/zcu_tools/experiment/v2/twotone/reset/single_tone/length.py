@@ -86,7 +86,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                     result_shape=(len(lens),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     lens, reset_length_signal2real(ctx.data)
                 ),
             )

@@ -224,7 +224,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=plot_fn,
+                on_update=plot_fn,
             )
             signals = np.asarray(results)
         plt.close(fig)

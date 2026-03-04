@@ -116,7 +116,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     result_shape=(len(ts),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
             )
 
         # record last cfg and result
@@ -158,7 +158,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     result_shape=(len(ts),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
             )
 
         # record last cfg and result
@@ -299,7 +299,7 @@ class T1WithToneExp(AbsExperiment):
                     result_shape=(len(ts),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
             )
 
         # record last cfg and result
@@ -454,7 +454,7 @@ class T1WithToneSweepExp(AbsExperiment):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     gains, ts, t1_sweep_tone_signal2real(np.asarray(ctx.data))
                 ),
             )

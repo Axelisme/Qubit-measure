@@ -85,9 +85,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
-                    lens, calc_populations(ctx.data).T
-                ),
+                on_update=lambda ctx: viewer.update(lens, calc_populations(ctx.data).T),
             )
 
         # record last cfg and result

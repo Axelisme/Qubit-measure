@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any, Dict
 
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing import Any, Dict
 from typing_extensions import Mapping, Optional, Tuple, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, ReTryIfFail, SoftTask, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import (
+    HardTask,
+    ReTryIfFail,
+    SoftTask,
+    TaskCfg,
+    run_task,
+)
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveFindPoints,
@@ -35,7 +41,9 @@ class FreqFluxCfg(TwoToneCfg, TaskCfg):
 
 
 class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any], fail_retry: int = 0) -> FreqFluxResult:
+    def run(
+        self, soc, soccfg, cfg: Dict[str, Any], fail_retry: int = 0
+    ) -> FreqFluxResult:
         _cfg = check_type(deepcopy(cfg), FreqFluxCfg)
 
         flx_sweep = _cfg["sweep"]["flux"]
@@ -72,7 +80,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     dev_values, fpts, freqflux_signal2real(np.asarray(ctx.data))
                 ),
             )

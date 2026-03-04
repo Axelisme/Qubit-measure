@@ -50,7 +50,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
                     result_shape=(len(amps),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(amps, rabi_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(amps, rabi_signal2real(ctx.data)),
             )
 
         self.last_cfg = _cfg

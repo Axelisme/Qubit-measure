@@ -70,7 +70,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
                     result_shape=(2, len(fpts)),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     fpts, dispersive_signal2real(ctx.data)
                 ),
             )

@@ -100,7 +100,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                     result_shape=(2, len(pdrs)),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     pdrs, reset_rabi_signal2real(ctx.data)
                 ),
             )

@@ -85,7 +85,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                     result_shape=(len(phases),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     phases, bathreset_signal2real(ctx.data)
                 ),
             )

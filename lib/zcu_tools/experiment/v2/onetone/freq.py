@@ -54,7 +54,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     result_shape=(len(fpts),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(fpts, freq_signal2real(ctx.data)),
+                on_update=lambda ctx: viewer.update(fpts, freq_signal2real(ctx.data)),
             )
 
         # record last cfg and result

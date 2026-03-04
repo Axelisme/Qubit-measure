@@ -183,7 +183,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
-                update_hook=plot_fn,
+                on_update=plot_fn,
             )
         plt.close(fig)
 

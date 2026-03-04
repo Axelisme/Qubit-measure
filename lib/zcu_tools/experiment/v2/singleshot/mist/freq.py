@@ -105,7 +105,7 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     freqs, calc_populations(ctx.data).T
                 ),
             )

@@ -212,7 +212,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=plot_fn,
+                on_update=plot_fn,
             )
             populations = np.asarray(populations)
         plt.close(fig)

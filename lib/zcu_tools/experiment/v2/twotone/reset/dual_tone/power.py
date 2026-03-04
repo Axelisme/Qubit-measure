@@ -100,7 +100,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     result_shape=(len(pdrs1), len(pdrs2)),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     pdrs1, pdrs2, dual_reset_pdr_signal2real(ctx.data)
                 ),
             )

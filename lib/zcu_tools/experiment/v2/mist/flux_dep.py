@@ -109,7 +109,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     values, gains, mist_signal2real(np.asarray(ctx.data))
                 ),
             )

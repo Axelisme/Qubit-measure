@@ -71,7 +71,7 @@ class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     fpts, jpa_check_signal2real(np.asarray(ctx.data))
                 ),
             )

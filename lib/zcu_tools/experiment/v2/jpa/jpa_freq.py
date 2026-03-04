@@ -102,7 +102,7 @@ class JPAFreqExp(AbsExperiment[JPAFreqResult, JPAFreqCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(jpa_freqs, np.abs(ctx.data)),
+                on_update=lambda ctx: viewer.update(jpa_freqs, np.abs(ctx.data)),
             )
             signals = np.asarray(signals)
 

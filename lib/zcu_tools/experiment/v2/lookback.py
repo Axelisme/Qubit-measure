@@ -65,9 +65,7 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
                     result_shape=(len(Ts),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
-                    Ts, lookback_signal2real(ctx.data)
-                ),
+                on_update=lambda ctx: viewer.update(Ts, lookback_signal2real(ctx.data)),
             )
 
         # record last cfg and result

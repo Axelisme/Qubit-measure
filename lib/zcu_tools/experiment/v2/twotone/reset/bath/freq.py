@@ -94,7 +94,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
                     result_shape=(len(gains), len(fpts)),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     fpts, gains, bathreset_signal2real(ctx.data).T
                 ),
             )

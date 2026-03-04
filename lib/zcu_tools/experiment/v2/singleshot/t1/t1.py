@@ -187,7 +187,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
-                update_hook=plot_fn,
+                on_update=plot_fn,
             )
         plt.close(fig)
 

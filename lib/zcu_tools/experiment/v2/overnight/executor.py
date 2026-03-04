@@ -227,7 +227,7 @@ class OvernightExecutor(AbsExperiment):
                     ),
                     init_cfg=cfg,
                     env_dict=env_dict,
-                    update_hook=plot_fn,
+                    on_update=plot_fn,
                 )
 
             plt.close(fig)

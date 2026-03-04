@@ -92,9 +92,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                     result_shape=(len(ts),),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
-                    ts, t2ramsey_signal2real(ctx.data)
-                ),
+                on_update=lambda ctx: viewer.update(ts, t2ramsey_signal2real(ctx.data)),
             )
 
         # record last cfg and result

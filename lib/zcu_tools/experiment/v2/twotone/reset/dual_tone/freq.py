@@ -102,7 +102,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     ),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     fpts1, fpts2, dual_reset_signal2real(np.asarray(ctx.data).T)
                 ),
             )
@@ -161,7 +161,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     result_shape=(len(fpts1), len(fpts2)),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     fpts1, fpts2, dual_reset_signal2real(ctx.data)
                 ),
             )

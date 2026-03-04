@@ -120,7 +120,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
                     sub_task=HardTask(measure_fn=measure_fn),
                 ),
                 init_cfg=_cfg,
-                update_hook=lambda ctx: viewer.update(
+                on_update=lambda ctx: viewer.update(
                     times, zigzag_signal2real(np.asarray(ctx.data))
                 ),
             )

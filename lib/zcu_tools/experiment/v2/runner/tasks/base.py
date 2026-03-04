@@ -53,7 +53,7 @@ def run_task(
     task: AbsTask[T_Result, T_Result],
     init_cfg: Mapping[str, Any],
     env_dict: Optional[MutableMapping[str, Any]] = None,
-    update_hook: Optional[Callable[[TaskContextView[Result, T_Result]], Any]] = None,
+    on_update: Optional[Callable[[TaskContextView[Result, T_Result]], Any]] = None,
     update_interval: Optional[float] = 0.1,
 ) -> T_Result:
     cfg = cast(MutableMapping[str, Any], deepcopy(init_cfg))
@@ -62,10 +62,10 @@ def run_task(
     if env_dict is None:
         env_dict = dict()
 
-    update_hook = min_interval(update_hook, update_interval)
+    on_update = min_interval(on_update, update_interval)
 
     ctx = TaskContext(init_result, env_dict)
-    ctx_view = ctx.view(cfg, update_hook)
+    ctx_view = ctx.view(cfg, on_update)
 
     try:
         task.init(ctx_view, dynamic_pbar=False)
