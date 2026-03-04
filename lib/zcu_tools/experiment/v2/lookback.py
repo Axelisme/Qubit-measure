@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
+from typeguard import check_type
+from typing_extensions import Any, Dict, Optional, Tuple, cast
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
@@ -16,12 +17,12 @@ from zcu_tools.program.v2 import OneToneCfg, OneToneProgram
 from zcu_tools.program.v2.modules import PulseReadoutCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from .runner import HardTask, run_task
+from .runner import HardTask, TaskCfg, run_task
 
 LookbackResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class LookbackCfg(OneToneCfg): ...
+class LookbackCfg(OneToneCfg, TaskCfg): ...
 
 
 def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -29,17 +30,17 @@ def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 
 
 class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
-    def run(self, soc, soccfg, cfg: LookbackCfg) -> LookbackResult:
-        cfg = deepcopy(cfg)
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> LookbackResult:
+        _cfg = check_type(deepcopy(cfg), LookbackCfg)
 
-        if cfg.setdefault("reps", 1) != 1:
+        if _cfg.setdefault("reps", 1) != 1:
             warnings.warn("reps is not 1 in config, this will be ignored.")
-            cfg["reps"] = 1
+            _cfg["reps"] = 1
 
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         readout_cfg = cast(PulseReadoutCfg, modules["readout"])
 
-        prog = OneToneProgram(soccfg, cfg)
+        prog = OneToneProgram(soccfg, _cfg)
         Ts = prog.get_time_axis(ro_index=0) + readout_cfg["ro_cfg"]["trig_offset"]
         assert isinstance(Ts, np.ndarray)
 
@@ -56,14 +57,14 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
                     raw2signal_fn=lambda raw: raw[0].dot([1, 1j]),
                     result_shape=(len(Ts),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     Ts, lookback_signal2real(ctx.data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (Ts, signals)
 
         return Ts, signals

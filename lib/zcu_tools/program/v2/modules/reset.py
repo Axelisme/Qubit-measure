@@ -80,6 +80,8 @@ class NoneReset(Reset, tag="none"):
         if isinstance(reset_cfg, str):
             reset_cfg = ml.get_module(reset_cfg)
 
+        reset_cfg["type"] = "reset/none"
+
         return cast(NoneResetCfg, reset_cfg)
 
 
@@ -120,6 +122,7 @@ class PulseReset(Reset, tag="pulse"):
         if isinstance(reset_cfg, str):
             reset_cfg = ml.get_module(reset_cfg)
 
+        reset_cfg["type"] = "reset/pulse"
         reset_cfg["pulse_cfg"] = Pulse.auto_fill(reset_cfg["pulse_cfg"], ml)
 
         return cast(PulseResetCfg, reset_cfg)
@@ -190,6 +193,7 @@ class TwoPulseReset(Reset, tag="two_pulse"):
         if isinstance(reset_cfg, str):
             reset_cfg = ml.get_module(reset_cfg)
 
+        reset_cfg["type"] = "reset/two_pulse"
         reset_cfg["pulse1_cfg"] = Pulse.auto_fill(reset_cfg["pulse1_cfg"], ml)
         reset_cfg["pulse2_cfg"] = Pulse.auto_fill(reset_cfg["pulse2_cfg"], ml)
 
@@ -273,6 +277,7 @@ class BathReset(Reset, tag="bath"):
         if isinstance(reset_cfg, str):
             reset_cfg = ml.get_module(reset_cfg)
 
+        reset_cfg["type"] = "reset/bath"
         reset_cfg["qubit_tone_cfg"] = Pulse.auto_fill(reset_cfg["qubit_tone_cfg"], ml)
         reset_cfg["cavity_tone_cfg"] = Pulse.auto_fill(reset_cfg["cavity_tone_cfg"], ml)
         reset_cfg["pi2_cfg"] = Pulse.auto_fill(reset_cfg["pi2_cfg"], ml)

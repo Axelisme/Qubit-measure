@@ -102,6 +102,10 @@ class ModuleLibrary(SyncFile):
             module_cls = Module.parse(sub_cfg["type"])
             modules[name] = module_cls.auto_fill(sub_cfg, self)  # type: ignore
 
+        exp_cfg.setdefault("relax_delay", 0.0)
+        exp_cfg.setdefault("rounds", 1)
+        exp_cfg.setdefault("reps", 1)
+
         return numpy2number(exp_cfg)
 
     @auto_sync("write")

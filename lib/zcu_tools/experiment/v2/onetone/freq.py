@@ -6,6 +6,7 @@ from typing import Any, Dict, Literal, Optional, Tuple
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -14,13 +15,13 @@ from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2para
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 
-from ..runner import HardTask, run_task
+from ..runner import HardTask, TaskCfg, run_task
 
 # (fpts, signals)
 FreqResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class FreqCfg(OneToneCfg): ...
+class FreqCfg(OneToneCfg, TaskCfg): ...
 
 
 def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -28,20 +29,20 @@ def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
-        cfg = deepcopy(cfg)
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
 
         # Ensure the sweep section is in canonical single-axis form.
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
+        assert "sweep" in _cfg
+        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "freq")
 
         # Predicted frequency points (before mapping to ADC domain)
-        fpts: NDArray[np.float64] = sweep2array(cfg["sweep"]["freq"])  # MHz
+        fpts: NDArray[np.float64] = sweep2array(_cfg["sweep"]["freq"])  # MHz
 
         # set readout frequency as sweep param
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         Readout.set_param(
-            modules["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
         )
 
         # run experiment
@@ -53,12 +54,12 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(fpts),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(fpts, freq_signal2real(ctx.data)),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (fpts, signals)
 
         return fpts, signals

@@ -6,14 +6,18 @@ from copy import deepcopy
 from typing_extensions import (
     Any,
     Callable,
+    Dict,
     Generic,
     Mapping,
     MutableMapping,
+    NotRequired,
     Optional,
+    TypedDict,
     TypeVar,
     cast,
 )
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import min_interval
 
@@ -21,6 +25,10 @@ from ..context import Result, TaskContext, TaskContextView
 
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
+
+
+class TaskCfg(TypedDict, closed=True):
+    dev: NotRequired[Dict[str, DeviceInfo]]
 
 
 class AbsTask(ABC, Generic[T_Result, T_RootResult]):

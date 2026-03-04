@@ -162,6 +162,7 @@ class Pulse(Module, tag="pulse"):
         if isinstance(pulse_cfg, str):
             pulse_cfg = ml.get_module(pulse_cfg)
 
+        pulse_cfg["type"] = "pulse"
         pulse_cfg.setdefault("phase", 0.0)
         pulse_cfg.setdefault("pre_delay", 0.0)
         pulse_cfg.setdefault("post_delay", 0.0)

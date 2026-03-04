@@ -6,6 +6,7 @@ from .tasks import (
     RepeatOverTime,
     ReTryIfFail,
     SoftTask,
+    TaskCfg,
     default_raw2signal_fn,
     run_task,
     run_with_retries,

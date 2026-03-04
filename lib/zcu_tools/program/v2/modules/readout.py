@@ -98,6 +98,7 @@ class DirectReadout(Readout, tag="direct"):
         if isinstance(readout_cfg, str):
             readout_cfg = ml.get_module(readout_cfg)
 
+        readout_cfg["type"] = "readout/direct"
         readout_cfg.setdefault("trig_offset", 0.0)
 
         return cast(DirectReadoutCfg, readout_cfg)
@@ -168,6 +169,7 @@ class PulseReadout(Readout, tag="pulse"):
         if isinstance(readout_cfg, str):
             readout_cfg = ml.get_module(readout_cfg)
 
+        readout_cfg["type"] = "readout/pulse"
         readout_cfg["pulse_cfg"] = Pulse.auto_fill(readout_cfg["pulse_cfg"], ml)
         readout_cfg["ro_cfg"] = DirectReadout.auto_fill(readout_cfg["ro_cfg"], ml)
         if freq := readout_cfg["pulse_cfg"].get("freq"):
