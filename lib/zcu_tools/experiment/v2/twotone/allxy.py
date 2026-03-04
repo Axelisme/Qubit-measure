@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,6 +11,13 @@ from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.v2.runner import (
+    BatchTask,
+    HardTask,
+    TaskCfg,
+    TaskContextView,
+    run_task,
+)
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -24,8 +31,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
-
-from ..runner import BatchTask, HardTask, TaskCfg, run_task
 
 # (sequence, signals)
 AllXY_Result = Dict[Tuple[str, str], NDArray[np.complex128]]
@@ -165,21 +170,30 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
             )
 
         with liveplotter as viewer:
-            signals_dict = run_task(
-                task=BatchTask(
-                    tasks={
-                        (gate1, gate2): HardTask(
-                            measure_fn=lambda ctx, update_hook: ModularProgramV2(
+
+            def make_task(gate1: str, gate2: str) -> HardTask:
+                return HardTask(
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
                                 soccfg,
                                 ctx.cfg,
                                 modules=[
-                                    Reset("reset", ctx.cfg["modules"].get("reset")),
+                                    Reset("reset", modules.get("reset")),
                                     Pulse("first_pulse", gate2pulse_map[gate1]),
                                     Pulse("second_pulse", gate2pulse_map[gate2]),
-                                    Readout("readout", ctx.cfg["modules"]["readout"]),
+                                    Readout("readout", modules["readout"]),
                                 ],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
+                    )
+                )
+
+            signals_dict = run_task(
+                task=BatchTask(
+                    tasks={
+                        (gate1, gate2): make_task(gate1, gate2)
                         for gate1, gate2 in ALLXY_SEQUENCE
                     }
                 ),
