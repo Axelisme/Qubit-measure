@@ -5,8 +5,8 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import plotly.graph_objects as go
-from typeguard import check_type
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.device import DeviceInfo
@@ -92,21 +92,19 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                         ctx.cfg["dev"], value
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset(
-                                    "reset",
-                                    ctx.cfg["modules"].get("reset", {"type": "none"}),
-                                ),
-                                Pulse(
-                                    "init_pulse", ctx.cfg["modules"].get("init_pulse")
-                                ),
-                                Pulse("probe_pulse", ctx.cfg["modules"]["probe_pulse"]),
-                                Readout("readout", ctx.cfg["modules"]["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook),
+                        measure_fn=lambda ctx, update_hook: (
+                            (modules := ctx.cfg["modules"])
+                            and ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("init_pulse", modules.get("init_pulse")),
+                                    Pulse("probe_pulse", modules["probe_pulse"]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        ),
                         result_shape=(len(gains),),
                     ),
                 ),

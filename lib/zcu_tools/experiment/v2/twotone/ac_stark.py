@@ -365,7 +365,7 @@ class AcStarkRamseyExp(AbsExperiment):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Reset("reset", modules.get("reset")),
                         NonBlocking(
                             [
                                 Delay(

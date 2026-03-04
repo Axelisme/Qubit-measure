@@ -117,7 +117,7 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotterDict])
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse("pi2_pulse1", modules["pi2_pulse"]),
                     Delay("t2e_delay1", delay=0.5 * t2e_params),
                     Pulse("pi_pulse", modules["pi_pulse"]),

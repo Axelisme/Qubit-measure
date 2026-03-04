@@ -72,10 +72,7 @@ class JPAFluxExp(AbsExperiment[JPAFluxResult, JPAFluxCfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset(
-                            "reset",
-                            modules.get("reset", {"type": "none"}),
-                        ),
+                        Reset("reset", modules.get("reset")),
                         Pulse("pi_pulse", modules["pi_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],

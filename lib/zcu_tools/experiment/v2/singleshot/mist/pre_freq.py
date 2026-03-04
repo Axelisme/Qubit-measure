@@ -84,10 +84,10 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset", {"type": "none"})),
-                        Pulse(name="init_pulse", cfg=modules["init_pulse"]),
-                        Pulse(name="pi_pulse", cfg=modules.get("pi_pulse")),
-                        Pulse(name="probe_pulse", cfg=modules["probe_pulse"]),
+                        Reset("reset", modules.get("reset")),
+                        Pulse("init_pulse", modules["init_pulse"]),
+                        Pulse("pi_pulse", modules.get("pi_pulse")),
+                        Pulse("probe_pulse", modules["probe_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
                 ).acquire(

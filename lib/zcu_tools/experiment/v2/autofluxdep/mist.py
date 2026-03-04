@@ -112,7 +112,7 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse(name="pi_pulse", cfg=modules.get("pi_pulse")),
                     Pulse(name="mist_pulse", cfg=modules["mist_pulse"]),
                     Readout("readout", cfg=modules["readout"]),

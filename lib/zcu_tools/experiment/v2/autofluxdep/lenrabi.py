@@ -139,7 +139,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse("rabi_pulse", modules["rabi_pulse"]),
                     Readout("readout", modules["readout"]),
                 ],

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Any, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing import Any, Dict
 from typing_extensions import NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
@@ -69,21 +69,19 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         with LivePlotter1D("Phase (deg)", "Signal (a.u.)") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                (modules := ctx.cfg["modules"]).get(
-                                    "reset", {"type": "none"}
-                                ),
-                            ),
-                            Pulse("init_pulse", modules.get("init_pulse")),
-                            Reset("tested_reset", modules["tested_reset"]),
-                            Readout("readout", modules["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                Reset("reset", modules.get("reset")),
+                                Pulse("init_pulse", modules.get("init_pulse")),
+                                Reset("tested_reset", modules["tested_reset"]),
+                                Readout("readout", modules["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
                     result_shape=(len(phases),),
                 ),
                 init_cfg=_cfg,

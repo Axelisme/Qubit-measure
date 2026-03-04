@@ -68,27 +68,27 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         ) as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                ctx.cfg["modules"].get("reset", {"type": "none"}),
-                            ),
-                            Pulse("pi2_pulse1", ctx.cfg["modules"]["pi2_pulse"]),
-                            Delay("t2_delay", delay=t2r_spans),
-                            Pulse(
-                                name="pi2_pulse2",
-                                cfg=PulseCfg(
-                                    **ctx.cfg["modules"]["pi2_pulse"],
-                                    phase=ctx.cfg["modules"]["pi2_pulse"]["phase"]
-                                    + 360 * detune * t2r_spans,
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                Reset("reset", modules.get("reset")),
+                                Pulse("pi2_pulse1", modules["pi2_pulse"]),
+                                Delay("t2_delay", delay=t2r_spans),
+                                Pulse(
+                                    name="pi2_pulse2",
+                                    cfg=PulseCfg(
+                                        **modules["pi2_pulse"],
+                                        phase=modules["pi2_pulse"]["phase"]
+                                        + 360 * detune * t2r_spans,
+                                    ),
                                 ),
-                            ),
-                            Readout("readout", ctx.cfg["modules"]["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                                Readout("readout", modules["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
                     result_shape=(len(ts),),
                 ),
                 init_cfg=_cfg,

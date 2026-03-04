@@ -18,7 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContextView, TaskCfg
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
@@ -328,7 +328,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
                 ctx.env_dict["soccfg"],
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse("init_pulse", cfg=modules.get("init_pulse")),
                     Pulse("probe_pulse", cfg=modules["probe_pulse"]),
                     Readout("readout", modules["readout"]),

@@ -125,7 +125,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse(name="pi2_pulse1", cfg=modules["pi2_pulse"]),
                     Delay(name="t2r_delay", delay=t2r_params),
                     Pulse(

@@ -83,7 +83,7 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Reset("reset", modules.get("reset")),
                         Pulse("init_pulse", modules.get("init_pulse")),
                         Pulse("probe_pulse", modules["probe_pulse"]),
                         Readout("readout", modules["readout"]),

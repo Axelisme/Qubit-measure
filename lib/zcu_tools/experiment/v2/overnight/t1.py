@@ -10,7 +10,7 @@ from typeguard import check_type
 from typing_extensions import Callable, Dict, List, NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContextView, TaskCfg
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.utils import make_comment
@@ -168,7 +168,7 @@ class T1Task(
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
                     Delay("t1_delay", delay=t1_span),
                     Readout("readout", modules["readout"]),
@@ -244,7 +244,7 @@ class T1WithToneTask(
                 ctx.env_dict["soccfg"],
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
                     Pulse("probe_pulse", modules["probe_pulse"]),
                     Readout("readout", modules["readout"]),

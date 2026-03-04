@@ -112,7 +112,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
                 ctx.env_dict["soccfg"],
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
                     Delay("t1_delay", delay=t1_span),
                     Readout("readout", modules["readout"]),
