@@ -185,12 +185,8 @@ jpa_sgs.get_info()
 # Initial Experiment Folder
 
 ```python
-md.cur_A = 1.8e-3
-```
-
-```python
-# ml, md = em.new_flux(md.cur_A, clone_from=(ml, md), unit="mA")
-ml, md = em.use_flux(label="0304_1.800mA_3")
+ml, md = em.new_flux(md.cur_A, clone_from=(ml, md), unit="mA")
+# ml, md = em.use_flux(label="0304_1.800mA_3")
 ml, md
 ```
 
@@ -244,7 +240,7 @@ md.timeFly
 
 ```python
 filename = "lookback"
-savefig(fig, str(em.flx_dir / "image" / f"{filename}.png"))
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 lookback_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -311,7 +307,7 @@ md.rf_w = kappa
 
 ```python
 filename = f"{res_name}_freq"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 res_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -632,7 +628,7 @@ md.best_jpa_power
 
 ```python
 filename = "JPA_power"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 jpa_pdr_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -728,7 +724,7 @@ fig = jpa_check_exp.analyze()
 
 ```python
 filename = "JPA_check"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 jpa_check_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -831,7 +827,7 @@ md.qf_w = kappa
 
 ```python
 filename = f"{qub_name}_freq"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 qub_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -895,7 +891,7 @@ md.pi_len, md.pi2_len, md.rabi_f
 
 ```python
 filename = f"{qub_name}_rabi_length"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 qub_lenrabi_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -966,7 +962,7 @@ md.pi_gain, md.pi2_gain
 
 ```python
 filename = f"{qub_name}_rabi_amplitude"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 qub_amprabi_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1061,7 +1057,7 @@ md.reset_f = f
 
 ```python
 filename = f"{qub_name}_sidereset_freq"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 single_reset_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1168,7 +1164,7 @@ fig = single_reset_check_exp.analyze()
 
 ```python
 filename = f"{qub_name}_sidereset_check"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 single_reset_check_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1234,7 +1230,7 @@ md.resetf1_w = kappa
 
 ```python
 filename = f"{qub_name}_dualreset_freq1"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 dualreset_freq1_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1324,7 +1320,7 @@ reset_f2 = f2
 
 ```python
 filename = f"{qub_name}_dualreset_both_freq"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 dualreset_freq2_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1403,7 +1399,7 @@ gain1, gain2, fig = dual_reset_pdr_exp.analyze(xname=xlabal, yname=ylabal)
 
 ```python
 filename = f"{qub_name}_mux_reset_gain"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 dual_reset_pdr_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1526,7 +1522,7 @@ _ = rabifreq_exp.run(soc, soccfg, cfg)
 
 ```python
 filename = f"{qub_name}_rabi_freq"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 rabifreq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1588,7 +1584,7 @@ md.bathreset_gain, md.bathreset_freq, fig = bathreset_freq_exp.analyze(
 
 ```python
 filename = f"{qub_name}_bathreset_freqgain"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 bathreset_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1646,7 +1642,7 @@ fig = bathreset_len_exp.analyze()
 
 ```python
 filename = f"{qub_name}_bathreset_len"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 bathreset_len_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1711,7 +1707,7 @@ fig = bathreset_rabicheck_exp.analyze()
 
 ```python
 filename = f"{qub_name}_bathreset_rabicheck"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 bathreset_rabicheck_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1891,7 +1887,7 @@ md.readout_f = center_freq
 
 ```python
 filename = f"{qub_name}_ckp"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 ckp_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -1939,7 +1935,7 @@ md.chi, rf_w, fig = dispersive_shift_exp.analyze()
 
 ```python
 filename = f"{qub_name}_dispersive_shift_gain{cfg['readout']['pulse_cfg']['gain']:.3f}"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 dispersive_shift_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2004,7 +2000,7 @@ md.ac_stark_coeff, fig = ac_stark_exp.analyze(
 
 ```python
 filename = f"{qub_name}_ac_stark"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 ac_stark_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2122,7 +2118,7 @@ best_x, fig = zigzag_sweep_exp.analyze()
 
 ```python
 filename = f"{qub_name}_zigzag_sweep_{repeat_on}"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 zigzag_sweep_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2190,7 +2186,7 @@ md.best_ro_freq
 
 ```python
 filename = f"{qub_name}_ro_opt_freq"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 opt_ro_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2243,7 +2239,7 @@ md.best_ro_gain
 
 ```python
 filename = f"{qub_name}_ro_opt_pdr"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 opt_ro_pdr_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2289,7 +2285,7 @@ md.best_ro_length
 
 ```python
 filename = f"{qub_name}_ro_opt_len"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 opt_ro_len_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2424,7 +2420,7 @@ print(f"real detune: {(detune - activate_detune) * 1e3:.1f}kHz")
 
 ```python
 filename = f"{qub_name}_t2ramsey"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t2ramsey_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2476,7 +2472,7 @@ md.t1
 
 ```python
 filename = f"{qub_name}_t1"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t1_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2539,7 +2535,7 @@ md.t1_with_tone
 
 ```python
 filename = f"{qub_name}_t1_with_tone_{cfg['test_pulse']['gain']:.2f}"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t1_with_tone_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2632,7 +2628,7 @@ md.t2e, _, detune, _, fig = t2echo_exp.analyze(fit_method="fringe")
 
 ```python
 filename = f"{qub_name}_t2echo"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t2echo_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2747,7 +2743,7 @@ print(f"Optimal fidelity after rotation = {md.fid:.1%}")
 import time
 
 filename = f"{qub_name}_singleshot_w_jpa_wo_reset_log_{time.strftime('%Y%m%d_%H%M%S')}"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 ge_sh_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2822,7 +2818,7 @@ fig = check_sh_exp.analyze(md.g_center, md.e_center, md.ge_radius, max_point=100
 
 ```python
 filename = f"{qub_name}_singleshot_g"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 ge_sh_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2870,7 +2866,7 @@ fig = qub_lenrabi_sh_exp.analyze(
 
 ```python
 filename = f"{qub_name}_rabi_length_pop"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 qub_lenrabi_sh_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2910,7 +2906,7 @@ fig = t1_sh_exp.analyze(confusion_matrix=md.confusion_matrix, skip=1)
 
 ```python
 filename = f"{qub_name}_t1_pop"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t1_sh_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -2964,7 +2960,7 @@ md.t1_with_tone = t1
 
 ```python
 filename = f"{qub_name}_t1_with_tone_gain{cfg['probe_pulse']['gain']:.3f}_pop"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t1_with_tone_sh_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -3016,7 +3012,7 @@ fig = t1_with_tone_sweep_sh_exp.analyze(
 
 ```python
 filename = f"{qub_name}_t1_with_tone_sweep_pop"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t1_with_tone_sweep_sh_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -3071,7 +3067,7 @@ fig = mist_sh_exp.analyze(
 ```python
 filename = f"{qub_name}_mist_g_singleshot_short_{time.strftime('%Y%m%d_%H%M%S')}"
 # filename = f"{qub_name}_mist_singleshot_steady_{time.strftime('%Y%m%d_%H%M%S')}"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 mist_sh_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -3121,7 +3117,7 @@ fig = mist_sh_exp.analyze(md.g_center, md.e_center, md.ge_radius)
 ```python
 # filename = f"{qub_name}_mist_gain{cfg['probe_pulse']['gain']:.4f}_singleshot_steady"
 filename = f"{qub_name}_e_mist_gain{cfg['probe_pulse']['gain']:.4f}_singleshot_short"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 mist_sh_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -3178,7 +3174,7 @@ _ = ac_stark_sh_exp.run(soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius
 
 ```python
 filename = f"{qub_name}_ac_stark_pop_rf{cfg['stark_pulse1']['freq']:.3f}MHz_{time.strftime('%Y%m%d_%H%M%S')}"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 ac_stark_sh_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
@@ -3272,7 +3268,7 @@ fig = mist_exp.analyze(
 
 ```python
 filename = f"{qub_name}_mist_e"
-savefig(fig, f"{result_dir}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png")
+savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 mist_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
