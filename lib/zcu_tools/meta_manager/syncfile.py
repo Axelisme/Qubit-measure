@@ -73,7 +73,7 @@ class SyncFile(ABC):
             mtime = self._path.stat().st_mtime_ns
             if self._dirty:
                 self.dump()
-            elif mtime <= self._modify_time:
+            elif mtime >= self._modify_time:
                 self.load()
         else:
             self.dump()

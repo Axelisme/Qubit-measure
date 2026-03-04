@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -25,6 +27,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
+from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background, rotate2real
 
@@ -40,27 +43,25 @@ FreqResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex1
 class FreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
-    tested_reset: ResetCfg
+    tested_reset: TwoPulseResetCfg
     readout: ReadoutCfg
 
 
-class FreqCfg(ModularProgramCfg):
+class FreqCfg(ModularProgramCfg, TaskCfg):
     modules: FreqModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run_soft(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run_soft(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
 
         # Check that reset pulse is dual pulse type
-        modules = cfg["modules"]
-        if modules["tested_reset"]["type"] != "two_pulse":
-            raise ValueError("This experiment only supports dual-tone reset")
+        modules = _cfg["modules"]
 
-        assert "sweep" in cfg
-        fpt1_sweep = cfg["sweep"]["freq1"]
-        fpt2_sweep = cfg["sweep"]["freq2"]
-        cfg["sweep"] = {"freq1": fpt1_sweep}
+        fpt1_sweep = _cfg["sweep"]["freq1"]
+        fpt2_sweep = _cfg["sweep"]["freq2"]
+        _cfg["sweep"] = {"freq1": fpt1_sweep}
 
         fpts1 = sweep2array(fpt1_sweep)  # predicted frequency points
         fpts2 = sweep2array(fpt2_sweep)  # predicted frequency points
@@ -82,25 +83,25 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                         ctx.cfg["modules"]["tested_reset"], "freq2", fpt2
                     ),
                     sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset(
-                                    "reset",
-                                    (modules := ctx.cfg["modules"]).get(
-                                        "reset", {"type": "none"}
-                                    ),
-                                ),
-                                Pulse("init_pulse", modules.get("init_pulse")),
-                                Reset("tested_reset", modules["tested_reset"]),
-                                Readout("readout", modules["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook),
+                        measure_fn=lambda ctx, update_hook: (
+                            (modules := ctx.cfg["modules"])
+                            and (
+                                ModularProgramV2(
+                                    soccfg,
+                                    ctx.cfg,
+                                    modules=[
+                                        Reset("reset", modules.get("reset")),
+                                        Pulse("init_pulse", modules.get("init_pulse")),
+                                        Reset("tested_reset", modules["tested_reset"]),
+                                        Readout("readout", modules["readout"]),
+                                    ],
+                                ).acquire(soc, progress=False, callback=update_hook)
+                            )
+                        ),
                         result_shape=(len(fpts1),),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     fpts1, fpts2, dual_reset_signal2real(np.asarray(ctx.data).T)
                 ),
@@ -108,61 +109,58 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             signals = np.asarray(signals).T
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (fpts1, fpts2, signals)
 
         return fpts1, fpts2, signals
 
-    def run_hard(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run_hard(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
 
         # Check that reset pulse is dual pulse type
-        modules = cfg["modules"]
-        if modules["tested_reset"]["type"] != "two_pulse":
-            raise ValueError("This experiment only supports dual-tone reset")
+        modules = _cfg["modules"]
 
         # Ensure freq1 is the outer loop for better visualization
-        assert "sweep" in cfg
-        cfg["sweep"] = {
-            "freq1": cfg["sweep"]["freq1"],
-            "freq2": cfg["sweep"]["freq2"],
+        _cfg["sweep"] = {
+            "freq1": _cfg["sweep"]["freq1"],
+            "freq2": _cfg["sweep"]["freq2"],
         }
 
-        fpts1 = sweep2array(cfg["sweep"]["freq1"])
-        fpts2 = sweep2array(cfg["sweep"]["freq2"])
+        fpts1 = sweep2array(_cfg["sweep"]["freq1"])
+        fpts2 = sweep2array(_cfg["sweep"]["freq2"])
 
         Reset.set_param(
             modules["tested_reset"],
             "freq1",
-            sweep2param("freq1", cfg["sweep"]["freq1"]),
+            sweep2param("freq1", _cfg["sweep"]["freq1"]),
         )
         Reset.set_param(
             modules["tested_reset"],
             "freq2",
-            sweep2param("freq2", cfg["sweep"]["freq2"]),
+            sweep2param("freq2", _cfg["sweep"]["freq2"]),
         )
 
         with LivePlotter2D("Frequency1 (MHz)", "Frequency2 (MHz)") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                (modules := ctx.cfg["modules"]).get(
-                                    "reset", {"type": "none"}
-                                ),
-                            ),
-                            Pulse("init_pulse", modules.get("init_pulse")),
-                            Reset("tested_reset", modules["tested_reset"]),
-                            Readout("readout", modules["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("init_pulse", modules.get("init_pulse")),
+                                    Reset("tested_reset", modules["tested_reset"]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    ),
                     result_shape=(len(fpts1), len(fpts2)),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     fpts1, fpts2, dual_reset_signal2real(ctx.data)
                 ),
@@ -170,7 +168,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (fpts1, fpts2, signals)
 
         return fpts1, fpts2, signals
@@ -179,7 +177,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         soc,
         soccfg,
-        cfg: FreqCfg,
+        cfg: Dict[str, Any],
         *,
         method: Literal["soft", "hard"] = "soft",
     ) -> FreqResult:

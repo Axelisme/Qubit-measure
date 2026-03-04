@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import (
     Callable,
     Dict,
@@ -13,12 +14,11 @@ from typing_extensions import (
     Optional,
     Tuple,
     TypedDict,
-    cast,
 )
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
 from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.meta_manager import ModuleLibrary
@@ -70,13 +70,12 @@ class T2EchoModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class T2EchoCfgTemplate(ModularProgramCfg):
+class T2EchoCfgTemplate(ModularProgramCfg, TaskCfg):
     modules: T2EchoModuleCfg
-    dev: NotRequired[Dict[str, DeviceInfo]]
     sweep_range: Tuple[float, float]
 
 
-class T2EchoCfg(ModularProgramCfg):
+class T2EchoCfg(ModularProgramCfg, TaskCfg):
     modules: T2EchoModuleCfg
     dev: Dict[str, DeviceInfo]
     sweep: Dict[str, SweepCfg]
@@ -171,7 +170,7 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotterDict])
         del cfg_temp["sweep_range"]
         deepupdate(cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}})
         cfg_temp["activate_detune"] = self.detune_ratio / len_sweep["step"]  # type: ignore
-        cfg = cast(T2EchoCfg, cfg_temp)
+        cfg = check_type(cfg_temp, T2EchoCfg)
 
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 

@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import (
     Callable,
     Dict,
@@ -18,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.meta_manager import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment
@@ -68,12 +69,11 @@ class Mist_ModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class Mist_CfgTemplate(ModularProgramCfg):
+class Mist_CfgTemplate(ModularProgramCfg, TaskCfg):
     modules: Mist_ModuleCfg
-    dev: NotRequired[Dict[str, DeviceInfo]]
 
 
-class Mist_Cfg(ModularProgramCfg):
+class Mist_Cfg(ModularProgramCfg, TaskCfg):
     modules: Mist_ModuleCfg
     dev: Dict[str, DeviceInfo]
     sweep: Dict[str, SweepCfg]
@@ -137,7 +137,7 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
             cast(dict, cfg_temp),
             {"dev": ctx.cfg["dev"], "sweep": {"gain": self.gain_sweep}},
         )
-        cfg = cast(Mist_Cfg, cfg_temp)
+        cfg = check_type(cfg_temp, Mist_Cfg)
 
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 

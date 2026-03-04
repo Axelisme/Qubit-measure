@@ -4,17 +4,20 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
+from typeguard import check_type
+from typing import Any, Dict
 from typing_extensions import Mapping, Optional, Tuple, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, ReTryIfFail, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, ReTryIfFail, SoftTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveFindPoints,
     InteractiveLines,
 )
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
@@ -26,26 +29,26 @@ def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return np.abs(minus_background(signals, axis=1))
 
 
-class FreqFluxCfg(TwoToneCfg):
+class FreqFluxCfg(TwoToneCfg, TaskCfg):
     dev: Mapping[str, DeviceInfo]
+    sweep: Dict[str, SweepCfg]
 
 
 class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
-    def run(self, soc, soccfg, cfg: FreqFluxCfg, fail_retry: int = 0) -> FreqFluxResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run(self, soc, soccfg, cfg: Dict[str, Any], fail_retry: int = 0) -> FreqFluxResult:
+        _cfg = check_type(deepcopy(cfg), FreqFluxCfg)
 
-        assert "sweep" in cfg
-        flx_sweep = cfg["sweep"]["flux"]
-        fpt_sweep = cfg["sweep"]["freq"]
+        flx_sweep = _cfg["sweep"]["flux"]
+        fpt_sweep = _cfg["sweep"]["freq"]
 
         # Remove flux from sweep dict - will be handled by soft loop
-        cfg["sweep"] = {"freq": fpt_sweep}
+        _cfg["sweep"] = {"freq": fpt_sweep}
 
         dev_values = sweep2array(flx_sweep, allow_array=True)
         fpts = sweep2array(fpt_sweep)  # predicted frequency points
 
         # Frequency is swept by FPGA (hard sweep)
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         modules["qub_pulse"]["freq"] = sweep2param("freq", fpt_sweep)
 
         with LivePlotter2DwithLine(
@@ -68,7 +71,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
                         ),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     dev_values, fpts, freqflux_signal2real(np.asarray(ctx.data))
                 ),
@@ -76,7 +79,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (dev_values, fpts, signals)
 
         return dev_values, fpts, signals

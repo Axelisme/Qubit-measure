@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
@@ -24,7 +25,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..runner import BatchTask, HardTask, run_task
+from ..runner import BatchTask, HardTask, TaskCfg, run_task
 
 # (sequence, signals)
 AllXY_Result = Dict[Tuple[str, str], NDArray[np.complex128]]
@@ -116,16 +117,16 @@ class AllXY_ModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class AllXY_Cfg(ModularProgramCfg):
+class AllXY_Cfg(ModularProgramCfg, TaskCfg):
     modules: AllXY_ModuleCfg
 
 
 class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
-    def run(self, soc, soccfg, cfg: AllXY_Cfg) -> AllXY_Result:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-        modules = cfg["modules"]
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> AllXY_Result:
+        _cfg = check_type(deepcopy(cfg), AllXY_Cfg)
+        modules = _cfg["modules"]
 
-        assert cfg.get("sweep", dict()) == {}, (
+        assert _cfg.get("sweep", dict()) == {}, (
             "AllXY experiment does not support sweep configurations. "
             "Please remove 'sweep' key from the configuration."
         )
@@ -172,12 +173,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                                 soccfg,
                                 ctx.cfg,
                                 modules=[
-                                    Reset(
-                                        "reset",
-                                        ctx.cfg["modules"].get(
-                                            "reset", {"type": "none"}
-                                        ),
-                                    ),
+                                    Reset("reset", ctx.cfg["modules"].get("reset")),
                                     Pulse("first_pulse", gate2pulse_map[gate1]),
                                     Pulse("second_pulse", gate2pulse_map[gate2]),
                                     Readout("readout", ctx.cfg["modules"]["readout"]),
@@ -187,7 +183,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                         for gate1, gate2 in ALLXY_SEQUENCE
                     }
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
                     allxy_signal2real(ctx.data),
@@ -196,7 +192,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
         signals_dict = dict(signals_dict)
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = signals_dict
 
         return signals_dict

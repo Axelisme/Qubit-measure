@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
+from typing import Any, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import (
     HardTask,
+    TaskCfg,
     TaskContextView,
     run_task,
 )
@@ -40,23 +43,23 @@ class CheckModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class CheckCfg(ModularProgramCfg):
+class CheckCfg(ModularProgramCfg, TaskCfg):
     modules: CheckModuleCfg
     shots: int
 
 
 class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
-    def run(self, soc, soccfg, cfg: dict) -> CheckResult:
-        _cfg = cast(CheckCfg, deepcopy(cfg))  # avoid in-place modification
-
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> CheckResult:
         # Validate and setup configuration
-        if _cfg.setdefault("rounds", 1) != 1:
+        if cfg.setdefault("rounds", 1) != 1:
             warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
-            _cfg["rounds"] = 1
+            cfg["rounds"] = 1
 
-        if "reps" in _cfg:
+        if cfg.get("reps", 1) != 1:
             warnings.warn("reps will be overwritten by singleshot measurement shots")
-        _cfg["reps"] = _cfg["shots"]
+        cfg["reps"] = cfg["shots"]
+
+        _cfg = check_type(deepcopy(cfg), CheckCfg)  # avoid in-place modification
 
         def measure_fn(ctx: TaskContextView, _) -> NDArray[np.float64]:
             modules = ctx.cfg["modules"]
@@ -64,7 +67,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse("init_pulse", modules.get("init_pulse")),
                     Pulse("probe_pulse", modules.get("probe_pulse")),
                     Readout("readout", modules["readout"]),

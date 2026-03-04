@@ -1,5 +1,5 @@
 import warnings
-from typing import Mapping, Dict, Optional, Union, cast
+from typing import Dict, Mapping, Optional, Sequence, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -72,8 +72,8 @@ def check_time_sweep(
 
 
 def sweep2array(
-    sweep: Union[SweepCfg, NDArray[np.float64]], allow_array: bool = False
-) -> NDArray[np.float64]:
+    sweep: Union[SweepCfg, Sequence, NDArray], allow_array: bool = False
+) -> NDArray:
     """
     Convert sweep parameter to a numpy array.
 

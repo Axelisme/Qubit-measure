@@ -80,6 +80,8 @@ class MetaDict(SyncFile):
             return object.__getattr__(self, name)  # type: ignore
 
         self.sync()
+        if name not in self._data:
+            raise AttributeError(f"MetaDict has no attribute {name}")
         return self._data[name]
 
     def __setattr__(self, name: str, value: Any) -> None:

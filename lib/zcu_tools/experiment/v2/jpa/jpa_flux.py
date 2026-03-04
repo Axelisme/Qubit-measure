@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
@@ -17,10 +18,11 @@ from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     sweep2array,
 )
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -43,23 +45,23 @@ class JPAFluxModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class JPAFluxCfg(ModularProgramCfg):
+class JPAFluxCfg(ModularProgramCfg, TaskCfg):
     modules: JPAFluxModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class JPAFluxExp(AbsExperiment[JPAFluxResult, JPAFluxCfg]):
-    def run(self, soc, soccfg, cfg: JPAFluxCfg) -> JPAFluxResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPAFluxResult:
+        _cfg = check_type(deepcopy(cfg), JPAFluxCfg)
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_flux")
+        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "jpa_flux")
 
-        jpa_flxs = sweep2array(cfg["sweep"]["jpa_flux"], allow_array=True)
+        jpa_flxs = sweep2array(_cfg["sweep"]["jpa_flux"], allow_array=True)
 
-        modules = cfg["modules"]
-        cfg["sweep"] = {"ge": make_ge_sweep()}
+        modules = _cfg["modules"]
+        _cfg["sweep"] = {"ge": make_ge_sweep()}
         Pulse.set_param(
-            modules["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
         with LivePlotter1D("JPA Flux value (a.u.)", "Signal Difference") as viewer:
@@ -102,13 +104,13 @@ class JPAFluxExp(AbsExperiment[JPAFluxResult, JPAFluxCfg]):
                         dtype=np.float64,
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(jpa_flxs, np.abs(ctx.data)),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (jpa_flxs, signals)
 
         return jpa_flxs, signals

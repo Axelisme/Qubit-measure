@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,14 +9,16 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -47,8 +49,9 @@ class T1ModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class T1Cfg(ModularProgramCfg):
+class T1Cfg(ModularProgramCfg, TaskCfg):
     modules: T1ModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class T1Exp(AbsExperiment[T1Result, T1Cfg]):
@@ -58,13 +61,11 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     to measure the qubit's energy relaxation.
     """
 
-    def _run_non_uniform(self, soc, soccfg, cfg: T1Cfg) -> T1Result:
-        cfg = deepcopy(cfg)
+    def _run_non_uniform(self, soc, soccfg, cfg: Dict[str, Any]) -> T1Result:
+        _cfg = check_type(deepcopy(cfg), T1Cfg)
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        len_sweep = cfg["sweep"]["length"]
-        del cfg["sweep"]
+        len_sweep = _cfg["sweep"]["length"]
+        del _cfg["sweep"]["length"]
 
         if isinstance(len_sweep, dict):
             ts = (
@@ -92,7 +93,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                         soccfg,
                         ctx.cfg,
                         modules=[
-                            Reset("reset", modules.get("reset", {"type": "none"})),
+                            Reset("reset", modules.get("reset")),
                             Pulse("pi_pulse", modules["pi_pulse"]),
                             Delay("t1_delay", delay=t1_delay),
                             Readout("readout", modules["readout"]),
@@ -114,58 +115,60 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     raw2signal_fn=lambda raw: raw,
                     result_shape=(len(ts),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (ts, signals)
 
         return ts, signals
 
-    def _run_uniform(self, soc, soccfg, cfg: T1Cfg) -> T1Result:
-        cfg = deepcopy(cfg)
+    def _run_uniform(self, soc, soccfg, cfg: Dict[str, Any]) -> T1Result:
+        _cfg = check_type(deepcopy(cfg), T1Cfg)
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-
-        ts = sweep2array(cfg["sweep"]["length"])
+        ts = sweep2array(_cfg["sweep"]["length"])
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                ctx.cfg["modules"].get("reset", {"type": "none"}),
-                            ),
-                            Pulse("pi_pulse", ctx.cfg["modules"]["pi_pulse"]),
-                            Delay(
-                                name="t1_delay",
-                                delay=sweep2param("length", ctx.cfg["sweep"]["length"]),
-                            ),
-                            Readout("readout", ctx.cfg["modules"]["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("pi_pulse", modules["pi_pulse"]),
+                                    Delay(
+                                        name="t1_delay",
+                                        delay=sweep2param(
+                                            "length", ctx.cfg["sweep"]["length"]
+                                        ),
+                                    ),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    ),
                     result_shape=(len(ts),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (ts, signals)
 
         return ts, signals
 
-    def run(self, soc, soccfg, cfg: T1Cfg, uniform: bool = True) -> T1Result:
+    def run(self, soc, soccfg, cfg: Dict[str, Any], uniform: bool = True) -> T1Result:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         if uniform:
             return self._run_uniform(soc, soccfg, cfg)
         else:
@@ -260,24 +263,23 @@ class T1WithToneProgramCfg(ModularProgramCfg):
     modules: T1WithToneModuleCfg
 
 
-class T1WithToneTaskConfig(T1WithToneProgramCfg): ...
+class T1WithToneTaskConfig(T1WithToneProgramCfg, TaskCfg):
+    sweep: Dict[str, SweepCfg]
 
 
 class T1WithToneExp(AbsExperiment):
-    def run(self, soc, soccfg, cfg: T1WithToneTaskConfig) -> T1Result:
-        cfg = deepcopy(cfg)
-        modules = cfg["modules"]
-
-        assert "sweep" in cfg
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        _cfg = check_type(deepcopy(cfg), T1WithToneTaskConfig)
+        modules = _cfg["modules"]
 
         Pulse.set_param(
             modules["test_pulse"],
             "length",
-            sweep2param("length", cfg["sweep"]["length"]),
+            sweep2param("length", _cfg["sweep"]["length"]),
         )
 
-        ts = sweep2array(cfg["sweep"]["length"])
+        ts = sweep2array(_cfg["sweep"]["length"])
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
@@ -288,7 +290,7 @@ class T1WithToneExp(AbsExperiment):
                         soccfg,
                         ctx.cfg,
                         modules=[
-                            Reset("reset", modules.get("reset", {"type": "none"})),
+                            Reset("reset", modules.get("reset")),
                             Pulse(name="pi_pulse", cfg=modules["pi_pulse"]),
                             Pulse(name="test_pulse", cfg=modules["test_pulse"]),
                             Readout("readout", modules["readout"]),
@@ -296,12 +298,12 @@ class T1WithToneExp(AbsExperiment):
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(ts),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (ts, signals)
 
         return ts, signals
@@ -398,26 +400,26 @@ class T1WithToneSweepProgramCfg(ModularProgramCfg):
     modules: T1WithToneModuleCfg
 
 
-class T1WithToneSweepTaskConfig(T1WithToneSweepProgramCfg): ...
+class T1WithToneSweepTaskConfig(T1WithToneSweepProgramCfg, TaskCfg):
+    sweep: Dict[str, SweepCfg]
 
 
 class T1WithToneSweepExp(AbsExperiment):
-    def run(self, soc, soccfg, cfg: T1WithToneSweepTaskConfig) -> T1SweepResultType:
-        cfg = deepcopy(cfg)
-        modules = cfg["modules"]
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1SweepResultType:
+        _cfg = check_type(deepcopy(cfg), T1WithToneSweepTaskConfig)
+        modules = _cfg["modules"]
 
-        assert "sweep" in cfg
-        gain_sweep = cfg["sweep"]["gain"]
-        cfg["sweep"] = {"length": cfg["sweep"]["length"]}
+        gain_sweep = _cfg["sweep"]["gain"]
+        _cfg["sweep"] = {"length": _cfg["sweep"]["length"]}
 
         Pulse.set_param(
             modules["test_pulse"],
             "length",
-            sweep2param("length", cfg["sweep"]["length"]),
+            sweep2param("length", _cfg["sweep"]["length"]),
         )
 
         gains = sweep2array(gain_sweep, allow_array=True)  # predicted
-        ts = sweep2array(cfg["sweep"]["length"])  # predicted times
+        ts = sweep2array(_cfg["sweep"]["length"])  # predicted times
 
         with LivePlotter2DwithLine(
             "gain", "Time (us)", line_axis=1, num_lines=5
@@ -436,7 +438,7 @@ class T1WithToneSweepExp(AbsExperiment):
                             modules=[
                                 Reset(
                                     "reset",
-                                    ctx.cfg["modules"].get("reset", {"type": "none"}),
+                                    ctx.cfg["modules"].get("reset"),
                                 ),
                                 Pulse(
                                     name="pi_pulse", cfg=ctx.cfg["modules"]["pi_pulse"]
@@ -451,7 +453,7 @@ class T1WithToneSweepExp(AbsExperiment):
                         result_shape=(len(ts),),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     gains, ts, t1_sweep_tone_signal2real(np.asarray(ctx.data))
                 ),
@@ -459,7 +461,7 @@ class T1WithToneSweepExp(AbsExperiment):
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (gains, ts, signals)
 
         return gains, ts, signals

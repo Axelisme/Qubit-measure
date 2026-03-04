@@ -1,27 +1,28 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
+from typing_extensions import Any, Dict, Literal, Optional, Tuple
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
-
-from ..runner import HardTask, TaskCfg, run_task
 
 # (fpts, signals)
 FreqResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class FreqCfg(OneToneCfg, TaskCfg): ...
+class FreqCfg(OneToneCfg, TaskCfg):
+    sweep: Dict[str, SweepCfg]
 
 
 def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -30,19 +31,17 @@ def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), FreqCfg)
-
-        # Ensure the sweep section is in canonical single-axis form.
-        assert "sweep" in _cfg
-        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "freq")
 
         # Predicted frequency points (before mapping to ADC domain)
         fpts: NDArray[np.float64] = sweep2array(_cfg["sweep"]["freq"])  # MHz
 
         # set readout frequency as sweep param
-        modules = _cfg["modules"]
         Readout.set_param(
-            modules["readout"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
+            _cfg["modules"]["readout"],
+            "freq",
+            sweep2param("freq", _cfg["sweep"]["freq"]),
         )
 
         # run experiment

@@ -1,22 +1,24 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import minus_background, rotate2real
 
-from ..runner import HardTask, run_task
+from ..runner import HardTask, TaskCfg, run_task
 
 FreqResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
@@ -25,23 +27,21 @@ def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals))
 
 
-class FreqCfg(TwoToneCfg): ...
+class FreqCfg(TwoToneCfg, TaskCfg):
+    sweep: Dict[str, SweepCfg]
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        # canonicalise sweep section to single-axis form «{'freq': ...}»
-        assert "sweep" in cfg
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
 
         # predicted sweep points before FPGA coercion
-        fpts = sweep2array(cfg["sweep"]["freq"])  # MHz
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # MHz
 
         # bind sweep parameter as *QickParam* so it is executed by FPGA
-        modules = cfg["modules"]
-        modules["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
+        modules = _cfg["modules"]
+        modules["qub_pulse"]["freq"] = sweep2param("freq", _cfg["sweep"]["freq"])
 
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
@@ -51,14 +51,14 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(fpts),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     fpts, qubfreq_signal2real(ctx.data)
                 ),
             )
 
         # cache
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (fpts, signals)
 
         return fpts, signals

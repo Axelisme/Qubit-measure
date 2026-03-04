@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_rabi
@@ -26,28 +28,26 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class LenRabiCfg(TwoToneCfg): ...
+class LenRabiCfg(TwoToneCfg, TaskCfg):
+    sweep: Dict[str, SweepCfg]
 
 
 class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
-    def _run_for_flat(self, soc, soccfg, cfg: LenRabiCfg) -> LenRabiResult:
-        cfg = deepcopy(cfg)  # avoid in-place modification
-        modules = cfg["modules"]
+    def _run_for_flat(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResult:
+        _cfg = check_type(deepcopy(cfg), LenRabiCfg)
+        modules = _cfg["modules"]
 
         assert modules["qub_pulse"]["waveform"]["style"] in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-
-        lens = sweep2array(cfg["sweep"]["length"])  # predicted
+        lens = sweep2array(_cfg["sweep"]["length"])  # predicted
         lens = round_zcu_time(lens, soccfg, gen_ch=modules["qub_pulse"]["ch"])
 
         Pulse.set_param(
             modules["qub_pulse"],
             "length",
-            sweep2param("length", cfg["sweep"]["length"]),
+            sweep2param("length", _cfg["sweep"]["length"]),
         )
 
         with LivePlotter1D("Length (us)", "Signal") as viewer:
@@ -58,23 +58,21 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(lens),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(lens, rabi_signal2real(ctx.data)),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (lens, signals)
 
         return lens, signals
 
-    def _run_for_arb(self, soc, soccfg, cfg: LenRabiCfg) -> LenRabiResult:
-        cfg = deepcopy(cfg)  # avoid in-place modification
-        modules = cfg["modules"]
+    def _run_for_arb(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResult:
+        _cfg = check_type(deepcopy(cfg), LenRabiCfg)
+        modules = _cfg["modules"]
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        len_sweep = cfg["sweep"].pop("length")
+        len_sweep = _cfg["sweep"].pop("length")
 
         lens = sweep2array(len_sweep)  # predicted
         lens = round_zcu_time(lens, soccfg, gen_ch=modules["qub_pulse"]["ch"])
@@ -94,7 +92,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                         ).acquire(soc, progress=False, callback=update_hook),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     lens, rabi_signal2real(np.asarray(ctx.data))
                 ),
@@ -102,14 +100,16 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (lens, signals)
 
         return lens, signals
 
-    def run(self, soc, soccfg, cfg: LenRabiCfg) -> LenRabiResult:
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResult:
         modules = cfg["modules"]
         qub_waveform = modules["qub_pulse"]["waveform"]
+
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
         if qub_waveform["style"] in ["const", "flat_top"]:
             # use hard sweep for flat top pulse

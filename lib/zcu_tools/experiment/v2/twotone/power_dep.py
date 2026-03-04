@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
+from typeguard import check_type
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
-from ..runner import HardTask, run_task
+from ..runner import HardTask, TaskCfg, run_task
 
 PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
@@ -22,27 +24,27 @@ def pdr_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class PowerCfg(TwoToneCfg): ...
+class PowerCfg(TwoToneCfg, TaskCfg):
+    sweep: Dict[str, SweepCfg]
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
-    def run(self, soc, soccfg, cfg: PowerCfg) -> PowerResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> PowerResult:
+        _cfg = check_type(deepcopy(cfg), PowerCfg)
 
         # Ensure gain is the outer loop for better visualization
-        assert "sweep" in cfg
-        cfg["sweep"] = {
-            "gain": cfg["sweep"]["gain"],
-            "freq": cfg["sweep"]["freq"],
+        _cfg["sweep"] = {
+            "gain": _cfg["sweep"]["gain"],
+            "freq": _cfg["sweep"]["freq"],
         }
 
-        pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+        pdrs = sweep2array(_cfg["sweep"]["gain"])  # predicted pulse gains
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
 
         # Attach both sweep parameters to the qubit pulse
-        modules = cfg["modules"]
-        modules["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
-        modules["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
+        modules = _cfg["modules"]
+        modules["qub_pulse"]["gain"] = sweep2param("gain", _cfg["sweep"]["gain"])
+        modules["qub_pulse"]["freq"] = sweep2param("freq", _cfg["sweep"]["freq"])
 
         with LivePlotter2D("Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
             signals = run_task(
@@ -52,14 +54,14 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(pdrs), len(fpts)),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     pdrs, fpts, pdr_signal2real(ctx.data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (pdrs, fpts, signals)
 
         return pdrs, fpts, signals

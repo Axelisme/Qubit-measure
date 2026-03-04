@@ -5,11 +5,11 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import (
     Callable,
     Dict,
     List,
-    NotRequired,
     Optional,
     TypedDict,
     cast,
@@ -17,7 +17,7 @@ from typing_extensions import (
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.meta_manager import ModuleLibrary
@@ -54,11 +54,10 @@ def qubitfreq_fluxdep_signal2real(
     return np.array(list(map(qubitfreq_signal2real, signals)), dtype=np.float64)
 
 
-class QubitFreqCfgTemplate(TwoToneCfg):
-    dev: NotRequired[Dict[str, DeviceInfo]]
+class QubitFreqCfgTemplate(TwoToneCfg, TaskCfg): ...
 
 
-class QubitFreqCfg(TwoToneCfg):
+class QubitFreqCfg(TwoToneCfg, TaskCfg):
     dev: Dict[str, DeviceInfo]
     sweep: Dict[str, SweepCfg]
 
@@ -137,7 +136,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
             "freq",
             center_freq + sweep2param("detune", self.detune_sweep),
         )
-        cfg = cast(QubitFreqCfg, cfg_temp)
+        cfg = check_type(cfg_temp, QubitFreqCfg)
 
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
 

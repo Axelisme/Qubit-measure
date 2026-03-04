@@ -1,19 +1,21 @@
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -36,26 +38,26 @@ class PowerModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class PowerCfg(ModularProgramCfg):
+class PowerCfg(ModularProgramCfg, TaskCfg):
     modules: PowerModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
-    def run(self, soc, soccfg, cfg: PowerCfg) -> PowerResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        assert "sweep" in cfg
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> PowerResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "power")
-        cfg["sweep"] = {"ge": make_ge_sweep(), "power": cfg["sweep"]["power"]}
+        _cfg = check_type(deepcopy(cfg), PowerCfg)
 
-        gains = sweep2array(cfg["sweep"]["power"])  # predicted power points
+        _cfg["sweep"] = {"ge": make_ge_sweep(), "power": _cfg["sweep"]["power"]}
 
-        modules = cfg["modules"]
+        gains = sweep2array(_cfg["sweep"]["power"])  # predicted power points
+
+        modules = _cfg["modules"]
         Pulse.set_param(
-            modules["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
         Readout.set_param(
-            modules["readout"], "gain", sweep2param("power", cfg["sweep"]["power"])
+            modules["readout"], "gain", sweep2param("power", _cfg["sweep"]["power"])
         )
 
         with LivePlotter1D("Readout Power", "SNR") as viewer:
@@ -66,7 +68,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Reset("reset", modules.get("reset")),
                         Pulse("qub_pulse", modules["qub_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
@@ -89,12 +91,12 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     result_shape=(len(gains),),
                     dtype=np.float64,
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(gains, np.abs(ctx.data)),
             )
 
         # record the last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (gains, signals)
 
         return gains, signals

@@ -74,8 +74,8 @@ class ModuleLibrary(SyncFile):
         with open(str(path), "r") as f:
             cfg = yaml.safe_load(f)
 
-        deepupdate(self.waveforms, cfg["waveforms"], behavior="force")
-        deepupdate(self.modules, cfg["modules"], behavior="force")
+        self.waveforms = cfg["waveforms"]
+        self.modules = cfg["modules"]
 
     def _dump(self, path: str) -> None:
         self.check_can_write()
@@ -99,6 +99,9 @@ class ModuleLibrary(SyncFile):
         for name, sub_cfg in modules.items():
             if isinstance(sub_cfg, str):
                 sub_cfg = self.get_module(sub_cfg)
+            if "type" not in sub_cfg:
+                raise ValueError(f"Top-level module {name} is missing 'type' field")
+
             module_cls = Module.parse(sub_cfg["type"])
             modules[name] = module_cls.auto_fill(sub_cfg, self)  # type: ignore
 
@@ -151,6 +154,10 @@ class ModuleLibrary(SyncFile):
     def get_module(
         self, name: str, override_cfg: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
+        if name not in self.modules:
+            raise ValueError(
+                f"Module {name} not found, available modules: {list(self.modules.keys())}"
+            )
         module = deepcopy(self.modules[name])
         if override_cfg is not None:
             deepupdate(module, override_cfg, behavior="force")

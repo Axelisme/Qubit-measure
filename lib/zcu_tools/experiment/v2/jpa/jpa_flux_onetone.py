@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
+from typeguard import check_type
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
@@ -19,24 +21,24 @@ JPAFluxByOneToneResult = Tuple[
 ]
 
 
-class JPAFluxByOneToneCfg(OneToneCfg):
+class JPAFluxByOneToneCfg(OneToneCfg, TaskCfg):
     dev: Mapping[str, DeviceInfo]
+    sweep: Dict[str, SweepCfg]
 
 
 class JPAFluxByOneToneExp(AbsExperiment[JPAFluxByOneToneResult, JPAFluxByOneToneCfg]):
-    def run(self, soc, soccfg, cfg: JPAFluxByOneToneCfg) -> JPAFluxByOneToneResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPAFluxByOneToneResult:
+        _cfg = check_type(deepcopy(cfg), JPAFluxByOneToneCfg)
 
-        assert "sweep" in cfg
-        jpa_flux_sweep = cfg["sweep"]["jpa_flux"]
-        cfg["sweep"] = {"freq": cfg["sweep"]["freq"]}
+        jpa_flux_sweep = _cfg["sweep"]["jpa_flux"]
+        _cfg["sweep"] = {"freq": _cfg["sweep"]["freq"]}
 
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         jpa_flxs = sweep2array(jpa_flux_sweep, allow_array=True)
-        fpts = sweep2array(cfg["sweep"]["freq"], allow_array=True)
+        fpts = sweep2array(_cfg["sweep"]["freq"], allow_array=True)
 
         Readout.set_param(
-            modules["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
         )
 
         with LivePlotter2DwithLine(
@@ -59,7 +61,7 @@ class JPAFluxByOneToneExp(AbsExperiment[JPAFluxByOneToneResult, JPAFluxByOneTone
                         result_shape=(len(fpts),),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     jpa_flxs, fpts, np.abs(np.asarray(ctx.data))
                 ),
@@ -67,7 +69,7 @@ class JPAFluxByOneToneExp(AbsExperiment[JPAFluxByOneToneResult, JPAFluxByOneTone
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (jpa_flxs, fpts, signals)
 
         return jpa_flxs, fpts, signals

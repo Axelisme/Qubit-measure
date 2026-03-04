@@ -172,7 +172,7 @@ class PulseReadout(Readout, tag="pulse"):
         readout_cfg["type"] = "readout/pulse"
         readout_cfg["pulse_cfg"] = Pulse.auto_fill(readout_cfg["pulse_cfg"], ml)
         readout_cfg["ro_cfg"] = DirectReadout.auto_fill(readout_cfg["ro_cfg"], ml)
-        if freq := readout_cfg["pulse_cfg"].get("freq"):
+        if (freq := readout_cfg["pulse_cfg"].get("freq")) is not None:
             readout_cfg["ro_cfg"].setdefault("ro_freq", freq)
         readout_cfg["ro_cfg"].setdefault("gen_ch", readout_cfg["pulse_cfg"]["ch"])
 

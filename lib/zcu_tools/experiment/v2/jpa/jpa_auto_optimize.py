@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +9,8 @@ from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, TypedDict
+from typeguard import check_type
+from typing_extensions import Any, Dict, NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
@@ -19,10 +19,17 @@ from zcu_tools.experiment.utils import (
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
 )
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskContextView, run_task
+from zcu_tools.experiment.v2.runner import (
+    HardTask,
+    SoftTask,
+    TaskCfg,
+    TaskContextView,
+    run_task,
+)
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -47,23 +54,25 @@ class JPAOptModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class JPAOptCfg(ModularProgramCfg):
+class JPAOptCfg(ModularProgramCfg, TaskCfg):
     modules: JPAOptModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
-    def run(self, soc, soccfg, cfg: JPAOptCfg, num_points: int) -> JPAOptimizeResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run(
+        self, soc, soccfg, cfg: Dict[str, Any], num_points: int
+    ) -> JPAOptimizeResult:
+        _cfg = check_type(deepcopy(cfg), JPAOptCfg)
 
-        assert "sweep" in cfg
-        flx_sweep = cfg["sweep"]["jpa_flux"]
-        fpt_sweep = cfg["sweep"]["jpa_freq"]
-        pdr_sweep = cfg["sweep"]["jpa_power"]
+        flx_sweep = _cfg["sweep"]["jpa_flux"]
+        fpt_sweep = _cfg["sweep"]["jpa_freq"]
+        pdr_sweep = _cfg["sweep"]["jpa_power"]
 
-        modules = cfg["modules"]
-        cfg["sweep"] = {"ge": make_ge_sweep()}
+        modules = _cfg["modules"]
+        _cfg["sweep"] = {"ge": make_ge_sweep()}
         Pulse.set_param(
-            modules["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
         optimizer = JPAOptimizer(flx_sweep, fpt_sweep, pdr_sweep, num_points)
@@ -185,14 +194,14 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                         dtype=np.float64,
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=plot_fn,
             )
             signals = np.asarray(results)
 
         plt.close(fig)
 
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (params, phases, signals)
 
         return params, phases, signals

@@ -1,16 +1,18 @@
 from copy import deepcopy
-from typing import Optional, Tuple, cast
+from typing import Any, Dict, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -36,8 +38,9 @@ class PowerModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class PowerCfg(ModularProgramCfg):
+class PowerCfg(ModularProgramCfg, TaskCfg):
     modules: PowerModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
@@ -45,20 +48,19 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         self,
         soc,
         soccfg,
-        cfg: PowerCfg,
+        cfg: Dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> PowerResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-        modules = cfg["modules"]
-
-        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
+        _cfg = check_type(deepcopy(cfg), PowerCfg)  # prevent in-place modification
+        modules = _cfg["modules"]
+
+        pdrs = sweep2array(_cfg["sweep"]["gain"])  # predicted amplitudes
 
         Pulse.set_param(
-            modules["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+            modules["probe_pulse"], "gain", sweep2param("gain", _cfg["sweep"]["gain"])
         )
 
         with LivePlotter1D(
@@ -81,8 +83,8 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset", {"type": "none"})),
-                        Pulse(name="init_pulse", cfg=modules["init_pulse"]),
+                        Reset("reset", modules.get("reset")),
+                        Pulse(name="init_pulse", cfg=modules.get("init_pulse")),
                         Pulse(name="probe_pulse", cfg=modules["probe_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
@@ -102,14 +104,14 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     result_shape=(len(pdrs), 2),
                     dtype=np.float64,
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     pdrs, calc_populations(ctx.data).T
                 ),
             )
 
         # record the last result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result: PowerResult = (pdrs, signals)
 
         return pdrs, signals

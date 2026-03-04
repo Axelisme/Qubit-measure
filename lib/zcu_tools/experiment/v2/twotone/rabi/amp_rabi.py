@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_rabi
@@ -25,20 +27,19 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class AmpRabiCfg(TwoToneCfg): ...
+class AmpRabiCfg(TwoToneCfg, TaskCfg):
+    sweep: Dict[str, SweepCfg]
 
 
 class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
-    def run(self, soc, soccfg, cfg: AmpRabiCfg) -> AmpRabiResult:
-        cfg = deepcopy(cfg)
-
-        assert "sweep" in cfg
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> AmpRabiResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
+        _cfg = check_type(deepcopy(cfg), AmpRabiCfg)
 
-        amps = sweep2array(cfg["sweep"]["gain"])  # predicted
+        amps = sweep2array(_cfg["sweep"]["gain"])  # predicted
 
-        modules = cfg["modules"]
-        modules["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
+        modules = _cfg["modules"]
+        modules["qub_pulse"]["gain"] = sweep2param("gain", _cfg["sweep"]["gain"])
 
         with LivePlotter1D("Pulse gain", "Amplitude") as viewer:
             signals = run_task(
@@ -48,11 +49,11 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(amps),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(amps, rabi_signal2real(ctx.data)),
             )
 
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (amps, signals)
 
         return amps, signals

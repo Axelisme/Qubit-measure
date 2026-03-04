@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import Dict, List, NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContextView, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program import SweepCfg
@@ -44,7 +46,7 @@ class T1WithToneModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class T1WithToneCfg(ModularProgramCfg):
+class T1WithToneCfg(ModularProgramCfg, TaskCfg):
     modules: T1WithToneModuleCfg
     sweep: Dict[str, SweepCfg]
 
@@ -54,23 +56,22 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         self,
         soc,
         soccfg,
-        cfg: T1WithToneCfg,
+        cfg: Dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
         uniform: bool = False,
     ) -> T1WithToneResult:
-        cfg = deepcopy(cfg)
-
-        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        len_sweep = cfg["sweep"]["length"]
+        _cfg = check_type(deepcopy(cfg), T1WithToneCfg)
+
+        len_sweep = _cfg["sweep"]["length"]
 
         if uniform:
             assert isinstance(len_sweep, dict)
             ts = sweep2array(len_sweep)
             ts = round_zcu_time(ts, soccfg)
-            cfg["sweep"] = {"length": len_sweep, "ge": make_ge_sweep()}
+            _cfg["sweep"] = {"length": len_sweep, "ge": make_ge_sweep()}
         else:
             if isinstance(len_sweep, dict):
                 ts = np.geomspace(
@@ -80,7 +81,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 ts = np.asarray(len_sweep)
             ts = round_zcu_time(ts, soccfg)
             ts = np.unique(ts)
-            cfg["sweep"] = {"ge": make_ge_sweep()}
+            _cfg["sweep"] = {"ge": make_ge_sweep()}
 
         fig, axs = make_plot_frame(1, 2, figsize=(12, 5))
         axs[0][0].set_ylim(0, 1)
@@ -131,7 +132,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 viewer.refresh()
 
             def measure_fn(ctx: TaskContextView, update_hook):
-                ge_param = sweep2param("ge", cfg["sweep"]["ge"])
+                ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
 
                 def prog_maker(cfg, t1_param):
                     cfg = deepcopy(cfg)
@@ -140,7 +141,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                         soccfg,
                         cfg,
                         modules=[
-                            Reset("reset", modules.get("reset", {"type": "none"})),
+                            Reset("reset", modules.get("reset")),
                             Pulse("init_pulse", modules.get("init_pulse")),
                             Pulse(
                                 "pi_pulse",
@@ -167,7 +168,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                     population_radius=radius,
                 )
                 if uniform:
-                    len_param = sweep2param("length", cfg["sweep"]["length"])
+                    len_param = sweep2param("length", _cfg["sweep"]["length"])
                     return prog_maker(ctx.cfg, len_param).acquire(**acquire_kwargs)
                 else:
                     return measure_with_sweep(
@@ -181,13 +182,13 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                     result_shape=(len(ts), 2, 2),
                     dtype=np.float64,
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=plot_fn,
             )
         plt.close(fig)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (ts, populations)
 
         return ts, populations

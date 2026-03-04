@@ -2,18 +2,20 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -73,42 +75,41 @@ class CKP_ModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class CKP_Cfg(ModularProgramCfg):
+class CKP_Cfg(ModularProgramCfg, TaskCfg):
     modules: CKP_ModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
-    def run(self, soc, soccfg, cfg: CKP_Cfg) -> CKP_Result:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-        modules = cfg["modules"]
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> CKP_Result:
+        _cfg = check_type(deepcopy(cfg), CKP_Cfg)
+        modules = _cfg["modules"]
 
         if modules["res_pulse"].get("block_mode", True):
             raise ValueError("Resonator pulse must not in block mode")
 
-        assert "sweep" in cfg
-        assert isinstance(cfg["sweep"], dict)
-        cfg["sweep"] = {
+        _cfg["sweep"] = {
             "ge": make_ge_sweep(),
-            "res_freq": cfg["sweep"]["res_freq"],
-            "qub_freq": cfg["sweep"]["qub_freq"],
+            "res_freq": _cfg["sweep"]["res_freq"],
+            "qub_freq": _cfg["sweep"]["qub_freq"],
         }
 
         # uniform in square space
-        res_freqs = sweep2array(cfg["sweep"]["res_freq"])
-        qub_freqs = sweep2array(cfg["sweep"]["qub_freq"])
+        res_freqs = sweep2array(_cfg["sweep"]["res_freq"])
+        qub_freqs = sweep2array(_cfg["sweep"]["qub_freq"])
 
         Pulse.set_param(
-            modules["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
         Pulse.set_param(
             modules["res_pulse"],
             "freq",
-            sweep2param("res_freq", cfg["sweep"]["res_freq"]),
+            sweep2param("res_freq", _cfg["sweep"]["res_freq"]),
         )
         Pulse.set_param(
             modules["qub_pulse"],
             "freq",
-            sweep2param("qub_freq", cfg["sweep"]["qub_freq"]),
+            sweep2param("qub_freq", _cfg["sweep"]["qub_freq"]),
         )
 
         fig, axs = make_plot_frame(1, 2, figsize=(10, 4))
@@ -148,7 +149,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Reset("reset", modules.get("reset")),
                         Pulse("pi_pulse", modules["pi_pulse"]),
                         Pulse("res_pulse", modules["res_pulse"]),
                         Pulse("qub_pulse", modules["qub_pulse"]),
@@ -161,13 +162,13 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                     measure_fn=measure_fn,
                     result_shape=(2, len(res_freqs), len(qub_freqs)),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=plot_fn,
             )
         plt.close(fig)
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (res_freqs, qub_freqs, signals)
 
         return res_freqs, qub_freqs, signals

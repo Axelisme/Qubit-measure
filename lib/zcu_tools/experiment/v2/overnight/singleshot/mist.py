@@ -6,6 +6,7 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+from typeguard import check_type
 from typing_extensions import (
     Callable,
     Dict,
@@ -17,7 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskContextView, TaskCfg
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
@@ -58,7 +59,7 @@ class MistModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class MistCfg(ModularProgramCfg):
+class MistCfg(ModularProgramCfg, TaskCfg):
     modules: MistModuleCfg
     sweep: Dict[str, SweepCfg]
 
@@ -307,7 +308,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
     def __init__(
         self, cfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
-        cfg = cast(MistCfg, deepcopy(cfg))
+        cfg = check_type(deepcopy(cfg), MistCfg)
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")

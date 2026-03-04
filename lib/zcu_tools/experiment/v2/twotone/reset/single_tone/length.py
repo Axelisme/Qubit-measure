@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -24,6 +26,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
+from zcu_tools.program.v2.modules import PulseResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
@@ -38,62 +41,58 @@ def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
 class LengthModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
-    tested_reset: ResetCfg
+    tested_reset: PulseResetCfg
     readout: ReadoutCfg
 
 
-class LengthCfg(ModularProgramCfg):
+class LengthCfg(ModularProgramCfg, TaskCfg):
     modules: LengthModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
-    def run(self, soc, soccfg, cfg: LengthCfg) -> LengthResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        assert "sweep" in cfg
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        _cfg = check_type(deepcopy(cfg), LengthCfg)
 
-        lens = sweep2array(cfg["sweep"]["length"])  # predicted pulse lengths
+        lens = sweep2array(_cfg["sweep"]["length"])  # predicted pulse lengths
 
         # Check that reset pulse is single pulse type
-        modules = cfg["modules"]
-        if modules["tested_reset"]["type"] != "pulse":
-            raise ValueError("This experiment only supports single pulse reset")
-
+        modules = _cfg["modules"]
         Reset.set_param(
             modules["tested_reset"],
             "length",
-            sweep2param("length", cfg["sweep"]["length"]),
+            sweep2param("length", _cfg["sweep"]["length"]),
         )
 
         with LivePlotter1D("Length (us)", "Amplitude") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                (modules := ctx.cfg["modules"]).get(
-                                    "reset", {"type": "none"}
-                                ),
-                            ),
-                            Pulse("init_pulse", modules.get("init_pulse")),
-                            Reset("tested_reset", modules["tested_reset"]),
-                            Readout("readout", modules["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("init_pulse", modules.get("init_pulse")),
+                                    Reset("tested_reset", modules["tested_reset"]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    ),
                     result_shape=(len(lens),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     lens, reset_length_signal2real(ctx.data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (lens, signals)
 
         return lens, signals

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
@@ -15,8 +16,9 @@ from zcu_tools.experiment.utils import (
     set_output_in_dev_cfg,
     sweep2array,
 )
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
@@ -27,24 +29,24 @@ def jpa_check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     return np.abs(signals)
 
 
-class JPACheckCfg(OneToneCfg):
+class JPACheckCfg(OneToneCfg, TaskCfg):
     dev: Mapping[str, DeviceInfo]
+    sweep: Dict[str, SweepCfg]
 
 
 class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
     OUTPUT_MAP = {0: "off", 1: "on"}
 
-    def run(self, soc, soccfg, cfg: JPACheckCfg) -> JPACheckResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPACheckResult:
+        _cfg = check_type(deepcopy(cfg), JPACheckCfg)
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
+        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "freq")
 
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
 
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         Readout.set_param(
-            modules["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
         )
 
         outputs = np.array([0, 1])
@@ -68,7 +70,7 @@ class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
                         result_shape=(len(fpts),),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     fpts, jpa_check_signal2real(np.asarray(ctx.data))
                 ),
@@ -76,7 +78,7 @@ class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (outputs, fpts, signals)
 
         return outputs, fpts, signals

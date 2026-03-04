@@ -3,13 +3,20 @@ from __future__ import annotations
 import sys
 from abc import ABC, abstractmethod
 
-from typing_extensions import TYPE_CHECKING, Generic, NotRequired, TypedDict, TypeVar
+from typing_extensions import (
+    TYPE_CHECKING,
+    Any,
+    Generic,
+    NotRequired,
+    TypedDict,
+    TypeVar,
+)
 
 if TYPE_CHECKING:
     from pyvisa import ResourceManager
 
 
-class DeviceInfo(TypedDict, closed=False):
+class DeviceInfo(TypedDict, extra_items=Any):
     type: str
     address: str
 

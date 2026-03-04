@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import plotly.graph_objects as go
+from typeguard import check_type
 from numpy.typing import NDArray
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -53,26 +55,26 @@ class FluxDepModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class FluxDepCfg(ModularProgramCfg):
+class FluxDepCfg(ModularProgramCfg, TaskCfg):
     modules: FluxDepModuleCfg
     dev: Mapping[str, DeviceInfo]
+    sweep: Dict[str, SweepCfg]
 
 
 class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
-    def run(self, soc, soccfg, cfg: FluxDepCfg) -> FluxDepResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-        modules = cfg["modules"]
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FluxDepResult:
+        _cfg = check_type(deepcopy(cfg), FluxDepCfg)
+        modules = _cfg["modules"]
 
-        assert "sweep" in cfg
-        flx_sweep = cfg["sweep"]["flux"]
-        cfg["sweep"] = {"gain": cfg["sweep"]["gain"]}
+        flx_sweep = _cfg["sweep"]["flux"]
+        _cfg["sweep"] = {"gain": _cfg["sweep"]["gain"]}
 
         # predict sweep points
         values = sweep2array(flx_sweep)
-        gains = sweep2array(cfg["sweep"]["gain"])
+        gains = sweep2array(_cfg["sweep"]["gain"])
 
         Pulse.set_param(
-            modules["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+            modules["probe_pulse"], "gain", sweep2param("gain", _cfg["sweep"]["gain"])
         )
 
         with LivePlotter2DwithLine(
@@ -108,7 +110,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                         result_shape=(len(gains),),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     values, gains, mist_signal2real(np.asarray(ctx.data))
                 ),
@@ -116,7 +118,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (values, gains, signals)
 
         return values, gains, signals

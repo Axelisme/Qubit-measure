@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple, cast
+from typing import Any, Dict, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -43,32 +45,32 @@ class RabiCheckModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class RabiCheckCfg(ModularProgramCfg):
+class RabiCheckCfg(ModularProgramCfg, TaskCfg):
     modules: RabiCheckModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
-    def run(self, soc, soccfg, cfg: RabiCheckCfg) -> RabiCheckResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        assert "sweep" in cfg
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> RabiCheckResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        cfg["sweep"] = {
+        _cfg = check_type(deepcopy(cfg), RabiCheckCfg)
+
+        _cfg["sweep"] = {
             "w/o_reset": make_ge_sweep(),
-            "gain": cfg["sweep"]["gain"],
+            "gain": _cfg["sweep"]["gain"],
         }
 
-        pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
+        pdrs = sweep2array(_cfg["sweep"]["gain"])  # predicted amplitudes
 
         # Attach gain sweep to initialization pulse
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         Pulse.set_param(
-            modules["rabi_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+            modules["rabi_pulse"], "gain", sweep2param("gain", _cfg["sweep"]["gain"])
         )
         Reset.set_param(
             modules["tested_reset"],
             "on/off",
-            sweep2param("w/o_reset", cfg["sweep"]["w/o_reset"]),
+            sweep2param("w/o_reset", _cfg["sweep"]["w/o_reset"]),
         )
 
         def measure_fn(ctx, update_hook):
@@ -78,7 +80,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse("rabi_pulse", modules["rabi_pulse"]),
                     Reset("tested_reset", modules["tested_reset"]),
                     Pulse("post_pulse", modules.get("post_pulse")),
@@ -97,14 +99,14 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                     measure_fn=measure_fn,
                     result_shape=(2, len(pdrs)),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     pdrs, reset_rabi_signal2real(ctx.data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (pdrs, signals)
 
         return pdrs, signals

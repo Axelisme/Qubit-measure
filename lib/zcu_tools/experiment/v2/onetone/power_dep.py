@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
+from typeguard import check_type
+from typing_extensions import Any, Dict, Optional, Tuple
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background, rescale
 
-from ..runner import HardTask, SoftTask, run_task
+from ..runner import HardTask, SoftTask, TaskCfg, run_task
 from ..utils import wrap_earlystop_check
 
 PowerDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
@@ -23,25 +25,24 @@ def pdrdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rescale(minus_background(np.abs(signals), axis=1), axis=1)
 
 
-class PowerDepCfg(OneToneCfg): ...
+class PowerDepCfg(OneToneCfg, TaskCfg):
+    sweep: Dict[str, SweepCfg]
 
 
 class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     def run(
-        self, soc, soccfg, cfg: PowerDepCfg, *, earlystop_snr: Optional[float] = None
+        self, soc, soccfg, cfg: Dict[str, Any], *, earlystop_snr: Optional[float] = None
     ) -> PowerDepResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+        _cfg = check_type(deepcopy(cfg), PowerDepCfg)
 
-        assert "sweep" in cfg
-        assert isinstance(cfg["sweep"], dict)
-        pdr_sweep = cfg["sweep"].pop("gain")
+        pdr_sweep = _cfg["sweep"].pop("gain")
 
         pdrs = sweep2array(pdr_sweep, allow_array=True)
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
 
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         Readout.set_param(
-            modules["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
         )
 
         # run experiment
@@ -74,7 +75,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                         result_shape=(len(fpts),),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     pdrs, fpts, pdrdep_signal2real(np.asarray(ctx.data))
                 ),
@@ -82,7 +83,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (pdrs, fpts, signals)
 
         return pdrs, fpts, signals

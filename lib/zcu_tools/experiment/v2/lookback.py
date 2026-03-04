@@ -9,12 +9,12 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typeguard import check_type
-from typing_extensions import Any, Dict, Optional, Tuple, cast
+from typing_extensions import Any, Dict, NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneCfg, OneToneProgram
-from zcu_tools.program.v2.modules import PulseReadoutCfg
+from zcu_tools.program.v2 import ModularProgramCfg, OneToneProgram
+from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
 from .runner import HardTask, TaskCfg, run_task
@@ -22,7 +22,14 @@ from .runner import HardTask, TaskCfg, run_task
 LookbackResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class LookbackCfg(OneToneCfg, TaskCfg): ...
+class LookbackModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
+    init_pulse: NotRequired[PulseCfg]
+    readout: PulseReadoutCfg
+
+
+class LookbackCfg(ModularProgramCfg, TaskCfg):
+    modules: LookbackModuleCfg
 
 
 def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -37,11 +44,11 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
             warnings.warn("reps is not 1 in config, this will be ignored.")
             _cfg["reps"] = 1
 
-        modules = _cfg["modules"]
-        readout_cfg = cast(PulseReadoutCfg, modules["readout"])
-
         prog = OneToneProgram(soccfg, _cfg)
-        Ts = prog.get_time_axis(ro_index=0) + readout_cfg["ro_cfg"]["trig_offset"]
+        Ts = (
+            prog.get_time_axis(ro_index=0)
+            + _cfg["modules"]["readout"]["ro_cfg"]["trig_offset"]
+        )
         assert isinstance(Ts, np.ndarray)
 
         with LivePlotter1D("Time (us)", "Amplitude") as viewer:

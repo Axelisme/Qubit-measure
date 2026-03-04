@@ -1,19 +1,21 @@
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -36,25 +38,25 @@ class LengthModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class LengthCfg(ModularProgramCfg):
+class LengthCfg(ModularProgramCfg, TaskCfg):
     modules: LengthModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
-    def run(self, soc, soccfg, cfg: LengthCfg) -> LengthResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        assert "sweep" in cfg
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        length_sweep = cfg["sweep"]["length"]
+        _cfg = check_type(deepcopy(cfg), LengthCfg)
+
+        length_sweep = _cfg["sweep"]["length"]
 
         # replace length sweep with ge sweep, and use soft loop for length
-        cfg["sweep"] = {"ge": make_ge_sweep()}
+        _cfg["sweep"] = {"ge": make_ge_sweep()}
 
         # set with / without pi gain for qubit pulse
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         Pulse.set_param(
-            modules["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
         lengths = sweep2array(length_sweep)  # predicted readout lengths
@@ -73,7 +75,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Reset("reset", modules.get("reset")),
                         Pulse("qub_pulse", modules["qub_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
@@ -102,13 +104,13 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                         dtype=np.float64,
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(lengths, np.abs(ctx.data)),
             )
             signals = np.asarray(signals)
 
         # record the last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (lengths, signals)
 
         return lengths, signals

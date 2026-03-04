@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
@@ -16,10 +17,11 @@ from zcu_tools.experiment.utils import (
     set_freq_in_dev_cfg,
     sweep2array,
 )
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -42,24 +44,24 @@ class JPAFreqModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class JPAFreqCfg(ModularProgramCfg):
+class JPAFreqCfg(ModularProgramCfg, TaskCfg):
     modules: JPAFreqModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class JPAFreqExp(AbsExperiment[JPAFreqResult, JPAFreqCfg]):
-    def run(self, soc, soccfg, cfg: JPAFreqCfg) -> JPAFreqResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPAFreqResult:
+        _cfg = check_type(deepcopy(cfg), JPAFreqCfg)
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_freq")
+        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "jpa_freq")
 
-        jpa_freqs = sweep2array(cfg["sweep"]["jpa_freq"], allow_array=True)
+        jpa_freqs = sweep2array(_cfg["sweep"]["jpa_freq"], allow_array=True)
         np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
 
-        modules = cfg["modules"]
-        cfg["sweep"] = {"ge": make_ge_sweep()}
+        modules = _cfg["modules"]
+        _cfg["sweep"] = {"ge": make_ge_sweep()}
         Pulse.set_param(
-            modules["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
         with LivePlotterScatter("JPA Frequency (MHz)", "Signal Difference") as viewer:
@@ -102,13 +104,13 @@ class JPAFreqExp(AbsExperiment[JPAFreqResult, JPAFreqCfg]):
                         dtype=np.float64,
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(jpa_freqs, np.abs(ctx.data)),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (jpa_freqs, signals)
 
         return jpa_freqs, signals

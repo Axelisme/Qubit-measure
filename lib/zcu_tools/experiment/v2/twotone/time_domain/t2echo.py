@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -45,58 +47,61 @@ class T2EchoModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class T2EchoCfg(ModularProgramCfg):
+class T2EchoCfg(ModularProgramCfg, TaskCfg):
     modules: T2EchoModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
-    def run(self, soc, soccfg, cfg: T2EchoCfg, *, detune: float = 0.0) -> T2EchoResult:
-        cfg = deepcopy(cfg)
-
-        assert "sweep" in cfg
+    def run(
+        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
+    ) -> T2EchoResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        _cfg = check_type(deepcopy(cfg), T2EchoCfg)
 
-        ts = sweep2array(cfg["sweep"]["length"])
+        ts = sweep2array(_cfg["sweep"]["length"])
         ts = round_zcu_time(ts, soccfg)
 
-        t2e_spans = sweep2param("length", cfg["sweep"]["length"])
+        t2e_spans = sweep2param("length", _cfg["sweep"]["length"])
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Echo"}
         ) as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                ctx.cfg["modules"].get("reset", {"type": "none"}),
-                            ),
-                            Pulse("pi2_pulse1", ctx.cfg["modules"]["pi2_pulse"]),
-                            Delay("t2e_delay1", delay=0.5 * t2e_spans),
-                            Pulse("pi_pulse", ctx.cfg["modules"]["pi_pulse"]),
-                            Delay("t2e_delay2", delay=0.5 * t2e_spans),
-                            Pulse(
-                                name="pi2_pulse2",
-                                cfg=PulseCfg(
-                                    **ctx.cfg["modules"]["pi2_pulse"],
-                                    phase=ctx.cfg["modules"]["pi2_pulse"]["phase"]
-                                    + 360 * detune * t2e_spans,
-                                ),
-                            ),
-                            Readout("readout", ctx.cfg["modules"]["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("pi2_pulse1", modules["pi2_pulse"]),
+                                    Delay("t2e_delay1", delay=0.5 * t2e_spans),
+                                    Pulse("pi_pulse", modules["pi_pulse"]),
+                                    Delay("t2e_delay2", delay=0.5 * t2e_spans),
+                                    Pulse(
+                                        name="pi2_pulse2",
+                                        cfg=PulseCfg(
+                                            **modules["pi2_pulse"],
+                                            phase=modules["pi2_pulse"]["phase"]
+                                            + 360 * detune * t2e_spans,
+                                        ),
+                                    ),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    ),
                     result_shape=(len(ts),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(ts, t2echo_signal2real(ctx.data)),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (ts, signals)
 
         return ts, signals

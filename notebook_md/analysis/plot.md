@@ -7,7 +7,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.18.1
+      jupytext_version: 1.19.1
   kernelspec:
     display_name: .venv
     language: python
@@ -67,7 +67,7 @@ if "sample_f" in allows:
     sample_f = allows["sample_f"]
 
 
-flxs = np.linspace(0.842 - 0.01, 0.842 + 0.01, 1000)
+flxs = np.linspace(0.5, 1.0, 100)
 mAs = flx2mA(flxs, mA_c, period)
 ```
 
@@ -140,14 +140,15 @@ fig.show()
 ```python
 v_allows = {
     # **allows,
-    "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
+    "transitions": [(0, 1), (1, 4), (4, 7), (7, 9), (1, 9)],
+    # "transitions": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
     # "transitions2": [(i, j) for i in (0, 1) for j in range(i + 1, 20)],
     # "transitions3": [(i, j) for i in (0, 1) for j in range(i + 1, 25)],
     # "transitions4": [(i, j) for i in (0, 1) for j in range(i + 1, 30)],
     # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 4)],
     # "blue side": [(i, j) for i in (0, 1) for j in range(i + 1, 4)],
     # "red side": [(i, j) for i in (0, 1) for j in range(i + 1, 15)],
-    "mirror": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 15)],
+    # "mirror": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 15)],
     # "mirror2": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 20)],
     # "mirror3": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 25)],
     # "mirror4": [(i, j) for i in (0, 1, 2) for j in range(i + 1, 30)],

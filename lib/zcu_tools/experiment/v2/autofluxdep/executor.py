@@ -82,7 +82,7 @@ class MeasurementTask(
 
 
 class FluxDepCfg(TypedDict):
-    dev: Mapping[str, DeviceInfo]
+    dev: Dict[str, DeviceInfo]
 
 
 class FluxDepInfoDict(UserDict):
@@ -251,7 +251,7 @@ class FluxDepExecutor:
 
     def run(
         self,
-        dev_cfg: Mapping[str, DeviceInfo],
+        dev_cfg: Dict[str, DeviceInfo],
         predictor: FluxoniumPredictor,
         env_dict: Optional[Dict[str, Any]] = None,
         retry_time: int = 3,

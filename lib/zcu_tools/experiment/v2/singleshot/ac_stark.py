@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,17 +11,19 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy import float64
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.liveplot import (
     LivePlotter1D,
     LivePlotter2D,
     MultiLivePlotter,
     make_plot_frame,
 )
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -76,8 +78,9 @@ class AcStarkModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class AcStarkCfg(ModularProgramCfg):
+class AcStarkCfg(ModularProgramCfg, TaskCfg):
     modules: AcStarkModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
@@ -85,30 +88,28 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         self,
         soc,
         soccfg,
-        cfg: AcStarkCfg,
+        cfg: Dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> AcStarkResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-        modules = cfg["modules"]
+        _cfg = check_type(deepcopy(cfg), AcStarkCfg)  # prevent in-place modification
+        modules = _cfg["modules"]
 
         if modules["stark_pulse1"].get("block_mode", True):
             raise ValueError("Stark pulse 1 must be in block mode")
 
-        assert "sweep" in cfg
-        assert isinstance(cfg["sweep"], dict)
-        gain_sweep = cfg["sweep"].pop("gain")
+        gain_sweep = _cfg["sweep"].pop("gain")
 
         # uniform in square space
-        freqs = sweep2array(cfg["sweep"]["freq"])  # predicted frequencies
+        freqs = sweep2array(_cfg["sweep"]["freq"])  # predicted frequencies
         gains = np.sqrt(
             np.linspace(
                 gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
             )
         )
 
-        freq_param = sweep2param("freq", cfg["sweep"]["freq"])
+        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
         Pulse.set_param(modules["stark_pulse2"], "freq", freq_param)
 
         fig, axs = make_plot_frame(2, 2, figsize=(8, 6))
@@ -178,7 +179,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Reset("reset", modules.get("reset")),
                         Pulse("init_pulse", modules.get("init_pulse")),
                         Pulse("stark_pulse1", modules["stark_pulse1"]),
                         Pulse("stark_pulse2", modules["stark_pulse2"]),
@@ -205,14 +206,14 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                         dtype=np.float64,
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=plot_fn,
             )
             signals = np.asarray(signals)
         plt.close(fig)
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (gains, freqs, signals)
 
         return gains, freqs, signals

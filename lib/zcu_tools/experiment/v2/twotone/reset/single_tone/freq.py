@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -43,51 +45,51 @@ class FreqModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class FreqCfg(ModularProgramCfg):
+class FreqCfg(ModularProgramCfg, TaskCfg):
     modules: FreqModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        assert "sweep" in cfg
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
 
-        modules = cfg["modules"]
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
+
+        modules = _cfg["modules"]
         Reset.set_param(
-            modules["tested_reset"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["tested_reset"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
         )
 
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                (modules := ctx.cfg["modules"]).get(
-                                    "reset", {"type": "none"}
-                                ),
-                            ),
-                            Pulse("init_pulse", modules.get("init_pulse")),
-                            Reset("tested_reset", modules["tested_reset"]),
-                            Readout("readout", modules["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("init_pulse", modules.get("init_pulse")),
+                                    Reset("tested_reset", modules["tested_reset"]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    ),
                     result_shape=(len(fpts),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     fpts, reset_signal2real(ctx.data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (fpts, signals)
 
         return fpts, signals

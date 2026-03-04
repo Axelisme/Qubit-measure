@@ -1,25 +1,37 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, TypedDict
+from typeguard import check_type
+from typing_extensions import (
+    Any,
+    Callable,
+    Dict,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
+    TaskCfg,
     TaskContextView,
     run_task,
 )
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -55,19 +67,23 @@ class CPMG_ModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class CPMG_Cfg(ModularProgramCfg):
+class CPMG_SweepCfg(TypedDict, closed=True):
+    times: Union[SweepCfg, NDArray, list]
+    length: SweepCfg
+
+
+class CPMG_Cfg(ModularProgramCfg, TaskCfg):
     modules: CPMG_ModuleCfg
+    sweep: CPMG_SweepCfg
 
 
 class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
-    def run(self, soc, soccfg, cfg: CPMG_Cfg) -> CPMG_Result:
-        cfg = deepcopy(cfg)
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> CPMG_Result:
+        _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
 
-        assert "sweep" in cfg
-        assert isinstance(cfg["sweep"], dict)
-        times_sweep = cfg["sweep"]["times"]
-        len_sweep = cfg["sweep"]["length"]
-        cfg["sweep"].pop("times")
+        times_sweep = _cfg["sweep"]["times"]
+        len_sweep = _cfg["sweep"]["length"]
+        _cfg["sweep"].pop("times")  # type: ignore
 
         times = sweep2array(times_sweep, allow_array=True)
         ts = sweep2array(len_sweep)  # predicted times
@@ -86,7 +102,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse("pi2_pulse1", modules["pi2_pulse"], pulse_name="pi2_pulse"),
                     Delay("initial_cpmg_delay", delay=0.5 * interval),
                     Repeat(
@@ -114,7 +130,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     update_cfg_fn=lambda _, ctx, time: ctx.env_dict.update(time=time),
                     sub_task=HardTask(measure_fn=measure_fn, result_shape=(len(ts),)),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     times, ts, cpmg_signal2real(np.asarray(ctx.data))
                 ),
@@ -122,7 +138,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (times, ts, signals)
 
         return times, ts, signals

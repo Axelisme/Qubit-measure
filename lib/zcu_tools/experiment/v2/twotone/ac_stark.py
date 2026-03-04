@@ -2,20 +2,22 @@ from __future__ import annotations
 
 from copy import deepcopy
 from turtle import mode
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -88,26 +90,25 @@ class AcStarkModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class AcStarkCfg(ModularProgramCfg):
+class AcStarkCfg(ModularProgramCfg, TaskCfg):
     modules: AcStarkModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
     def run(
-        self, soc, soccfg, cfg: AcStarkCfg, *, earlystop_snr: Optional[float] = None
+        self, soc, soccfg, cfg: Dict[str, Any], *, earlystop_snr: Optional[float] = None
     ) -> AcStarkResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-        modules = cfg["modules"]
+        _cfg = check_type(deepcopy(cfg), AcStarkCfg)
+        modules = _cfg["modules"]
 
         if modules["stark_pulse1"].get("block_mode", True):
             raise ValueError("Stark pulse 1 must not in block mode")
 
-        assert "sweep" in cfg
-        assert isinstance(cfg["sweep"], dict)
-        gain_sweep = cfg["sweep"].pop("gain")
+        gain_sweep = _cfg["sweep"].pop("gain")
 
         # uniform in square space
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequencies
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequencies
         pdrs = np.sqrt(
             np.linspace(
                 gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
@@ -115,7 +116,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         )
 
         Pulse.set_param(
-            modules["stark_pulse2"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["stark_pulse2"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
         )
 
         with LivePlotter2DwithLine(
@@ -136,42 +137,36 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                     ),
                     sub_task=HardTask(
                         measure_fn=lambda ctx, update_hook: (
-                            prog := ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset",
-                                        ctx.cfg["modules"].get(
-                                            "reset", {"type": "none"}
-                                        ),
+                            (modules := ctx.cfg["modules"])
+                            and (
+                                prog := ModularProgramV2(
+                                    soccfg,
+                                    ctx.cfg,
+                                    modules=[
+                                        Reset("reset", modules.get("reset")),
+                                        Pulse("stark_pulse1", modules["stark_pulse1"]),
+                                        Pulse("stark_pulse2", modules["stark_pulse2"]),
+                                        Readout("readout", modules["readout"]),
+                                    ],
+                                )
+                            ).acquire(
+                                soc,
+                                progress=False,
+                                callback=wrap_earlystop_check(
+                                    prog,
+                                    update_hook,
+                                    earlystop_snr,
+                                    signal2real_fn=np.abs,
+                                    snr_hook=lambda snr: ax1d.set_title(
+                                        f"snr = {snr:.1f}"
                                     ),
-                                    Pulse(
-                                        "stark_pulse1",
-                                        ctx.cfg["modules"]["stark_pulse1"],
-                                    ),
-                                    Pulse(
-                                        "stark_pulse2",
-                                        ctx.cfg["modules"]["stark_pulse2"],
-                                    ),
-                                    Readout("readout", ctx.cfg["modules"]["readout"]),
-                                ],
+                                ),
                             )
-                        ).acquire(
-                            soc,
-                            progress=False,
-                            callback=wrap_earlystop_check(
-                                prog,
-                                update_hook,
-                                earlystop_snr,
-                                signal2real_fn=np.abs,
-                                snr_hook=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
-                            ),
                         ),
                         result_shape=(len(fpts),),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     pdrs, fpts, acstark_signal2real(np.asarray(ctx.data))
                 ),
@@ -179,7 +174,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (pdrs, fpts, signals)
 
         return pdrs, fpts, signals
@@ -333,29 +328,28 @@ class AcStarkRamseyProgramCfg(ModularProgramCfg):
     modules: AcStarkRamseyModuleCfg
 
 
-class AcStarkRamseyTaskConfig(AcStarkRamseyProgramCfg):
+class AcStarkRamseyTaskConfig(AcStarkRamseyProgramCfg, TaskCfg):
     wait_delay: float
+    sweep: Dict[str, SweepCfg]
 
 
 class AcStarkRamseyExp(AbsExperiment):
     def run(
-        self, soc, soccfg, cfg: AcStarkRamseyTaskConfig, *, detune: float = 0.0
+        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
     ) -> AcStarkResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+        _cfg = check_type(deepcopy(cfg), AcStarkRamseyTaskConfig)
 
-        assert "sweep" in cfg
-        assert isinstance(cfg["sweep"], dict)
-        gain_sweep = cfg["sweep"].pop("gain")
+        gain_sweep = _cfg["sweep"].pop("gain")
 
         # uniform in square space
-        lens = sweep2array(cfg["sweep"]["length"])
+        lens = sweep2array(_cfg["sweep"]["length"])
         pdrs = np.sqrt(
             np.linspace(
                 gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
             )
         )
 
-        t2r_spans = sweep2param("length", cfg["sweep"]["length"])
+        t2r_spans = sweep2param("length", _cfg["sweep"]["length"])
 
         with LivePlotter2DwithLine(
             "Stark Pulse Gain (a.u.)",
@@ -408,7 +402,7 @@ class AcStarkRamseyExp(AbsExperiment):
                         result_shape=(len(lens),),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     pdrs, lens, acstark_ramsey_signal2real(np.asarray(ctx.data))
                 ),
@@ -416,7 +410,7 @@ class AcStarkRamseyExp(AbsExperiment):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (pdrs, lens, signals)
 
         return pdrs, lens, signals

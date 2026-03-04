@@ -6,12 +6,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
+from typing import Any, Dict
 from typing_extensions import NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -42,25 +45,25 @@ class PhaseModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class PhaseCfg(ModularProgramCfg):
+class PhaseCfg(ModularProgramCfg, TaskCfg):
     modules: PhaseModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
-    def run(self, soc, soccfg, cfg: PhaseCfg) -> PhaseResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> PhaseResult:
+        _cfg = check_type(deepcopy(cfg), PhaseCfg)
 
         # Check that reset pulse is dual pulse type
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         if modules["tested_reset"]["type"] != "bath":
             raise ValueError("This experiment only supports bath reset")
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "phase")
+        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "phase")
 
-        phases = sweep2array(cfg["sweep"]["phase"])  # predicted phase points
+        phases = sweep2array(_cfg["sweep"]["phase"])  # predicted phase points
 
-        phase_param = sweep2param("phase", cfg["sweep"]["phase"])
+        phase_param = sweep2param("phase", _cfg["sweep"]["phase"])
         Reset.set_param(modules["tested_reset"], "pi2_phase", phase_param)
 
         with LivePlotter1D("Phase (deg)", "Signal (a.u.)") as viewer:
@@ -83,14 +86,14 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(phases),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     phases, bathreset_signal2real(ctx.data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (phases, signals)
 
         return phases, signals

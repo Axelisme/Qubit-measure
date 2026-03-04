@@ -2,16 +2,24 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
+from typing import Any, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import Literal, NotRequired, Optional, Tuple, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskContextView, run_task
+from zcu_tools.experiment.v2.runner import (
+    HardTask,
+    SoftTask,
+    TaskCfg,
+    TaskContextView,
+    run_task,
+)
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -167,7 +175,7 @@ class GEModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class GE_Cfg(ModularProgramCfg):
+class GE_Cfg(ModularProgramCfg, TaskCfg):
     modules: GEModuleCfg
     shots: int
     rounds: NotRequired[int]  # will be overwritten to 1
@@ -175,17 +183,17 @@ class GE_Cfg(ModularProgramCfg):
 
 
 class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
-    def run(self, soc, soccfg, cfg: GE_Cfg) -> GE_Result:
-        cfg = deepcopy(cfg)  # avoid in-place modification
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> GE_Result:
+        _cfg = check_type(deepcopy(cfg), GE_Cfg)  # avoid in-place modification
 
         # Validate and setup configuration
-        if cfg.setdefault("rounds", 1) != 1:
+        if _cfg.setdefault("rounds", 1) != 1:
             warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
-            cfg["rounds"] = 1
+            _cfg["rounds"] = 1
 
-        if "reps" in cfg:
+        if "reps" in _cfg:
             warnings.warn("reps will be overwritten by singleshot measurement shots")
-        cfg["reps"] = cfg["shots"]
+        _cfg["reps"] = _cfg["shots"]
 
         def measure_fn(ctx: TaskContextView, _):
             modules = ctx.cfg["modules"]
@@ -197,7 +205,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset", {"type": "none"})),
+                    Reset("reset", modules.get("reset")),
                     Pulse("init_pulse", modules.get("init_pulse")),
                     Pulse("probe_pulse", probe_cfg),
                     Readout("readout", modules["readout"]),
@@ -229,15 +237,15 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
                 sub_task=HardTask(
                     measure_fn=measure_fn,
                     raw2signal_fn=raw2signal_fn,
-                    result_shape=(cfg["shots"],),
+                    result_shape=(_cfg["shots"],),
                 ),
             ),
-            init_cfg=cfg,
+            init_cfg=_cfg,
         )
         signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = signals
 
         return signals

@@ -1,16 +1,18 @@
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -42,53 +44,49 @@ class PowerDepModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class PowerDepCfg(ModularProgramCfg):
+class PowerDepCfg(ModularProgramCfg, TaskCfg):
     modules: PowerDepModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
-    def run(self, soc, soccfg, cfg: PowerDepCfg) -> PowerDepResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-        modules = cfg["modules"]
-
-        assert "sweep" in cfg
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> PowerDepResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
+        _cfg = check_type(deepcopy(cfg), PowerDepCfg)
+        modules = _cfg["modules"]
+
+        pdrs = sweep2array(_cfg["sweep"]["gain"])  # predicted amplitudes
 
         Pulse.set_param(
-            modules["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+            modules["probe_pulse"], "gain", sweep2param("gain", _cfg["sweep"]["gain"])
         )
 
         with LivePlotter1D("Pulse gain", "MIST") as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                ctx.cfg["modules"].get("reset", {"type": "none"}),
-                            ),
-                            Pulse(
-                                name="init_pulse",
-                                cfg=ctx.cfg["modules"].get("init_pulse"),
-                            ),
-                            Pulse(
-                                name="probe_pulse",
-                                cfg=ctx.cfg["modules"]["probe_pulse"],
-                            ),
-                            Readout("readout", ctx.cfg["modules"]["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("init_pulse", modules.get("init_pulse")),
+                                    Pulse("probe_pulse", modules["probe_pulse"]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    ),
                     result_shape=(len(pdrs),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(pdrs, mist_signal2real(ctx.data)),
             )
 
         # record the last result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (pdrs, signals)
 
         return pdrs, signals

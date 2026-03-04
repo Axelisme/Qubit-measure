@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -44,23 +46,22 @@ class T2RamseyModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class T2RamseyCfg(ModularProgramCfg):
+class T2RamseyCfg(ModularProgramCfg, TaskCfg):
     modules: T2RamseyModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
     def run(
-        self, soc, soccfg, cfg: T2RamseyCfg, *, detune: float = 0.0
+        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
     ) -> T2RamseyResult:
-        cfg = deepcopy(cfg)
-
-        assert "sweep" in cfg
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        _cfg = check_type(deepcopy(cfg), T2RamseyCfg)
 
-        ts = sweep2array(cfg["sweep"]["length"])
+        ts = sweep2array(_cfg["sweep"]["length"])
         ts = round_zcu_time(ts, soccfg)
 
-        t2r_spans = sweep2param("length", cfg["sweep"]["length"])
+        t2r_spans = sweep2param("length", _cfg["sweep"]["length"])
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Ramsey"}
@@ -90,14 +91,14 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(ts),),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     ts, t2ramsey_signal2real(ctx.data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (ts, signals)
 
         return ts, signals

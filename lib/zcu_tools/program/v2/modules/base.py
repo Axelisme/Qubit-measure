@@ -8,6 +8,7 @@ from typing_extensions import (
     TYPE_CHECKING,
     Any,
     Dict,
+    NotRequired,
     Optional,
     Sequence,
     Type,
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 
 class ModuleCfg(TypedDict, closed=False):
     type: str
+    desc: NotRequired[str]
 
 
 class Module(ABC):

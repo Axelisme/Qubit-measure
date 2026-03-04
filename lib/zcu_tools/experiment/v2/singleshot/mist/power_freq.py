@@ -1,16 +1,19 @@
 from copy import deepcopy
 from pathlib import Path
+from typing import Any, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import List, NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -36,8 +39,9 @@ class FreqPowerModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class FreqPowerCfg(ModularProgramCfg):
+class FreqPowerCfg(ModularProgramCfg, TaskCfg):
     modules: FreqPowerModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
@@ -45,18 +49,17 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         self,
         soc,
         soccfg,
-        cfg: FreqPowerCfg,
+        cfg: Dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> FreqPowerResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-        modules = cfg["modules"]
+        _cfg = check_type(deepcopy(cfg), FreqPowerCfg)  # prevent in-place modification
+        modules = _cfg["modules"]
 
-        assert "sweep" in cfg
-        freq_sweep = cfg["sweep"]["freq"]
-        gain_sweep = cfg["sweep"]["gain"]
-        cfg["sweep"] = {"freq": freq_sweep}
+        freq_sweep = _cfg["sweep"]["freq"]
+        gain_sweep = _cfg["sweep"]["gain"]
+        _cfg["sweep"] = {"freq": freq_sweep}
 
         Pulse.set_param(modules["probe_pulse"], "freq", sweep2param("freq", freq_sweep))
 
@@ -138,13 +141,13 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
                         dtype=np.float64,
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=plot_fn,
             )
             signals = np.asarray(signals)
 
         # record the last result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result: FreqPowerResult = (gains, freqs, signals)
 
         return self.last_result

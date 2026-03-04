@@ -6,10 +6,11 @@ from pathlib import Path
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import Callable, Dict, List, NotRequired, TypedDict, cast
+from typeguard import check_type
+from typing_extensions import Callable, Dict, List, NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskContextView, TaskCfg
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.utils import make_comment
@@ -143,7 +144,7 @@ class OvernightT1ModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class OvernightT1Cfg(ModularProgramCfg):
+class OvernightT1Cfg(ModularProgramCfg, TaskCfg):
     modules: OvernightT1ModuleCfg
     sweep: Dict[str, SweepCfg]
 
@@ -152,7 +153,7 @@ class T1Task(
     T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotterDict]
 ):
     def __init__(self, cfg) -> None:
-        cfg = cast(OvernightT1Cfg, deepcopy(cfg))
+        cfg = check_type(deepcopy(cfg), OvernightT1Cfg)
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -212,7 +213,7 @@ class OvernightT1WithToneModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class OvernightT1WithToneCfg(ModularProgramCfg):
+class OvernightT1WithToneCfg(ModularProgramCfg, TaskCfg):
     modules: OvernightT1WithToneModuleCfg
     sweep: Dict[str, SweepCfg]
 
@@ -222,7 +223,7 @@ class T1WithToneTask(
     MeasurementTask[T1Result, T_RootResult, T1PlotterDict],
 ):
     def __init__(self, cfg) -> None:
-        cfg = cast(OvernightT1WithToneCfg, deepcopy(cfg))
+        cfg = check_type(deepcopy(cfg), OvernightT1WithToneCfg)
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")

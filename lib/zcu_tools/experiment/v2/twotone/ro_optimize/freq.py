@@ -1,19 +1,21 @@
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -36,26 +38,26 @@ class FreqModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class FreqCfg(ModularProgramCfg):
+class FreqCfg(ModularProgramCfg, TaskCfg):
     modules: FreqModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        assert "sweep" in cfg
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        cfg["sweep"] = {"ge": make_ge_sweep(), "freq": cfg["sweep"]["freq"]}
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
 
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+        _cfg["sweep"] = {"ge": make_ge_sweep(), "freq": _cfg["sweep"]["freq"]}
 
-        modules = cfg["modules"]
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
+
+        modules = _cfg["modules"]
         Pulse.set_param(
-            modules["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
         Readout.set_param(
-            modules["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
         )
 
         with LivePlotter1D("Frequency (MHz)", "SNR") as viewer:
@@ -66,7 +68,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Reset("reset", modules.get("reset")),
                         Pulse("qub_pulse", modules["qub_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
@@ -89,12 +91,12 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     result_shape=(len(fpts),),
                     dtype=np.float64,
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(fpts, np.abs(ctx.data)),
             )
 
         # record the last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (fpts, signals)
 
         return fpts, signals  # fpts

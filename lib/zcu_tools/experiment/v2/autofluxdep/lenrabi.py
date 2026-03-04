@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
+from typeguard import check_type
 from typing_extensions import (
     Callable,
     Dict,
@@ -18,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, TaskContextView
 from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.meta_manager import ModuleLibrary
@@ -89,12 +90,11 @@ class LenRabiModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class LenRabiCfgTemplate(ModularProgramCfg):
+class LenRabiCfgTemplate(ModularProgramCfg, TaskCfg):
     modules: LenRabiModuleCfg
-    dev: NotRequired[Dict[str, DeviceInfo]]
 
 
-class LenRabiCfg(ModularProgramCfg):
+class LenRabiCfg(ModularProgramCfg, TaskCfg):
     modules: LenRabiModuleCfg
     dev: Dict[str, DeviceInfo]
     sweep: Dict[str, SweepCfg]
@@ -173,7 +173,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
             cast(dict, cfg_temp),
             {"dev": ctx.cfg["dev"], "sweep": {"length": self.length_sweep}},
         )
-        cfg = cast(LenRabiCfg, cfg_temp)
+        cfg = check_type(cfg_temp, LenRabiCfg)
 
         rabi_pulse = cfg["modules"]["rabi_pulse"]
         self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore

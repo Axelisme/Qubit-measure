@@ -1,6 +1,6 @@
 from copy import deepcopy
 from pathlib import Path
-from typing import Optional, Tuple, cast
+from typing import Any, Dict, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,6 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from skopt import Optimizer
 from skopt.space import Real
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
@@ -15,6 +16,7 @@ from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import (
     HardTask,
     SoftTask,
+    TaskCfg,
     TaskContextView,
     run_task,
 )
@@ -89,23 +91,23 @@ class AutoOptModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class AutoOptCfg(ModularProgramCfg):
+class AutoOptCfg(ModularProgramCfg, TaskCfg):
     modules: AutoOptModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
-    def run(self, soc, soccfg, cfg: AutoOptCfg, num_points: int) -> AutoOptResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run(self, soc, soccfg, cfg: Dict[str, Any], num_points: int) -> AutoOptResult:
+        _cfg = check_type(deepcopy(cfg), AutoOptCfg)
 
-        assert "sweep" in cfg
-        fpt_sweep = cfg["sweep"]["freq"]
-        pdr_sweep = cfg["sweep"]["gain"]
-        len_sweep = cfg["sweep"]["length"]
-        cfg["sweep"] = {"ge": make_ge_sweep()}
+        fpt_sweep = _cfg["sweep"]["freq"]
+        pdr_sweep = _cfg["sweep"]["gain"]
+        len_sweep = _cfg["sweep"]["length"]
+        _cfg["sweep"] = {"ge": make_ge_sweep()}
 
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         Pulse.set_param(
-            modules["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
         optimizer = ReadoutOptimizer(fpt_sweep, pdr_sweep, len_sweep, num_points)
@@ -194,7 +196,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset", {"type": "none"})),
+                        Reset("reset", modules.get("reset")),
                         Pulse("qub_pulse", modules["qub_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
@@ -221,14 +223,14 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                         dtype=np.float64,
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=plot_fn,
             )
             signals = np.asarray(results)
         plt.close(fig)
 
         # record the last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (params, signals)
 
         return params, signals

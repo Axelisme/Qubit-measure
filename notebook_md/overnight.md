@@ -5,9 +5,9 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.18.1
+      jupytext_version: 1.19.1
   kernelspec:
-    display_name: zcu-tools
+    display_name: .venv
     language: python
     name: python3
 ---
@@ -18,13 +18,10 @@ import os
 from datetime import datetime
 
 import numpy as np
-import matplotlib.pyplot as plt
 
 %autoreload 2
 import zcu_tools.experiment.v2.overnight as zeo
-from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.library import ModuleLibrary
-from zcu_tools.table import MetaDict
+from zcu_tools.meta_manager import ExperimentManager
 from zcu_tools.utils.datasaver import create_datafolder
 from zcu_tools.notebook.utils import make_sweep
 ```
@@ -39,8 +36,8 @@ result_dir = f"../result/{chip_name}/{qub_name}"
 database_path = create_datafolder(
     os.path.join(os.getcwd(), ".."), prefix=os.path.join(chip_name, qub_name)
 )
-ml = ModuleLibrary(cfg_path=f"{result_dir}/module_cfg.yaml")
-md = MetaDict(f"{result_dir}/meta_info.json")
+em = ExperimentManager(f"{result_dir}/exps")
+ml, md = em.use_flux(label="0303_1.800mA", readonly=True)
 ```
 
 # Connect ZCU216
@@ -52,28 +49,28 @@ soc, soccfg = make_proxy("192.168.10.179", 8887)
 print(soccfg)
 ```
 
-# Predefine Parameters
+# Connect Instruments
 
 ```python
-res_ch = 0
-qub_0_1_ch = 11
-qub_1_4_ch = 2
-# qub_4_5_ch = 5
-# qub_5_6_ch = 5
-# lo_flux_ch = 14
+import pyvisa
+from zcu_tools.device import GlobalDeviceManager
 
-ro_ch = 0
+resource_manager = pyvisa.ResourceManager()
+```
+
+## Flux Yoko
+
+```python
+from zcu_tools.device.yoko import YOKOGS200
+
+flux_yoko = YOKOGS200("USB0::0x0B21::0x0039::90ZB35281::INSTR", resource_manager)
+GlobalDeviceManager.register_device("flux_yoko", flux_yoko)
+
+flux_yoko.set_mode("current", rampstep=1e-6)
+# flux_yoko.set_mode("voltage", rampstep=1e-3)
 ```
 
 # Start Measurement
-
-```python
-import gc
-
-# del executor
-plt.close("all")
-gc.collect()
-```
 
 ```python
 %matplotlib widget
@@ -87,21 +84,21 @@ executor = (
         zeo.singleshot.MistTask(
             ml.make_cfg(
                 {
-                    # "reset": "reset_10",
-                    "probe_pulse": {
-                        "waveform": ml.get_waveform(
-                            "mist_waveform",
-                            {"length": 5.0 / (2 * np.pi * md.rf_w) + 0.3},
-                        ),
-                        "ch": res_ch,
-                        "nqz": 2,
-                        "freq": md.readout_f,
-                        "post_delay": 10 / (2 * np.pi * md.rf_w),
+                    "modules": {
+                        # "reset": "reset_10",
+                        "probe_pulse": {
+                            "waveform": ml.get_waveform(
+                                "mist_waveform",
+                                {"length": 5.0 / (2 * np.pi * md.rf_w) + 0.3},
+                            ),
+                            "ch": md.res_ch,
+                            "nqz": 2,
+                            "freq": md.readout_f,
+                            "post_delay": 10 / (2 * np.pi * md.rf_w),
+                        },
+                        "readout": "readout_dpm",
                     },
-                    "readout": "readout_dpm",
-                    "sweep": {
-                        "gain": make_sweep(0.0, 0.22, 101),
-                    },
+                    "sweep": {"gain": make_sweep(0.0, 0.22, 101)},
                     "relax_delay": 50.5,  # us
                 },
                 reps=3000,
@@ -117,19 +114,21 @@ executor = (
         zeo.singleshot.MistTask(
             ml.make_cfg(
                 {
-                    # "reset": "reset_10",
-                    "init_pulse": "pi_amp",
-                    "probe_pulse": {
-                        "waveform": ml.get_waveform(
-                            "mist_waveform",
-                            {"length": 5.0 / (2 * np.pi * md.rf_w) + 0.3},
-                        ),
-                        "ch": res_ch,
-                        "nqz": 2,
-                        "freq": md.readout_f,
-                        "post_delay": 10 / (2 * np.pi * md.rf_w),
+                    "modules": {
+                        # "reset": "reset_10",
+                        "init_pulse": "pi_amp",
+                        "probe_pulse": {
+                            "waveform": ml.get_waveform(
+                                "mist_waveform",
+                                {"length": 5.0 / (2 * np.pi * md.rf_w) + 0.3},
+                            ),
+                            "ch": md.res_ch,
+                            "nqz": 2,
+                            "freq": md.readout_f,
+                            "post_delay": 10 / (2 * np.pi * md.rf_w),
+                        },
+                        "readout": "readout_dpm",
                     },
-                    "readout": "readout_dpm",
                     "sweep": {
                         "gain": make_sweep(0.0, 0.22, 101),
                     },
@@ -148,17 +147,19 @@ executor = (
         zeo.singleshot.MistTask(
             ml.make_cfg(
                 {
-                    "probe_pulse": {
-                        "waveform": ml.get_waveform(
-                            "mist_waveform",
-                            {"length": 5.0 / (2 * np.pi * md.rf_w) + 50.0},
-                        ),
-                        "ch": res_ch,
-                        "nqz": 2,
-                        "freq": md.readout_f,
-                        "post_delay": 10 / (2 * np.pi * md.rf_w),
+                    "modules": {
+                        "probe_pulse": {
+                            "waveform": ml.get_waveform(
+                                "mist_waveform",
+                                {"length": 5.0 / (2 * np.pi * md.rf_w) + 50.0},
+                            ),
+                            "ch": md.res_ch,
+                            "nqz": 2,
+                            "freq": md.readout_f,
+                            "post_delay": 10 / (2 * np.pi * md.rf_w),
+                        },
+                        "readout": "readout_dpm",
                     },
-                    "readout": "readout_dpm",
                     "sweep": {
                         "gain": make_sweep(0.0, 0.22, 101),
                     },
@@ -182,7 +183,9 @@ _ = executor.run(
 ```python
 executor.save(
     filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    comment=datetime.now().strftime("Overnight run at %Y-%m-%d %H:%M:%S"),
+    comment=datetime.now().strftime("Overnight run at %Y-%m-%d %H:%M:%S")
+    + "\n".join(f"{k}: {v}" for k, v in GlobalDeviceManager.get_all_info().items())
+    + str(md),
 )
 del executor
 ```

@@ -5,7 +5,7 @@ from typing_extensions import TypedDict
 from .improve_acquire import AbsStatisticTracker, ImproveAcquireMixin
 
 
-class SweepCfg(TypedDict):
+class SweepCfg(TypedDict, closed=True):
     start: float
     stop: float
     expts: int

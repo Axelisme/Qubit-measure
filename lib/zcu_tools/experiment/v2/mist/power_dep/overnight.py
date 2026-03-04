@@ -1,8 +1,9 @@
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from typeguard import check_type
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typing_extensions import NotRequired, TypedDict
@@ -13,9 +14,11 @@ from zcu_tools.experiment.v2.runner import (
     HardTask,
     RepeatOverTime,
     ReTryIfFail,
+    TaskCfg,
     run_task,
 )
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -49,28 +52,28 @@ class PowerDepOvernightModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class PowerDepOvernightCfg(ModularProgramCfg):
+class PowerDepOvernightCfg(ModularProgramCfg, TaskCfg):
     modules: PowerDepOvernightModuleCfg
     interval: float
+    sweep: Dict[str, SweepCfg]
 
 
 class PowerDepOvernightExp(
     AbsExperiment[PowerDepOvernightResult, PowerDepOvernightCfg]
 ):
     def run(
-        self, soc, soccfg, cfg: PowerDepOvernightCfg, *, num_times=50, fail_retry=3
+        self, soc, soccfg, cfg: Dict[str, Any], *, num_times=50, fail_retry=3
     ) -> PowerDepOvernightResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-        modules = cfg["modules"]
+        _cfg = check_type(deepcopy(cfg), PowerDepOvernightCfg)
+        modules = _cfg["modules"]
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
+        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "gain")
 
         iters = np.arange(num_times, dtype=np.int64)
-        pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted amplitudes
+        pdrs = sweep2array(_cfg["sweep"]["gain"])  # predicted amplitudes
 
         Pulse.set_param(
-            modules["probe_pulse"], "gain", sweep2param("gain", cfg["sweep"]["gain"])
+            modules["probe_pulse"], "gain", sweep2param("gain", _cfg["sweep"]["gain"])
         )
 
         with LivePlotter2DwithLine(
@@ -80,7 +83,7 @@ class PowerDepOvernightExp(
                 task=RepeatOverTime(
                     name="repeat_over_time",
                     num_times=num_times,
-                    interval=cfg["interval"],
+                    interval=_cfg["interval"],
                     task=ReTryIfFail(
                         max_retries=fail_retry,
                         task=HardTask(
@@ -109,7 +112,7 @@ class PowerDepOvernightExp(
                         ),
                     ),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     iters.astype(np.float64),
                     pdrs,
@@ -119,7 +122,7 @@ class PowerDepOvernightExp(
             signals = np.asarray(signals)
 
         # record the last result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (iters, pdrs, signals)
 
         return iters, pdrs, signals

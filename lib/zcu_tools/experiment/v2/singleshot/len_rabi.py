@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
@@ -21,7 +23,8 @@ from .util import calc_populations
 LenRabiResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class LenRabiCfg(TwoToneCfg): ...
+class LenRabiCfg(TwoToneCfg, TaskCfg):
+    sweep: Dict[str, SweepCfg]
 
 
 class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
@@ -29,27 +32,25 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         self,
         soc,
         soccfg,
-        cfg: LenRabiCfg,
+        cfg: Dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> LenRabiResult:
-        cfg = deepcopy(cfg)  # avoid in-place modification
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        _cfg = check_type(deepcopy(cfg), LenRabiCfg)  # avoid in-place modification
 
-        modules = cfg["modules"]
+        modules = _cfg["modules"]
         assert modules["qub_pulse"]["waveform"]["style"] in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-
-        lens = sweep2array(cfg["sweep"]["length"])  # predicted
+        lens = sweep2array(_cfg["sweep"]["length"])  # predicted
 
         Pulse.set_param(
             modules["qub_pulse"],
             "length",
-            sweep2param("length", cfg["sweep"]["length"]),
+            sweep2param("length", _cfg["sweep"]["length"]),
         )
 
         with LivePlotter1D(
@@ -83,14 +84,14 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                     result_shape=(len(lens), 2),
                     dtype=np.float64,
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     lens, calc_populations(ctx.data).T
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (lens, populations)
 
         return lens, populations

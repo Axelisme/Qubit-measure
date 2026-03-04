@@ -6,6 +6,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
+from typeguard import check_type
 from typing_extensions import (
     Callable,
     Dict,
@@ -13,11 +14,10 @@ from typing_extensions import (
     NotRequired,
     Optional,
     TypedDict,
-    cast,
 )
 
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskContextView
+from zcu_tools.experiment.v2.runner import HardTask, TaskContextView, TaskCfg
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_comment
@@ -221,7 +221,7 @@ class OvernightSingleshotT1ProgramCfg(ModularProgramCfg):
     modules: OvernightSingleshotT1ModuleCfg
 
 
-class T1Cfg(OvernightSingleshotT1ProgramCfg):
+class T1Cfg(OvernightSingleshotT1ProgramCfg, TaskCfg):
     sweep: Dict[str, SweepCfg]
 
 
@@ -231,7 +231,7 @@ class T1Task(
     def __init__(
         self, cfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
-        cfg = cast(T1Cfg, deepcopy(cfg))
+        cfg = check_type(deepcopy(cfg), T1Cfg)
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
@@ -308,7 +308,7 @@ class OvernightSingleshotT1WithToneProgramCfg(ModularProgramCfg):
     modules: OvernightSingleshotT1WithToneModuleCfg
 
 
-class T1WithToneCfg(OvernightSingleshotT1WithToneProgramCfg):
+class T1WithToneCfg(OvernightSingleshotT1WithToneProgramCfg, TaskCfg):
     sweep: Dict[str, SweepCfg]
 
 
@@ -318,7 +318,7 @@ class T1WithToneTask(
     def __init__(
         self, cfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
-        cfg = cast(T1WithToneCfg, deepcopy(cfg))
+        cfg = check_type(deepcopy(cfg), T1WithToneCfg)
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")

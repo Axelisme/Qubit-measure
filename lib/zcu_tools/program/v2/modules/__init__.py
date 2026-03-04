@@ -13,11 +13,15 @@ from .readout import (
 )
 from .reset import (
     BathReset,
+    BathResetCfg,
     NoneReset,
+    NoneResetCfg,
     PulseReset,
+    PulseResetCfg,
     Reset,
     ResetCfg,
     TwoPulseReset,
+    TwoPulseResetCfg,
 )
 from .util import param2str
 from .waveform import WaveformCfg

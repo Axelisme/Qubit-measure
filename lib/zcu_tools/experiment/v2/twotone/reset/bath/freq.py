@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+from typeguard import check_type
 from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, run_task
+from zcu_tools.experiment.v2.runner import HardTask, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -23,6 +25,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
+from zcu_tools.program.v2.modules import BathResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
@@ -31,12 +34,13 @@ FreqGainResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.comp
 
 class FreqGainModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    tested_reset: ResetCfg
+    tested_reset: BathResetCfg
     readout: ReadoutCfg
 
 
-class FreqGainCfg(ModularProgramCfg):
+class FreqGainCfg(ModularProgramCfg, TaskCfg):
     modules: FreqGainModuleCfg
+    sweep: Dict[str, SweepCfg]
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -44,32 +48,28 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
-    def run(self, soc, soccfg, cfg: FreqGainCfg) -> FreqGainResult:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqGainResult:
+        _cfg = check_type(deepcopy(cfg), FreqGainCfg)
 
         # Check that reset pulse is dual pulse type
-        modules = cfg["modules"]
-        if modules["tested_reset"]["type"] != "bath":
-            raise ValueError("This experiment only supports bath reset")
-
-        assert "sweep" in cfg
-        cfg["sweep"] = {
-            "gain": cfg["sweep"]["gain"],
-            "freq": cfg["sweep"]["freq"],
+        modules = _cfg["modules"]
+        _cfg["sweep"] = {
+            "gain": _cfg["sweep"]["gain"],
+            "freq": _cfg["sweep"]["freq"],
         }
 
-        gains = sweep2array(cfg["sweep"]["gain"])  # predicted gain points
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+        gains = sweep2array(_cfg["sweep"]["gain"])  # predicted gain points
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
 
         Reset.set_param(
             modules["tested_reset"],
             "res_gain",
-            sweep2param("gain", cfg["sweep"]["gain"]),
+            sweep2param("gain", _cfg["sweep"]["gain"]),
         )
         Reset.set_param(
             modules["tested_reset"],
             "res_freq",
-            sweep2param("freq", cfg["sweep"]["freq"]),
+            sweep2param("freq", _cfg["sweep"]["freq"]),
         )
 
         with LivePlotter2D(
@@ -77,30 +77,30 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         ) as viewer:
             signals = run_task(
                 task=HardTask(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                (modules := ctx.cfg["modules"]).get(
-                                    "reset", {"type": "none"}
-                                ),
-                            ),
-                            Reset("tested_reset", modules["tested_reset"]),
-                            Readout("readout", modules["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Reset("tested_reset", modules["tested_reset"]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    ),
                     result_shape=(len(gains), len(fpts)),
                 ),
-                init_cfg=cfg,
+                init_cfg=_cfg,
                 update_hook=lambda ctx: viewer.update(
                     fpts, gains, bathreset_signal2real(ctx.data).T
                 ),
             )
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (gains, fpts, signals)
 
         return gains, fpts, signals

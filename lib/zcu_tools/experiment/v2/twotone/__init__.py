@@ -6,4 +6,5 @@ from .dispersive import DispersiveExp
 from .fluxdep import FreqFluxExp
 from .freq import FreqExp
 from .power_dep import PowerExp
-from .zigzag import ZigZagExp, ZigZagSweepExp
+from .zigzag import ZigZagExp
+from .zigzag_sweep import ZigZagSweepExp
