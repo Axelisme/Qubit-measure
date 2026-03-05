@@ -118,7 +118,7 @@ filepath = (
     # "../../../Database/Q12_2D[5]/Q4/Q4_mist_e_singleshot_short@-0.650mA_2.hdf5"
 )
 
-exp = ze.singleshot.mist.PowerDepExp()
+exp = ze.singleshot.mist.PowerExp()
 exp.load(filepath)
 fig = exp.analyze(
     ac_coeff=ac_coeff,
@@ -163,7 +163,7 @@ from zcu_tools.notebook.analysis.mist.branch import plot_cn_with_mist
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 from plotly.subplots import make_subplots
 
-exp = ze.mist.flux_dep.MistFluxDepExp()
+exp = ze.mist.flux_dep.FluxDepExp()
 
 # fig = go.Figure()
 fig = make_subplots(rows=2, cols=1, vertical_spacing=0.1)

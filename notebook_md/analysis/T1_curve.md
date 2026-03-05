@@ -7,7 +7,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.18.1
+      jupytext_version: 1.19.1
   kernelspec:
     display_name: axelenv13
     language: python
@@ -88,10 +88,10 @@ loadpath = f"../../result/{qub_name}/samples.csv"
 
 freqs_df = pd.read_csv(loadpath)
 freqs_df = freqs_df[~np.isnan(freqs_df["T1 (us)"])]
-s_mAs = freqs_df["calibrated mA"].values  # mA
-s_fpts = 1e-3 * freqs_df["Freq (MHz)"].values  # GHz
-s_T1s = 1e3 * freqs_df["T1 (us)"].values  # ns
-s_T1errs = 1e3 * freqs_df["T1err (us)"].values  # ns
+s_mAs: np.ndarray = freqs_df["calibrated mA"].values  # type: ignore
+s_fpts = 1e-3 * freqs_df["Freq (MHz)"].values  # type: ignore
+s_T1s = 1e3 * freqs_df["T1 (us)"].values  # type: ignore
+s_T1errs = 1e3 * freqs_df["T1err (us)"].values  # type: ignore
 
 # filter out bad points
 # valid = np.logical_or(s_T1errs < 0.25 * s_T1s, np.isnan(s_T1errs))
@@ -123,7 +123,9 @@ t_mAs = flx2mA(t_flxs, mA_c, period)
 ```
 
 ```python
-fluxonium = scq.Fluxonium(*params, flux=0.5, cutoff=40, truncated_dim=6)
+from scqubits.core.fluxonium import Fluxonium
+
+fluxonium = Fluxonium(*params, flux=0.5, cutoff=40, truncated_dim=6)
 
 t_spectrum_data = fluxonium.get_spectrum_vs_paramvals(
     "flux", t_flxs, evals_count=20, get_eigenstates=True

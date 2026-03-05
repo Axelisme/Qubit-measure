@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pathlib import Path
+from typing import List, cast
 
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
@@ -30,8 +31,8 @@ _, params, mA_c, period, allows, data_dict = load_result(
 )
 
 if dispersive_cfg := data_dict.get("dispersive"):
-    g = dispersive_cfg["g"]
-    r_f = dispersive_cfg["r_f"]
+    g: float = dispersive_cfg["g"]
+    r_f: float = dispersive_cfg["r_f"]
     print(f"g: {g}, r_f: {r_f}")
 elif "r_f" in allows:
     r_f = allows["r_f"]
@@ -57,7 +58,7 @@ sim_flxs = np.linspace(-0.05, 0.55, 200)
 %matplotlib widget
 filepath = r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1127\R4_flux_1.hdf5"
 
-exp = ze.onetone.FluxDepExperiment()
+exp = ze.onetone.FluxDepExp()
 flxs, fpts, signals = exp.load(filepath)
 
 actline = exp.analyze()
@@ -77,7 +78,7 @@ filepath = (
 # signals, fpts, _ = load_data(filepath)
 # fpts /= 1e6
 
-exp = ze.twotone.dispersive.DispersiveExperiment()
+exp = ze.twotone.dispersive.DispersiveExp()
 fpts, signals = exp.load(filepath)
 
 chi, kappa, fig = exp.analyze()
@@ -90,7 +91,7 @@ filepath = (
     r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_ac_stark@4.000mA_1.hdf5"
 )
 
-exp = ze.twotone.ac_stark.AcStarkExperiment()
+exp = ze.twotone.ac_stark.AcStarkExp()
 pdrs, fpts, signals = exp.load(filepath)
 
 ac_coeff, fig = exp.analyze(chi=chi, kappa=kappa, cutoff=0.04)
@@ -100,6 +101,8 @@ plt.close(fig)
 ```
 
 ```python
+from zcu_tools.experiment.v2.mist.flux_dep import mist_signal2real
+
 filepaths = [
     # r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1116\Q4_mist_flux_bare@-4.990mA_1.hdf5",
     r"../../../Database/Q12_2D[5]/Q1/Q1_mist_over_flux@-7.000mA_1.hdf5"
@@ -110,13 +113,13 @@ ac_coeff = 1e3
 fig = go.Figure()
 
 for filepath in filepaths:
-    signals, As, pdrs = load_data(filepath)
+    signals, As, pdrs = load_data(filepath, return_cfg=False)
     assert pdrs is not None
 
     flxs = mA2flx(As, mA_c, period)
     photons = ac_coeff * pdrs**2
 
-    real_signals = mist_signal2real(signals)
+    real_signals = mist_signal2real(signals.astype(np.complex128))
 
     fig.add_trace(
         go.Heatmap(
@@ -143,9 +146,12 @@ max_photon = 100
 amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
 sim_photons = (amps / (2 * g)) ** 2
 
-overlay_over_flx = Parallel(n_jobs=-1)(
-    delayed(calc_overlay)(params, sim_photons, r_f, g, flx, qub_dim, qub_cutoff)
-    for flx in tqdm(sim_flxs)
+overlay_over_flx = cast(
+    List[np.ndarray],
+    Parallel(n_jobs=-1)(
+        delayed(calc_overlay)(params, sim_photons, r_f, g, flx, qub_dim, qub_cutoff)
+        for flx in tqdm(sim_flxs)
+    ),
 )
 overlay_over_flx = np.array(overlay_over_flx)  # shape: (flxs, photons, ge)
 ```
@@ -176,16 +182,16 @@ map_flxs = 1 - sim_flxs
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True)
 fig.update_layout(height=600, margin=dict(t=10, b=20, l=20))
 
-from zcu_tools.experiment.v2.twotone.mist.flux_dep import mist_signal2real
+from zcu_tools.experiment.v2.mist.flux_dep import mist_signal2real
 
 for filepath in filepaths:
-    signals, As, pdrs = load_data(filepath)
+    signals, As, pdrs = load_data(filepath, return_cfg=False)
     assert pdrs is not None
 
     flxs = mA2flx(As, mA_c, period)
     photons = ac_coeff * pdrs**2
 
-    real_signals = mist_signal2real(signals)
+    real_signals = mist_signal2real(signals.astype(np.complex128))
     fig.add_trace(
         go.Heatmap(
             x=flxs,

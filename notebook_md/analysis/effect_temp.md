@@ -7,7 +7,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.18.1
+      jupytext_version: 1.19.1
   kernelspec:
     display_name: Python 3
     language: python
@@ -64,7 +64,7 @@ SC086_4K_att_tb = [  # (Hz, dB/m)
     (10.0e9, 18.1),
     (20.0e9, 25.7),
 ]
-SC086_att = np.interp(fpts, *zip(*SC086_4K_att_tb))
+SC086_att = np.interp(fpts, *zip(*SC086_4K_att_tb))  # type: ignore
 
 # for freq out of data table range, use A ~ sqrt(f)
 first_f, first_att = SC086_4K_att_tb[0]
@@ -114,11 +114,11 @@ def logPSD(log_fpt, R, T):
     return np.log10(4 * sc.k * T * R) + log_n - log_expm1(10**log_n) / np.log(10)
 
 
-def find_eff_T(fpt, R, fpts, logSvv_total):
+def find_eff_T(fpt, R, fpts, logSvv_total) -> float:
     # first use interpolation to find the effective PSD at the given frequency
     # then use opt.bisect to find the effective temperature
     logSvv = np.interp(fpt, fpts, logSvv_total)
-    return opt.bisect(lambda T: logPSD(np.log10(fpt), R, T) - logSvv, 1e-6, 1e3)
+    return opt.bisect(lambda T: logPSD(np.log10(fpt), R, T) - logSvv, 1e-6, 1e3)  # type: ignore
 
 
 def photonNum(T, f):

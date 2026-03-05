@@ -7,7 +7,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.18.1
+      jupytext_version: 1.19.1
   kernelspec:
     display_name: Python 3
     language: python
@@ -67,7 +67,7 @@ spectrum_data = None
 return_dim = 7
 # flxs = np.linspace(0.0, 0.5, 200)
 # mAs = flx2mA(flxs, mA_c, period)
-mAs = np.linspace(-1.0, 3.0, 200)
+mAs = np.linspace(-1.0, 3.0, 200, dtype=np.float64)
 flxs = mA2flx(mAs, mA_c, period)
 ```
 

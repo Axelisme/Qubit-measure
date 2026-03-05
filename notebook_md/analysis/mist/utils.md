@@ -5,7 +5,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.18.1
+      jupytext_version: 1.19.1
   kernelspec:
     display_name: axelenv13
     language: python
@@ -13,6 +13,9 @@ jupyter:
 ---
 
 ```python
+from scqubits.core.fluxonium import Fluxonium
+from scqubits.core.oscillator import Oscillator
+from scqubits.core.hilbert_space import HilbertSpace
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
@@ -31,18 +34,17 @@ elif "r_f" in allows:
     r_f = allows["r_f"]
     print(f"r_f: {r_f} GHz")
 
-predictor = FluxoniumPredictor(loadpath)
+predictor = FluxoniumPredictor.from_file(loadpath)
 ```
 
 ```python
-import scqubits as scq
 import matplotlib.pyplot as plt
 import qutip as qt
 import numpy as np
 
 g = 0.1
 
-fluxonium = scq.Fluxonium(
+fluxonium = Fluxonium(
     *params,
     # EJ=4.0,
     # EC=1.0,
@@ -57,14 +59,9 @@ evals, evecs = fluxonium.eigensys(evals_count=50)
 # Collision Find
 
 ```python
-import scqubits as scq
-import matplotlib.pyplot as plt
-import qutip as qt
-import numpy as np
-
 g = 0.1
 
-fluxonium = scq.Fluxonium(
+fluxonium = Fluxonium(
     *params,
     # EJ=4.0,
     # EC=1.0,
@@ -73,12 +70,14 @@ fluxonium = scq.Fluxonium(
     cutoff=40,
     truncated_dim=10,
 )
-resonator = scq.Oscillator(
+resonator = Oscillator(
     E_osc=r_f,
     truncated_dim=50,
 )
-H = scq.HilbertSpace([fluxonium, resonator])
-H.add_interaction(g=g, op1=fluxonium.n_operator, op2=resonator.creation_operator, add_hc=True)
+H = HilbertSpace([fluxonium, resonator])
+H.add_interaction(
+    g=g, op1=fluxonium.n_operator, op2=resonator.creation_operator, add_hc=True
+)
 
 evals, evecs = H.eigensys(evals_count=100)
 

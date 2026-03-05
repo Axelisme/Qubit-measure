@@ -7,7 +7,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.18.1
+      jupytext_version: 1.19.1
   kernelspec:
     display_name: Python 3
     language: python
@@ -36,7 +36,7 @@ import zcu_tools.notebook.analysis.design as zd
 import zcu_tools.notebook.analysis.plot as zp
 import zcu_tools.simulate.equation as zeq
 from zcu_tools.notebook.persistance import dump_result
-from zcu_tools.notebook.analysis.branch import plot_chi_and_snr_over_photon
+from zcu_tools.notebook.analysis.mist.branch import plot_chi_and_snr_over_photon
 ```
 
 ```python

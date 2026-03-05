@@ -5,9 +5,9 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.18.1
+      jupytext_version: 1.19.1
   kernelspec:
-    display_name: zcu-tools
+    display_name: .venv
     language: python
     name: python3
 ---
@@ -26,7 +26,7 @@ from IPython.display import display
 
 %autoreload 2
 from zcu_tools.notebook.persistance import load_result
-from zcu_tools.table import MetaDict
+from zcu_tools.meta_manager import MetaDict
 from zcu_tools.simulate import mA2flx
 from zcu_tools.notebook.analysis.mist.branch import (
     plot_cn_over_flx,
@@ -223,6 +223,7 @@ def calc_populations_with_tls(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     branch_populations = fb_analysis.calc_branch_populations(
@@ -252,6 +253,7 @@ im = ax.imshow(
     vmax=2.0,
 )
 dh = display(fig, display_id=True)
+assert dh is not None
 for i, E_tls in enumerate(tqdm(E_tls_list, desc="Sweeping E_tls")):
     branch_populations = calc_populations_with_tls(
         branchs, E_tls, g_tls, progress=False
@@ -424,6 +426,7 @@ def calc_populations_with_flx(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     branch_populations = fb_analysis.calc_branch_populations(
@@ -509,6 +512,7 @@ def calc_populations_with_rf(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     branch_populations = fb_analysis.calc_branch_populations(
@@ -550,6 +554,7 @@ im_e = ax_e.imshow(
     vmax=3.0,
 )
 dh = display(fig, display_id=True)
+assert dh is not None
 for i, r_f in enumerate(tqdm(rfs, desc="Sweeping r_f")):
     if not np.any(np.isnan(pop_over_rf[i])):
         continue
