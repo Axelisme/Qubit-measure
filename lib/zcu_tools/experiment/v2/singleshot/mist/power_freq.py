@@ -11,7 +11,7 @@ from typing_extensions import List, NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -128,17 +128,16 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
                 )
 
             signals = run_task(
-                task=Scan(
-                    name="gain",
-                    values=gains.tolist(),
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: raw[0][0],
+                    result_shape=(len(freqs), 2),
+                    dtype=np.float64,
+                ).scan(
+                    "gain",
+                    gains.tolist(),
                     before_each=lambda i, ctx, gain: Pulse.set_param(
                         ctx.cfg["modules"]["probe_pulse"], "gain", gain
-                    ),
-                    task=Task(
-                        measure_fn=measure_fn,
-                        raw2signal_fn=lambda raw: raw[0][0],
-                        result_shape=(len(freqs), 2),
-                        dtype=np.float64,
                     ),
                 ),
                 init_cfg=_cfg,

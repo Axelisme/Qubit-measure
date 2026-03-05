@@ -12,7 +12,7 @@ from typing_extensions import NotRequired, TypedDict
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 from zcu_tools.program import SweepCfg
@@ -85,27 +85,26 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             title="MIST over FLux",
         ) as viewer:
             signals = run_task(
-                task=Scan(
-                    name="flux",
-                    values=values.tolist(),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                Reset("reset", modules.get("reset")),
+                                Pulse("init_pulse", modules.get("init_pulse")),
+                                Pulse("probe_pulse", modules["probe_pulse"]),
+                                Readout("readout", modules["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
+                    ),
+                    result_shape=(len(gains),),
+                ).scan(
+                    "flux",
+                    values.tolist(),
                     before_each=lambda _, ctx, value: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], value
-                    ),
-                    task=Task(
-                        measure_fn=lambda ctx, update_hook: (
-                            (modules := ctx.cfg["modules"])
-                            and ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    Pulse("init_pulse", modules.get("init_pulse")),
-                                    Pulse("probe_pulse", modules["probe_pulse"]),
-                                    Readout("readout", modules["readout"]),
-                                ],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        ),
-                        result_shape=(len(gains),),
                     ),
                 ),
                 init_cfg=_cfg,

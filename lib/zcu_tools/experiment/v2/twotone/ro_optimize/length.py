@@ -11,7 +11,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
@@ -92,16 +92,15 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                 return avg_d, [tracker.covariance], [tracker.rough_median]
 
             signals = run_task(
-                task=Scan(
-                    name="length",
-                    values=lengths.tolist(),
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    dtype=np.float64,
+                ).scan(
+                    "length",
+                    lengths.tolist(),
                     before_each=lambda _, ctx, length: Readout.set_param(
                         ctx.cfg["modules"]["readout"], "ro_length", length
-                    ),
-                    task=Task(
-                        measure_fn=measure_fn,
-                        raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
-                        dtype=np.float64,
                     ),
                 ),
                 init_cfg=_cfg,

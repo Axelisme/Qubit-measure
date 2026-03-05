@@ -6,14 +6,14 @@ STATUS_MAP = {"on": "1", "off": "0"}
 STATUS_MAP_INV = {"1": "on", "0": "off"}
 
 
-class RohdeSchwarzSGS100AInfo(DeviceInfo):
+class RohdeSchwarzSGS100AInfo(DeviceInfo, closed=True):
     output: Literal["on", "off"]
     IQ: Literal["on", "off"]
     freq_Hz: float
     power_dBm: float
 
 
-class RohdeSchwarzSGS100A(BaseDevice[RohdeSchwarzSGS100AInfo]):
+class RohdeSchwarzSGS100A(BaseDevice):
     def get_output(self) -> Literal["on", "off"]:
         return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
 

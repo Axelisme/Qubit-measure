@@ -11,7 +11,7 @@ from .metadict import MetaDict
 class ExperimentManager:
     def __init__(self, exp_dir: str) -> None:
         self.exp_dir = Path(exp_dir)
-        self._flx_dir: Optional[Path] = None
+        self._label: Optional[str] = None
 
     def list_contexts(self) -> List[str]:
         """Return sorted labels of all existing experiment contexts."""
@@ -40,6 +40,8 @@ class ExperimentManager:
                 "Use use_flux() to load it, or provide a different label."
             )
 
+        self._label = label
+
         flx_dir.mkdir(parents=True, exist_ok=True)
         if clone_from is not None:
             if isinstance(clone_from, str):
@@ -66,18 +68,23 @@ class ExperimentManager:
                 f"Folder '{label}' not found. Available: {self.list_contexts()}"
             )
 
+        self._label = label
         ml = ModuleLibrary(str(flx_dir / "module_cfg.yaml"), read_only=readonly)
         md = MetaDict(str(flx_dir / "meta_info.json"), read_only=readonly)
 
         return ml, md
 
     @property
-    def flx_dir(self) -> Path:
-        if self._flx_dir is None:
+    def label(self) -> str:
+        if self._label is None:
             raise RuntimeError(
                 "No active context. Call new_flux() or use_flux() first."
             )
-        return self._flx_dir
+        return self._label
+
+    @property
+    def flx_dir(self) -> Path:
+        return self.exp_dir / self.label
 
     def _auto_label(self, cur: float, unit: Literal["mA", "V"]) -> str:
         date_prefix = datetime.now().strftime("%m%d")
@@ -90,3 +97,11 @@ class ExperimentManager:
         while f"{base}_{idx}" in existing:
             idx += 1
         return f"{base}_{idx}"
+
+    def __str__(self) -> str:
+        if self.label is None:
+            return f"ExperimentManager(exp_dir={self.exp_dir})"
+        return f"ExperimentManager(exp_dir={self.exp_dir}, active={self.label})"
+
+    def __repr__(self) -> str:
+        return self.__str__()

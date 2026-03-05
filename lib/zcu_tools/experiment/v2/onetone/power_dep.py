@@ -9,14 +9,13 @@ from typing_extensions import Any, Dict, Optional, Tuple
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background, rescale
-
-from ..runner import Scan, Task, TaskCfg, run_task
-from ..utils import wrap_earlystop_check
 
 PowerDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
@@ -52,27 +51,26 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             ax1d = viewer.get_ax("1d")
 
             signals = run_task(
-                task=Scan(
-                    name="gain",
-                    values=pdrs.tolist(),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: (
+                        prog := OneToneProgram(soccfg, ctx.cfg)
+                    ).acquire(
+                        soc,
+                        progress=False,
+                        callback=wrap_earlystop_check(
+                            prog,
+                            update_hook,
+                            earlystop_snr,
+                            signal2real_fn=np.abs,
+                            after_check=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
+                        ),
+                    ),
+                    result_shape=(len(fpts),),
+                ).scan(
+                    "gain",
+                    pdrs.tolist(),
                     before_each=lambda _, ctx, pdr: Readout.set_param(
                         ctx.cfg["modules"]["readout"], "gain", pdr
-                    ),
-                    task=Task(
-                        measure_fn=lambda ctx, update_hook: (
-                            prog := OneToneProgram(soccfg, ctx.cfg)
-                        ).acquire(
-                            soc,
-                            progress=False,
-                            callback=wrap_earlystop_check(
-                                prog,
-                                update_hook,
-                                earlystop_snr,
-                                signal2real_fn=np.abs,
-                                snr_hook=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
-                            ),
-                        ),
-                        result_shape=(len(fpts),),
                     ),
                 ),
                 init_cfg=_cfg,

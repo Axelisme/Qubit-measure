@@ -13,7 +13,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
@@ -128,41 +128,40 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             ax1d = viewer.get_ax("1d")
 
             signals = run_task(
-                task=Scan(
-                    name="resonator gain",
-                    values=pdrs.tolist(),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            prog := ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("stark_pulse1", modules["stark_pulse1"]),
+                                    Pulse("stark_pulse2", modules["stark_pulse2"]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            )
+                        ).acquire(
+                            soc,
+                            progress=False,
+                            callback=wrap_earlystop_check(
+                                prog,
+                                update_hook,
+                                earlystop_snr,
+                                signal2real_fn=np.abs,
+                                after_check=lambda snr: ax1d.set_title(
+                                    f"snr = {snr:.1f}"
+                                ),
+                            ),
+                        )
+                    ),
+                    result_shape=(len(fpts),),
+                ).scan(
+                    "resonator gain",
+                    pdrs.tolist(),
                     before_each=lambda _, ctx, pdr: Pulse.set_param(
                         ctx.cfg["modules"]["stark_pulse1"], "gain", pdr
-                    ),
-                    task=Task(
-                        measure_fn=lambda ctx, update_hook: (
-                            (modules := ctx.cfg["modules"])
-                            and (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset("reset", modules.get("reset")),
-                                        Pulse("stark_pulse1", modules["stark_pulse1"]),
-                                        Pulse("stark_pulse2", modules["stark_pulse2"]),
-                                        Readout("readout", modules["readout"]),
-                                    ],
-                                )
-                            ).acquire(
-                                soc,
-                                progress=False,
-                                callback=wrap_earlystop_check(
-                                    prog,
-                                    update_hook,
-                                    earlystop_snr,
-                                    signal2real_fn=np.abs,
-                                    snr_hook=lambda snr: ax1d.set_title(
-                                        f"snr = {snr:.1f}"
-                                    ),
-                                ),
-                            )
-                        ),
-                        result_shape=(len(fpts),),
                     ),
                 ),
                 init_cfg=_cfg,
@@ -390,15 +389,14 @@ class AcStarkRamseyExp(AbsExperiment):
                 ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
-                task=Scan(
-                    name="resonator gain",
-                    values=pdrs.tolist(),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(lens),),
+                ).scan(
+                    "resonator gain",
+                    pdrs.tolist(),
                     before_each=lambda _, ctx, pdr: Pulse.set_param(
                         ctx.cfg["modules"]["stark_pulse"], "gain", pdr
-                    ),
-                    task=Task(
-                        measure_fn=measure_fn,
-                        result_shape=(len(lens),),
                     ),
                 ),
                 init_cfg=_cfg,

@@ -11,13 +11,7 @@ from typing_extensions import Mapping, Optional, Tuple, cast
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
-from zcu_tools.experiment.v2.runner import (
-    ReTryIfFail,
-    Scan,
-    Task,
-    TaskCfg,
-    run_task,
-)
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveFindPoints,
@@ -63,20 +57,18 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2
         ) as viewer:
             signals = run_task(
-                task=Scan(
-                    name="flux",
-                    values=dev_values.tolist(),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
+                    result_shape=(len(fpts),),
+                )
+                .auto_retry(max_retries=fail_retry)
+                .scan(
+                    "flux",
+                    dev_values.tolist(),
                     before_each=lambda _, ctx, flx: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], flx
-                    ),
-                    task=ReTryIfFail(
-                        max_retries=fail_retry,
-                        task=Task(
-                            measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                                soccfg, ctx.cfg
-                            ).acquire(soc, progress=False, callback=update_hook),
-                            result_shape=(len(fpts),),
-                        ),
                     ),
                 ),
                 init_cfg=_cfg,

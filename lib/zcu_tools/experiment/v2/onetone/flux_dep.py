@@ -10,13 +10,12 @@ from typing_extensions import Any, Dict, Mapping, Optional, Tuple
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
-
-from ..runner import Scan, Task, TaskCfg, run_task
 
 FluxDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
 
@@ -50,17 +49,16 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
             signals = run_task(
-                task=Scan(
-                    name="flux",
-                    values=dev_values.tolist(),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: OneToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
+                    result_shape=(len(fpts),),
+                ).scan(
+                    "flux",
+                    dev_values.tolist(),
                     before_each=lambda i, ctx, flx: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], flx
-                    ),
-                    task=Task(
-                        measure_fn=lambda ctx, update_hook: OneToneProgram(
-                            soccfg, ctx.cfg
-                        ).acquire(soc, progress=False, callback=update_hook),
-                        result_shape=(len(fpts),),
                     ),
                 ),
                 init_cfg=_cfg,

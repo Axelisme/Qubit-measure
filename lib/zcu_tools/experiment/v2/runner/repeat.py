@@ -137,7 +137,7 @@ class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult]):
             # If have time left, force trigger hooks
             if time.time() - start_t < self.interval:
                 with MinIntervalFunc.force_execute():
-                    state.root._trigger_update()
+                    state._trigger_update()
 
         if self.dynamic_pbar:
             self.iter_pbar.close()

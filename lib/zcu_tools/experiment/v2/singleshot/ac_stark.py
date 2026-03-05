@@ -16,7 +16,8 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.liveplot import (
     LivePlotter1D,
     LivePlotter2D,
@@ -38,8 +39,6 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background
-
-from .util import calc_populations
 
 # (gains, freqs, populations)
 AcStarkResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
@@ -195,16 +194,15 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                 )
 
             signals = run_task(
-                task=Scan(
-                    name="resonator gain",
-                    values=gains.tolist(),
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: raw[0][0],
+                    result_shape=(len(freqs), 2),
+                    dtype=np.float64,
+                ).scan(
+                    "resonator gain",
+                    gains.tolist(),
                     before_each=update_fn,
-                    task=Task(
-                        measure_fn=measure_fn,
-                        raw2signal_fn=lambda raw: raw[0][0],
-                        result_shape=(len(freqs), 2),
-                        dtype=np.float64,
-                    ),
                 ),
                 init_cfg=_cfg,
                 on_update=plot_fn,

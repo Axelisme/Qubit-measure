@@ -32,7 +32,6 @@ from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
     Result,
-    Scan,
     TaskState,
     run_task,
     run_with_retries,
@@ -120,7 +119,7 @@ class FluxDepBatchTask(BatchTask):
 
             run_with_retries(
                 task,
-                ctx(addr=name),
+                ctx.child(name),
                 self.retry_time,
                 dynamic_pbar=True,
                 raise_error=False,
@@ -292,14 +291,13 @@ class FluxDepExecutor:
             with plotter:
                 try:
                     results = run_task(
-                        task=Scan(
-                            name="flux",
-                            values=self.flx_values.tolist(),
+                        task=FluxDepBatchTask(
+                            self.measurements,
+                            retry_time=retry_time,
+                        ).scan(
+                            "flux",
+                            self.flx_values.tolist(),
                             before_each=update_fn,
-                            task=FluxDepBatchTask(
-                                self.measurements,
-                                retry_time=retry_time,
-                            ),
                         ),
                         init_cfg=cfg,
                         env_dict=env_dict,

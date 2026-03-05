@@ -10,10 +10,9 @@ from scipy.ndimage import gaussian_filter
 if TYPE_CHECKING:
     from qick import QickConfig
 
+from zcu_tools.experiment.v2.runner import Result, default_raw2signal_fn
 from zcu_tools.program.v2 import ModularProgramV2, PulseCfg
 from zcu_tools.utils.func_tools import min_interval
-
-from .runner import Result, default_raw2signal_fn
 
 
 def round_zcu_time(
@@ -75,15 +74,15 @@ T_RawResult = TypeVar("T_RawResult")
 
 def wrap_earlystop_check(
     prog: ModularProgramV2,
-    update_hook: Callable[[int, T_RawResult], Any],
+    callback_fn: Callable[[int, T_RawResult], Any],
     snr_threshold: Optional[float],
     signal2real_fn: Callable[[np.ndarray], np.ndarray],
     raw2signal_fn: Callable[[T_RawResult], np.ndarray] = default_raw2signal_fn,
-    snr_hook: Optional[Callable[[float], Any]] = None,
-    update_interval: Optional[float] = 0.1,
-) -> Callable[[int, T_RawResult], Any]:
+    after_check: Optional[Callable[[float], Any]] = None,
+    check_interval: Optional[float] = 0.1,
+) -> Callable[[int, T_RawResult], None]:
     if snr_threshold is None:
-        return update_hook
+        return callback_fn
 
     def check_snr(raw: T_RawResult) -> None:
         signals = raw2signal_fn(raw)
@@ -91,17 +90,17 @@ def wrap_earlystop_check(
         if snr >= snr_threshold:
             prog.set_early_stop(silent=True)
 
-        if snr_hook is not None:
-            snr_hook(snr)
+        if after_check is not None:
+            after_check(snr)
 
-    check_snr = min_interval(check_snr, update_interval)
+    check_snr = min_interval(check_snr, check_interval)
 
-    @wraps(update_hook)
-    def wrapped_update_hook(i: int, raw: T_RawResult) -> None:
-        update_hook(i, raw)
+    @wraps(callback_fn)
+    def wrapped_callback_fn(i: int, raw: T_RawResult) -> None:
+        callback_fn(i, raw)
         check_snr(raw)
 
-    return wrapped_update_hook
+    return wrapped_callback_fn
 
 
 T_Result = TypeVar("T_Result", bound=Result)

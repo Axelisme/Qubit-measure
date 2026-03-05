@@ -16,7 +16,7 @@ from zcu_tools.experiment.utils import (
     set_output_in_dev_cfg,
     sweep2array,
 )
-from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
@@ -55,19 +55,18 @@ class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
             "Frequency (MHz)", "Magnitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
             signals = run_task(
-                task=Scan(
-                    name="JPA on/off",
-                    values=outputs.tolist(),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: OneToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
+                    result_shape=(len(fpts),),
+                ).scan(
+                    "JPA on/off",
+                    outputs.tolist(),
                     before_each=lambda i, ctx, output: set_output_in_dev_cfg(
                         ctx.cfg["dev"],
                         self.OUTPUT_MAP[output],  # type: ignore
                         label="jpa_rf_dev",
-                    ),
-                    task=Task(
-                        measure_fn=lambda ctx, update_hook: OneToneProgram(
-                            soccfg, ctx.cfg
-                        ).acquire(soc, progress=False, callback=update_hook),
-                        result_shape=(len(fpts),),
                     ),
                 ),
                 init_cfg=_cfg,

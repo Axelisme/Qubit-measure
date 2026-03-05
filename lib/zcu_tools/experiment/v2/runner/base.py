@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from typing import Sequence
 
 from typing_extensions import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -22,6 +24,10 @@ from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import min_interval
 
 from .state import Result, TaskState
+
+if TYPE_CHECKING:
+    from .repeat import RepeatOverTime, ReTryIfFail
+    from .soft import Scan, T_ValueType
 
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
@@ -50,6 +56,33 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult]):
 
     @abstractmethod
     def get_default_result(self) -> T_Result: ...
+
+    def scan(
+        self,
+        name: str,
+        values: Sequence[T_ValueType],
+        before_each: Callable[
+            [int, TaskState[Sequence[T_Result], T_RootResult], T_ValueType], Any
+        ],
+    ) -> Scan[T_Result, T_RootResult]:
+        """Scan a task over a sequence of values."""
+        from .soft import Scan
+
+        return Scan(name, values, before_each, task=self)
+
+    def repeat(
+        self, name: str, times: int, interval: float
+    ) -> RepeatOverTime[T_Result, T_RootResult]:
+        """Repeat a task over a fixed number of times at a fixed interval."""
+        from .repeat import RepeatOverTime
+
+        return RepeatOverTime(name, times, interval, task=self)
+
+    def auto_retry(self, max_retries: int) -> ReTryIfFail[T_Result, T_RootResult]:
+        """Automatically retry a task if it fails."""
+        from .repeat import ReTryIfFail
+
+        return ReTryIfFail(task=self, max_retries=max_retries)
 
 
 def run_task(

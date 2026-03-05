@@ -23,7 +23,6 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import (
-    Scan,
     Task,
     TaskCfg,
     TaskState,
@@ -124,11 +123,10 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             "Number of Pi", "Time (us)", line_axis=1, num_lines=2, title="CPMG"
         ) as viewer:
             signals = run_task(
-                task=Scan(
-                    name="times",
-                    values=times.tolist(),
+                task=Task(measure_fn=measure_fn, result_shape=(len(ts),)).scan(
+                    "times",
+                    times.tolist(),
                     before_each=lambda _, ctx, time: ctx.env.update(time=time),
-                    task=Task(measure_fn=measure_fn, result_shape=(len(ts),)),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

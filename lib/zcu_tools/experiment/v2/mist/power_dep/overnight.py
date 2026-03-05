@@ -10,13 +10,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import (
-    RepeatOverTime,
-    ReTryIfFail,
-    Task,
-    TaskCfg,
-    run_task,
-)
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -80,30 +74,24 @@ class PowerDepOvernightExp(
             "Pulse gain", "Iteration", line_axis=1, title="MIST Overnight"
         ) as viewer:
             signals = run_task(
-                task=RepeatOverTime(
-                    name="repeat_over_time",
-                    num_times=num_times,
-                    interval=_cfg["interval"],
-                    task=ReTryIfFail(
-                        max_retries=fail_retry,
-                        task=Task(
-                            measure_fn=lambda ctx, update_hook: (
-                                (modules := ctx.cfg["modules"])
-                                and ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset("reset", modules.get("reset")),
-                                        Pulse("init_pulse", modules.get("init_pulse")),
-                                        Pulse("probe_pulse", modules["probe_pulse"]),
-                                        Readout("readout", modules["readout"]),
-                                    ],
-                                ).acquire(soc, progress=False, callback=update_hook)
-                            ),
-                            result_shape=(len(pdrs),),
-                        ),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                Reset("reset", modules.get("reset")),
+                                Pulse("init_pulse", modules.get("init_pulse")),
+                                Pulse("probe_pulse", modules["probe_pulse"]),
+                                Readout("readout", modules["readout"]),
+                            ],
+                        ).acquire(soc, progress=False, callback=update_hook)
                     ),
-                ),
+                    result_shape=(len(pdrs),),
+                )
+                .auto_retry(max_retries=fail_retry)
+                .repeat("repeat_over_time", num_times, _cfg["interval"]),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     iters.astype(np.float64),

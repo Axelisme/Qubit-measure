@@ -24,7 +24,8 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import (
     LivePlotter1D,
@@ -46,8 +47,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
-
-from ..util import calc_populations
 
 # (values, times, signals)
 T1WithToneSweepResult = Tuple[
@@ -200,16 +199,15 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 )
 
             populations = run_task(
-                task=Scan(
-                    name=sweep_name,
-                    values=xs.tolist(),
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: raw[0][0],
+                    result_shape=(2, len(ts), 2),
+                    dtype=np.float64,
+                ).scan(
+                    sweep_name,
+                    xs.tolist(),
                     before_each=update_fn,
-                    task=Task(
-                        measure_fn=measure_fn,
-                        raw2signal_fn=lambda raw: raw[0][0],
-                        result_shape=(2, len(ts), 2),
-                        dtype=np.float64,
-                    ),
                 ),
                 init_cfg=_cfg,
                 on_update=plot_fn,

@@ -30,7 +30,7 @@ def calc_therm_ratio(omega: float, T: float) -> float:
 
 
 def calc_Qcap_vs_omega(
-    params: List[float],
+    params: Tuple[float, float, float],
     fpts: NDArray[np.float64],
     T1s: NDArray[np.float64],
     n_elements: NDArray[np.float64],
@@ -259,7 +259,9 @@ def plot_t1_with_sample(
     *,
     name: str,
     noise_name: str,
-    values: list[float],
+    values: list[
+        Union[float, Callable[[NDArray[np.float64], float], NDArray[np.float64]]]
+    ],
     Temp: float,
     **other_noise_options: dict,
 ) -> Tuple[Figure, Axes]:

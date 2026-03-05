@@ -26,7 +26,6 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
-    RepeatOverTime,
     Result,
     TaskState,
     run_task,
@@ -215,14 +214,9 @@ class OvernightExecutor(AbsExperiment):
 
             with plotter:
                 results = run_task(
-                    task=RepeatOverTime(
-                        name="Iter",
-                        num_times=self.num_times,
-                        interval=self.interval,
-                        task=OvernightBatchTask(
-                            self.measurements, retry_time=fail_retry
-                        ),
-                    ),
+                    task=OvernightBatchTask(
+                        self.measurements, retry_time=fail_retry
+                    ).repeat("Iter", self.num_times, self.interval),
                     init_cfg=cfg,
                     env_dict=env_dict,
                     on_update=plot_fn,

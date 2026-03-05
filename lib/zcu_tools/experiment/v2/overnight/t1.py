@@ -183,10 +183,10 @@ class T1Task(
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
 
-        self.task.init(ctx(addr="signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+        self.task.init(ctx.child("signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
     def run(self, ctx: TaskState[T1Result, T_RootResult]) -> None:
-        self.task.run(ctx(addr="signals", new_cfg=self.cfg))  # type: ignore
+        self.task.run(ctx.child("signals", new_cfg=self.cfg))  # type: ignore
 
         with MinIntervalFunc.force_execute():
             ctx.set_value(

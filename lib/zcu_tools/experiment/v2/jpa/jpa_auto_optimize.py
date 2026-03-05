@@ -29,7 +29,6 @@ from zcu_tools.experiment.utils import (
     set_power_in_dev_cfg,
 )
 from zcu_tools.experiment.v2.runner import (
-    Scan,
     Task,
     TaskCfg,
     TaskState,
@@ -196,15 +195,14 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 return avg_d, [tracker.covariance], [tracker.rough_median]
 
             results = run_task(
-                task=Scan(
-                    name="Iteration",
-                    values=list(range(num_points)),
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    dtype=np.float64,
+                ).scan(
+                    "Iteration",
+                    list(range(num_points)),
                     before_each=update_fn,
-                    task=Task(
-                        measure_fn=measure_fn,
-                        raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
-                        dtype=np.float64,
-                    ),
                 ),
                 init_cfg=_cfg,
                 on_update=plot_fn,

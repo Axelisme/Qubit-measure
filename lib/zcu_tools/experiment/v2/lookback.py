@@ -12,12 +12,11 @@ from typeguard import check_type
 from typing_extensions import Any, Dict, NotRequired, Optional, Tuple, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import ModularProgramCfg, OneToneProgram
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
-
-from .runner import Task, TaskCfg, run_task
 
 LookbackResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 

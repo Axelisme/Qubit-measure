@@ -19,6 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -34,8 +35,6 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
-
-from ..runner import Scan, Task, TaskCfg, TaskState, run_task
 
 # (times, signals)
 ZigZagResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
@@ -111,11 +110,10 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
                 ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
-                task=Scan(
-                    name="times",
-                    values=times.tolist(),
+                task=Task(measure_fn=measure_fn).scan(
+                    "times",
+                    times.tolist(),
                     before_each=lambda _, ctx, time: ctx.env.update(zigzag_time=time),
-                    task=Task(measure_fn=measure_fn),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

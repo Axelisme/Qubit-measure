@@ -13,7 +13,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -76,29 +76,28 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             line_axis=0,
         ) as viewer:
             signals = run_task(
-                task=Scan(
-                    name="freq2",
-                    values=fpts2.tolist(),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("init_pulse", modules.get("init_pulse")),
+                                    Reset("tested_reset", modules["tested_reset"]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    ),
+                    result_shape=(len(fpts1),),
+                ).scan(
+                    "freq2",
+                    fpts2.tolist(),
                     before_each=lambda _, ctx, fpt2: Reset.set_param(
                         ctx.cfg["modules"]["tested_reset"], "freq2", fpt2
-                    ),
-                    task=Task(
-                        measure_fn=lambda ctx, update_hook: (
-                            (modules := ctx.cfg["modules"])
-                            and (
-                                ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset("reset", modules.get("reset")),
-                                        Pulse("init_pulse", modules.get("init_pulse")),
-                                        Reset("tested_reset", modules["tested_reset"]),
-                                        Readout("readout", modules["readout"]),
-                                    ],
-                                ).acquire(soc, progress=False, callback=update_hook)
-                            )
-                        ),
-                        result_shape=(len(fpts1),),
                     ),
                 ),
                 init_cfg=_cfg,

@@ -1,9 +1,9 @@
 import time
 import warnings
-from typing import Literal, Optional
 
 import numpy as np
 from tqdm.auto import tqdm
+from typing_extensions import Literal, Optional
 
 from .base import BaseDevice, DeviceInfo
 
@@ -13,13 +13,13 @@ MODE_MAPS = {"voltage": "VOLT", "current": "CURR"}
 MODE_MAPS_INV = {"VOLT": "voltage", "CURR": "current"}
 
 
-class YOKOGS200Info(DeviceInfo):
+class YOKOGS200Info(DeviceInfo, closed=True):
     output: Literal["on", "off"]
     mode: Literal["voltage", "current"]
     value: float
 
 
-class YOKOGS200(BaseDevice[YOKOGS200Info]):
+class YOKOGS200(BaseDevice):
     # Initializes session for device.
     # address: address of device, rm: VISA resource manager
     def __init__(self, address: str, rm) -> None:

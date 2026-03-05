@@ -156,12 +156,12 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
             )
 
         self.task = Task[T_RootResult, List[NDArray[np.float64]]](
-            measure_fn=measure_fn, result_shape=(self.length_sweep["expts"],)
+            measure_fn, result_shape=(self.length_sweep["expts"],)
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
         self.init_cfg = deepcopy(ctx.cfg)
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+        self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
     def run(self, ctx: TaskState[LenRabiResult, T_RootResult]) -> None:
         cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
@@ -176,12 +176,9 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         cfg = check_type(cfg_temp, LenRabiCfg)
 
         rabi_pulse = cfg["modules"]["rabi_pulse"]
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
+        self.task.run(ctx.child("raw_signals", new_cfg=cfg))
 
-        raw_signals = ctx.value["raw_signals"]
-        assert isinstance(raw_signals, np.ndarray)
-
-        real_signals = lenrabi_signal2real(raw_signals)
+        real_signals = lenrabi_signal2real(ctx.value["raw_signals"])
 
         lengths = sweep2array(self.length_sweep)
         lengths = round_zcu_time(lengths, ctx.env["soccfg"], gen_ch=rabi_pulse["ch"])
@@ -221,7 +218,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         with MinIntervalFunc.force_execute():
             ctx.set_value(
                 LenRabiResult(
-                    raw_signals=raw_signals,
+                    raw_signals=ctx.value["raw_signals"],
                     pi_length=np.array(pi_len),
                     pi2_length=np.array(pi2_len),
                     rabi_freq=np.array(rabi_freq),

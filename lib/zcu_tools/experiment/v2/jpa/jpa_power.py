@@ -17,7 +17,7 @@ from zcu_tools.experiment.utils import (
     set_power_in_dev_cfg,
     sweep2array,
 )
-from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter
@@ -89,16 +89,15 @@ class JPAPowerExp(AbsExperiment[JPAPowerResult, JPAPowerCfg]):
                 return avg_d, [tracker.covariance], [tracker.rough_median]
 
             signals = run_task(
-                task=Scan(
-                    name="power (dBm)",
-                    values=jpa_powers.tolist(),
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    dtype=np.float64,
+                ).scan(
+                    "power (dBm)",
+                    jpa_powers.tolist(),
                     before_each=lambda i, ctx, pdr: set_power_in_dev_cfg(
                         ctx.cfg["dev"], pdr, label="jpa_rf_dev"
-                    ),
-                    task=Task(
-                        measure_fn=measure_fn,
-                        raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
-                        dtype=np.float64,
                     ),
                 ),
                 init_cfg=_cfg,

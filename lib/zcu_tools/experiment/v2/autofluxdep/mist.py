@@ -142,7 +142,7 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
         )
         cfg = check_type(cfg_temp, Mist_Cfg)
 
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
+        self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)

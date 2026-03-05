@@ -14,7 +14,6 @@ from typing_extensions import Literal, NotRequired, Optional, Tuple, TypedDict, 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
 from zcu_tools.experiment.v2.runner import (
-    Scan,
     Task,
     TaskCfg,
     TaskState,
@@ -228,16 +227,15 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
             return signals
 
         signals = run_task(
-            task=Scan(
-                name="w/o probe pulse",
-                values=[False, True],
+            task=Task(
+                measure_fn=measure_fn,
+                raw2signal_fn=raw2signal_fn,
+                result_shape=(_cfg["shots"],),
+            ).scan(
+                "w/o probe pulse",
+                [False, True],
                 before_each=lambda _, ctx, with_probe: ctx.env.update(
                     with_probe=with_probe
-                ),
-                task=Task(
-                    measure_fn=measure_fn,
-                    raw2signal_fn=raw2signal_fn,
-                    result_shape=(_cfg["shots"],),
                 ),
             ),
             init_cfg=_cfg,

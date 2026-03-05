@@ -11,7 +11,7 @@ from typeguard import check_type
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import Scan, Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
@@ -82,16 +82,15 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         with LivePlotter1D("Length (us)", "Signal") as viewer:
             signals = run_task(
-                task=Scan(
-                    name="length",
-                    values=lens.tolist(),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
+                ).scan(
+                    "length",
+                    lens.tolist(),
                     before_each=lambda _, ctx, length: Pulse.set_param(
                         ctx.cfg["modules"]["qub_pulse"], "length", length
-                    ),
-                    task=Task(
-                        measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                            soccfg, ctx.cfg
-                        ).acquire(soc, progress=False, callback=update_hook),
                     ),
                 ),
                 init_cfg=_cfg,

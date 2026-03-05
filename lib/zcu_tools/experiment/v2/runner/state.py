@@ -32,7 +32,7 @@ T_ChildResult = TypeVar("T_ChildResult", bound=Result)
 
 @dataclass
 class TaskState(Generic[T_Result, T_RootResult]):
-    """State object passed to tasks in runner_v2.
+    """State object passed to tasks in runner.
 
     - `root_data` holds the full result tree for the entire task hierarchy.
     - `path` tracks the current position inside `root_data`.
@@ -54,18 +54,18 @@ class TaskState(Generic[T_Result, T_RootResult]):
     def child(
         self,
         addr: Union[int, Hashable],
-        new_cfg: Optional[MutableMapping[str, Any]] = None,
+        new_cfg: Optional[Mapping[str, Any]] = None,
     ) -> "TaskState[T_ChildResult, T_RootResult]":
         """Return a new TaskState pointing to a child result.
 
         Strategy A: `cfg` is deep-copied when `new_cfg` is None, so that
         modifications in the child do not affect the parent's cfg.
         """
-        actual_cfg = deepcopy(self.cfg) if new_cfg is None else new_cfg
+        actual_cfg = self.cfg if new_cfg is None else new_cfg
 
         return TaskState(
             root_data=self.root_data,
-            cfg=actual_cfg,
+            cfg=deepcopy(actual_cfg),  # type: ignore
             env=self.env,
             on_update=self.on_update,
             path=self.path + (addr,),
@@ -118,21 +118,6 @@ class TaskState(Generic[T_Result, T_RootResult]):
             np.copyto(dst=target, src=value)
 
         self._trigger_update()
-
-    # ------------------------------------------------------------------
-    # Root / env helpers
-    # ------------------------------------------------------------------
-
-    @property
-    def root(self) -> "TaskState[T_RootResult, T_RootResult]":
-        """Return a view pointing to the whole result tree."""
-        return TaskState(
-            root_data=self.root_data,
-            cfg=self.cfg,
-            env=self.env,
-            on_update=self.on_update,
-            path=tuple(),
-        )
 
     def _trigger_update(self) -> None:
         if self.on_update is not None:
