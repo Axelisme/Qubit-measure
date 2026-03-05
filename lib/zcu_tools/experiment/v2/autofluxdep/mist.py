@@ -8,6 +8,7 @@ from numpy import float64
 from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
+    Any,
     Callable,
     Dict,
     List,
@@ -94,7 +95,7 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
         gain_sweep: SweepCfg,
         cfg_maker: Callable[
             [TaskState[Mist_Result, T_RootResult], ModuleLibrary],
-            Optional[Mist_CfgTemplate],
+            Optional[Dict[str, Any]],
         ],
     ) -> None:
         self.gain_sweep = gain_sweep
@@ -135,6 +136,8 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
 
         if cfg_temp is None:
             return  # skip this task
+
+        cfg_temp = check_type(cfg_temp, Mist_CfgTemplate)
 
         deepupdate(
             cast(dict, cfg_temp),

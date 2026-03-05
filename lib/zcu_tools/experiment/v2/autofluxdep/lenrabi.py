@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
+    Any,
     Callable,
     Dict,
     List,
@@ -116,15 +117,13 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
     def __init__(
         self,
         length_sweep: SweepCfg,
-        ref_pi_product: float,
         cfg_maker: Callable[
             [TaskState[LenRabiResult, T_RootResult], ModuleLibrary],
-            Optional[LenRabiCfgTemplate],
+            Optional[Dict[str, Any]],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
         self.length_sweep = length_sweep
-        self.ref_product = ref_pi_product
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
@@ -159,7 +158,9 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
             measure_fn, result_shape=(self.length_sweep["expts"],)
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
+    def init(
+        self, ctx: TaskState[LenRabiResult, T_RootResult], dynamic_pbar: bool = False
+    ) -> None:
         self.init_cfg = deepcopy(ctx.cfg)
         self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
@@ -168,6 +169,8 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
 
         if cfg_temp is None:
             return  # skip this task
+
+        cfg_temp = check_type(cfg_temp, LenRabiCfgTemplate)
 
         deepupdate(
             cast(dict, cfg_temp),
@@ -191,25 +194,22 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         if (
             pi2_len < 0.03
             or mean_err > 0.1 * np.ptp(fit_signals)
-            or pi_len > 0.5 * np.max(lengths)
+            or pi_len > 0.75 * np.max(lengths)
         ):
             pi_len, pi2_len, rabi_freq = np.nan, np.nan, np.nan
             success = False
 
         if success:
             info: FluxDepInfoDict = ctx.env["info"]
-            info["pi_product"] = pi_len * rabi_pulse["gain"]
-            new_gain_factor = (
-                info["m_ratio"] * info["pi_product"] / info.first["pi_product"]
+
+            alpha = 0.3
+            cur_pi_product = pi_len * rabi_pulse["gain"]
+            info["pi_product"] = alpha * cur_pi_product + (1 - alpha) * info.last.get(
+                "pi_product", cur_pi_product
             )
 
-            info.update(
-                pi_length=pi_len,
-                pi2_length=pi2_len,
-                gain_factor=np.sqrt(
-                    info.last.get("gain_factor", 1.0) * new_gain_factor
-                ),
-            )
+            info["pi_length"] = pi_len
+            info["pi2_length"] = pi2_len
             info["pi_pulse"] = deepcopy(rabi_pulse)
             info["pi_pulse"]["waveform"]["length"] = pi_len
             info["pi2_pulse"] = deepcopy(rabi_pulse)

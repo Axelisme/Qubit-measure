@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
+    Any,
     Callable,
     Dict,
     List,
@@ -84,7 +85,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         detune_sweep: SweepCfg,
         cfg_maker: Callable[
             [TaskState[QubitFreqResult, T_RootResult], ModuleLibrary],
-            Optional[QubitFreqCfgTemplate],
+            Optional[Dict[str, Any]],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -125,9 +126,9 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         info["predict_freq"] = predict_freq
 
         cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
-
         if cfg_temp is None:
             return  # skip this task
+        cfg_temp = check_type(cfg_temp, QubitFreqCfgTemplate)
 
         deepupdate(
             cast(dict, cfg_temp),

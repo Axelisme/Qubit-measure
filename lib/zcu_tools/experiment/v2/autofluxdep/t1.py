@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
+    Any,
     Callable,
     Dict,
     List,
@@ -99,7 +100,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
         num_expts: int,
         cfg_maker: Callable[
             [TaskState[T1Result, T_RootResult], ModuleLibrary],
-            Optional[T1CfgTemplate],
+            Optional[Dict[str, Any]],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -148,6 +149,8 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
 
         if cfg_temp is None:
             return  # skip this task
+
+        cfg_temp = check_type(cfg_temp, T1CfgTemplate)
 
         len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
         self.lengths = sweep2array(len_sweep)
