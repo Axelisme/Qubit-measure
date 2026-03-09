@@ -6,6 +6,7 @@ from .modules import (
     DirectReadout,
     DirectReadoutCfg,
     Module,
+    ModuleCfg,
     NonBlocking,
     Pulse,
     PulseCfg,

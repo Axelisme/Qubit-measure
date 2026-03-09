@@ -4,10 +4,10 @@ from copy import deepcopy
 from pathlib import Path
 
 import yaml
-from typing_extensions import Any, Dict, Optional, Union
+from typing_extensions import Any, Dict, Optional, Union, cast
 
 from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.program.v2 import Module, WaveformCfg
+from zcu_tools.program.v2 import Module, ModuleCfg, WaveformCfg
 from zcu_tools.utils import deepupdate, numpy2number
 
 from .syncfile import SyncFile, auto_sync
@@ -45,8 +45,8 @@ SmartDumper.add_representer(dict, SmartDumper.represent_dict)
 
 class ModuleLibrary(SyncFile):
     def __init__(self, cfg_path: Optional[str] = None, read_only: bool = False) -> None:
-        self.waveforms: Dict[str, Dict[str, Any]] = {}
-        self.modules: Dict[str, Dict[str, Any]] = {}
+        self.waveforms: Dict[str, WaveformCfg] = {}
+        self.modules: Dict[str, ModuleCfg] = {}
         self.read_only = read_only
 
         super().__init__(cfg_path)
@@ -147,34 +147,36 @@ class ModuleLibrary(SyncFile):
     ) -> WaveformCfg:
         waveform = deepcopy(self.waveforms[name])
         if override_cfg is not None:
-            deepupdate(waveform, override_cfg, behavior="force")
+            deepupdate(cast(dict, waveform), override_cfg, behavior="force")
         return waveform  # type: ignore[return-value]
 
     @auto_sync("read")
     def get_module(
         self, name: str, override_cfg: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    ) -> ModuleCfg:
         if name not in self.modules:
             raise ValueError(
                 f"Module {name} not found, available modules: {list(self.modules.keys())}"
             )
         module = deepcopy(self.modules[name])
         if override_cfg is not None:
-            deepupdate(module, override_cfg, behavior="force")
-        return module  # type: ignore[return-value]
+            deepupdate(cast(dict, module), override_cfg, behavior="force")
+        return module
 
     @auto_sync("write")
     def update_module(self, name: str, override_cfg: Dict[str, Any]) -> None:
         self.check_can_write()
 
-        deepupdate(self.modules[name], deepcopy(override_cfg), behavior="force")
+        deepupdate(
+            cast(dict, self.modules[name]), deepcopy(override_cfg), behavior="force"
+        )
         self._dirty = True
 
     def __str__(self) -> str:
         self.sync()
         waveforms_str = ", ".join([f"{name}" for name in self.waveforms.keys()])
         modules_str = ", ".join([f"{name}" for name in self.modules.keys()])
-        return f"ModuleLibrary(waveforms=[{waveforms_str}], modules=[{modules_str}])"
+        return f"{self.__class__.__name__}(waveforms=[{waveforms_str}], modules=[{modules_str}])"
 
     def __repr__(self) -> str:
         return self.__str__()

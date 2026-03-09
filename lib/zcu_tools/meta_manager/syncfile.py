@@ -3,9 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from functools import wraps
 from pathlib import Path
-from typing import Callable, Literal, Optional, TypeVar
 
-from typing_extensions import ParamSpec
+from typing_extensions import Callable, Literal, Optional, ParamSpec, Self, TypeVar
 
 P = ParamSpec("P")
 T = TypeVar("T")

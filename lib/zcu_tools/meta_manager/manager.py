@@ -100,8 +100,8 @@ class ExperimentManager:
 
     def __str__(self) -> str:
         if self.label is None:
-            return f"ExperimentManager(exp_dir={self.exp_dir})"
-        return f"ExperimentManager(exp_dir={self.exp_dir}, active={self.label})"
+            return f"{self.__class__.__name__}(exp_dir={self.exp_dir})"
+        return f"{self.__class__.__name__}(exp_dir={self.exp_dir}, active={self.label})"
 
     def __repr__(self) -> str:
         return self.__str__()

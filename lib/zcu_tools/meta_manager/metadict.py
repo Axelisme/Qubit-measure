@@ -5,7 +5,8 @@ import warnings
 from copy import deepcopy
 from pathlib import Path
 from pprint import pformat
-from typing import Any, Optional
+
+from typing_extensions import Any, Optional, Self
 
 from zcu_tools.utils import numpy2number
 
@@ -38,11 +39,11 @@ class MetaDict(SyncFile):
         super().__init__(json_path)
 
     @auto_sync("read")
-    def clone(self, dst_path: Optional[str] = None, read_only=False) -> MetaDict:
+    def clone(self, dst_path: Optional[str] = None, read_only=False) -> Self:
         if dst_path is not None and Path(dst_path).exists():
             raise FileExistsError(f"Destination path {dst_path} already exists")
 
-        md = MetaDict(dst_path, read_only=read_only)
+        md = self.__class__(dst_path, read_only=read_only)
         md._data = deepcopy(self._data)
         md.update_modify_time()
         md.dump()
