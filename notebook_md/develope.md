@@ -25,6 +25,50 @@ from scqubits.core.oscillator import Oscillator
 from scqubits.core.hilbert_space import HilbertSpace
 ```
 
+```python
+from zcu_tools.utils.datasaver import load_data
+
+filepath = r"../Database/SA/R_freq_1.hdf5"
+signals, fpts, _, cfg = load_data(filepath, return_cfg=True)
+
+fpts *= 1e-9
+amps = np.abs(signals)
+
+drive_freq = 1e-3 * cfg["readout"]["pulse_cfg"]["freq"]
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+ax1.plot(fpts, amps)
+ax1.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
+ax1.set_title(f"Drive frequency: {drive_freq:.2f} GHz")
+ax1.set_ylim(0.0, None)
+ax2.plot(fpts, amps)
+ax2.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
+ax2.set_ylim(0.0, 0.03)
+plt.show(fig)
+```
+
+```python
+from zcu_tools.utils.datasaver import load_data
+
+filepath = r"../Database/SA/R_freq_2.hdf5"
+signals, fpts, _, cfg = load_data(filepath, return_cfg=True)
+
+fpts *= 1e-9
+amps = np.abs(signals)
+
+drive_freq = 1e-3 * cfg["readout"]["pulse_cfg"]["freq"]
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+ax1.plot(fpts, amps)
+ax1.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
+ax1.set_title(f"Drive frequency: {drive_freq:.2f} GHz")
+ax1.set_ylim(0.0, None)
+ax2.plot(fpts, amps)
+ax2.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
+ax2.set_ylim(0.0, 0.01)
+plt.show(fig)
+```
+
 # Mist Simulation
 
 ```python

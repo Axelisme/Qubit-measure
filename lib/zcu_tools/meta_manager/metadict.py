@@ -6,7 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 from pprint import pformat
 
-from typing_extensions import Any, Optional, Self
+from typing_extensions import Any, List, Optional, Self, Union
 
 from zcu_tools.utils import numpy2number
 
@@ -31,7 +31,7 @@ class MetaDict(SyncFile):
     _PROTECTED_KEYS = ["dump", "load", "sync", "update_modify_time", "clone"]
 
     def __init__(
-        self, json_path: Optional[str] = None, read_only: bool = False
+        self, json_path: Optional[Union[str, Path]] = None, read_only: bool = False
     ) -> None:
         self._data = {}
         self._read_only = read_only
@@ -39,7 +39,9 @@ class MetaDict(SyncFile):
         super().__init__(json_path)
 
     @auto_sync("read")
-    def clone(self, dst_path: Optional[str] = None, read_only=False) -> Self:
+    def clone(
+        self, dst_path: Optional[Union[str, Path]] = None, read_only=False
+    ) -> Self:
         if dst_path is not None and Path(dst_path).exists():
             raise FileExistsError(f"Destination path {dst_path} already exists")
 
@@ -117,3 +119,7 @@ class MetaDict(SyncFile):
 
     def __repr__(self) -> str:
         return self.__str__()
+
+    def __dir__(self) -> List[str]:
+        self.sync()
+        return list(self._data.keys()) + self._PROTECTED_KEYS

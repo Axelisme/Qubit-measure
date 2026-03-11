@@ -47,7 +47,7 @@ from zcu_tools.notebook.utils import make_sweep, make_comment, savefig
 from zcu_tools.utils.datasaver import create_datafolder
 ```
 
-# Create data folder and cfg
+# Create data/result folder
 
 ```python
 chip_name = "Test"
@@ -67,9 +67,9 @@ md = MetaDict()
 # Connect to zcu216
 
 ```python
-from zcu_tools.remote import make_proxy
+from zcu_tools.remote import make_soc_proxy
 
-soc, soccfg = make_proxy("192.168.10.179", 8887)
+soc, soccfg = make_soc_proxy("192.168.10.179", 8887)
 print(soccfg)
 ```
 
@@ -102,6 +102,9 @@ resource_manager = pyvisa.ResourceManager()
 
 ## YOKOGS200
 
+```python
+
+```
 
 ### Qubit Flux
 
@@ -159,6 +162,9 @@ jpa_yoko.set_current(current=md.cur_jpa_A)
 
 ## RF Source
 
+```python
+
+```
 
 ### JPA Pump
 
@@ -185,7 +191,7 @@ jpa_sgs.get_info()
 # Initial Experiment Folder
 
 ```python
-ml, md = em.new_flux(md.cur_A, clone_from=(ml, md), unit="mA")
+ml, md = em.new_flux(md.cur_A, clone_from=(ml, md), unit="A")
 # ml, md = em.use_flux(label="0304_1.800mA_3")
 ml, md
 ```
@@ -243,7 +249,7 @@ filename = "lookback"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 lookback_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"timeFly = {md.timeFly}us"),
 )
 ```
@@ -310,8 +316,8 @@ filename = f"{res_name}_freq"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 res_freq_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, str(params)),
 )
 ```
@@ -353,8 +359,8 @@ _ = res_pdr_exp.run(soc, soccfg, cfg, earlystop_snr=100.0)
 
 ```python
 res_pdr_exp.save(
-    filepath=os.path.join(database_path, f"{res_name}_pdr_e@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{res_name}_pdr@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{res_name}_pdr_e@{em.label}"),
+    # filepath=os.path.join(database_path, f"{res_name}_pdr@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -541,7 +547,7 @@ filename = "JPA_freq"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 jpa_freq_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -590,7 +596,7 @@ filename = "JPA_flux"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 jpa_flux_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -631,7 +637,7 @@ filename = "JPA_power"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 jpa_pdr_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -683,7 +689,7 @@ filename = "JPA_opt"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 jpa_opt_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -727,7 +733,7 @@ filename = "JPA_check"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 jpa_check_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -776,7 +782,7 @@ md.cur_A = 1.8e-3
 # md.cur_V = 0.0
 # flux_yoko.set_voltage(md.cur_V)
 
-ml, md = em.new_flux(cur=md.cur_A, clone_from=(ml, md), unit="mA")
+ml, md = em.new_flux(value=md.cur_A, clone_from=(ml, md), unit="A")
 ```
 
 ```python
@@ -830,8 +836,8 @@ filename = f"{qub_name}_freq"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 qub_freq_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"frequency = {f}MHz"),
 )
 ```
@@ -894,8 +900,8 @@ filename = f"{qub_name}_rabi_length"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 qub_lenrabi_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"pi len = {md.pi_len}us\npi/2 len = {md.pi2_len}us"),
 )
 ```
@@ -965,8 +971,8 @@ filename = f"{qub_name}_rabi_amplitude"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 qub_amprabi_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"pi gain = {md.pi_gain}\npi/2 gain = {md.pi2_gain}"),
 )
 ```
@@ -1060,8 +1066,8 @@ filename = f"{qub_name}_sidereset_freq"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 single_reset_freq_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"frequency = {f}MHz"),
 )
 ```
@@ -1108,8 +1114,8 @@ filename = f"{qub_name}_sidereset_time"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 single_reset_length_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -1167,8 +1173,8 @@ filename = f"{qub_name}_sidereset_check"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 single_reset_check_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -1233,8 +1239,8 @@ filename = f"{qub_name}_dualreset_freq1"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 dualreset_freq1_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"frequency = {f}MHz"),
 )
 ```
@@ -1323,8 +1329,8 @@ filename = f"{qub_name}_dualreset_both_freq"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 dualreset_freq2_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"frequency = ({reset_f1:.1f}, {reset_f2:.1f})MHz"),
 )
 ```
@@ -1402,8 +1408,8 @@ filename = f"{qub_name}_mux_reset_gain"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 dual_reset_pdr_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"best gain = ({gain1:.1f}, {gain2:.1f})"),
 )
 ```
@@ -1442,8 +1448,8 @@ _ = dual_reset_len_exp.run(soc, soccfg, cfg)
 
 ```python
 dual_reset_len_exp.save(
-    # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_time@{md.cur_A * 1e3:.3f}mA"),
-    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_time@{md.cur_V:.3f}V"),
+    # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_time@{em.label}"),
+    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_time@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -1480,8 +1486,8 @@ _ = dual_reset_check_exp.run(soc, soccfg, cfg)
 
 ```python
 dual_reset_check_exp.save(
-    # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_check@{md.cur_A * 1e3:.3f}mA"),
-    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_check@{md.cur_V:.3f}V"),
+    # filepath=os.path.join(database_path, f"{qub_name}_mux_reset_check@{em.label}"),
+    filepath=os.path.join(database_path, f"{qub_name}_mux_reset_check@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -1525,8 +1531,8 @@ filename = f"{qub_name}_rabi_freq"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 rabifreq_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"pi len = {md.pi_len}us\npi/2 len = {md.pi2_len}us"),
 )
 ```
@@ -1587,8 +1593,8 @@ filename = f"{qub_name}_bathreset_freqgain"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 bathreset_freq_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -1645,8 +1651,8 @@ filename = f"{qub_name}_bathreset_len"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 bathreset_len_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -1710,8 +1716,8 @@ filename = f"{qub_name}_bathreset_rabicheck"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 bathreset_rabicheck_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -1770,8 +1776,8 @@ _ = qub_flux_exp.run(soc, soccfg, cfg, fail_retry=3)
 ```python
 qub_flux_exp.save(
     filepath=os.path.join(database_path, f"{qub_name}_flux"),
-    # filepath=os.path.join(database_path, f"{qub_name}_flux@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{qub_name}_flux@{md.cur_V:.3f}V"),
+    # filepath=os.path.join(database_path, f"{qub_name}_flux@{em.label}"),
+    # filepath=os.path.join(database_path, f"{qub_name}_flux@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -1788,6 +1794,9 @@ md.mA_c, md.mA_e
 
 # Other TwoTone
 
+```python
+
+```
 
 ## Power dependence
 
@@ -1823,7 +1832,7 @@ _ = qub_pdr_exp.run(soc, soccfg, cfg)
 
 ```python
 qub_pdr_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_pdr@{md.cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{qub_name}_pdr@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -1890,8 +1899,8 @@ filename = f"{qub_name}_ckp"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 ckp_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     # comment=make_comment(cfg, f"ac_stark_coeff = {md.ac_stark_coeff:.3g} MHz"),
     comment=make_comment(cfg),
 )
@@ -1938,8 +1947,8 @@ filename = f"{qub_name}_dispersive_shift_gain{cfg['readout']['pulse_cfg']['gain'
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 dispersive_shift_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"chi = {md.chi:.3g} MHz, kappa = {rf_w:.3g} MHz"),
 )
 ```
@@ -2003,8 +2012,8 @@ filename = f"{qub_name}_ac_stark"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 ac_stark_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     # comment=make_comment(cfg, f"ac_stark_coeff = {md.ac_stark_coeff:.3g} MHz"),
     comment=make_comment(cfg),
 )
@@ -2039,8 +2048,8 @@ allxy_exp.analyze()
 
 ```python
 allxy_exp.save(
-    # filepath=os.path.join(database_path, f"{qub_name}_allxy@{md.cur_A * 1e3:.3f}mA"),
-    filepath=os.path.join(database_path, f"{qub_name}_allxy@{md.cur_V:.3f}V"),
+    # filepath=os.path.join(database_path, f"{qub_name}_allxy@{em.label}"),
+    filepath=os.path.join(database_path, f"{qub_name}_allxy@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -2071,8 +2080,8 @@ _ = zigzag_exp.run(soc, soccfg, cfg, repeat_on=repeat_on)
 ```python
 filename = f"{qub_name}_zigzag_{repeat_on}"
 zigzag_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{qub_name}_zigzag@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{qub_name}_zigzag@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -2121,8 +2130,8 @@ filename = f"{qub_name}_zigzag_sweep_{repeat_on}"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 zigzag_sweep_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -2189,8 +2198,8 @@ filename = f"{qub_name}_ro_opt_freq"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 opt_ro_freq_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"optimal frequency = {md.best_ro_freq:.1f}MHz"),
 )
 ```
@@ -2242,8 +2251,8 @@ filename = f"{qub_name}_ro_opt_pdr"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 opt_ro_pdr_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"optimal power = {md.best_ro_gain:.2f}"),
 )
 ```
@@ -2288,8 +2297,8 @@ filename = f"{qub_name}_ro_opt_len"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 opt_ro_len_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"optimal readout length = {md.best_ro_length:.2f}us"),
 )
 ```
@@ -2355,8 +2364,8 @@ md.best_ro_freq, md.best_ro_gain, md.best_ro_length
 ```python
 filename = f"{qub_name}_auto_opt"
 auto_opt_ro_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -2423,8 +2432,8 @@ filename = f"{qub_name}_t2ramsey"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t2ramsey_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"detune = {detune:.3f}MHz\nt2r = {t2r:.3f}us"),
 )
 ```
@@ -2475,8 +2484,8 @@ filename = f"{qub_name}_t1"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t1_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"t1 = {md.t1:.3f}us"),
 )
 ```
@@ -2494,7 +2503,7 @@ sample_table.add_sample(
         "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 )
-md.dump_json(f"../result/{qub_name}/exp_image/{md.cur_A * 1e3:.3f}mA/metadata.json")
+md.dump_json(f"../result/{qub_name}/exp_image/{em.label}/metadata.json")
 ```
 
 ### With Tone
@@ -2538,8 +2547,8 @@ filename = f"{qub_name}_t1_with_tone_{cfg['test_pulse']['gain']:.2f}"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t1_with_tone_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"t1 = {md.t1_with_tone:.3f}us"),
 )
 ```
@@ -2585,12 +2594,12 @@ _ = t1_with_tone_sweep_exp.run(soc, soccfg, cfg)
 filename = f"{qub_name}_t1_with_tone_sweep"
 savefig(
     fig,
-    f"../result/{qub_name}/exp_image/{md.cur_A * 1e3:.3f}mA/{filename}.png",
+    f"../result/{qub_name}/exp_image/{em.label}/{filename}.png",
 )
 plt.close(fig)
 t1_with_tone_sweep_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -2631,8 +2640,8 @@ filename = f"{qub_name}_t2echo"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t2echo_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"detune = {detune:.3f}MHz\nt2echo = {md.t2e:.3f}us"),
 )
 ```
@@ -2674,8 +2683,8 @@ _, _, fig = cpmg_exp.analyze()
 
 ```python
 cpmg_exp.save(
-    # filepath=os.path.join(database_path, f"{qub_name}_t2echo@{md.cur_A * 1e3:.3f}mA"),
-    filepath=os.path.join(database_path, f"{qub_name}_cpmg@{md.cur_V:.3f}V"),
+    # filepath=os.path.join(database_path, f"{qub_name}_t2echo@{em.label}"),
+    filepath=os.path.join(database_path, f"{qub_name}_cpmg@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -2746,8 +2755,8 @@ filename = f"{qub_name}_singleshot_w_jpa_wo_reset_log_{time.strftime('%Y%m%d_%H%
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 ge_sh_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"fide: {md.fid:.1%}"),
 )
 ```
@@ -2821,8 +2830,8 @@ filename = f"{qub_name}_singleshot_g"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 ge_sh_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"ge_radius: {md.ge_radius:.3}"),
 )
 ```
@@ -2869,8 +2878,8 @@ filename = f"{qub_name}_rabi_length_pop"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 qub_lenrabi_sh_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -2909,8 +2918,8 @@ filename = f"{qub_name}_t1_pop"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t1_sh_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -2963,8 +2972,8 @@ filename = f"{qub_name}_t1_with_tone_gain{cfg['probe_pulse']['gain']:.3f}_pop"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t1_with_tone_sh_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -3015,8 +3024,8 @@ filename = f"{qub_name}_t1_with_tone_sweep_pop"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 t1_with_tone_sweep_sh_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -3070,8 +3079,8 @@ filename = f"{qub_name}_mist_g_singleshot_short_{time.strftime('%Y%m%d_%H%M%S')}
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 mist_sh_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -3120,8 +3129,8 @@ filename = f"{qub_name}_e_mist_gain{cfg['probe_pulse']['gain']:.4f}_singleshot_s
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 mist_sh_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -3177,8 +3186,8 @@ filename = f"{qub_name}_ac_stark_pop_rf{cfg['stark_pulse1']['freq']:.3f}MHz_{tim
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 ac_stark_sh_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -3271,8 +3280,8 @@ filename = f"{qub_name}_mist_e"
 savefig(fig, f"{em.flx_dir}/image/{filename}.png")
 plt.close(fig)
 mist_exp.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{filename}@{md.cur_V:.3f}V"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -3335,8 +3344,8 @@ filename = (
 )
 qub_flux_exp.save(
     filepath=os.path.join(database_path, filename),
-    # filepath=os.path.join(database_path, f"{qub_name}_flux@{md.cur_A * 1e3:.3f}mA"),
-    # filepath=os.path.join(database_path, f"{qub_name}_flux@{md.cur_V:.3f}V"),
+    # filepath=os.path.join(database_path, f"{qub_name}_flux@{em.label}"),
+    # filepath=os.path.join(database_path, f"{qub_name}_flux@{em.label}"),
     comment=make_comment(cfg),
 )
 ```

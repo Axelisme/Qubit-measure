@@ -1,12 +1,17 @@
 from typing import Literal
 
+from typeguard import check_type
+
 from .base import BaseDevice, DeviceInfo
 
 STATUS_MAP = {"on": "1", "off": "0"}
-STATUS_MAP_INV = {"1": "on", "0": "off"}
+
+
+STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
 
 
 class RohdeSchwarzSGS100AInfo(DeviceInfo, closed=True):
+    type: Literal["RohdeSchwarzSGS100A"]
     output: Literal["on", "off"]
     IQ: Literal["on", "off"]
     freq_Hz: float
@@ -70,7 +75,9 @@ class RohdeSchwarzSGS100A(BaseDevice):
 
     # ==========================================================================#
 
-    def _setup(self, cfg: RohdeSchwarzSGS100AInfo, *, progress: bool = True) -> None:
+    def _setup(self, cfg: RohdeSchwarzSGS100AInfo, /, progress: bool = True) -> None:
+        cfg = check_type(cfg, RohdeSchwarzSGS100AInfo)  # runtime check
+
         self.set_output(cfg["output"])
         self.set_IQ_state(cfg["IQ"])
         self.set_frequency(cfg["freq_Hz"])
@@ -79,7 +86,7 @@ class RohdeSchwarzSGS100A(BaseDevice):
     def get_info(self) -> RohdeSchwarzSGS100AInfo:
         return RohdeSchwarzSGS100AInfo(
             {
-                "type": self.__class__.__name__,
+                "type": "RohdeSchwarzSGS100A",
                 "address": self.address,
                 "output": self.get_output(),
                 "IQ": self.get_IQ_state(),

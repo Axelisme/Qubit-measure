@@ -25,13 +25,13 @@ class ExperimentManager:
 
     def new_flux(
         self,
-        cur: float,
+        value: Optional[float] = None,
         clone_from: Optional[Union[Tuple[ModuleLibrary, MetaDict], str]] = None,
         label: Optional[str] = None,
-        unit: Literal["mA", "V"] = "mA",
+        unit: Literal["A", "V", "K"] = "A",
     ) -> Tuple[ModuleLibrary, MetaDict]:
         if label is None:
-            label = self._auto_label(cur, unit)
+            label = self._auto_label(value, unit)
 
         flx_dir = self.exp_dir / label
         if (flx_dir / "meta_info.json").exists():
@@ -45,17 +45,16 @@ class ExperimentManager:
         flx_dir.mkdir(parents=True, exist_ok=True)
         if clone_from is not None:
             if isinstance(clone_from, str):
-                ml = ModuleLibrary(
-                    str(Path(clone_from) / "module_cfg.yaml"), read_only=True
-                )
-                md = MetaDict(str(Path(clone_from) / "meta_info.json"), read_only=True)
+                src_folder = Path(clone_from)
+                ml = ModuleLibrary(src_folder / "module_cfg.yaml", read_only=True)
+                md = MetaDict(src_folder / "meta_info.json", read_only=True)
             else:
                 (ml, md) = clone_from
-            ml = ml.clone(dst_path=str(flx_dir / "module_cfg.yaml"))
-            md = md.clone(dst_path=str(flx_dir / "meta_info.json"))
+            ml = ml.clone(dst_path=flx_dir / "module_cfg.yaml")
+            md = md.clone(dst_path=flx_dir / "meta_info.json")
         else:
-            ml = ModuleLibrary(str(flx_dir / "module_cfg.yaml"))
-            md = MetaDict(str(flx_dir / "meta_info.json"))
+            ml = ModuleLibrary(flx_dir / "module_cfg.yaml")
+            md = MetaDict(flx_dir / "meta_info.json")
 
         return ml, md
 
@@ -69,8 +68,8 @@ class ExperimentManager:
             )
 
         self._label = label
-        ml = ModuleLibrary(str(flx_dir / "module_cfg.yaml"), read_only=readonly)
-        md = MetaDict(str(flx_dir / "meta_info.json"), read_only=readonly)
+        ml = ModuleLibrary(flx_dir / "module_cfg.yaml", read_only=readonly)
+        md = MetaDict(flx_dir / "meta_info.json", read_only=readonly)
 
         return ml, md
 
@@ -86,22 +85,42 @@ class ExperimentManager:
     def flx_dir(self) -> Path:
         return self.exp_dir / self.label
 
-    def _auto_label(self, cur: float, unit: Literal["mA", "V"]) -> str:
-        date_prefix = datetime.now().strftime("%m%d")
-        flx_value = f"{cur * 1e3:.3f}mA" if unit == "mA" else f"{cur:.3f}V"
-        base = f"{date_prefix}_{flx_value}"
+    def _auto_label(
+        self, value: Optional[float] = None, unit: Literal["A", "V", "K"] = "A"
+    ) -> str:
+
+        if value is not None:
+            if unit == "A":
+                if value <= 0.1:  # 100 mA
+                    united_value = f"{value * 1e3:.3f}mA"  # convert to mA
+                else:
+                    united_value = f"{value:.3f}A"
+            elif unit == "V":
+                if value <= 0.1:  # 100 mV
+                    united_value = f"{value * 1e3:.3f}mV"  # convert to mV
+                else:
+                    united_value = f"{value:.3f}V"
+            elif unit == "K":
+                if value <= 1.0:  # 1000 mK
+                    united_value = f"{value * 1e3:.3f}mK"  # convert to mK
+                else:
+                    united_value = f"{value:.3f}K"
+            else:
+                raise ValueError(f"Invalid unit: {unit}")
+        else:
+            united_value = "NoValue"
+
+        base_name = f"{datetime.now().strftime('%m%d%H')}_{united_value}"
         existing = set(self.list_contexts())
-        if base not in existing:
-            return base
+        if base_name not in existing:
+            return base_name
         idx = 2
-        while f"{base}_{idx}" in existing:
+        while f"{base_name}_{idx}" in existing:
             idx += 1
-        return f"{base}_{idx}"
+        return f"{base_name}_{idx}"
 
     def __str__(self) -> str:
-        if self.label is None:
-            return f"{self.__class__.__name__}(exp_dir={self.exp_dir})"
-        return f"{self.__class__.__name__}(exp_dir={self.exp_dir}, active={self.label})"
+        return f"{self.__class__.__name__}(exp_dir={self.exp_dir}, active={None if self.label is None else self.label})"
 
     def __repr__(self) -> str:
         return self.__str__()

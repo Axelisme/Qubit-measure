@@ -17,6 +17,7 @@ from typing_extensions import (
     List,
     Mapping,
     Optional,
+    Self,
     Tuple,
     TypedDict,
     TypeVar,
@@ -117,12 +118,11 @@ class OvernightExecutor(AbsExperiment):
 
         self.measurements: Dict[str, MeasurementTask] = OrderedDict()
 
-    def add_measurement(
-        self, name: str, measurement: MeasurementTask
-    ) -> OvernightExecutor:
-        if name in self.measurements:
-            raise ValueError(f"Measurement {name} already exists")
-        self.measurements[name] = measurement
+    def add_measurements(self, measurements: Dict[str, MeasurementTask]) -> Self:
+        for name, measurement in measurements.items():
+            if name in self.measurements:
+                raise ValueError(f"Measurement {name} already exists")
+            self.measurements[name] = measurement
 
         return self
 

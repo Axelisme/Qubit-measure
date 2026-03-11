@@ -21,6 +21,7 @@ from typing_extensions import (
     List,
     Mapping,
     Optional,
+    Self,
     Tuple,
     TypedDict,
     TypeVar,
@@ -141,16 +142,15 @@ class FluxDepExecutor:
         self.record_path = None
         self.measurements: Dict[str, MeasurementTask] = OrderedDict()
 
-    def add_measurement(
-        self, name: str, measurement: MeasurementTask
-    ) -> FluxDepExecutor:
-        if name in self.measurements:
-            raise ValueError(f"Measurement {name} already exists")
-        self.measurements[name] = measurement
+    def add_measurements(self, measurements: Dict[str, MeasurementTask]) -> Self:
+        for name, measurement in measurements.items():
+            if name in self.measurements:
+                raise ValueError(f"Measurement {name} already exists")
+            self.measurements[name] = measurement
 
         return self
 
-    def record_animation(self, path: str) -> FluxDepExecutor:
+    def record_animation(self, path: str) -> Self:
         if self.record_path is not None:
             raise ValueError("Animation recording path already set")
         self.record_path = Path(path)

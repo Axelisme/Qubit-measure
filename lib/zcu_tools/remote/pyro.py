@@ -1,5 +1,4 @@
 import socket
-from types import ModuleType
 from typing import Any, Literal, Tuple
 
 import psutil
@@ -22,17 +21,6 @@ def setup_pyro4() -> None:
 
 
 setup_pyro4()
-
-
-def get_program_module(version: Literal["v1", "v2"]) -> ModuleType:
-    import importlib
-
-    if version == "v1":
-        return importlib.import_module("zcu_tools.program.v1")
-    elif version == "v2":
-        return importlib.import_module("zcu_tools.program.v2")
-    else:
-        raise ValueError(f"Invalid version {version}")
 
 
 def get_localhost_ip(ns: Pyro4.naming.NameServer, iface: str) -> str:
@@ -91,7 +79,7 @@ def start_server(
     daemon.requestLoop()  # this will run forever until interrupted
 
 
-def make_proxy(
+def make_soc_proxy(
     ns_host: str,
     ns_port: int,
     remote_traceback: bool = True,

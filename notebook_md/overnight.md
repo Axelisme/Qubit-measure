@@ -43,9 +43,9 @@ ml, md = em.use_flux(label="0303_1.800mA", readonly=True)
 # Connect ZCU216
 
 ```python
-from zcu_tools.remote import make_proxy
+from zcu_tools.remote import make_soc_proxy
 
-soc, soccfg = make_proxy("192.168.10.179", 8887)
+soc, soccfg = make_soc_proxy("192.168.10.179", 8887)
 print(soccfg)
 ```
 
@@ -77,11 +77,9 @@ flux_yoko.set_mode("current", rampstep=1e-6)
 filename = f"{qub_name}_overnight"
 
 
-executor = (
-    zeo.OvernightExecutor(num_times=300, interval=120)
-    .add_measurement(
-        "mist_g",
-        zeo.singleshot.MistTask(
+executor = zeo.OvernightExecutor(num_times=300, interval=120).add_measurements(
+    dict(
+        mist_g=zeo.singleshot.MistTask(
             ml.make_cfg(
                 {
                     "modules": {
@@ -108,10 +106,7 @@ executor = (
             md.e_center,
             md.ge_radius,
         ),
-    )
-    .add_measurement(
-        "mist_e",
-        zeo.singleshot.MistTask(
+        mist_e=zeo.singleshot.MistTask(
             ml.make_cfg(
                 {
                     "modules": {
@@ -141,10 +136,7 @@ executor = (
             md.e_center,
             md.ge_radius,
         ),
-    )
-    .add_measurement(
-        "mist_steady",
-        zeo.singleshot.MistTask(
+        mist_steady=zeo.singleshot.MistTask(
             ml.make_cfg(
                 {
                     "modules": {
@@ -182,7 +174,7 @@ _ = executor.run(
 
 ```python
 executor.save(
-    filepath=os.path.join(database_path, f"{filename}@{md.cur_A * 1e3:.3f}mA"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=datetime.now().strftime("Overnight run at %Y-%m-%d %H:%M:%S")
     + "\n".join(f"{k}: {v}" for k, v in GlobalDeviceManager.get_all_info().items())
     + str(md),

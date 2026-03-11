@@ -63,38 +63,38 @@ def mist_fluxdep_signal2real(
     return mist_signals
 
 
-class Mist_ModuleCfg(TypedDict, closed=True):
+class MistModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     mist_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class Mist_CfgTemplate(ModularProgramCfg, TaskCfg):
-    modules: Mist_ModuleCfg
+class MistCfgTemplate(ModularProgramCfg, TaskCfg):
+    modules: MistModuleCfg
 
 
-class Mist_Cfg(ModularProgramCfg, TaskCfg):
-    modules: Mist_ModuleCfg
+class MistCfg(ModularProgramCfg, TaskCfg):
+    modules: MistModuleCfg
     dev: Dict[str, DeviceInfo]
     sweep: Dict[str, SweepCfg]
 
 
-class Mist_Result(TypedDict, closed=True):
+class MistResult(TypedDict, closed=True):
     raw_signals: NDArray[np.complex128]
     success: NDArray[np.bool_]
 
 
-class Mist_PlotterDict(TypedDict, closed=True):
+class MistPlotterDict(TypedDict, closed=True):
     mist: LivePlotter2DwithLine
 
 
-class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
+class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
     def __init__(
         self,
         gain_sweep: SweepCfg,
         cfg_maker: Callable[
-            [TaskState[Mist_Result, T_RootResult], ModuleLibrary],
+            [TaskState[MistResult, T_RootResult], ModuleLibrary],
             Optional[Dict[str, Any]],
         ],
     ) -> None:
@@ -126,24 +126,24 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
         )
 
     def init(
-        self, ctx: TaskState[Mist_Result, T_RootResult], dynamic_pbar=False
+        self, ctx: TaskState[MistResult, T_RootResult], dynamic_pbar=False
     ) -> None:
         self.init_cfg = deepcopy(ctx.cfg)
         self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx: TaskState[Mist_Result, T_RootResult]) -> None:
+    def run(self, ctx: TaskState[MistResult, T_RootResult]) -> None:
         cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
 
         if cfg_temp is None:
             return  # skip this task
 
-        cfg_temp = check_type(cfg_temp, Mist_CfgTemplate)
+        cfg_temp = check_type(cfg_temp, MistCfgTemplate)
 
         deepupdate(
             cast(dict, cfg_temp),
             {"dev": ctx.cfg["dev"], "sweep": {"gain": self.gain_sweep}},
         )
-        cfg = check_type(cfg_temp, Mist_Cfg)
+        cfg = check_type(cfg_temp, MistCfg)
 
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
 
@@ -152,14 +152,14 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
 
         with MinIntervalFunc.force_execute():
             ctx.set_value(
-                Mist_Result(
+                MistResult(
                     raw_signals=raw_signals,
                     success=np.array(True),
                 )
             )
 
-    def get_default_result(self) -> Mist_Result:
-        return Mist_Result(
+    def get_default_result(self) -> MistResult:
+        return MistResult(
             raw_signals=self.task.get_default_result(),
             success=np.array(True),
         )
@@ -170,8 +170,8 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
     def num_axes(self) -> Dict[str, int]:
         return dict(mist=2)
 
-    def make_plotter(self, name, axs) -> Mist_PlotterDict:
-        return Mist_PlotterDict(
+    def make_plotter(self, name, axs) -> MistPlotterDict:
+        return MistPlotterDict(
             mist=LivePlotter2DwithLine(
                 "Flux device value",
                 "Readout Gain (a.u.)",
@@ -181,7 +181,7 @@ class Mist_Task(MeasurementTask[Mist_Result, T_RootResult, Mist_PlotterDict]):
             ),
         )
 
-    def update_plotter(self, plotters, ctx: TaskState, signals: Mist_Result) -> None:
+    def update_plotter(self, plotters, ctx: TaskState, signals: MistResult) -> None:
         flx_values: np.ndarray = ctx.env["flx_values"]
         gains: np.ndarray = sweep2array(self.gain_sweep)
 

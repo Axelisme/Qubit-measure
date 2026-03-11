@@ -1,4 +1,5 @@
-import os
+# import os
+from pathlib import Path
 from typing import Literal
 
 
@@ -9,6 +10,4 @@ def get_bitfile(version: Literal["v1", "v2"]) -> str:
     }
     if version not in version_dict:
         raise ValueError(f"Invalid version {version}")
-    return os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), version_dict[version]
-    )
+    return str(Path(__file__).absolute().parent / version_dict[version])

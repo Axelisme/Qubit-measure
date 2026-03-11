@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from functools import wraps
 from pathlib import Path
 
-from typing_extensions import Callable, Literal, Optional, ParamSpec, Self, TypeVar
+from typing_extensions import Callable, Literal, Optional, ParamSpec, TypeVar, Union
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -34,7 +34,7 @@ def auto_sync(
 
 
 class SyncFile(ABC):
-    def __init__(self, path: Optional[str] = None) -> None:
+    def __init__(self, path: Optional[Union[str, Path]] = None) -> None:
         self._path = Path(path) if path is not None else None
         self._modify_time = 0
         self._dirty = False

@@ -31,9 +31,17 @@ class SmartDumper(yaml.SafeDumper):
         # 將 dict 拆解為 (key, value)
         items = list(data.items())
 
-        # 排序：如果值是 dict，權重設為 1，其餘（字串、數字、列表）設為 0
-        # 這樣權重 0 的會排在前面，權重 1 的（字典）會被擠到後面
-        items.sort(key=lambda x: 1 if isinstance(x[1], dict) else 0)
+        # priorities: str > int > float > bool > other > list > dict
+        _type_weights = {
+            "str": 0,
+            "int": 1,
+            "float": 2,
+            "bool": 3,
+            "list": 5,
+            "dict": 6,
+        }
+
+        items.sort(key=lambda x: _type_weights.get(type(x[1]).__name__, 4))
 
         # 使用排序後的 list 重新構建 mapping 節點
         return self.represent_mapping("tag:yaml.org,2002:map", items)
@@ -44,7 +52,9 @@ SmartDumper.add_representer(dict, SmartDumper.represent_dict)
 
 
 class ModuleLibrary(SyncFile):
-    def __init__(self, cfg_path: Optional[str] = None, read_only: bool = False) -> None:
+    def __init__(
+        self, cfg_path: Optional[Union[str, Path]] = None, read_only: bool = False
+    ) -> None:
         self.waveforms: Dict[str, WaveformCfg] = {}
         self.modules: Dict[str, ModuleCfg] = {}
         self.read_only = read_only
@@ -53,7 +63,7 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("read")
     def clone(
-        self, dst_path: Optional[str] = None, read_only: bool = False
+        self, dst_path: Optional[Union[str, Path]] = None, read_only: bool = False
     ) -> ModuleLibrary:
         if dst_path is not None and Path(dst_path).exists():
             raise FileExistsError(f"Destination path {dst_path} already exists")
@@ -71,7 +81,7 @@ class ModuleLibrary(SyncFile):
             raise RuntimeError("ModuleLibrary is read-only")
 
     def _load(self, path: str) -> None:
-        with open(str(path), "r") as f:
+        with open(path, "r") as f:
             cfg = yaml.safe_load(f)
 
         self.waveforms = cfg["waveforms"]
@@ -153,7 +163,7 @@ class ModuleLibrary(SyncFile):
     @auto_sync("read")
     def get_module(
         self, name: str, override_cfg: Optional[Dict[str, Any]] = None
-    ) -> ModuleCfg:
+    ) -> Dict[str, Any]:
         if name not in self.modules:
             raise ValueError(
                 f"Module {name} not found, available modules: {list(self.modules.keys())}"
@@ -161,7 +171,7 @@ class ModuleLibrary(SyncFile):
         module = deepcopy(self.modules[name])
         if override_cfg is not None:
             deepupdate(cast(dict, module), override_cfg, behavior="force")
-        return module
+        return cast(dict, module)
 
     @auto_sync("write")
     def update_module(self, name: str, override_cfg: Dict[str, Any]) -> None:
