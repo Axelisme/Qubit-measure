@@ -9,7 +9,7 @@ from .metadict import MetaDict
 
 
 class ExperimentManager:
-    def __init__(self, exp_dir: str) -> None:
+    def __init__(self, exp_dir: Union[str, Path]) -> None:
         self.exp_dir = Path(exp_dir).resolve()
         self._label: Optional[str] = None
 

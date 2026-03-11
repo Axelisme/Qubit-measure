@@ -25,6 +25,7 @@ class YOKOGS200Info(DeviceInfo, closed=True):
     output: Literal["on", "off"]
     mode: Literal["voltage", "current"]
     value: float
+    rampstep: float
 
 
 class YOKOGS200(BaseDevice):
@@ -240,6 +241,8 @@ class YOKOGS200(BaseDevice):
         else:
             raise ValueError(f"Unknown mode {cur_mode} in device {self.address}")
 
+        self._rampstep = cfg["rampstep"]
+
     def get_info(self) -> YOKOGS200Info:
         return YOKOGS200Info(
             {
@@ -248,5 +251,6 @@ class YOKOGS200(BaseDevice):
                 "output": self.get_output(),
                 "mode": self.get_mode(),
                 "value": self._get_level(),
+                "rampstep": self._rampstep,
             }
         )

@@ -43,7 +43,7 @@ from zcu_tools.meta_manager import (
     SampleTable,
     ExperimentManager,
 )
-from zcu_tools.notebook.utils import make_sweep, make_comment, savefig
+from zcu_tools.notebook.utils import make_sweep, make_comment, savefig, dump_device_info
 from zcu_tools.utils.datasaver import create_datafolder
 ```
 
@@ -98,6 +98,10 @@ import pyvisa
 from zcu_tools.device import GlobalDeviceManager
 
 resource_manager = pyvisa.ResourceManager()
+```
+
+```python
+# dump_device_info(f"{em.flx_dir}/device_info.json")
 ```
 
 ## YOKOGS200

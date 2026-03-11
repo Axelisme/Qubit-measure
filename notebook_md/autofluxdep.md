@@ -14,7 +14,9 @@ jupyter:
 
 ```python
 %load_ext autoreload
-import os
+from pprint import pprint
+from pathlib import Path
+import json
 from datetime import datetime
 from collections import OrderedDict
 
@@ -26,7 +28,7 @@ import zcu_tools.experiment.v2.autofluxdep as zefd
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.meta_manager import ExperimentManager
 from zcu_tools.utils.datasaver import create_datafolder
-from zcu_tools.notebook.utils import make_sweep
+from zcu_tools.notebook.utils import make_sweep, reconnect_devices, dump_device_info
 from zcu_tools.program.v2 import PulseCfg
 ```
 
@@ -38,7 +40,7 @@ qub_name = "Q1"
 result_dir = f"../result/{chip_name}/{qub_name}"
 
 database_path = create_datafolder(
-    os.path.join(os.getcwd(), ".."), prefix=os.path.join(chip_name, qub_name)
+    str(Path.cwd().parent), prefix=str(Path(chip_name, qub_name))
 )
 em = ExperimentManager(f"{result_dir}/exps")
 ml, md = em.use_flux(label="0305_1.800mA", readonly=True)
@@ -61,22 +63,20 @@ soc.get_sample_rates()
 # Connect Instruments
 
 ```python
-import pyvisa
 from zcu_tools.device import GlobalDeviceManager
-
-resource_manager = pyvisa.ResourceManager()
-```
-
-## Flux Yoko
-
-```python
 from zcu_tools.device.yoko import YOKOGS200
 
-flux_yoko = YOKOGS200("USB0::0x0B21::0x0039::90ZB35281::INSTR", resource_manager)
-GlobalDeviceManager.register_device("flux_yoko", flux_yoko)
+dev_info_path = f"{result_dir}/device_info.json"
 
-flux_yoko.set_mode("current", rampstep=1e-6)
-# flux_yoko.set_mode("voltage", rampstep=1e-3)
+with open(dev_info_path, "r") as f:
+    dev_info = json.load(f)
+pprint(dev_info)
+
+resource_manager = reconnect_devices(dev_info)
+
+flux_yoko = cast(YOKOGS200, GlobalDeviceManager.get_device("flux_yoko"))
+
+GlobalDeviceManager.setup_devices(dev_info, progress=True)
 ```
 
 # Initial Tools
@@ -104,6 +104,8 @@ pi_pulse = cast(PulseCfg, ml.get_module("pi_amp"))
 pi_product = pi_pulse["waveform"]["length"] * pi_pulse["gain"]
 ref_pi_len = 1.2 * pi_pulse["waveform"]["length"]
 
+# snapshot of execution code
+measure_code: str = In[-1]  # noqa: F821 # type: ignore
 
 executor = (
     zefd.FluxDepExecutor(flx_values=flx_values)
@@ -277,12 +279,21 @@ _ = executor.run(
 ```
 
 ```python
+filepath = Path(database_path, f"{filename}@{em.label}")
+
+snapshot_dir = filepath.parent / f"{filepath.name}_snapshot"
+snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+(snapshot_dir / "measure_code.py").write_text(measure_code)
+dump_device_info(str(snapshot_dir / "device_info.json"))
+ml.clone(dst_path=snapshot_dir / "module_cfg.yaml")
+md.clone(dst_path=snapshot_dir / "meta_info.json")
+
 executor.save(
-    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=datetime.now().strftime("Autofluxdep run at %Y-%m-%d %H:%M:%S")
-    + "\n".join(f"{k}: {v}" for k, v in GlobalDeviceManager.get_all_info().items())
-    + str(md),
+    filepath=str(filepath),
+    comment=datetime.now().strftime("Autofluxdep run at %Y-%m-%d %H:%M:%S"),
 )
+del executor
 ```
 
 ```python
