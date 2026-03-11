@@ -7,16 +7,6 @@ requires-python = ">=3.9"
 dependencies = ["numpy", "tqdm", "matplotlib", "typing-extensions", "typeguard"]
 
 [project.optional-dependencies]
-client = [
-    "zcu-tools[fit]",
-    "qick @ git+https://github.com/openquantumhardware/qick.git",
-    "labber @ git+https://github.com/Axelisme/labber_api.git",
-    "numpy==1.23.5",
-    "matplotlib==3.9",
-    "pyyaml",
-    "pyvisa",
-    "pyro4",
-]
 server = ["numpy==1.23.5"]
 fit = [
     "h5py",
@@ -37,6 +27,16 @@ fit = [
     "jupytext",
     "scikit-optimize",
 ]
+client = [
+    "zcu-tools[fit]",
+    "qick @ git+https://github.com/openquantumhardware/qick.git",
+    "labber @ git+https://github.com/Axelisme/labber_api.git",
+    "numpy==1.23.5",
+    "matplotlib==3.9",
+    "pyyaml",
+    "pyvisa",
+    "pyro4",
+]
 design = ["qiskit_metal"]
 gdrive = [
     "google-api-python-client",
@@ -44,6 +44,7 @@ gdrive = [
     "google-auth-oauthlib",
     "python-dotenv",
 ]
+all = ["zcu_tools[client,design,gdrive]"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
