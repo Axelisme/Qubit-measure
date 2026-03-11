@@ -23,7 +23,7 @@ import numpy as np
 
 %autoreload 2
 import zcu_tools.experiment.v2.overnight as zeo
-from zcu_tools.meta_manager import ExperimentManager
+from zcu_tools.meta_tool import ExperimentManager
 from zcu_tools.utils.datasaver import create_datafolder
 from zcu_tools.notebook.utils import make_sweep, reconnect_devices, dump_device_info
 ```

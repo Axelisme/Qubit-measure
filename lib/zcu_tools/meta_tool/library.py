@@ -13,7 +13,7 @@ from zcu_tools.utils import deepupdate, numpy2number
 from .syncfile import SyncFile, auto_sync
 
 
-class SmartDumper(yaml.SafeDumper):
+class ModuleDumper(yaml.SafeDumper):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.last_indent_level = 0
@@ -48,7 +48,7 @@ class SmartDumper(yaml.SafeDumper):
 
 
 # 註冊自定義的 dict 處理函數
-SmartDumper.add_representer(dict, SmartDumper.represent_dict)
+ModuleDumper.add_representer(dict, ModuleDumper.represent_dict)
 
 
 class ModuleLibrary(SyncFile):
@@ -94,7 +94,7 @@ class ModuleLibrary(SyncFile):
         dump_cfg = numpy2number(deepcopy(dump_cfg))
 
         with open(path, "w") as f:
-            yaml.dump(dump_cfg, f, Dumper=SmartDumper, sort_keys=False)
+            yaml.dump(dump_cfg, f, Dumper=ModuleDumper, sort_keys=False)
 
     def make_cfg(self, exp_cfg: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         exp_cfg = deepcopy(exp_cfg)

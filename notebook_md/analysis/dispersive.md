@@ -36,7 +36,7 @@ from scipy.ndimage import gaussian_filter1d
 
 %autoreload 2
 from zcu_tools.experiment.v2.onetone import FluxDepExp
-from zcu_tools.meta_manager import MetaDict
+from zcu_tools.meta_tool import MetaDict
 import zcu_tools.notebook.persistance as zp
 import zcu_tools.notebook.analysis.dispersive as zd
 from zcu_tools.simulate import mA2flx, flx2mA

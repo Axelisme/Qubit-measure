@@ -9,7 +9,7 @@ from .pulse import Pulse, PulseCfg, check_block_mode
 from .util import calc_max_length
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_manager import ModuleLibrary
+    from zcu_tools.meta_tool import ModuleLibrary
 
 
 class Reset(Module, tag="reset"):

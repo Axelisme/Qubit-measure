@@ -21,7 +21,7 @@ from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
-from zcu_tools.meta_manager import ModuleLibrary
+from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param

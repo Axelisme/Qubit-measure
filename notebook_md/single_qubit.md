@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.meta_manager import (
+from zcu_tools.meta_tool import (
     ModuleLibrary,
     MetaDict,
     SampleTable,

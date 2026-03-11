@@ -26,7 +26,7 @@ from typing_extensions import cast
 %autoreload 2
 import zcu_tools.experiment.v2.autofluxdep as zefd
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.meta_manager import ExperimentManager
+from zcu_tools.meta_tool import ExperimentManager
 from zcu_tools.utils.datasaver import create_datafolder
 from zcu_tools.notebook.utils import make_sweep, reconnect_devices, dump_device_info
 from zcu_tools.program.v2 import PulseCfg

@@ -20,7 +20,7 @@ from typing_extensions import (
 from ..base import MyProgramV2
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_manager import ModuleLibrary
+    from zcu_tools.meta_tool import ModuleLibrary
 
 
 class ModuleCfg(TypedDict, closed=False):

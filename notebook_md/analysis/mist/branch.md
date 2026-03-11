@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 
 %autoreload 2
-from zcu_tools.meta_manager import MetaDict
+from zcu_tools.meta_tool import MetaDict
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate import mA2flx
 from zcu_tools.notebook.analysis.mist.branch import (
