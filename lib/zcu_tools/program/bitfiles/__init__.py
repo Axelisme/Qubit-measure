@@ -10,4 +10,4 @@ def get_bitfile(version: Literal["v1", "v2"]) -> str:
     }
     if version not in version_dict:
         raise ValueError(f"Invalid version {version}")
-    return str(Path(__file__).absolute().parent / version_dict[version])
+    return str(Path(__file__).resolve().parent / version_dict[version])

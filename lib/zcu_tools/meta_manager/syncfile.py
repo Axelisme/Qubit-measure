@@ -40,7 +40,7 @@ class SyncFile(ABC):
         self._dirty = False
 
         if path is not None:
-            self.sync()
+            self.load()
 
     @abstractmethod
     def _load(self, path: str) -> None: ...
