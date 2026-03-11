@@ -69,14 +69,8 @@ class ExperimentManager:
 
         self._label = label
 
-        ml_path = flx_dir / "module_cfg.yaml"
-        md_path = flx_dir / "meta_info.json"
-        if not ml_path.exists():
-            ml_path = None
-        if not md_path.exists():
-            md_path = None
-        ml = ModuleLibrary(ml_path, read_only=readonly)
-        md = MetaDict(md_path, read_only=readonly)
+        ml = ModuleLibrary(flx_dir / "module_cfg.yaml", read_only=readonly)
+        md = MetaDict(flx_dir / "meta_info.json", read_only=readonly)
 
         return ml, md
 

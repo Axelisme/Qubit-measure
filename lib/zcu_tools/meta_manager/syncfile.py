@@ -39,7 +39,7 @@ class SyncFile(ABC):
         self._modify_time = 0
         self._dirty = False
 
-        if path is not None:
+        if path is not None and Path(path).exists():
             self.load()
 
     @abstractmethod
