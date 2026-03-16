@@ -21,11 +21,8 @@ class MyProgram(ImproveAcquireMixin):
     """
 
     def __init__(self, soccfg, cfg: Dict[str, Any], **kwargs) -> None:
-        self._parse_cfg(cfg)  # parse config first
-        super().__init__(soccfg, cfg=cfg, **kwargs)
-
-    def _parse_cfg(self, cfg: Dict[str, Any]) -> None:
         self.cfg = cfg
+        super().__init__(soccfg, cfg=cfg, **kwargs)
 
 
 __all__ = ["MyProgram", "SweepCfg", "AbsStatisticTracker"]

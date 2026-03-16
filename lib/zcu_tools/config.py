@@ -1,5 +1,5 @@
 from argparse import Namespace
 
 config = Namespace(
-    DATA_DRY_RUN=False,
+    DATASAVER_DRY_RUN=False,
 )

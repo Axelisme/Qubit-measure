@@ -24,7 +24,7 @@ def create_datafolder(root_dir: str, prefix: str = "") -> str:
     root_dir = os.path.abspath(os.path.join(root_dir, KEYWORD))
     yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
     save_dir = os.path.join(root_dir, prefix, os.path.join(yy, mm, f"Data_{mm}{dd}"))
-    if not config.DATA_DRY_RUN:
+    if not config.DATASAVER_DRY_RUN:
         os.makedirs(save_dir, exist_ok=True)
     return save_dir
 
@@ -122,7 +122,7 @@ def save_local_data(
 
     filepath = remove_ext(filepath)  # because labber will add .hdf5 automatically
 
-    if config.DATA_DRY_RUN:
+    if config.DATASAVER_DRY_RUN:
         print("DRY RUN: Save data to ", filepath)
         return
 
@@ -170,7 +170,7 @@ def load_local_data(
 
     filepath = format_ext(filepath)
 
-    if config.DATA_DRY_RUN:
+    if config.DATASAVER_DRY_RUN:
         print("DRY RUN: Load data from ", filepath)
         return np.array([]), np.array([]), None
 
@@ -235,7 +235,7 @@ def load_local_cfg(filepath: str) -> dict:
 
     filepath = format_ext(filepath)
 
-    if config.DATA_DRY_RUN:
+    if config.DATASAVER_DRY_RUN:
         print("DRY RUN: Load data from ", filepath)
         return {}
 
@@ -260,7 +260,7 @@ def upload_to_server(filepath: str, server_ip: str, port: int) -> bool:
     """
     import requests
 
-    if config.DATA_DRY_RUN:
+    if config.DATASAVER_DRY_RUN:
         print(f"DRY RUN: Upload {filepath} to {server_ip}:{port}")
         return True
 
@@ -288,7 +288,7 @@ def download_from_server(filepath: str, server_ip: str, port: int) -> None:
     """
     import requests
 
-    if config.DATA_DRY_RUN:
+    if config.DATASAVER_DRY_RUN:
         print(f"DRY RUN: Download {filepath} from {server_ip}:{port}")
         return
 

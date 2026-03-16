@@ -84,6 +84,7 @@ def calculate_system_n_oper_vs_flx(
         from scqubits.core.fluxonium import Fluxonium
         from scqubits.core.hilbert_space import HilbertSpace
         from scqubits.core.oscillator import Oscillator
+        from scqubits.core.param_sweep import ParameterSweep
         from scqubits.utils.spectrum_utils import identity_wrap
 
         resonator = Oscillator(r_f, truncated_dim=res_dim)

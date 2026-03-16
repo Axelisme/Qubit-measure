@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING, Callable, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Callable, Optional, Tuple, Union
 
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
@@ -19,9 +19,38 @@ from zcu_tools.simulate import flx2mA, mA2flx
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flx_with
 
 
+def format_exponent(n):
+    # 將數字轉為標準科學記號字串，例如 "1.30e+03"
+    a = "{:.2e}".format(n)
+    base, exp = a.split("e")
+    # 移除指數部分的正號與多餘的 0 (例如 +03 變成 3)
+    clean_exp = int(exp)
+    return rf"${base} \times 10^{{{clean_exp}}}$"
+
+
 def freq2omega(fpts: NDArray[np.float64]) -> NDArray[np.float64]:
     """GHz -> rad/ns"""
     return 2 * np.pi * fpts
+
+
+def charge_spectral_density(omega, Temp: float, EC: float):
+    """omega: rad/ns, EC: GHz, T: K"""
+    therm_ratio = calc_therm_ratio(omega, Temp)
+    return (
+        2
+        * 8
+        * EC
+        * (1 / np.tanh(0.5 * np.abs(therm_ratio)))
+        / (1 + np.exp(-therm_ratio))
+    )
+
+
+def inductive_spectral_density(omega, Temp: float, EL: float):
+    """omega: rad/ns, EL: GHz, T: K"""
+    therm_ratio = calc_therm_ratio(omega, Temp)
+    return (
+        2 * EL * (1 / np.tanh(0.5 * np.abs(therm_ratio))) / (1 + np.exp(-therm_ratio))
+    )
 
 
 def calc_therm_ratio(omega: float, T: float) -> float:
@@ -31,31 +60,21 @@ def calc_therm_ratio(omega: float, T: float) -> float:
 
 def calc_Qcap_vs_omega(
     params: Tuple[float, float, float],
-    fpts: NDArray[np.float64],
+    freqs: NDArray[np.float64],
     T1s: NDArray[np.float64],
     n_elements: NDArray[np.float64],
     T1errs: Optional[NDArray[np.float64]] = None,
-    guess_Temp: float = 20e-3,
+    Temp: float = 20e-3,
 ) -> Union[NDArray[np.float64], Tuple[NDArray[np.float64], NDArray[np.float64]]]:
     """fpts: GHz, T1s: ns, guess_Temp: K"""
-    omegas = freq2omega(fpts)
+    omegas = freq2omega(freqs)
 
     EJ, EC, EL = params
 
-    def spectral_density(omega) -> float:
-        """omega: rad/ns, EC: GHz, T: K"""
-        therm_ratio = calc_therm_ratio(omega, guess_Temp)
-        s = (
-            2
-            * 8
-            * EC
-            * (1 / np.tanh(0.5 * np.abs(therm_ratio)))
-            / (1 + np.exp(-therm_ratio))
-        )
-        return s
-
     # calculate Qcap vs omega
-    other_factors = spectral_density(omegas) + spectral_density(-omegas)
+    other_factors = charge_spectral_density(omegas, Temp, EC) + charge_spectral_density(
+        -omegas, Temp, EC
+    )
     Qcap_vs_omega = T1s * np.abs(n_elements) ** 2 * other_factors
 
     if T1errs is not None:
@@ -72,26 +91,17 @@ def calc_Qind_vs_omega(
     T1s: NDArray[np.float64],
     phi_elements: NDArray[np.float64],
     T1errs: Optional[NDArray[np.float64]] = None,
-    guess_Temp: float = 20e-3,
+    Temp: float = 20e-3,
 ) -> Union[NDArray[np.float64], Tuple[NDArray[np.float64], NDArray[np.float64]]]:
     """fpts: GHz, T1s: ns, guess_Temp: K"""
     omegas = freq2omega(fpts)
 
     EJ, EC, EL = params
 
-    def spectral_density(omega) -> float:
-        """omega: rad/ns, EL: GHz, T: K"""
-        therm_ratio = calc_therm_ratio(omega, guess_Temp)
-        s = (
-            2
-            * EL
-            * (1 / np.tanh(0.5 * np.abs(therm_ratio)))
-            / (1 + np.exp(-therm_ratio))
-        )
-        return s
-
-    # calculate Qcap vs omega
-    other_factors = spectral_density(omegas) + spectral_density(-omegas)
+    # calculate Qind vs omega
+    other_factors = inductive_spectral_density(
+        omegas, Temp, EL
+    ) + inductive_spectral_density(-omegas, Temp, EL)
     Qind_vs_omega = T1s * np.abs(phi_elements) ** 2 * other_factors
 
     if T1errs is not None:
@@ -167,7 +177,7 @@ def add_Q_fit(
         mean_Q = np.exp(np.mean(np.log(Q_vs_omega)))
         fit_Qs = np.full_like(omegas, mean_Q)
 
-        ax.plot(omegas, fit_Qs, label=rf"$Q = {mean_Q:.1g}$")
+        ax.plot(omegas, fit_Qs, label=f"Q = {format_exponent(mean_Q)}")
 
     else:
         a, b = np.polyfit(np.log(omegas), np.log(Q_vs_omega), 1)
@@ -175,7 +185,8 @@ def add_Q_fit(
 
         fit_Qs = Q_0 * omegas**esp
 
-        ax.plot(omegas, fit_Qs, label=rf"$Q(\omega) = {Q_0:.1g} \omega^{{{esp:.1f}}}$")
+        label = rf"$Q(\omega) = {format_exponent(Q_0)} \omega^{{{esp:.1f}}}$"
+        ax.plot(omegas, fit_Qs, label=label)
 
     ax.legend()
 
@@ -183,38 +194,56 @@ def add_Q_fit(
 
 
 def plot_t1_vs_m01(
-    elements: NDArray[np.float64],
+    dipoles: NDArray[np.float64],
     T1s: NDArray[np.float64],
     T1errs: Optional[NDArray[np.float64]] = None,
-    op_name: str = r"$n_{01}$",
+    op_name: str = "d_{01}",
+    Q_name: str = r"$Q_{cap}$",
 ) -> Tuple[Figure, Axes]:
-    """T1s: ns"""
+    """T1s: ns, Q_factors: ns/rad"""
     fig, ax = plt.subplots()
 
-    ax.errorbar(np.abs(elements) ** 2, T1s, yerr=T1errs, fmt=".")
+    sorted_idxs = np.argsort(dipoles)
+    dipoles = dipoles[sorted_idxs]
+    T1s = T1s[sorted_idxs]
+    if T1errs is not None:
+        T1errs = T1errs[sorted_idxs]
+
+    ax.errorbar(dipoles, T1s, yerr=T1errs, fmt=".")
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel(f"|{op_name}|^2")
+
+    log_product = np.log(T1s * dipoles)
+    up_Q = np.exp(np.mean(log_product) + 2.0 * np.std(log_product))
+    down_Q = np.exp(np.mean(log_product) - 2.0 * np.std(log_product))
+
+    up_ys = up_Q / dipoles
+    down_ys = down_Q / dipoles
+    ax.plot(dipoles, up_ys, "k--", alpha=0.5)
+    ax.plot(dipoles, down_ys, "k--", alpha=0.5)
+    ax.fill_between(dipoles, up_ys, down_ys, alpha=0.05, color="k")
+
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    angle = 5 - np.degrees(
+        np.arctan2(
+            np.log(xlim[1]) - np.log(xlim[0]),
+            np.log(ylim[1]) - np.log(ylim[0]),
+        )
+    )
+    text_x = np.exp(np.mean(np.log(dipoles)) + 0.5)
+    idx = np.argmin(np.abs(dipoles - text_x))
+    yup = up_ys[idx] * 1.01
+    ydown = down_ys[idx] * 0.75
+
+    text_kwargs = dict(rotation=angle, color="k", ha="right", va="bottom")
+    ax.text(text_x, yup, f"{Q_name} = {format_exponent(up_Q)}", **text_kwargs)
+    ax.text(text_x, ydown, f"{Q_name} = {format_exponent(down_Q)}", **text_kwargs)
+
+    ax.set_xlabel(rf"$|{op_name}|^2$")
     ax.set_ylabel(r"$T_1$ (ns)")
-    ax.set_title(r"$T_1 \; vs \; |n_{01}|^2$")
     ax.grid()
 
-    log_product = np.log(T1s * np.abs(elements) ** 2)
-    up_line_value = np.exp(np.mean(log_product) + 2 * np.std(log_product))
-    down_line_value = np.exp(np.mean(log_product) - 2 * np.std(log_product))
-    ax.plot(
-        np.abs(elements) ** 2,
-        up_line_value / np.abs(elements) ** 2,
-        "k--",
-        label=r"$T_1|n_{01}|^2 = $" + f"{up_line_value:.2e}",
-    )
-    ax.plot(
-        np.abs(elements) ** 2,
-        down_line_value / np.abs(elements) ** 2,
-        "k--",
-        label=r"$T_1|n_{01}|^2 = $" + f"{down_line_value:.2e}",
-    )
-    ax.legend()
     return fig, ax
 
 
@@ -228,21 +257,23 @@ def plot_sample_t1(
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
 
-    ax.errorbar(s_mAs, s_T1s, yerr=s_T1errs, fmt=".", label="Current")
+    s_flxs = mA2flx(s_mAs, mA_c=mA_c, period=period)
+
+    ax.errorbar(s_flxs, s_T1s, yerr=s_T1errs, fmt=".", label="Current")
 
     ax.grid()
-    ax.set_xlabel(r"Current (mA)", fontsize=14)
+    ax.set_xlabel(r"$\phi_{ext}/\phi_0$", fontsize=14)
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
 
     ax2 = ax.secondary_xaxis(
         "top",
         functions=(
-            partial(mA2flx, mA_c=mA_c, period=period),
             partial(flx2mA, mA_c=mA_c, period=period),
+            partial(mA2flx, mA_c=mA_c, period=period),
         ),
     )
-    ax2.set_xlabel(r"$\phi_{ext}/\phi_0$", fontsize=14)
+    ax2.set_xlabel("Current (mA)", fontsize=14)
 
     return fig, ax
 
@@ -266,7 +297,7 @@ def plot_t1_with_sample(
     **other_noise_options: dict,
 ) -> Tuple[Figure, Axes]:
     """T1s: ns"""
-    t_mAs = flx2mA(t_flxs, mA_c=mA_c, period=period)
+    s_flxs = mA2flx(s_mAs, mA_c=mA_c, period=period)
 
     t1_effs = [
         calculate_eff_t1_vs_flx_with(
@@ -283,15 +314,21 @@ def plot_t1_with_sample(
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     fig.suptitle(f"Temperature = {Temp * 1e3:.2f} mK")
 
-    ax.errorbar(s_mAs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
+    ax.errorbar(s_flxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
 
-    for i, (v, t1_eff) in enumerate(zip(values, t1_effs)):
-        label = f"{name}(w)" if callable(v) else f"{name} = {v:.1e}"
-        ax.plot(t_mAs, t1_eff, label=label, linestyle="--")
+    nname = {
+        "Q_cap": r"$Q_{cap}$",
+        "x_qp": r"$x_{qp}$",
+        "Q_ind": r"$Q_{ind}$",
+    }[name]
 
-    range = np.ptp(s_mAs)
-    ax.set_xlim(s_mAs.min() - 0.01 * range, s_mAs.max() + 0.01 * range)
-    ax.set_xlabel(r"Current (mA)", fontsize=14)
+    for v, t1_eff in zip(values, t1_effs):
+        label = f"{nname}(w)" if callable(v) else f"{nname} = {format_exponent(v)}"
+        ax.plot(t_flxs, t1_eff, label=label, linestyle="--")
+
+    range = np.ptp(s_flxs)
+    ax.set_xlim(s_flxs.min() - 0.01 * range, s_flxs.max() + 0.01 * range)
+    ax.set_xlabel(r"$\phi_{ext}/\phi_0$")
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
     ax.legend(fontsize="x-large")
@@ -300,11 +337,11 @@ def plot_t1_with_sample(
     ax2 = ax.secondary_xaxis(
         "top",
         functions=(
-            partial(mA2flx, mA_c=mA_c, period=period),
             partial(flx2mA, mA_c=mA_c, period=period),
+            partial(mA2flx, mA_c=mA_c, period=period),
         ),
     )
-    ax2.set_xlabel(r"$\phi_{ext}/\phi_0$")
+    ax2.set_xlabel(r"Current (mA)", fontsize=14)
 
     return fig, ax
 
@@ -318,23 +355,23 @@ def plot_eff_t1_with_sample(
     period: float,
     t_flxs: NDArray[np.float64],
     *,
-    label: str = "t1_eff",
+    label: str = r"$t_1^{eff}$",
     title: Optional[str] = None,
 ) -> Tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     if title is not None:
         fig.suptitle(title)
-    ax.errorbar(s_mAs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
 
-    t_mAs = flx2mA(t_flxs, mA_c=mA_c, period=period)
+    s_flxs = mA2flx(s_mAs, mA_c=mA_c, period=period)
+    ax.errorbar(s_flxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
 
-    ax.plot(t_mAs, t1_effs, label=label, linestyle="--")
+    ax.plot(t_flxs, t1_effs, label=label, linestyle="--")
 
-    range = np.ptp(s_mAs)
-    ax.set_xlim(s_mAs.min() - 0.01 * range, s_mAs.max() + 0.01 * range)
+    range = np.ptp(s_flxs)
+    ax.set_xlim(s_flxs.min() - 0.01 * range, s_flxs.max() + 0.01 * range)
     ax.set_ylim(0.5 * s_T1s.min(), 3.0 * s_T1s.max())
-    ax.set_xlabel(r"Current (mA)", fontsize=14)
+    ax.set_xlabel(r"$\phi_{ext}/\phi_0$")
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
     ax.legend(fontsize="x-large")
@@ -343,10 +380,10 @@ def plot_eff_t1_with_sample(
     ax2 = ax.secondary_xaxis(
         "top",
         functions=(
-            partial(mA2flx, mA_c=mA_c, period=period),
             partial(flx2mA, mA_c=mA_c, period=period),
+            partial(mA2flx, mA_c=mA_c, period=period),
         ),
     )
-    ax2.set_xlabel(r"$\phi_{ext}/\phi_0$")
+    ax2.set_xlabel(r"Current (mA)", fontsize=14)
 
     return fig, ax
