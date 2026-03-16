@@ -2,14 +2,22 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import List, NotRequired, Optional, Tuple, TypedDict
+from typing_extensions import (
+    Any,
+    Dict,
+    List,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
@@ -36,7 +44,7 @@ from ..util import calc_populations
 from .util import measure_with_sweep
 
 # (times, signals)
-T1Result = Tuple[NDArray[np.float64], NDArray[np.float64]]
+T1Result: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class T1ModuleCfg(TypedDict, closed=True):

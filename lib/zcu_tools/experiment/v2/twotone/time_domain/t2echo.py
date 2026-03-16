@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Any,
+    Dict,
+    Literal,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -33,7 +41,7 @@ from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-T2EchoResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T2EchoResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

@@ -1,23 +1,25 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Any,
+    Dict,
+    Mapping,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.v2.runner import (
-    BatchTask,
-    Task,
-    TaskCfg,
-    TaskState,
-    run_task,
-)
+from zcu_tools.experiment.v2.runner import BatchTask, Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -33,7 +35,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (sequence, signals)
-AllXY_Result = Dict[Tuple[str, str], NDArray[np.complex128]]
+AllXY_Result: TypeAlias = Dict[Tuple[str, str], NDArray[np.complex128]]
 
 # Standard AllXY sequence of 21 gate pairs
 ALLXY_SEQUENCE = [

@@ -76,7 +76,7 @@ class TaskState(Generic[T_Result, T_RootResult]):
     # ------------------------------------------------------------------
 
     def _get_target(self) -> Result:
-        target: Result = self.root_data
+        target = self.root_data
         for seg in self.path:
             if isinstance(target, Mapping):
                 target = target[seg]  # type: ignore[index]

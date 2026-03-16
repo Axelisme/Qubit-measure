@@ -18,6 +18,7 @@ from typing_extensions import (
     Optional,
     Sequence,
     Tuple,
+    TypeAlias,
     TypedDict,
     Union,
 )
@@ -49,7 +50,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 
 # (values, times, signals)
-T1WithToneSweepResult = Tuple[
+T1WithToneSweepResult: TypeAlias = Tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
 ]
 

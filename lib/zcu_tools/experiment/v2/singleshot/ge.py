@@ -2,14 +2,23 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Any, Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Literal, NotRequired, Optional, Tuple, TypedDict, cast
+from typing_extensions import (
+    Any,
+    Dict,
+    Literal,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
@@ -164,7 +173,7 @@ def optimize_ge_radius(
 # ------------------------------------------------------------
 
 # (signals)
-GE_Result = NDArray[np.complex128]
+GE_Result: TypeAlias = NDArray[np.complex128]
 
 
 class GEModuleCfg(TypedDict, closed=True):

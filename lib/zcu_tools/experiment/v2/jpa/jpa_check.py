@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
+from typing_extensions import Any, Dict, Mapping, Optional, Tuple, TypeAlias
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
@@ -22,7 +22,9 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPACheckResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+JPACheckResult: TypeAlias = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
 def jpa_check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

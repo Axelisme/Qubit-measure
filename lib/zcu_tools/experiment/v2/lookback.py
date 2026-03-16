@@ -9,7 +9,15 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typeguard import check_type
-from typing_extensions import Any, Dict, NotRequired, Optional, Tuple, TypedDict
+from typing_extensions import (
+    Any,
+    Dict,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
@@ -18,7 +26,7 @@ from zcu_tools.program.v2 import ModularProgramCfg, OneToneProgram
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
-LookbackResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+LookbackResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 class LookbackModuleCfg(TypedDict, closed=True):

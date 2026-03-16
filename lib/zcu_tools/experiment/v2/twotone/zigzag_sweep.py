@@ -16,6 +16,7 @@ from typing_extensions import (
     Optional,
     Sequence,
     Tuple,
+    TypeAlias,
     TypedDict,
     Union,
 )
@@ -41,7 +42,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (times, values, signals)
-ZigZagSweepResult = Tuple[
+ZigZagSweepResult: TypeAlias = Tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
 ]
 

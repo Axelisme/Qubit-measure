@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
+from typing_extensions import Any, Dict, Optional, Tuple, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -16,7 +16,9 @@ from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
-PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+PowerResult: TypeAlias = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
 def pdr_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

@@ -15,6 +15,7 @@ from typing_extensions import (
     NotRequired,
     Optional,
     Tuple,
+    TypeAlias,
     TypedDict,
     Union,
     cast,
@@ -56,7 +57,9 @@ def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return (real_signals - min_vals) / (max_vals - min_vals)
 
 
-CPMG_Result = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+CPMG_Result: TypeAlias = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
 class CPMG_ModuleCfg(TypedDict, closed=True):

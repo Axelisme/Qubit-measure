@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
+from typing_extensions import Any, Dict, Mapping, Optional, Tuple, TypeAlias
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
@@ -16,7 +16,7 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAFluxByOneToneResult = Tuple[
+JPAFluxByOneToneResult: TypeAlias = Tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 

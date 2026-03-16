@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,7 +11,16 @@ from matplotlib.image import NonUniformImage
 from numpy import float64
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Any,
+    Dict,
+    List,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -41,7 +49,9 @@ from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background
 
 # (gains, freqs, populations)
-AcStarkResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+AcStarkResult: TypeAlias = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
+]
 
 
 def get_resonance_freq(

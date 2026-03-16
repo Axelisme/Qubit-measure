@@ -16,6 +16,7 @@ from typing_extensions import (
     NotRequired,
     Optional,
     Tuple,
+    TypeAlias,
     TypedDict,
 )
 
@@ -40,7 +41,9 @@ from zcu_tools.utils.fitting import batch_fit_func, fitlor, lorfunc
 from zcu_tools.utils.process import rotate2real
 
 # (res_freqs, qub_freqs, signals2D)
-CKP_Result = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+CKP_Result: TypeAlias = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
 def ckp_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

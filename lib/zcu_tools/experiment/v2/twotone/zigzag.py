@@ -11,8 +11,8 @@ from typing_extensions import (
     Literal,
     NotRequired,
     Optional,
-    Sequence,
     Tuple,
+    TypeAlias,
     TypedDict,
     Union,
 )
@@ -37,7 +37,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-ZigZagResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+ZigZagResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

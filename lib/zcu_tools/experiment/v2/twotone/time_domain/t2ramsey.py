@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Any,
+    Dict,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -37,7 +44,7 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return rotate2real(signals).real
 
 
-T2RamseyResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T2RamseyResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 class T2RamseyModuleCfg(TypedDict, closed=True):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +8,16 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    Dict,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
@@ -35,7 +43,9 @@ from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import rotate2real
 
 # (amps, freqs, signals2D)
-AcStarkResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+AcStarkResult: TypeAlias = Tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
 def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:

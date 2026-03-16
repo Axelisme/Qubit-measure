@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +9,15 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Any,
+    Dict,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+)
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
@@ -36,7 +43,7 @@ from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-T1Result = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T1Result: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -434,9 +441,7 @@ class T1WithToneSweepExp(AbsExperiment):
                                 "reset",
                                 ctx.cfg["modules"].get("reset"),
                             ),
-                            Pulse(
-                                name="pi_pulse", cfg=ctx.cfg["modules"]["pi_pulse"]
-                            ),
+                            Pulse(name="pi_pulse", cfg=ctx.cfg["modules"]["pi_pulse"]),
                             Pulse(
                                 name="test_pulse",
                                 cfg=ctx.cfg["modules"]["test_pulse"],

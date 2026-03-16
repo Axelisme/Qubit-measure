@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +10,16 @@ from numpy.typing import NDArray
 from skopt import Optimizer
 from skopt.space import Real
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Any,
+    Dict,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
@@ -36,7 +46,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-AutoOptResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
+AutoOptResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class ReadoutOptimizer:

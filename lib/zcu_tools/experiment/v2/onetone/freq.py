@@ -6,7 +6,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Dict, Literal, Optional, Tuple
+from typing_extensions import Any, Dict, Literal, Optional, Tuple, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -18,7 +18,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 
 # (fpts, signals)
-FreqResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+FreqResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 class FreqCfg(OneToneCfg, TaskCfg):

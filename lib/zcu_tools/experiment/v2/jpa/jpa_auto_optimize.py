@@ -18,6 +18,7 @@ from typing_extensions import (
     NotRequired,
     Optional,
     Tuple,
+    TypeAlias,
     TypedDict,
 )
 
@@ -28,12 +29,7 @@ from zcu_tools.experiment.utils import (
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
 )
-from zcu_tools.experiment.v2.runner import (
-    Task,
-    TaskCfg,
-    TaskState,
-    run_task,
-)
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot
@@ -53,7 +49,9 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from .jpa_optimizer import JPAOptimizer
 
-JPAOptimizeResult = Tuple[NDArray[np.float64], NDArray[np.int32], NDArray[np.float64]]
+JPAOptimizeResult: TypeAlias = Tuple[
+    NDArray[np.float64], NDArray[np.int32], NDArray[np.float64]
+]
 
 
 class JPAOptModuleCfg(TypedDict, closed=True):

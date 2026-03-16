@@ -1,12 +1,21 @@
+from __future__ import annotations
+
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Any,
+    Dict,
+    NotRequired,
+    Optional,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -28,7 +37,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-FreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
+FreqResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class FreqModuleCfg(TypedDict, closed=True):

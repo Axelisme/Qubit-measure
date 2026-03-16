@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,6 +9,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
 from typeguard import check_type
+from typing_extensions import Any, Dict, Optional, Tuple, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
@@ -29,7 +31,7 @@ from zcu_tools.utils.fitting.resonance import (
     remove_edelay,
 )
 
-DispersiveResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+DispersiveResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
