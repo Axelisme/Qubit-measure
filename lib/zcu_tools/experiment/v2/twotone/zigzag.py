@@ -7,12 +7,10 @@ from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
     Any,
-    Dict,
     Literal,
     NotRequired,
     Optional,
-    Sequence,
-    Tuple,
+    TypeAlias,
     TypedDict,
     Union,
 )
@@ -37,7 +35,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-ZigZagResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+ZigZagResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -65,7 +63,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
     ) -> ZigZagResult:
@@ -131,7 +129,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
     def analyze(
         self,
         result: Optional[ZigZagResult] = None,
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         raise NotImplementedError("Not implemented")
 
     def save(

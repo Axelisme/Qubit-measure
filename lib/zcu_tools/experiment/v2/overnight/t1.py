@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Callable, Dict, List, NotRequired, TypedDict
+from typing_extensions import Callable, NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
@@ -63,7 +63,7 @@ class T1PlotterDict(TypedDict, closed=True):
 
 
 class T1PlotAndSaveMixin:
-    def num_axes(self) -> Dict[str, int]:
+    def num_axes(self) -> dict[str, int]:
         return dict(t1=2)
 
     def make_plotter(self, name, axs) -> T1PlotterDict:
@@ -146,7 +146,7 @@ class OvernightT1ModuleCfg(TypedDict, closed=True):
 
 class OvernightT1Cfg(ModularProgramCfg, TaskCfg):
     modules: OvernightT1ModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T1Task(
@@ -175,7 +175,7 @@ class T1Task(
                 ],
             ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
-        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=measure_t1_fn,
             result_shape=(len_sweep["expts"],),
         )
@@ -215,7 +215,7 @@ class OvernightT1WithToneModuleCfg(TypedDict, closed=True):
 
 class OvernightT1WithToneCfg(ModularProgramCfg, TaskCfg):
     modules: OvernightT1WithToneModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T1WithToneTask(
@@ -251,7 +251,7 @@ class T1WithToneTask(
                 ],
             ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
-        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=measure_t1_fn,
             result_shape=(len_sweep["expts"],),
         )

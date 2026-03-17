@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
@@ -37,7 +36,9 @@ def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 # (fpts1, fpts2, signals_2d)
-FreqResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+FreqResult: TypeAlias = tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
 class FreqModuleCfg(TypedDict, closed=True):
@@ -49,11 +50,11 @@ class FreqModuleCfg(TypedDict, closed=True):
 
 class FreqCfg(ModularProgramCfg, TaskCfg):
     modules: FreqModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run_soft(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
+    def run_soft(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
 
         # Check that reset pulse is dual pulse type
@@ -113,7 +114,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         return fpts1, fpts2, signals
 
-    def run_hard(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
+    def run_hard(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
 
         # Check that reset pulse is dual pulse type
@@ -176,7 +177,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
         *,
         method: Literal["soft", "hard"] = "soft",
     ) -> FreqResult:
@@ -193,7 +194,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         xname: Optional[str] = None,
         yname: Optional[str] = None,
         corner_as_background: bool = False,
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

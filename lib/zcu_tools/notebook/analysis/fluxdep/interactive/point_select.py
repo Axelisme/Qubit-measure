@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from threading import Timer
-from typing import Tuple
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
@@ -7,12 +8,19 @@ import numpy as np
 from IPython.display import clear_output, display
 from matplotlib.patches import Ellipse
 from numpy import ndarray
+from numpy.typing import NDArray
+from typing_extensions import Any, Optional
 
 from ..processing import cast2real_and_norm, downsample_points
 
 
 class InteractiveSelector:
-    def __init__(self, s_pects, selected=None, brush_width=0.05) -> None:
+    def __init__(
+        self,
+        s_pects: dict[str, Any],
+        selected: Optional[NDArray[np.bool_]] = None,
+        brush_width: float = 0.05,
+    ) -> None:
         self.s_spects = s_pects
 
         self.s_mAs = np.concatenate([s["points"]["mAs"] for s in s_pects.values()])
@@ -181,7 +189,7 @@ class InteractiveSelector:
         self.is_finished = True
         plt.close(self.fig)
 
-    def get_positions(self, finish: bool = True) -> Tuple[ndarray, ndarray, np.ndarray]:
+    def get_positions(self, finish: bool = True) -> tuple[ndarray, ndarray, np.ndarray]:
         if not self.is_finished and finish:
             self.finish_interactive()
 

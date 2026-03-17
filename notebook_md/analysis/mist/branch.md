@@ -59,7 +59,7 @@ qub_dim = 20
 qub_cutoff = 50
 res_dim = 310
 
-photons = np.arange(0, res_dim - 10)
+photons = np.arange(0, res_dim - 10, dtype=np.float64)
 ```
 
 # Single

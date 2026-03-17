@@ -4,16 +4,7 @@ import warnings
 from copy import deepcopy
 
 from qick.asm_v2 import QickParam
-from typing_extensions import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    Union,
-    cast,
-)
+from typing_extensions import TYPE_CHECKING, Any, NotRequired, Optional, Union, cast
 
 from ..base import MyProgramV2
 from .base import Module, ModuleCfg
@@ -36,10 +27,10 @@ class PulseCfg(ModuleCfg, closed=True):
     block_mode: bool
 
     mixer_freq: NotRequired[float]
-    mux_freqs: NotRequired[List[float]]
-    mux_gains: NotRequired[List[float]]
-    mux_phases: NotRequired[List[float]]
-    mask: NotRequired[List[int]]
+    mux_freqs: NotRequired[list[float]]
+    mux_gains: NotRequired[list[float]]
+    mux_phases: NotRequired[list[float]]
+    mask: NotRequired[list[int]]
     outsel: NotRequired[int]
     ro_ch: NotRequired[int]
 
@@ -140,36 +131,36 @@ class Pulse(Module, tag="pulse"):
 
     @staticmethod
     def set_param(
-        pulse_cfg: PulseCfg, param_name: str, param_value: Union[float, QickParam]
+        cfg: PulseCfg, param_name: str, param_value: Union[float, QickParam]
     ) -> PulseCfg:
         if param_name == "on/off":
-            pulse_cfg["gain"] = param_value * pulse_cfg["gain"]
+            cfg["gain"] = param_value * cfg["gain"]
 
             # if the pulse is const or flat_top, also shrink the waveform length
-            if pulse_cfg["waveform"]["style"] in ["const", "flat_top"]:
-                Waveform.set_param(pulse_cfg["waveform"], param_name, param_value)
+            if cfg["waveform"]["style"] in ["const", "flat_top"]:
+                Waveform.set_param(cfg["waveform"], param_name, param_value)
         elif param_name == "length":
-            Waveform.set_param(pulse_cfg["waveform"], param_name, param_value)
+            Waveform.set_param(cfg["waveform"], param_name, param_value)
         elif param_name in ["gain", "freq", "phase"]:
-            pulse_cfg[param_name] = param_value
+            cfg[param_name] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
 
-        return pulse_cfg
+        return cfg
 
     @staticmethod
-    def auto_fill(pulse_cfg: Union[str, Dict[str, Any]], ml: ModuleLibrary) -> PulseCfg:
-        if isinstance(pulse_cfg, str):
-            pulse_cfg = ml.get_module(pulse_cfg)
+    def auto_fill(cfg: Union[str, dict[str, Any]], ml: ModuleLibrary) -> PulseCfg:
+        if isinstance(cfg, str):
+            cfg = ml.get_module(cfg)
 
-        pulse_cfg["type"] = "pulse"
-        pulse_cfg.setdefault("phase", 0.0)
-        pulse_cfg.setdefault("pre_delay", 0.0)
-        pulse_cfg.setdefault("post_delay", 0.0)
-        pulse_cfg.setdefault("block_mode", True)
+        cfg["type"] = "pulse"
+        cfg.setdefault("phase", 0.0)
+        cfg.setdefault("pre_delay", 0.0)
+        cfg.setdefault("post_delay", 0.0)
+        cfg.setdefault("block_mode", True)
 
-        if isinstance(pulse_cfg["waveform"], str):
-            wav_name = pulse_cfg["waveform"]
-            pulse_cfg["waveform"] = ml.get_waveform(wav_name, dict(name=wav_name))
+        if isinstance(cfg["waveform"], str):
+            wav_name = cfg["waveform"]
+            cfg["waveform"] = ml.get_waveform(wav_name, dict(name=wav_name))
 
-        return cast(PulseCfg, pulse_cfg)
+        return cast(PulseCfg, cfg)

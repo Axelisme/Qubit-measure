@@ -12,13 +12,10 @@ from numpy.typing import NDArray
 from typing_extensions import (
     Any,
     Callable,
-    Dict,
     Generic,
-    List,
     Mapping,
     Optional,
     Self,
-    Tuple,
     TypedDict,
     TypeVar,
 )
@@ -46,10 +43,10 @@ class MeasurementTask(
     AbsTask[T_Result, T_RootResult],
     Generic[T_Result, T_RootResult, T_PlotterDictType],
 ):
-    def num_axes(self) -> Dict[str, int]: ...
+    def num_axes(self) -> dict[str, int]: ...
 
     def make_plotter(
-        self, name: str, axs: Dict[str, List[Axes]]
+        self, name: str, axs: dict[str, list[Axes]]
     ) -> T_PlotterDictType: ...
 
     def update_plotter(
@@ -70,8 +67,9 @@ class MeasurementTask(
 
     def load(self, filepath: str, **kwargs) -> T_Result: ...
 
+    @classmethod
     def analyze(
-        self, name: str, iters: NDArray[np.int64], result: T_Result, **kwargs
+        cls, name: str, iters: NDArray[np.int64], result: T_Result, **kwargs
     ) -> None: ...
 
 
@@ -116,9 +114,9 @@ class OvernightExecutor(AbsExperiment):
         self.num_times = num_times
         self.interval = interval
 
-        self.measurements: Dict[str, MeasurementTask] = OrderedDict()
+        self.measurements: dict[str, MeasurementTask] = OrderedDict()
 
-    def add_measurements(self, measurements: Dict[str, MeasurementTask]) -> Self:
+    def add_measurements(self, measurements: dict[str, MeasurementTask]) -> Self:
         for name, measurement in measurements.items():
             if name in self.measurements:
                 raise ValueError(f"Measurement {name} already exists")
@@ -126,7 +124,7 @@ class OvernightExecutor(AbsExperiment):
 
         return self
 
-    def make_ax_layout(self) -> Tuple[Figure, Dict[str, Dict[str, List[Axes]]]]:
+    def make_ax_layout(self) -> tuple[Figure, dict[str, dict[str, list[Axes]]]]:
         assert len(self.measurements) > 0
 
         num_axes_map = {
@@ -145,7 +143,7 @@ class OvernightExecutor(AbsExperiment):
         )
 
         # collect axes into dict
-        axs_map: Dict[str, Dict[str, List[Axes]]] = defaultdict(dict)
+        axs_map: dict[str, dict[str, list[Axes]]] = defaultdict(dict)
         i, j = 0, 0
         for ms_name, num_axes in num_axes_map.items():
             for ax_name, ax_num in num_axes.items():
@@ -160,7 +158,7 @@ class OvernightExecutor(AbsExperiment):
 
     def make_plotter(
         self,
-    ) -> Tuple[Figure, MultiLivePlotter[Tuple[str, str]], Callable[[TaskState], None]]:
+    ) -> tuple[Figure, MultiLivePlotter[tuple[str, str]], Callable[[TaskState], None]]:
         fig, axs_map = self.make_ax_layout()
 
         plotters_map = {
@@ -170,7 +168,7 @@ class OvernightExecutor(AbsExperiment):
 
         T = TypeVar("T")
 
-        def flatten_dict(d: Mapping[str, Mapping[str, T]]) -> Dict[Tuple[str, str], T]:
+        def flatten_dict(d: Mapping[str, Mapping[str, T]]) -> dict[tuple[str, str], T]:
             return {(n1, n2): v for n1, d2 in d.items() for n2, v in d2.items()}
 
         plotter = MultiLivePlotter(fig, flatten_dict(plotters_map))
@@ -195,7 +193,7 @@ class OvernightExecutor(AbsExperiment):
         return fig, plotter, plot_fn
 
     def run(
-        self, fail_retry: int = 3, env_dict: Optional[Dict[str, Any]] = None
+        self, fail_retry: int = 3, env_dict: Optional[dict[str, Any]] = None
     ) -> Mapping[str, Result]:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
@@ -234,7 +232,7 @@ class OvernightExecutor(AbsExperiment):
     def analyze(
         self,
         result: Optional[Mapping[str, Result]] = None,
-        task_kwargs: Optional[Dict[str, dict]] = None,
+        task_kwargs: Optional[dict[str, dict]] = None,
     ) -> None:
         if result is None:
             result = self.last_result

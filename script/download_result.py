@@ -121,7 +121,7 @@ def find_folder_id(service, name, parent_id):
 
 
 def list_items_in_folder(service, folder_id):
-    """Lists all files and folders in a specific Google Drive folder."""
+    """lists all files and folders in a specific Google Drive folder."""
     items = []
     page_token = None
     try:

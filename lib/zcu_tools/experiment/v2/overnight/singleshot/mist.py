@@ -8,15 +8,7 @@ from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typeguard import check_type
-from typing_extensions import (
-    Callable,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    TypedDict,
-    cast,
-)
+from typing_extensions import Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
@@ -62,7 +54,7 @@ class MistModuleCfg(TypedDict, closed=True):
 
 class MistCfg(ModularProgramCfg, TaskCfg):
     modules: MistModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class MistOvernightAnalyzer:
@@ -279,7 +271,7 @@ class MistOvernightAnalyzer:
             tag=prefix_tag + "/e_populations",
         )
 
-    def load(self, filepath: List[str], **kwargs) -> MistResult:
+    def load(self, filepath: list[str], **kwargs) -> MistResult:
         g_filepath, e_filepath = filepath
 
         g_pops, iters, gains, cfg = load_data(g_filepath, return_cfg=True, **kwargs)
@@ -343,7 +335,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
                 population_radius=radius,
             )
 
-        self.task = Task[T_RootResult, List[NDArray[np.float64]], np.float64](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]], np.float64](
             measure_fn=measure_mist_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(pdr_sweep["expts"], 2),
@@ -375,10 +367,10 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
     def cleanup(self) -> None:
         self.task.cleanup()
 
-    def num_axes(self) -> Dict[str, int]:
+    def num_axes(self) -> dict[str, int]:
         return dict(populations_g=1, populations_e=1, populations_o=1, current=1)
 
-    def make_plotter(self, name: str, axs: Dict[str, List[Axes]]) -> MistPlotterDict:
+    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> MistPlotterDict:
         return MistPlotterDict(
             populations_g=LivePlotter2D(
                 "Iteration",

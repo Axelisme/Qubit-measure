@@ -1,10 +1,11 @@
-from typing import Tuple
+from __future__ import annotations
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output, display
 from matplotlib.animation import FuncAnimation
+from numpy.typing import NDArray
 
 from ..processing import cast2real_and_norm, diff_mirror
 
@@ -16,7 +17,14 @@ class InteractiveLines:
         "none": "<span style='color:gray'>未選擇線條</span>",
     }
 
-    def __init__(self, spectrum, mAs, fpts, mA_c=None, mA_e=None) -> None:
+    def __init__(
+        self,
+        spectrum: NDArray,
+        mAs: NDArray[np.float64],
+        fpts: NDArray[np.float64],
+        mA_c=None,
+        mA_e=None,
+    ) -> None:
         plt.ioff()  # 避免立即顯示圖表
         self.fig_main, self.ax_main = plt.subplots(figsize=(4, 3))
         self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(4, 3))
@@ -487,7 +495,7 @@ class InteractiveLines:
         plt.close(self.fig_main)
         plt.close(self.fig_zoom)
 
-    def get_positions(self, finish: bool = True) -> Tuple[float, float]:
+    def get_positions(self, finish: bool = True) -> tuple[float, float]:
         """運行交互式選擇器並返回兩條線的位置"""
         if not self.is_finished and finish:
             self.finish_interactive()

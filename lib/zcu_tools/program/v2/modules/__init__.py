@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import qick.asm_v2 as qick_asm_v2
 
 from .base import Delay, Module, ModuleCfg, NonBlocking

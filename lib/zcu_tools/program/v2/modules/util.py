@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import warnings
-from typing import Optional, Union
 
 from qick.asm_v2 import AbsQickProgram, QickParam
+from typing_extensions import Optional, Union
 
 from ..utils import param2str
 

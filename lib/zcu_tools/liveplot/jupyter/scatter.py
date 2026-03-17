@@ -1,8 +1,9 @@
-from typing import Optional, Sequence, Tuple, Union, List
+from __future__ import annotations
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from typing_extensions import Optional, Sequence, Union
 
 from ..base import AbsLivePlotter
 from ..segments import ScatterSegment
@@ -16,7 +17,7 @@ class LivePlotterScatter(JupyterPlotMixin, AbsLivePlotter):
         ylabel: str,
         *,
         segment_kwargs: Optional[dict] = None,
-        existed_axes: Optional[List[List[Axes]]] = None,
+        existed_axes: Optional[list[list[Axes]]] = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:
@@ -36,8 +37,8 @@ class LivePlotterScatter(JupyterPlotMixin, AbsLivePlotter):
         ys: NDArray[np.float64],
         colors: Union[
             Sequence[str],
-            Sequence[Tuple[float, float, float]],
-            Sequence[Tuple[float, float, float, float]],
+            Sequence[tuple[float, float, float]],
+            Sequence[tuple[float, float, float, float]],
             NDArray[np.float64],
             None,
         ] = None,

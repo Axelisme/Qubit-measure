@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
@@ -35,7 +34,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAFreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
+JPAFreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class JPAFreqModuleCfg(TypedDict, closed=True):
@@ -46,11 +45,11 @@ class JPAFreqModuleCfg(TypedDict, closed=True):
 
 class JPAFreqCfg(ModularProgramCfg, TaskCfg):
     modules: JPAFreqModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class JPAFreqExp(AbsExperiment[JPAFreqResult, JPAFreqCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPAFreqResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> JPAFreqResult:
         _cfg = check_type(deepcopy(cfg), JPAFreqCfg)
 
         _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "jpa_freq")
@@ -111,7 +110,7 @@ class JPAFreqExp(AbsExperiment[JPAFreqResult, JPAFreqCfg]):
 
         return jpa_freqs, signals
 
-    def analyze(self, result: Optional[JPAFreqResult] = None) -> Tuple[float, Figure]:
+    def analyze(self, result: Optional[JPAFreqResult] = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

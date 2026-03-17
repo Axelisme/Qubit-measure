@@ -7,14 +7,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
 from typeguard import check_type
-from typing_extensions import (
-    Callable,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    TypedDict,
-)
+from typing_extensions import Callable, NotRequired, Optional, TypedDict
 
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
@@ -55,7 +48,7 @@ class T1PlotterDict(TypedDict, closed=True):
 
 
 class T1_PlotAndSaveMixin:
-    def num_axes(self) -> Dict[str, int]:
+    def num_axes(self) -> dict[str, int]:
         return dict(populations_go=1, populations_eo=1, current_g=1, current_e=1)
 
     def make_plotter(self, name, axs):
@@ -174,8 +167,9 @@ class T1_PlotAndSaveMixin:
             tag=prefix_tag + "/ee_populations",
         )
 
+    @classmethod
     def analyze(
-        self,
+        cls,
         name,
         iters,
         result,
@@ -222,7 +216,7 @@ class OvernightSingleshotT1ProgramCfg(ModularProgramCfg):
 
 
 class T1Cfg(OvernightSingleshotT1ProgramCfg, TaskCfg):
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T1Task(
@@ -264,7 +258,7 @@ class T1Task(
                 population_radius=radius,
             )
 
-        self.task = Task[T_RootResult, List[NDArray[np.float64]], np.float64](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]], np.float64](
             measure_fn=measure_t1_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(2, len(self.lengths), 2),
@@ -311,7 +305,7 @@ class OvernightSingleshotT1WithToneProgramCfg(ModularProgramCfg):
 
 
 class T1WithToneCfg(OvernightSingleshotT1WithToneProgramCfg, TaskCfg):
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T1WithToneTask(
@@ -355,7 +349,7 @@ class T1WithToneTask(
                 population_radius=radius,
             )
 
-        self.task = Task[T_RootResult, List[NDArray[np.float64]], np.float64](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]], np.float64](
             measure_fn=measure_t1_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(2, len(self.lengths), 2),

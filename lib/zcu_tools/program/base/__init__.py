@@ -1,6 +1,6 @@
-from typing import Any, Dict
+from __future__ import annotations
 
-from typing_extensions import TypedDict
+from typing_extensions import Any, TypedDict
 
 from .improve_acquire import AbsStatisticTracker, ImproveAcquireMixin
 
@@ -20,12 +20,9 @@ class MyProgram(ImproveAcquireMixin):
         wrap acqurie callback to be a coroutine
     """
 
-    def __init__(self, soccfg, cfg: Dict[str, Any], **kwargs) -> None:
-        self._parse_cfg(cfg)  # parse config first
-        super().__init__(soccfg, cfg=cfg, **kwargs)
-
-    def _parse_cfg(self, cfg: Dict[str, Any]) -> None:
+    def __init__(self, soccfg, cfg: dict[str, Any], **kwargs) -> None:
         self.cfg = cfg
+        super().__init__(soccfg, cfg=cfg, **kwargs)
 
 
 __all__ = ["MyProgram", "SweepCfg", "AbsStatisticTracker"]

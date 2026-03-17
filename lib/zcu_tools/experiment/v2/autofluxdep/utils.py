@@ -1,8 +1,8 @@
 import warnings
-from typing import Optional, Union, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Optional, Union, cast, overload
 
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import PulseCfg

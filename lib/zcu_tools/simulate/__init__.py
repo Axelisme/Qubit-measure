@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Union, overload
-
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Union, overload
 
 
 @overload

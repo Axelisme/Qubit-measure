@@ -11,11 +11,12 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from math import ceil
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy.stats import qmc
 from skopt import Optimizer
+from typing_extensions import Optional
 
 from zcu_tools.program import SweepCfg
 
@@ -28,9 +29,9 @@ warnings.filterwarnings(
 )
 
 # Type aliases for clarity
-Point2D = Tuple[float, float]  # (freq, power)
-Point3D = Tuple[float, float, float]  # (flux, freq, power)
-Bounds = Tuple[float, float]  # (min, max)
+Point2D = tuple[float, float]  # (freq, power)
+Point3D = tuple[float, float, float]  # (flux, freq, power)
+Bounds = tuple[float, float]  # (min, max)
 
 
 @dataclass
@@ -56,11 +57,11 @@ class BudgetConfig:
 class Phase1State:
     """State tracking for Phase 1 (LHS exploration)."""
 
-    flux_grid: np.ndarray
+    flux_grid: NDArray
     flux_interval: float
     current_flux_idx: int = 0
     current_slice_iter: int = 0
-    lhs_points: List[List[float]] = field(default_factory=list)
+    lhs_points: list[list[float]] = field(default_factory=list)
     lhs_idx: int = 0
 
 
@@ -68,15 +69,15 @@ class Phase1State:
 class RefinementState:
     """State tracking for Phase 2+ (refinement phases)."""
 
-    flux_list: List[float] = field(default_factory=list)
+    flux_list: list[float] = field(default_factory=list)
     flux_idx: int = 0
     current_flux: Optional[float] = None
     slice_iter: int = 0
     budget_per_flux: int = 0
     lhs_budget: int = 0
-    lhs_points: List[List[float]] = field(default_factory=list)
+    lhs_points: list[list[float]] = field(default_factory=list)
     lhs_idx: int = 0
-    neighbor_guess: Optional[List[float]] = None
+    neighbor_guess: Optional[list[float]] = None
     neighbor_guess_used: bool = False
     current_freq_bounds: Optional[Bounds] = None
     current_power_bounds: Optional[Bounds] = None
@@ -87,14 +88,14 @@ class DataStorage:
     """Storage for optimization history and results."""
 
     # Per-flux data: flux -> [(freq, power, snr), ...]
-    flux_data: Dict[float, List[Tuple[float, float, float]]] = field(
+    flux_data: dict[float, list[tuple[float, float, float]]] = field(
         default_factory=dict
     )
     # Best result per flux: flux -> (best_freq, best_power, best_snr)
-    flux_best: Dict[float, Tuple[float, float, float]] = field(default_factory=dict)
+    flux_best: dict[float, tuple[float, float, float]] = field(default_factory=dict)
     # Global history for compatibility
-    history_X: List[List[float]] = field(default_factory=list)  # [flux, freq, power]
-    history_y: List[float] = field(default_factory=list)  # SNR values
+    history_X: list[list[float]] = field(default_factory=list)  # [flux, freq, power]
+    history_y: list[float] = field(default_factory=list)  # SNR values
     # Last measured flux value
     last_flux: Optional[float] = None
 
@@ -219,7 +220,7 @@ class JPAOptimizer:
         n_samples: Optional[int] = None,
         freq_bounds: Optional[Bounds] = None,
         power_bounds: Optional[Bounds] = None,
-    ) -> List[List[float]]:
+    ) -> list[list[float]]:
         """
         Generate 2D LHS samples for the (freq, power) space.
 
@@ -229,7 +230,7 @@ class JPAOptimizer:
             power_bounds: Power bounds. If None, uses default bounds.
 
         Returns:
-            List of [freq, power] samples.
+            list of [freq, power] samples.
         """
         if n_samples is None:
             n_samples = max(1, self.budget.per_flux_slice)
@@ -246,7 +247,7 @@ class JPAOptimizer:
         freq_range = freq_bounds[1] - freq_bounds[0]
         power_range = power_bounds[1] - power_bounds[0]
 
-        lhs_points: List[List[float]] = []
+        lhs_points: list[list[float]] = []
         for s in samples:
             freq = freq_bounds[0] + s[0] * freq_range
             power = power_bounds[0] + s[1] * power_range
@@ -285,7 +286,7 @@ class JPAOptimizer:
 
         return max(valid_flux, key=lambda f: self.data.flux_best[f][2])
 
-    def _select_top_flux_values(self) -> List[float]:
+    def _select_top_flux_values(self) -> list[float]:
         """Select top 20% flux values by best SNR."""
         if not self.data.flux_best:
             return []
@@ -307,7 +308,7 @@ class JPAOptimizer:
 
     def _get_restricted_bounds(
         self, center_freq: float, center_power: float, phase: int
-    ) -> Tuple[Bounds, Bounds]:
+    ) -> tuple[Bounds, Bounds]:
         """
         Get restricted 2D bounds centered on (center_freq, center_power).
 
@@ -352,7 +353,7 @@ class JPAOptimizer:
 
         # Only use data from THIS flux value (avoid model pollution)
         if target_flux in self.data.flux_data:
-            init_points: List[Tuple[List[float], float]] = []
+            init_points: list[tuple[list[float], float]] = []
             for freq, power, snr in self.data.flux_data[target_flux]:
                 # Check if point is within the current bounds
                 if (
@@ -373,8 +374,8 @@ class JPAOptimizer:
     # =========================================================================
 
     def _generate_refinement_points(
-        self, selected_flux_list: List[float]
-    ) -> List[float]:
+        self, selected_flux_list: list[float]
+    ) -> list[float]:
         """
         Generate refinement test points for selected flux values.
 
@@ -403,7 +404,7 @@ class JPAOptimizer:
 
         return list(new_points)
 
-    def _sort_refinement_points(self, points: List[float]) -> List[float]:
+    def _sort_refinement_points(self, points: list[float]) -> list[float]:
         """
         Sort refinement points so the first point is closest to last_flux.
 
@@ -725,15 +726,15 @@ class JPAOptimizer:
         return self.budget.per_flux_slice
 
     @property
-    def flux_best(self) -> Dict[float, Tuple[float, float, float]]:
+    def flux_best(self) -> dict[float, tuple[float, float, float]]:
         return self.data.flux_best
 
     @property
-    def history_X(self) -> List[List[float]]:
+    def history_X(self) -> list[list[float]]:
         return self.data.history_X
 
     @property
-    def history_y(self) -> List[float]:
+    def history_y(self) -> list[float]:
         return self.data.history_y
 
     def next_params(self, i: int, last_snr: Optional[float]) -> Optional[Point3D]:
@@ -854,12 +855,10 @@ if __name__ == "__main__":
     # Test JPAOptimizer with a simulated SNR function
 
     import time
-    from typing import List as ListType
-    from typing import Optional as OptionalType
-    from typing import Tuple as TupleType
 
     import matplotlib.pyplot as plt
     from tqdm.auto import trange
+    from typing_extensions import Optional
 
     from zcu_tools.notebook.utils import make_sweep
 
@@ -975,11 +974,11 @@ if __name__ == "__main__":
     ax6.grid(True, alpha=0.3, axis="y")
 
     # Run optimization
-    params_list: ListType[TupleType[float, float, float]] = []
-    snrs_list: ListType[float] = []
-    phases_list: ListType[int] = []
+    params_list: list[tuple[float, float, float]] = []
+    snrs_list: list[float] = []
+    phases_list: list[int] = []
 
-    last_snr: OptionalType[float] = None
+    last_snr: Optional[float] = None
 
     plt.ion()
     plt.show(block=False)

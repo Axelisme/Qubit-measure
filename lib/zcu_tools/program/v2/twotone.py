@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing_extensions import NotRequired, Sequence, TypedDict
 
 from .modular import BaseCustomProgramV2, ModularProgramCfg
@@ -16,7 +18,7 @@ class TwoToneCfg(ModularProgramCfg):
 
 
 class TwoToneProgram(BaseCustomProgramV2):
-    def make_modules(self, cfg: TwoToneCfg) -> Sequence[Module]:
+    def make_modules(self, cfg: TwoToneCfg) -> Sequence[Module]:  # type: ignore
         modules = cfg["modules"]
         return [
             Reset("reset", cfg=modules.get("reset")),

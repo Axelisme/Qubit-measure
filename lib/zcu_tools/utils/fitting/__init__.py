@@ -27,6 +27,7 @@ from .decay import (
     fit_gauss_decay,
     fit_ge_decay,
 )
+from .multi_decay import fit_transition_rates
 from .qubfreq import fit_qubit_freq
 from .rabi import fit_rabi
 from .resonance import HangerModel, TransmissionModel, get_proper_model
@@ -36,4 +37,3 @@ from .singleshot import (
     fit_singleshot_p0,
     gauss_func,
 )
-from .multi_decay import fit_transition_rates

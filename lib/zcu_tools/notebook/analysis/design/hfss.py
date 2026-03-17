@@ -1,4 +1,4 @@
-from typing import Tuple
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +11,7 @@ from zcu_tools.utils.fitting import fit_anticross
 
 def analyze_1d_sweep(
     result_path: str, ref_freq: float, param_name: str
-) -> Tuple[Figure, Axes, float]:
+) -> tuple[Figure, Axes, float]:
     data = pd.read_csv(result_path)
 
     params = np.asarray(data[param_name].values)
@@ -46,7 +46,7 @@ def analyze_1d_sweep(
 
 def analyze_xy_sweep(
     result_path: str, ref_freq: float
-) -> Tuple[Figure, Axes, float, float]:
+) -> tuple[Figure, Axes, float, float]:
     data = pd.read_csv(result_path)
 
     Xs = np.asarray(data["Arm_X [mm]"].values)
@@ -115,7 +115,7 @@ def analyze_xy_sweep(
 
 def fit_hfss_anticross(
     result_path: str,
-) -> Tuple[Figure, Axes, float, float, float]:
+) -> tuple[Figure, Axes, float, float, float]:
     """
     Fit the anticrossing of the HFSS simulation
     """

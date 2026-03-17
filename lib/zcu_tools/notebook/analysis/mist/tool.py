@@ -1,4 +1,4 @@
-from typing import Tuple
+from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
@@ -10,7 +10,7 @@ def calc_mod_energy(energies: NDArray[np.float64], r_f: float) -> NDArray[np.flo
 
 def add_nan_on_discontinue(
     x: NDArray[np.float64], y: NDArray[np.float64], r_f: float
-) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     discontinuities = np.where(np.abs(np.diff(y)) > r_f / 2)[0]
     x_new = np.insert(x, discontinuities + 1, np.nan)
     y_new = np.insert(y, discontinuities + 1, np.nan)

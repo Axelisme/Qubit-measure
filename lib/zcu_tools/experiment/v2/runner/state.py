@@ -15,7 +15,6 @@ from typing_extensions import (
     MutableMapping,
     Optional,
     Sequence,
-    Tuple,
     TypeAlias,
     TypeVar,
     Union,
@@ -45,7 +44,7 @@ class TaskState(Generic[T_Result, T_RootResult]):
     cfg: MutableMapping[str, Any]
     env: MutableMapping[str, Any] = field(default_factory=dict)
     on_update: Optional[Callable[["TaskState[Result, T_RootResult]"], Any]] = None
-    path: Tuple[Union[int, Hashable], ...] = field(default_factory=tuple)
+    path: tuple[Union[int, Hashable], ...] = field(default_factory=tuple)
 
     # ------------------------------------------------------------------
     # Navigation helpers
@@ -76,7 +75,7 @@ class TaskState(Generic[T_Result, T_RootResult]):
     # ------------------------------------------------------------------
 
     def _get_target(self) -> Result:
-        target: Result = self.root_data
+        target = self.root_data
         for seg in self.path:
             if isinstance(target, Mapping):
                 target = target[seg]  # type: ignore[index]

@@ -1,7 +1,8 @@
-from typing import List, Union
+from __future__ import annotations
 
 import qick.asm_v2 as qasm
 from qick.asm_v2 import QickParam
+from typing_extensions import Union
 
 from ..base import MyProgramV2
 from .base import Module
@@ -15,7 +16,7 @@ class Repeat(Module):
     """
 
     def __init__(
-        self, name: str, n: int, sub_module: Union[Module, List[Module]]
+        self, name: str, n: int, sub_module: Union[Module, list[Module]]
     ) -> None:
         self.name = name
         self.n = n

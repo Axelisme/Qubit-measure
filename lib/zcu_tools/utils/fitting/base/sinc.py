@@ -1,18 +1,24 @@
-from typing import List, Optional, Sequence, cast
+from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import Optional, Sequence, cast
 
 from .base import assign_init_p, fit_func
 
 
 # sinc函數模型
-def sincfunc(x, *p):
+def sincfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
     y0, slope, yscale, x0, gamma = p
     return y0 + slope * (x - x0) + yscale * np.sinc((x - x0) / gamma)
 
 
 # 擬合sinc函數
-def fitsinc(xdata, ydata, fitparams: Optional[Sequence[Optional[float]]] = None):
+def fitsinc(
+    xdata: NDArray[np.float64],
+    ydata: NDArray[np.float64],
+    fitparams: Optional[Sequence[Optional[float]]] = None,
+) -> tuple[list[float], NDArray[np.float64]]:
     if fitparams is None:
         fitparams = [None] * 5
     fitparams = list(fitparams)
@@ -31,7 +37,7 @@ def fitsinc(xdata, ydata, fitparams: Optional[Sequence[Optional[float]]] = None)
         gamma = (xdata[-1] - xdata[0]) / 10
 
         assign_init_p(fitparams, [y0, slope, yscale, x0, gamma])
-    fitparams = cast(List[float], fitparams)
+    fitparams = cast(list[float], fitparams)
 
     # 參數邊界
     yscale = fitparams[2]

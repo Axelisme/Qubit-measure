@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +8,7 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
@@ -35,7 +34,9 @@ from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import rotate2real
 
 # (amps, freqs, signals2D)
-AcStarkResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+AcStarkResult: TypeAlias = tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
 def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -59,7 +60,7 @@ def acstark_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 def get_resonance_freq(
     xs: NDArray[np.float64], fpts: NDArray[np.float64], amps: NDArray[np.float64]
-) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     s_xs = []
     s_fpts = []
 
@@ -91,12 +92,12 @@ class AcStarkModuleCfg(TypedDict, closed=True):
 
 class AcStarkCfg(ModularProgramCfg, TaskCfg):
     modules: AcStarkModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, earlystop_snr: Optional[float] = None
+        self, soc, soccfg, cfg: dict[str, Any], *, earlystop_snr: Optional[float] = None
     ) -> AcStarkResult:
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)
         modules = _cfg["modules"]
@@ -328,12 +329,12 @@ class AcStarkRamseyProgramCfg(ModularProgramCfg):
 
 class AcStarkRamseyTaskConfig(AcStarkRamseyProgramCfg, TaskCfg):
     wait_delay: float
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class AcStarkRamseyExp(AbsExperiment):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
+        self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
     ) -> AcStarkResult:
         _cfg = check_type(deepcopy(cfg), AcStarkRamseyTaskConfig)
 

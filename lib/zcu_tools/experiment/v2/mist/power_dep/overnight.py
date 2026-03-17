@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -26,7 +27,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-PowerDepOvernightResult = Tuple[
+PowerDepOvernightResult: TypeAlias = tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -49,14 +50,14 @@ class PowerDepOvernightModuleCfg(TypedDict, closed=True):
 class PowerDepOvernightCfg(ModularProgramCfg, TaskCfg):
     modules: PowerDepOvernightModuleCfg
     interval: float
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class PowerDepOvernightExp(
     AbsExperiment[PowerDepOvernightResult, PowerDepOvernightCfg]
 ):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, num_times=50, fail_retry=3
+        self, soc, soccfg, cfg: dict[str, Any], *, num_times=50, fail_retry=3
     ) -> PowerDepOvernightResult:
         _cfg = check_type(deepcopy(cfg), PowerDepOvernightCfg)
         modules = _cfg["modules"]

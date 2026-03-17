@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import sweep2array
@@ -31,7 +30,9 @@ from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
 # (pdrs1, pdrs2, signals_2d)
-PowerResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+PowerResult: TypeAlias = tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
 class PowerModuleCfg(TypedDict, closed=True):
@@ -43,11 +44,11 @@ class PowerModuleCfg(TypedDict, closed=True):
 
 class PowerCfg(ModularProgramCfg, TaskCfg):
     modules: PowerModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> PowerResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PowerResult:
         _cfg = check_type(deepcopy(cfg), PowerCfg)
 
         # Check that reset pulse is dual pulse type
@@ -73,7 +74,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             sweep2param("gain2", _cfg["sweep"]["gain2"]),
         )
 
-        def dual_reset_pdr_signal2real(signals: np.ndarray) -> np.ndarray:
+        def dual_reset_pdr_signal2real(signals: NDArray) -> np.ndarray:
             # Choose reference point based on sweep direction (use minimum power point)
             ref_i = 0 if pdrs1[0] < pdrs1[-1] else -1
             ref_j = 0 if pdrs2[0] < pdrs2[-1] else -1
@@ -118,7 +119,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         smooth: float = 1.0,
         xname: Optional[str] = None,
         yname: Optional[str] = None,
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

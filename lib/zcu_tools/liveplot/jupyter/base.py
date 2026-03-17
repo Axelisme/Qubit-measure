@@ -1,7 +1,8 @@
+from __future__ import annotations
+
 import warnings
 from itertools import chain
 from threading import Lock
-from typing import List, Optional, Tuple, TypeVar
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ from IPython.display import display
 from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from typing_extensions import Optional, TypeVar
 
 from ..segments import AbsSegment
 
@@ -46,7 +48,7 @@ def instant_plot(fig: Figure) -> None:
 
 def make_plot_frame(
     n_row: int, n_col: int, plot_instant=True, **kwargs
-) -> Tuple[Figure, List[List[Axes]]]:
+) -> tuple[Figure, list[list[Axes]]]:
     kwargs.setdefault("squeeze", False)
     kwargs.setdefault("figsize", (6 * n_col, 4 * n_row))
     fig, axs = plt.subplots(n_row, n_col, **kwargs)
@@ -90,8 +92,8 @@ class JupyterPlotMixin:
 
     def __init__(
         self,
-        segments: List[List[AbsSegment]],
-        existed_axes: Optional[List[List[Axes]]] = None,
+        segments: list[list[AbsSegment]],
+        existed_axes: Optional[list[list[Axes]]] = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:

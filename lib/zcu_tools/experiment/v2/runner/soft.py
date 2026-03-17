@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from tqdm.auto import tqdm
-from typing_extensions import Any, Callable, List, Optional, Sequence, TypeVar, Union
+from typing_extensions import Any, Callable, Optional, Sequence, TypeVar, Union
 
 from .base import AbsTask
 from .state import Result, TaskState
@@ -83,7 +83,7 @@ class Scan(AbsTask[Sequence[T_ChildResult], T_RootResult]):
             self.sweep_pbar.close()
             self.sweep_pbar = None
 
-    def get_default_result(self) -> List[T_ChildResult]:
+    def get_default_result(self) -> list[T_ChildResult]:
         return [
             self.sub_task.get_default_result() for _ in range(len(self.sweep_values))
         ]

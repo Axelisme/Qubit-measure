@@ -4,15 +4,15 @@ This module provides functions for processing flux-dependent spectroscopy data,
 including removing close points, preprocessing data, and analyzing spectra.
 """
 
-from typing import Optional, Tuple
-
 import numpy as np
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
+from typing_extensions import Optional, Tuple
 
 
 def cast2real_and_norm(
-    signals: np.ndarray, use_phase: bool = True, sigma: float = 1
+    signals: NDArray, use_phase: bool = True, sigma: float = 1
 ) -> np.ndarray:
     """
     Convert complex signals to real with maximum snr
@@ -31,12 +31,12 @@ def cast2real_and_norm(
 
 
 def spectrum2d_findpoint(
-    mAs: np.ndarray,
-    fpts: np.ndarray,
-    amps: np.ndarray,
+    mAs: NDArray[np.float64],
+    fpts: NDArray[np.float64],
+    amps: NDArray[np.float64],
     threshold: float,
     weight: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """
     Find points in a 2D spectrum.
     """
@@ -58,7 +58,9 @@ def spectrum2d_findpoint(
     return np.array(s_mAs), np.array(s_fpts)
 
 
-def downsample_points(xs: np.ndarray, ys: np.ndarray, threshold: float) -> np.ndarray:
+def downsample_points(
+    xs: NDArray[np.float64], ys: NDArray[np.float64], threshold: float
+) -> NDArray[np.bool_]:
     """
     Downsample points in a 2D spectrum.
     """
@@ -86,7 +88,9 @@ def downsample_points(xs: np.ndarray, ys: np.ndarray, threshold: float) -> np.nd
     return mask
 
 
-def diff_mirror(xs: np.ndarray, data: np.ndarray, center: float) -> np.ndarray:
+def diff_mirror(
+    xs: NDArray[np.float64], data: NDArray, center: float
+) -> NDArray[np.float64]:
     """
     計算 data 對於 center 位置的鏡像反轉與原本的差值
 

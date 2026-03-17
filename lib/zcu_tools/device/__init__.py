@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import warnings
 
-from typing_extensions import Any, Dict, Mapping
+from typing_extensions import Any, Mapping
 
 from .base import BaseDevice, DeviceInfo
 
 
 class GlobalDeviceManager:
-    _devices: Dict[str, BaseDevice] = {}
+    _devices: dict[str, BaseDevice] = {}
 
     @classmethod
     def register_device(cls, name: str, device: Any) -> None:
@@ -27,7 +29,7 @@ class GlobalDeviceManager:
         return cls._devices[name]
 
     @classmethod
-    def get_all_devices(cls) -> Dict[str, BaseDevice]:
+    def get_all_devices(cls) -> dict[str, BaseDevice]:
         return cls._devices
 
     @classmethod
@@ -38,5 +40,5 @@ class GlobalDeviceManager:
             cls._devices[name].setup(cfg, progress=progress)
 
     @classmethod
-    def get_all_info(cls) -> Dict[str, DeviceInfo]:
+    def get_all_info(cls) -> dict[str, DeviceInfo]:
         return {name: device.get_info() for name, device in cls._devices.items()}

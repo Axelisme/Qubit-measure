@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Generic, List, Mapping, Optional, TypeVar, Union
+
+from typing_extensions import Any, Generic, Mapping, Optional, TypeVar
 
 T_Result = TypeVar("T_Result")
 T_Config = TypeVar("T_Config", bound=Mapping[str, Any])
@@ -16,9 +19,6 @@ class AbsExperiment(Generic[T_Result, T_Config], ABC):
 
     @abstractmethod
     def run(self, *args, **kwargs) -> T_Result: ...
-
-    @abstractmethod
-    def analyze(self, *args, result: Optional[T_Result] = None, **kwargs) -> None: ...
 
     @abstractmethod
     def save(

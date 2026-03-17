@@ -1,13 +1,14 @@
-from typing import List, Optional, Sequence, cast
+from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Optional, Sequence, cast
 
 from .base import assign_init_p, fit_func
 
 
 # lorentzian function
-def lorfunc(x: NDArray[np.float64], *p) -> NDArray[np.float64]:
+def lorfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
     """p = [y0, slope, yscale, x0, gamma]"""
     y0, slope, yscale, x0, gamma = p
     return y0 + slope * (x - x0) + yscale / (1 + ((x - x0) / gamma) ** 2)
@@ -18,7 +19,7 @@ def fitlor(
     ydata: NDArray[np.float64],
     fitparams: Optional[Sequence[Optional[float]]] = None,
     fixedparams: Optional[Sequence[Optional[float]]] = None,
-):
+) -> tuple[list[float], NDArray[np.float64]]:
     if fitparams is None:
         fitparams = [None] * 5
     fitparams = list(fitparams)
@@ -37,7 +38,7 @@ def fitlor(
         gamma = np.abs(yscale) / 10
 
         assign_init_p(fitparams, [y0, slope, yscale, x0, gamma])
-    fitparams = cast(List[float], fitparams)
+    fitparams = cast(list[float], fitparams)
 
     # bounds
     yscale = fitparams[2]
@@ -51,7 +52,7 @@ def fitlor(
 
 
 # asymmtric lorentzian function
-def asym_lorfunc(x: NDArray[np.float64], *p) -> NDArray[np.float64]:
+def asym_lorfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
     """p = [y0, slope, yscale, x0, gamma, alpha]"""
     y0, slope, yscale, x0, gamma, alpha = p
     return (
@@ -62,11 +63,11 @@ def asym_lorfunc(x: NDArray[np.float64], *p) -> NDArray[np.float64]:
 
 
 def fit_asym_lor(
-    xdata: np.ndarray,
-    ydata: np.ndarray,
+    xdata: NDArray[np.float64],
+    ydata: NDArray[np.float64],
     fitparams: Optional[Sequence[Optional[float]]] = None,
     fixedparams: Optional[Sequence[Optional[float]]] = None,
-):
+) -> tuple[list[float], NDArray[np.float64]]:
     if fitparams is None:
         fitparams = [None] * 6
     fitparams = list(fitparams)
@@ -87,7 +88,7 @@ def fit_asym_lor(
         alpha = 0
 
         assign_init_p(fitparams, [y0, slope, yscale, x0, gamma, alpha])
-    fitparams = cast(List[float], fitparams)
+    fitparams = cast(list[float], fitparams)
 
     # bounds
     yscale = fitparams[2]

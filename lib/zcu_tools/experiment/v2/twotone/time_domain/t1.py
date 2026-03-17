@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +9,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
@@ -36,7 +35,7 @@ from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-T1Result = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T1Result: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -51,7 +50,7 @@ class T1ModuleCfg(TypedDict, closed=True):
 
 class T1Cfg(ModularProgramCfg, TaskCfg):
     modules: T1ModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T1Exp(AbsExperiment[T1Result, T1Cfg]):
@@ -61,7 +60,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     to measure the qubit's energy relaxation.
     """
 
-    def _run_non_uniform(self, soc, soccfg, cfg: Dict[str, Any]) -> T1Result:
+    def _run_non_uniform(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
         _cfg = check_type(deepcopy(cfg), T1Cfg)
 
         len_sweep = _cfg["sweep"]["length"]
@@ -125,7 +124,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         return ts, signals
 
-    def _run_uniform(self, soc, soccfg, cfg: Dict[str, Any]) -> T1Result:
+    def _run_uniform(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
         _cfg = check_type(deepcopy(cfg), T1Cfg)
 
         ts = sweep2array(_cfg["sweep"]["length"])
@@ -167,7 +166,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         return ts, signals
 
-    def run(self, soc, soccfg, cfg: Dict[str, Any], uniform: bool = True) -> T1Result:
+    def run(self, soc, soccfg, cfg: dict[str, Any], uniform: bool = True) -> T1Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         if uniform:
             return self._run_uniform(soc, soccfg, cfg)
@@ -176,7 +175,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
     def analyze(
         self, result: Optional[T1Result] = None, *, dual_exp: bool = False
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -189,6 +188,8 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             t1, t1err, t1b, t1berr, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
         else:
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
+            t1b = 0.0
+            t1berr = 0.0
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
@@ -204,7 +205,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         else:
             title = f"$T_1$ = {t1_str}"
         ax.set_title(title, fontsize=14)
-        ax.set_xlabel("Time (us)", fontsize=14)
+        ax.set_xlabel("Delay Time (us)", fontsize=14)
         ax.set_ylabel("Signal (a.u.)", fontsize=14)
         ax.legend(loc="upper right")
         ax.grid(True)
@@ -264,11 +265,11 @@ class T1WithToneProgramCfg(ModularProgramCfg):
 
 
 class T1WithToneTaskConfig(T1WithToneProgramCfg, TaskCfg):
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T1WithToneExp(AbsExperiment):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1Result:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T1WithToneTaskConfig)
         modules = _cfg["modules"]
@@ -310,7 +311,7 @@ class T1WithToneExp(AbsExperiment):
 
     def analyze(
         self, result: Optional[T1Result] = None, *, dual_exp: bool = False
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -323,10 +324,14 @@ class T1WithToneExp(AbsExperiment):
             t1b, t1berr, t1, t1err, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
         else:
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
+            t1b = 0.0
+            t1berr = 0.0
 
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
         if dual_exp:
             t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
+        else:
+            t1b_str = "N/A"
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
@@ -387,7 +392,7 @@ class T1WithToneExp(AbsExperiment):
 
 
 # (values, times, signals)
-T1SweepResultType = Tuple[
+T1SweepResultType = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -401,11 +406,11 @@ class T1WithToneSweepProgramCfg(ModularProgramCfg):
 
 
 class T1WithToneSweepTaskConfig(T1WithToneSweepProgramCfg, TaskCfg):
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T1WithToneSweepExp(AbsExperiment):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> T1SweepResultType:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> T1SweepResultType:
         _cfg = check_type(deepcopy(cfg), T1WithToneSweepTaskConfig)
         modules = _cfg["modules"]
 
@@ -434,9 +439,7 @@ class T1WithToneSweepExp(AbsExperiment):
                                 "reset",
                                 ctx.cfg["modules"].get("reset"),
                             ),
-                            Pulse(
-                                name="pi_pulse", cfg=ctx.cfg["modules"]["pi_pulse"]
-                            ),
+                            Pulse(name="pi_pulse", cfg=ctx.cfg["modules"]["pi_pulse"]),
                             Pulse(
                                 name="test_pulse",
                                 cfg=ctx.cfg["modules"]["test_pulse"],
@@ -467,7 +470,7 @@ class T1WithToneSweepExp(AbsExperiment):
 
     def analyze(
         self, result: Optional[T1SweepResultType] = None
-    ) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Figure]:
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

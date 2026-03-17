@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 import argparse
 import fnmatch
 import os
 import sys
 import threading
 from datetime import datetime, timezone
-from typing import List
 
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
@@ -18,7 +19,7 @@ from joblib import Parallel, delayed
 # If modifying these scopes, delete the file token.json.
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 TOKEN_FILE = "token.json"
-IGNORE_FILE: List[str] = ["*.lock"]
+IGNORE_FILE: list[str] = ["*.lock"]
 
 # Thread-local storage for Google Drive service instances
 _thread_local = threading.local()
@@ -134,7 +135,7 @@ def find_or_create_folder(service, name, parent_id):
 
 
 def list_files_in_folder(service, folder_id):
-    """Lists all files in a specific Google Drive folder to avoid duplicates."""
+    """lists all files in a specific Google Drive folder to avoid duplicates."""
     files_data = {}  # Change to dictionary to store more file info
     page_token = None
     try:
@@ -296,7 +297,9 @@ def process_upload_task(creds, task):
 
     try:
         if task_type == "delete":
-            service.files().delete(fileId=remote_file_id, supportsAllDrives=True).execute()
+            service.files().delete(
+                fileId=remote_file_id, supportsAllDrives=True
+            ).execute()
             print(f"    Deleted remote file: {filename}")
             return
 

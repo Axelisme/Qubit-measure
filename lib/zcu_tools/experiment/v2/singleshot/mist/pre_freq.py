@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -28,7 +29,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-PreFreqResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
+PreFreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class PreFreqModuleCfg(TypedDict, closed=True):
@@ -41,7 +42,7 @@ class PreFreqModuleCfg(TypedDict, closed=True):
 
 class PreFreqCfg(ModularProgramCfg, TaskCfg):
     modules: PreFreqModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
@@ -49,7 +50,7 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
@@ -114,7 +115,7 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
 
         # record the last result
         self.last_cfg = _cfg
-        self.last_result: PreFreqResult = (fpts, signals)
+        self.last_result = (fpts, signals)
 
         return fpts, signals
 

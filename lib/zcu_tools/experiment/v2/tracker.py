@@ -1,7 +1,8 @@
-from typing import List, Optional, Tuple
+from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Optional
 
 from zcu_tools.program.base import AbsStatisticTracker
 
@@ -20,7 +21,7 @@ class PCATracker(AbsStatisticTracker):
         self.n = 0
         self.mean: Optional[NDArray[np.float64]] = None
         self.M2: Optional[NDArray[np.float64]] = None
-        self.medians: List[NDArray[np.float64]] = []
+        self.medians: list[NDArray[np.float64]] = []
 
     @staticmethod
     def _merge(
@@ -30,7 +31,7 @@ class PCATracker(AbsStatisticTracker):
         n2: int,
         mean2: NDArray[np.float64],
         M2_2: NDArray[np.float64],
-    ) -> Tuple[int, NDArray[np.float64], NDArray[np.float64]]:
+    ) -> tuple[int, NDArray[np.float64], NDArray[np.float64]]:
         """Merge two sets of statistics. Supports leading dimensions."""
         n = n1 + n2
         mean = (mean1 * n1 + mean2 * n2) / float(n)
@@ -97,14 +98,16 @@ class PCATracker(AbsStatisticTracker):
 
 
 if __name__ == "__main__":
-    from copy import copy
-
     import matplotlib.pyplot as plt
     from matplotlib.patches import Ellipse
 
     def plot_covariance_ellipse(
-        ax, mean: Tuple[float, float], cov: NDArray, n_std: float = 2.0, **kwargs
-    ):
+        ax,
+        mean: tuple[float, float],
+        cov: NDArray[np.float64],
+        n_std: float = 2.0,
+        **kwargs,
+    ) -> Ellipse:
         """Plot an ellipse representing the covariance matrix."""
         eigenvalues, eigenvectors = np.linalg.eigh(cov)
         # Sort by eigenvalue (largest first)

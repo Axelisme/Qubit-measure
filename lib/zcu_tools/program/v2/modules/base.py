@@ -7,7 +7,6 @@ from qick.asm_v2 import QickParam
 from typing_extensions import (
     TYPE_CHECKING,
     Any,
-    Dict,
     NotRequired,
     Optional,
     Sequence,
@@ -61,8 +60,8 @@ class Module(ABC):
         return cur_cls
 
     @staticmethod
-    def auto_fill(module_cfg: Dict[str, Any], ml: ModuleLibrary) -> ModuleCfg:
-        return cast(ModuleCfg, module_cfg)
+    def auto_fill(cfg: Union[str, dict[str, Any]], ml: ModuleLibrary) -> ModuleCfg:
+        raise NotImplementedError("auto_fill is not implemented for this module")
 
     def __init__(self, *args, **kwargs) -> None: ...
 

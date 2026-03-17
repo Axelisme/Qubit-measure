@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -31,7 +30,7 @@ from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
 # (fpts, signals)
-FreqResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -47,11 +46,11 @@ class FreqModuleCfg(TypedDict, closed=True):
 
 class FreqCfg(ModularProgramCfg, TaskCfg):
     modules: FreqModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), FreqCfg)
 
@@ -96,7 +95,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
     def analyze(
         self, result: Optional[FreqResult] = None
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

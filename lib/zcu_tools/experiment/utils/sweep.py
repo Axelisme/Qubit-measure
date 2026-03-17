@@ -1,16 +1,17 @@
+from __future__ import annotations
+
 import warnings
-from typing import Dict, Mapping, Optional, Sequence, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import TypeVar
+from typing_extensions import Mapping, Optional, Sequence, TypeVar, Union, cast
 
 from zcu_tools.program import SweepCfg
 
 T = TypeVar("T", bound=Union[SweepCfg, NDArray])
 
 
-def format_sweep1D(sweep: Union[Mapping[str, T], T], name: str) -> Dict[str, T]:
+def format_sweep1D(sweep: Union[Mapping[str, T], T], name: str) -> dict[str, T]:
     """
     Convert abbreviated single sweep to regular format.
 
@@ -57,7 +58,7 @@ def check_time_sweep(
 
     Args:
         soccfg: SocCfg object containing the system configuration
-        ts: List of time points in microseconds (us)
+        ts: list of time points in microseconds (us)
         gen_ch: Generator channel number (optional)
         ro_ch: Readout channel number (optional)
 

@@ -1,6 +1,7 @@
-from typing import List, Union, Optional
+from __future__ import annotations
 
 from qick.asm_v2 import AsmInst, Macro, QickParam, QickSweep1D
+from typing_extensions import Optional, Union
 
 from zcu_tools.program import SweepCfg
 
@@ -38,14 +39,14 @@ class PrintTimeStamp(Macro):
     def __init__(
         self,
         prefix: str = "",
-        gen_chs: Optional[List[int]] = None,
-        ro_chs: Optional[List[int]] = None,
+        gen_chs: Optional[list[int]] = None,
+        ro_chs: Optional[list[int]] = None,
     ) -> None:
         self.prefix = prefix
         self.gen_chs = gen_chs
         self.ro_chs = ro_chs
 
-    def expand(self, prog) -> List[AsmInst]:
+    def expand(self, prog) -> list[AsmInst]:  # type: ignore
         return []
 
     def preprocess(self, prog) -> None:

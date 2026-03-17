@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
+from typing_extensions import Any, Mapping, Optional, TypeAlias
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
@@ -16,18 +16,18 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAFluxByOneToneResult = Tuple[
+JPAFluxByOneToneResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
 
 class JPAFluxByOneToneCfg(OneToneCfg, TaskCfg):
     dev: Mapping[str, DeviceInfo]
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class JPAFluxByOneToneExp(AbsExperiment[JPAFluxByOneToneResult, JPAFluxByOneToneCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPAFluxByOneToneResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> JPAFluxByOneToneResult:
         _cfg = check_type(deepcopy(cfg), JPAFluxByOneToneCfg)
 
         jpa_flux_sweep = _cfg["sweep"]["jpa_flux"]

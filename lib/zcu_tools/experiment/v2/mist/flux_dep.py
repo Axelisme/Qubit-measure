@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import plotly.graph_objects as go
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, Mapping, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
@@ -30,7 +29,9 @@ from zcu_tools.program.v2 import (
 from zcu_tools.simulate import mA2flx
 from zcu_tools.utils.datasaver import load_data, save_data
 
-FluxDepResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+FluxDepResult: TypeAlias = tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -58,11 +59,11 @@ class FluxDepModuleCfg(TypedDict, closed=True):
 class FluxDepCfg(ModularProgramCfg, TaskCfg):
     modules: FluxDepModuleCfg
     dev: Mapping[str, DeviceInfo]
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FluxDepResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FluxDepResult:
         _cfg = check_type(deepcopy(cfg), FluxDepCfg)
         modules = _cfg["modules"]
 

@@ -4,19 +4,9 @@ from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
-from numpy import float64
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    TypedDict,
-    cast,
-)
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
@@ -76,8 +66,8 @@ class MistCfgTemplate(ModularProgramCfg, TaskCfg):
 
 class MistCfg(ModularProgramCfg, TaskCfg):
     modules: MistModuleCfg
-    dev: Dict[str, DeviceInfo]
-    sweep: Dict[str, SweepCfg]
+    dev: dict[str, DeviceInfo]
+    sweep: dict[str, SweepCfg]
 
 
 class MistResult(TypedDict, closed=True):
@@ -95,7 +85,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         gain_sweep: SweepCfg,
         cfg_maker: Callable[
             [TaskState[MistResult, T_RootResult], ModuleLibrary],
-            Optional[Dict[str, Any]],
+            Optional[dict[str, Any]],
         ],
     ) -> None:
         self.gain_sweep = gain_sweep
@@ -103,7 +93,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
 
         def measure_fn(
             ctx: TaskState, update_hook: Optional[Callable]
-        ) -> List[NDArray[float64]]:
+        ) -> list[NDArray[np.float64]]:
             modules = ctx.cfg["modules"]
             Pulse.set_param(
                 modules["mist_pulse"],
@@ -121,7 +111,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
                 ],
             ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
-        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=measure_fn, result_shape=(self.gain_sweep["expts"],)
         )
 
@@ -167,7 +157,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
     def cleanup(self) -> None:
         self.task.cleanup()
 
-    def num_axes(self) -> Dict[str, int]:
+    def num_axes(self) -> dict[str, int]:
         return dict(mist=2)
 
     def make_plotter(self, name, axs) -> MistPlotterDict:
@@ -182,8 +172,8 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         )
 
     def update_plotter(self, plotters, ctx: TaskState, signals: MistResult) -> None:
-        flx_values: np.ndarray = ctx.env["flx_values"]
-        gains: np.ndarray = sweep2array(self.gain_sweep)
+        flx_values: NDArray[np.float64] = ctx.env["flx_values"]
+        gains: NDArray[np.float64] = sweep2array(self.gain_sweep)
 
         # shape: (flx, gains)
         mist_signals = mist_fluxdep_signal2real(signals["raw_signals"])

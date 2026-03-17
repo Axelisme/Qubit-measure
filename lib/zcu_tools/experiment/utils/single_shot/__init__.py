@@ -1,24 +1,31 @@
-from typing import Literal
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import TABLEAU_COLORS
+from numpy.typing import NDArray
+from typing_extensions import Literal
 
 from .gauss2d import fit_gauss_2d, fit_gauss_2d_bayesian
-from .ge import fidelity_func, singleshot_ge_analysis, singleshot_visualize
+from .ge import (
+    GE_FitResult,
+    fidelity_func,
+    singleshot_ge_analysis,
+    singleshot_visualize,
+)
 
 
 def fit_singleshot2d(
-    signals: np.ndarray,
+    signals: NDArray[np.complex128],
     num_gauss: int = 3,
     method: Literal["standard", "bayesian"] = "bayesian",
-) -> np.ndarray:
+) -> NDArray[np.float64]:
     """
     使用二維高斯混合模型擬合單次測量數據並視覺化結果。
 
     參數
     ----------
-    signals : np.ndarray
+    signals : NDArray
         複數測量信號。可以是一維數組或二維數組（多個測量組）。
     num_gauss : int, default=2
         要擬合的高斯分佈數量。
@@ -32,7 +39,7 @@ def fit_singleshot2d(
 
     返回
     -------
-    np.ndarray
+    NDArray
         形狀為(m, 4)的擬合結果，每行包含一個高斯分佈的參數 [x0, y0, sigma, n]，
         其中m是擬合的高斯分佈數量，可能小於等於num_gauss。
     """
@@ -122,6 +129,7 @@ def fit_singleshot2d(
 
 
 __all__ = [
+    "GE_FitResult",
     "fidelity_func",
     "singleshot_ge_analysis",
     "fit_singleshot2d",

@@ -6,17 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypedDict,
-    cast,
-)
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
@@ -66,7 +56,7 @@ def lenrabi_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.f
 
 def auto_fit_lenrabi(
     lengths: NDArray[np.float64], real_signals: NDArray[np.float64]
-) -> Tuple[float, float, float, float, NDArray[np.float64]]:
+) -> tuple[float, float, float, float, NDArray[np.float64]]:
     *decay_args, decay_signals, _ = fit_rabi(lengths, real_signals, decay=True)
     *normal_args, normal_signals, _ = fit_rabi(lengths, real_signals, decay=False)
 
@@ -97,8 +87,8 @@ class LenRabiCfgTemplate(ModularProgramCfg, TaskCfg):
 
 class LenRabiCfg(ModularProgramCfg, TaskCfg):
     modules: LenRabiModuleCfg
-    dev: Dict[str, DeviceInfo]
-    sweep: Dict[str, SweepCfg]
+    dev: dict[str, DeviceInfo]
+    sweep: dict[str, SweepCfg]
 
 
 class LenRabiResult(TypedDict, closed=True):
@@ -119,7 +109,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         length_sweep: SweepCfg,
         cfg_maker: Callable[
             [TaskState[LenRabiResult, T_RootResult], ModuleLibrary],
-            Optional[Dict[str, Any]],
+            Optional[dict[str, Any]],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -154,7 +144,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
                 ),
             )
 
-        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn, result_shape=(self.length_sweep["expts"],)
         )
 
@@ -238,7 +228,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
     def cleanup(self) -> None:
         self.task.cleanup()
 
-    def num_axes(self) -> Dict[str, int]:
+    def num_axes(self) -> dict[str, int]:
         return dict(rabi_curve=2)
 
     def make_plotter(self, name, axs) -> LenRabiPlotterDict:

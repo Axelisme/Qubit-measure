@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
+from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -20,7 +20,7 @@ from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
 # (amps, signals)
-AmpRabiResult = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+AmpRabiResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -28,11 +28,11 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class AmpRabiCfg(TwoToneCfg, TaskCfg):
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> AmpRabiResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> AmpRabiResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), AmpRabiCfg)
 
@@ -62,7 +62,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
 
     def analyze(
         self, result: Optional[AmpRabiResult] = None, skip: int = 0
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -79,7 +79,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
             init_phase = 180
 
         pi_amp, pi2_amp, _, y_fit, _ = fit_rabi(
-            pdrs, real_signals, decay=False, init_phase=init_phase, min_length=0.0
+            pdrs, real_signals, decay=False, init_phase=init_phase
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)

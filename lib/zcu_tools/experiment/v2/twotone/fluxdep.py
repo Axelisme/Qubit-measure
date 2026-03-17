@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Dict
 
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Mapping, Optional, Tuple, cast
+from typing_extensions import Any, Mapping, Optional, TypeAlias, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
@@ -22,7 +21,9 @@ from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
-FreqFluxResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+FreqFluxResult: TypeAlias = tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
 def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -31,12 +32,12 @@ def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 
 class FreqFluxCfg(TwoToneCfg, TaskCfg):
     dev: Mapping[str, DeviceInfo]
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], fail_retry: int = 0
+        self, soc, soccfg, cfg: dict[str, Any], fail_retry: int = 0
     ) -> FreqFluxResult:
         _cfg = check_type(deepcopy(cfg), FreqFluxCfg)
 

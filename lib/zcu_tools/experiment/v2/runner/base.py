@@ -2,18 +2,17 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Sequence
 
 from typing_extensions import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Dict,
     Generic,
     Mapping,
     MutableMapping,
     NotRequired,
     Optional,
+    Sequence,
     TypedDict,
     TypeVar,
     cast,
@@ -33,8 +32,8 @@ T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
-class TaskCfg(TypedDict, closed=True):
-    dev: NotRequired[Dict[str, DeviceInfo]]
+class TaskCfg(TypedDict, closed=False):
+    dev: NotRequired[dict[str, DeviceInfo]]
 
 
 class AbsTask(ABC, Generic[T_Result, T_RootResult]):

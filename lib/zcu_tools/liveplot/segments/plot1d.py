@@ -1,8 +1,9 @@
-from typing import Any, List, Mapping, Optional, Sequence
+from __future__ import annotations
 
 import numpy as np
 from matplotlib.lines import Line2D
 from numpy.typing import NDArray
+from typing_extensions import Any, Mapping, Optional, Sequence
 
 from .base import AbsSegment, Axes
 
@@ -31,7 +32,7 @@ class Plot1DSegment(AbsSegment):
         )
 
         default_line_kwargs = {"marker": ".", "linestyle": "-", "markersize": 5}
-        self.line_kwargs: List[Mapping[str, Any]] = []
+        self.line_kwargs: list[Mapping[str, Any]] = []
         for kwargs_i in line_kwargs:
             if kwargs_i is None:
                 kwargs_i = dict()
@@ -41,7 +42,7 @@ class Plot1DSegment(AbsSegment):
                 kwargs_i.setdefault(k, v)
             self.line_kwargs.append(kwargs_i)
 
-        self.lines: Optional[List[Line2D]] = None
+        self.lines: Optional[list[Line2D]] = None
 
     def init_ax(self, ax: Axes) -> None:
         ax.set_xlabel(self.xlabel)

@@ -6,16 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypedDict,
-)
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
@@ -74,13 +65,13 @@ class T2RamseyModuleCfg(TypedDict, closed=True):
 
 class T2RamseyCfgTemplate(ModularProgramCfg, TaskCfg):
     modules: T2RamseyModuleCfg
-    sweep_range: Tuple[float, float]
+    sweep_range: tuple[float, float]
 
 
 class T2RamseyCfg(ModularProgramCfg, TaskCfg):
     modules: T2RamseyModuleCfg
-    dev: Dict[str, DeviceInfo]
-    sweep: Dict[str, SweepCfg]
+    dev: dict[str, DeviceInfo]
+    sweep: dict[str, SweepCfg]
     activate_detune: float
 
 
@@ -106,7 +97,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
         detune_ratio: float,
         cfg_maker: Callable[
             [TaskState[T2RamseyResult, T_RootResult], ModuleLibrary],
-            Optional[Dict[str, Any]],
+            Optional[dict[str, Any]],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -154,7 +145,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
             )
 
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=measure_ramsey_fn,
             result_shape=(num_expts,),
         )
@@ -238,7 +229,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
     def cleanup(self) -> None:
         self.task.cleanup()
 
-    def num_axes(self) -> Dict[str, int]:
+    def num_axes(self) -> dict[str, int]:
         return dict(t2r=1, t2r_curve=1)
 
     def make_plotter(self, name, axs) -> T2RamseyPlotterDict:

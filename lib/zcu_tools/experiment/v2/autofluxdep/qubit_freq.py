@@ -6,15 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    TypedDict,
-    cast,
-)
+from typing_extensions import Any, Callable, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
@@ -59,8 +51,8 @@ class QubitFreqCfgTemplate(TwoToneCfg, TaskCfg): ...
 
 
 class QubitFreqCfg(TwoToneCfg, TaskCfg):
-    dev: Dict[str, DeviceInfo]
-    sweep: Dict[str, SweepCfg]
+    dev: dict[str, DeviceInfo]
+    sweep: dict[str, SweepCfg]
 
 
 class QubitFreqResult(TypedDict, closed=True):
@@ -85,7 +77,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         detune_sweep: SweepCfg,
         cfg_maker: Callable[
             [TaskState[QubitFreqResult, T_RootResult], ModuleLibrary],
-            Optional[Dict[str, Any]],
+            Optional[dict[str, Any]],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -93,7 +85,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=lambda ctx, update_hook: (
                 prog := TwoToneProgram(ctx.env["soccfg"], ctx.cfg)
             ).acquire(
@@ -207,7 +199,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
     def cleanup(self) -> None:
         self.task.cleanup()
 
-    def num_axes(self) -> Dict[str, int]:
+    def num_axes(self) -> dict[str, int]:
         return dict(fit_freq=1, detune=2)
 
     def make_plotter(self, name, axs) -> FreqPlotterDict:

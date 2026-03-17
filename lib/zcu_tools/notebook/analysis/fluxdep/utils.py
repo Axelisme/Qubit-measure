@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from numpy.typing import NDArray
-from typing_extensions import Any, Callable, Dict, Optional, Self, Tuple, Union
+from typing_extensions import Any, Callable, Optional, Self, Union
 
 from zcu_tools.simulate import mA2flx
 
@@ -79,8 +81,8 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
 
     def update_limits(
         self,
-        xrange: Tuple[Union[float, None], Union[float, None]],
-        yrange: Tuple[Union[float, None], Union[float, None]],
+        xrange: tuple[Union[float, None], Union[float, None]],
+        yrange: tuple[Union[float, None], Union[float, None]],
     ) -> None:
         self.xlimits = [
             self.xlimits[0] if xrange[0] is None else min(self.xlimits[0], xrange[0]),
@@ -91,7 +93,7 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
             self.ylimits[1] if yrange[1] is None else max(self.ylimits[1], yrange[1]),
         ]
 
-    def plot_background(self, spects: Dict[str, Dict[str, Any]]) -> Self:
+    def plot_background(self, spects: dict[str, dict[str, Any]]) -> Self:
         # Add heatmap traces for each spectrum in spects
         for name, spect in spects.items():
             # Get corresponding data and range
@@ -99,8 +101,8 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
             flx_mask = np.any(~np.isnan(signals), axis=1)
             fpt_mask = np.any(~np.isnan(signals), axis=0)
             signals = signals[flx_mask, :][:, fpt_mask]
-            values = spect["spectrum"]["mAs"][flx_mask]
-            fpts = spect["spectrum"]["fpts"][fpt_mask]
+            values: NDArray[np.float64] = spect["spectrum"]["mAs"][flx_mask]
+            fpts: NDArray[np.float64] = spect["spectrum"]["fpts"][fpt_mask]
 
             # Normalize data
             norm_signals = cast2real_and_norm(signals)
@@ -130,7 +132,7 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
         self,
         flxs: NDArray[np.float64],
         energies: NDArray[np.float64],
-        allows: Dict[str, Any],
+        allows: dict[str, Any],
     ) -> Self:
         fs, labels = energy2transition(energies, allows)
 

@@ -1,8 +1,9 @@
-from typing import Optional, List
+from __future__ import annotations
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from typing_extensions import Optional
 
 from ..base import AbsLivePlotter
 from ..segments import Plot1DSegment
@@ -16,7 +17,7 @@ class LivePlotter1D(JupyterPlotMixin, AbsLivePlotter):
         ylabel: str,
         *,
         segment_kwargs: Optional[dict] = None,
-        existed_axes: Optional[List[List[Axes]]] = None,
+        existed_axes: Optional[list[list[Axes]]] = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:

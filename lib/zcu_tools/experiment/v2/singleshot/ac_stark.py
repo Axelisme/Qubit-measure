@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,7 +11,7 @@ from matplotlib.image import NonUniformImage
 from numpy import float64
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -41,12 +40,14 @@ from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import minus_background
 
 # (gains, freqs, populations)
-AcStarkResult = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+AcStarkResult: TypeAlias = tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
+]
 
 
 def get_resonance_freq(
     xs: NDArray[np.float64], fpts: NDArray[np.float64], populations: NDArray[np.float64]
-) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     s_xs = []
     s_fpts = []
 
@@ -79,7 +80,7 @@ class AcStarkModuleCfg(TypedDict, closed=True):
 
 class AcStarkCfg(ModularProgramCfg, TaskCfg):
     modules: AcStarkModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
@@ -87,7 +88,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
@@ -172,7 +173,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
 
                 viewer.refresh()
 
-            def measure_fn(ctx, update_hook) -> List[NDArray[float64]]:
+            def measure_fn(ctx, update_hook) -> list[NDArray[float64]]:
                 modules = ctx.cfg["modules"]
                 return ModularProgramV2(
                     soccfg,
@@ -224,7 +225,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         eta: float = 1.0,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
         cutoff: Optional[float] = None,
-    ) -> Tuple[float, Figure]:
+    ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
@@ -425,7 +426,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> AcStarkResult:
+    def load(self, filepath: list[str], **kwargs) -> AcStarkResult:
         g_filepath, e_filepath = filepath
 
         # Load ground populations

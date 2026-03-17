@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Tuple
-
 import numpy as np
 import scipy.constants as sc
 from numpy.typing import NDArray
+from typing_extensions import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
@@ -97,7 +96,7 @@ def calculate_percell_t1_vs_flx(
     kappa: float,
     g: float,
     Temp: float,
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
 ) -> NDArray[np.float64]:
     Nf = 10
     Nr = 10
@@ -138,7 +137,7 @@ def calculate_percell_t1_vs_flx(
         evecs = paramsweep["evecs"][paramindex_tuple]
         Vec_n = paramsweep["bare_evecs"]["subsys":1][paramindex_tuple]
 
-        def get_esys(state: int) -> Tuple[NDArray[np.float64], NDArray[np.complex128]]:
+        def get_esys(state: int) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
             idxs = [paramsweep.dressed_index((state, n), paramindex_tuple) for n in ns]
             mask = np.array([idx is None for idx in idxs])
 

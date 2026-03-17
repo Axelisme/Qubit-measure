@@ -2,50 +2,50 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Literal, Optional, TypeAlias
+from typing_extensions import Any, Optional, TypeAlias
 
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting import HangerModel, TransmissionModel, get_proper_model
 
 # (fpts, signals)
-FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+SA_FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class FreqCfg(OneToneCfg, TaskCfg):
+class SA_FreqCfg(OneToneCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
-def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+def safreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        _cfg = check_type(deepcopy(cfg), FreqCfg)
+class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> SA_FreqResult:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "ro_freq")
+        _cfg = check_type(deepcopy(cfg), SA_FreqCfg)
 
         # Predicted frequency points (before mapping to ADC domain)
-        fpts: NDArray[np.float64] = sweep2array(_cfg["sweep"]["freq"])  # MHz
+        fpts: NDArray[np.float64] = sweep2array(_cfg["sweep"]["ro_freq"])  # MHz
 
         # set readout frequency as sweep param
         Readout.set_param(
             _cfg["modules"]["readout"],
-            "freq",
-            sweep2param("freq", _cfg["sweep"]["freq"]),
+            "ro_freq",
+            sweep2param("ro_freq", _cfg["sweep"]["ro_freq"]),
         )
 
         # run experiment
-        with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
+        with LivePlotter1D("SA Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: OneToneProgram(
@@ -55,7 +55,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    fpts, freq_signal2real(ctx.root_data)
+                    fpts, safreq_signal2real(ctx.root_data)
                 ),
             )
 
@@ -65,48 +65,33 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         return fpts, signals
 
-    def analyze(
-        self,
-        result: Optional[FreqResult] = None,
-        *,
-        model_type: Literal["hm", "t", "auto"] = "auto",
-        edelay: Optional[float] = None,
-    ) -> tuple[float, float, dict[str, Any], Figure]:
+    def analyze(self, result: Optional[SA_FreqResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         fpts, signals = result
 
-        # remove first and last point, sometimes they have problems
-        fpts = fpts[1:-1]
-        signals = signals[1:-1]
+        fig, ax = plt.subplots(figsize=config.figsize)
 
-        if model_type == "hm":
-            model = HangerModel()
-        elif model_type == "t":
-            model = TransmissionModel()
-        elif model_type == "auto":
-            model = get_proper_model(fpts, signals)
-        else:
-            raise ValueError(f"Invalid model type: {model_type}")
+        amps = safreq_signal2real(signals)
 
-        param_dict = model.fit(fpts, signals, edelay)
-        fig = model.visualize_fit(fpts, signals, param_dict)  # type: ignore
+        ax.plot(fpts, amps, label="signal", marker="o", markersize=3)
+        ax.set_xlabel("Frequency (MHz)")
+        ax.set_ylabel("Amplitude (a.u.)")
+        ax.legend()
+        ax.grid(True)
 
-        return (
-            float(param_dict["freq"]),
-            float(param_dict["kappa"]),
-            dict(param_dict),
-            fig,
-        )
+        fig.tight_layout()
+
+        return fig
 
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResult] = None,
+        result: Optional[SA_FreqResult] = None,
         comment: Optional[str] = None,
-        tag: str = "onetone/freq",
+        tag: str = "onetone/sa_freq",
         **kwargs,
     ) -> None:
         if result is None:
@@ -124,7 +109,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> FreqResult:
+    def load(self, filepath: str, **kwargs) -> SA_FreqResult:
         signals, fpts, _ = load_data(filepath, **kwargs)
         assert len(fpts.shape) == 1 and len(signals.shape) == 1
         assert fpts.shape == signals.shape

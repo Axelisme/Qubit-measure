@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
-from typing_extensions import Optional, Tuple, TypedDict
+from typing_extensions import Optional, TypedDict
 
 from .base import (
     calc_phase,
@@ -17,7 +19,7 @@ from .base import (
 
 
 def calc_peak_signals(
-    circle_params: Tuple[float, float, float], theta0: float
+    circle_params: tuple[float, float, float], theta0: float
 ) -> complex:
     xc, yc, r0 = circle_params
     center = xc + 1j * yc
@@ -31,7 +33,7 @@ class TransmissionParams(TypedDict):
     a0: complex
     edelay: float
     theta0: float
-    circle_params: Tuple[float, float, float]
+    circle_params: tuple[float, float, float]
 
 
 class TransmissionModel:
@@ -58,7 +60,7 @@ class TransmissionModel:
         signals: NDArray[np.complex128],
         edelay: Optional[float] = None,
     ) -> TransmissionParams:
-        """Dict[freq, kappa, Ql, a0, edelay, circle_params]"""
+        """dict[freq, kappa, Ql, a0, edelay, circle_params]"""
         if edelay is None:
             edelay = fit_edelay(fpts, signals)
 
@@ -80,7 +82,12 @@ class TransmissionModel:
         )
 
     @classmethod
-    def visualize_fit(cls, fpts, signals, param_dict: TransmissionParams) -> Figure:
+    def visualize_fit(
+        cls,
+        fpts: NDArray[np.float64],
+        signals: NDArray[np.complex128],
+        param_dict: TransmissionParams,
+    ) -> Figure:
         freq = param_dict["freq"]
         kappa = param_dict["kappa"]
         theta0 = param_dict["theta0"]

@@ -1,24 +1,60 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable, ClassVar, Dict, Literal, Type, Union, cast
 
 from qick.asm_v2 import QickParam
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Callable,
+    ClassVar,
+    Literal,
+    NotRequired,
+    Type,
+    TypeAlias,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from ..base import MyProgramV2
 
 
-class WaveformCfg(TypedDict, closed=True):
-    style: Literal["const", "cosine", "gauss", "drag", "flat_top"]
+class ConstWaveformCfg(TypedDict, closed=True):
+    style: Literal["const"]
     length: Union[float, QickParam]
 
-    name: NotRequired[str]  # waveform name
 
-    sigma: NotRequired[float]  # guassian sigma
-    delta: NotRequired[float]  # drag delta
-    alpha: NotRequired[float]  # drag alpha
-    raise_waveform: NotRequired[WaveformCfg]  # flat top
+class CosineWaveformCfg(TypedDict, closed=True):
+    style: Literal["cosine"]
+    length: float
+
+
+class GaussWaveformCfg(TypedDict, closed=True):
+    style: Literal["gauss"]
+    length: float
+    sigma: float
+
+
+class DragWaveformCfg(TypedDict, closed=True):
+    style: Literal["drag"]
+    length: float
+    sigma: float
+    delta: float
+    alpha: float
+
+
+class FlatTopWaveformCfg(TypedDict, closed=True):
+    style: Literal["flat_top"]
+    length: Union[float, QickParam]
+    raise_waveform: Union[CosineWaveformCfg, GaussWaveformCfg, DragWaveformCfg]
+
+
+WaveformCfg: TypeAlias = Union[
+    ConstWaveformCfg,
+    CosineWaveformCfg,
+    GaussWaveformCfg,
+    DragWaveformCfg,
+    FlatTopWaveformCfg,
+]
 
 
 class QickWaveformKwargs(TypedDict):
@@ -51,7 +87,7 @@ class AbsWaveform(ABC):
 
 
 class Waveform(AbsWaveform):
-    SUPPORTED_STYLES: ClassVar[Dict[str, Type[AbsWaveform]]] = {}
+    SUPPORTED_STYLES: ClassVar[dict[str, Type[AbsWaveform]]] = {}
 
     @classmethod
     def register_waveform(
@@ -104,10 +140,6 @@ class Waveform(AbsWaveform):
         return self.waveform.waveform_cfg
 
 
-class ConstWaveformCfg(WaveformCfg):
-    style: Literal["const"]
-
-
 @Waveform.register_waveform("const")
 class ConstWaveform(AbsWaveform):
     @classmethod
@@ -133,11 +165,6 @@ class ConstWaveform(AbsWaveform):
             "style": "const",
             "length": self.waveform_cfg["length"],
         }
-
-
-class CosineWaveformCfg(WaveformCfg):
-    style: Literal["cosine"]
-    length: float
 
 
 @Waveform.register_waveform("cosine")
@@ -168,12 +195,6 @@ class CosineWaveform(AbsWaveform):
             "style": "arb",
             "envelope": self.name,
         }
-
-
-class GaussWaveformCfg(WaveformCfg):
-    style: Literal["gauss"]
-    sigma: float
-    length: float
 
 
 @Waveform.register_waveform("gauss")
@@ -222,14 +243,6 @@ class GaussWaveform(AbsWaveform):
             "style": "arb",
             "envelope": self.name,
         }
-
-
-class DragWaveformCfg(WaveformCfg):
-    style: Literal["drag"]
-    sigma: float
-    delta: float
-    alpha: float
-    length: float
 
 
 @Waveform.register_waveform("drag")
@@ -284,11 +297,6 @@ class DragWaveform(AbsWaveform):
             "style": "arb",
             "envelope": self.name,
         }
-
-
-class FlatTopWaveformCfg(WaveformCfg):
-    style: Literal["flat_top"]
-    raise_waveform: WaveformCfg
 
 
 @Waveform.register_waveform("flat_top")

@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +10,7 @@ from numpy.typing import NDArray
 from skopt import Optimizer
 from skopt.space import Real
 from typeguard import check_type
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
@@ -36,7 +37,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-AutoOptResult = Tuple[NDArray[np.float64], NDArray[np.float64]]
+AutoOptResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class ReadoutOptimizer:
@@ -70,7 +71,7 @@ class ReadoutOptimizer:
 
     def next_params(
         self, i: int, last_snr: Optional[float]
-    ) -> Optional[Tuple[float, float, float]]:
+    ) -> Optional[tuple[float, float, float]]:
         if i >= self.num_points:
             return None
 
@@ -78,7 +79,7 @@ class ReadoutOptimizer:
             self.optimizer.tell(self.last_param, -last_snr)
 
         param = self.optimizer.ask()
-        param = cast(Optional[Tuple[float, float, float]], param)
+        param = cast(Optional[tuple[float, float, float]], param)
 
         self.last_param = param
         return param
@@ -92,11 +93,11 @@ class AutoOptModuleCfg(TypedDict, closed=True):
 
 class AutoOptCfg(ModularProgramCfg, TaskCfg):
     modules: AutoOptModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any], num_points: int) -> AutoOptResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any], num_points: int) -> AutoOptResult:
         _cfg = check_type(deepcopy(cfg), AutoOptCfg)
 
         fpt_sweep = _cfg["sweep"]["freq"]
@@ -235,7 +236,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
 
     def analyze(
         self, result: Optional[AutoOptResult] = None
-    ) -> Tuple[float, float, float, Figure]:
+    ) -> tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -323,17 +324,19 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str) -> AutoOptResult:
+    def load(self, filepath: str, **kwargs) -> AutoOptResult:
         _filepath = Path(filepath)
 
         params_data, _, _ = load_data(
             filepath=str(_filepath.with_name(_filepath.name + "_params")),
             return_cfg=False,
+            **kwargs,
         )
 
         signals_data, _, _ = load_data(
             filepath=str(_filepath.with_name(_filepath.name + "_signals")),
             return_cfg=False,
+            **kwargs,
         )
 
         params = params_data.astype(np.float64)

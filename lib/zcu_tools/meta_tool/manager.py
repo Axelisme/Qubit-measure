@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple, Union
+
+from typing_extensions import Literal, Optional, Union
 
 from .library import ModuleLibrary
 from .metadict import MetaDict
@@ -13,7 +14,7 @@ class ExperimentManager:
         self.exp_dir = Path(exp_dir).resolve()
         self._label: Optional[str] = None
 
-    def list_contexts(self) -> List[str]:
+    def list_contexts(self) -> list[str]:
         """Return sorted labels of all existing experiment contexts."""
         if not self.exp_dir.exists():
             return []
@@ -26,10 +27,10 @@ class ExperimentManager:
     def new_flux(
         self,
         value: Optional[float] = None,
-        clone_from: Optional[Union[Tuple[ModuleLibrary, MetaDict], str]] = None,
+        clone_from: Optional[Union[tuple[ModuleLibrary, MetaDict], str]] = None,
         label: Optional[str] = None,
         unit: Literal["A", "V", "K"] = "A",
-    ) -> Tuple[ModuleLibrary, MetaDict]:
+    ) -> tuple[ModuleLibrary, MetaDict]:
         if label is None:
             label = self._auto_label(value, unit)
 
@@ -60,7 +61,7 @@ class ExperimentManager:
 
     def use_flux(
         self, label: str, readonly: bool = False
-    ) -> Tuple[ModuleLibrary, MetaDict]:
+    ) -> tuple[ModuleLibrary, MetaDict]:
         flx_dir = self.exp_dir / label
         if not (flx_dir / "meta_info.json").exists():
             raise FileNotFoundError(
