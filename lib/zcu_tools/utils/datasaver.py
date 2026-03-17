@@ -350,9 +350,9 @@ def save_data(
 @overload
 def load_data(
     filepath: str,
+    *,
     server_ip: Optional[str] = None,
     port: int = 4999,
-    *,
     return_cfg: Literal[True],
 ) -> tuple[
     NDArray[np.complex128],
@@ -365,9 +365,9 @@ def load_data(
 @overload
 def load_data(
     filepath: str,
+    *,
     server_ip: Optional[str] = None,
     port: int = 4999,
-    *,
     return_cfg: Literal[False],
 ) -> tuple[
     NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]
@@ -376,9 +376,9 @@ def load_data(
 
 def load_data(
     filepath: str,
+    *,
     server_ip: Optional[str] = None,
     port: int = 4999,
-    *,
     return_cfg: bool = False,
 ):
     """

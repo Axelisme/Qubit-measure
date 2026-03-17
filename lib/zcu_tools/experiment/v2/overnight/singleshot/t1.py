@@ -167,8 +167,9 @@ class T1_PlotAndSaveMixin:
             tag=prefix_tag + "/ee_populations",
         )
 
+    @classmethod
     def analyze(
-        self,
+        cls,
         name,
         iters,
         result,

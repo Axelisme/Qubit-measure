@@ -67,8 +67,9 @@ class MeasurementTask(
 
     def load(self, filepath: str, **kwargs) -> T_Result: ...
 
+    @classmethod
     def analyze(
-        self, name: str, iters: NDArray[np.int64], result: T_Result, **kwargs
+        cls, name: str, iters: NDArray[np.int64], result: T_Result, **kwargs
     ) -> None: ...
 
 

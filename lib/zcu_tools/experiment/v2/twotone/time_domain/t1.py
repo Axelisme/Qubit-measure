@@ -205,7 +205,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         else:
             title = f"$T_1$ = {t1_str}"
         ax.set_title(title, fontsize=14)
-        ax.set_xlabel("Time (us)", fontsize=14)
+        ax.set_xlabel("Delay Time (us)", fontsize=14)
         ax.set_ylabel("Signal (a.u.)", fontsize=14)
         ax.legend(loc="upper right")
         ax.grid(True)

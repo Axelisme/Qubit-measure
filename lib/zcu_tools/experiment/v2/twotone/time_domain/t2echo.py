@@ -153,7 +153,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
             raise ValueError(f"Unknown fit_method: {fit_method}")
 
         ax.set_title(title, fontsize=14)
-        ax.set_xlabel("Time (us)", fontsize=14)
+        ax.set_xlabel("Delay Time (us)", fontsize=14)
         ax.set_ylabel("Signal (a.u.)", fontsize=14)
         ax.legend(loc="upper right")
         ax.grid(True)

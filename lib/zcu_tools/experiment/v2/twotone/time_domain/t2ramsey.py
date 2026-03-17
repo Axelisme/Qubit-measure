@@ -133,7 +133,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
             ax.set_title(f"T2 fringe = {t2r_str}, detune = {detune_str}", fontsize=15)
         else:
             ax.set_title(f"T2 decay = {t2r_str}", fontsize=15)
-        ax.set_xlabel("Time (us)")
+        ax.set_xlabel("Delay Time (us)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
         ax.grid(True)

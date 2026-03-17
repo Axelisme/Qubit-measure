@@ -107,8 +107,9 @@ def fit_ge_decay(
         g_pCov, e_pCov = ge_pcov
 
     g_t1 = g_params[2]
-    g_t1err = np.sqrt(g_pCov[2, 2])
     e_t1 = e_params[2]
+    # TODO: handle the error of the shared t1, consider the correlation between the two t1s
+    g_t1err = np.sqrt(g_pCov[2, 2])
     e_t1err = np.sqrt(e_pCov[2, 2])
 
     if g_t1 > 0.8 * np.max(times) or g_t1 < 3 * (times[1] - times[0]):
