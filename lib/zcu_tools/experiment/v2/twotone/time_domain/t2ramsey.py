@@ -79,11 +79,11 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                                 Delay("t2_delay", delay=t2r_spans),
                                 Pulse(
                                     name="pi2_pulse2",
-                                    cfg=PulseCfg(
+                                    cfg={
                                         **modules["pi2_pulse"],
-                                        phase=modules["pi2_pulse"]["phase"]
+                                        "phase": modules["pi2_pulse"]["phase"]
                                         + 360 * detune * t2r_spans,
-                                    ),
+                                    },  # type: ignore[dict-item]
                                 ),
                                 Readout("readout", modules["readout"]),
                             ],

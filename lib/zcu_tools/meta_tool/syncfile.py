@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import warnings
 from abc import ABC, abstractmethod
 from functools import wraps
 from pathlib import Path
 
-from typing_extensions import Callable, Literal, Optional, ParamSpec, TypeVar, Union
+from typing_extensions import (
+    Callable,
+    Literal,
+    Optional,
+    ParamSpec,
+    TypeVar,
+    Union,
+    cast,
+)
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -16,15 +25,20 @@ def auto_sync(
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         @wraps(func)
         def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-            assert isinstance(args[0], SyncFile)
+            sync_file = args[0]
+            if not isinstance(sync_file, SyncFile):
+                warnings.warn(
+                    f"Expected first argument to be SyncFile, got {args} and {kwargs}"
+                )
+            sync_file = cast(SyncFile, sync_file)
 
             if time in ["read", "write"]:
-                args[0].sync()
+                sync_file.sync()
 
             result = func(*args, **kwargs)
 
             if time in ["write"]:
-                args[0].sync()
+                sync_file.sync()
 
             return result
 
@@ -50,7 +64,10 @@ class SyncFile(ABC):
 
     def update_modify_time(self) -> None:
         assert self._path is not None
-        self._modify_time = self._path.stat().st_mtime_ns
+        if self._path.exists():
+            self._modify_time = self._path.stat().st_mtime_ns
+        else:
+            self._modify_time = 0
 
     def load(self) -> None:
         assert self._path is not None

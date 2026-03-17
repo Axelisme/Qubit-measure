@@ -62,16 +62,13 @@ class ModuleLibrary(SyncFile):
         super().__init__(cfg_path)
 
     @auto_sync("read")
-    def clone(
-        self, dst_path: Optional[Union[str, Path]] = None, read_only: bool = False
-    ) -> ModuleLibrary:
+    def clone(self, dst_path: Optional[Union[str, Path]] = None) -> ModuleLibrary:
         if dst_path is not None and Path(dst_path).exists():
             raise FileExistsError(f"Destination path {dst_path} already exists")
 
-        ml = ModuleLibrary(dst_path, read_only=read_only)
+        ml = ModuleLibrary(dst_path, read_only=False)
         ml.waveforms = deepcopy(self.waveforms)
         ml.modules = deepcopy(self.modules)
-        ml.update_modify_time()
         ml.dump()
 
         return ml

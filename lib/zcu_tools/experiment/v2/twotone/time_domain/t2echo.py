@@ -83,11 +83,11 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
                                     Delay("t2e_delay2", delay=0.5 * t2e_spans),
                                     Pulse(
                                         name="pi2_pulse2",
-                                        cfg=PulseCfg(
+                                        cfg={
                                             **modules["pi2_pulse"],
-                                            phase=modules["pi2_pulse"]["phase"]
+                                            "phase": modules["pi2_pulse"]["phase"]
                                             + 360 * detune * t2e_spans,
-                                        ),
+                                        },  # type: ignore
                                     ),
                                     Readout("readout", modules["readout"]),
                                 ],
