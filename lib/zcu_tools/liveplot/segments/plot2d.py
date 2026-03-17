@@ -1,9 +1,10 @@
-from typing import Optional
+from __future__ import annotations
 
 import numpy as np
 from matplotlib.image import AxesImage, NonUniformImage
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
+from typing_extensions import Optional
 
 from .base import AbsSegment, Axes
 

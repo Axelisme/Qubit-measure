@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Dict
+
+from typing_extensions import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .pulse import PulseCfg
@@ -11,7 +12,7 @@ class PulseRegistry:
     """A registry to manage and share pulse configurations within a program."""
 
     def __init__(self) -> None:
-        self._pulses: Dict[str, "PulseCfg"] = {}
+        self._pulses: dict[str, "PulseCfg"] = {}
 
     def register(self, name: str, cfg: "PulseCfg") -> None:
         """Registers a pulse configuration."""

@@ -1,11 +1,6 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING, Callable, Optional, Tuple, Union
-
-if TYPE_CHECKING:
-    from scqubits.core.fluxonium import Fluxonium
-    from scqubits.core.storage import SpectrumData
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,12 +9,17 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.optimize import minimize
+from typing_extensions import TYPE_CHECKING, Callable, Optional, Union
 
 from zcu_tools.simulate import flx2mA, mA2flx
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flx_with
 
+if TYPE_CHECKING:
+    from scqubits.core.fluxonium import Fluxonium
+    from scqubits.core.storage import SpectrumData
 
-def format_exponent(n):
+
+def format_exponent(n: float) -> str:
     # 將數字轉為標準科學記號字串，例如 "1.30e+03"
     a = "{:.2e}".format(n)
     base, exp = a.split("e")
@@ -53,19 +53,19 @@ def inductive_spectral_density(omega, Temp: float, EL: float):
     )
 
 
-def calc_therm_ratio(omega: float, T: float) -> float:
+def calc_therm_ratio(omega, T: float):
     """omega: rad/ns, T: K"""
     return (sp.constants.hbar * omega * 1e9) / (sp.constants.k * T)
 
 
 def calc_Qcap_vs_omega(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     freqs: NDArray[np.float64],
     T1s: NDArray[np.float64],
     n_elements: NDArray[np.float64],
     T1errs: Optional[NDArray[np.float64]] = None,
     Temp: float = 20e-3,
-) -> Union[NDArray[np.float64], Tuple[NDArray[np.float64], NDArray[np.float64]]]:
+) -> Union[NDArray[np.float64], tuple[NDArray[np.float64], NDArray[np.float64]]]:
     """fpts: GHz, T1s: ns, guess_Temp: K"""
     omegas = freq2omega(freqs)
 
@@ -86,13 +86,13 @@ def calc_Qcap_vs_omega(
 
 
 def calc_Qind_vs_omega(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     fpts: NDArray[np.float64],
     T1s: NDArray[np.float64],
     phi_elements: NDArray[np.float64],
     T1errs: Optional[NDArray[np.float64]] = None,
     Temp: float = 20e-3,
-) -> Union[NDArray[np.float64], Tuple[NDArray[np.float64], NDArray[np.float64]]]:
+) -> Union[NDArray[np.float64], tuple[NDArray[np.float64], NDArray[np.float64]]]:
     """fpts: GHz, T1s: ns, guess_Temp: K"""
     omegas = freq2omega(fpts)
 
@@ -133,7 +133,7 @@ def plot_Q_vs_omega(
     Q_vs_omega: NDArray[np.float64],
     Q_vs_omega_err: NDArray[np.float64],
     Qname: str = r"$Q_{cap}$",
-) -> Tuple[Figure, Axes]:
+) -> tuple[Figure, Axes]:
     """fpts: GHz, Q_vs_omega: ns/rad, Q_vs_omega_err: ns/rad"""
     omegas = freq2omega(fpts)
 
@@ -154,9 +154,9 @@ def add_Q_fit(
     ax: Axes,
     fpts: NDArray[np.float64],
     Q_vs_omega: NDArray[np.float64],
-    w_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
+    w_range: Optional[tuple[Optional[float], Optional[float]]] = None,
     fit_constant: bool = False,
-) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """fpts: GHz, Q_vs_omega: ns/rad, w_range: (GHz, GHz)"""
     omegas = freq2omega(fpts)
 
@@ -199,7 +199,7 @@ def plot_t1_vs_m01(
     T1errs: Optional[NDArray[np.float64]] = None,
     op_name: str = "d_{01}",
     Q_name: str = r"$Q_{cap}$",
-) -> Tuple[Figure, Axes]:
+) -> tuple[Figure, Axes]:
     """T1s: ns, Q_factors: ns/rad"""
     fig, ax = plt.subplots()
 
@@ -253,7 +253,7 @@ def plot_sample_t1(
     s_T1errs: NDArray[np.float64],
     mA_c: float,
     period: float,
-) -> Tuple[Figure, Axes]:
+) -> tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
 
@@ -295,14 +295,14 @@ def plot_t1_with_sample(
     ],
     Temp: float,
     **other_noise_options: dict,
-) -> Tuple[Figure, Axes]:
+) -> tuple[Figure, Axes]:
     """T1s: ns"""
     s_flxs = mA2flx(s_mAs, mA_c=mA_c, period=period)
 
     t1_effs = [
         calculate_eff_t1_vs_flx_with(
             t_flxs,
-            noise_channels=[(noise_name, {name: v})],
+            noise_channels=[(noise_name, {name: v})],  # type: ignore
             Temp=Temp,
             fluxonium=fluxonium,
             spectrum_data=spectrum_data,
@@ -357,7 +357,7 @@ def plot_eff_t1_with_sample(
     *,
     label: str = r"$t_1^{eff}$",
     title: Optional[str] = None,
-) -> Tuple[Figure, Axes]:
+) -> tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     if title is not None:

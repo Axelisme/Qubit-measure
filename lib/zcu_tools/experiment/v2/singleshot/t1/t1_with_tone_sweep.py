@@ -12,12 +12,9 @@ from tqdm.auto import tqdm
 from typeguard import check_type
 from typing_extensions import (
     Any,
-    Dict,
-    List,
     NotRequired,
     Optional,
     Sequence,
-    Tuple,
     TypeAlias,
     TypedDict,
     Union,
@@ -50,7 +47,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting.multi_decay import fit_dual_transition_rates
 
 # (values, times, signals)
-T1WithToneSweepResult: TypeAlias = Tuple[
+T1WithToneSweepResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
 ]
 
@@ -76,7 +73,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
@@ -406,7 +403,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> T1WithToneSweepResult:
+    def load(self, filepath: list[str], **kwargs) -> T1WithToneSweepResult:
         gg_filepath, ge_filepath, eg_filepath, ee_filepath = filepath
 
         # Load ground populations

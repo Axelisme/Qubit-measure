@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Dict, Mapping, Optional, Tuple, TypeAlias
+from typing_extensions import Any, Mapping, Optional, TypeAlias
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
@@ -22,7 +22,7 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPACheckResult: TypeAlias = Tuple[
+JPACheckResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -33,13 +33,13 @@ def jpa_check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 class JPACheckCfg(OneToneCfg, TaskCfg):
     dev: Mapping[str, DeviceInfo]
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
     OUTPUT_MAP = {0: "off", 1: "on"}
 
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPACheckResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> JPACheckResult:
         _cfg = check_type(deepcopy(cfg), JPACheckCfg)
 
         _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "freq")

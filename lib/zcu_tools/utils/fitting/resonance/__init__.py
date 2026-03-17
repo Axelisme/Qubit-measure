@@ -1,7 +1,8 @@
-from typing import Union
+from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Union
 
 from .base import (
     calc_phase,

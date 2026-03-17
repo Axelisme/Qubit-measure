@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +10,17 @@ from tqdm.auto import tqdm
 from .base import batch_fit_func, fit_func
 
 
-def model_func(t, T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0, pe0) -> NDArray[np.float64]:
+def model_func(
+    t: NDArray[np.float64],
+    T_ge: float,
+    T_eg: float,
+    T_eo: float,
+    T_oe: float,
+    T_go: float,
+    T_og: float,
+    pg0: float,
+    pe0: float,
+) -> NDArray[np.float64]:
     P0 = np.array([pg0, pe0, 1.0 - pg0 - pe0])
     M = np.array(
         [
@@ -31,7 +41,7 @@ def model_func(t, T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0, pe0) -> NDArray[np.fl
 
 def guess_initial_params(
     populations: NDArray[np.float64], times: NDArray[np.float64]
-) -> Tuple[float, ...]:
+) -> tuple[float, float, float, float, float, float, float, float]:
     """
     使用積分法最小平方估計三能階系統速率常數。
     假設 populations 欄位順序為: [Ground (g), Excited (e), Other (o)]
@@ -82,16 +92,16 @@ def guess_initial_params(
 
     T_ge, T_eg, T_eo, T_oe, T_go, T_og = x
 
-    return (T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0, pe0)
+    return T_ge, T_eg, T_eo, T_oe, T_go, T_og, pg0, pe0
 
 
 def fit_transition_rates(
     times: NDArray[np.float64], populations: NDArray[np.float64]
-) -> Tuple[
-    Tuple[float, ...],
-    Tuple[float, ...],
+) -> tuple[
+    tuple[float, float, float, float, float, float],
+    tuple[float, float, float, float, float, float],
     NDArray[np.float64],
-    Tuple[List[float], NDArray[np.float64]],
+    tuple[list[float], NDArray[np.float64]],
 ]:
     """
     Returns:
@@ -133,7 +143,7 @@ def guess_dual_initial_params(
     populations1: NDArray[np.float64],
     populations2: NDArray[np.float64],
     times: NDArray[np.float64],
-) -> Tuple[float, ...]:
+) -> tuple[float, float, float, float, float, float, float, float, float, float]:
     """
     使用積分法最小平方估計三能階系統速率常數。
     假設 populations 欄位順序為: [Ground (g), Excited (e), Other (o)]
@@ -198,13 +208,13 @@ def fit_dual_transition_rates(
     times: NDArray[np.float64],
     populations1: NDArray[np.float64],
     populations2: NDArray[np.float64],
-) -> Tuple[
-    Tuple[float, ...],
-    Tuple[float, ...],
+) -> tuple[
+    tuple[float, float, float, float, float, float],
+    tuple[float, float, float, float, float, float],
     NDArray[np.float64],
     NDArray[np.float64],
-    Tuple[List[float], NDArray[np.float64]],
-    Tuple[List[float], NDArray[np.float64]],
+    tuple[list[float], NDArray[np.float64]],
+    tuple[list[float], NDArray[np.float64]],
 ]:
     """
     Returns:
@@ -255,12 +265,12 @@ def fit_dual_transition_rates(
     rates = tuple(pOpt1[:6])
     rate_errs = tuple(np.sqrt(np.diag(pCov1))[:6])
 
-    return rates, rate_errs, fit_pops1, fit_pops2, (pOpt1, pCov1), (pOpt2, pCov2)
+    return rates, rate_errs, fit_pops1, fit_pops2, (pOpt1, pCov1), (pOpt2, pCov2)  # type: ignore
 
 
 def calc_lambdas(
-    rate: Tuple[float, ...],
-) -> Tuple[NDArray[np.float64], NDArray[np.complex128]]:
+    rate: tuple[float, float, float, float, float, float],
+) -> tuple[NDArray[np.float64], NDArray[np.complex128]]:
     T_ge, T_eg, T_eo, T_oe, T_go, T_og = rate
     M = [
         [-(T_ge + T_go), T_eg, T_og],
@@ -281,7 +291,7 @@ def calc_lambdas(
 
 def clac_amplitude(
     vectors: NDArray[np.complex128], p0g: float, p0e: float
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     P0 = np.array([p0g, p0e, 1.0 - p0g - p0e])  # (3,)
     try:
         amplitudes = np.abs(np.linalg.solve(vectors, P0))  # (3,)
@@ -290,7 +300,9 @@ def clac_amplitude(
     return tuple(amplitudes)
 
 
-def fit_with_vadality(times: NDArray[np.float64], populations: NDArray[np.float64]):
+def fit_with_vadality(
+    times: NDArray[np.float64], populations: NDArray[np.float64]
+) -> None:
     pass_times = times - times[0]
 
     Rs = []
@@ -399,7 +411,7 @@ def fit_dual_with_vadality(
     times: NDArray[np.float64],
     populations1: NDArray[np.float64],
     populations2: NDArray[np.float64],
-):
+) -> None:
     pass_times = times - times[0]
     time_idxs = list(range(len(times) // 2, len(times)))
 

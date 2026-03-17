@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from qick import QickConfig
 from typing_extensions import Any, Mapping, NotRequired, Sequence, cast
 

@@ -8,17 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
@@ -41,7 +31,7 @@ from zcu_tools.utils.fitting import batch_fit_func, fitlor, lorfunc
 from zcu_tools.utils.process import rotate2real
 
 # (res_freqs, qub_freqs, signals2D)
-CKP_Result: TypeAlias = Tuple[
+CKP_Result: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -55,7 +45,7 @@ def ckp_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 def get_resonance_freq(
     xs: NDArray[np.float64], fpts: NDArray[np.float64], amps: NDArray[np.float64]
-) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     s_xs = []
     s_fpts = []
 
@@ -88,11 +78,11 @@ class CKP_ModuleCfg(TypedDict, closed=True):
 
 class CKP_Cfg(ModularProgramCfg, TaskCfg):
     modules: CKP_ModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> CKP_Result:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> CKP_Result:
         _cfg = check_type(deepcopy(cfg), CKP_Cfg)
         modules = _cfg["modules"]
 
@@ -186,7 +176,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
 
     def analyze(
         self, result: Optional[CKP_Result] = None
-    ) -> Tuple[float, float, float, Figure]:
+    ) -> tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
@@ -198,7 +188,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         e_res_freqs, e_qub_freqs = get_resonance_freq(res_freqs, qub_freqs, amps[1])
 
         # y0, slope, yscale, x0, gamma
-        fixedparams: List[Optional[float]] = [None] * 5
+        fixedparams: list[Optional[float]] = [None] * 5
         fixedparams[1] = 0.0  # fix slope to 0
 
         g_params, _ = fitlor(g_res_freqs, g_qub_freqs, fixedparams=fixedparams)
@@ -332,7 +322,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> CKP_Result:
+    def load(self, filepath: list[str], **kwargs) -> CKP_Result:
         g_filepath, e_filepath = filepath
 
         g_signals, res_freqs, qub_freqs = load_data(g_filepath, **kwargs)

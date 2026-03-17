@@ -15,7 +15,6 @@ from typing_extensions import (
     MutableMapping,
     Optional,
     Sequence,
-    Tuple,
     TypeAlias,
     TypeVar,
     Union,
@@ -45,7 +44,7 @@ class TaskState(Generic[T_Result, T_RootResult]):
     cfg: MutableMapping[str, Any]
     env: MutableMapping[str, Any] = field(default_factory=dict)
     on_update: Optional[Callable[["TaskState[Result, T_RootResult]"], Any]] = None
-    path: Tuple[Union[int, Hashable], ...] = field(default_factory=tuple)
+    path: tuple[Union[int, Hashable], ...] = field(default_factory=tuple)
 
     # ------------------------------------------------------------------
     # Navigation helpers

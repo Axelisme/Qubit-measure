@@ -8,16 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
@@ -43,7 +34,7 @@ from ..util import calc_populations
 from .util import measure_with_sweep
 
 # (times, signals)
-T1WithToneResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.float64]]
+T1WithToneResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class T1WithToneModuleCfg(TypedDict, closed=True):
@@ -56,7 +47,7 @@ class T1WithToneModuleCfg(TypedDict, closed=True):
 
 class T1WithToneCfg(ModularProgramCfg, TaskCfg):
     modules: T1WithToneModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
@@ -64,7 +55,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
@@ -207,7 +198,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         *,
         confusion_matrix: Optional[NDArray[np.float64]] = None,
         skip: int = 0,
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -309,7 +300,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> T1WithToneResult:
+    def load(self, filepath: list[str], **kwargs) -> T1WithToneResult:
         g_filepath, e_filepath = filepath
 
         # Load ground populations

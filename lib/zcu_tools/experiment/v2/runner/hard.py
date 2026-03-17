@@ -3,16 +3,7 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
-from typing_extensions import (
-    Any,
-    Callable,
-    Generic,
-    Optional,
-    Sequence,
-    Tuple,
-    Type,
-    TypeVar,
-)
+from typing_extensions import Any, Callable, Generic, Optional, Sequence, Type, TypeVar
 
 from zcu_tools.device import GlobalDeviceManager
 
@@ -43,7 +34,7 @@ class Task(
             T_Raw,
         ],
         raw2signal_fn: Callable[[T_Raw], NDArray[T_DType]] = default_raw2signal_fn,
-        result_shape: Tuple[int, ...] = (),
+        result_shape: tuple[int, ...] = (),
         dtype: Type[T_DType] = np.complex128,
     ) -> None:
         self.measure_fn = measure_fn

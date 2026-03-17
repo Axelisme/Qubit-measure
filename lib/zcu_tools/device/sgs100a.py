@@ -1,6 +1,7 @@
-from typing import Literal
+from __future__ import annotations
 
 from typeguard import check_type
+from typing_extensions import Literal
 
 from .base import BaseDevice, DeviceInfo
 

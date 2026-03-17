@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
-from typing_extensions import Optional, Tuple, TypedDict
+from typing_extensions import Optional, TypedDict
 
 from .base import (
     calc_phase,
@@ -17,7 +19,7 @@ from .base import (
 
 
 def calc_background_signals(
-    circle_params: Tuple[float, float, float], theta0: float
+    circle_params: tuple[float, float, float], theta0: float
 ) -> complex:
     xc, yc, r0 = circle_params
     center = xc + 1j * yc
@@ -46,7 +48,7 @@ class HangerParams(TypedDict):
     a0: complex
     edelay: float
     theta0: float
-    circle_params: Tuple[float, float, float]
+    circle_params: tuple[float, float, float]
 
 
 class HangerModel:
@@ -78,7 +80,7 @@ class HangerModel:
         signals: NDArray[np.complex128],
         edelay: Optional[float] = None,
     ) -> HangerParams:
-        """Dict[freq, kappa, Ql, Qc, Qi, phi, a0, edelay, circle_params]"""
+        """dict[freq, kappa, Ql, Qc, Qi, phi, a0, edelay, circle_params]"""
         if edelay is None:
             edelay = fit_edelay(fpts, signals)
 

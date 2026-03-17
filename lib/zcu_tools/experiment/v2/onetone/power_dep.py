@@ -5,7 +5,7 @@ from copy import deepcopy
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Dict, Optional, Tuple, TypeAlias
+from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -17,7 +17,7 @@ from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2para
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background, rescale
 
-PowerDepResult: TypeAlias = Tuple[
+PowerDepResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -27,12 +27,12 @@ def pdrdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class PowerDepCfg(OneToneCfg, TaskCfg):
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, earlystop_snr: Optional[float] = None
+        self, soc, soccfg, cfg: dict[str, Any], *, earlystop_snr: Optional[float] = None
     ) -> PowerDepResult:
         _cfg = check_type(deepcopy(cfg), PowerDepCfg)
 

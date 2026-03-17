@@ -1,23 +1,27 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Tuple, cast
-
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from sklearn.mixture import GaussianMixture
+    from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
 
 
 def gauss_2d(
-    x: np.ndarray, y: np.ndarray, x0: float, y0: float, sigma: float, n: float
-) -> np.ndarray:
+    x: NDArray[np.float64],
+    y: NDArray[np.float64],
+    x0: float,
+    y0: float,
+    sigma: float,
+    n: float,
+) -> NDArray[np.float64]:
     return n * np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma**2))
 
 
 def fit_gauss_2d(
-    xs: np.ndarray, ys: np.ndarray, num_gauss: int = 2
-) -> Tuple[np.ndarray, "GaussianMixture"]:
+    xs: NDArray[np.float64], ys: NDArray[np.float64], num_gauss: int = 2
+) -> tuple[NDArray[np.float64], GaussianMixture]:
     """
     擬合給定數量的二維各向同性高斯分佈到採樣點。
     使用 GaussianMixture 內建的 k-means 初始化。
@@ -85,7 +89,9 @@ def fit_gauss_2d(
     return params, gmm
 
 
-def fit_gauss_2d_bayesian(xs: np.ndarray, ys: np.ndarray, num_gauss: int = 3):
+def fit_gauss_2d_bayesian(
+    xs: NDArray[np.float64], ys: NDArray[np.float64], num_gauss: int = 3
+) -> tuple[NDArray[np.float64], BayesianGaussianMixture]:
     """
     使用 BayesianGaussianMixture 擬合二維各向同性高斯分佈。
     模型會自動決定實際使用的成分數。

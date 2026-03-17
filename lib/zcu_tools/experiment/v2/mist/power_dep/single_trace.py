@@ -7,15 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -35,7 +27,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-PowerDepResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+PowerDepResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -55,11 +47,11 @@ class PowerDepModuleCfg(TypedDict, closed=True):
 
 class PowerDepCfg(ModularProgramCfg, TaskCfg):
     modules: PowerDepModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> PowerDepResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PowerDepResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), PowerDepCfg)
         modules = _cfg["modules"]

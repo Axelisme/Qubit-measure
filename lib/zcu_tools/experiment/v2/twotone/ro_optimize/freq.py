@@ -8,15 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
@@ -38,7 +30,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-FreqResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.float64]]
+FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class FreqModuleCfg(TypedDict, closed=True):
@@ -49,11 +41,11 @@ class FreqModuleCfg(TypedDict, closed=True):
 
 class FreqCfg(ModularProgramCfg, TaskCfg):
     modules: FreqModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), FreqCfg)
 
@@ -112,7 +104,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
     def analyze(
         self, result: Optional[FreqResult] = None, *, smooth: float = 1.0
-    ) -> Tuple[float, Figure]:
+    ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

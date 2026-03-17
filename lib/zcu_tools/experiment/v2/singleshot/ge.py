@@ -10,18 +10,16 @@ from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
     Any,
-    Dict,
     Literal,
     NotRequired,
     Optional,
-    Tuple,
     TypeAlias,
     TypedDict,
     cast,
 )
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils.single_shot import singleshot_ge_analysis
+from zcu_tools.experiment.utils.single_shot import GE_FitResult, singleshot_ge_analysis
 from zcu_tools.experiment.v2.runner import (
     Task,
     TaskCfg,
@@ -191,7 +189,7 @@ class GE_Cfg(ModularProgramCfg, TaskCfg):
 
 
 class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> GE_Result:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> GE_Result:
         _cfg = check_type(deepcopy(cfg), GE_Cfg)  # avoid in-place modification
 
         # Validate and setup configuration
@@ -262,7 +260,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         result: Optional[GE_Result] = None,
         backend: Literal["center", "regression", "pca"] = "pca",
         **kwargs,
-    ) -> Tuple[float, np.ndarray, dict, Figure]:
+    ) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -279,7 +277,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
         radius: Optional[float] = None,
         result: Optional[GE_Result] = None,
         consider_other: bool = True,
-    ) -> Tuple[NDArray[np.float64], float, Figure]:
+    ) -> tuple[NDArray[np.float64], float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

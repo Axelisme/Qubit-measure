@@ -7,16 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -38,7 +29,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-PowerResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.float64]]
+PowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class PowerModuleCfg(TypedDict, closed=True):
@@ -50,7 +41,7 @@ class PowerModuleCfg(TypedDict, closed=True):
 
 class PowerCfg(ModularProgramCfg, TaskCfg):
     modules: PowerModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
@@ -58,7 +49,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,

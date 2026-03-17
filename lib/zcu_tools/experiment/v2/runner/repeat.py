@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 
 from tqdm.auto import tqdm
-from typing_extensions import List, Optional, Sequence, Tuple, TypeVar
+from typing_extensions import Optional, Sequence, TypeVar
 
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
@@ -80,7 +80,7 @@ class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult]):
         self.time_pbar: Optional[tqdm] = None
         self.dynamic_pbar: bool = False
 
-    def make_pbar(self, leave: bool) -> Tuple[tqdm, tqdm]:
+    def make_pbar(self, leave: bool) -> tuple[tqdm, tqdm]:
         return (
             tqdm(total=self.num_times, smoothing=0, desc=self.name, leave=leave),
             tqdm(
@@ -156,5 +156,5 @@ class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult]):
             self.time_pbar.close()
             self.time_pbar = None
 
-    def get_default_result(self) -> List[T_ChildResult]:
+    def get_default_result(self) -> list[T_ChildResult]:
         return [self.task.get_default_result() for _ in range(self.num_times)]

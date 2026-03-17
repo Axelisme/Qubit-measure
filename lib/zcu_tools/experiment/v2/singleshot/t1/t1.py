@@ -8,16 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
@@ -44,7 +35,7 @@ from ..util import calc_populations
 from .util import measure_with_sweep
 
 # (times, signals)
-T1Result: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.float64]]
+T1Result: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class T1ModuleCfg(TypedDict, closed=True):
@@ -55,7 +46,7 @@ class T1ModuleCfg(TypedDict, closed=True):
 
 class T1Cfg(ModularProgramCfg, TaskCfg):
     modules: T1ModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T1Exp(AbsExperiment[T1Result, T1Cfg]):
@@ -69,7 +60,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
@@ -305,7 +296,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> T1Result:
+    def load(self, filepath: list[str], **kwargs) -> T1Result:
         g_filepath, e_filepath = filepath
 
         # Load ground populations

@@ -7,16 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
@@ -38,7 +29,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (pdrs, signals_2d)  # signals shape: (2, len(pdrs)) for [w/o reset, w/ reset]
-RabiCheckResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+RabiCheckResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -55,11 +46,11 @@ class RabiCheckModuleCfg(TypedDict, closed=True):
 
 class RabiCheckCfg(ModularProgramCfg, TaskCfg):
     modules: RabiCheckModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> RabiCheckResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> RabiCheckResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), RabiCheckCfg)
 

@@ -7,16 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    Mapping,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, Mapping, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import BatchTask, Task, TaskCfg, run_task
@@ -35,7 +26,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (sequence, signals)
-AllXY_Result: TypeAlias = Dict[Tuple[str, str], NDArray[np.complex128]]
+AllXY_Result: TypeAlias = dict[tuple[str, str], NDArray[np.complex128]]
 
 # Standard AllXY sequence of 21 gate pairs
 ALLXY_SEQUENCE = [
@@ -68,7 +59,7 @@ ALLXY_SEQUENCE = [
 
 
 def predict_state_with_error(
-    gates: Tuple[str, str], power_err: float, detune_err: float
+    gates: tuple[str, str], power_err: float, detune_err: float
 ) -> float:
     ep = power_err
     ed = detune_err
@@ -103,7 +94,7 @@ def predict_state_with_error(
 
 
 def allxy_signal2real(
-    signals_dict: Mapping[Tuple[str, str], NDArray[np.complex128]],
+    signals_dict: Mapping[tuple[str, str], NDArray[np.complex128]],
 ) -> NDArray[np.float64]:
     all_signals = np.array(list(signals_dict.values()))
     return rotate2real(all_signals).real  # type: ignore
@@ -129,7 +120,7 @@ class AllXY_Cfg(ModularProgramCfg, TaskCfg):
 
 
 class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> AllXY_Result:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> AllXY_Result:
         _cfg = check_type(deepcopy(cfg), AllXY_Cfg)
         modules = _cfg["modules"]
 

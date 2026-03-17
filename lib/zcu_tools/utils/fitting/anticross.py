@@ -1,21 +1,16 @@
-from typing import Tuple
+from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import least_squares, minimize
 from tqdm.auto import tqdm
 
-from .base import (
-    encode_params,
-    quadratic_fit,
-    quadratic_fit_wo_a,
-    retrieve_params,
-)
+from .base import encode_params, quadratic_fit, quadratic_fit_wo_a, retrieve_params
 
 
 def get_predict_ys(
     xs: NDArray[np.float64], a: float, b: float, c: float, d: float, e: float, f: float
-) -> Tuple[NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     # 對每個 xs 求兩個 y，分別對應 ys1, ys2, 其中 ys1 > ys2
 
     # c y^2 + (d + e x) y + (a x^2 + b x + f) = 0
@@ -39,7 +34,7 @@ def fit_hyperbolic(
     ys1: NDArray[np.float64],
     ys2: NDArray[np.float64],
     horizontal_line: bool = False,
-) -> Tuple[float, float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float]:
     if np.sum(ys1 > ys2) < len(ys1) / 2:
         ys1, ys2 = ys2, ys1
 
@@ -114,7 +109,7 @@ def fit_anticross(
     fpts1: NDArray[np.float64],
     fpts2: NDArray[np.float64],
     horizontal_line: bool = False,
-) -> Tuple[
+) -> tuple[
     float,
     float,
     float,
@@ -122,7 +117,7 @@ def fit_anticross(
     float,
     NDArray[np.float64],
     NDArray[np.float64],
-    Tuple[float, float, float, float, float, float],
+    tuple[float, float, float, float, float, float],
 ]:
     """
     Fit a anticrossing pattern to the data.
@@ -147,12 +142,12 @@ def fit_anticross(
 
 def fit_anticross2d(
     xs: NDArray[np.float64], fpts: NDArray[np.float64], signals: NDArray[np.complex128]
-) -> Tuple[float, float, float, float, float]:
+) -> tuple[float, float, float, float, float]:
     MAX_ITER = 1000
 
     pbar = tqdm(total=MAX_ITER, desc="Auto fitting", leave=False)
 
-    def update_pbar(cx, cy, width) -> None:
+    def update_pbar(cx: float, cy: float, width: float) -> None:
         pbar.update(1)
         pbar.set_postfix_str(f"({cx:.3f}, {cy:.3f}, {width:.3f})")
 
@@ -172,7 +167,7 @@ def fit_anticross2d(
     # derive the fitting tolerance
     ftol = np.max(amps) * 1e-4
 
-    def loss_fn(cx, cy, width, m1, m2) -> float:
+    def loss_fn(cx: float, cy: float, width: float, m1: float, m2: float) -> float:
         update_pbar(cx, cy, width)
 
         fit_fpts1, fit_fpts2 = get_predict_ys(

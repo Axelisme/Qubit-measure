@@ -1,22 +1,26 @@
-from typing import List, Optional, Sequence, cast
+from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import Optional, Sequence, cast
 
 from .base import assign_init_p, fit_func
 
 
 # Gaussian function
-def gauss_func(x, y0, yscale, x_c, sigma):
+def gauss_func(
+    x: NDArray[np.float64], y0: float, yscale: float, x_c: float, sigma: float
+) -> NDArray[np.float64]:
     """params: [y0, yscale, x_c, sigma]"""
     return y0 + yscale * np.exp(-0.5 * ((x - x_c) / sigma) ** 2)
 
 
 def fit_gauss(
-    xdata,
-    ydata,
+    xdata: NDArray[np.float64],
+    ydata: NDArray[np.float64],
     fitparams: Optional[Sequence[Optional[float]]] = None,
     fixedparams: Optional[Sequence[Optional[float]]] = None,
-):
+) -> tuple[list[float], NDArray[np.float64]]:
     """params: [y0, yscale, x_c, sigma]"""
     if fixedparams is not None and len(fixedparams) != 4:
         raise ValueError(
@@ -44,8 +48,8 @@ def fit_gauss(
             / (len(xdata) - 1)
             * np.sum(norm_ydata > 0.5 * np.abs(yscale))
         )
-        assign_init_p(fitparams, [y0, yscale, x_c, sigma])
-    fitparams = cast(List[float], fitparams)
+        assign_init_p(fitparams, [y0, yscale, x_c, sigma])  # type: ignore
+    fitparams = cast(list[float], fitparams)
 
     # bounds
     y0, yscale, x_c, sigma = fitparams
@@ -68,13 +72,23 @@ def fit_gauss(
 
 
 # # Dual Gaussian function
-def dual_gauss_func(x, yscale1, x_c1, sigma1, yscale2, x_c2, sigma2):
+def dual_gauss_func(
+    x: NDArray[np.float64],
+    yscale1: float,
+    x_c1: float,
+    sigma1: float,
+    yscale2: float,
+    x_c2: float,
+    sigma2: float,
+) -> NDArray[np.float64]:
     return gauss_func(x, 0.0, yscale1, x_c1, sigma1) + gauss_func(
         x, 0.0, yscale2, x_c2, sigma2
     )
 
 
-def guess_dual_gauss_params(xdata, ydata):
+def guess_dual_gauss_params(
+    xdata: NDArray[np.float64], ydata: NDArray[np.float64]
+) -> tuple[float, float, float, float, float, float]:
     abs_ydata = np.abs(ydata)
 
     # guess initial parameters
@@ -96,12 +110,16 @@ def guess_dual_gauss_params(xdata, ydata):
     sigma2 = sigma1
 
     if x_c1 < x_c2:  # make first peak left
-        return [yscale1, x_c1, sigma1, yscale2, x_c2, sigma2]
+        return yscale1, x_c1, sigma1, yscale2, x_c2, sigma2
     else:
-        return [yscale2, x_c2, sigma2, yscale1, x_c1, sigma1]
+        return yscale2, x_c2, sigma2, yscale1, x_c1, sigma1
 
 
-def fit_dual_gauss(xdata, ydata, fixedparams=None):
+def fit_dual_gauss(
+    xdata: NDArray[np.float64],
+    ydata: NDArray[np.float64],
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
+) -> tuple[list[float], NDArray[np.float64]]:
     if fixedparams is not None and len(fixedparams) != 6:
         raise ValueError(
             "Fixed parameters must be a list of six elements: [yscale1, x_c1, sigma1, yscale2, x_c2, sigma2]"
@@ -136,7 +154,9 @@ def fit_dual_gauss(xdata, ydata, fixedparams=None):
     return params, pcov
 
 
-def fit_dual_gauss_gmm(signals):
+def fit_dual_gauss_gmm(
+    signals: NDArray[np.float64],
+) -> tuple[float, float, float, float, float, float]:
     """
     Params:
     -----------
@@ -173,6 +193,6 @@ def fit_dual_gauss_gmm(signals):
     sigma2 = np.sqrt(covariances[1])
 
     if x_c1 < x_c2:  # make first peak left
-        return [yscale1, x_c1, sigma1, yscale2, x_c2, sigma2]
+        return yscale1, x_c1, sigma1, yscale2, x_c2, sigma2
     else:
-        return [yscale2, x_c2, sigma2, yscale1, x_c1, sigma1]
+        return yscale2, x_c2, sigma2, yscale1, x_c1, sigma1

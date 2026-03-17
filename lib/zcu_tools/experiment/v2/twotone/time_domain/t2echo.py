@@ -7,16 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    Literal,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -41,7 +32,7 @@ from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-T2EchoResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T2EchoResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -57,12 +48,12 @@ class T2EchoModuleCfg(TypedDict, closed=True):
 
 class T2EchoCfg(ModularProgramCfg, TaskCfg):
     modules: T2EchoModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
+        self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
     ) -> T2EchoResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2EchoCfg)
@@ -121,7 +112,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         result: Optional[T2EchoResult] = None,
         *,
         fit_method: Literal["fringe", "decay"] = "decay",
-    ) -> Tuple[float, float, float, float, Figure]:
+    ) -> tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

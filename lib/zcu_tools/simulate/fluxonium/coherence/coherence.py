@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Tuple
-
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
@@ -12,10 +11,10 @@ if TYPE_CHECKING:
 
 def calculate_eff_t1_with(
     flx: float,
-    noise_channels: list,
+    noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
     fluxonium: Fluxonium,
-    esys: Optional[Tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
     **other_noise_options,
 ) -> float:
     import scqubits.settings as scq_settings
@@ -36,9 +35,9 @@ def calculate_eff_t1_with(
 
 def calculate_eff_t1(
     flx: float,
-    noise_channels: list,
+    noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     cutoff: int = 40,
     evals_count: int = 20,
     **other_noise_options,
@@ -54,7 +53,7 @@ def calculate_eff_t1(
 
 def calculate_eff_t1_vs_flx_with(
     flxs: NDArray[np.float64],
-    noise_channels: list,
+    noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
     fluxonium: Fluxonium,
     spectrum_data: Optional[SpectrumData] = None,
@@ -85,12 +84,12 @@ def calculate_eff_t1_vs_flx_with(
 
 def calculate_eff_t1_vs_flx(
     flxs: NDArray[np.float64],
-    noise_channels: list,
+    noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     cutoff: int = 40,
     evals_count: int = 20,
-    **other_noise_options,
+    **other_options,
 ) -> NDArray[np.float64]:
     from scqubits.core.fluxonium import Fluxonium
 
@@ -103,5 +102,5 @@ def calculate_eff_t1_vs_flx(
         get_eigenstates=True,
     )
     return calculate_eff_t1_vs_flx_with(
-        flxs, noise_channels, Temp, fluxonium, spectrum_data, **other_noise_options
+        flxs, noise_channels, Temp, fluxonium, spectrum_data, **other_options
     )

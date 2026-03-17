@@ -6,7 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 from pprint import pformat
 
-from typing_extensions import Any, List, Optional, Self, Union
+from typing_extensions import Any, Optional, Self, Union
 
 from zcu_tools.utils import numpy2number
 
@@ -120,6 +120,6 @@ class MetaDict(SyncFile):
     def __repr__(self) -> str:
         return self.__str__()
 
-    def __dir__(self) -> List[str]:
+    def __dir__(self) -> list[str]:
         self.sync()
         return list(self._data.keys()) + self._PROTECTED_KEYS

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Tuple
-
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from scqubits.core.storage import SpectrumData
 
 
 def calculate_energy(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     flx: float,
     cutoff: int = 40,
     evals_count: int = 20,
@@ -26,12 +25,12 @@ def calculate_energy(
 
 
 def calculate_energy_vs_flx(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     flxs: NDArray[np.float64],
     cutoff: int = 40,
     evals_count: int = 20,
     spectrum_data: Optional[SpectrumData] = None,
-) -> Tuple[SpectrumData, NDArray[np.float64]]:
+) -> tuple[SpectrumData, NDArray[np.float64]]:
     """
     Calculate the energy of a fluxonium qubit.
     """

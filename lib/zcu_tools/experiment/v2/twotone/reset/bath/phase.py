@@ -7,15 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -38,7 +30,7 @@ from zcu_tools.utils.fitting.base import cosfunc, fitcos
 from zcu_tools.utils.process import rotate2real
 
 # (phases, signals)
-PhaseResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+PhaseResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -54,11 +46,11 @@ class PhaseModuleCfg(TypedDict, closed=True):
 
 class PhaseCfg(ModularProgramCfg, TaskCfg):
     modules: PhaseModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> PhaseResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PhaseResult:
         _cfg = check_type(deepcopy(cfg), PhaseCfg)
 
         # Check that reset pulse is dual pulse type
@@ -105,7 +97,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
 
     def analyze(
         self, result: Optional[PhaseResult] = None
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

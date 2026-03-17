@@ -4,7 +4,8 @@ from copy import deepcopy
 from pathlib import Path
 
 import yaml
-from typing_extensions import Any, Dict, Optional, Union, cast
+from typing_extensions import Any, Optional, Union, cast
+from yaml.nodes import MappingNode
 
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.program.v2 import Module, ModuleCfg, WaveformCfg
@@ -27,7 +28,8 @@ class ModuleDumper(yaml.SafeDumper):
         self.last_indent_level = current_indent_level
 
     # --- 邏輯 2：將字典類型的 Value 排到最後 ---
-    def represent_dict(self, data: dict):
+    def represent_dict(self, data) -> MappingNode:
+        data = cast(dict, data)
         # 將 dict 拆解為 (key, value)
         items = list(data.items())
 
@@ -55,8 +57,8 @@ class ModuleLibrary(SyncFile):
     def __init__(
         self, cfg_path: Optional[Union[str, Path]] = None, read_only: bool = False
     ) -> None:
-        self.waveforms: Dict[str, WaveformCfg] = {}
-        self.modules: Dict[str, ModuleCfg] = {}
+        self.waveforms: dict[str, WaveformCfg] = {}
+        self.modules: dict[str, ModuleCfg] = {}
         self.read_only = read_only
 
         super().__init__(cfg_path)
@@ -96,7 +98,7 @@ class ModuleLibrary(SyncFile):
         with open(path, "w") as f:
             yaml.dump(dump_cfg, f, Dumper=ModuleDumper, sort_keys=False)
 
-    def make_cfg(self, exp_cfg: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    def make_cfg(self, exp_cfg: dict[str, Any], **kwargs) -> dict[str, Any]:
         exp_cfg = deepcopy(exp_cfg)
         deepupdate(exp_cfg, kwargs, behavior="force")
 
@@ -105,7 +107,7 @@ class ModuleLibrary(SyncFile):
         deepupdate(dev_cfg, exp_cfg.get("dev", {}), behavior="force")
         exp_cfg["dev"] = dev_cfg
 
-        modules: Dict[str, Union[str, dict]] = exp_cfg.get("modules", {})
+        modules: dict[str, Union[str, dict]] = exp_cfg.get("modules", {})
         for name, sub_cfg in modules.items():
             if isinstance(sub_cfg, str):
                 sub_cfg = self.get_module(sub_cfg)
@@ -153,7 +155,7 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("read")
     def get_waveform(
-        self, name: str, override_cfg: Optional[Dict[str, Any]] = None
+        self, name: str, override_cfg: Optional[dict[str, Any]] = None
     ) -> WaveformCfg:
         waveform = deepcopy(self.waveforms[name])
         if override_cfg is not None:
@@ -162,8 +164,8 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("read")
     def get_module(
-        self, name: str, override_cfg: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        self, name: str, override_cfg: Optional[dict[str, Any]] = None
+    ) -> dict[str, Any]:
         if name not in self.modules:
             raise ValueError(
                 f"Module {name} not found, available modules: {list(self.modules.keys())}"
@@ -174,7 +176,7 @@ class ModuleLibrary(SyncFile):
         return cast(dict, module)
 
     @auto_sync("write")
-    def update_module(self, name: str, override_cfg: Dict[str, Any]) -> None:
+    def update_module(self, name: str, override_cfg: dict[str, Any]) -> None:
         self.check_can_write()
 
         deepupdate(

@@ -1,23 +1,24 @@
-from typing import List, Optional, Sequence, Tuple, cast
+from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Optional, Sequence, cast
 
 from .base import assign_init_p, fit_func
 
 
 # exponential decay function
-def expfunc(x: np.ndarray, *p: float) -> np.ndarray:
+def expfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
     """p = [y0, yscale, decay_time]"""
     y0, yscale, decay_time = p
     return y0 + yscale * np.exp(-x / decay_time)
 
 
 def fitexp(
-    xdata: np.ndarray,
-    ydata: np.ndarray,
+    xdata: NDArray[np.float64],
+    ydata: NDArray[np.float64],
     fitparams: Optional[Sequence[Optional[float]]] = None,
-) -> Tuple[Tuple[float, float, float], np.ndarray]:
+) -> tuple[tuple[float, float, float], NDArray[np.float64]]:
     """return (y0, yscale, decay_time), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 3
@@ -32,7 +33,7 @@ def fitexp(
         decay_time = (x_2 / np.log(2) + x_4 / np.log(4)) / 2
 
         assign_init_p(fitparams, [y0, yscale, decay_time])
-    fitparams = cast(List[float], fitparams)
+    fitparams = cast(list[float], fitparams)
 
     # bounds
     bounds = (
@@ -50,10 +51,10 @@ def dual_expfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
 
 
 def fit_dualexp(
-    xdata: np.ndarray,
-    ydata: np.ndarray,
+    xdata: NDArray[np.float64],
+    ydata: NDArray[np.float64],
     fitparams: Optional[Sequence[Optional[float]]] = None,
-) -> Tuple[Tuple[float, float, float, float, float], np.ndarray]:
+) -> tuple[tuple[float, float, float, float, float], NDArray[np.float64]]:
     """return (y0, yscale1, decay_time1, yscale2, decay_time2), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 5
@@ -85,7 +86,7 @@ def fit_dualexp(
         yscale2 /= 2
 
         assign_init_p(fitparams, [y0, yscale1, decay1, yscale2, decay2])
-    fitparams = cast(List[float], fitparams)
+    fitparams = cast(list[float], fitparams)
 
     # bounds
     bounds = (

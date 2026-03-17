@@ -6,16 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypedDict,
-)
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
@@ -72,13 +63,13 @@ class T1ModuleCfg(TypedDict, closed=True):
 
 class T1CfgTemplate(ModularProgramCfg, TaskCfg):
     modules: T1ModuleCfg
-    sweep_range: Tuple[float, float]
+    sweep_range: tuple[float, float]
 
 
 class T1Cfg(ModularProgramCfg, TaskCfg):
     modules: T1ModuleCfg
-    dev: Dict[str, DeviceInfo]
-    sweep: Dict[str, SweepCfg]
+    dev: dict[str, DeviceInfo]
+    sweep: dict[str, SweepCfg]
 
 
 class T1Result(TypedDict, closed=True):
@@ -100,7 +91,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
         num_expts: int,
         cfg_maker: Callable[
             [TaskState[T1Result, T_RootResult], ModuleLibrary],
-            Optional[Dict[str, Any]],
+            Optional[dict[str, Any]],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -133,7 +124,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
             )
 
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = Task[T_RootResult, List[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=measure_t1_fn,
             result_shape=(num_expts,),
         )
@@ -203,7 +194,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
     def cleanup(self) -> None:
         self.task.cleanup()
 
-    def num_axes(self) -> Dict[str, int]:
+    def num_axes(self) -> dict[str, int]:
         return dict(t1=1, t1_curve=1)
 
     def make_plotter(self, name, axs) -> T1PlotterDict:

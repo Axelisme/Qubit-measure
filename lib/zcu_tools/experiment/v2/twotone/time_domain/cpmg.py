@@ -11,10 +11,8 @@ from typeguard import check_type
 from typing_extensions import (
     Any,
     Callable,
-    Dict,
     NotRequired,
     Optional,
-    Tuple,
     TypeAlias,
     TypedDict,
     Union,
@@ -57,7 +55,7 @@ def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return (real_signals - min_vals) / (max_vals - min_vals)
 
 
-CPMG_Result: TypeAlias = Tuple[
+CPMG_Result: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -80,7 +78,7 @@ class CPMG_Cfg(ModularProgramCfg, TaskCfg):
 
 
 class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> CPMG_Result:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> CPMG_Result:
         _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
 
         times_sweep = _cfg["sweep"]["times"]
@@ -146,7 +144,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
     def analyze(
         self, result: Optional[CPMG_Result] = None
-    ) -> Tuple[np.ndarray, np.ndarray, Figure]:
+    ) -> tuple[np.ndarray, np.ndarray, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -173,7 +171,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             if t2err > 0.5 * t2r:
                 continue
 
-            fit_params = cast(Tuple[float, float, float], tuple(pOpt))
+            fit_params = cast(tuple[float, float, float], tuple(pOpt))
 
             t2s[i] = t2r
             t2errs[i] = t2err

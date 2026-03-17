@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, Tuple
-
 import numpy as np
 from numpy.typing import NDArray
-from scqubits.core.param_sweep import ParameterSweep
+from typing_extensions import TYPE_CHECKING, Any, Callable, Union
 
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
+    from scqubits.core.param_sweep import ParameterSweep
 
 
 def calculate_dispersive(
-    params: Tuple[float, float, float], flx: float, r_f: float, g: float
-) -> Tuple[float, ...]:
+    params: tuple[float, float, float], flx: float, r_f: float, g: float
+) -> tuple[float, float]:
     """
     Calculate the dispersive shift of ground and excited state
     """
@@ -56,12 +55,11 @@ def calculate_dispersive_sweep(
     qub_cutoff: int = 30,
     qub_dim: int = 20,
     return_dim: int = 2,
-) -> Tuple[NDArray[np.float64], ...]:
+) -> tuple[NDArray[np.float64], ...]:
     """
     Calculate the dispersive shift of ground and excited state vs. params of fluxonium
     """
 
-    # import scqubits as scq  # lazy import
     import scqubits.settings as scq_settings
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.hilbert_space import HilbertSpace
@@ -104,7 +102,7 @@ def calculate_dispersive_sweep(
 
 
 def calculate_dispersive_vs_flx(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     flxs: NDArray[np.float64],
     r_f: float,
     g: float,
@@ -113,7 +111,7 @@ def calculate_dispersive_vs_flx(
     qub_cutoff: int = 30,
     qub_dim: int = 10,
     return_dim: int = 2,
-) -> Tuple[NDArray[np.float64], ...]:
+) -> tuple[NDArray[np.float64], ...]:
     """
     Calculate the dispersive shift of ground and excited state vs. flux
     """
@@ -138,7 +136,7 @@ def calculate_dispersive_vs_flx(
 
 
 def calculate_chi_sweep(
-    sweep_list: NDArray,
+    sweep_list: Union[NDArray, list],
     update_fn: Callable[[Fluxonium, Any], None],
     g: float,
     r_f: float,
@@ -172,7 +170,7 @@ def calculate_chi_sweep(
     scq_settings.PROGRESSBAR_DISABLED = not progress
     sweep = ParameterSweep(
         hilbertspace,
-        {"params": sweep_list},
+        {"params": np.asarray(sweep_list)},
         update_hilbertspace=update_hilbertspace,
         evals_count=resonator_dim * evals_count,
         subsys_update_info={"params": [fluxonium]},
@@ -184,7 +182,7 @@ def calculate_chi_sweep(
 
 
 def calculate_chi_vs_flx(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     flxs: NDArray[np.float64],
     r_f: float,
     g: float,

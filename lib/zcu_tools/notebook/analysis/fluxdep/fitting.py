@@ -4,17 +4,18 @@ This module provides functions for fitting flux-dependent spectroscopy data,
 including candidate breakpoint search, database search, and spectrum fitting.
 """
 
-from typing import Tuple
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
 from h5py import File
 from joblib import Parallel, delayed
-from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numba import njit
+from numpy.typing import NDArray
 from scipy.optimize import least_squares
 from tqdm.auto import tqdm, trange
+from typing_extensions import Any
 
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 
@@ -22,8 +23,16 @@ from .models import count_max_evals, energy2linearform
 
 
 def search_in_database(
-    flxs, fpts, datapath, allows, EJb, ECb, ELb, n_jobs=-1, fuzzy=True
-) -> Tuple[Tuple[float, float, float], Figure]:
+    flxs: NDArray[np.float64],
+    fpts: NDArray[np.float64],
+    datapath: str,
+    allows: dict[str, Any],
+    EJb: tuple[float, float],
+    ECb: tuple[float, float],
+    ELb: tuple[float, float],
+    n_jobs: int = -1,
+    fuzzy: bool = True,
+) -> tuple[tuple[float, float, float], Figure]:
     # Load data from database
     with File(datapath, "r") as file:
         f_flxs = file["flxs"][:]  # (f_flxs, ) # type: ignore[index]
@@ -64,7 +73,9 @@ def search_in_database(
         "float64(float64[:], float64, float64[:,:], float64[:,:])",
         nogil=True,
     )
-    def eval_dist(A: np.ndarray, a: float, B: np.ndarray, C: np.ndarray) -> float:
+    def eval_dist(
+        A: NDArray[np.float64], a: float, B: NDArray[np.float64], C: NDArray[np.float64]
+    ) -> float:
         """
         計算: mean_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
         """
@@ -88,8 +99,12 @@ def search_in_database(
         nogil=True,
     )
     def candidate_breakpoint_search(
-        A: np.ndarray, B: np.ndarray, C: np.ndarray, a_min: float, a_max: float
-    ) -> Tuple[float, float]:
+        A: NDArray[np.float64],
+        B: NDArray[np.float64],
+        C: NDArray[np.float64],
+        a_min: float,
+        a_max: float,
+    ) -> tuple[float, float]:
         """
         使用候選斷點法尋找最佳的 a 值, 使得目標函數最小化
         目標函數: F(a) = mean_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
@@ -137,8 +152,12 @@ def search_in_database(
         nogil=True,
     )
     def smart_fuzzy_search(
-        A: np.ndarray, B: np.ndarray, C: np.ndarray, a_min: float, a_max: float
-    ) -> Tuple[float, float]:
+        A: NDArray[np.float64],
+        B: NDArray[np.float64],
+        C: NDArray[np.float64],
+        a_min: float,
+        a_max: float,
+    ) -> tuple[float, float]:
         """
         結合密度估計和有限評估的方法尋找最佳的 a 值
         先通過密度估計找到可能的高密度區域，然後在這些區域中進行有限的評估
@@ -235,7 +254,7 @@ def search_in_database(
     # search function define done
     # ------------------------------------------------------------
 
-    def process_energy(i, fuzzy) -> Tuple[int, float, float]:
+    def process_energy(i, fuzzy) -> tuple[int, float, float]:
         nonlocal f_params, sf_energies, fpts, allows
         assert isinstance(f_params, np.ndarray)
 
@@ -311,8 +330,13 @@ def search_in_database(
 
 
 def fit_spectrum(
-    flxs, fpts, init_params, allows, param_b, maxfun=1000
-) -> Tuple[float, float, float]:
+    flxs: NDArray[np.float64],
+    fpts: NDArray[np.float64],
+    init_params: tuple[float, float, float],
+    allows: dict[str, Any],
+    param_b: tuple[tuple[float, float], tuple[float, float], tuple[float, float]],
+    maxfun: int = 1000,
+) -> tuple[float, float, float]:
     evals_count = count_max_evals(allows)
 
     pbar = tqdm(desc="Distance: nan", total=maxfun)

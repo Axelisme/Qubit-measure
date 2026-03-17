@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Dict, Optional, Tuple, TypeAlias
+from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
@@ -31,7 +31,7 @@ from zcu_tools.utils.fitting.resonance import (
     remove_edelay,
 )
 
-DispersiveResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+DispersiveResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -39,11 +39,11 @@ def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
 
 
 class DispersiveCfg(TwoToneCfg, TaskCfg):
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> DispersiveResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> DispersiveResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), DispersiveCfg)
 
@@ -84,7 +84,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
 
     def analyze(
         self, result: Optional[DispersiveResult] = None
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -139,7 +139,11 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         ax_main.grid(True)
 
         def _plot_circle_fit(
-            ax: Axes, signals: NDArray, params_dict: dict, color: str, label: str
+            ax: Axes,
+            signals: NDArray[np.complex128],
+            params_dict: dict[str, Any],
+            color: str,
+            label: str,
         ) -> None:
             rot_signals = remove_edelay(fpts, signals, edelay)
             norm_signals, norm_circle_params = normalize_signal(

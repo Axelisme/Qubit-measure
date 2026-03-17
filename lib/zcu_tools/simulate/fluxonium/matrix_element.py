@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Tuple, cast
-
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import TYPE_CHECKING, Optional, cast
 
 if TYPE_CHECKING:
     from scqubits.core.param_sweep import ParameterSweep
@@ -11,10 +10,10 @@ if TYPE_CHECKING:
 
 
 def calculate_n_oper(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     flx: float,
     return_dim: int = 4,
-    esys: Optional[Tuple[NDArray[np.float64], NDArray[np.float64]]] = None,
+    esys: Optional[tuple[NDArray[np.float64], NDArray[np.float64]]] = None,
 ) -> NDArray[np.float64]:
     """
     Calculate the matrix elements of the fluxonium
@@ -34,11 +33,11 @@ def calculate_n_oper(
 
 
 def calculate_n_oper_vs_flx(
-    params: Tuple[float, float, float],
-    flxs: np.ndarray,
+    params: tuple[float, float, float],
+    flxs: NDArray[np.float64],
     return_dim: int = 4,
     spectrum_data: Optional[SpectrumData] = None,
-) -> Tuple[SpectrumData, NDArray[np.float64]]:
+) -> tuple[SpectrumData, NDArray[np.float64]]:
     """
     Calculate the matrix elements of the fluxonium vs. a parameter
     """
@@ -63,14 +62,14 @@ def calculate_n_oper_vs_flx(
 
 
 def calculate_system_n_oper_vs_flx(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     flxs: NDArray[np.float64],
     r_f: float,
     g: float,
     return_dim: int = 4,
     progress: bool = True,
     sweep: Optional[ParameterSweep] = None,
-) -> Tuple[ParameterSweep, NDArray[np.float64]]:
+) -> tuple[ParameterSweep, NDArray[np.float64]]:
     """
     Calculate the matrix elements of the system over a parameter sweep
     """
@@ -110,8 +109,10 @@ def calculate_system_n_oper_vs_flx(
         scq_settings.PROGRESSBAR_DISABLED = old
 
     def get_n_oper(
-        paramsweep: ParameterSweep, paramindex_tuple: Tuple[int, int], **kwargs
+        paramsweep: ParameterSweep, paramindex_tuple: tuple[int, int], **kwargs
     ) -> NDArray[np.float64]:
+        from scqubits.utils.spectrum_utils import identity_wrap
+
         fluxonium = cast(Fluxonium, paramsweep.get_subsys(1))
 
         bare_evecs = paramsweep["bare_evecs"]["subsys":1][paramindex_tuple]

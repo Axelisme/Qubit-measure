@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, Generic, Hashable, TypeVar
 
 from matplotlib.figure import Figure
+from typing_extensions import Generic, Hashable, TypeVar
 
 
 class AbsLivePlotter(ABC):
@@ -69,7 +69,7 @@ class MultiLivePlotter(AbsLivePlotter, Generic[PlotterKey_T]):
     def __init__(
         self,
         fig: Figure,
-        plotters: Dict[PlotterKey_T, AbsLivePlotter],
+        plotters: dict[PlotterKey_T, AbsLivePlotter],
     ) -> None:
         self.fig = fig
         self.plotters = plotters
@@ -79,7 +79,7 @@ class MultiLivePlotter(AbsLivePlotter, Generic[PlotterKey_T]):
             plotter.clear()
 
     def update(
-        self, plot_args: Dict[PlotterKey_T, tuple], refresh: bool = True
+        self, plot_args: dict[PlotterKey_T, tuple], refresh: bool = True
     ) -> None:
         for key, args in plot_args.items():
             self.plotters[key].update(*args, refresh=False)

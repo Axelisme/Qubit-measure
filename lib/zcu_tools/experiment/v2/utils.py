@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence, Tuple, TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
+from typing_extensions import TYPE_CHECKING, Any, Callable, Optional, Sequence, TypeVar
 
 if TYPE_CHECKING:
     from qick import QickConfig
@@ -39,7 +39,7 @@ def set_pulse_freq(pulse_cfg: PulseCfg, freq: float) -> PulseCfg:
 
 
 def snr_as_signal(
-    raw: Tuple[
+    raw: tuple[
         Sequence[NDArray[np.float64]],
         Sequence[NDArray[np.float64]],
         Sequence[NDArray[np.float64]],

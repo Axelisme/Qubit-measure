@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 from typing_extensions import Any, Mapping, TypedDict, cast
@@ -13,7 +15,7 @@ class ProgramV2Cfg(TypedDict):
     relax_delay: float
 
 
-class MyProgramV2(MyProgram, AveragerProgramV2):
+class MyProgramV2(MyProgram, AveragerProgramV2):  # type: ignore
     def __init__(self, soccfg: QickConfig, cfg: Mapping[str, Any], **kwargs) -> None:
         _cfg = cast(ProgramV2Cfg, cfg)
 

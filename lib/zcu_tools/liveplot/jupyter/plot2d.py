@@ -1,8 +1,9 @@
-from typing import Literal, Optional, Union, List
+from __future__ import annotations
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from typing_extensions import Literal, Optional, Union
 
 from ..base import AbsLivePlotter
 from ..segments import Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment
@@ -17,7 +18,7 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         *,
         uniform: bool = True,
         segment_kwargs: Optional[dict] = None,
-        existed_axes: Optional[List[List[Axes]]] = None,
+        existed_axes: Optional[list[list[Axes]]] = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:
@@ -72,7 +73,7 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         title: Optional[str] = None,
         uniform: bool = True,
         segment2d_kwargs: Optional[dict] = None,
-        segment1d_line_kwargs: Optional[List[dict]] = None,
+        segment1d_line_kwargs: Optional[list[dict]] = None,
         **kwargs,
     ) -> None:
         if segment2d_kwargs is None:

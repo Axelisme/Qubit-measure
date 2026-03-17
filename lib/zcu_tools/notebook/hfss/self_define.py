@@ -67,8 +67,8 @@ class Cross(QComponent):
         p = self.p  # p for parsed parameters. Access to the parsed options.
 
         # create the geometry
-        rect1 = draw.rectangle(p.width, p.trace_width, p.pos_x, p.pos_y)
-        rect2 = draw.rectangle(p.trace_width, p.height, p.pos_x, p.pos_y)
+        rect1 = draw.rectangle(p.width, p.trace_width, p.pos_x, p.pos_y)  # type: ignore
+        rect2 = draw.rectangle(p.trace_width, p.height, p.pos_x, p.pos_y)  # type: ignore
         cross = draw.union(rect1, rect2)
         cross = draw.rotate(cross, p.orientation)
         ##############################################
@@ -76,10 +76,10 @@ class Cross(QComponent):
         self.add_qgeometry(
             "poly",
             {"cross": cross},
-            subtract=p.subtract,
-            helper=p.helper,
-            layer=p.layer,
-            chip=p.chip,
+            subtract=p.subtract,  # type: ignore
+            helper=p.helper,  # type: ignore
+            layer=p.layer,  # type: ignore
+            chip=p.chip,  # type: ignore
         )
 
 
@@ -118,9 +118,12 @@ class Fillet_vertex(QComponent):
         # create the geometry
 
         square = draw.rectangle(
-            p.fillet, p.fillet, p.pos_x + p.fillet / 2, p.pos_y + p.fillet / 2
+            p.fillet,  # type: ignore
+            p.fillet,  # type: ignore
+            p.pos_x + p.fillet / 2,  # type: ignore
+            p.pos_y + p.fillet / 2,  # type: ignore
         )
-        circle = draw.Point(p.pos_x, p.pos_y).buffer(p.fillet)
+        circle = draw.Point(p.pos_x, p.pos_y).buffer(p.fillet)  # type: ignore
         fil_ver = draw.subtract(square, circle)
         fil_ver = draw.rotate(fil_ver, p.orientation)
 
@@ -129,10 +132,10 @@ class Fillet_vertex(QComponent):
         self.add_qgeometry(
             "poly",
             {"fillet_vertex": fil_ver},
-            subtract=p.subtract,
-            helper=p.helper,
-            layer=p.layer,
-            chip=p.chip,
+            subtract=p.subtract,  # type: ignore
+            helper=p.helper,  # type: ignore
+            layer=p.layer,  # type: ignore
+            chip=p.chip,  # type: ignore
         )
 
 
@@ -173,10 +176,10 @@ class Rect_fillet(QComponent):
         p = self.p  # p for parsed parameters. Access to the parsed options.
 
         # create the geometry
-        rect1 = draw.rectangle(p.width - 2 * p.fillet, p.height, p.pos_x, p.pos_y)
-        rect2 = draw.rectangle(p.width, p.height - 2 * p.fillet, p.pos_x, p.pos_y)
-        cir = draw.Point(p.pos_x, p.pos_y).buffer(p.fillet)
-        x, y = +p.width / 2 - p.fillet, +p.height / 2 - p.fillet
+        rect1 = draw.rectangle(p.width - 2 * p.fillet, p.height, p.pos_x, p.pos_y)  # type: ignore
+        rect2 = draw.rectangle(p.width, p.height - 2 * p.fillet, p.pos_x, p.pos_y)  # type: ignore
+        cir = draw.Point(p.pos_x, p.pos_y).buffer(p.fillet)  # type: ignore
+        x, y = +p.width / 2 - p.fillet, +p.height / 2 - p.fillet  # type: ignore
         rect_fil = draw.union(
             rect1,
             rect2,
@@ -190,8 +193,8 @@ class Rect_fillet(QComponent):
         self.add_qgeometry(
             "poly",
             {"rectangle": rect_fil},
-            subtract=p.subtract,
-            helper=p.helper,
-            layer=p.layer,
-            chip=p.chip,
+            subtract=p.subtract,  # type: ignore
+            helper=p.helper,  # type: ignore
+            layer=p.layer,  # type: ignore
+            chip=p.chip,  # type: ignore
         )

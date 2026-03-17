@@ -171,32 +171,34 @@ class Fillet_Qubit(BaseQubit):
         chip = p.chip
         # main pad
         max_pad_fillet = min(
-            (p.pad_width - 2 * p.arm_width) / 2, (p.pad_height - p.arm_width) / 2
+            (p.pad_width - 2 * p.arm_width) / 2,  # type: ignore
+            (p.pad_height - p.arm_width) / 2,  # type: ignore
         )
         if p.pad_fillet > max_pad_fillet:
             warnings.warn(
                 f"pad_fillet is larger than the maximum fillet size. Setting it to {max_pad_fillet}"
             )
-            p.pad_fillet = max_pad_fillet
-        rect1 = draw.rectangle(p.pad_width, p.pad_height - 2 * p.pad_fillet)
-        rect2 = draw.rectangle(p.pad_width - 2 * p.pad_fillet, p.pad_height)
-        cir1 = draw.Point(0, 0).buffer(p.pad_fillet)
+            p.pad_fillet = max_pad_fillet  # type: ignore
+        rect1 = draw.rectangle(p.pad_width, p.pad_height - 2 * p.pad_fillet)  # type: ignore
+        rect2 = draw.rectangle(p.pad_width - 2 * p.pad_fillet, p.pad_height)  # type: ignore
+        cir1 = draw.Point(0, 0).buffer(p.pad_fillet)  # type: ignore
         # arm and tapper
         max_arm_fillet = min(
-            (p.pad_width - 2 * p.pad_fillet - p.arm_width) / 2, p.arm_length
+            (p.pad_width - 2 * p.pad_fillet - p.arm_width) / 2,  # type: ignore
+            p.arm_length,  # type: ignore
         )
         if p.arm_fillet > max_arm_fillet:
             warnings.warn(
                 f"arm_fillet is larger than the maximum fillet size. Setting it to {max_arm_fillet}"
             )
-            p.arm_fillet = max_arm_fillet
+            p.arm_fillet = max_arm_fillet  # type: ignore
         arm_fillet = p.arm_fillet
 
-        rect3 = draw.rectangle(p.arm_width + 2 * arm_fillet, arm_fillet)
-        cir2 = draw.Point(0, 0).buffer(arm_fillet)
-        rect4 = draw.rectangle(p.arm_width, p.arm_length - arm_fillet)
+        rect3 = draw.rectangle(p.arm_width + 2 * arm_fillet, arm_fillet)  # type: ignore
+        cir2 = draw.Point(0, 0).buffer(arm_fillet)  # type: ignore
+        rect4 = draw.rectangle(p.arm_width, p.arm_length - arm_fillet)  # type: ignore
         # Union and create both pads
-        x, y = p.pad_width / 2 - p.pad_fillet, p.pad_height / 2 - p.pad_fillet
+        x, y = p.pad_width / 2 - p.pad_fillet, p.pad_height / 2 - p.pad_fillet  # type: ignore
         main_pad = draw.union(
             rect1,
             rect2,
@@ -205,26 +207,28 @@ class Fillet_Qubit(BaseQubit):
             draw.translate(cir1, -x, y),
             draw.translate(cir1, -x, -y),
         )
-        x, y = (p.arm_width + 2 * arm_fillet) / 2, -arm_fillet / 2
-        arm_pad_connect = draw.subtract(rect3, draw.translate(cir2, x, y))
-        arm_pad_connect = draw.subtract(arm_pad_connect, draw.translate(cir2, -x, y))
+        x, y = (p.arm_width + 2 * arm_fillet) / 2, -arm_fillet / 2  # type: ignore
+        arm_pad_connect = draw.subtract(rect3, draw.translate(cir2, x, y))  # type: ignore
+        arm_pad_connect = draw.subtract(arm_pad_connect, draw.translate(cir2, -x, y))  # type: ignore
         pad_top = draw.union(
-            draw.translate(main_pad, 0, p.arm_length + (p.pad_height + p.pad_gap) / 2),
+            draw.translate(main_pad, 0, p.arm_length + (p.pad_height + p.pad_gap) / 2),  # type: ignore
             draw.translate(
-                arm_pad_connect, 0, p.arm_length + (p.pad_gap - arm_fillet) / 2
+                arm_pad_connect,
+                0,
+                p.arm_length + (p.pad_gap - arm_fillet) / 2,  # type: ignore
             ),
-            draw.translate(rect4, 0, (p.arm_length - arm_fillet + p.pad_gap) / 2),
+            draw.translate(rect4, 0, (p.arm_length - arm_fillet + p.pad_gap) / 2),  # type: ignore
         )
-        pad_bot = draw.rotate(pad_top, 180, origin=(0, 0))
+        pad_bot = draw.rotate(pad_top, 180, origin=(0, 0))  # type: ignore
         # JJ
-        rect_jj = draw.LineString([(0, -p.pad_gap / 2), (0, +p.pad_gap / 2)])
+        rect_jj = draw.LineString([(0, -p.pad_gap / 2), (0, +p.pad_gap / 2)])  # type: ignore
         # pocket
-        rect4 = draw.rectangle(p.pocket_width, p.pocket_height - 2 * p.pocket_fillet)
-        rect5 = draw.rectangle(p.pocket_width - 2 * p.pocket_fillet, p.pocket_height)
-        cir3 = draw.Point(0, 0).buffer(p.pocket_fillet)
+        rect4 = draw.rectangle(p.pocket_width, p.pocket_height - 2 * p.pocket_fillet)  # type: ignore
+        rect5 = draw.rectangle(p.pocket_width - 2 * p.pocket_fillet, p.pocket_height)  # type: ignore
+        cir3 = draw.Point(0, 0).buffer(p.pocket_fillet)  # type: ignore
         x, y = (
-            p.pocket_width / 2 - p.pocket_fillet,
-            p.pocket_height / 2 - p.pocket_fillet,
+            p.pocket_width / 2 - p.pocket_fillet,  # type: ignore
+            p.pocket_height / 2 - p.pocket_fillet,  # type: ignore
         )
         rect_pk = draw.union(
             rect4,
@@ -236,14 +240,17 @@ class Fillet_Qubit(BaseQubit):
         )
         # Rotate and translate all qgeometry as needed.
         polys = [rect_jj, pad_top, pad_bot, rect_pk]
-        polys = draw.rotate(polys, p.orientation, origin=(0, 0))
-        polys = draw.translate(polys, p.pos_x, p.pos_y)
+        polys = draw.rotate(polys, p.orientation, origin=(0, 0))  # type: ignore
+        polys = draw.translate(polys, p.pos_x, p.pos_y)  # type: ignore
         [rect_jj, pad_top, pad_bot, rect_pk] = polys
         # Use the geometry to create Metal qgeometry
-        self.add_qgeometry("poly", dict(pad_top=pad_top, pad_bot=pad_bot), chip=chip)
-        self.add_qgeometry("poly", dict(rect_pk=rect_pk), subtract=True, chip=chip)
+        self.add_qgeometry("poly", dict(pad_top=pad_top, pad_bot=pad_bot), chip=chip)  # type: ignore
+        self.add_qgeometry("poly", dict(rect_pk=rect_pk), subtract=True, chip=chip)  # type: ignore
         self.add_qgeometry(
-            "junction", dict(rect_jj=rect_jj), width=p.arm_width, chip=chip
+            "junction",
+            dict(rect_jj=rect_jj),
+            width=p.arm_width,
+            chip=chip,  # type: ignore
         )
 
     # def make_connection_pads(self):

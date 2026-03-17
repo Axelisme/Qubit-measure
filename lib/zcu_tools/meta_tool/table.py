@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
+from typing_extensions import Optional
 
 from .syncfile import SyncFile, auto_sync
 

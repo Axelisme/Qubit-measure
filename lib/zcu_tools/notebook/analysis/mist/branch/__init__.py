@@ -1,4 +1,4 @@
-from typing import Dict, List, Mapping, Optional, Tuple
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,6 +7,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from plotly.subplots import make_subplots
+from typing_extensions import Mapping, Optional
 
 
 def round_to_nearest(
@@ -18,12 +19,12 @@ def round_to_nearest(
 
 
 def plot_chi_and_snr_over_photon(
-    photons: np.ndarray,
-    chi_over_n: np.ndarray,
-    snrs: np.ndarray,
+    photons: NDArray[np.float64],
+    chi_over_n: NDArray[np.float64],
+    snrs: NDArray[np.float64],
     qub_name: str,
     flx: float,
-) -> Tuple[Figure, Tuple[Axes, Axes]]:
+) -> tuple[Figure, tuple[Axes, Axes]]:
     best_n = photons[np.argsort(snrs)[-3]]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
@@ -45,9 +46,9 @@ def plot_chi_and_snr_over_photon(
 
 
 def plot_populations_over_photon(
-    branchs: List[int],
-    photons: np.ndarray,
-    branch_populations: Mapping[int, np.ndarray],
+    branchs: list[int],
+    photons: NDArray[np.float64],
+    branch_populations: Mapping[int, NDArray[np.float64]],
 ) -> go.Figure:
     fig = go.Figure()
 
@@ -86,9 +87,9 @@ def plot_populations_over_photon(
 
 def calc_transitions(
     branch_energies: Mapping[int, NDArray[np.float64]],
-    transitions: Optional[List[Tuple[int, int]]] = None,
+    transitions: Optional[list[tuple[int, int]]] = None,
     threshold: float = 50e-3,  # GHz
-) -> Dict[Tuple[int, int], NDArray[np.float64]]:
+) -> dict[tuple[int, int], NDArray[np.float64]]:
     E_01 = branch_energies[1] - branch_energies[0]
     all_transitions = list(branch_energies.keys())
 
@@ -113,8 +114,8 @@ def calc_transitions(
 
 
 def plot_transition_over_photon(
-    photons: np.ndarray,
-    transitions: Dict[str, NDArray[np.float64]],
+    photons: NDArray[np.float64],
+    transitions: dict[str, NDArray[np.float64]],
     threshold: float = 50e-3,  # GHz
 ) -> go.Figure:
     fig = go.Figure()
@@ -149,8 +150,8 @@ def plot_transition_over_photon(
 
 
 def calc_critical_photons(
-    photons: np.ndarray,
-    populations: np.ndarray,
+    photons: NDArray[np.float64],
+    populations: NDArray[np.float64],
     critical_level: float,
 ) -> np.ndarray:
     critical_idx = np.argmax(populations >= critical_level, axis=-1)
@@ -162,10 +163,10 @@ def calc_critical_photons(
 
 
 def plot_cn_over_flx(
-    flxs: np.ndarray,
-    photons: np.ndarray,
-    populations_over_flx: np.ndarray,
-    critical_levels: Dict[int, float],
+    flxs: NDArray[np.float64],
+    photons: NDArray[np.float64],
+    populations_over_flx: NDArray[np.float64],
+    critical_levels: dict[int, float],
 ) -> go.Figure:
     # plot the critical photon number as a function of flux
     fig = make_subplots(
@@ -216,11 +217,11 @@ def plot_cn_over_flx(
 
 def plot_cn_with_mist(
     fig,
-    flxs: np.ndarray,
-    photons: np.ndarray,
-    populations_over_flx: np.ndarray,
-    critical_levels: Dict[int, float],
-    mist_flxs: np.ndarray,
+    flxs: NDArray[np.float64],
+    photons: NDArray[np.float64],
+    populations_over_flx: NDArray[np.float64],
+    critical_levels: dict[int, float],
+    mist_flxs: NDArray[np.float64],
     fill_alpha: float = 0.2,
     **fig_kwargs,
 ):

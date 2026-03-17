@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: axelenv13
+    display_name: .venv
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.4
+    version: 3.9.23
 ---
 
 ```python
@@ -29,7 +29,7 @@ jupyter:
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import scqubits as scq
+import os
 
 %autoreload 2
 from zcu_tools.notebook.persistance import load_result
@@ -39,21 +39,29 @@ from zcu_tools.notebook.analysis.t1_curve import (
     plot_eff_t1_with_sample,
     calculate_eff_t1_vs_flx_with,
     plot_Q_vs_omega,
+    plot_t1_vs_m01,
     calc_Qcap_vs_omega,
     add_Q_fit,
     calc_Qind_vs_omega,
     freq2omega,
     find_proper_Temp,
+    charge_spectral_density,
 )
 from zcu_tools.simulate import flx2mA, mA2flx
 from zcu_tools.simulate.fluxonium import (
     calculate_eff_t1_with,
     calculate_percell_t1_vs_flx,
+    calculate_n_oper_vs_flx,
 )
 ```
 
 ```python
-qub_name = "Si001"
+qub_name = "Q12_2D/Q4"
+
+result_dir = f"../../result/{qub_name}"
+image_dir = f"{result_dir}/image/T1_curve"
+
+os.makedirs(image_dir, exist_ok=True)
 ```
 
 # Load data
@@ -61,7 +69,7 @@ qub_name = "Si001"
 ## Parameters
 
 ```python
-loadpath = f"../../result/{qub_name}/params.json"
+loadpath = f"{result_dir}/params.json"
 _, params, mA_c, period, allows, results = load_result(loadpath)
 EJ, EC, EL = params
 
@@ -84,7 +92,7 @@ if "dispersive" in allows:
 
 ```python
 # loading points
-loadpath = f"../../result/{qub_name}/samples.csv"
+loadpath = f"{result_dir}/samples.csv"
 
 freqs_df = pd.read_csv(loadpath)
 freqs_df = freqs_df[~np.isnan(freqs_df["T1 (us)"])]
@@ -111,14 +119,14 @@ freqs_df.head(10)
 
 ```python
 fig, _ = plot_sample_t1(s_mAs, s_T1s, s_T1errs, mA_c, period)
-fig.savefig(f"../../result/{qub_name}/image/T1s.png")
+fig.savefig(f"{image_dir}/T1s.png")
 plt.show()
 ```
 
 # Simulation
 
 ```python
-t_flxs = np.linspace(0.0, 1.0, 1000)
+t_flxs = np.linspace(0.0, 1.0, 100)
 t_mAs = flx2mA(t_flxs, mA_c, period)
 ```
 
@@ -138,7 +146,7 @@ s_spectrum_data = fluxonium.get_spectrum_vs_paramvals(
 # T1 curve
 
 ```python
-Temp = 20e-3
+Temp = 60e-3
 
 plot_args = (s_mAs, s_T1s, s_T1errs, mA_c, period, fluxonium, t_spectrum_data, t_flxs)
 ```
@@ -154,16 +162,16 @@ s_n_elements = fluxonium.get_matelements_vs_paramvals(
 Temp_Qcap = find_proper_Temp(
     Temp,
     lambda T: calc_Qcap_vs_omega(
-        params, s_fpts, s_T1s, s_n_elements, T1errs=s_T1errs, guess_Temp=T
+        params, s_fpts, s_T1s, s_n_elements, T1errs=s_T1errs, Temp=T
     )[0],
 )
 print(f"Temp_Qcap = {Temp_Qcap * 1e3:.2f} mK")
 ```
 
 ```python
-Temp_Qcap = Temp
+# Temp_Qcap = Temp
 Qcaps, Qcaps_err = calc_Qcap_vs_omega(
-    params, s_fpts, s_T1s, s_n_elements, T1errs=s_T1errs, guess_Temp=Temp_Qcap
+    params, s_fpts, s_T1s, s_n_elements, T1errs=s_T1errs, Temp=Temp_Qcap
 )
 
 fig, ax = plot_Q_vs_omega(s_fpts, Qcaps, Qcaps_err, Qname=r"$Q_{cap}$")
@@ -185,7 +193,27 @@ def fitted_Qcap(w: np.ndarray, T: float) -> np.ndarray:
     return np.interp(w, fit_Qcaps[0], fit_Qcaps[1])
 
 
-fig.savefig(f"../../result/{qub_name}/image/Qcap_vs_omega.png")
+fig.savefig(f"{image_dir}/Qcap_vs_omega.png")
+plt.show()
+```
+
+```python
+# Temp_Qcap = Temp
+_, n_elements = calculate_n_oper_vs_flx(params, s_flxs, return_dim=2)
+
+omegas = freq2omega(s_fpts)
+Q_factors = charge_spectral_density(omegas, Temp_Qcap, EC) + charge_spectral_density(
+    -omegas, Temp_Qcap, EC
+)
+
+dipoles = np.abs(n_elements[:, 0, 1]) ** 2 * Q_factors
+
+fig, ax = plot_t1_vs_m01(dipoles, s_T1s, s_T1errs)
+ax.set_title(f"Temp = {Temp_Qcap * 1e3:.2f} mK")
+# ax.set_ylim(5e3, 5e5)
+
+
+fig.savefig(f"{image_dir}/T1s_vs_|d01|.png")
 plt.show()
 ```
 
@@ -195,16 +223,18 @@ plt.show()
 Q_cap_array = fitted_Qcap(freq2omega(s_fpts), Temp_Qcap)
 Q_cap_max, Q_cap_min = np.max(Q_cap_array), np.min(Q_cap_array)
 
+Q_cap = 0.5 * (Q_cap_max + Q_cap_min)
+
 fig, _ = plot_t1_with_sample(
     *plot_args,
     name="Q_cap",
     noise_name="t1_capacitive",
-    # values=[Q_cap / 2, Q_cap, Q_cap * 2],
-    values=[Q_cap_min, fitted_Qcap, Q_cap_max],
+    values=[Q_cap / 2, Q_cap, Q_cap * 2],
+    # values=[Q_cap_min, fitted_Qcap, Q_cap_max],
     Temp=Temp_Qcap,
 )
 
-fig.savefig(f"../../result/{qub_name}/image/T1s_fit_Qcap.png")
+fig.savefig(f"{image_dir}/T1s_fit_Qcap.png")
 plt.show()
 ```
 
@@ -222,7 +252,7 @@ fig, _ = plot_t1_with_sample(
 )
 
 
-fig.savefig(f"../../result/{qub_name}/image/T1s_fit_xqp.png")
+fig.savefig(f"{image_dir}/T1s_fit_xqp.png")
 plt.show()
 ```
 
@@ -236,7 +266,7 @@ s_phi_elements = fluxonium.get_matelements_vs_paramvals(
 Temp_Qind = find_proper_Temp(
     Temp,
     lambda T: calc_Qind_vs_omega(
-        params, s_fpts, s_T1s, s_phi_elements, T1errs=s_T1errs, guess_Temp=T
+        params, s_fpts, s_T1s, s_phi_elements, T1errs=s_T1errs, Temp=T
     )[0],
 )
 print(f"Temp_Qind = {Temp_Qind * 1e3:.2f} mK")
@@ -245,7 +275,7 @@ print(f"Temp_Qind = {Temp_Qind * 1e3:.2f} mK")
 ```python
 Temp_Qind = Temp
 Qind_array, Qind_array_err = calc_Qind_vs_omega(
-    params, s_fpts, s_T1s, s_phi_elements, T1errs=s_T1errs, guess_Temp=Temp_Qind
+    params, s_fpts, s_T1s, s_phi_elements, T1errs=s_T1errs, Temp=Temp_Qind
 )
 
 fig, ax = plot_Q_vs_omega(s_fpts, Qind_array, Qind_array_err, Qname=r"$Q_{ind}$")
@@ -266,7 +296,7 @@ def fitted_Qind(w: np.ndarray, T: float) -> np.ndarray:
     return np.interp(w, Qind_params[0], Qind_params[1])
 
 
-fig.savefig(f"../../result/{qub_name}/image/Qind_vs_omega.png")
+fig.savefig(f"{image_dir}/Qind_vs_omega.png")
 plt.show()
 ```
 
@@ -348,7 +378,7 @@ fig, ax = plot_eff_t1_with_sample(
     title=f"Temperature = {Temp * 1e3:.2f} mK",
 )
 
-fig.savefig(f"../../result/{qub_name}/image/T1s_fit_eff_with_percell.png")
+fig.savefig(f"{image_dir}/T1s_fit_eff_with_percell.png")
 plt.show()
 ```
 
@@ -368,7 +398,7 @@ fig, ax = plot_eff_t1_with_sample(
     title=f"Temperature = {Temp * 1e3:.2f} mK",
 )
 
-fig.savefig(f"../../result/{qub_name}/image/T1s_fit_eff.png")
+fig.savefig(f"{image_dir}/T1s_fit_eff.png")
 plt.show()
 ```
 

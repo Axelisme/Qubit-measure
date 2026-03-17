@@ -1,8 +1,9 @@
-from typing import Any, Mapping, Optional, Sequence, Tuple, Union
+from __future__ import annotations
 
 import numpy as np
 from matplotlib.collections import PathCollection
 from numpy.typing import NDArray
+from typing_extensions import Any, Mapping, Optional, Sequence, Union
 
 from .base import AbsSegment, Axes
 
@@ -51,8 +52,8 @@ class ScatterSegment(AbsSegment):
         ys: NDArray[np.float64],
         colors: Union[
             Sequence[str],
-            Sequence[Tuple[float, float, float]],
-            Sequence[Tuple[float, float, float, float]],
+            Sequence[tuple[float, float, float]],
+            Sequence[tuple[float, float, float, float]],
             NDArray[np.float64],
             None,
         ] = None,

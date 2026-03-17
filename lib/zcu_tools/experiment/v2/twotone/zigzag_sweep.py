@@ -10,12 +10,10 @@ from scipy.ndimage import gaussian_filter1d
 from typeguard import check_type
 from typing_extensions import (
     Any,
-    Dict,
     Literal,
     NotRequired,
     Optional,
     Sequence,
-    Tuple,
     TypeAlias,
     TypedDict,
     Union,
@@ -42,7 +40,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (times, values, signals)
-ZigZagSweepResult: TypeAlias = Tuple[
+ZigZagSweepResult: TypeAlias = tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -78,7 +76,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
     ) -> ZigZagSweepResult:
@@ -163,7 +161,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
     def analyze(
         self,
         result: Optional[ZigZagSweepResult] = None,
-    ) -> Tuple[float, Figure]:
+    ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

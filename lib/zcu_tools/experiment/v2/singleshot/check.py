@@ -8,15 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
@@ -51,7 +43,7 @@ class CheckCfg(ModularProgramCfg, TaskCfg):
 
 
 class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> CheckResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> CheckResult:
         # Validate and setup configuration
         if cfg.setdefault("rounds", 1) != 1:
             warnings.warn("rounds will be overwritten to 1 for singleshot measurement")

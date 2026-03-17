@@ -7,15 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
@@ -42,7 +34,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAPowerResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.float64]]
+JPAPowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class JPAPowerModuleCfg(TypedDict, closed=True):
@@ -53,11 +45,11 @@ class JPAPowerModuleCfg(TypedDict, closed=True):
 
 class JPAPowerCfg(ModularProgramCfg, TaskCfg):
     modules: JPAPowerModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class JPAPowerExp(AbsExperiment[JPAPowerResult, JPAPowerCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> JPAPowerResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> JPAPowerResult:
         _cfg = check_type(deepcopy(cfg), JPAPowerCfg)
 
         _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "jpa_power")
@@ -118,7 +110,7 @@ class JPAPowerExp(AbsExperiment[JPAPowerResult, JPAPowerCfg]):
 
         return jpa_powers, signals
 
-    def analyze(self, result: Optional[JPAPowerResult] = None) -> Tuple[float, Figure]:
+    def analyze(self, result: Optional[JPAPowerResult] = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

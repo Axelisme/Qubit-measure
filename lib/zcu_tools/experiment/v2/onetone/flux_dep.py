@@ -5,7 +5,7 @@ from copy import deepcopy
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Dict, Mapping, Optional, Tuple, TypeAlias
+from typing_extensions import Any, Mapping, Optional, TypeAlias
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
@@ -17,7 +17,7 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 
-FluxDepResult: TypeAlias = Tuple[
+FluxDepResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -28,11 +28,11 @@ def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 class FluxDepCfg(OneToneCfg, TaskCfg):
     dev: Mapping[str, DeviceInfo]
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FluxDepResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FluxDepResult:
         _cfg = check_type(deepcopy(cfg), FluxDepCfg)
 
         fpt_sweep = _cfg["sweep"]["freq"]

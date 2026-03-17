@@ -7,15 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -44,7 +36,7 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return rotate2real(signals).real
 
 
-T2RamseyResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T2RamseyResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 class T2RamseyModuleCfg(TypedDict, closed=True):
@@ -55,12 +47,12 @@ class T2RamseyModuleCfg(TypedDict, closed=True):
 
 class T2RamseyCfg(ModularProgramCfg, TaskCfg):
     modules: T2RamseyModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], *, detune: float = 0.0
+        self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
     ) -> T2RamseyResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2RamseyCfg)
@@ -112,7 +104,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
 
     def analyze(
         self, result: Optional[T2RamseyResult] = None, *, fit_fringe: bool = True
-    ) -> Tuple[float, float, float, float, Figure]:
+    ) -> tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

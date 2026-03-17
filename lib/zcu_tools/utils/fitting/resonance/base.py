@@ -1,8 +1,9 @@
-from typing import List, Tuple, Union, cast
+from __future__ import annotations
 
 import numpy as np
 import scipy as sp
 from numpy.typing import NDArray
+from typing_extensions import Union, cast
 
 from ..base import fit_func
 
@@ -49,7 +50,7 @@ def calc_M(xs: NDArray[np.float64], ys: NDArray[np.float64]) -> NDArray[np.float
 
 def fit_circle_params(
     xs: NDArray[np.float64], ys: NDArray[np.float64]
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     """[center_x, center_y, radius]"""
     mean_x, mean_y = np.mean(xs), np.mean(ys)
     xs = xs - mean_x
@@ -85,13 +86,13 @@ def fit_edelay(fpts: NDArray[np.float64], signals: NDArray[np.complex128]) -> fl
     rough_edelay = get_rough_edelay(fpts, signals)
     signals = remove_edelay(fpts, signals, rough_edelay)
 
-    def loss_func(edelay):
+    def loss_func(edelay: float) -> float:
         rot_signals = remove_edelay(fpts, signals, edelay)
         xc, yc, r0 = fit_circle_params(rot_signals.real, rot_signals.imag)
         return np.sum(
             (r0 - np.sqrt((rot_signals.real - xc) ** 2 + (rot_signals.imag - yc) ** 2))
             ** 2
-        )
+        ).item()
 
     fit_range = 5.0 / np.ptp(fpts)
     edelays = np.linspace(-fit_range, fit_range, 1000)
@@ -116,9 +117,9 @@ def phase_func(
 def fit_resonant_params(
     fpts: NDArray[np.float64],
     signals: NDArray[np.complex128],
-    circle_params: Tuple[float, float, float],
+    circle_params: tuple[float, float, float],
     fit_theta0: bool = True,
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     """[resonant_freq, Ql, theta0]"""
     phases = calc_phase(signals, circle_params[0], circle_params[1])
 
@@ -129,7 +130,7 @@ def fit_resonant_params(
     init_Ql = 2 * init_freq / fwhm
     init_theta0 = 0.5 * float(np.max(phases) + np.min(phases))
 
-    fixedparams: List[Union[float, None]] = [None] * 3
+    fixedparams: list[Union[float, None]] = [None] * 3
     if not fit_theta0:
         init_theta0 = np.angle(circle_params[0] + 1j * circle_params[1]).item()
         while init_theta0 < np.min(phases):
@@ -150,14 +151,14 @@ def fit_resonant_params(
         fixedparams=fixedparams,
     )
 
-    return cast(Tuple[float, float, float], tuple(pOpt))
+    return cast(tuple[float, float, float], tuple(pOpt))
 
 
 def normalize_signal(
     signals: NDArray[np.complex128],
-    circle_params: Tuple[float, float, float],
+    circle_params: tuple[float, float, float],
     a0: complex,
-) -> Tuple[NDArray[np.complex128], Tuple[float, float, float]]:
+) -> tuple[NDArray[np.complex128], tuple[float, float, float]]:
     xc, yc, r0 = circle_params
     center = xc + 1j * yc
 

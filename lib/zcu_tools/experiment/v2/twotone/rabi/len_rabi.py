@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Dict, Optional, Tuple, TypeAlias
+from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
@@ -21,7 +21,7 @@ from zcu_tools.utils.fitting import fit_rabi
 from zcu_tools.utils.process import rotate2real
 
 # (lens, signals)
-LenRabiResult: TypeAlias = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+LenRabiResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -29,11 +29,11 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class LenRabiCfg(TwoToneCfg, TaskCfg):
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
-    def _run_for_flat(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResult:
+    def _run_for_flat(self, soc, soccfg, cfg: dict[str, Any]) -> LenRabiResult:
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)
         modules = _cfg["modules"]
 
@@ -70,7 +70,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         return lens, signals
 
-    def _run_for_arb(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResult:
+    def _run_for_arb(self, soc, soccfg, cfg: dict[str, Any]) -> LenRabiResult:
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)
         modules = _cfg["modules"]
 
@@ -106,7 +106,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         return lens, signals
 
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> LenRabiResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> LenRabiResult:
         modules = cfg["modules"]
         qub_waveform = modules["qub_pulse"]["waveform"]
 
@@ -120,12 +120,8 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             return self._run_for_arb(soc, soccfg, cfg)
 
     def analyze(
-        self,
-        result: Optional[LenRabiResult] = None,
-        *,
-        decay: bool = True,
-        min_length: float = 0.03,
-    ) -> Tuple[float, float, float, Figure]:
+        self, result: Optional[LenRabiResult] = None, *, decay: bool = True
+    ) -> tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -142,7 +138,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         real_signals = real_signals[~nan_mask]
 
         pi_len, pi2_len, freq, y_fit, _ = fit_rabi(
-            lens, real_signals, decay=decay, init_phase=None, min_length=min_length
+            lens, real_signals, decay=decay, init_phase=None
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)

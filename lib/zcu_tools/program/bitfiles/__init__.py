@@ -1,6 +1,8 @@
-# import os
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Literal
+
+from typing_extensions import Literal
 
 
 def get_bitfile(version: Literal["v1", "v2"]) -> str:

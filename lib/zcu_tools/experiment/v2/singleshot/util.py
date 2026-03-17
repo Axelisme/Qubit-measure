@@ -1,4 +1,4 @@
-from typing import Tuple
+from __future__ import annotations
 
 import numpy as np
 from matplotlib.axes import Axes
@@ -16,10 +16,10 @@ def classify_result(
     g_center: complex,
     e_center: complex,
     radius: float,
-) -> Tuple[NDArray[np.bool_], NDArray[np.bool_], NDArray[np.bool_]]:
+) -> tuple[NDArray[np.bool_], NDArray[np.bool_], NDArray[np.bool_]]:
     """Classify shots into ground, excited, and other."""
-    dists_g = np.abs(signals - g_center)
-    dists_e = np.abs(signals - e_center)
+    dists_g = np.abs(signals - np.array(g_center))
+    dists_e = np.abs(signals - np.array(e_center))
     mask_g = dists_g < radius
     mask_e = dists_e < radius
     mask_o = ~(mask_g | mask_e)

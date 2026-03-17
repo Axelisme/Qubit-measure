@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import os
 from datetime import datetime
-from typing import Literal, Optional, Tuple, overload
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Any, Literal, Optional, overload
 
 from zcu_tools.config import config
 
@@ -77,7 +79,7 @@ def safe_labber_filepath(filepath: str) -> str:
 
     filepath = format_ext(filepath)
 
-    def parse_filepath(filepath) -> Tuple[str, int, str]:
+    def parse_filepath(filepath: str) -> tuple[str, int, str]:
         filename, ext = os.path.splitext(filepath)
         count = filename.split("_")[-1]
         if count.isdigit():
@@ -98,9 +100,9 @@ def safe_labber_filepath(filepath: str) -> str:
 
 def save_local_data(
     filepath: str,
-    x_info: dict,
-    z_info: dict,
-    y_info: Optional[dict] = None,
+    x_info: dict[str, Any],
+    z_info: dict[str, Any],
+    y_info: Optional[dict[str, Any]] = None,
     comment: Optional[str] = None,
     tag: Optional[str] = None,
 ) -> None:
@@ -156,7 +158,7 @@ def save_local_data(
 
 def load_local_data(
     filepath: str,
-) -> Tuple[NDArray, NDArray, Optional[NDArray]]:
+) -> tuple[NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]]:
     """
     Load data from a local HDF5 file.
 
@@ -164,7 +166,7 @@ def load_local_data(
         file_path (str): The path to the HDF5 file.
 
     Returns:
-        Tuple[NDArray, NDArray, Optional[NDArray]]: The loaded z, x, and y data arrays.
+        tuple[NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]]: The loaded z, x, and y data arrays.
     """
     import h5py
 
@@ -175,8 +177,10 @@ def load_local_data(
         return np.array([]), np.array([]), None
 
     def parser_data(
-        data: NDArray,
-    ) -> Tuple[NDArray, NDArray, Optional[NDArray]]:
+        data: NDArray[np.float64],
+    ) -> tuple[
+        NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]
+    ]:
         if data.shape[2] == 1:  # 1D data,
             x_data = data[:, 0, 0][:]
             y_data = None
@@ -199,7 +203,9 @@ def load_local_data(
             z_data = [z_data]
 
             def check_log_valid(
-                z_i: NDArray, x_i: NDArray, y_i: Optional[NDArray]
+                z_i: NDArray[np.complex128],
+                x_i: NDArray[np.float64],
+                y_i: Optional[NDArray[np.float64]],
             ) -> None:
                 if not x_data.shape == x_i.shape:
                     raise ValueError("x data shape mismatch")
@@ -228,7 +234,7 @@ def load_local_data(
     return z_data, x_data, y_data
 
 
-def load_local_cfg(filepath: str) -> dict:
+def load_local_cfg(filepath: str) -> dict[str, Any]:
     import json
 
     import h5py
@@ -305,9 +311,9 @@ def download_from_server(filepath: str, server_ip: str, port: int) -> None:
 
 def save_data(
     filepath: str,
-    x_info: dict,
-    z_info: dict,
-    y_info: Optional[dict] = None,
+    x_info: dict[str, Any],
+    z_info: dict[str, Any],
+    y_info: Optional[dict[str, Any]] = None,
     comment: Optional[str] = None,
     tag: Optional[str] = None,
     server_ip: Optional[str] = None,
@@ -346,9 +352,13 @@ def load_data(
     filepath: str,
     server_ip: Optional[str] = None,
     port: int = 4999,
-    return_cfg: Literal[True] = True,
-) -> Tuple[
-    NDArray[np.float64], NDArray[np.float64], Optional[NDArray[np.float64]], dict
+    *,
+    return_cfg: Literal[True],
+) -> tuple[
+    NDArray[np.complex128],
+    NDArray[np.float64],
+    Optional[NDArray[np.float64]],
+    dict[str, Any],
 ]: ...
 
 
@@ -357,14 +367,18 @@ def load_data(
     filepath: str,
     server_ip: Optional[str] = None,
     port: int = 4999,
-    return_cfg: Literal[False] = False,
-) -> Tuple[NDArray[np.float64], NDArray[np.float64], Optional[NDArray[np.float64]]]: ...
+    *,
+    return_cfg: Literal[False],
+) -> tuple[
+    NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]
+]: ...
 
 
 def load_data(
     filepath: str,
     server_ip: Optional[str] = None,
     port: int = 4999,
+    *,
     return_cfg: bool = False,
 ):
     """
@@ -376,7 +390,7 @@ def load_data(
         port (int, optional): The port number of the server. Defaults to 4999.
 
     Returns:
-        Tuple[NDArray, NDArray, Optional[NDArray]]: The loaded z, x, and y data arrays.
+        tuple[NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]]: The loaded z, x, and y data arrays.
     """
     if server_ip is not None:
         if not os.path.exists(filepath):

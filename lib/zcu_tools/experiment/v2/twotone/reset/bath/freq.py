@@ -8,16 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    Literal,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -37,7 +28,7 @@ from zcu_tools.program.v2.modules import BathResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-FreqGainResult: TypeAlias = Tuple[
+FreqGainResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -50,7 +41,7 @@ class FreqGainModuleCfg(TypedDict, closed=True):
 
 class FreqGainCfg(ModularProgramCfg, TaskCfg):
     modules: FreqGainModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -58,7 +49,7 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
-    def run(self, soc, soccfg, cfg: Dict[str, Any]) -> FreqGainResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqGainResult:
         _cfg = check_type(deepcopy(cfg), FreqGainCfg)
 
         # Check that reset pulse is dual pulse type
@@ -120,7 +111,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         result: Optional[FreqGainResult] = None,
         smooth: float = 1.0,
         find: Literal["min", "max", "med"] = "min",
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

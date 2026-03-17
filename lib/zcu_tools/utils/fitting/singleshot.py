@@ -1,9 +1,10 @@
-from typing import List, Optional, Sequence, Tuple, cast
+from __future__ import annotations
 
 import numpy as np
 import scipy.stats as stats
 from numpy.typing import NDArray
 from scipy.special import iv
+from typing_extensions import Optional, Sequence, cast
 
 from .base import assign_init_p, fit_func
 
@@ -81,7 +82,7 @@ def fit_singleshot(
     e_pdfs: NDArray[np.float64],
     fitparams: Optional[Sequence[Optional[float]]] = None,
     fixedparams: Optional[Sequence[Optional[float]]] = None,
-) -> Tuple[Tuple[float, float, float, float, float, float, float], NDArray[np.float64]]:
+) -> tuple[tuple[float, float, float, float, float, float, float], NDArray[np.float64]]:
     """fitparams: [sg, se, s, p0_g, p0_e, p_avg, length_ratio]"""
     if fixedparams is not None:
         if len(fixedparams) != 7:
@@ -136,7 +137,7 @@ def fit_singleshot(
         length_ratio = 0.01
 
         assign_init_p(fitparams, [sg, se, s, p0_g, p0_e, p_avg, length_ratio])
-    fitparams = cast(List[float], fitparams)
+    fitparams = cast(list[float], fitparams)
 
     sg, se, s, p0_g, p0_e, p_avg, length_ratio = fitparams
     bounds = (
@@ -166,7 +167,7 @@ def fit_singleshot(
     cat_xs = np.concatenate([xs, xs])
     cat_pdfs = np.concatenate([g_pdfs, e_pdfs])
 
-    def calc_cat_pdf(cat_xs, *args):
+    def calc_cat_pdf(cat_xs: NDArray[np.float64], *args: float) -> NDArray[np.float64]:
         p0_g, p0_e = args[3], args[4]
         g_args = list(args)
         e_args = list(args)
@@ -183,7 +184,7 @@ def fit_singleshot(
         bounds=bounds,
         fixedparams=fixedparams,
     )
-    pOpt = cast(Tuple[float, float, float, float, float, float, float], pOpt)
+    pOpt = cast(tuple[float, float, float, float, float, float, float], pOpt)
 
     return pOpt, pCov
 
@@ -193,15 +194,17 @@ def fit_singleshot_p0(
     pdfs: NDArray[np.float64],
     init_p0_g: float,
     init_p0_e: float,
-    ge_params: Tuple[float, float, float, float, float, float, float],
+    ge_params: tuple[float, float, float, float, float, float, float],
     fit_length_ratio: bool = False,
-):
+) -> tuple[tuple[float, float, float], NDArray[np.float64]]:
     sg, se, s, _, _, p_avg, length_ratio = ge_params
 
-    def calc_pdf(xs, p0_g, p0_e, length_ratio):
+    def calc_pdf(
+        xs: NDArray[np.float64], p0_g: float, p0_e: float, length_ratio: float
+    ) -> NDArray[np.float64]:
         return calc_population_pdf(xs, sg, se, s, p0_g, p0_e, p_avg, length_ratio)
 
-    fixedparams: List[Optional[float]] = [None, None, None]
+    fixedparams: list[Optional[float]] = [None, None, None]
     if not fit_length_ratio:
         fixedparams[2] = length_ratio
 
@@ -217,7 +220,7 @@ def fit_singleshot_p0(
         sigma=sigmas,
         absolute_sigma=False,
     )
-    pOpt = cast(Tuple[float, float, float], pOpt)
+    pOpt = cast(tuple[float, float, float], pOpt)
 
     p0_g, p0_e, length_ratio = pOpt
 

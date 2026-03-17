@@ -10,17 +10,7 @@ from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
@@ -49,7 +39,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from .jpa_optimizer import JPAOptimizer
 
-JPAOptimizeResult: TypeAlias = Tuple[
+JPAOptimizeResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.int32], NDArray[np.float64]
 ]
 
@@ -62,12 +52,12 @@ class JPAOptModuleCfg(TypedDict, closed=True):
 
 class JPAOptCfg(ModularProgramCfg, TaskCfg):
     modules: JPAOptModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
     def run(
-        self, soc, soccfg, cfg: Dict[str, Any], num_points: int
+        self, soc, soccfg, cfg: dict[str, Any], num_points: int
     ) -> JPAOptimizeResult:
         _cfg = check_type(deepcopy(cfg), JPAOptCfg)
 
@@ -166,10 +156,10 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
 
             def measure_fn(
                 ctx: TaskState, update_hook: Callable
-            ) -> Tuple[
-                List[NDArray[np.float64]],
-                List[NDArray[np.float64]],
-                List[NDArray[np.float64]],
+            ) -> tuple[
+                list[NDArray[np.float64]],
+                list[NDArray[np.float64]],
+                list[NDArray[np.float64]],
             ]:
                 modules = ctx.cfg["modules"]
                 prog = ModularProgramV2(
@@ -216,7 +206,7 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
 
     def analyze(
         self, result: Optional[JPAOptimizeResult] = None
-    ) -> Tuple[float, float, float, Figure]:
+    ) -> tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

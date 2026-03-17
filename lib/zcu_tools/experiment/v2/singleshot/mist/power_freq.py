@@ -8,16 +8,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Dict,
-    List,
-    NotRequired,
-    Optional,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -39,7 +30,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from ..util import calc_populations
 
-FreqPowerResult: TypeAlias = Tuple[
+FreqPowerResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
 ]
 
@@ -53,7 +44,7 @@ class FreqPowerModuleCfg(TypedDict, closed=True):
 
 class FreqPowerCfg(ModularProgramCfg, TaskCfg):
     modules: FreqPowerModuleCfg
-    sweep: Dict[str, SweepCfg]
+    sweep: dict[str, SweepCfg]
 
 
 class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
@@ -61,7 +52,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         self,
         soc,
         soccfg,
-        cfg: Dict[str, Any],
+        cfg: dict[str, Any],
         g_center: complex,
         e_center: complex,
         radius: float,
@@ -266,7 +257,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: List[str], **kwargs) -> FreqPowerResult:
+    def load(self, filepath: list[str], **kwargs) -> FreqPowerResult:
         g_filepath, e_filepath = filepath
 
         # Load ground populations

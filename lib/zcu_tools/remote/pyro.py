@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import socket
-from typing import Any, Literal, Tuple
 
 import psutil
 import Pyro4
 import Pyro4.naming
 from qick import QickConfig
+from typing_extensions import Any, Literal
 
 from zcu_tools.program.bitfiles import get_bitfile
 
@@ -84,7 +86,7 @@ def make_soc_proxy(
     ns_port: int,
     remote_traceback: bool = True,
     lookup_name: str = "myqick",
-) -> Tuple[Any, QickConfig]:
+) -> tuple[Any, QickConfig]:
     ns = Pyro4.locateNS(host=ns_host, port=ns_port)
 
     soc = Pyro4.Proxy(ns.lookup(lookup_name))
