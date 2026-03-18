@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import warnings
-from typing import Literal, Optional, Tuple, TypeVar, cast
 
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
+from typing_extensions import Literal, Optional, TypeVar, cast
 
 T_dtype = TypeVar("T_dtype", bound=np.number)
 
@@ -228,7 +230,7 @@ def rescale(signals: NDArray[T_dtype], axis: Optional[int] = None) -> NDArray[T_
     return signals
 
 
-def calculate_noise(signals: NDArray[T_dtype]) -> Tuple[float, NDArray[T_dtype]]:
+def calculate_noise(signals: NDArray[T_dtype]) -> tuple[float, NDArray[T_dtype]]:
     """
     Calculate the noise level of the signals
     by comparing the signals with a smoothed version of themselves

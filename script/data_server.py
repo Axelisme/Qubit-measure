@@ -60,8 +60,11 @@ def remote2server():
         return "No selected file", 400
     if not is_allowed_file(file.filename):
         return "Invalid file format", 400
+
     if file:
         return save_file(file)
+    else:
+        return "No file part", 400
 
 
 @app.route("/download", methods=["POST"])

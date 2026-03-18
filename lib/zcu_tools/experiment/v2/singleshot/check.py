@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+import warnings
+from copy import deepcopy
+
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
+
+from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    Pulse,
+    PulseCfg,
+    Readout,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
+)
+from zcu_tools.utils.datasaver import load_data, save_data
+
+from .util import classify_result, plot_with_classified
+
+# (signals)
+CheckResult: TypeAlias = NDArray[np.complex128]
+
+
+class CheckModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
+    init_pulse: NotRequired[PulseCfg]
+    probe_pulse: NotRequired[PulseCfg]
+    readout: ReadoutCfg
+
+
+class CheckCfg(ModularProgramCfg, TaskCfg):
+    modules: CheckModuleCfg
+    shots: int
+
+
+class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> CheckResult:
+        # Validate and setup configuration
+        if cfg.setdefault("rounds", 1) != 1:
+            warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
+            cfg["rounds"] = 1
+
+        if cfg.get("reps", 1) != 1:
+            warnings.warn("reps will be overwritten by singleshot measurement shots")
+        cfg["reps"] = cfg["shots"]
+
+        _cfg = check_type(deepcopy(cfg), CheckCfg)  # avoid in-place modification
+
+        def measure_fn(ctx: TaskState, _) -> NDArray[np.float64]:
+            modules = ctx.cfg["modules"]
+            prog = ModularProgramV2(
+                soccfg,
+                ctx.cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("init_pulse", modules.get("init_pulse")),
+                    Pulse("probe_pulse", modules.get("probe_pulse")),
+                    Readout("readout", modules["readout"]),
+                ],
+            )
+            prog.acquire(soc, progress=True)
+
+            acc_buf = prog.get_raw()
+            assert acc_buf is not None
+
+            length = cast(int, list(prog.ro_chs.values())[0]["length"])
+            avgiq = acc_buf[0] / length  # (reps, 1, 2)
+
+            return avgiq
+
+        def raw2signal_fn(avgiq: NDArray[np.float64]) -> NDArray[np.complex128]:
+            i0, q0 = avgiq[..., 0, 0], avgiq[..., 0, 1]  # (reps, )
+            return np.array(i0 + 1j * q0)  # (reps, )
+
+        signals = run_task(
+            task=Task(
+                measure_fn=measure_fn,
+                raw2signal_fn=raw2signal_fn,
+                result_shape=(_cfg["shots"],),
+            ),
+            init_cfg=_cfg,
+        )
+
+        # Cache results
+        self.last_cfg = _cfg
+        self.last_result = signals
+
+        return signals
+
+    def analyze(
+        self,
+        g_center: complex,
+        e_center: complex,
+        radius: float,
+        result: Optional[CheckResult] = None,
+        max_point: int = 5000,
+    ) -> Figure:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        signals = result
+
+        fig, ax = plt.subplots(figsize=(6, 6))
+
+        mask_g, mask_e, mask_o = classify_result(signals, g_center, e_center, radius)
+        ng = mask_g.sum() / signals.shape[0]
+        ne = mask_e.sum() / signals.shape[0]
+        no = mask_o.sum() / signals.shape[0]
+
+        plot_with_classified(
+            ax, signals, g_center, e_center, radius, max_point=max_point
+        )
+
+        ax.set_title(
+            f"Population: Ground: {ng:.1%}, Excited: {ne:.1%}, Other: {no:.1%}"
+        )
+
+        return fig
+
+    def save(
+        self,
+        filepath: str,
+        result: Optional[CheckResult] = None,
+        comment: Optional[str] = None,
+        tag: str = "singleshot/check",
+        **kwargs,
+    ) -> None:
+        if result is None:
+            result = self.last_result
+        assert result is not None, (
+            "No measurement data available. Run experiment first."
+        )
+
+        signals = result
+
+        shots = np.arange(signals.shape[0])
+
+        save_data(
+            filepath=filepath,
+            x_info={"name": "shot", "unit": "point", "values": shots},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+            comment=comment,
+            tag=tag,
+            **kwargs,
+        )
+
+    def load(self, filepath: str, **kwargs) -> CheckResult:
+        signals, _, _ = load_data(filepath, **kwargs)
+        signals = cast(CheckResult, signals)
+
+        self.last_cfg = None
+        self.last_result = signals
+
+        return signals

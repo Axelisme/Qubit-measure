@@ -1,27 +1,22 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
-from typing import Callable, Dict, Optional, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import List, NotRequired, TypedDict
+from typeguard import check_type
+from typing_extensions import Any, Callable, Optional, TypedDict, cast
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import wrap_earlystop_check
-from zcu_tools.library import ModuleLibrary
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
-from zcu_tools.program.base import SweepCfg
-from zcu_tools.program.v2 import (
-    Pulse,
-    PulseCfg,
-    ReadoutCfg,
-    ResetCfg,
-    TwoToneProgram,
-    TwoToneProgramCfg,
-    sweep2param,
-)
+from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.notebook.utils import make_comment
+from zcu_tools.program import SweepCfg
+from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -29,7 +24,7 @@ from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
-from .executor import FluxDepInfoDict, MeasurementTask, T_RootResultType
+from .executor import FluxDepInfoDict, MeasurementTask, T_RootResult
 
 
 def qubitfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -52,13 +47,12 @@ def qubitfreq_fluxdep_signal2real(
     return np.array(list(map(qubitfreq_signal2real, signals)), dtype=np.float64)
 
 
-class QubitFreqCfgTemplate(TypedDict):
-    reset: NotRequired[ResetCfg]
-    qub_pulse: PulseCfg
-    readout: ReadoutCfg
+class QubitFreqCfgTemplate(TwoToneCfg, TaskCfg): ...
 
 
-class QubitFreqCfg(TaskConfig, TwoToneProgramCfg): ...
+class QubitFreqCfg(TwoToneCfg, TaskCfg):
+    dev: dict[str, DeviceInfo]
+    sweep: dict[str, SweepCfg]
 
 
 class QubitFreqResult(TypedDict, closed=True):
@@ -72,19 +66,18 @@ class QubitFreqResult(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict, closed=True):
+class FreqPlotterDict(TypedDict, closed=True):
     fit_freq: LivePlotter1D
     detune: LivePlotter2DwithLine
 
 
-class QubitFreqMeasurementTask(
-    MeasurementTask[QubitFreqResult, T_RootResultType, TaskConfig, PlotterDictType]
-):
+class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDict]):
     def __init__(
         self,
         detune_sweep: SweepCfg,
         cfg_maker: Callable[
-            [TaskContextView, ModuleLibrary], Optional[QubitFreqCfgTemplate]
+            [TaskState[QubitFreqResult, T_RootResult], ModuleLibrary],
+            Optional[dict[str, Any]],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -92,16 +85,11 @@ class QubitFreqMeasurementTask(
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        self.task = HardTask[
-            np.complex128,
-            T_RootResultType,
-            TwoToneProgramCfg,
-            List[NDArray[np.float64]],
-        ](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=lambda ctx, update_hook: (
-                prog := TwoToneProgram(ctx.env_dict["soccfg"], ctx.cfg)
+                prog := TwoToneProgram(ctx.env["soccfg"], ctx.cfg)
             ).acquire(
-                ctx.env_dict["soc"],
+                ctx.env["soc"],
                 progress=False,
                 callback=wrap_earlystop_check(
                     prog,
@@ -113,12 +101,110 @@ class QubitFreqMeasurementTask(
             result_shape=(self.detune_sweep["expts"],),
         )
 
-    def num_axes(self) -> Dict[str, int]:
+    def init(
+        self, ctx: TaskState[QubitFreqResult, T_RootResult], dynamic_pbar=False
+    ) -> None:
+        self.init_cfg = deepcopy(ctx.cfg)
+        self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+
+    def run(self, ctx: TaskState[QubitFreqResult, T_RootResult]) -> None:
+        predictor: FluxoniumPredictor = ctx.env["predictor"]
+        info: FluxDepInfoDict = ctx.env["info"]
+
+        detunes = sweep2array(self.detune_sweep)
+
+        flx = info["flx_value"]
+        predict_freq = predictor.predict_freq(flx)
+        info["predict_freq"] = predict_freq
+
+        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
+        if cfg_temp is None:
+            return  # skip this task
+        cfg_temp = check_type(cfg_temp, QubitFreqCfgTemplate)
+
+        deepupdate(
+            cast(dict, cfg_temp),
+            {"dev": ctx.cfg["dev"], "sweep": {"detune": self.detune_sweep}},
+        )
+        center_freq = cast(float, cfg_temp["modules"]["qub_pulse"]["freq"])
+        Pulse.set_param(
+            cfg_temp["modules"]["qub_pulse"],
+            "freq",
+            center_freq + sweep2param("detune", self.detune_sweep),
+        )
+        cfg = check_type(cfg_temp, QubitFreqCfg)
+
+        self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
+
+        raw_signals = ctx.value["raw_signals"]
+        assert isinstance(raw_signals, np.ndarray)
+
+        real_signals = qubitfreq_signal2real(raw_signals)
+
+        detune, freq_err, kappa, kappa_err, fit_signals, _ = fit_qubit_freq(
+            detunes, real_signals
+        )
+        fit_freq = center_freq + detune
+
+        success = True
+        mean_err = float(np.mean(np.abs(real_signals - fit_signals)))
+
+        # calibrate if good enough
+        if mean_err < 0.3 * np.ptp(fit_signals):
+            bias = predictor.calculate_bias(flx, fit_freq)
+            predictor.update_bias(bias)
+
+        # if fitting is bad, disgard it
+        if mean_err > 0.2 * np.ptp(fit_signals):
+            detune = np.nan
+            fit_freq = np.nan
+            freq_err = np.nan
+            kappa = np.nan
+            kappa_err = np.nan
+            success = False
+
+        if success:
+            info.update(
+                qubit_freq=fit_freq,
+                fit_detune=detune,
+                fit_kappa=kappa,
+            )
+
+        with MinIntervalFunc.force_execute():
+            ctx.set_value(
+                QubitFreqResult(
+                    raw_signals=raw_signals,
+                    predict_freq=np.array(center_freq),
+                    fit_detune=np.array(detune),
+                    fit_freq=np.array(fit_freq),
+                    fit_freq_err=np.array(freq_err),
+                    fit_kappa=np.array(kappa),
+                    fit_kappa_err=np.array(kappa_err),
+                    success=np.array(success),
+                )
+            )
+
+    def get_default_result(self) -> QubitFreqResult:
+        return QubitFreqResult(
+            raw_signals=self.task.get_default_result(),
+            predict_freq=np.array(np.nan),
+            fit_detune=np.array(np.nan),
+            fit_freq=np.array(np.nan),
+            fit_freq_err=np.array(np.nan),
+            fit_kappa=np.array(np.nan),
+            fit_kappa_err=np.array(np.nan),
+            success=np.array(False),
+        )
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
+
+    def num_axes(self) -> dict[str, int]:
         return dict(fit_freq=1, detune=2)
 
-    def make_plotter(self, name, axs) -> PlotterDictType:
+    def make_plotter(self, name, axs) -> FreqPlotterDict:
         self.freq_line = axs["detune"][1].axvline(np.nan, color="red", linestyle="--")
-        return PlotterDictType(
+        return FreqPlotterDict(
             fit_freq=LivePlotter1D(
                 "Flux device value",
                 "Frequency (MHz)",
@@ -135,10 +221,12 @@ class QubitFreqMeasurementTask(
             ),
         )
 
-    def update_plotter(self, plotters, ctx, signals) -> None:
-        flx_values = ctx.env_dict["flx_values"]
+    def update_plotter(
+        self, plotters, ctx: TaskState, signals: QubitFreqResult
+    ) -> None:
+        flx_values = ctx.env["flx_values"]
 
-        self.freq_line.set_xdata([ctx.env_dict["info"].get("fit_detune", np.nan)])
+        self.freq_line.set_xdata([ctx.env["info"].get("fit_detune", np.nan)])
         plotters["fit_freq"].update(flx_values, signals["fit_freq"], refresh=False)
         plotters["detune"].update(
             flx_values,
@@ -165,7 +253,7 @@ class QubitFreqMeasurementTask(
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/signals",
         )
 
@@ -178,7 +266,7 @@ class QubitFreqMeasurementTask(
                 "unit": "Hz",
                 "values": result["predict_freq"] * 1e6,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/predict_freq",
         )
 
@@ -191,7 +279,7 @@ class QubitFreqMeasurementTask(
                 "unit": "Hz",
                 "values": result["fit_freq"] * 1e6,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/fit_freq",
         )
 
@@ -200,19 +288,20 @@ class QubitFreqMeasurementTask(
             filepath=str(filepath.with_name(filepath.name + "_success")),
             x_info=x_info,
             z_info={"name": "Success", "unit": "bool", "values": result["success"]},
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/success",
         )
 
-    def load(self, filepath: str, **kwargs) -> QubitFreqResult:
+    @classmethod
+    def load(cls, filepath: str, **kwargs) -> dict:
         data = np.load(filepath)
 
-        flx_values = data["flx_values"]
-        detunes = data["detunes"]
-        fit_detune = data["fit_detune"]
-        fit_freq_err = data["fit_freq_err"]
-        fit_kappa = data["fit_kappa"]
-        fit_kappa_err = data["fit_kappa_err"]
+        flx_values: NDArray[np.float64] = data["flx_values"]
+        detunes: NDArray[np.float64] = data["detunes"]
+        fit_detune: NDArray[np.float64] = data["fit_detune"]
+        fit_freq_err: NDArray[np.float64] = data["fit_freq_err"]
+        fit_kappa: NDArray[np.float64] = data["fit_kappa"]
+        fit_kappa_err: NDArray[np.float64] = data["fit_kappa_err"]
 
         signals_stored, flx_sig, detunes_sig = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs
@@ -255,127 +344,13 @@ class QubitFreqMeasurementTask(
         fit_kappa_err = np.asarray(fit_kappa_err, dtype=np.float64)
         success = success_data.astype(np.bool_)
 
-        return QubitFreqResult(
-            raw_signals=raw_signals,
-            predict_freq=predict_freq,
-            fit_detune=fit_detune,
-            fit_freq=fit_freq,
-            fit_freq_err=fit_freq_err,
-            fit_kappa=fit_kappa,
-            fit_kappa_err=fit_kappa_err,
-            success=success,
-        )
-
-    def init(self, ctx, dynamic_pbar=False) -> None:
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
-
-        self.uncalibrate_count = 0
-        self.last_calibrated_flx = ctx.env_dict["info"]["flx_value"] - 1
-        self.last_detune_slope = 0.0
-
-    def run(self, ctx) -> None:
-        ml: ModuleLibrary = ctx.env_dict["ml"]
-        predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
-        info: FluxDepInfoDict = ctx.env_dict["info"]
-
-        detunes = sweep2array(self.detune_sweep)
-
-        flx = info["flx_value"]
-        predict_freq = predictor.predict_freq(flx)
-        if self.uncalibrate_count > 1:
-            # linear predict the detune before next calibration point
-            predict_detune = self.last_detune_slope * (flx - self.last_calibrated_flx)
-            predict_detune = min(predict_detune, np.max(detunes))
-            predict_detune = max(predict_detune, np.min(detunes))
-            predict_freq += predict_detune
-        info["predict_freq"] = predict_freq
-
-        cfg_temp = self.cfg_maker(ctx, ml)
-
-        if cfg_temp is None:
-            return  # skip this task
-
-        cfg_temp = dict(cfg_temp)
-        deepupdate(
-            cfg_temp,
-            {"dev": ctx.cfg.get("dev", {}), "sweep": {"detune": self.detune_sweep}},
-        )
-        cfg_temp = ml.make_cfg(cfg_temp)
-
-        center_freq = cfg_temp["qub_pulse"]["freq"]
-        Pulse.set_param(
-            cfg_temp["qub_pulse"],
-            "freq",
-            center_freq + sweep2param("detune", self.detune_sweep),
-        )
-
-        cfg = cast(QubitFreqCfg, cfg_temp)
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
-
-        raw_signals = ctx.get_data()["raw_signals"]
-        assert isinstance(raw_signals, np.ndarray)
-
-        real_signals = qubitfreq_signal2real(raw_signals)
-
-        detune, freq_err, kappa, kappa_err, fit_signals, _ = fit_qubit_freq(
-            detunes, real_signals
-        )
-        fit_freq = center_freq + detune
-
-        success = True
-        mean_err = np.mean(np.abs(real_signals - fit_signals))
-
-        # calibrate if good enough
-        if mean_err < 0.3 * np.ptp(fit_signals):
-            bias = predictor.calculate_bias(flx, fit_freq)
-            predictor.update_bias(bias)
-            self.uncalibrate_count = 0
-            self.last_detune_slope = detune / (flx - self.last_calibrated_flx)
-            self.last_calibrated_flx = flx
-        else:
-            self.uncalibrate_count += 1
-
-        # if fitting is bad, disgard it
-        if mean_err > 0.2 * np.ptp(fit_signals):
-            detune = np.nan
-            fit_freq = np.nan
-            freq_err = np.nan
-            kappa = np.nan
-            kappa_err = np.nan
-            success = False
-
-        if success:
-            info.update(
-                qubit_freq=fit_freq,
-                fit_detune=detune,
-                fit_kappa=kappa,
-            )
-
-        with MinIntervalFunc.force_execute():
-            ctx.set_data(
-                QubitFreqResult(
-                    raw_signals=raw_signals,
-                    predict_freq=np.array(center_freq),
-                    fit_detune=np.array(detune),
-                    fit_freq=np.array(fit_freq),
-                    fit_freq_err=np.array(freq_err),
-                    fit_kappa=np.array(kappa),
-                    fit_kappa_err=np.array(kappa_err),
-                    success=np.array(success),
-                )
-            )
-
-    def get_default_result(self) -> QubitFreqResult:
-        return QubitFreqResult(
-            raw_signals=self.task.get_default_result(),
-            predict_freq=np.array(np.nan),
-            fit_detune=np.array(np.nan),
-            fit_freq=np.array(np.nan),
-            fit_freq_err=np.array(np.nan),
-            fit_kappa=np.array(np.nan),
-            fit_kappa_err=np.array(np.nan),
-            success=np.array(False),
-        )
-
-    def cleanup(self) -> None:
-        self.task.cleanup()
+        return {
+            "raw_signals": raw_signals,
+            "predict_freq": predict_freq,
+            "fit_detune": fit_detune,
+            "fit_freq": fit_freq,
+            "fit_freq_err": fit_freq_err,
+            "fit_kappa": fit_kappa,
+            "fit_kappa_err": fit_kappa_err,
+            "success": success,
+        }

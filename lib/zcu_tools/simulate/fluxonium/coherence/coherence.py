@@ -1,95 +1,97 @@
-from typing import TYPE_CHECKING, Optional, Tuple
+from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
-    # otherwise, lazy import
-    import scqubits as scq
+    from scqubits.core.fluxonium import Fluxonium
+    from scqubits.core.storage import SpectrumData
 
 
 def calculate_eff_t1_with(
     flx: float,
-    noise_channels: list,
+    noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
-    fluxonium: "scq.Fluxonium",
-    esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-    **other_noise_options: dict,
+    fluxonium: Fluxonium,
+    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    **other_noise_options,
 ) -> float:
-    import scqubits as scq  # lazy import
+    import scqubits.settings as scq_settings
 
-    scq.settings.T1_DEFAULT_WARNING = False
+    old, scq_settings.T1_DEFAULT_WARNING = scq_settings.T1_DEFAULT_WARNING, False
+
     fluxonium.flux = flx
-    return (
-        2
-        * np.pi
-        * fluxonium.t1_effective(
-            noise_channels=noise_channels,
-            common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
-            esys=esys,
-        )
+    t1s = fluxonium.t1_effective(
+        noise_channels=noise_channels,
+        common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
+        esys=esys,
     )
+
+    scq_settings.T1_DEFAULT_WARNING = old
+
+    return 2 * np.pi * t1s  # convert units
 
 
 def calculate_eff_t1(
     flx: float,
-    noise_channels: list,
+    noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     cutoff: int = 40,
     evals_count: int = 20,
-    **other_noise_options: dict,
+    **other_noise_options,
 ) -> float:
-    import scqubits as scq  # lazy import
+    from scqubits.core.fluxonium import Fluxonium
 
-    scq.settings.T1_DEFAULT_WARNING = False
-    fluxonium = scq.Fluxonium(
-        *params, flux=flx, cutoff=cutoff, truncated_dim=evals_count
-    )
-    return (
-        2
-        * np.pi
-        * fluxonium.t1_effective(
-            noise_channels=noise_channels,
-            common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
-        )
+    fluxonium = Fluxonium(*params, flux=flx, cutoff=cutoff, truncated_dim=evals_count)
+
+    return calculate_eff_t1_with(
+        flx, noise_channels, Temp, fluxonium, esys=None, **other_noise_options
     )
 
 
 def calculate_eff_t1_vs_flx_with(
-    flxs: np.ndarray,
-    noise_channels: list,
+    flxs: NDArray[np.float64],
+    noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
-    fluxonium: "scq.Fluxonium",
-    spectrum_data: Optional["scq.SpectrumData"] = None,
-    **other_noise_options: dict,
-) -> np.ndarray:
-    import scqubits as scq  # lazy import
+    fluxonium: Fluxonium,
+    spectrum_data: Optional[SpectrumData] = None,
+    **other_noise_options,
+) -> NDArray[np.float64]:
+    import scqubits.settings as scq_settings
 
-    scq.settings.T1_DEFAULT_WARNING = False
-    return np.asarray(
-        [
-            2
-            * np.pi
-            * fluxonium.set_and_return("flux", flx).t1_effective(
-                noise_channels=noise_channels,
-                common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
-                esys=(spectrum_data.energy_table[i, :], spectrum_data.state_table[i]),
-            )
-            for i, flx in enumerate(flxs)
-        ]
-    )
+    old, scq_settings.T1_DEFAULT_WARNING = scq_settings.T1_DEFAULT_WARNING, False
+
+    eff_t1s = np.zeros_like(flxs, dtype=np.float64)
+    for i, flx in enumerate(flxs):
+        fluxonium.flux = flx
+
+        esys = None
+        if spectrum_data is not None:
+            esys = (spectrum_data.energy_table[i, :], spectrum_data.state_table[i])
+
+        eff_t1s[i] = fluxonium.t1_effective(
+            noise_channels=noise_channels,
+            common_noise_options=dict(i=1, j=0, T=Temp, **other_noise_options),
+            esys=esys,
+        )
+
+    scq_settings.T1_DEFAULT_WARNING = old
+
+    return 2 * np.pi * eff_t1s
 
 
 def calculate_eff_t1_vs_flx(
-    flxs: np.ndarray,
-    noise_channels: list,
+    flxs: NDArray[np.float64],
+    noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     cutoff: int = 40,
     evals_count: int = 20,
-    **other_noise_options: dict,
-) -> np.ndarray:
-    from scqubits import Fluxonium  # lazy import
+    **other_options,
+) -> NDArray[np.float64]:
+    from scqubits.core.fluxonium import Fluxonium
 
     fluxonium = Fluxonium(*params, flux=0.0, cutoff=cutoff, truncated_dim=evals_count)
     spectrum_data = fluxonium.get_spectrum_vs_paramvals(
@@ -100,5 +102,5 @@ def calculate_eff_t1_vs_flx(
         get_eigenstates=True,
     )
     return calculate_eff_t1_vs_flx_with(
-        flxs, noise_channels, Temp, fluxonium, spectrum_data, **other_noise_options
+        flxs, noise_channels, Temp, fluxonium, spectrum_data, **other_options
     )

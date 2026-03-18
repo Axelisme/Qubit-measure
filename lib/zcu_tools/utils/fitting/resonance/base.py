@@ -1,12 +1,16 @@
-from typing import List, Optional, Tuple, Union, cast
+from __future__ import annotations
 
 import numpy as np
 import scipy as sp
+from numpy.typing import NDArray
+from typing_extensions import Union, cast
 
 from ..base import fit_func
 
 
-def get_rough_edelay(fpts, signals) -> float:
+def get_rough_edelay(
+    fpts: NDArray[np.float64], signals: NDArray[np.complex128]
+) -> float:
     signal_ratios = signals[1:] / (signals[:-1] + 1e-12)
 
     slope = np.median(np.angle(signal_ratios)) / (fpts[1] - fpts[0])
@@ -14,11 +18,13 @@ def get_rough_edelay(fpts, signals) -> float:
     return -slope / (2 * np.pi)
 
 
-def remove_edelay(fpts, signals, edelay: float) -> np.ndarray:
+def remove_edelay(
+    fpts: NDArray[np.float64], signals: NDArray[np.complex128], edelay: float
+) -> NDArray[np.complex128]:
     return np.exp(1j * 2 * np.pi * fpts * edelay) * signals
 
 
-def calc_M(xs, ys) -> np.ndarray:
+def calc_M(xs: NDArray[np.float64], ys: NDArray[np.float64]) -> NDArray[np.float64]:
     zs = xs**2 + ys**2
     N = len(zs)
     Mx = np.sum(xs)
@@ -42,7 +48,9 @@ def calc_M(xs, ys) -> np.ndarray:
     return M
 
 
-def fit_circle_params(xs, ys) -> Tuple[float, float, float]:
+def fit_circle_params(
+    xs: NDArray[np.float64], ys: NDArray[np.float64]
+) -> tuple[float, float, float]:
     """[center_x, center_y, radius]"""
     mean_x, mean_y = np.mean(xs), np.mean(ys)
     xs = xs - mean_x
@@ -74,17 +82,17 @@ def fit_circle_params(xs, ys) -> Tuple[float, float, float]:
     return center_x, center_y, radius
 
 
-def fit_edelay(fpts, signals) -> float:
+def fit_edelay(fpts: NDArray[np.float64], signals: NDArray[np.complex128]) -> float:
     rough_edelay = get_rough_edelay(fpts, signals)
     signals = remove_edelay(fpts, signals, rough_edelay)
 
-    def loss_func(edelay):
+    def loss_func(edelay: float) -> float:
         rot_signals = remove_edelay(fpts, signals, edelay)
         xc, yc, r0 = fit_circle_params(rot_signals.real, rot_signals.imag)
         return np.sum(
             (r0 - np.sqrt((rot_signals.real - xc) ** 2 + (rot_signals.imag - yc) ** 2))
             ** 2
-        )
+        ).item()
 
     fit_range = 5.0 / np.ptp(fpts)
     edelays = np.linspace(-fit_range, fit_range, 1000)
@@ -94,17 +102,24 @@ def fit_edelay(fpts, signals) -> float:
     return edelay
 
 
-def calc_phase(signals, xc, yc, axis: int = 0) -> np.ndarray:
+def calc_phase(
+    signals: NDArray[np.complex128], xc: float, yc: float, axis: int = 0
+) -> NDArray[np.float64]:
     return np.unwrap(np.angle(signals - (xc + 1j * yc)), axis=axis)
 
 
-def phase_func(fpts, resonant_f, Ql, theta0: float) -> np.ndarray:
+def phase_func(
+    fpts: NDArray[np.float64], resonant_f: float, Ql: float, theta0: float
+) -> NDArray[np.float64]:
     return theta0 + 2 * np.arctan(2 * Ql * (1 - fpts / resonant_f))
 
 
 def fit_resonant_params(
-    fpts, signals, circle_params: Tuple[float, float, float], fit_theta0=True
-) -> Tuple[float, float, float]:
+    fpts: NDArray[np.float64],
+    signals: NDArray[np.complex128],
+    circle_params: tuple[float, float, float],
+    fit_theta0: bool = True,
+) -> tuple[float, float, float]:
     """[resonant_freq, Ql, theta0]"""
     phases = calc_phase(signals, circle_params[0], circle_params[1])
 
@@ -113,9 +128,9 @@ def fit_resonant_params(
 
     init_freq = fpts[np.argmax(np.abs(np.diff(signals)))]
     init_Ql = 2 * init_freq / fwhm
-    init_theta0 = 0.5 * (np.max(phases) + np.min(phases))
+    init_theta0 = 0.5 * float(np.max(phases) + np.min(phases))
 
-    fixedparams: List[Union[float, None]] = [None] * 3
+    fixedparams: list[Union[float, None]] = [None] * 3
     if not fit_theta0:
         init_theta0 = np.angle(circle_params[0] + 1j * circle_params[1]).item()
         while init_theta0 < np.min(phases):
@@ -136,12 +151,14 @@ def fit_resonant_params(
         fixedparams=fixedparams,
     )
 
-    return cast(Tuple[float, float, float], tuple(pOpt))
+    return cast(tuple[float, float, float], tuple(pOpt))
 
 
 def normalize_signal(
-    signals: np.ndarray, circle_params: Tuple[float, float, float], a0: complex
-) -> Tuple[np.ndarray, Tuple[float, float, float]]:
+    signals: NDArray[np.complex128],
+    circle_params: tuple[float, float, float],
+    a0: complex,
+) -> tuple[NDArray[np.complex128], tuple[float, float, float]]:
     xc, yc, r0 = circle_params
     center = xc + 1j * yc
 

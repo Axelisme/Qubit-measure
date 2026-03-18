@@ -1,14 +1,23 @@
-from typing import Literal, Tuple, cast
+from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import Literal, cast
 
 from .base import fitlor, fitsinc, lorfunc, sincfunc
 
 
 def fit_qubit_freq(
-    fpts: np.ndarray, real_signals: np.ndarray, type: Literal["lor", "sinc"] = "lor"
-) -> Tuple[
-    float, float, float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]
+    fpts: NDArray[np.float64],
+    real_signals: NDArray[np.float64],
+    type: Literal["lor", "sinc"] = "lor",
+) -> tuple[
+    float,
+    float,
+    float,
+    float,
+    NDArray[np.float64],
+    tuple[tuple[float, ...], NDArray[np.float64]],
 ]:
     """[freq, freq_err, kappa, kappa_err, fit_singals, (pOpt, pCov)]"""
     if type == "lor":
@@ -29,6 +38,6 @@ def fit_qubit_freq(
         freq_err = np.sqrt(np.diag(pCov))[3]
         kappa_err = 1.2067 * np.sqrt(np.diag(pCov))[4]
 
-    pOpt = cast(Tuple[float, float, float, float, float], tuple(pOpt))
+    pOpt = cast(tuple[float, float, float, float, float], tuple(pOpt))
 
     return freq, freq_err, kappa, kappa_err, fit_singals, (pOpt, pCov)

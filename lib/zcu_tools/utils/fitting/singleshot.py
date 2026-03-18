@@ -1,13 +1,15 @@
-from typing import List, Optional, Sequence, cast
+from __future__ import annotations
 
 import numpy as np
 import scipy.stats as stats
+from numpy.typing import NDArray
 from scipy.special import iv
+from typing_extensions import Optional, Sequence, cast
 
 from .base import assign_init_p, fit_func
 
 
-def calc_fc(x, rA, rB) -> np.ndarray:
+def calc_fc(x: NDArray[np.float64], rA: float, rB: float) -> NDArray[np.float64]:
     f_c = np.zeros_like(x, dtype=float)
 
     mask_main = (x > 0) & (x <= 1)
@@ -25,7 +27,9 @@ def calc_fc(x, rA, rB) -> np.ndarray:
     return f_c
 
 
-def calc_noise_fc(xs, rA, rB, s) -> np.ndarray:
+def calc_noise_fc(
+    xs: NDArray[np.float64], rA: float, rB: float, s: float
+) -> NDArray[np.float64]:
     assert xs.ndim == 1 and xs.size > 0
     fc = calc_fc(xs, rA, rB)
     dx = (xs.max() - xs.min()) / (xs.size - 1)
@@ -35,7 +39,9 @@ def calc_noise_fc(xs, rA, rB, s) -> np.ndarray:
     return noise_fc
 
 
-def calc_noise_f(xs, rA, rB, s) -> np.ndarray:
+def calc_noise_f(
+    xs: NDArray[np.float64], rA: float, rB: float, s: float
+) -> NDArray[np.float64]:
     noise_f0 = np.exp(-rA) * stats.norm.pdf(xs, loc=0, scale=s)
     if rA != 0.0 or rB != 0.0:
         noise_fc = calc_noise_fc(xs, rA, rB, s)
@@ -45,45 +51,55 @@ def calc_noise_f(xs, rA, rB, s) -> np.ndarray:
     return noise_f / np.sum(noise_f)
 
 
-def calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio) -> np.ndarray:
+def calc_population_pdf(
+    xs: NDArray[np.float64],
+    sg: float,
+    se: float,
+    s: float,
+    p0_g: float,
+    p0_e: float,
+    p_avg: float,
+    length_ratio: float,
+) -> NDArray[np.float64]:
     rg = p_avg * length_ratio
     re = (1 - p_avg) * length_ratio
     norm_s = s / abs(se - sg)
     norm_g_f = calc_noise_f((xs - sg) / (se - sg), rg, re, norm_s)
     norm_e_f = calc_noise_f((xs - se) / (sg - se), re, rg, norm_s)
-    norm_f = (1 - p0) * norm_g_f + p0 * norm_e_f
-    return norm_f / np.sum(norm_f)
+    norm_f = p0_g * norm_g_f + p0_e * norm_e_f
+    return norm_f / np.sum(norm_f) * (p0_g + p0_e)
 
 
-def gauss_func(xs, x_c, s) -> np.ndarray:
+def gauss_func(xs: NDArray[np.float64], x_c: float, s: float) -> NDArray[np.float64]:
     """params: [x_c, s]"""
     f = stats.norm.pdf(xs, loc=x_c, scale=s)
     return f / np.sum(f)
 
 
 def fit_singleshot(
-    xs,
-    g_pdfs,
-    e_pdfs,
+    xs: NDArray[np.float64],
+    g_pdfs: NDArray[np.float64],
+    e_pdfs: NDArray[np.float64],
     fitparams: Optional[Sequence[Optional[float]]] = None,
     fixedparams: Optional[Sequence[Optional[float]]] = None,
-):
-    """fitparams: [sg, se, s, p0, p_avg, length_ratio]"""
+) -> tuple[tuple[float, float, float, float, float, float, float], NDArray[np.float64]]:
+    """fitparams: [sg, se, s, p0_g, p0_e, p_avg, length_ratio]"""
     if fixedparams is not None:
-        if len(fixedparams) != 6:
+        if len(fixedparams) != 7:
             raise ValueError(
-                "Fixed parameters must be a list of six elements: [sg, se, s, p0, p_avg, length_ratio]"
+                "Fixed parameters must be a list of six elements: [sg, se, s, p0_g, p0_e, p_avg, length_ratio]"
             )
 
         fixedparams = list(fixedparams)
 
-        length_ratio = fixedparams[5]
+        length_ratio = fixedparams[6]
         if length_ratio == 0.0:
             # p_avg not affecting the result
-            fixedparams[4] = 0.5 if fixedparams[4] is None else fixedparams[4]
+            fixedparams[5] = 0.5 if fixedparams[5] is None else fixedparams[5]
 
     if fitparams is None:
-        fitparams = [None] * 6
+        fitparams = [None] * 7
+    fitparams = list(fitparams)
 
     # guess initial parameters
     if any([p is None for p in fitparams]):
@@ -115,14 +131,15 @@ def fit_singleshot(
         g_tran_pop = np.sum(g_pdfs[e_idxs])
         e_tran_pop = np.sum(e_pdfs[g_idxs])
 
-        p0 = min(0.5 * (g_tran_pop + e_tran_pop), 0.5)
+        p0_g = min(0.5 * (g_tran_pop + e_tran_pop), 0.5)
+        p0_e = 1 - p0_g
         p_avg = min(e_tran_pop / (g_tran_pop + e_tran_pop), 0.5)
         length_ratio = 0.01
 
-        assign_init_p(fitparams, [sg, se, s, p0, p_avg, length_ratio])
-    fitparams = cast(List[float], fitparams)
+        assign_init_p(fitparams, [sg, se, s, p0_g, p0_e, p_avg, length_ratio])
+    fitparams = cast(list[float], fitparams)
 
-    sg, se, s, p0, p_avg, length_ratio = fitparams
+    sg, se, s, p0_g, p0_e, p_avg, length_ratio = fitparams
     bounds = (
         [
             se if se < sg else np.min(xs),
@@ -131,12 +148,14 @@ def fit_singleshot(
             0.0,
             0.0,
             0.0,
+            0.0,
         ],
         [
             se if se > sg else np.max(xs),
             sg if sg > se else np.max(xs),
             xs[-1] - xs[0],
-            0.5,
+            1.0,
+            1.0,
             0.5,
             3.0,
         ],
@@ -148,16 +167,16 @@ def fit_singleshot(
     cat_xs = np.concatenate([xs, xs])
     cat_pdfs = np.concatenate([g_pdfs, e_pdfs])
 
-    def calc_cat_pdf(cat_xs, *args):
-        p0 = args[3]
+    def calc_cat_pdf(cat_xs: NDArray[np.float64], *args: float) -> NDArray[np.float64]:
+        p0_g, p0_e = args[3], args[4]
         g_args = list(args)
         e_args = list(args)
-        e_args[3] = 1.0 - p0
+        e_args[3], e_args[4] = p0_e, p0_g
         g_pdf = calc_population_pdf(cat_xs[: len(xs)], *g_args)
         e_pdf = calc_population_pdf(cat_xs[len(xs) :], *e_args)
         return np.concatenate([g_pdf, e_pdf])
 
-    return fit_func(
+    pOpt, pCov = fit_func(
         cat_xs,
         cat_pdfs,
         calc_cat_pdf,
@@ -165,22 +184,44 @@ def fit_singleshot(
         bounds=bounds,
         fixedparams=fixedparams,
     )
+    pOpt = cast(tuple[float, float, float, float, float, float, float], pOpt)
+
+    return pOpt, pCov
 
 
-def fit_singleshot_p0(xs, pdfs, init_p0, ge_params, fit_length_ratio=False):
-    sg, se, s, _, p_avg, length_ratio = ge_params
+def fit_singleshot_p0(
+    xs: NDArray[np.float64],
+    pdfs: NDArray[np.float64],
+    init_p0_g: float,
+    init_p0_e: float,
+    ge_params: tuple[float, float, float, float, float, float, float],
+    fit_length_ratio: bool = False,
+) -> tuple[tuple[float, float, float], NDArray[np.float64]]:
+    sg, se, s, _, _, p_avg, length_ratio = ge_params
 
-    def calc_pdf(xs, p0, length_ratio):
-        return calc_population_pdf(xs, sg, se, s, p0, p_avg, length_ratio)
+    def calc_pdf(
+        xs: NDArray[np.float64], p0_g: float, p0_e: float, length_ratio: float
+    ) -> NDArray[np.float64]:
+        return calc_population_pdf(xs, sg, se, s, p0_g, p0_e, p_avg, length_ratio)
 
-    fixedparams = [None, None]
+    fixedparams: list[Optional[float]] = [None, None, None]
     if not fit_length_ratio:
-        fixedparams[1] = length_ratio
+        fixedparams[2] = length_ratio
 
-    return fit_func(
+    weights = init_p0_g * gauss_func(xs, sg, s) + init_p0_e * gauss_func(xs, se, s)
+    sigmas = 1 / np.sqrt(weights)
+
+    pOpt, pCov = fit_func(
         xs,
         pdfs,
         calc_pdf,
-        init_p=[init_p0, length_ratio],
-        bounds=([0.0, 0.5 * length_ratio], [1.0, 2.0 * length_ratio]),
+        init_p=[init_p0_g, init_p0_e, length_ratio],
+        bounds=([0.0, 0.0, 0.5 * length_ratio], [1.0, 1.0, 2.0 * length_ratio]),
+        sigma=sigmas,
+        absolute_sigma=False,
     )
+    pOpt = cast(tuple[float, float, float], pOpt)
+
+    p0_g, p0_e, length_ratio = pOpt
+
+    return (p0_g, p0_e, length_ratio), pCov

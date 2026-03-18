@@ -1,4 +1,2 @@
-from .freq import FreqExperiment
-from .length import LengthExperiment
-
-__all__ = ["FreqExperiment", "LengthExperiment"]
+from .freq import FreqExp
+from .length import LengthExp

@@ -5,9 +5,9 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.17.2
+      jupytext_version: 1.19.1
   kernelspec:
-    display_name: axelenv13
+    display_name: .venv
     language: python
     name: python3
 ---
@@ -15,8 +15,9 @@ jupyter:
 ```python
 %load_ext autoreload
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, cast
 
+import qutip as qt
 import numpy as np
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
@@ -24,33 +25,35 @@ import matplotlib.pyplot as plt
 from IPython.display import display
 
 %autoreload 2
-from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.notebook.persistance import load_result
-from zcu_tools.notebook.analysis.branch import (
+from zcu_tools.meta_tool import MetaDict
+from zcu_tools.simulate import mA2flx
+from zcu_tools.notebook.analysis.mist.branch import (
     plot_cn_over_flx,
     plot_populations_over_photon,
-    plot_chi_and_snr_over_photon,
     calc_critical_photons,
+    plot_transition_over_photon,
 )
 from zcu_tools.simulate.fluxonium.branch.floquet import (
     FloquetBranchAnalysis,
     FloquetWithTLSBranchAnalysis,
 )
-from zcu_tools.notebook.analysis.design import calc_snr
 ```
 
 # Load Parameters
 
 ```python
-qub_name = "Si001"
+qub_name = "Q12_2D[6]/Q1"
 
-os.makedirs(f"../../../result/{qub_name}/image/branch_floquet", exist_ok=True)
-os.makedirs(f"../../../result/{qub_name}/web/branch_floquet", exist_ok=True)
-os.makedirs(f"../../../result/{qub_name}/data/branch_floquet", exist_ok=True)
+result_dir = f"../../../result/{qub_name}"
+
+os.makedirs(f"{result_dir}/image/branch_floquet", exist_ok=True)
+os.makedirs(f"{result_dir}/web/branch_floquet", exist_ok=True)
+os.makedirs(f"{result_dir}/data/branch_floquet", exist_ok=True)
 ```
 
 ```python
-loadpath = f"../../../result/{qub_name}/params.json"
+loadpath = f"{result_dir}/params.json"
 _, params, mA_c, period, allows, data_dict = load_result(loadpath)
 
 print(f"EJ: {params[0]:.3f} GHz, EC: {params[1]:.3f} GHz, EL: {params[2]:.3f} GHz")
@@ -63,60 +66,96 @@ elif "r_f" in allows:
     r_f = allows["r_f"]
     print(f"r_f: {r_f} GHz")
 
-rf_w = 4.2e-3  # GHz
 
-predictor = FluxoniumPredictor(loadpath)
-```
-
-# SNR power dependence
-
-```python
-# r_f = 5.927
-# r_f = 7.5
-rf_w = 0.0041
-g = 0.1
-flx = 0.5
-
-qub_dim = 20
-qub_cutoff = 60
-max_photon = 120
-
-photons, chi_over_n, snrs = calc_snr(
-    params, r_f, g, flx, qub_dim, qub_cutoff, max_photon, rf_w
-)
+# g = 70e-3  # GHz
+# rf_w = 6.1e-3  # GHz
 ```
 
 ```python
-fig, _ = plot_chi_and_snr_over_photon(photons, chi_over_n, snrs, qub_name, flx)
-
-fig.savefig(f"../../../result/{qub_name}/image/branch_floquet/snr_over_n_flx{flx}.png")
-plt.show()
+md = MetaDict(json_path=f"{result_dir}/meta_info.json", read_only=True)
 ```
 
 # Single
 
 ```python
-flx = predictor.A_to_flx(1.162e-3)
+# flx = 0.8
+flx = mA2flx(md.cur_A, md.mA_c, 2 * abs(md.mA_e - md.mA_c))
 flx
 ```
 
 ```python
-# r_f = 5.25
-rf_w = 0.0041
-g = 0.1
-# flx = 0.5
+qub_dim = 30
+qub_cutoff = 50
+max_photon = 400
 
+amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), 1e-3 * md.rf_w)
+photons = (amps / (2 * g)) ** 2
+
+
+def calc_energies(branchs: List[int]) -> Dict[int, np.ndarray]:
+    avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
+
+    fb_analysis = FloquetBranchAnalysis(
+        params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
+    )
+
+    fbasis_n = Parallel(n_jobs=-1)(
+        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
+        for photon in tqdm(photons, desc="Computing Floquet basis")
+    )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
+
+    branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs)
+    branch_energies = fb_analysis.calc_branch_energies(fbasis_n, branch_infos)
+
+    return {k: np.asarray(v) for k, v in branch_energies.items()}
+```
+
+```python
+branchs = list(range(15))
+branch_energies = calc_energies(branchs)
+```
+
+```python
+from zcu_tools.notebook.analysis.mist.branch import round_to_nearest
+from scqubits.core.fluxonium import Fluxonium
+
+fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
+
+E_n0 = fluxonium.eigenvals(evals_count=15)
+
+transitions = {}
+E_01 = branch_energies[1] - branch_energies[0]
+E_01 += (E_n0[1] - E_n0[0]) - E_01[0]
+for i in (0, 1):
+    for j in range(i + 1, 15):
+        E_ij = branch_energies[j] - branch_energies[i]
+        E_ij += (E_n0[j] - E_n0[i]) - E_ij[0]
+
+        transitions[f"{i} → {j}"] = round_to_nearest(E_01, E_ij, r_f)
+
+        for k in [2]:
+            transitions[f"{i} → {j} half"] = E_ij / k
+
+```
+
+```python
+fig = plot_transition_over_photon(photons, transitions, threshold=g)
+fig.show()
+```
+
+```python
 qub_dim = 40
-qub_cutoff = 80
-max_photon = 20
+qub_cutoff = 60
+max_photon = 500
 
-amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
+amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), 1e-3 * md.rf_w)
 photons = (amps / (2 * g)) ** 2
 
 
 def calc_populations(
     branchs: List[int], progress: bool = True
-) -> Tuple[Dict[int, List[int]], Dict[int, List[float]]]:
+) -> Dict[int, np.ndarray]:
     avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
 
     fb_analysis = FloquetBranchAnalysis(
@@ -129,13 +168,14 @@ def calc_populations(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     branch_populations = fb_analysis.calc_branch_populations(
         fbasis_n, branch_infos, avg_times, progress=progress
     )
 
-    return branch_populations
+    return {k: np.asarray(v) for k, v in branch_populations.items()}
 ```
 
 ```python
@@ -147,12 +187,8 @@ branch_populations = calc_populations(branchs)
 ```python
 fig = plot_populations_over_photon(branchs, photons, branch_populations)
 
-fig.write_html(
-    f"../../../result/{qub_name}/web/branch_floquet/populations_phi{flx:0.2f}.html"
-)
-fig.write_image(
-    f"../../../result/{qub_name}/image/branch_floquet/populations_phi{flx:0.2f}.png"
-)
+fig.write_html(f"{result_dir}/web/branch_floquet/populations_phi{flx:0.2f}.html")
+fig.write_image(f"{result_dir}/image/branch_floquet/populations_phi{flx:0.2f}.png")
 fig.show()
 ```
 
@@ -187,6 +223,7 @@ def calc_populations_with_tls(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     branch_populations = fb_analysis.calc_branch_populations(
@@ -216,6 +253,7 @@ im = ax.imshow(
     vmax=2.0,
 )
 dh = display(fig, display_id=True)
+assert dh is not None
 for i, E_tls in enumerate(tqdm(E_tls_list, desc="Sweeping E_tls")):
     branch_populations = calc_populations_with_tls(
         branchs, E_tls, g_tls, progress=False
@@ -274,13 +312,9 @@ peak_Etls
 # Sweep flux
 
 ```python
-# r_f = 5.7945
-# rf_w = 0.006
-# g = 0.11
-
 qub_dim = 30
 qub_cutoff = 60
-max_photon = 70
+max_photon = 100
 
 amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
 photons = (amps / (2 * g)) ** 2
@@ -304,6 +338,7 @@ def calc_populations_with_flx(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     branch_populations = fb_analysis.calc_branch_populations(
@@ -314,7 +349,7 @@ def calc_populations_with_flx(
 ```
 
 ```python
-flxs = np.linspace(0.0, 0.5, 1001)
+flxs = np.linspace(-0.1, 0.6, 1001)
 branchs = [0, 1]
 
 pop_over_flx = []
@@ -329,7 +364,7 @@ pop_over_flx = np.array(pop_over_flx)
 
 ```python
 np.savez_compressed(
-    f"../../../result/{qub_name}/data/branch_floquet/populations_over_flx.npz",
+    f"{result_dir}/data/branch_floquet/populations_over_flx.npz",
     flxs=flxs,
     branchs=branchs,
     photons=photons,
@@ -338,19 +373,19 @@ np.savez_compressed(
 ```
 
 ```python
-data = np.load(f"../../../result/{qub_name}/data/branch_floquet/populations_over_flx.npz")
+data = np.load(f"{result_dir}/data/branch_floquet/populations_over_flx.npz")
 flxs = data["flxs"]
 photons = data["photons"]
 pop_over_flx = data["populations_over_flx"]
 
-fig = plot_cn_over_flx(flxs, photons, pop_over_flx, {0: 4, 1: 5})
+fig = plot_cn_over_flx(flxs, photons, pop_over_flx, {0: 1, 1: 2})
 # fig.update_layout(height=600, width=800)
 
 # fig.add_vline(x=1-flx)
 
 # Save the figure
-fig.write_html(f"../../../result/{qub_name}/web/branch_floquet/cn_over_flx.html")
-fig.write_image(f"../../../result/{qub_name}/image/branch_floquet/cn_over_flx.png")
+fig.write_html(f"{result_dir}/web/branch_floquet/cn_over_flx.html")
+fig.write_image(f"{result_dir}/image/branch_floquet/cn_over_flx.png")
 
 fig.show()
 ```
@@ -391,6 +426,7 @@ def calc_populations_with_flx(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     branch_populations = fb_analysis.calc_branch_populations(
@@ -476,6 +512,7 @@ def calc_populations_with_rf(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     branch_populations = fb_analysis.calc_branch_populations(
@@ -517,6 +554,7 @@ im_e = ax_e.imshow(
     vmax=3.0,
 )
 dh = display(fig, display_id=True)
+assert dh is not None
 for i, r_f in enumerate(tqdm(rfs, desc="Sweeping r_f")):
     if not np.any(np.isnan(pop_over_rf[i])):
         continue

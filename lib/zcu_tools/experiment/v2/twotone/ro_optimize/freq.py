@@ -1,18 +1,22 @@
+from __future__ import annotations
+
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -26,76 +30,81 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-FreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class OptimizeFreqTaskConfig(TaskConfig, ModularProgramCfg):
+class FreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class OptimizeFreqExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: OptimizeFreqTaskConfig) -> FreqResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class FreqCfg(ModularProgramCfg, TaskCfg):
+    modules: FreqModuleCfg
+    sweep: dict[str, SweepCfg]
 
-        assert "sweep" in cfg
+
+class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        cfg["sweep"] = {"ge": make_ge_sweep(), "freq": cfg["sweep"]["freq"]}
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
 
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+        _cfg["sweep"] = {"ge": make_ge_sweep(), "freq": _cfg["sweep"]["freq"]}
 
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
+
+        modules = _cfg["modules"]
         Pulse.set_param(
-            cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
         Readout.set_param(
-            cfg["readout"], "freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["readout"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
         )
 
         with LivePlotter1D("Frequency (MHz)", "SNR") as viewer:
-            signals = run_task(
-                task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        (
-                            prog := ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset", ctx.cfg.get("reset", {"type": "none"})
-                                    ),
-                                    Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                                    Readout("readout", ctx.cfg["readout"]),
-                                ],
-                            )
-                        )
-                        and (
-                            prog.acquire(
-                                soc,
-                                progress=False,
-                                callback=update_hook,
-                                record_statistic=True,
-                            ),
-                            prog.get_covariance(),
-                            prog.get_median(),
-                        )
+
+            def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
                     ),
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
+            signals = run_task(
+                task=Task(
+                    measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     result_shape=(len(fpts),),
+                    dtype=np.float64,
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(fpts, np.abs(ctx.data)),
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(fpts, np.abs(ctx.root_data)),
             )
 
         # record the last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (fpts, signals)
 
         return fpts, signals  # fpts
 
     def analyze(
-        self, result: Optional[FreqResultType] = None, *, smooth: float = 1.0
-    ) -> Tuple[float, Figure]:
+        self, result: Optional[FreqResult] = None, *, smooth: float = 1.0
+    ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -127,7 +136,7 @@ class OptimizeFreqExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/freq",
         **kwargs,
@@ -147,7 +156,7 @@ class OptimizeFreqExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> FreqResultType:
+    def load(self, filepath: str, **kwargs) -> FreqResult:
         signals, fpts, _ = load_data(filepath, **kwargs)
         assert fpts is not None
         assert len(fpts.shape) == 1 and len(signals.shape) == 1

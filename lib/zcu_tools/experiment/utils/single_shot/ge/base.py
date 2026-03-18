@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Optional, Tuple, Union
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,8 +6,8 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.special import erfc
+from typing_extensions import Any, Callable, Optional, TypedDict, Union
 
-# from zcu_tools.utils.fitting import fit_dual_gauss, gauss_func
 from zcu_tools.utils.fitting.singleshot import (
     calc_population_pdf,
     fit_singleshot,
@@ -17,8 +17,8 @@ from zcu_tools.utils.fitting.singleshot import (
 
 
 def rotate(
-    I_orig: np.ndarray, Q_orig: np.ndarray, theta: float
-) -> Tuple[np.ndarray, np.ndarray]:
+    I_orig: NDArray[np.float64], Q_orig: NDArray[np.float64], theta: float
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     I_new = I_orig * np.cos(theta) - Q_orig * np.sin(theta)
     Q_new = I_orig * np.sin(theta) + Q_orig * np.cos(theta)
     return I_new, Q_new
@@ -26,8 +26,8 @@ def rotate(
 
 def scatter_ge_plot(
     ax: Axes,
-    Ige: Tuple[np.ndarray, np.ndarray],
-    Qge: Tuple[np.ndarray, np.ndarray],
+    Ige: tuple[NDArray[np.float64], NDArray[np.float64]],
+    Qge: tuple[NDArray[np.float64], NDArray[np.float64]],
     title: Optional[str] = None,
     max_points: int = 10000,
 ) -> None:
@@ -80,14 +80,14 @@ def scatter_ge_plot(
 
 
 def hist(
-    Ig: np.ndarray,
-    Ie: np.ndarray,
+    Ig: NDArray[np.float64],
+    Ie: NDArray[np.float64],
     numbins: Union[int, str] = "auto",
     ax: Optional[Axes] = None,
     title: Optional[str] = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     I_tot = np.concatenate((Ie, Ig))
-    xlims = (np.min(I_tot), np.max(I_tot))
+    xlims = (np.min(I_tot).item(), np.max(I_tot).item())
     bins = np.histogram_bin_edges(I_tot, bins=numbins)
     ng, *_ = np.histogram(Ig, bins=bins, range=xlims)
     ne, *_ = np.histogram(Ie, bins=bins, range=xlims)
@@ -117,8 +117,8 @@ def fidelity_func(tp: float, tn: float, fp: float, fn: float) -> float:
 
 
 def calc_fidelity(
-    ng: np.ndarray, ne: np.ndarray, bins: np.ndarray
-) -> Tuple[float, float]:
+    ng: NDArray[np.float64], ne: NDArray[np.float64], bins: NDArray[np.float64]
+) -> tuple[float, float]:
     cum_ng, cum_ne = np.cumsum(ng), np.cumsum(ne)
     contrast = np.abs(2 * (cum_ng - cum_ne) / (ng.sum() + ne.sum()))
     tind = contrast.argmax()
@@ -147,16 +147,40 @@ def calc_ideal_fidelity(sg: float, se: float, s: float) -> float:
     return fidelity_func(tp=tp, tn=tn, fp=fp, fn=fn)
 
 
+class GE_FitResult(TypedDict, closed=True):
+    ge_params: tuple[float, float, float, float, float, float, float]
+    p0_gg: float
+    p0_ge: float
+    p0_eg: float
+    p0_ee: float
+    s: float
+    length_ratio_g: float
+    length_ratio_e: float
+    theta: float
+    threshold: float
+    g_center: complex
+    e_center: complex
+
+
 def fitting_ge_and_plot(
-    signals: np.ndarray,
-    classify_func: Callable[[np.ndarray, np.ndarray, np.ndarray, np.ndarray], Dict],
+    signals: NDArray[np.complex128],
+    classify_func: Callable[
+        [
+            NDArray[np.float64],
+            NDArray[np.float64],
+            NDArray[np.float64],
+            NDArray[np.float64],
+        ],
+        dict[str, Any],
+    ],
     numbins: Union[int, str] = "auto",
     logscale: bool = False,
     length_ratio: Optional[float] = None,
-    init_p0: Optional[float] = None,
+    init_p0_g: Optional[float] = None,
+    init_p0_e: Optional[float] = None,
     avg_p: Optional[float] = None,
     align_t1: bool = True,
-) -> Tuple[float, NDArray, Dict, Figure]:
+) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
     Ig, Ie = signals.real
     Qg, Qe = signals.imag
 
@@ -179,30 +203,37 @@ def fitting_ge_and_plot(
     axs[0, 1].hist(xs, bins=bins, weights=g_pdfs, color="b", alpha=0.5)
     axs[1, 1].hist(xs, bins=bins, weights=e_pdfs, color="r", alpha=0.5)
 
-    fixedparams = [None, None, None, init_p0, avg_p, length_ratio]
+    fixedparams = [None, None, None, init_p0_g, init_p0_e, avg_p, length_ratio]
     ge_params, _ = fit_singleshot(xs, g_pdfs, e_pdfs, fixedparams=fixedparams)
-    sg, se, s, p0, p_avg, length_ratio = ge_params
-    (p0_g, l_ratio_g), _ = fit_singleshot_p0(
-        xs, g_pdfs, init_p0=p0, ge_params=ge_params, fit_length_ratio=not align_t1
+    sg, se, s, p0_gg, p0_ge, p_avg, length_ratio = ge_params
+    (p0_gg, p0_ge, l_ratio_g), _ = fit_singleshot_p0(
+        xs, g_pdfs, p0_gg, p0_ge, ge_params=ge_params, fit_length_ratio=not align_t1
     )
-    (p0_e, l_ratio_e), _ = fit_singleshot_p0(
-        xs, e_pdfs, init_p0=1.0 - p0, ge_params=ge_params, fit_length_ratio=not align_t1
+    (p0_eg, p0_ee, l_ratio_e), _ = fit_singleshot_p0(
+        xs, e_pdfs, p0_ge, p0_gg, ge_params=ge_params, fit_length_ratio=not align_t1
     )
-    fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_g, p_avg, l_ratio_g)
-    fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_e, p_avg, l_ratio_e)
+    # p0_eg = p0_ge
+    # p0_ee = p0_gg
+    # l_ratio_g = length_ratio
+    # l_ratio_e = length_ratio
 
-    n_gg = 1.0 - p0_g
-    n_ge = p0_g
-    n_ee = p0_e
-    n_eg = 1.0 - p0_e
+    p0_go = 1 - p0_gg - p0_ge
+    p0_eo = 1 - p0_eg - p0_ee
 
-    gg_fit = n_gg * gauss_func(xs, sg, s)
-    ge_fit = n_ge * gauss_func(xs, se, s)
-    eg_fit = n_eg * gauss_func(xs, sg, s)
-    ee_fit = n_ee * gauss_func(xs, se, s)
+    fit_g_pdfs = calc_population_pdf(xs, sg, se, s, p0_gg, p0_ge, p_avg, l_ratio_g)
+    fit_e_pdfs = calc_population_pdf(xs, sg, se, s, p0_eg, p0_ee, p_avg, l_ratio_e)
+    gg_fit = p0_gg * gauss_func(xs, sg, s)
+    ge_fit = p0_ge * gauss_func(xs, se, s)
+    eg_fit = p0_eg * gauss_func(xs, sg, s)
+    ee_fit = p0_ee * gauss_func(xs, se, s)
 
-    rotated_g_center = sg + 1j * np.median(Qg)
-    rotated_e_center = se + 1j * np.median(Qe)
+    residual_g = np.clip(g_pdfs - fit_g_pdfs, 0.0, None)
+    residual_e = np.clip(e_pdfs - fit_e_pdfs, 0.0, None)
+
+    Qg_mask = (Ig > sg - 2 * s) & (Ig < sg + 2 * s)
+    Qe_mask = (Ie > se - 2 * s) & (Ie < se + 2 * s)
+    rotated_g_center = sg + 1j * np.median(Qg[Qg_mask])
+    rotated_e_center = se + 1j * np.median(Qe[Qe_mask])
 
     plt_params = dict(linestyle=":", marker="o", markersize=5)
     axs[0, 0].plot(
@@ -223,17 +254,19 @@ def fitting_ge_and_plot(
 
     axs[0, 1].plot(xs, fit_g_pdfs, "k-", label="total")
     if length_ratio != 0.0:
-        axs[0, 1].plot(xs, gg_fit + ge_fit, "k--", alpha=0.3, label="ideal total")
-    axs[0, 1].plot(xs, gg_fit, "b-", alpha=0.3)
-    axs[0, 1].plot(xs, ge_fit, "r--", alpha=0.3)
-    axs[0, 1].set_title(f"{n_gg:.1%} / {n_ge:.1%}", fontsize=14)
+        axs[0, 1].plot(xs, gg_fit + ge_fit, "k--", alpha=0.5, label="ideal total")
+    axs[0, 1].plot(xs, gg_fit, "b-", alpha=0.4, label="ground")
+    axs[0, 1].plot(xs, ge_fit, "r--", alpha=0.4, label="excited")
+    axs[0, 1].plot(xs, residual_g, "g--", alpha=0.5, label="other")
+    axs[0, 1].set_title(f"{p0_gg:.1%} / {p0_ge:.1%} / {p0_go:.1%}", fontsize=14)
     axs[0, 1].legend()
     axs[1, 1].plot(xs, fit_e_pdfs, "k-", label="total")
     if length_ratio != 0.0:
-        axs[1, 1].plot(xs, eg_fit + ee_fit, "k--", alpha=0.3, label="ideal total")
-    axs[1, 1].plot(xs, ee_fit, "r-", alpha=0.3)
-    axs[1, 1].plot(xs, eg_fit, "b--", alpha=0.3)
-    axs[1, 1].set_title(f"{n_eg:.1%} / {n_ee:.1%}", fontsize=14)
+        axs[1, 1].plot(xs, eg_fit + ee_fit, "k--", alpha=0.5, label="ideal total")
+    axs[1, 1].plot(xs, ee_fit, "r-", alpha=0.4, label="excited")
+    axs[1, 1].plot(xs, eg_fit, "b--", alpha=0.4, label="ground")
+    axs[1, 1].plot(xs, residual_e, "g--", alpha=0.5, label="other")
+    axs[1, 1].set_title(f"{p0_eg:.1%} / {p0_ee:.1%} / {p0_eo:.1%}", fontsize=14)
     axs[1, 1].legend()
 
     axs[1, 0].plot(xs, fit_g_pdfs, "b-", label="g")
@@ -269,20 +302,23 @@ def fitting_ge_and_plot(
         fid,
         np.array(
             [
-                [n_gg, n_ge],
-                [n_eg, n_ee],
+                [p0_gg, p0_ge],
+                [p0_eg, p0_ee],
             ]
         ),
-        {
-            "ge_params": ge_params,
-            "p0_g": p0_g,
-            "p0_e": p0_e,
-            "length_ratio_g": l_ratio_g,
-            "length_ratio_e": l_ratio_e,
-            "theta": theta,
-            "threshold": threshold,
-            "g_center": rotated_g_center * np.exp(-1j * theta),
-            "e_center": rotated_e_center * np.exp(-1j * theta),
-        },
+        GE_FitResult(
+            ge_params=ge_params,
+            p0_gg=p0_gg,
+            p0_ge=p0_ge,
+            p0_eg=p0_eg,
+            p0_ee=p0_ee,
+            s=s,
+            length_ratio_g=l_ratio_g,
+            length_ratio_e=l_ratio_e,
+            theta=theta,
+            threshold=threshold,
+            g_center=rotated_g_center * np.exp(-1j * theta),
+            e_center=rotated_e_center * np.exp(-1j * theta),
+        ),
         fig,
     )

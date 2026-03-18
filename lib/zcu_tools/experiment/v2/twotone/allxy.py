@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Dict, Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, Mapping, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.v2.runner import BatchTask, Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -24,10 +25,8 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-from ..runner import BatchTask, HardTask, TaskConfig, run_task
-
 # (sequence, signals)
-AllXYResultType = Dict[Tuple[str, str], NDArray[np.complex128]]
+AllXY_Result: TypeAlias = dict[tuple[str, str], NDArray[np.complex128]]
 
 # Standard AllXY sequence of 21 gate pairs
 ALLXY_SEQUENCE = [
@@ -60,7 +59,7 @@ ALLXY_SEQUENCE = [
 
 
 def predict_state_with_error(
-    gates: Tuple[str, str], power_err: float, detune_err: float
+    gates: tuple[str, str], power_err: float, detune_err: float
 ) -> float:
     ep = power_err
     ed = detune_err
@@ -95,7 +94,7 @@ def predict_state_with_error(
 
 
 def allxy_signal2real(
-    signals_dict: Mapping[Tuple[str, str], NDArray[np.complex128]],
+    signals_dict: Mapping[tuple[str, str], NDArray[np.complex128]],
 ) -> NDArray[np.float64]:
     all_signals = np.array(list(signals_dict.values()))
     return rotate2real(all_signals).real  # type: ignore
@@ -106,8 +105,9 @@ def allxy_signal2real(
 # ------------------------------------------------------------------------------
 
 
-class AllXYTaskConfig(TaskConfig, ModularProgramCfg):
+class AllXY_ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
+    I_pulse: NotRequired[PulseCfg]
     X180_pulse: PulseCfg
     Y180_pulse: PulseCfg
     X90_pulse: PulseCfg
@@ -115,22 +115,27 @@ class AllXYTaskConfig(TaskConfig, ModularProgramCfg):
     readout: ReadoutCfg
 
 
-class AllXYExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: AllXYTaskConfig) -> AllXYResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class AllXY_Cfg(ModularProgramCfg, TaskCfg):
+    modules: AllXY_ModuleCfg
 
-        assert cfg.get("sweep", dict()) == {}, (
+
+class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> AllXY_Result:
+        _cfg = check_type(deepcopy(cfg), AllXY_Cfg)
+        modules = _cfg["modules"]
+
+        assert _cfg.get("sweep", dict()) == {}, (
             "AllXY experiment does not support sweep configurations. "
             "Please remove 'sweep' key from the configuration."
         )
 
         # Create gate-to-pulse mapping from configuration
         gate2pulse_map = {
-            "I": cfg.get("I_pulse"),
-            "X180": cfg["X180_pulse"],
-            "Y180": cfg["Y180_pulse"],
-            "X90": cfg["X90_pulse"],
-            "Y90": cfg["Y90_pulse"],
+            "I": modules.get("I_pulse"),
+            "X180": modules["X180_pulse"],
+            "Y180": modules["Y180_pulse"],
+            "X90": modules["X90_pulse"],
+            "Y90": modules["Y90_pulse"],
         }
 
         # Validate that all required gates are defined
@@ -143,7 +148,7 @@ class AllXYExperiment(AbsExperiment):
             ylabel="Signal",
             segment_kwargs=dict(
                 show_grid=True,
-                line_kwargs=[dict(marker="o", linestyle=None, markersize=5)],
+                line_kwargs=[dict(marker=".", linestyle=None, markersize=5)],
             ),
         )
 
@@ -158,45 +163,49 @@ class AllXYExperiment(AbsExperiment):
             )
 
         with liveplotter as viewer:
+
+            def make_task(gate1: str, gate2: str) -> Task:
+                return Task(
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("first_pulse", gate2pulse_map[gate1]),
+                                    Pulse("second_pulse", gate2pulse_map[gate2]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    )
+                )
+
             signals_dict = run_task(
                 task=BatchTask(
                     tasks={
-                        (gate1, gate2): HardTask(
-                            measure_fn=lambda ctx, update_hook: (
-                                ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse("first_pulse", gate2pulse_map[gate1]),
-                                        Pulse("second_pulse", gate2pulse_map[gate2]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                ).acquire(soc, progress=False, callback=update_hook)
-                            )
-                        )
+                        (gate1, gate2): make_task(gate1, gate2)
                         for gate1, gate2 in ALLXY_SEQUENCE
                     }
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(
                     np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
-                    allxy_signal2real(ctx.data),
+                    allxy_signal2real(ctx.root_data),
                 ),
             )
         signals_dict = dict(signals_dict)
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = signals_dict
 
         return signals_dict
 
     def analyze(
-        self, result: Optional[AllXYResultType] = None, fit_ge: bool = False
+        self, result: Optional[AllXY_Result] = None, fit_ge: bool = False
     ) -> None:
         if result is None:
             result = self.last_result
@@ -307,7 +316,7 @@ class AllXYExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[AllXYResultType] = None,
+        result: Optional[AllXY_Result] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/allxy",
         **kwargs,
@@ -334,7 +343,7 @@ class AllXYExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> AllXYResultType:
+    def load(self, filepath: str, **kwargs) -> AllXY_Result:
         signals, gate_indices, _ = load_data(filepath, **kwargs)
         assert gate_indices is not None
         assert len(gate_indices.shape) == 1 and len(signals.shape) == 1
@@ -344,7 +353,7 @@ class AllXYExperiment(AbsExperiment):
         signals = signals.astype(np.complex128)
 
         # Reconstruct signals_dict from flat signals array
-        signals_dict: AllXYResultType = {}
+        signals_dict: AllXY_Result = {}
         for i, seq in enumerate(ALLXY_SEQUENCE):
             signals_dict[seq] = signals[i : i + 1]
 

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import shutil
+from abc import abstractmethod
 from collections import OrderedDict, UserDict, defaultdict
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Tuple, TypeVar
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -13,18 +13,26 @@ from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typing_extensions import (
+    Any,
+    Callable,
+    Generic,
+    Mapping,
+    Optional,
+    Self,
+    TypedDict,
+    TypeVar,
+)
 
-from zcu_tools.device import DeviceInfo
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
     Result,
-    SoftTask,
-    TaskConfig,
-    TaskContextView,
+    TaskState,
     run_task,
+    run_with_retries,
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import (
@@ -35,93 +43,118 @@ from zcu_tools.liveplot import (
 )
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
-T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlotter])
+T_PlotterDict = TypeVar("T_PlotterDict", bound=Mapping[str, AbsLivePlotter])
 
 
-T_ResultType = TypeVar("T_ResultType", bound=Result)
-T_RootResultType = TypeVar("T_RootResultType", bound=Result)
-T_TaskConfigType = TypeVar("T_TaskConfigType", bound=TaskConfig)
+T_Result = TypeVar("T_Result", bound=Result)
+T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
 class MeasurementTask(
-    AbsTask[T_ResultType, T_RootResultType, T_TaskConfigType],
-    Generic[T_ResultType, T_RootResultType, T_TaskConfigType, T_PlotterDictType],
+    AbsTask[T_Result, T_RootResult], Generic[T_Result, T_RootResult, T_PlotterDict]
 ):
-    def num_axes(self) -> Dict[str, int]: ...
+    @abstractmethod
+    def num_axes(self) -> dict[str, int]: ...
 
-    def make_plotter(
-        self, name: str, axs: Dict[str, List[Axes]]
-    ) -> T_PlotterDictType: ...
+    @abstractmethod
+    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> T_PlotterDict: ...
 
+    @abstractmethod
     def update_plotter(
-        self,
-        plotters: T_PlotterDictType,
-        ctx: TaskContextView,
-        signals: T_ResultType,
+        self, plotters: T_PlotterDict, ctx: TaskState, signals: T_Result
     ) -> None: ...
 
+    @abstractmethod
     def save(
         self,
         filepath: str,
         flx_values: NDArray[np.float64],
-        result: T_ResultType,
+        result: T_Result,
         comment: Optional[str],
         prefix_tag: str,
     ) -> None: ...
 
-    def load(self, filepath: str, **kwargs) -> T_ResultType: ...
 
-
-class FluxDepTaskConfig(TaskConfig):
-    dev: Mapping[str, DeviceInfo]
+class FluxDepCfg(TypedDict):
+    dev: dict[str, DeviceInfo]
 
 
 class FluxDepInfoDict(UserDict):
     def __init__(self, initialdata: Optional[Mapping[str, Any]] = None) -> None:
-        self.first_info: Dict[str, Any] = {}
-        self.last_info: Dict[str, Any] = {}
+        self.first_info: dict[str, Any] = {}
+        self.last_info: dict[str, Any] = {}
         super().__init__(initialdata)
 
     @property
-    def last(self) -> Dict[str, Any]:
+    def last(self) -> dict[str, Any]:
         return self.last_info
 
     @property
-    def first(self) -> Dict[str, Any]:
+    def first(self) -> dict[str, Any]:
         return self.first_info
 
-    def __setitem__(self, key: str, value: Any) -> None:
-        super().__setitem__(key, value)
-        self.first_info.setdefault(key, deepcopy(value))
-        self.last_info[key] = deepcopy(value)
+    def __setitem__(self, key: str, item: Any) -> None:
+        super().__setitem__(key, item)
+        self.first_info.setdefault(key, deepcopy(item))
+        self.last_info[key] = deepcopy(item)
 
 
-class FluxDepExecutor(AbsExperiment):
+class FluxDepBatchTask(BatchTask):
+    def __init__(self, tasks, retry_time: int = 0) -> None:
+        self.retry_time = retry_time
+
+        super().__init__(tasks)
+
+    def run(self, ctx) -> None:
+        if self.dynamic_pbar:
+            self.task_pbar = self.make_pbar(leave=False)
+        else:
+            assert self.task_pbar is not None
+            self.task_pbar.reset()
+
+        for name, task in self.tasks.items():
+            self.task_pbar.set_description(desc=f"Task [{str(name)}]")
+
+            run_with_retries(
+                task,
+                ctx.child(name),
+                self.retry_time,
+                dynamic_pbar=True,
+                raise_error=False,
+            )
+
+            self.task_pbar.update()
+
+        if self.dynamic_pbar:
+            self.task_pbar.close()
+            self.task_pbar = None
+
+
+class FluxDepExecutor:
     def __init__(self, flx_values: NDArray[np.float64]) -> None:
         super().__init__()
 
         self.flx_values = flx_values
 
         self.record_path = None
-        self.measurements: Dict[str, MeasurementTask] = OrderedDict()
+        self.measurements: dict[str, MeasurementTask] = OrderedDict()
 
-    def add_measurement(
-        self, name: str, measurement: MeasurementTask
-    ) -> FluxDepExecutor:
-        if name in self.measurements:
-            raise ValueError(f"Measurement {name} already exists")
-        self.measurements[name] = measurement
+    def add_measurements(self, measurements: dict[str, MeasurementTask]) -> Self:
+        for name, measurement in measurements.items():
+            if name in self.measurements:
+                raise ValueError(f"Measurement {name} already exists")
+            self.measurements[name] = measurement
 
         return self
 
-    def record_animation(self, path: str) -> FluxDepExecutor:
+    def record_animation(self, path: str) -> Self:
         if self.record_path is not None:
             raise ValueError("Animation recording path already set")
         self.record_path = Path(path)
         self.record_path.parent.mkdir(parents=True, exist_ok=True)
         return self
 
-    def make_ax_layout(self) -> Tuple[Figure, Dict[str, Dict[str, List[Axes]]]]:
+    def make_ax_layout(self) -> tuple[Figure, dict[str, dict[str, list[Axes]]]]:
         assert len(self.measurements) > 0
 
         num_axes_map = {
@@ -140,7 +173,7 @@ class FluxDepExecutor(AbsExperiment):
         )
 
         # collect axes into dict
-        axs_map: Dict[str, Dict[str, List[Axes]]] = defaultdict(dict)
+        axs_map: dict[str, dict[str, list[Axes]]] = defaultdict(dict)
         i, j = 0, 0
         for ms_name, num_axes in num_axes_map.items():
             for ax_name, ax_num in num_axes.items():
@@ -155,10 +188,10 @@ class FluxDepExecutor(AbsExperiment):
 
     def make_plotter(
         self,
-    ) -> Tuple[
+    ) -> tuple[
         Figure,
-        MultiLivePlotter[Tuple[str, str]],
-        Callable[[TaskContextView], None],
+        MultiLivePlotter[tuple[str, str]],
+        Callable[[TaskState], None],
         Optional[FFMpegWriter],
     ]:
         fig, axs_map = self.make_ax_layout()
@@ -181,21 +214,19 @@ class FluxDepExecutor(AbsExperiment):
 
         T = TypeVar("T")
 
-        def flatten_dict(d: Mapping[str, Mapping[str, T]]) -> Dict[Tuple[str, str], T]:
+        def flatten_dict(d: Mapping[str, Mapping[str, T]]) -> dict[tuple[str, str], T]:
             return {(n1, n2): v for n1, d2 in d.items() for n2, v in d2.items()}
 
         plotter = MultiLivePlotter(fig, flatten_dict(plotters_map))
 
-        def plot_fn(ctx: TaskContextView) -> None:
-            if len(ctx._addr_stack) < 2:
+        def plot_fn(ctx: TaskState) -> None:
+            if len(ctx.path) < 2:
                 cur_tasks = list(self.measurements.keys())
             else:
-                assert isinstance(ctx._addr_stack[1], str)
-                cur_tasks = [ctx._addr_stack[1]]
+                assert isinstance(ctx.path[1], str)
+                cur_tasks = [ctx.path[1]]
 
-            results = ctx.get_data()
-            assert isinstance(results, list)
-            results = merge_result_list(results)
+            results = merge_result_list(ctx.root_data)
 
             assert isinstance(results, dict)
             for cur_task in cur_tasks:
@@ -213,9 +244,10 @@ class FluxDepExecutor(AbsExperiment):
 
     def run(
         self,
-        dev_cfg: Mapping[str, DeviceInfo],
+        dev_cfg: dict[str, DeviceInfo],
         predictor: FluxoniumPredictor,
-        env_dict: Optional[Dict[str, Any]] = None,
+        env_dict: Optional[dict[str, Any]] = None,
+        retry_time: int = 3,
     ) -> Mapping[str, Result]:
         if len(self.measurements) == 0:
             raise ValueError("No measurements added")
@@ -223,7 +255,7 @@ class FluxDepExecutor(AbsExperiment):
         if env_dict is None:
             env_dict = {}
 
-        cfg = FluxDepTaskConfig(dev=dev_cfg)
+        cfg = FluxDepCfg(dev=dev_cfg)
 
         env_dict.update(
             flx_values=self.flx_values,
@@ -231,9 +263,9 @@ class FluxDepExecutor(AbsExperiment):
             info=FluxDepInfoDict(),
         )
 
-        def update_fn(i: int, ctx: TaskContextView, flx: float) -> None:
-            info: FluxDepInfoDict = ctx.env_dict["info"]
-            predictor: FluxoniumPredictor = ctx.env_dict["predictor"]
+        def update_fn(i: int, ctx: TaskState, flx: float) -> None:
+            info: FluxDepInfoDict = ctx.env["info"]
+            predictor: FluxoniumPredictor = ctx.env["predictor"]
 
             info.clear()  # clear current info dict
 
@@ -245,6 +277,9 @@ class FluxDepExecutor(AbsExperiment):
 
             set_flux_in_dev_cfg(ctx.cfg["dev"], flx, label="flux_dev")
 
+        set_flux_in_dev_cfg(cfg["dev"], self.flx_values[0], label="flux_dev")
+        GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+
         with matplotlib.rc_context(
             {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}
         ):
@@ -253,15 +288,17 @@ class FluxDepExecutor(AbsExperiment):
             with plotter:
                 try:
                     results = run_task(
-                        task=SoftTask(
-                            sweep_name="flux",
-                            sweep_values=self.flx_values.tolist(),
-                            update_cfg_fn=update_fn,
-                            sub_task=BatchTask(self.measurements),
+                        task=FluxDepBatchTask(
+                            self.measurements,
+                            retry_time=retry_time,
+                        ).scan(
+                            "flux",
+                            self.flx_values.tolist(),
+                            before_each=update_fn,
                         ),
                         init_cfg=cfg,
                         env_dict=env_dict,
-                        update_hook=plot_fn,
+                        on_update=plot_fn,
                     )
 
                 finally:
@@ -277,39 +314,31 @@ class FluxDepExecutor(AbsExperiment):
 
         return signals_dict
 
-    def analyze(self, result: Optional[Mapping[str, Result]] = None) -> None:
+    def analyze(
+        self, *args, result: Optional[Mapping[str, Result]] = None, **kwargs
+    ) -> None:
         raise NotImplementedError("Not implemented")
 
     def save(
         self,
         filepath: str,
-        results: Optional[Mapping[str, Result]] = None,
+        result: Optional[Mapping[str, Result]] = None,
         comment: Optional[str] = None,
         prefix_tag: str = "autoflux_dep",
     ) -> None:
-        if results is None:
-            results = self.last_result
-        assert results is not None, "no result found"
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
 
         _filepath = Path(filepath)
         for ms_name, ms in self.measurements.items():
             ms.save(
                 str(_filepath.with_name(_filepath.name + f"_{ms_name}")),
                 self.flx_values,
-                results[ms_name],
+                result[ms_name],
                 comment,
                 prefix_tag + f"/{ms_name}",
             )
 
     def load(self, filepath: str, **kwargs) -> Mapping[str, Result]:
-        _filepath = Path(filepath)
-
-        loaded: Dict[str, Result] = {}
-        for ms_name, ms in self.measurements.items():
-            ms_filepath = str(_filepath.with_name(_filepath.name + f"_{ms_name}"))
-            loaded[ms_name] = ms.load(ms_filepath, **kwargs)
-
-        self.last_cfg = None
-        self.last_result = loaded
-
-        return loaded
+        raise NotImplementedError("Not implemented")

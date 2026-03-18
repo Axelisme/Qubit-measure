@@ -1,21 +1,30 @@
-from typing import Optional
+from __future__ import annotations
 
 import numpy as np
 from matplotlib.image import AxesImage, NonUniformImage
 from matplotlib.ticker import ScalarFormatter
 from numpy.typing import NDArray
+from typing_extensions import Optional
 
 from .base import AbsSegment, Axes
 
 
 class Plot2DSegment(AbsSegment):
     def __init__(
-        self, xlabel: str, ylabel: str, title: Optional[str] = None, flip: bool = False
+        self,
+        xlabel: str,
+        ylabel: str,
+        title: Optional[str] = None,
+        flip: bool = False,
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel
         self.title = title
         self.flip = flip
+        self.vmin = vmin
+        self.vmax = vmax
 
         self.im: Optional[AxesImage] = None
 
@@ -37,7 +46,13 @@ class Plot2DSegment(AbsSegment):
         ax.yaxis.set_major_formatter(formatter)
 
         self.im = ax.imshow(
-            [[0, 1e-6]], aspect="auto", origin="lower", interpolation="nearest"
+            [[0, 1e-6]],
+            aspect="auto",
+            origin="lower",
+            interpolation="nearest",
+            vmin=self.vmin,
+            vmax=self.vmax,
+            cmap="RdBu_r",
         )
 
     def update(
@@ -72,12 +87,20 @@ class Plot2DSegment(AbsSegment):
 
 class PlotNonUniform2DSegment(AbsSegment):
     def __init__(
-        self, xlabel: str, ylabel: str, title: Optional[str] = None, flip: bool = False
+        self,
+        xlabel: str,
+        ylabel: str,
+        title: Optional[str] = None,
+        flip: bool = False,
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None,
     ) -> None:
         self.xlabel = xlabel
         self.ylabel = ylabel
         self.title = title
         self.flip = flip
+        self.vmin = vmin
+        self.vmax = vmax
 
         self.im: Optional[NonUniformImage] = None
 
@@ -92,7 +115,10 @@ class PlotNonUniform2DSegment(AbsSegment):
         if self.title is not None:
             ax.set_title(self.title)
 
-        self.im = NonUniformImage(ax, cmap="viridis", interpolation="nearest")
+        self.im = NonUniformImage(ax, cmap="RdBu_r", interpolation="nearest")
+        self.im.set_extent((0, 1, 0, 1))
+        self.im.set_data([0, 1], [0, 1], [[0, 1e-6], [0, 1e-6]])
+        self.im.set_clim(vmin=self.vmin, vmax=self.vmax)
         ax.add_image(self.im)
 
     def update(
@@ -115,7 +141,10 @@ class PlotNonUniform2DSegment(AbsSegment):
             self.im.set_extent((xs[0] - dx, xs[-1] + dx, ys[0] - dy, ys[-1] + dy))
             self.im.set_data(xs, ys, signals.T)
 
-        self.im.autoscale()
+        if self.vmin is not None or self.vmax is not None:
+            self.im.set_clim(vmin=self.vmin, vmax=self.vmax)
+        if self.vmin is None or self.vmax is None:
+            self.im.autoscale()
 
         if title is not None:
             ax.set_title(title)

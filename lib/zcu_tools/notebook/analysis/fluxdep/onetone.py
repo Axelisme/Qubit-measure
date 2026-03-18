@@ -1,19 +1,21 @@
-from typing import Any, Tuple
+from __future__ import annotations
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import display
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
+from typing_extensions import Any
 
 
 class InteractiveOneTone:
     def __init__(
         self,
-        mAs: np.ndarray,
-        fpts: np.ndarray,
-        spectrum: np.ndarray,
+        mAs: NDArray[np.float64],
+        fpts: NDArray[np.float64],
+        spectrum: NDArray,
         threshold: float = 1.0,
     ) -> None:
         self.mAs = mAs
@@ -132,7 +134,7 @@ class InteractiveOneTone:
         plt.close(self.fig)
         self.is_finished = True
 
-    def get_positions(self) -> Tuple[np.ndarray, np.ndarray]:
+    def get_positions(self) -> tuple[np.ndarray, np.ndarray]:
         """返回找到的點位置"""
         if not self.is_finished:
             self.on_finish(None)

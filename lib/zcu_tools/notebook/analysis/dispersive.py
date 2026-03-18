@@ -1,26 +1,29 @@
+from __future__ import annotations
+
 from functools import lru_cache
-from typing import Callable, Optional, Tuple
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
 from IPython.display import display
+from numpy.typing import NDArray
 from scipy.optimize import minimize
 from tqdm.auto import tqdm
+from typing_extensions import Callable, Optional
 
 from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flx
 
 
 def search_proper_g(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     r_f: float,
-    sp_flxs: np.ndarray,
-    sp_fpts: np.ndarray,
-    signals: np.ndarray,
-    g_bound: Tuple[float, float],
+    sp_flxs: NDArray[np.float64],
+    sp_fpts: NDArray[np.float64],
+    signals: NDArray,
+    g_bound: tuple[float, float],
     g_init: Optional[float] = None,
-) -> Callable[[], Tuple[float, float]]:
+) -> Callable[[], tuple[float, float]]:
     """
     Search the proper coupling strength g and resonator frequency r_f by plotting the dispersive shift
     of ground and excited state vs. flux. Returns a function that when called, returns (g, r_f) values.
@@ -96,7 +99,7 @@ def search_proper_g(
         qub_cutoff: int = default_qub_cutoff,
         res_dim: int = default_res_dim,
         step: int = default_step,
-    ) -> Tuple[np.ndarray, ...]:
+    ) -> tuple[np.ndarray, ...]:
         # Calculate the dispersive shift using provided parameters
         return calculate_dispersive_vs_flx(
             params,
@@ -183,15 +186,15 @@ def search_proper_g(
 
 
 def auto_fit_dispersive(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     r_f: float,
-    sp_flxs: np.ndarray,
-    sp_fpts: np.ndarray,
-    signals: np.ndarray,
-    g_bound: Tuple[float, float] = (0.01, 0.2),
+    sp_flxs: NDArray[np.float64],
+    sp_fpts: NDArray[np.float64],
+    signals: NDArray,
+    g_bound: tuple[float, float] = (0.01, 0.2),
     g_init: Optional[float] = None,
     fit_rf: bool = False,
-) -> Tuple[float, Optional[float]]:
+) -> tuple[float, Optional[float]]:
     """
     Auto fit the coupling strength g by maximizing the overlap of predicted ground state frequency with onetone spectrum
     """
@@ -259,13 +262,13 @@ def auto_fit_dispersive(
 def plot_dispersive_with_onetone(
     r_f: float,
     g: float,
-    mAs: np.ndarray,
-    flxs: np.ndarray,
-    rf_list: Tuple[np.ndarray, ...],
-    sp_mAs: np.ndarray,
-    sp_flxs: np.ndarray,
-    sp_fpts: np.ndarray,
-    signals: np.ndarray,
+    mAs: NDArray[np.float64],
+    flxs: NDArray[np.float64],
+    rf_list: tuple[NDArray[np.float64], ...],
+    sp_mAs: NDArray[np.float64],
+    sp_flxs: NDArray[np.float64],
+    sp_fpts: NDArray[np.float64],
+    signals: NDArray,
 ) -> go.Figure:
     """
     Plot the dispersive resonator frequency vs. flux with one tone signal
@@ -292,6 +295,8 @@ def plot_dispersive_with_onetone(
         kwargs = [dict()] * len(rf_list)  # too many states, use default color
 
     for i, rf in enumerate(rf_list):
+        rf = rf.copy()
+        rf[np.abs(np.diff(rf, prepend=rf[0])) > 0.5 * np.ptp(sp_fpts)] = np.nan
         fig.add_trace(
             go.Scatter(x=mAs, y=rf, mode="lines", name=f"state {i}", **kwargs[i])
         )

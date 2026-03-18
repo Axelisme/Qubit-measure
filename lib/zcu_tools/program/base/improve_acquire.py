@@ -1,10 +1,10 @@
-from typing import Callable, List, Optional, Tuple, Union, cast
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
 
 import numpy as np
 from qick.qick_asm import AcquireMixin
-from typing_extensions import TypeAlias
-
-from .util import OnlineStatisticTracker
+from typing_extensions import Callable, Optional, TypeAlias, Union, cast
 
 try:
     from numpy.typing import NDArray
@@ -16,7 +16,7 @@ class TypedAcquireMixin(AcquireMixin):
     Add type checking to the AcquireMixin class
     """
 
-    def get_raw(self) -> Optional[List[NDArray[np.int64]]]:
+    def get_raw(self) -> Optional[list[NDArray[np.int64]]]:
         return super().get_raw()
 
     def get_time_axis(
@@ -25,32 +25,42 @@ class TypedAcquireMixin(AcquireMixin):
         return super().get_time_axis(ro_index, length_only)
 
     def _summarize_accumulated(
-        self, rounds_buf: List[NDArray[np.float64]]
-    ) -> List[NDArray[np.float64]]:
+        self, rounds_buf: list[NDArray[np.float64]]
+    ) -> list[NDArray[np.float64]]:
         return super()._summarize_accumulated(rounds_buf)
 
     def _summarize_decimated(
-        self, rounds_buf: List[NDArray[np.float64]]
-    ) -> List[NDArray[np.float64]]:
+        self, rounds_buf: list[NDArray[np.float64]]
+    ) -> list[NDArray[np.float64]]:
         return super()._summarize_decimated(rounds_buf)
 
-    def _average_buf(
+    def _average_buf(  # type: ignore
         self,
-        buf: List[NDArray[np.float64]],
+        d_reps: list[NDArray[np.float64]],
         length_norm: bool = True,
         remove_offset: bool = True,
-    ) -> List[NDArray[np.float64]]:
+    ) -> list[NDArray[np.float64]]:
         return super()._average_buf(
-            buf,  # type: ignore
+            d_reps,  # type: ignore
             length_norm=length_norm,
             remove_offset=remove_offset,
         )
 
-    def acquire(self, *args, **kwargs) -> List[NDArray[np.float64]]:
+    def _process_accumulated(  # type: ignore
+        self, acc_buf: list[NDArray[np.float64]]
+    ) -> list[NDArray[np.float64]]:
+        return super()._process_accumulated(acc_buf)  # type: ignore
+
+    def acquire(self, *args, **kwargs) -> list[NDArray[np.float64]]:
         return super().acquire(*args, **kwargs)  # type: ignore
 
-    def acquire_decimated(self, *args, **kwargs) -> List[NDArray[np.float64]]:
+    def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]]:
         return super().acquire_decimated(*args, **kwargs)  # type: ignore
+
+
+class AbsStatisticTracker(ABC):
+    @abstractmethod
+    def update(self, points: NDArray[np.float64]) -> None: ...
 
 
 class StatisticMixin(TypedAcquireMixin):
@@ -58,30 +68,15 @@ class StatisticMixin(TypedAcquireMixin):
     Add statistic information for acquired method to the AcquireMixin class
     """
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._statistic_trackers: Optional[List[OnlineStatisticTracker]] = None
-
-    def get_covariance(self) -> Optional[List[NDArray[np.float64]]]:
-        if self._statistic_trackers is None:
-            return None
-
-        return [tracker.covariance for tracker in self._statistic_trackers]
-
-    def get_median(self) -> Optional[List[NDArray[np.float64]]]:
-        if self._statistic_trackers is None:
-            return None
-
-        return [tracker.rough_median for tracker in self._statistic_trackers]
-
     def finish_round(self) -> bool:
         not_finish = super().finish_round()
 
         assert self.acc_buf is not None
         assert self.acquire_params is not None
 
-        if self.acquire_params.get("record_statistic", False):
-            assert self._statistic_trackers is not None
+        trackers = self.acquire_params.get("statistic_trackers")
+        if trackers is not None:
+            trackers = cast(list[AbsStatisticTracker], trackers)
             if self.acquire_params["type"] != "accumulated":
                 raise NotImplementedError(
                     "Statistic is not implemented for type other than accumulated"
@@ -92,12 +87,10 @@ class StatisticMixin(TypedAcquireMixin):
                     "Statistic is not implemented for thresholded data"
                 )
 
-            ro_chs = self.ro_chs  # type: ignore
+            ro_chs: dict = self.ro_chs  # type: ignore
 
             assert isinstance(ro_chs, dict)
-            for d_rep, tracker, ro in zip(
-                self.acc_buf, self._statistic_trackers, ro_chs.values()
-            ):
+            for d_rep, tracker, ro in zip(self.acc_buf, trackers, ro_chs.values()):
                 assert self.avg_level is not None
                 d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
 
@@ -109,14 +102,17 @@ class StatisticMixin(TypedAcquireMixin):
 
         return not_finish
 
-    def acquire(self, *args, record_statistic=False, **kwargs):
+    def acquire(
+        self,
+        *args,
+        statistic_trackers: Optional[list[AbsStatisticTracker]] = None,
+        **kwargs,
+    ):
         ro_chs = self.ro_chs  # type: ignore
 
         assert isinstance(ro_chs, dict)
-        if record_statistic:
-            self._statistic_trackers = [OnlineStatisticTracker() for _ in ro_chs.keys()]
         extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(record_statistic=record_statistic)
+        extra_args.update(statistic_trackers=statistic_trackers)
         return super().acquire(*args, extra_args=extra_args, **kwargs)
 
 
@@ -151,19 +147,7 @@ class EarlyStopMixin(TypedAcquireMixin):
         return not_finish and not self.early_stop
 
 
-BaseCallbackType: TypeAlias = Callable[[int, List[NDArray[np.float64]]], None]
-StatisticCallbackType: TypeAlias = Callable[
-    [
-        int,
-        Tuple[
-            List[NDArray[np.float64]],
-            List[NDArray[np.float64]],
-            List[NDArray[np.float64]],
-        ],
-    ],
-    None,
-]
-CallbackType: TypeAlias = Union[BaseCallbackType, StatisticCallbackType]
+CallbackType: TypeAlias = Callable[[int, list[NDArray[np.float64]]], None]
 
 
 class CallbackMixin(StatisticMixin):
@@ -198,22 +182,8 @@ class CallbackMixin(StatisticMixin):
             round_n = len(self.rounds_buf)
             if self.acquire_params["type"] == "accumulated":
                 avg_d = self._summarize_accumulated(self.rounds_buf)
-                if self.acquire_params.get("record_statistic", False):
-                    callback = cast(StatisticCallbackType, callback)
-
-                    cov_d = self.get_covariance()
-                    med_d = self.get_median()
-                    assert cov_d is not None
-                    assert med_d is not None
-
-                    callback(round_n, (avg_d, cov_d, med_d))
-                else:
-                    callback = cast(BaseCallbackType, callback)
-
-                    callback(round_n, avg_d)
+                callback(round_n, avg_d)
             elif self.acquire_params["type"] == "decimated":
-                callback = cast(BaseCallbackType, callback)
-
                 dec_d = self._summarize_decimated(self.rounds_buf)
                 callback(round_n, dec_d)
             else:
@@ -259,7 +229,7 @@ class SingleShotMixin(TypedAcquireMixin):
 
         return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
 
-    def _process_accumulated(self, acc_buf):
+    def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
         assert self.acquire_params is not None
         if self.acquire_params["threshold"] is not None:
             d_reps = [np.zeros_like(d) for d in acc_buf]
@@ -271,7 +241,7 @@ class SingleShotMixin(TypedAcquireMixin):
             )
             for i, ch_shot in enumerate(self.shots):
                 d_reps[i][..., 0] = ch_shot
-            return self._average_buf(d_reps, length_norm=False)  # type: ignore
+            return self._average_buf(d_reps, length_norm=False)
         elif self.acquire_params["population_radius"] is not None:
             d_reps = [np.zeros_like(d) for d in acc_buf]
             self.shots = self._apply_classification(
@@ -283,7 +253,7 @@ class SingleShotMixin(TypedAcquireMixin):
             )
             for i, ch_shot in enumerate(self.shots):
                 d_reps[i] = ch_shot
-            return self._average_buf(d_reps, length_norm=False)  # type: ignore
+            return self._average_buf(d_reps, length_norm=False)
         else:
             d_reps = acc_buf
             return self._average_buf(
@@ -294,12 +264,12 @@ class SingleShotMixin(TypedAcquireMixin):
 
     def _apply_classification(
         self,
-        acc_buf: List[NDArray[np.float64]],
+        acc_buf: list[NDArray[np.float64]],
         g_center: complex,
         e_center: complex,
         population_radius: float,
         remove_offset: bool,
-    ) -> List[NDArray[np.float64]]:
+    ) -> list[NDArray[np.float64]]:
         shots = []
         for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):  # type: ignore
             avg = acc_buf[i_ch] / ro["length"]

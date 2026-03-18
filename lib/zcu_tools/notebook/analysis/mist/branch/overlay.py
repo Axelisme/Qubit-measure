@@ -1,12 +1,22 @@
+from __future__ import annotations
+
 import numpy as np
 import plotly.graph_objects as go
 import qutip as qt
+from numpy.typing import NDArray
+from typing_extensions import TYPE_CHECKING, Any, Optional
 from zcu_tools.simulate.fluxonium.branch.floquet import FloquetBranchAnalysis
 
 
 def calc_overlay(
-    params, photons, r_f: float, g: float, flx: float, qub_dim=30, qub_cutoff=40
-) -> np.ndarray:
+    params: tuple[float, float, float],
+    photons: NDArray[np.float64],
+    r_f: float,
+    g: float,
+    flx: float,
+    qub_dim=30,
+    qub_cutoff=40,
+) -> NDArray[np.float64]:
     f_analysis = FloquetBranchAnalysis(
         params, r_f, g, flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
     )
@@ -14,7 +24,7 @@ def calc_overlay(
     def calc_max_overlay(states, target_state):
         return np.max([np.abs(state.dag() @ target_state) for state in states])
 
-    overlays = np.zeros((len(photons), 2), dtype=np.float32)
+    overlays = np.zeros((len(photons), 2), dtype=np.float64)
     for i, n in enumerate(photons):
         # calculate time average of states
         states_n = f_analysis.make_floquet_basis(photon=n).state(t=0)
@@ -27,7 +37,15 @@ def calc_overlay(
 
 
 def plot_overlay(
-    fig, name, overlay, sim_flxs, sim_photons, threshold, row=1, col=1, line_kwargs=None
+    fig: go.Figure,
+    name: str,
+    overlay: NDArray[np.float64],
+    sim_flxs: NDArray[np.float64],
+    sim_photons: NDArray[np.float64],
+    threshold: float,
+    row: int = 1,
+    col: int = 1,
+    line_kwargs: Optional[dict[str, Any]] = None,
 ) -> None:
     crit_idxs = np.argmax(overlay < threshold, axis=1)
     crit_idxs[crit_idxs == 0] = len(sim_photons) - 1

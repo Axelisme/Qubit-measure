@@ -1,14 +1,18 @@
 # make energies of fluxonium under different external fluxes
 # and save them in a file
+from __future__ import annotations
 
 import os
 
 import h5py as h5
 import matplotlib.pyplot as plt
 import numpy as np
-import scqubits as scq
+import scqubits.settings as scq_settings
 from joblib import Parallel, delayed
+from numpy.typing import NDArray
+from scqubits.core.fluxonium import Fluxonium
 from tqdm.auto import tqdm
+from typing_extensions import Any, cast
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 
 # parameters
@@ -29,17 +33,23 @@ ELb = (0.01, 3.0)
 
 
 DRY_RUN = True
-scq.settings.PROGRESSBAR_DISABLED = True
+scq_settings.PROGRESSBAR_DISABLED = True
 
 cutoff = 40
 evals_count = 15
 flxs = np.linspace(0.0, 0.5, 120)
 
 
-fluxonium = scq.Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=cutoff)
+fluxonium = Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=cutoff)
 
 
-def dump_data(filepath, flxs, params, energies, Ebounds):
+def dump_data(
+    filepath: str,
+    flxs: NDArray[np.float64],
+    params: NDArray[np.float64],
+    energies: NDArray[np.float64],
+    Ebounds: NDArray[np.float64],
+) -> None:
     with h5.File(filepath, "w") as f:
         f.create_dataset("Ebounds", data=Ebounds)
         f.create_dataset("flxs", data=flxs)
@@ -47,7 +57,7 @@ def dump_data(filepath, flxs, params, energies, Ebounds):
         f.create_dataset("energies", data=energies)
 
 
-def fibonacci_lattice(K):
+def fibonacci_lattice(K) -> NDArray[np.float64]:
     """
     在單位球面上生成 K 個近似均勻分布的方向(Fibonacci lattic)）。
     返回: K 個單位向量，形狀為 (K, 3)。
@@ -74,7 +84,7 @@ def fibonacci_lattice(K):
     return directions
 
 
-def fibonacci_lattice_positive_vectorized(K):
+def fibonacci_lattice_positive_vectorized(K) -> NDArray[np.float64]:
     """
     使用 numpy 向量化生成約均勻分布在球面上的點，並篩選出 xyz 坐標都大於 0 的點，
     最後返回最少 K 個點。
@@ -97,7 +107,12 @@ def fibonacci_lattice_positive_vectorized(K):
     return valid_directions
 
 
-def ray_intersects_box(direction, x_range, y_range, z_range):
+def ray_intersects_box(
+    direction: NDArray[np.float64],
+    x_range: tuple[float, float],
+    y_range: tuple[float, float],
+    z_range: tuple[float, float],
+) -> bool:
     """
     檢查一條從原點出發的射線是否與長方體相交。
     direction: 單位向量，表示射線方向，形狀為 (3,)
@@ -120,7 +135,13 @@ def ray_intersects_box(direction, x_range, y_range, z_range):
     return t_min <= t_max
 
 
-def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
+def get_intersecting_rays(
+    x_range: tuple[float, float],
+    y_range: tuple[float, float],
+    z_range: tuple[float, float],
+    N: int,
+    n_jobs: int = -1,
+) -> NDArray[np.float64]:
     """
     給定長方體範圍和所需射線數量 N, 回傳正好 N 條與長方體相交的射線方向。
     使用並行化加速篩選。
@@ -136,6 +157,7 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
     def check_direction(direction):
         return direction, ray_intersects_box(direction, x_range, y_range, z_range)
 
+    intersect_dirs = []
     for attempt in range(max_attempts):
         # 生成 Fibonacci lattice 上的方向
         directions = fibonacci_lattice_positive_vectorized(K)  # (K, 3)
@@ -145,9 +167,10 @@ def get_intersecting_rays(x_range, y_range, z_range, N, n_jobs=-1):
         directions[:, 2] *= z_range[1]
 
         # 使用並行化篩選與長方體相交的射線
-        results = Parallel(n_jobs=n_jobs, batch_size=2**14)(
+        results = Parallel(n_jobs=n_jobs, batch_size=2**14)(  # type: ignore
             delayed(check_direction)(direction) for direction in directions
         )
+        results = cast(list[tuple[np.ndarray, bool]], results)
 
         # 提取相交的方向
         intersect_dirs = [result[0] for result in results if result[1]]
@@ -193,7 +216,7 @@ else:
     ]
 
 
-scq.settings.PROGRESSBAR_DISABLED = False
+scq_settings.PROGRESSBAR_DISABLED = False
 
 # we can flip the data around 0.5 to make the other half
 # since the fluxonium is symmetric

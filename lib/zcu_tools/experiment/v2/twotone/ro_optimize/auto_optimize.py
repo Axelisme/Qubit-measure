@@ -1,6 +1,7 @@
+from __future__ import annotations
+
 from copy import deepcopy
 from pathlib import Path
-from typing import Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,17 +9,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from skopt import Optimizer
 from skopt.space import Real
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    SoftTask,
-    TaskConfig,
-    TaskContextView,
+    Task,
+    TaskCfg,
+    TaskState,
     run_task,
 )
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot
 from zcu_tools.program import SweepCfg
@@ -33,9 +35,9 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 
-AutoOptResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+AutoOptResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
 class ReadoutOptimizer:
@@ -58,7 +60,7 @@ class ReadoutOptimizer:
                 Real(name="gain", low=pdrs.min(), high=pdrs.max()),
                 Real(name="length", low=lens.min(), high=lens.max()),
             ],
-            n_initial_points=num_points // 3,
+            n_initial_points=num_points // 2,
             initial_point_generator="lhs",
             base_estimator="ET",
             acq_func="EI",
@@ -69,7 +71,7 @@ class ReadoutOptimizer:
 
     def next_params(
         self, i: int, last_snr: Optional[float]
-    ) -> Optional[Tuple[float, float, float]]:
+    ) -> Optional[tuple[float, float, float]]:
         if i >= self.num_points:
             return None
 
@@ -77,32 +79,35 @@ class ReadoutOptimizer:
             self.optimizer.tell(self.last_param, -last_snr)
 
         param = self.optimizer.ask()
-        param = cast(Optional[Tuple[float, float, float]], param)
+        param = cast(Optional[tuple[float, float, float]], param)
 
         self.last_param = param
         return param
 
 
-class AutoOptimizeTaskConfig(TaskConfig, ModularProgramCfg):
+class AutoOptModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class AutoOptimizeExperiment(AbsExperiment):
-    def run(
-        self, soc, soccfg, cfg: AutoOptimizeTaskConfig, num_points: int
-    ) -> AutoOptResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class AutoOptCfg(ModularProgramCfg, TaskCfg):
+    modules: AutoOptModuleCfg
+    sweep: dict[str, SweepCfg]
 
-        assert "sweep" in cfg
-        fpt_sweep = cfg["sweep"]["freq"]
-        pdr_sweep = cfg["sweep"]["gain"]
-        len_sweep = cfg["sweep"]["length"]
-        cfg["sweep"] = {"ge": make_ge_sweep()}
 
+class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any], num_points: int) -> AutoOptResult:
+        _cfg = check_type(deepcopy(cfg), AutoOptCfg)
+
+        fpt_sweep = _cfg["sweep"]["freq"]
+        pdr_sweep = _cfg["sweep"]["gain"]
+        len_sweep = _cfg["sweep"]["length"]
+        _cfg["sweep"] = {"ge": make_ge_sweep()}
+
+        modules = _cfg["modules"]
         Pulse.set_param(
-            cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
         optimizer = ReadoutOptimizer(fpt_sweep, pdr_sweep, len_sweep, num_points)
@@ -110,12 +115,13 @@ class AutoOptimizeExperiment(AbsExperiment):
         # (num_points, [freq, gain, length])
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
 
-        def update_fn(i: int, ctx: TaskContextView, _) -> None:
-            ctx.env_dict["index"] = i
+        def update_fn(i: int, ctx: TaskState, _) -> None:
+            ctx.env["index"] = i
 
             last_snr = None
             if i > 0:
-                last_snr = np.abs(ctx.data[i - 1])
+                last_snr = np.abs(ctx.root_data[i - 1])
+                # last_snr /= np.sqrt(params[i - 1, 2])
             cur_params = optimizer.next_params(i, last_snr)
 
             if cur_params is None:
@@ -123,9 +129,10 @@ class AutoOptimizeExperiment(AbsExperiment):
                 raise KeyboardInterrupt("No more parameters to optimize.")
 
             params[i, :] = cur_params
-            Readout.set_param(ctx.cfg["readout"], "freq", cur_params[0])
-            Readout.set_param(ctx.cfg["readout"], "gain", cur_params[1])
-            Readout.set_param(ctx.cfg["readout"], "length", cur_params[2])
+            modules = ctx.cfg["modules"]
+            Readout.set_param(modules["readout"], "freq", cur_params[0])
+            Readout.set_param(modules["readout"], "gain", cur_params[1])
+            Readout.set_param(modules["readout"], "length", cur_params[2])
 
         # initialize figure and axes
         figsize = (8, 5)
@@ -159,9 +166,9 @@ class AutoOptimizeExperiment(AbsExperiment):
             ),
         ) as viewer:
 
-            def plot_fn(ctx: TaskContextView) -> None:
-                idx: int = ctx.env_dict["index"]
-                snrs = np.abs(ctx.data)  # (num_points, )
+            def plot_fn(ctx: TaskState) -> None:
+                idx: int = ctx.env["index"]
+                snrs = np.abs(ctx.root_data)  # (num_points, )
 
                 cur_freq, cur_gain, cur_len = params[idx, :]
 
@@ -183,56 +190,53 @@ class AutoOptimizeExperiment(AbsExperiment):
                 )
                 viewer.refresh()
 
-            results = run_task(
-                task=SoftTask(
-                    sweep_name="Iteration",
-                    sweep_values=list(range(num_points)),
-                    update_cfg_fn=update_fn,
-                    sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                )
-                            )
-                            and (
-                                prog.acquire(
-                                    soc,
-                                    progress=False,
-                                    callback=update_hook,
-                                    record_statistic=True,
-                                ),
-                                prog.get_covariance(),
-                                prog.get_median(),
-                            )
-                        ),
-                        raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+            def measure_fn(ctx: TaskState, update_hook):
+                modules = ctx.cfg["modules"]
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
                     ),
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
+            results = run_task(
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    dtype=np.float64,
+                ).scan(
+                    "Iteration",
+                    list(range(num_points)),
+                    before_each=update_fn,
                 ),
-                init_cfg=cfg,
-                update_hook=plot_fn,
+                init_cfg=_cfg,
+                on_update=plot_fn,
             )
             signals = np.asarray(results)
         plt.close(fig)
 
         # record the last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (params, signals)
 
         return params, signals
 
     def analyze(
-        self, result: Optional[AutoOptResultType] = None
-    ) -> Tuple[float, float, float, Figure]:
+        self, result: Optional[AutoOptResult] = None
+    ) -> tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -282,7 +286,7 @@ class AutoOptimizeExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[AutoOptResultType] = None,
+        result: Optional[AutoOptResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/auto",
         **kwargs,
@@ -319,3 +323,24 @@ class AutoOptimizeExperiment(AbsExperiment):
             tag=tag + "/signals",
             **kwargs,
         )
+
+    def load(self, filepath: str, **kwargs) -> AutoOptResult:
+        _filepath = Path(filepath)
+
+        params_data, _, _ = load_data(
+            filepath=str(_filepath.with_name(_filepath.name + "_params")),
+            return_cfg=False,
+            **kwargs,
+        )
+
+        signals_data, _, _ = load_data(
+            filepath=str(_filepath.with_name(_filepath.name + "_signals")),
+            return_cfg=False,
+            **kwargs,
+        )
+
+        params = params_data.astype(np.float64)
+        signals = signals_data.astype(np.float64)
+
+        self.last_result = (params, signals)
+        return params, signals

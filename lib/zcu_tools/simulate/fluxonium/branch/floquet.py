@@ -1,28 +1,30 @@
-from typing import Dict, List, Optional, Tuple
+from __future__ import annotations
 
 import numpy as np
 import qutip as qt
 from joblib import Parallel, delayed
+from numpy.typing import NDArray
 from tqdm.auto import tqdm
+from typing_extensions import Optional, Sequence, cast
 
 
 class FloquetBranchAnalysis:
     def __init__(
         self,
-        params: Tuple[float, float, float],
+        params: tuple[float, float, float],
         r_f: float,
         g: float,
         flx: float = 0.5,
         qub_dim: int = 40,
         qub_cutoff: int = 60,
-        esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
     ) -> None:
         self.r_f = r_f
         self.g = g
 
-        import scqubits as scq  # lazy import
+        from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-        fluxonium = scq.Fluxonium(
+        fluxonium = Fluxonium(
             *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
         )
         if esys is None:
@@ -32,7 +34,7 @@ class FloquetBranchAnalysis:
         self.H_with_drive = [H, [n_op, lambda t, amp: amp * np.cos(r_f * t)]]
 
     def make_floquet_basis(
-        self, photon: float, precompute: Optional[np.ndarray] = None
+        self, photon: float, precompute: Optional[NDArray[np.float64]] = None
     ) -> qt.FloquetBasis:
         return qt.FloquetBasis(
             self.H_with_drive,
@@ -42,8 +44,11 @@ class FloquetBranchAnalysis:
         )
 
     def calc_branch_infos(
-        self, fbasis_n: List[qt.FloquetBasis], branchs: List[int], progress: bool = True
-    ) -> Dict[int, List[int]]:
+        self,
+        fbasis_n: Sequence[qt.FloquetBasis],
+        branchs: list[int],
+        progress: bool = True,
+    ) -> dict[int, list[int]]:
         branch_infos = {b: [] for b in branchs}
         fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]
         qub_dim = len(fstate_n[0])
@@ -63,15 +68,24 @@ class FloquetBranchAnalysis:
 
         return branch_infos
 
+    def calc_branch_energies(
+        self, fbasis_n: list[qt.FloquetBasis], branch_infos: dict[int, list[int]]
+    ) -> dict[int, list[float]]:
+        branch_energies = {b: [] for b in branch_infos.keys()}
+        for b, b_list in branch_infos.items():
+            for n, b_idx in enumerate(b_list):
+                branch_energies[b].append(fbasis_n[n].e_quasi[b_idx])
+        return branch_energies
+
     def calc_branch_populations(
         self,
-        fbasis_n: List[qt.FloquetBasis],
-        branch_infos: Dict[int, List[int]],
-        avg_times: np.ndarray,
+        fbasis_n: list[qt.FloquetBasis],
+        branch_infos: dict[int, list[int]],
+        avg_times: NDArray[np.float64],
         progress: bool = True,
-    ) -> Dict[int, List[float]]:
+    ) -> dict[int, list[float]]:
         fstates_t_n = [
-            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])
+            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])  # type: ignore
             for fbasis in tqdm(
                 fbasis_n, desc="Computing time dependent states", disable=not progress
             )
@@ -100,25 +114,26 @@ class FloquetBranchAnalysis:
             )(b)
             for b in branch_infos.keys()
         )
-        branch_populations = dict(branch_populations)
+        branch_populations = dict(branch_populations)  # type: ignore
+        branch_populations = cast(dict[int, list[float]], branch_populations)
 
         return branch_populations
 
 
 def calc_branch_infos(
-    branchs: List[int],
+    branchs: list[int],
     *,
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     r_f: float,
     g: float,
     flx: float,
     qub_dim: int,
     qub_cutoff: int,
-    photons: np.ndarray,
-    avg_times: Optional[np.ndarray] = None,
+    photons: NDArray[np.float64],
+    avg_times: Optional[NDArray[np.float64]] = None,
     progress: bool = True,
-    esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-) -> Tuple[Dict[int, List[int]], Dict[int, List[float]]]:
+    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+) -> tuple[dict[int, list[int]], list[qt.FloquetBasis]]:
     fb_analysis = FloquetBranchAnalysis(
         params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff, esys=esys
     )
@@ -129,13 +144,15 @@ def calc_branch_infos(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    assert isinstance(fbasis_n, list)
+    fbasis_n = cast(list[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     return branch_infos, fbasis_n
 
 
 def calc_ge_snr(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     flx: float,
     r_f: float,
     rf_w: float,
@@ -143,8 +160,8 @@ def calc_ge_snr(
     qub_dim: int,
     qub_cutoff: int,
     max_photon: int,
-    esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     branchs = [0, 1]
 
     amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)
@@ -173,7 +190,7 @@ def calc_ge_snr(
     f01_over_n = branch_energies[1] - branch_energies[0]
     chi_over_n = (f01_over_n[1:] - f01_over_n[:-1]) / (photons[1:] - photons[:-1])
 
-    def signal_diff(x: np.ndarray) -> np.ndarray:
+    def signal_diff(x: NDArray) -> NDArray:
         return 1 - np.exp(-(x**2) / (2 * rf_w**2))
 
     snrs = np.abs(signal_diff(chi_over_n) * np.sqrt(photons[:-1]))
@@ -184,7 +201,7 @@ def calc_ge_snr(
 class FloquetWithTLSBranchAnalysis:
     def __init__(
         self,
-        params: Tuple[float, float, float],
+        params: tuple[float, float, float],
         r_f: float,
         g: float,
         E_tls: float,
@@ -192,14 +209,14 @@ class FloquetWithTLSBranchAnalysis:
         flx: float = 0.5,
         qub_dim: int = 40,
         qub_cutoff: int = 60,
-        esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
     ) -> None:
         self.r_f = r_f
         self.g = g
 
-        import scqubits as scq  # lazy import
+        from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-        fluxonium = scq.Fluxonium(
+        fluxonium = Fluxonium(
             *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
         )
         if esys is None:
@@ -217,7 +234,7 @@ class FloquetWithTLSBranchAnalysis:
         self.H_with_drive = [H, [n_op, lambda t, amp: amp * np.cos(r_f * t)]]
 
     def make_floquet_basis(
-        self, photon: float, precompute: Optional[np.ndarray] = None
+        self, photon: float, precompute: Optional[NDArray[np.float64]] = None
     ) -> qt.FloquetBasis:
         return qt.FloquetBasis(
             self.H_with_drive,
@@ -227,8 +244,8 @@ class FloquetWithTLSBranchAnalysis:
         )
 
     def calc_branch_infos(
-        self, fbasis_n: List[qt.FloquetBasis], branchs: List[int], progress: bool = True
-    ) -> Dict[int, List[int]]:
+        self, fbasis_n: list[qt.FloquetBasis], branchs: list[int], progress: bool = True
+    ) -> dict[int, list[int]]:
         branch_infos = {b: [] for b in branchs}
         fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]
         qub_dim = len(fstate_n[0]) // 2
@@ -250,16 +267,16 @@ class FloquetWithTLSBranchAnalysis:
 
     def calc_branch_populations(
         self,
-        fbasis_n: List[qt.FloquetBasis],
-        branch_infos: Dict[int, List[int]],
-        avg_times: Optional[np.ndarray] = None,
+        fbasis_n: list[qt.FloquetBasis],
+        branch_infos: dict[int, list[int]],
+        avg_times: Optional[NDArray[np.float64]] = None,
         progress: bool = True,
-    ) -> Dict[int, List[float]]:
+    ) -> dict[int, list[float]]:
         if avg_times is None:
-            avg_times = [0.0]
+            avg_times = np.array([0.0])
 
         fstates_t_n = [
-            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])
+            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])  # type: ignore
             for fbasis in tqdm(
                 fbasis_n,
                 desc="Computing time dependent states",
@@ -295,15 +312,18 @@ class FloquetWithTLSBranchAnalysis:
             )(b)
             for b in branch_infos.keys()
         )
-        branch_populations = dict(branch_populations)
+        assert isinstance(branch_populations, list)
+
+        branch_populations = dict(branch_populations)  # type: ignore
+        branch_populations = cast(dict[int, list[float]], branch_populations)
 
         return branch_populations
 
 
 def calc_branch_infos_with_tls(
-    branchs: List[int],
+    branchs: list[int],
     *,
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     r_f: float,
     g: float,
     E_tls: float,
@@ -311,11 +331,11 @@ def calc_branch_infos_with_tls(
     flx: float,
     qub_dim: int,
     qub_cutoff: int,
-    photons: np.ndarray,
-    avg_times: Optional[np.ndarray] = None,
+    photons: NDArray[np.float64],
+    avg_times: Optional[NDArray[np.float64]] = None,
     progress: bool = True,
-    esys: Optional[Tuple[np.ndarray, np.ndarray]] = None,
-) -> Tuple[Dict[int, List[int]], Dict[int, List[float]]]:
+    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+) -> tuple[dict[int, list[int]], list[qt.FloquetBasis]]:
     fb_analysis = FloquetWithTLSBranchAnalysis(
         params,
         r_f,
@@ -334,6 +354,130 @@ def calc_branch_infos_with_tls(
             photons, desc="Computing Floquet basis", disable=not progress
         )
     )
+    assert isinstance(fbasis_n, list)
+    fbasis_n = cast(list[qt.FloquetBasis], fbasis_n)
 
     branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs, progress=progress)
     return branch_infos, fbasis_n
+
+
+class FloquetDualCouplingBranchAnalysis:
+    def __init__(
+        self,
+        params: tuple[float, float, float],
+        r_f: float,
+        g1: float,
+        g2: float,
+        flx: float = 0.5,
+        qub_dim: int = 40,
+        qub_cutoff: int = 60,
+        esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    ) -> None:
+        self.r_f = r_f
+        self.g1 = g1
+        self.g2 = g2
+
+        from scqubits.core.fluxonium import Fluxonium  # lazy import
+
+        fluxonium = Fluxonium(
+            *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
+        )
+        if esys is None:
+            esys = fluxonium.eigensys(evals_count=qub_dim)
+        H = qt.Qobj(fluxonium.hamiltonian(energy_esys=esys))
+        n_op = qt.Qobj(fluxonium.n_operator(energy_esys=esys))
+        phi_op = qt.Qobj(fluxonium.phi_operator(energy_esys=esys))
+        self.H_with_drive = [
+            H,
+            [n_op, lambda t, amp1, amp2: amp1 * np.cos(r_f * t)],
+            [phi_op, lambda t, amp1, amp2: amp2 * np.sin(r_f * t)],
+        ]
+
+    def make_floquet_basis(
+        self, photon: float, precompute: Optional[NDArray[np.float64]] = None
+    ) -> qt.FloquetBasis:
+        return qt.FloquetBasis(
+            self.H_with_drive,
+            2 * np.pi / self.r_f,
+            args=dict(
+                amp1=2 * self.g1 * np.sqrt(photon),
+                amp2=2 * self.g2 * np.sqrt(photon),
+            ),
+            precompute=precompute,
+        )
+
+    def calc_branch_infos(
+        self,
+        fbasis_n: Sequence[qt.FloquetBasis],
+        branchs: list[int],
+        progress: bool = True,
+    ) -> dict[int, list[int]]:
+        branch_infos = {b: [] for b in branchs}
+        fstate_n = [fbasis.state(t=0) for fbasis in fbasis_n]
+        qub_dim = len(fstate_n[0])
+
+        for n in tqdm(
+            range(len(fstate_n)), desc="Computing branch infos", disable=not progress
+        ):
+            for b, b_list in branch_infos.items():
+                if n == 0:
+                    # the first element is always the bare label state
+                    last_state = qt.basis(qub_dim, b)
+                else:
+                    last_state = fstate_n[n - 1][b_list[n - 1]]
+                # the next state is the one with the largest overlap with the last state
+                dists = [np.abs(last_state.dag() @ fstate) for fstate in fstate_n[n]]
+                b_list.append(np.argmax(dists))
+
+        return branch_infos
+
+    def calc_branch_energies(
+        self, fbasis_n: list[qt.FloquetBasis], branch_infos: dict[int, list[int]]
+    ) -> dict[int, list[float]]:
+        branch_energies = {b: [] for b in branch_infos.keys()}
+        for b, b_list in branch_infos.items():
+            for n, b_idx in enumerate(b_list):
+                branch_energies[b].append(fbasis_n[n].e_quasi[b_idx])
+        return branch_energies
+
+    def calc_branch_populations(
+        self,
+        fbasis_n: list[qt.FloquetBasis],
+        branch_infos: dict[int, list[int]],
+        avg_times: NDArray[np.float64],
+        progress: bool = True,
+    ) -> dict[int, list[float]]:
+        fstates_t_n = [
+            np.array([fbasis.state(t=t, data=True).to_array() for t in avg_times])  # type: ignore
+            for fbasis in tqdm(
+                fbasis_n, desc="Computing time dependent states", disable=not progress
+            )
+        ]
+        qub_dim = len(fstates_t_n[0][0])
+
+        # time average over one period on the expectation value of population
+        dag_weighted_bare_states = np.array(
+            [np.sqrt(j) * qt.basis(qub_dim, j).dag().full() for j in range(qub_dim)]
+        )
+
+        def calc_pop(fstates_t, i) -> float:
+            return np.sum(
+                np.abs(np.dot(dag_weighted_bare_states, fstates_t[..., i].T)) ** 2
+            ) / len(fstates_t)
+
+        branch_populations = Parallel(n_jobs=-1)(
+            delayed(
+                lambda b: (
+                    b,
+                    [
+                        calc_pop(fstates_t, i)
+                        for fstates_t, i in zip(fstates_t_n, branch_infos[b])
+                    ],
+                )
+            )(b)
+            for b in branch_infos.keys()
+        )
+        branch_populations = dict(branch_populations)  # type: ignore
+        branch_populations = cast(dict[int, list[float]], branch_populations)
+
+        return branch_populations

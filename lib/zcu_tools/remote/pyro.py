@@ -1,38 +1,28 @@
+from __future__ import annotations
+
 import socket
-from types import ModuleType
-from typing import Any, Literal, Tuple
 
 import psutil
 import Pyro4
 import Pyro4.naming
-
 from qick import QickConfig
+from typing_extensions import Any, Literal
+
 from zcu_tools.program.bitfiles import get_bitfile
 
 
 def setup_pyro4() -> None:
     # use dill instead of pickle
-    Pyro4.config.SERIALIZER = "pickle"
-    # Pyro4.config.SERIALIZER = "dill"
-    Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])
+    Pyro4.config.SERIALIZER = "pickle"  # type: ignore
+    # Pyro4.config.SERIALIZER = "dill"  # type: ignore
+    Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill", "pickle"])  # type: ignore
     Pyro4.config.DILL_PROTOCOL_VERSION = 5
-    Pyro4.config.PICKLE_PROTOCOL_VERSION = 4
-    Pyro4.config.REQUIRE_EXPOSE = False
+    Pyro4.config.PICKLE_PROTOCOL_VERSION = 4  # type: ignore
+    Pyro4.config.REQUIRE_EXPOSE = False  # type: ignore
     Pyro4.config.ONEWAY_THREADED = True
 
 
 setup_pyro4()
-
-
-def get_program_module(version: Literal["v1", "v2"]) -> ModuleType:
-    import importlib
-
-    if version == "v1":
-        return importlib.import_module("zcu_tools.program.v1")
-    elif version == "v2":
-        return importlib.import_module("zcu_tools.program.v2")
-    else:
-        raise ValueError(f"Invalid version {version}")
 
 
 def get_localhost_ip(ns: Pyro4.naming.NameServer, iface: str) -> str:
@@ -62,7 +52,9 @@ def start_nameserver(ns_port: int) -> None:
     Pyro4.naming.startNSloop(host="0.0.0.0", port=ns_port)
 
 
-def start_server(port: int, ns_port: int, version="v1", iface="eth0", **kwargs) -> None:
+def start_server(
+    port: int, ns_port: int, version: Literal["v1", "v2"] = "v1", iface="eth0", **kwargs
+) -> None:
     from qick import QickSoc
 
     print("looking for nameserver . . .")
@@ -89,12 +81,12 @@ def start_server(port: int, ns_port: int, version="v1", iface="eth0", **kwargs) 
     daemon.requestLoop()  # this will run forever until interrupted
 
 
-def make_proxy(
+def make_soc_proxy(
     ns_host: str,
     ns_port: int,
     remote_traceback: bool = True,
     lookup_name: str = "myqick",
-) -> Tuple[Any, QickConfig]:
+) -> tuple[Any, QickConfig]:
     ns = Pyro4.locateNS(host=ns_host, port=ns_port)
 
     soc = Pyro4.Proxy(ns.lookup(lookup_name))

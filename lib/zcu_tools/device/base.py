@@ -2,25 +2,21 @@ from __future__ import annotations
 
 import sys
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, TypedDict
 
-from typing_extensions import Generic, NotRequired, TypeVar
+from typing_extensions import TYPE_CHECKING, Any, NotRequired, TypedDict
 
 if TYPE_CHECKING:
     from pyvisa import ResourceManager
 
 
-class DeviceInfo(TypedDict):
+class DeviceInfo(TypedDict, extra_items=Any):
     type: str
     address: str
 
     label: NotRequired[str]
 
 
-T_DeviceInfo = TypeVar("T_DeviceInfo", bound=DeviceInfo)
-
-
-class BaseDevice(ABC, Generic[T_DeviceInfo]):
+class BaseDevice(ABC):
     """
     Base class for all devices.
     """
@@ -54,6 +50,7 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
             print(f"Could not query IDN. Error: {e}")
 
     def close(self) -> None:
+
         print(f"Disconnecting from {self.session.resource_name}")
         self.session.close()
 
@@ -66,9 +63,9 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
     # ----- abstract methods -----
 
     @abstractmethod
-    def _setup(self, cfg: T_DeviceInfo, *, progress: bool = True) -> None: ...
+    def _setup(self, cfg: DeviceInfo, *, progress: bool = True) -> None: ...
 
-    def setup(self, cfg: T_DeviceInfo, *, progress: bool = True) -> None:
+    def setup(self, cfg: DeviceInfo, *, progress: bool = True) -> None:
         """
         Setup the device with the given configuration.
         """
@@ -87,7 +84,7 @@ class BaseDevice(ABC, Generic[T_DeviceInfo]):
         self._setup(cfg, progress=progress)
 
     @abstractmethod
-    def get_info(self) -> T_DeviceInfo:
+    def get_info(self) -> DeviceInfo:
         """
         Get the current configuration of the device.
         """

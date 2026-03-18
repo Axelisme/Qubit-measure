@@ -1,16 +1,24 @@
-from typing import Tuple
+from __future__ import annotations
 
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output, display
 from numpy import ndarray
+from numpy.typing import NDArray
 
 from ..processing import cast2real_and_norm, spectrum2d_findpoint
 
 
 class InteractiveFindPoints:
-    def __init__(self, spectrum, mAs, fpts, threshold=1.0, brush_width=0.05) -> None:
+    def __init__(
+        self,
+        spectrum: NDArray,
+        mAs: NDArray[np.float64],
+        fpts: NDArray[np.float64],
+        threshold=1.0,
+        brush_width=0.05,
+    ) -> None:
         self.spectrum = spectrum
         self.mAs = mAs
         self.fpts = fpts
@@ -239,7 +247,7 @@ class InteractiveFindPoints:
         self.is_finished = True
         plt.close(self.fig)
 
-    def get_positions(self, finish: bool = True) -> Tuple[ndarray, ndarray]:
+    def get_positions(self, finish: bool = True) -> tuple[ndarray, ndarray]:
         if not self.is_finished and finish:
             self.finish_interactive()
 

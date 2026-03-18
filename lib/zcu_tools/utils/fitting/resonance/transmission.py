@@ -1,9 +1,11 @@
-from typing import Optional, Tuple
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
+from numpy.typing import NDArray
+from typing_extensions import Optional, TypedDict
 
 from .base import (
     calc_phase,
@@ -17,16 +19,34 @@ from .base import (
 
 
 def calc_peak_signals(
-    circle_params: Tuple[float, float, float], theta0: float
+    circle_params: tuple[float, float, float], theta0: float
 ) -> complex:
     xc, yc, r0 = circle_params
     center = xc + 1j * yc
     return center + r0 * np.exp(1j * theta0)
 
 
+class TransmissionParams(TypedDict):
+    freq: float
+    kappa: float
+    Ql: float
+    a0: complex
+    edelay: float
+    theta0: float
+    circle_params: tuple[float, float, float]
+
+
 class TransmissionModel:
     @classmethod
-    def calc_signals(cls, fpts, freq, Ql, a0, edelay, **kwargs) -> np.ndarray:
+    def calc_signals(
+        cls,
+        fpts: NDArray[np.float64],
+        freq: float,
+        Ql: float,
+        a0: complex,
+        edelay: float,
+        **kwargs,
+    ) -> NDArray[np.complex128]:
         return (
             a0
             * np.exp(-1j * 2 * np.pi * fpts * edelay)
@@ -35,9 +55,12 @@ class TransmissionModel:
 
     @classmethod
     def fit(
-        cls, fpts: np.ndarray, signals: np.ndarray, edelay: Optional[float] = None
-    ) -> dict:
-        """Dict[freq, kappa, Ql, a0, edelay, circle_params]"""
+        cls,
+        fpts: NDArray[np.float64],
+        signals: NDArray[np.complex128],
+        edelay: Optional[float] = None,
+    ) -> TransmissionParams:
+        """dict[freq, kappa, Ql, a0, edelay, circle_params]"""
         if edelay is None:
             edelay = fit_edelay(fpts, signals)
 
@@ -48,7 +71,7 @@ class TransmissionModel:
         )
         a0 = calc_peak_signals(circle_params, theta0)
 
-        return dict(
+        return TransmissionParams(
             freq=freq,
             kappa=freq / Ql,
             Ql=Ql,
@@ -59,7 +82,12 @@ class TransmissionModel:
         )
 
     @classmethod
-    def visualize_fit(cls, fpts, signals, param_dict: dict) -> Figure:
+    def visualize_fit(
+        cls,
+        fpts: NDArray[np.float64],
+        signals: NDArray[np.complex128],
+        param_dict: TransmissionParams,
+    ) -> Figure:
         freq = param_dict["freq"]
         kappa = param_dict["kappa"]
         theta0 = param_dict["theta0"]

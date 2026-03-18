@@ -1,25 +1,35 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Any, Callable, Optional, Tuple, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    SoftTask,
-    TaskConfig,
-    TaskContextView,
+    Task,
+    TaskCfg,
+    TaskState,
     run_task,
 )
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -45,57 +55,68 @@ def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return (real_signals - min_vals) / (max_vals - min_vals)
 
 
-CPMGResultType = Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]
+CPMG_Result: TypeAlias = tuple[
+    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+]
 
 
-class CPMGTaskConfig(TaskConfig, ModularProgramCfg):
+class CPMG_ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi2_pulse: PulseCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class CPMGExperiment(AbsExperiment):
-    def run(
-        self, soc, soccfg, cfg: CPMGTaskConfig, *, progress: bool = True
-    ) -> CPMGResultType:
-        cfg = deepcopy(cfg)
+class CPMG_SweepCfg(TypedDict, closed=True):
+    times: Union[SweepCfg, NDArray, list]
+    length: SweepCfg
 
-        assert "sweep" in cfg
-        assert isinstance(cfg["sweep"], dict)
-        times_sweep = cfg["sweep"]["times"]
-        len_sweep = cfg["sweep"]["length"]
-        cfg["sweep"].pop("times")
+
+class CPMG_Cfg(ModularProgramCfg, TaskCfg):
+    modules: CPMG_ModuleCfg
+    sweep: CPMG_SweepCfg
+
+
+class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> CPMG_Result:
+        _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
+
+        times_sweep = _cfg["sweep"]["times"]
+        len_sweep = _cfg["sweep"]["length"]
+        _cfg["sweep"].pop("times")  # type: ignore
 
         times = sweep2array(times_sweep, allow_array=True)
         ts = sweep2array(len_sweep)  # predicted times
+        ts = round_zcu_time(ts, soccfg)
 
         cpmg_spans = sweep2param("length", len_sweep)
 
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
 
-        def measure_fn(ctx: TaskContextView, update_hook: Callable[[int, Any], None]):
-            interval = cpmg_spans / ctx.cfg["time"]
+        def measure_fn(ctx: TaskState, update_hook: Callable[[int, Any], None]):
+            cfg = ctx.cfg
+            modules = cfg["modules"]
+            interval = cpmg_spans / ctx.env["time"]
             return ModularProgramV2(
                 soccfg,
-                ctx.cfg,
+                cfg,
                 modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"], pulse_name="pi2_pulse"),
+                    Reset("reset", modules.get("reset")),
+                    Pulse("pi2_pulse1", modules["pi2_pulse"], pulse_name="pi2_pulse"),
                     Delay("initial_cpmg_delay", delay=0.5 * interval),
                     Repeat(
                         name="cpmg_pi_loop",
-                        n=ctx.cfg["time"] - 1,
+                        n=ctx.env["time"] - 1,
                         sub_module=[
-                            Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                            Pulse("pi_pulse", modules["pi_pulse"]),
                             Delay("interval_cpmg_delay", delay=interval),
                         ],
                     ),
-                    Pulse("last_pi_pulse", ctx.cfg["pi_pulse"], pulse_name="pi_pulse"),
+                    Pulse("last_pi_pulse", modules["pi_pulse"], pulse_name="pi_pulse"),
                     Delay("final_cpmg_delay", delay=0.5 * interval),
-                    Pulse("pi2_pulse2", ctx.cfg["pi2_pulse"], pulse_name="pi2_pulse"),
-                    Readout("readout", ctx.cfg["readout"]),
+                    Pulse("pi2_pulse2", modules["pi2_pulse"], pulse_name="pi2_pulse"),
+                    Readout("readout", modules["readout"]),
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 
@@ -103,28 +124,27 @@ class CPMGExperiment(AbsExperiment):
             "Number of Pi", "Time (us)", line_axis=1, num_lines=2, title="CPMG"
         ) as viewer:
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="times",
-                    sweep_values=times.tolist(),
-                    update_cfg_fn=lambda _, ctx, time: ctx.env_dict.update(time=time),
-                    sub_task=HardTask(measure_fn=measure_fn, result_shape=(len(ts),)),
+                task=Task(measure_fn=measure_fn, result_shape=(len(ts),)).scan(
+                    "times",
+                    times.tolist(),
+                    before_each=lambda _, ctx, time: ctx.env.update(time=time),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    times, ts, cpmg_signal2real(np.asarray(ctx.data))
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(
+                    times, ts, cpmg_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (times, ts, signals)
 
         return times, ts, signals
 
     def analyze(
-        self, result: Optional[CPMGResultType] = None
-    ) -> Tuple[np.ndarray, np.ndarray, Figure]:
+        self, result: Optional[CPMG_Result] = None
+    ) -> tuple[np.ndarray, np.ndarray, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -151,7 +171,7 @@ class CPMGExperiment(AbsExperiment):
             if t2err > 0.5 * t2r:
                 continue
 
-            fit_params = cast(Tuple[float, float, float], tuple(pOpt))
+            fit_params = cast(tuple[float, float, float], tuple(pOpt))
 
             t2s[i] = t2r
             t2errs[i] = t2err
@@ -185,7 +205,7 @@ class CPMGExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[CPMGResultType] = None,
+        result: Optional[CPMG_Result] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/cpmg",
         **kwargs,
@@ -205,7 +225,7 @@ class CPMGExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> CPMGResultType:
+    def load(self, filepath: str, **kwargs) -> CPMG_Result:
         signals2D, times, Ts = load_data(filepath, **kwargs)
         assert times is not None and Ts is not None
         assert len(times.shape) == 1 and len(Ts.shape) == 1

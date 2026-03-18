@@ -1,18 +1,22 @@
+from __future__ import annotations
+
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import NotRequired
-from matplotlib.figure import Figure
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -26,84 +30,87 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-PowerResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+PowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class OptimizePowerTaskConfig(TaskConfig, ModularProgramCfg):
+class PowerModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class OptimizePowerExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: OptimizePowerTaskConfig) -> PowerResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class PowerCfg(ModularProgramCfg, TaskCfg):
+    modules: PowerModuleCfg
+    sweep: dict[str, SweepCfg]
 
-        assert "sweep" in cfg
+
+class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PowerResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "power")
-        cfg["sweep"] = {"ge": make_ge_sweep(), "power": cfg["sweep"]["power"]}
+        _cfg = check_type(deepcopy(cfg), PowerCfg)
 
-        gains = sweep2array(cfg["sweep"]["power"])  # predicted power points
+        _cfg["sweep"] = {"ge": make_ge_sweep(), "power": _cfg["sweep"]["power"]}
 
+        gains = sweep2array(_cfg["sweep"]["power"])  # predicted power points
+
+        modules = _cfg["modules"]
         Pulse.set_param(
-            cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
         Readout.set_param(
-            cfg["readout"], "gain", sweep2param("power", cfg["sweep"]["power"])
+            modules["readout"], "gain", sweep2param("power", _cfg["sweep"]["power"])
         )
 
         with LivePlotter1D("Readout Power", "SNR") as viewer:
-            signals = run_task(
-                task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        (
-                            prog := ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset",
-                                        ctx.cfg.get("reset", {"type": "none"}),
-                                    ),
-                                    Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                                    Readout("readout", ctx.cfg["readout"]),
-                                ],
-                            )
-                        )
-                        and (
-                            prog.acquire(
-                                soc,
-                                progress=False,
-                                callback=update_hook,
-                                record_statistic=True,
-                            ),
-                            prog.get_covariance(),
-                            prog.get_median(),
-                        )
+
+            def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
                     ),
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
+            signals = run_task(
+                task=Task(
+                    measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     result_shape=(len(gains),),
+                    dtype=np.float64,
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(gains, np.abs(ctx.data)),
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(gains, np.abs(ctx.root_data)),
             )
 
         # record the last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (gains, signals)
 
         return gains, signals
 
     def analyze(
-        self, result: Optional[PowerResultType] = None, penalty_ratio: float = 0.0
-    ) -> Tuple[float, Figure]:
+        self, result: Optional[PowerResult] = None, penalty_ratio: float = 0.0
+    ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        powers, signals = result
-
-        snrs = np.abs(signals)
+        powers, snrs = result
+        snrs = np.abs(snrs)
 
         # fill NaNs with zeros
         snrs[np.isnan(snrs)] = 0.0
@@ -129,7 +136,7 @@ class OptimizePowerExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[PowerResultType] = None,
+        result: Optional[PowerResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/gain",
         **kwargs,
@@ -149,7 +156,7 @@ class OptimizePowerExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> PowerResultType:
+    def load(self, filepath: str, **kwargs) -> PowerResult:
         signals, pdrs, _ = load_data(filepath, **kwargs)
         assert pdrs is not None
         assert len(pdrs.shape) == 1 and len(signals.shape) == 1

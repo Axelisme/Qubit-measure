@@ -1,15 +1,17 @@
-from typing import TYPE_CHECKING, Optional, Tuple
+from __future__ import annotations
 
 import numpy as np
 from joblib import Parallel, delayed
+from numpy.typing import NDArray
 from tqdm.auto import tqdm, trange
+from typing_extensions import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from scqubits import Fluxonium, HilbertSpace, Oscillator, ParameterSweep
+    from scqubits.core.hilbert_space import HilbertSpace
 
 
 def make_hilbertspace(
-    params: Tuple[float, float, float],
+    params: tuple[float, float, float],
     r_f: float,
     qub_dim: int,
     qub_cutoff: int,
@@ -17,7 +19,10 @@ def make_hilbertspace(
     g: float,
     flx: float = 0.5,
 ) -> "HilbertSpace":
-    from scqubits import Fluxonium, HilbertSpace, Oscillator  # lazy import
+    # lazy import
+    from scqubits.core.fluxonium import Fluxonium
+    from scqubits.core.hilbert_space import HilbertSpace
+    from scqubits.core.oscillator import Oscillator
 
     resonator = Oscillator(r_f, truncated_dim=res_dim)
     fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
@@ -30,8 +35,8 @@ def make_hilbertspace(
 
 
 def make_bra_array(
-    hilbertspace: "HilbertSpace", qub_dim: int, res_dim: int
-) -> np.ndarray:
+    hilbertspace: HilbertSpace, qub_dim: int, res_dim: int
+) -> NDArray[np.complex128]:
     return np.array(
         [
             np.sqrt(j) * hilbertspace.bare_productstate((j, m)).dag().full()
@@ -41,7 +46,9 @@ def make_bra_array(
     )
 
 
-def calc_population(bra_array: np.ndarray, evec: np.ndarray) -> float:
+def calc_population(
+    bra_array: NDArray[np.complex128], evec: NDArray[np.complex128]
+) -> float:
     r"""
     Calculate the average population of the the given state
 
@@ -51,8 +58,8 @@ def calc_population(bra_array: np.ndarray, evec: np.ndarray) -> float:
 
 
 def calc_branch_population(
-    hilbertspace: "HilbertSpace", branchs: np.ndarray, upto: int = -1
-) -> np.ndarray:
+    hilbertspace: HilbertSpace, branchs: list[int], upto: int = -1
+) -> dict[int, NDArray[np.float64]]:
     """
     Calculate the average population of the states in branchs upto provided photon number
     """
@@ -80,12 +87,14 @@ def calc_branch_population(
         )
     ).reshape(len(branchs), upto)
 
+    populations = dict(zip(branchs, populations))
+
     return populations
 
 
 def calc_branch_population_over_flux(
-    flxs: np.ndarray,
-    params: Tuple[float, float, float],
+    flxs: NDArray[np.float64],
+    params: tuple[float, float, float],
     r_f: float,
     qub_dim: int,
     qub_cutoff: int,
@@ -94,19 +103,17 @@ def calc_branch_population_over_flux(
     upto: int = -1,
     branchs: Optional[list[int]] = None,
     batch_size: int = 10,
-) -> np.ndarray:
-    from scqubits import (  # lazy import
-        Fluxonium,
-        HilbertSpace,
-        Oscillator,
-        ParameterSweep,
-    )
+) -> NDArray[np.float64]:
+    from scqubits.core.param_sweep import ParameterSweep  # lazy import
+
+    if branchs is None:
+        branchs = list(range(qub_dim))
 
     hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g)
     fluxonium, resonator = hilbertspace.subsystem_list
 
     def update_hilbertspace(flx: float) -> None:
-        fluxonium.flux = flx
+        fluxonium.flux = flx  # type: ignore
 
     bra_array = make_bra_array(hilbertspace, qub_dim, res_dim)
 
@@ -126,7 +133,7 @@ def calc_branch_population_over_flux(
 
         def _calc_branch_populations(
             paramsweep: ParameterSweep, paramindex_tuple: tuple, **kwargs
-        ) -> np.ndarray:
+        ) -> NDArray[np.float64]:
             # (qub_dim * res_dim, (qub_dim * res_dim, 1))
             evecs = paramsweep["evecs"][paramindex_tuple]
 

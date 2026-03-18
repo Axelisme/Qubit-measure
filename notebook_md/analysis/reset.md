@@ -7,9 +7,9 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.17.2
+      jupytext_version: 1.19.1
   kernelspec:
-    display_name: Python 3
+    display_name: .venv
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.13.2
+    version: 3.9.23
 ---
 
 ```python
@@ -31,7 +31,7 @@ import plotly.graph_objects as go
 
 %autoreload 2
 from zcu_tools.notebook.persistance import load_result
-from zcu_tools.simulate import flx2mA, mA2flx  # noqa: F401
+from zcu_tools.simulate import mA2flx
 from zcu_tools.simulate.fluxonium import (
     calculate_system_n_oper_vs_flx,
     calculate_n_oper_vs_flx,
@@ -40,10 +40,7 @@ from zcu_tools.simulate.fluxonium import (
 ```
 
 ```python
-qub_name = "SF008"
-
-server_ip = "021-zcu216"
-port = 4999
+qub_name = "Q12_2D[6]/Q1"
 ```
 
 # Load data
@@ -52,7 +49,7 @@ port = 4999
 
 ```python
 loadpath = f"../../result/{qub_name}/params.json"
-_, params, mA_c, period, _, result = load_result(loadpath)
+_, params, A_c, period, _, result = load_result(loadpath)
 
 r_f = result["dispersive"]["r_f"]
 g = result["dispersive"]["g"]
@@ -65,21 +62,19 @@ sweep = None
 spectrum_data = None
 
 return_dim = 7
-# flxs = np.linspace(0.0, 0.5, 200)
-# mAs = flx2mA(flxs, mA_c, period)
-mAs = np.linspace(-1.0, 3.0, 200)
-flxs = mA2flx(mAs, mA_c, period)
-```
-
-```python
-spectrum_data, energies = calculate_energy_vs_flx(
-    params, flxs, spectrum_data=spectrum_data
-)
+mAs = np.linspace(-1.0, 3.0, 200, dtype=np.float64)
+flxs = mA2flx(1e-3 * mAs, A_c, period)
 ```
 
 ```python
 spectrum_data, elements = calculate_n_oper_vs_flx(
     params, flxs, return_dim=return_dim, spectrum_data=spectrum_data
+)
+```
+
+```python
+spectrum_data, energies = calculate_energy_vs_flx(
+    params, flxs, spectrum_data=spectrum_data
 )
 ```
 

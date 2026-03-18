@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -34,70 +36,75 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return rotate2real(signals).real
 
 
-T2RamseyResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T2RamseyResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class T2RamseyTaskConfig(TaskConfig, ModularProgramCfg):
+class T2RamseyModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T2RamseyExperiment(AbsExperiment):
+class T2RamseyCfg(ModularProgramCfg, TaskCfg):
+    modules: T2RamseyModuleCfg
+    sweep: dict[str, SweepCfg]
+
+
+class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
     def run(
-        self, soc, soccfg, cfg: T2RamseyTaskConfig, *, detune: float = 0.0
-    ) -> T2RamseyResultType:
-        cfg = deepcopy(cfg)
-
-        assert "sweep" in cfg
+        self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
+    ) -> T2RamseyResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        _cfg = check_type(deepcopy(cfg), T2RamseyCfg)
 
-        ts = sweep2array(cfg["sweep"]["length"])
+        ts = sweep2array(_cfg["sweep"]["length"])
+        ts = round_zcu_time(ts, soccfg)
 
-        t2r_spans = sweep2param("length", cfg["sweep"]["length"])
+        t2r_spans = sweep2param("length", _cfg["sweep"]["length"])
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Ramsey"}
         ) as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
+                        (modules := ctx.cfg["modules"])
+                        and ModularProgramV2(
                             soccfg,
                             ctx.cfg,
                             modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
+                                Reset("reset", modules.get("reset")),
+                                Pulse("pi2_pulse1", modules["pi2_pulse"]),
                                 Delay("t2_delay", delay=t2r_spans),
                                 Pulse(
                                     name="pi2_pulse2",
                                     cfg={
-                                        **ctx.cfg["pi2_pulse"],
-                                        "phase": ctx.cfg["pi2_pulse"]["phase"]
+                                        **modules["pi2_pulse"],
+                                        "phase": modules["pi2_pulse"]["phase"]
                                         + 360 * detune * t2r_spans,
-                                    },
+                                    },  # type: ignore[dict-item]
                                 ),
-                                Readout("readout", ctx.cfg["readout"]),
+                                Readout("readout", modules["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(ts),),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    ts, t2ramsey_signal2real(ctx.data)
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(
+                    ts, t2ramsey_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (ts, signals)
 
         return ts, signals
 
     def analyze(
-        self, result: Optional[T2RamseyResultType] = None, *, fit_fringe: bool = True
-    ) -> Tuple[float, float, float, float, Figure]:
+        self, result: Optional[T2RamseyResult] = None, *, fit_fringe: bool = True
+    ) -> tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -126,7 +133,7 @@ class T2RamseyExperiment(AbsExperiment):
             ax.set_title(f"T2 fringe = {t2r_str}, detune = {detune_str}", fontsize=15)
         else:
             ax.set_title(f"T2 decay = {t2r_str}", fontsize=15)
-        ax.set_xlabel("Time (us)")
+        ax.set_xlabel("Delay Time (us)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.legend()
         ax.grid(True)
@@ -138,7 +145,7 @@ class T2RamseyExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[T2RamseyResultType] = None,
+        result: Optional[T2RamseyResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t2ramsey",
         **kwargs,
@@ -157,7 +164,7 @@ class T2RamseyExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T2RamseyResultType:
+    def load(self, filepath: str, **kwargs) -> T2RamseyResult:
         signals, Ts, _ = load_data(filepath, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Dict
+
+from typing_extensions import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .pulse import PulseCfg
@@ -10,10 +11,10 @@ if TYPE_CHECKING:
 class PulseRegistry:
     """A registry to manage and share pulse configurations within a program."""
 
-    def __init__(self):
-        self._pulses: Dict[str, "PulseCfg"] = {}
+    def __init__(self) -> None:
+        self._pulses: dict[str, "PulseCfg"] = {}
 
-    def register(self, name: str, cfg: "PulseCfg"):
+    def register(self, name: str, cfg: "PulseCfg") -> None:
         """Registers a pulse configuration."""
         if name in self._pulses:
             warnings.warn(
@@ -25,7 +26,9 @@ class PulseRegistry:
         """Checks if a pulse is registered."""
         return name in self._pulses
 
-    def check_valid_mixer_freq(self, new_pulse_name: str, new_pulse_cfg: "PulseCfg"):
+    def check_valid_mixer_freq(
+        self, new_pulse_name: str, new_pulse_cfg: "PulseCfg"
+    ) -> None:
         """
         Checks if a new pulse's mixer frequency is consistent with other pulses
         on the same channel.

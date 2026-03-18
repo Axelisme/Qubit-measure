@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -30,83 +32,95 @@ from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-T2EchoResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T2EchoResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class T2EchoTaskConfig(TaskConfig, ModularProgramCfg):
+class T2EchoModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi2_pulse: PulseCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T2EchoExperiment(AbsExperiment):
+class T2EchoCfg(ModularProgramCfg, TaskCfg):
+    modules: T2EchoModuleCfg
+    sweep: dict[str, SweepCfg]
+
+
+class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
     def run(
-        self, soc, soccfg, cfg: T2EchoTaskConfig, *, detune: float = 0.0
-    ) -> T2EchoResultType:
-        cfg = deepcopy(cfg)
-
-        assert "sweep" in cfg
+        self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
+    ) -> T2EchoResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        _cfg = check_type(deepcopy(cfg), T2EchoCfg)
 
-        ts = sweep2array(cfg["sweep"]["length"])
+        ts = sweep2array(_cfg["sweep"]["length"])
+        ts = round_zcu_time(ts, soccfg)
 
-        t2e_spans = sweep2param("length", cfg["sweep"]["length"])
+        t2e_spans = sweep2param("length", _cfg["sweep"]["length"])
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Echo"}
         ) as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
-                                Delay("t2e_delay1", delay=0.5 * t2e_spans),
-                                Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                Delay("t2e_delay2", delay=0.5 * t2e_spans),
-                                Pulse(
-                                    name="pi2_pulse2",
-                                    cfg={
-                                        **ctx.cfg["pi2_pulse"],
-                                        "phase": ctx.cfg["pi2_pulse"]["phase"]
-                                        + 360 * detune * t2e_spans,
-                                    },
-                                ),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("pi2_pulse1", modules["pi2_pulse"]),
+                                    Delay("t2e_delay1", delay=0.5 * t2e_spans),
+                                    Pulse("pi_pulse", modules["pi_pulse"]),
+                                    Delay("t2e_delay2", delay=0.5 * t2e_spans),
+                                    Pulse(
+                                        name="pi2_pulse2",
+                                        cfg={
+                                            **modules["pi2_pulse"],
+                                            "phase": modules["pi2_pulse"]["phase"]
+                                            + 360 * detune * t2e_spans,
+                                        },  # type: ignore
+                                    ),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
                     ),
                     result_shape=(len(ts),),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(ts, t2echo_signal2real(ctx.data)),
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(
+                    ts, t2echo_signal2real(ctx.root_data)
+                ),
             )
 
         # record last cfg and result
-        self.last_cfg = dict(cfg)
+        self.last_cfg = _cfg
         self.last_result = (ts, signals)
 
         return ts, signals
 
     def analyze(
         self,
-        result: Optional[T2EchoResultType] = None,
+        result: Optional[T2EchoResult] = None,
         *,
         fit_method: Literal["fringe", "decay"] = "decay",
-    ) -> Tuple[float, float, float, float, Figure]:
+    ) -> tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
         xs, signals = result
+
+        xs = xs[1:]
+        signals = signals[1:]
 
         real_signals = rotate2real(signals).real
 
@@ -124,21 +138,24 @@ class T2EchoExperiment(AbsExperiment):
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-        ax.plot(xs, y_fit, label="fit")
+        ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
+        ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
 
         t2e_str = f"{t2e:.2f}us ± {t2eerr:.2f}us"
         if fit_method == "fringe":
             detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"
-            ax.set_title(f"T2 fringe = {t2e_str}, detune = {detune_str}", fontsize=15)
+            title = r"$T_{2echo}$ fringe = " + f"{t2e_str}, detune = {detune_str}"
+
         elif fit_method == "decay":
-            ax.set_title(f"T2 decay = {t2e_str}", fontsize=15)
+            title = r"$T_{2echo}$ decay = {t2e_str}"
+
         else:
             raise ValueError(f"Unknown fit_method: {fit_method}")
 
-        ax.set_xlabel("Time (us)")
-        ax.set_ylabel("Signal Real (a.u.)")
-        ax.legend()
+        ax.set_title(title, fontsize=14)
+        ax.set_xlabel("Delay Time (us)", fontsize=14)
+        ax.set_ylabel("Signal (a.u.)", fontsize=14)
+        ax.legend(loc="upper right")
         ax.grid(True)
 
         fig.tight_layout()
@@ -148,7 +165,7 @@ class T2EchoExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[T2EchoResultType] = None,
+        result: Optional[T2EchoResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t2echo",
         **kwargs,
@@ -167,7 +184,7 @@ class T2EchoExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T2EchoResultType:
+    def load(self, filepath: str, **kwargs) -> T2EchoResult:
         signals, Ts, _ = load_data(filepath, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1

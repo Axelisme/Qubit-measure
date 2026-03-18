@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
     format_sweep1D,
@@ -17,9 +16,11 @@ from zcu_tools.experiment.utils import (
     set_power_in_dev_cfg,
     sweep2array,
 )
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -33,86 +34,83 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAPowerResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+JPAPowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class JPAFreqTaskConfig(TaskConfig, ModularProgramCfg):
+class JPAPowerModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
-    dev: Mapping[str, DeviceInfo]
+
+class JPAPowerCfg(ModularProgramCfg, TaskCfg):
+    modules: JPAPowerModuleCfg
+    sweep: dict[str, SweepCfg]
 
 
-class JPAPowerExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: JPAFreqTaskConfig) -> JPAPowerResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class JPAPowerExp(AbsExperiment[JPAPowerResult, JPAPowerCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> JPAPowerResult:
+        _cfg = check_type(deepcopy(cfg), JPAPowerCfg)
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_power")
+        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "jpa_power")
 
-        jpa_powers = sweep2array(cfg["sweep"]["jpa_power"], allow_array=True)
+        jpa_powers = sweep2array(_cfg["sweep"]["jpa_power"], allow_array=True)
         np.random.shuffle(jpa_powers[1:-1])
 
-        cfg["sweep"] = {"ge": make_ge_sweep()}
+        modules = _cfg["modules"]
+        _cfg["sweep"] = {"ge": make_ge_sweep()}
         Pulse.set_param(
-            cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
         with LivePlotterScatter("Power (dBm)", "Signal Difference") as viewer:
+
+            def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("pi_pulse", modules["pi_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                    ),
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="power (dBm)",
-                    sweep_values=jpa_powers.tolist(),
-                    update_cfg_fn=lambda i, ctx, pdr: set_power_in_dev_cfg(
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    dtype=np.float64,
+                ).scan(
+                    "power (dBm)",
+                    jpa_powers.tolist(),
+                    before_each=lambda i, ctx, pdr: set_power_in_dev_cfg(
                         ctx.cfg["dev"], pdr, label="jpa_rf_dev"
                     ),
-                    sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                )
-                            )
-                            and (
-                                prog.acquire(
-                                    soc,
-                                    progress=False,
-                                    callback=update_hook,
-                                    record_statistic=True,
-                                ),
-                                prog.get_covariance(),
-                                prog.get_median(),
-                            )
-                        ),
-                        raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
-                    ),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    jpa_powers, np.abs(np.asarray(ctx.data))
-                ),
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(jpa_powers, np.abs(ctx.root_data)),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (jpa_powers, signals)
 
         return jpa_powers, signals
 
-    def analyze(
-        self, result: Optional[JPAPowerResultType] = None
-    ) -> Tuple[float, Figure]:
+    def analyze(self, result: Optional[JPAPowerResult] = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -142,7 +140,7 @@ class JPAPowerExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[JPAPowerResultType] = None,
+        result: Optional[JPAPowerResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/power",
         **kwargs,
@@ -162,7 +160,7 @@ class JPAPowerExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAPowerResultType:
+    def load(self, filepath: str, **kwargs) -> JPAPowerResult:
         signals, jpa_powers, _ = load_data(filepath, **kwargs)
         assert jpa_powers is not None
         assert len(jpa_powers.shape) == 1 and len(signals.shape) == 1

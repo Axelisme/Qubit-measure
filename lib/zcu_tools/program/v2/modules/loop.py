@@ -1,10 +1,12 @@
-from typing import List, Union
+from __future__ import annotations
 
 import qick.asm_v2 as qasm
 from qick.asm_v2 import QickParam
+from typing_extensions import Union
 
 from ..base import MyProgramV2
 from .base import Module
+from .util import round_timestamp
 
 
 class Repeat(Module):
@@ -14,7 +16,7 @@ class Repeat(Module):
     """
 
     def __init__(
-        self, name: str, n: int, sub_module: Union[Module, List[Module]]
+        self, name: str, n: int, sub_module: Union[Module, list[Module]]
     ) -> None:
         self.name = name
         self.n = n
@@ -39,12 +41,12 @@ class Repeat(Module):
         # this n must > 0, to prevent infinite loop in qick
         assert self.n > 0
 
-        prog.delay(t=t)
+        prog.delay(t=round_timestamp(prog, t))
         prog.append_macro(qasm.OpenLoop(name=self.name, n=self.n))
         cur_t = 0.0
         for mod in self.sub_module:
             cur_t = mod.run(prog, cur_t)
-        prog.delay(t=cur_t)
+        prog.delay(t=round_timestamp(prog, cur_t))
         prog.append_macro(qasm.CloseLoop())
 
         return 0.0  # prog.delay will modify ref time

@@ -3,6 +3,11 @@ from .base import MyProgramV2, ProgramV2Cfg
 from .modular import ModularProgramCfg, ModularProgramV2
 from .modules import (
     Delay,
+    DirectReadout,
+    DirectReadoutCfg,
+    Module,
+    ModuleCfg,
+    NonBlocking,
     Pulse,
     PulseCfg,
     Readout,
@@ -10,11 +15,9 @@ from .modules import (
     Repeat,
     Reset,
     ResetCfg,
-    TriggerCfg,
-    TriggerReadout,
-    NonBlocking,
+    WaveformCfg,
     check_block_mode,
 )
-from .onetone import OneToneProgram, OneToneProgramCfg
-from .twotone import TwoToneProgram, TwoToneProgramCfg
+from .onetone import OneToneCfg, OneToneProgram
+from .twotone import TwoToneCfg, TwoToneProgram
 from .utils import sweep2param

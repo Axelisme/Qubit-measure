@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, Optional, TypeVar
+
+from typing_extensions import Any, Generic, Mapping, Optional, TypeVar
 
 T_Result = TypeVar("T_Result")
-T_Config = TypeVar("T_Config", bound=Dict[str, Any])
+T_Config = TypeVar("T_Config", bound=Mapping[str, Any])
 
 
 class AbsExperiment(Generic[T_Result, T_Config], ABC):
@@ -15,18 +18,11 @@ class AbsExperiment(Generic[T_Result, T_Config], ABC):
         self.last_result: Optional[T_Result] = None
 
     @abstractmethod
-    def run(self) -> T_Result: ...
-
-    @abstractmethod
-    def analyze(self, result: Optional[T_Result] = None) -> None: ...
+    def run(self, *args, **kwargs) -> T_Result: ...
 
     @abstractmethod
     def save(
-        self,
-        filepath: str,
-        result: Optional[T_Result] = None,
-        comment: Optional[str] = None,
-        tag: str = "",
+        self, filepath: str, result: Optional[T_Result] = None, **kwargs
     ) -> None: ...
 
     @abstractmethod

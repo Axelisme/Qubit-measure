@@ -1,10 +1,10 @@
 import warnings
-from typing import Optional, Union, cast, overload
 
 import numpy as np
 from numpy.typing import NDArray
+from typing_extensions import Optional, Union, cast, overload
 
-from zcu_tools.library import ModuleLibrary
+from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.program.v2 import PulseCfg
 
 
@@ -34,11 +34,13 @@ def make_pulse(
     gain: Optional[float] = None,
     length: Optional[float] = None,
 ) -> PulseCfg:
-    pulse_cfg = ml.get_module(pulse_name)
+    pulse_cfg = cast(PulseCfg, ml.get_module(pulse_name))
+
     if freq is not None:
         pulse_cfg["freq"] = freq
     if gain is not None:
         pulse_cfg["gain"] = gain
     if length is not None:
         pulse_cfg["waveform"]["length"] = length
-    return cast(PulseCfg, pulse_cfg)
+
+    return pulse_cfg

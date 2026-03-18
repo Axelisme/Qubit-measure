@@ -1,27 +1,30 @@
-from typing import List, Tuple
+from __future__ import annotations
 
 import numpy as np
 import scipy.constants as sc
+from numpy.typing import NDArray
 from scipy.optimize import curve_fit
 
 
-def boltzmann_distribution(freq: float, eff_T: float) -> float:
-    exp_term = np.exp(-1e6 * sc.h * freq / (sc.k * 1e-3 * eff_T))
+def boltzmann_distribution(
+    freq_MHz: NDArray[np.float64], eff_T: float
+) -> NDArray[np.float64]:
+    exp_term = np.exp(-1e6 * sc.h * freq_MHz / (sc.k * 1e-3 * eff_T))
     return exp_term / np.sum(exp_term)
 
 
-def effective_temperature(population: List[Tuple[float, float]]) -> Tuple[float, float]:
+def effective_temperature(population: list[tuple[float, float]]) -> tuple[float, float]:
     """
     Calculate the effective temperature of a population of qubits.
 
     Parameters
     ----------
-    population : List[Tuple[float, float]]
+    population : list[tuple[float, float]]
         A list of tuples of (population, energy in MHz).
 
     Returns
     -------
-    Tuple[float, float]
+    tuple[float, float]
         The effective temperature in mK and its error.
     """
 

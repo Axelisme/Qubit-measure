@@ -1,6 +1,8 @@
-from typing import Union
+from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import Union
 
 from .base import (
     calc_phase,
@@ -8,6 +10,7 @@ from .base import (
     fit_edelay,
     fit_resonant_params,
     get_rough_edelay,
+    normalize_signal,
     phase_func,
     remove_edelay,
 )
@@ -15,7 +18,9 @@ from .hanger import HangerModel
 from .transmission import TransmissionModel
 
 
-def get_proper_model(fpts, signals) -> Union[HangerModel, TransmissionModel]:
+def get_proper_model(
+    fpts: NDArray[np.float64], signals: NDArray[np.complex128]
+) -> Union[HangerModel, TransmissionModel]:
     background = 0.5 * (np.abs(signals[0]) + np.abs(signals[-1]))
     magnitudes = np.abs(signals)
 

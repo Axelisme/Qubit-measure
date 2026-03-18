@@ -1,18 +1,22 @@
+from __future__ import annotations
+
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import NotRequired
-from matplotlib.figure import Figure
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -26,93 +30,94 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-LengthResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+LengthResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class OptimizeLengthTaskConfig(TaskConfig, ModularProgramCfg):
+class LengthModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class OptimizeLengthExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: OptimizeLengthTaskConfig) -> LengthResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class LengthCfg(ModularProgramCfg, TaskCfg):
+    modules: LengthModuleCfg
+    sweep: dict[str, SweepCfg]
 
-        assert "sweep" in cfg
+
+class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        length_sweep = cfg["sweep"]["length"]
+        _cfg = check_type(deepcopy(cfg), LengthCfg)
+
+        length_sweep = _cfg["sweep"]["length"]
 
         # replace length sweep with ge sweep, and use soft loop for length
-        cfg["sweep"] = {"ge": make_ge_sweep()}
+        _cfg["sweep"] = {"ge": make_ge_sweep()}
 
         # set with / without pi gain for qubit pulse
+        modules = _cfg["modules"]
         Pulse.set_param(
-            cfg["qub_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
         lengths = sweep2array(length_sweep)  # predicted readout lengths
 
         # set initial readout length and adjust pulse length
         Readout.set_param(
-            cfg["readout"], "ro_length", sweep2param("length", length_sweep)
+            modules["readout"], "ro_length", sweep2param("length", length_sweep)
         )
-        Readout.set_param(cfg["readout"], "length", lengths.max() + 0.1)
+        Readout.set_param(modules["readout"], "length", lengths.max() + 0.11)
 
         with LivePlotter1D("Readout Length (us)", "SNR") as viewer:
+
+            def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                    ),
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="length",
-                    sweep_values=lengths.tolist(),
-                    update_cfg_fn=lambda _, ctx, length: Readout.set_param(
-                        ctx.cfg["readout"], "ro_length", length
-                    ),
-                    sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse("qub_pulse", ctx.cfg["qub_pulse"]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                )
-                            )
-                            and (
-                                prog.acquire(
-                                    soc,
-                                    progress=False,
-                                    callback=update_hook,
-                                    record_statistic=True,
-                                ),
-                                prog.get_covariance(),
-                                prog.get_median(),
-                            )
-                        ),
-                        raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    dtype=np.float64,
+                ).scan(
+                    "length",
+                    lengths.tolist(),
+                    before_each=lambda _, ctx, length: Readout.set_param(
+                        ctx.cfg["modules"]["readout"], "ro_length", length
                     ),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    lengths, np.abs(np.asarray(ctx.data))
-                ),
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(lengths, np.abs(ctx.root_data)),
             )
             signals = np.asarray(signals)
 
         # record the last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (lengths, signals)
 
         return lengths, signals
 
     def analyze(
-        self, result: Optional[LengthResultType] = None, *, t0: Optional[float] = None
-    ) -> Tuple[float, Figure]:
+        self, result: Optional[LengthResult] = None, *, t0: Optional[float] = None
+    ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -148,7 +153,7 @@ class OptimizeLengthExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[LengthResultType] = None,
+        result: Optional[LengthResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/ro_optimize/length",
         **kwargs,
@@ -168,7 +173,7 @@ class OptimizeLengthExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> LengthResultType:
+    def load(self, filepath: str, **kwargs) -> LengthResult:
         signals, lengths, _ = load_data(filepath, **kwargs)
         assert lengths is not None
         assert len(lengths.shape) == 1 and len(signals.shape) == 1

@@ -1,14 +1,17 @@
+from __future__ import annotations
+
 import json
 import os
-from typing import Any, Dict, Tuple
 
 import h5py as h5
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import Any
 
 
 def format_rawdata(
-    As: np.ndarray, fpts: np.ndarray, spectrum: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    As: NDArray[np.float64], fpts: NDArray[np.float64], spectrum: NDArray[np.complex128]
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]]:
     fpts = fpts / 1e9  # convert to GHz
 
     if As[0] > As[-1]:  # Ensure that the fluxes are in increasing
@@ -24,10 +27,10 @@ def format_rawdata(
 def dump_result(
     path: str,
     name: str,
-    params: np.ndarray,
+    params: tuple[float, float, float],
     cflx: float,
     period: float,
-    allows: Dict[str, Any],
+    allows: dict[str, Any],
 ) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
@@ -51,19 +54,19 @@ def dump_result(
 
 def load_result(
     path: str,
-) -> Tuple[
-    str, Tuple[float, float, float], float, float, Dict[str, Any], Dict[str, Any]
+) -> tuple[
+    str, tuple[float, float, float], float, float, dict[str, Any], dict[str, Any]
 ]:
     """
     Load the result from a json file
 
     Returns:
         name: str
-        params: np.ndarray
+        params: NDArray
         half_flux: float
         period: float
-        allows: Dict[str, Any]
-        data: Dict[str, Any], raw dict contain all result
+        allows: dict[str, Any]
+        data: dict[str, Any], raw dict contain all result
     """
 
     with open(path, "r") as f:
@@ -79,7 +82,7 @@ def load_result(
     )
 
 
-def update_result(path: str, update_dict: Dict[str, Any]) -> None:
+def update_result(path: str, update_dict: dict[str, Any]) -> None:
     with open(path, "r") as f:
         data = json.load(f)
 
@@ -89,7 +92,7 @@ def update_result(path: str, update_dict: Dict[str, Any]) -> None:
         json.dump(data, f, indent=4)
 
 
-def dump_spects(save_path: str, s_spects: Dict[str, Any], mode: str = "x") -> None:
+def dump_spects(save_path: str, s_spects: dict[str, Any], mode: str = "x") -> None:
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     with h5.File(save_path, mode) as f:
         for path, val in s_spects.items():
@@ -105,7 +108,7 @@ def dump_spects(save_path: str, s_spects: Dict[str, Any], mode: str = "x") -> No
             points_grp.create_dataset("fpts", data=val["points"]["fpts"])
 
 
-def load_spects(load_path: str) -> Dict[str, Any]:
+def load_spects(load_path: str) -> dict[str, Any]:
     s_spects = {}
     with h5.File(load_path, "r") as f:
         for key in f.keys():

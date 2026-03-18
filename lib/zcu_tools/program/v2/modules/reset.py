@@ -1,115 +1,90 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from typing import Any, Callable, ClassVar, Dict, Literal, Type, TypedDict, Union
-
 from qick.asm_v2 import QickParam
+from typing_extensions import (
+    TYPE_CHECKING,
+    Any,
+    Optional,
+    Type,
+    TypeAlias,
+    TypeVar,
+    Union,
+    cast,
+)
 
 from ..base import MyProgramV2
-from .base import Module
+from .base import Module, ModuleCfg
 from .pulse import Pulse, PulseCfg, check_block_mode
 from .util import calc_max_length
 
+if TYPE_CHECKING:
+    from zcu_tools.meta_tool import ModuleLibrary
 
-class NoneResetCfg(TypedDict):
-    type: Literal["none"]
+
+class NoneResetCfg(ModuleCfg): ...
 
 
-class PulseResetCfg(TypedDict):
-    type: Literal["pulse"]
+class PulseResetCfg(ModuleCfg):
     pulse_cfg: PulseCfg
 
 
-class TwoPulseResetCfg(TypedDict):
-    type: Literal["two_pulse"]
+class TwoPulseResetCfg(ModuleCfg):
     pulse1_cfg: PulseCfg
     pulse2_cfg: PulseCfg
 
 
-class BathResetCfg(TypedDict):
-    type: Literal["bath"]
+class BathResetCfg(ModuleCfg):
     qubit_tone_cfg: PulseCfg
     cavity_tone_cfg: PulseCfg
     pi2_cfg: PulseCfg
 
 
-ResetCfg = Union[NoneResetCfg, PulseResetCfg, TwoPulseResetCfg, BathResetCfg]
+ResetCfg: TypeAlias = Union[NoneResetCfg, PulseResetCfg, TwoPulseResetCfg, BathResetCfg]
 
 
-class AbsReset(Module):
-    def __init__(self, name: str, cfg: ResetCfg) -> None: ...
+T_ResetCfg = TypeVar("T_ResetCfg", bound=ResetCfg)
 
-    @classmethod
-    def set_param(
-        cls,
-        reset_cfg: ResetCfg,
-        param_name: str,
-        param_value: Union[float, QickParam],
-    ) -> ResetCfg:
-        raise NotImplementedError(
-            f"{cls.__name__} does not support set {param_name} params with {param_value}"
-        )
 
-    def total_length(self) -> Union[float, QickParam]:
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support total_length"
-        )
+class AbsReset(Module, tag="reset"): ...
 
 
 class Reset(Module):
-    SUPPORTED_TYPES: ClassVar[Dict[str, Type[AbsReset]]] = {}
-
-    @classmethod
-    def register_reset(
-        cls, reset_type: str
-    ) -> Callable[[Type[AbsReset]], Type[AbsReset]]:
-        if reset_type in cls.SUPPORTED_TYPES:
-            raise ValueError(
-                f"Reset type {reset_type} already registered by {cls.SUPPORTED_TYPES[reset_type].__name__}"
-            )
-
-        def decorator(cls: Type[AbsReset]) -> Type[AbsReset]:
-            Reset.SUPPORTED_TYPES[reset_type] = cls
-            return cls
-
-        return decorator
-
-    @classmethod
-    def get_reset_cls(cls, reset_cfg: ResetCfg) -> Type[AbsReset]:
-        if reset_cfg["type"] not in cls.SUPPORTED_TYPES:
-            raise ValueError(f"Unknown reset type: {reset_cfg['type']}")
-        return cls.SUPPORTED_TYPES[reset_cfg["type"]]
-
-    @classmethod
-    def set_param(
-        cls,
-        reset_cfg: ResetCfg,
-        param_name: str,
-        param_value: Union[float, QickParam],
-    ) -> ResetCfg:
-        return cls.get_reset_cls(reset_cfg).set_param(
-            reset_cfg, param_name, param_value
-        )
-
-    def __init__(self, name: str, cfg: ResetCfg) -> None:
+    def __init__(self, name: str, cfg: Optional[ResetCfg]) -> None:
         self.name = name
-        self.cfg = deepcopy(cfg)
-        self.reset = self.get_reset_cls(cfg)(name, cfg)
+
+        if cfg is None:
+            cfg = {"type": "reset/none"}
+
+        self.reset = cast(Reset, Module.parse(cfg["type"])(name, cfg))
 
     def init(self, prog: MyProgramV2) -> None:
         self.reset.init(prog)
+
+    def total_length(self) -> Union[float, QickParam]:
+        return self.reset.total_length()
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         return self.reset.run(prog, t)
 
-    def total_length(self) -> Union[float, QickParam]:
-        return self.reset.total_length()
+    @staticmethod
+    def set_param(
+        cfg: T_ResetCfg, param_name: str, param_value: Union[float, QickParam]
+    ) -> T_ResetCfg:
+        cls = cast(Type[Reset], Module.parse(cfg["type"]))
+        return cls.set_param(cfg, param_name, param_value)
+
+    @staticmethod
+    def auto_fill(cfg: Union[str, dict[str, Any]], ml: ModuleLibrary) -> ResetCfg:
+        if isinstance(cfg, str):
+            cfg = ml.get_module(cfg)
+
+        cls = cast(Type[Reset], Module.parse(cfg["type"]))
+        return cls.auto_fill(cfg, ml)
 
 
-@Reset.register_reset("none")
-class NoneReset(AbsReset):
+class NoneReset(AbsReset, tag="none"):
     def __init__(self, name: str, cfg: NoneResetCfg) -> None:
         self.name = name
 
@@ -123,9 +98,23 @@ class NoneReset(AbsReset):
     ) -> Union[float, QickParam]:
         return t
 
+    @staticmethod
+    def set_param(
+        cfg: NoneResetCfg, param_name: str, param_value: Union[float, QickParam]
+    ) -> NoneResetCfg:
+        raise ValueError("NoneReset does not support set_param")
 
-@Reset.register_reset("pulse")
-class PulseReset(AbsReset):
+    @staticmethod
+    def auto_fill(cfg: Union[str, dict[str, Any]], ml: ModuleLibrary) -> NoneResetCfg:
+        if isinstance(cfg, str):
+            cfg = ml.get_module(cfg)
+
+        cfg["type"] = "reset/none"
+
+        return cast(NoneResetCfg, cfg)
+
+
+class PulseReset(AbsReset, tag="pulse"):
     def __init__(self, name: str, cfg: PulseResetCfg) -> None:
         self.name = name
         pulse_cfg = cfg["pulse_cfg"]
@@ -145,16 +134,25 @@ class PulseReset(AbsReset):
 
     @staticmethod
     def set_param(
-        reset_cfg: PulseResetCfg, param_name: str, param_value: Union[float, QickParam]
+        cfg: PulseResetCfg, param_name: str, param_value: Union[float, QickParam]
     ) -> PulseResetCfg:
-        Pulse.set_param(reset_cfg["pulse_cfg"], param_name, param_value)
+        Pulse.set_param(cfg["pulse_cfg"], param_name, param_value)
 
-        return reset_cfg
+        return cfg
+
+    @staticmethod
+    def auto_fill(cfg: Union[str, dict[str, Any]], ml: ModuleLibrary) -> PulseResetCfg:
+        if isinstance(cfg, str):
+            cfg = ml.get_module(cfg)
+
+        cfg["type"] = "reset/pulse"
+        cfg["pulse_cfg"] = Pulse.auto_fill(cfg["pulse_cfg"], ml)
+
+        return cast(PulseResetCfg, cfg)
 
 
-@Reset.register_reset("two_pulse")
-class TwoPulseReset(AbsReset):
-    def __init__(self, name: str, cfg: Dict[str, Any]) -> None:
+class TwoPulseReset(AbsReset, tag="two_pulse"):
+    def __init__(self, name: str, cfg: dict[str, Any]) -> None:
         self.name = name
         pulse1_cfg = cfg["pulse1_cfg"]
         pulse2_cfg = cfg["pulse2_cfg"]
@@ -183,33 +181,39 @@ class TwoPulseReset(AbsReset):
 
     @staticmethod
     def set_param(
-        reset_cfg: TwoPulseResetCfg,
-        param_name: str,
-        param_value: Union[float, QickParam],
+        cfg: TwoPulseResetCfg, param_name: str, param_value: Union[float, QickParam]
     ) -> TwoPulseResetCfg:
         if param_name == "on/off":
-            Pulse.set_param(reset_cfg["pulse1_cfg"], "on/off", param_value)
-            Pulse.set_param(reset_cfg["pulse2_cfg"], "on/off", param_value)
+            Pulse.set_param(cfg["pulse1_cfg"], "on/off", param_value)
+            Pulse.set_param(cfg["pulse2_cfg"], "on/off", param_value)
         elif param_name in ["gain1", "freq1"]:
-            Pulse.set_param(
-                reset_cfg["pulse1_cfg"], param_name.replace("1", ""), param_value
-            )
+            Pulse.set_param(cfg["pulse1_cfg"], param_name.replace("1", ""), param_value)
         elif param_name in ["gain2", "freq2"]:
-            Pulse.set_param(
-                reset_cfg["pulse2_cfg"], param_name.replace("2", ""), param_value
-            )
+            Pulse.set_param(cfg["pulse2_cfg"], param_name.replace("2", ""), param_value)
         elif param_name == "length":
-            Pulse.set_param(reset_cfg["pulse1_cfg"], "length", param_value)
-            Pulse.set_param(reset_cfg["pulse2_cfg"], "length", param_value)
+            Pulse.set_param(cfg["pulse1_cfg"], "length", param_value)
+            Pulse.set_param(cfg["pulse2_cfg"], "length", param_value)
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
 
-        return reset_cfg
+        return cfg
+
+    @staticmethod
+    def auto_fill(
+        cfg: Union[str, dict[str, Any]], ml: ModuleLibrary
+    ) -> TwoPulseResetCfg:
+        if isinstance(cfg, str):
+            cfg = ml.get_module(cfg)
+
+        cfg["type"] = "reset/two_pulse"
+        cfg["pulse1_cfg"] = Pulse.auto_fill(cfg["pulse1_cfg"], ml)
+        cfg["pulse2_cfg"] = Pulse.auto_fill(cfg["pulse2_cfg"], ml)
+
+        return cast(TwoPulseResetCfg, cfg)
 
 
-@Reset.register_reset("bath")
-class BathReset(AbsReset):
-    def __init__(self, name: str, cfg: Dict[str, Any]) -> None:
+class BathReset(AbsReset, tag="bath"):
+    def __init__(self, name: str, cfg: dict[str, Any]) -> None:
         self.name = name
         qubit_tone_cfg = cfg["qubit_tone_cfg"]
         cavity_tone_cfg = cfg["cavity_tone_cfg"]
@@ -244,30 +248,40 @@ class BathReset(AbsReset):
 
     @staticmethod
     def set_param(
-        reset_cfg: BathResetCfg,
-        param_name: str,
-        param_value: Union[float, QickParam],
+        cfg: BathResetCfg, param_name: str, param_value: Union[float, QickParam]
     ) -> BathResetCfg:
         if param_name == "on/off":
-            Pulse.set_param(reset_cfg["qubit_tone_cfg"], "on/off", param_value)
-            Pulse.set_param(reset_cfg["cavity_tone_cfg"], "on/off", param_value)
-            Pulse.set_param(reset_cfg["pi2_cfg"], "on/off", param_value)
+            Pulse.set_param(cfg["qubit_tone_cfg"], "on/off", param_value)
+            Pulse.set_param(cfg["cavity_tone_cfg"], "on/off", param_value)
+            Pulse.set_param(cfg["pi2_cfg"], "on/off", param_value)
         elif param_name in ["qub_gain", "qub_freq"]:
             Pulse.set_param(
-                reset_cfg["qubit_tone_cfg"], param_name.replace("qub_", ""), param_value
+                cfg["qubit_tone_cfg"], param_name.replace("qub_", ""), param_value
             )
         elif param_name in ["res_gain", "res_freq"]:
             Pulse.set_param(
-                reset_cfg["cavity_tone_cfg"],
+                cfg["cavity_tone_cfg"],
                 param_name.replace("res_", ""),
                 param_value,
             )
         elif param_name == "length":
-            Pulse.set_param(reset_cfg["qubit_tone_cfg"], "length", param_value)
-            Pulse.set_param(reset_cfg["cavity_tone_cfg"], "length", param_value)
+            Pulse.set_param(cfg["qubit_tone_cfg"], "length", param_value)
+            Pulse.set_param(cfg["cavity_tone_cfg"], "length", param_value)
         elif param_name == "pi2_phase":
-            Pulse.set_param(reset_cfg["pi2_cfg"], "phase", param_value)
+            Pulse.set_param(cfg["pi2_cfg"], "phase", param_value)
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
 
-        return reset_cfg
+        return cfg
+
+    @staticmethod
+    def auto_fill(cfg: Union[str, dict[str, Any]], ml: ModuleLibrary) -> BathResetCfg:
+        if isinstance(cfg, str):
+            cfg = ml.get_module(cfg)
+
+        cfg["type"] = "reset/bath"
+        cfg["qubit_tone_cfg"] = Pulse.auto_fill(cfg["qubit_tone_cfg"], ml)
+        cfg["cavity_tone_cfg"] = Pulse.auto_fill(cfg["cavity_tone_cfg"], ml)
+        cfg["pi2_cfg"] = Pulse.auto_fill(cfg["pi2_cfg"], ml)
+
+        return cast(BathResetCfg, cfg)

@@ -1,8 +1,9 @@
-from typing import List, Optional, Tuple
+from __future__ import annotations
 
 import numpy as np
 import plotly.graph_objects as go
-import scqubits as scq
+from numpy.typing import NDArray
+from typing_extensions import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.notebook.analysis.fluxdep.utils import add_secondary_xaxis
 from zcu_tools.simulate.fluxonium import (
@@ -12,17 +13,20 @@ from zcu_tools.simulate.fluxonium import (
 )
 from zcu_tools.simulate.fluxonium.dispersive import calculate_chi_vs_flx
 
+if TYPE_CHECKING:
+    from scqubits.core.storage import SpectrumData
+
 PLOT_CUTOFF = 40
 PLOT_EVALS_COUNT = 15
 
 
 def plot_matrix_elements(
-    params: Tuple[float, float, float],
-    flxs: np.ndarray,
-    show_idxs: List[Tuple[int, int]],
-    mAs: Optional[np.ndarray] = None,
-    spectrum_data: Optional[scq.SpectrumData] = None,
-) -> Tuple[go.Figure, scq.SpectrumData]:
+    params: tuple[float, float, float],
+    flxs: NDArray[np.float64],
+    show_idxs: list[tuple[int, int]],
+    mAs: Optional[NDArray[np.float64]] = None,
+    spectrum_data: Optional[SpectrumData] = None,
+) -> tuple[go.Figure, SpectrumData]:
     need_dim = max(max(i, j) for i, j in show_idxs) + 1
 
     spectrum_data, matrix_elements = calculate_n_oper_vs_flx(
@@ -55,11 +59,11 @@ def plot_matrix_elements(
 
 
 def plot_dispersive_shift(
-    params: Tuple[float, float, float],
-    flxs: np.ndarray,
+    params: tuple[float, float, float],
+    flxs: NDArray[np.float64],
     r_f: float,
     g: float,
-    mAs: Optional[np.ndarray] = None,
+    mAs: Optional[NDArray[np.float64]] = None,
     upto: int = 2,
 ) -> go.Figure:
     fig = go.Figure()
@@ -90,12 +94,12 @@ def plot_dispersive_shift(
 
 
 def plot_t1s(
-    params: Tuple[float, float, float],
-    flxs: np.ndarray,
+    params: tuple[float, float, float],
+    flxs: NDArray[np.float64],
     noise_channels,
     Temp: float,
-    mAs: Optional[np.ndarray] = None,
-) -> Tuple[go.Figure, np.ndarray]:
+    mAs: Optional[NDArray[np.float64]] = None,
+) -> tuple[go.Figure, NDArray[np.float64]]:
     fig = go.Figure()
 
     t1s = calculate_eff_t1_vs_flx(
@@ -126,10 +130,10 @@ def plot_t1s(
 
 
 def plot_transitions(
-    params: Tuple[float, float, float],
-    flxs: np.ndarray,
-    show_idxs: List[Tuple[int, int]],
-    ref_freqs: Optional[List[float]] = None,
+    params: tuple[float, float, float],
+    flxs: NDArray[np.float64],
+    show_idxs: list[tuple[int, int]],
+    ref_freqs: Optional[list[float]] = None,
 ) -> go.Figure:
     fig = go.Figure()
 
@@ -154,11 +158,21 @@ def plot_transitions(
     return fig
 
 
-def plot_mist_condition(flxs, energies, r_f, max_level=None) -> go.Figure:
-    def calc_mod_transition(transition):
+def plot_mist_condition(
+    flxs: NDArray[np.float64],
+    energies: NDArray[np.float64],
+    r_f: float,
+    max_level: Optional[int] = None,
+) -> go.Figure:
+    def calc_mod_transition(transition: NDArray[np.float64]) -> NDArray[np.float64]:
         return np.mod(transition + r_f / 2, r_f) - r_f / 2
 
-    def plot_without_discontinuities(fig, x, y, **kwargs):
+    def plot_without_discontinuities(
+        fig: go.Figure,
+        x: NDArray[np.float64],
+        y: NDArray[np.float64],
+        **kwargs: Any,
+    ) -> None:
         discontinuities = np.where(np.abs(np.diff(y)) > r_f / 2)[0]
         x_new = np.insert(x, discontinuities + 1, np.nan)
         y_new = np.insert(y, discontinuities + 1, np.nan)

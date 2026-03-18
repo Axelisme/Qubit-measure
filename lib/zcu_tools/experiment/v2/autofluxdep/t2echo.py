@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Union, cast
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import NotRequired, TypedDict
+from typeguard import check_type
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, TaskContextView
-from zcu_tools.experiment.v2.utils import wrap_earlystop_check
-from zcu_tools.library import ModuleLibrary
-from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
-from zcu_tools.notebook.utils import make_sweep
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
+from zcu_tools.experiment.v2.utils import round_zcu_time, wrap_earlystop_check
+from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.meta_tool import ModuleLibrary
+from zcu_tools.notebook.utils import make_comment, make_sweep
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -31,7 +34,7 @@ from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
-from .executor import FluxDepInfoDict, MeasurementTask, T_RootResultType
+from .executor import FluxDepInfoDict, MeasurementTask, T_RootResult
 
 
 def t2echo_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -52,20 +55,22 @@ def t2echo_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.fl
     return np.array(list(map(t2echo_signal2real, signals)), dtype=np.float64)
 
 
-class T2EchoCfgTemplate(ModularProgramCfg):
-    reset: NotRequired[Union[ResetCfg, str]]
-    pi_pulse: Union[PulseCfg, str]
-    pi2_pulse: Union[PulseCfg, str]
-    readout: Union[ReadoutCfg, str]
-
-    sweep_range: Tuple[float, float]
-
-
-class T2EchoCfg(TaskConfig, ModularProgramCfg):
+class T2EchoModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
+
+
+class T2EchoCfgTemplate(ModularProgramCfg, TaskCfg):
+    modules: T2EchoModuleCfg
+    sweep_range: tuple[float, float]
+
+
+class T2EchoCfg(ModularProgramCfg, TaskCfg):
+    modules: T2EchoModuleCfg
+    dev: dict[str, DeviceInfo]
+    sweep: dict[str, SweepCfg]
     activate_detune: float
 
 
@@ -77,21 +82,19 @@ class T2EchoResult(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class PlotterDictType(TypedDict, closed=True):
+class T2EchoPlotterDict(TypedDict, closed=True):
     t2e: LivePlotter1D
-    t2e_over_flx: LivePlotter2D
     t2e_curve: LivePlotter1D
 
 
-class T2EchoMeasurementTask(
-    MeasurementTask[T2EchoResult, T_RootResultType, TaskConfig, PlotterDictType]
-):
+class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotterDict]):
     def __init__(
         self,
         num_expts: int,
         detune_ratio: float,
         cfg_maker: Callable[
-            [TaskContextView, ModuleLibrary], Optional[T2EchoCfgTemplate]
+            [TaskState[T2EchoResult, T_RootResult], ModuleLibrary],
+            Optional[dict[str, Any]],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -100,31 +103,32 @@ class T2EchoMeasurementTask(
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_t2echo_fn(ctx: TaskContextView, update_hook: Callable):
+        def measure_t2echo_fn(ctx: TaskState, update_hook: Callable):
+            modules = ctx.cfg["modules"]
             t2e_params = sweep2param("length", ctx.cfg["sweep"]["length"])
             prog = ModularProgramV2(
-                ctx.env_dict["soccfg"],
+                ctx.env["soccfg"],
                 ctx.cfg,
                 modules=[
-                    Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                    Pulse("pi2_pulse1", ctx.cfg["pi2_pulse"]),
+                    Reset("reset", modules.get("reset")),
+                    Pulse("pi2_pulse1", modules["pi2_pulse"]),
                     Delay("t2e_delay1", delay=0.5 * t2e_params),
-                    Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
+                    Pulse("pi_pulse", modules["pi_pulse"]),
                     Delay("t2e_delay2", delay=0.5 * t2e_params),
                     Pulse(
                         name="pi2_pulse2",
                         cfg=Pulse.set_param(
-                            PulseCfg(ctx.cfg["pi2_pulse"]),
+                            modules["pi2_pulse"],
                             "phase",
-                            ctx.cfg["pi2_pulse"]["phase"]
+                            modules["pi2_pulse"]["phase"]
                             + 360 * ctx.cfg["activate_detune"] * t2e_params,
                         ),
                     ),
-                    Readout("readout", ctx.cfg["readout"]),
+                    Readout("readout", modules["readout"]),
                 ],
             )
             return prog.acquire(
-                ctx.env_dict["soc"],
+                ctx.env["soc"],
                 progress=False,
                 callback=wrap_earlystop_check(
                     prog,
@@ -135,18 +139,88 @@ class T2EchoMeasurementTask(
             )
 
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = HardTask[
-            np.complex128, T_RootResultType, T2EchoCfg, List[NDArray[np.float64]]
-        ](
-            measure_fn=measure_t2echo_fn,
-            result_shape=(num_expts,),
+        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
+            measure_fn=measure_t2echo_fn, result_shape=(num_expts,)
         )
 
-    def num_axes(self) -> Dict[str, int]:
-        return dict(t2e=1, t2e_over_flx=1, t2e_curve=1)
+    def init(
+        self, ctx: TaskState[T2EchoResult, T_RootResult], dynamic_pbar=False
+    ) -> None:
+        self.init_cfg = deepcopy(ctx.cfg)
+        self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def make_plotter(self, name, axs) -> PlotterDictType:
-        return PlotterDictType(
+    def run(self, ctx: TaskState[T2EchoResult, T_RootResult]) -> None:
+        info: FluxDepInfoDict = ctx.env["info"]
+
+        cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
+
+        if cfg_temp is None:
+            return  # skip this task
+
+        cfg_temp = check_type(cfg_temp, T2EchoCfgTemplate)
+
+        len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
+        self.lengths = sweep2array(len_sweep)
+        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])  # type: ignore
+
+        cfg_temp = dict(cfg_temp)
+        del cfg_temp["sweep_range"]
+        deepupdate(cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}})
+        cfg_temp["activate_detune"] = self.detune_ratio / len_sweep["step"]  # type: ignore
+        cfg = check_type(cfg_temp, T2EchoCfg)
+
+        self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
+
+        raw_signals = ctx.value["raw_signals"]
+        assert isinstance(raw_signals, np.ndarray)
+
+        real_signals = t2echo_signal2real(raw_signals)
+
+        if self.detune_ratio == 0.0:
+            t2e, t2e_err, fit_signals, _ = fit_decay(self.lengths, real_signals)
+        else:
+            t2e, t2e_err, _, _, fit_signals, _ = fit_decay_fringe(
+                self.lengths, real_signals
+            )
+
+        success = True
+        mean_err = np.mean(np.abs(real_signals - fit_signals))
+        if t2e > 2 * np.max(self.lengths) or mean_err > 0.1 * np.ptp(fit_signals):
+            t2e, t2e_err = np.nan, np.nan
+            success = False
+
+        if success:
+            info["t2e"] = t2e
+            info["smooth_t2e"] = 0.5 * (info.last.get("smooth_t2e", t2e) + t2e)
+
+        with MinIntervalFunc.force_execute():
+            ctx.set_value(
+                T2EchoResult(
+                    raw_signals=raw_signals,
+                    length=self.lengths.copy(),
+                    t2e=np.array(t2e),
+                    t2e_err=np.array(t2e_err),
+                    success=np.array(success),
+                )
+            )
+
+    def get_default_result(self) -> T2EchoResult:
+        return T2EchoResult(
+            raw_signals=self.task.get_default_result(),
+            length=self.lengths.copy(),
+            t2e=np.array(np.nan),
+            t2e_err=np.array(np.nan),
+            success=np.array(False),
+        )
+
+    def cleanup(self) -> None:
+        self.task.cleanup()
+
+    def num_axes(self) -> dict[str, int]:
+        return dict(t2e=1, t2e_curve=1)
+
+    def make_plotter(self, name, axs) -> T2EchoPlotterDict:
+        return T2EchoPlotterDict(
             t2e=LivePlotter1D(
                 "Flux device value",
                 "T2 Echo (us)",
@@ -154,12 +228,6 @@ class T2EchoMeasurementTask(
                 segment_kwargs=dict(
                     title=name + "(t2e)", line_kwargs=[dict(linestyle="None")]
                 ),
-            ),
-            t2e_over_flx=LivePlotter2D(
-                "Flux device value",
-                "Time index",
-                segment_kwargs=dict(title=name + "(t2e over flux)"),
-                existed_axes=[axs["t2e_over_flx"]],
             ),
             t2e_curve=LivePlotter1D(
                 "Signal",
@@ -169,17 +237,13 @@ class T2EchoMeasurementTask(
             ),
         )
 
-    def update_plotter(self, plotters, ctx, signals) -> None:
-        flx_values = ctx.env_dict["flx_values"]
-        info: FluxDepInfoDict = ctx.env_dict["info"]
+    def update_plotter(self, plotters, ctx: TaskState, signals: T2EchoResult) -> None:
+        flx_values = ctx.env["flx_values"]
+        info: FluxDepInfoDict = ctx.env["info"]
 
-        len_idxs = np.arange(self.num_expts).astype(np.float64)
         real_signals = t2echo_fluxdep_signal2real(signals["raw_signals"])
 
         plotters["t2e"].update(flx_values, signals["t2e"], refresh=False)
-        plotters["t2e_over_flx"].update(
-            flx_values, len_idxs, real_signals, refresh=False
-        )
         plotters["t2e_curve"].update(
             self.lengths, real_signals[info["flx_idx"]], refresh=False
         )
@@ -205,7 +269,7 @@ class T2EchoMeasurementTask(
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/signals",
         )
 
@@ -223,7 +287,7 @@ class T2EchoMeasurementTask(
                 "unit": "s",
                 "values": result["length"].T * 1e-6,
             },
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/length",
         )
 
@@ -232,11 +296,12 @@ class T2EchoMeasurementTask(
             filepath=str(filepath.with_name(filepath.name + "_t2e")),
             x_info=x_info,
             z_info={"name": "T2 Echo", "unit": "s", "values": result["t2e"] * 1e-6},
-            comment=comment,
+            comment=make_comment(self.init_cfg, comment),
             tag=prefix_tag + "/t2e",
         )
 
-    def load(self, filepath: str, **kwargs) -> T2EchoResult:
+    @classmethod
+    def load(cls, filepath: str, **kwargs) -> dict:
         data = np.load(filepath)
 
         flx_values = data["flx_values"]
@@ -270,80 +335,12 @@ class T2EchoMeasurementTask(
         t2e_err = t2e_err.astype(np.float64)
         success = success.astype(np.bool_)
 
-        return T2EchoResult(
-            raw_signals=raw_signals,
-            length=length,
-            t2e=t2e,
-            t2e_err=t2e_err,
-            success=success,
-        )
-
-    def init(self, ctx, dynamic_pbar=False) -> None:
-        self.task.init(ctx(addr="raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
-
-    def run(self, ctx) -> None:
-        ml: ModuleLibrary = ctx.env_dict["ml"]
-        info: FluxDepInfoDict = ctx.env_dict["info"]
-
-        cfg_temp = self.cfg_maker(ctx, ml)
-
-        if cfg_temp is None:
-            return  # skip this task
-
-        len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
-        self.lengths = sweep2array(len_sweep)
-
-        cfg_temp = dict(cfg_temp)
-        deepupdate(
-            cfg_temp, {"dev": ctx.cfg.get("dev", {}), "sweep": {"length": len_sweep}}
-        )
-        cfg_temp = ml.make_cfg(cfg_temp)
-        cfg_temp["activate_detune"] = self.detune_ratio / len_sweep["step"]
-
-        cfg = cast(T2EchoCfg, cfg_temp)
-        self.task.run(ctx(addr="raw_signals", new_cfg=cfg))  # type: ignore
-
-        raw_signals = ctx.get_data()["raw_signals"]
-        assert isinstance(raw_signals, np.ndarray)
-
-        real_signals = t2echo_signal2real(raw_signals)
-
-        if self.detune_ratio == 0.0:
-            t2e, t2e_err, fit_signals, _ = fit_decay(self.lengths, real_signals)
-        else:
-            t2e, t2e_err, _, _, fit_signals, _ = fit_decay_fringe(
-                self.lengths, real_signals
-            )
-
-        success = True
-        mean_err = np.mean(np.abs(real_signals - fit_signals))
-        if t2e > 2 * np.max(self.lengths) or mean_err > 0.1 * np.ptp(fit_signals):
-            t2e, t2e_err = np.nan, np.nan
-            success = False
-
-        if success:
-            info["t2e"] = t2e
-            info["smooth_t2e"] = 0.5 * (info.last.get("smooth_t2e", t2e) + t2e)
-
-        with MinIntervalFunc.force_execute():
-            ctx.set_data(
-                T2EchoResult(
-                    raw_signals=raw_signals,
-                    length=self.lengths.copy(),
-                    t2e=np.array(t2e),
-                    t2e_err=np.array(t2e_err),
-                    success=np.array(success),
-                )
-            )
-
-    def get_default_result(self) -> T2EchoResult:
-        return T2EchoResult(
-            raw_signals=self.task.get_default_result(),
-            length=self.lengths.copy(),
-            t2e=np.array(np.nan),
-            t2e_err=np.array(np.nan),
-            success=np.array(False),
-        )
-
-    def cleanup(self) -> None:
-        self.task.cleanup()
+        return {
+            "raw_signals": raw_signals,
+            "length": length,
+            "t2e": t2e,
+            "t2e_err": t2e_err,
+            "success": success,
+            "flx_values": flx_values,
+            "lengths": length_stored[0],
+        }

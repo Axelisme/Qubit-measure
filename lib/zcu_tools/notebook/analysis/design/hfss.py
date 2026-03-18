@@ -1,20 +1,22 @@
-from typing import Tuple
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 from zcu_tools.utils.fitting import fit_anticross
 
 
 def analyze_1d_sweep(
     result_path: str, ref_freq: float, param_name: str
-) -> Tuple[plt.Figure, plt.Axes, float]:
+) -> tuple[Figure, Axes, float]:
     data = pd.read_csv(result_path)
 
-    params = data[param_name].values
-    fpts1 = 1e-9 * data["re(Mode(1)) []"].values
-    fpts2 = 1e-9 * data["re(Mode(2)) []"].values
+    params = np.asarray(data[param_name].values)
+    fpts1 = 1e-9 * np.asarray(data["re(Mode(1)) []"].values)
+    fpts2 = 1e-9 * np.asarray(data["re(Mode(2)) []"].values)
 
     dist1 = np.abs(fpts1 - ref_freq)
     dist2 = np.abs(fpts2 - ref_freq)
@@ -44,13 +46,13 @@ def analyze_1d_sweep(
 
 def analyze_xy_sweep(
     result_path: str, ref_freq: float
-) -> Tuple[plt.Figure, plt.Axes, float, float]:
+) -> tuple[Figure, Axes, float, float]:
     data = pd.read_csv(result_path)
 
-    Xs = data["Arm_X [mm]"].values
-    Ys = data["Pad_Y [um]"].values
-    fpts1 = 1e-9 * data["re(Mode(1)) []"].values
-    fpts2 = 1e-9 * data["re(Mode(2)) []"].values
+    Xs = np.asarray(data["Arm_X [mm]"].values)
+    Ys = np.asarray(data["Pad_Y [um]"].values)
+    fpts1 = 1e-9 * np.asarray(data["re(Mode(1)) []"].values)
+    fpts2 = 1e-9 * np.asarray(data["re(Mode(2)) []"].values)
 
     # reorganize data to 2D array
     xs = np.unique(Xs)
@@ -113,16 +115,16 @@ def analyze_xy_sweep(
 
 def fit_hfss_anticross(
     result_path: str,
-) -> Tuple[plt.Figure, plt.Axes, float, float, float]:
+) -> tuple[Figure, Axes, float, float, float]:
     """
     Fit the anticrossing of the HFSS simulation
     """
 
     data = pd.read_csv(result_path)
 
-    Ljs = data["Lj [nH]"].values
-    fpts1 = 1e-9 * data["re(Mode(1)) []"].values
-    fpts2 = 1e-9 * data["re(Mode(2)) []"].values
+    Ljs = np.asarray(data["Lj [nH]"].values)
+    fpts1 = 1e-9 * np.asarray(data["re(Mode(1)) []"].values)
+    fpts2 = 1e-9 * np.asarray(data["re(Mode(2)) []"].values)
 
     aqf = 1 / np.sqrt(Ljs)
     cx, cy, width, m1, m2, fit_fpts1, fit_fpts2, _ = fit_anticross(

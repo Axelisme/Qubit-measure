@@ -5,241 +5,342 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.17.2
+      jupytext_version: 1.19.1
   kernelspec:
-    display_name: Python 3
+    display_name: .venv
     language: python
     name: python3
 ---
 
 ```python
 %load_ext autoreload
-from unittest.mock import Mock
-
 import numpy as np
 import matplotlib.pyplot as plt
-
-%autoreload 2
-from zcu_tools.simulate.fluxonium import FluxoniumPredictor
-from zcu_tools.experiment.v2.autofluxdep import (
-    FluxDepExecutor,
-    QubitFreqMeasurementTask,
-    LenRabiMeasurementTask,
-    T1MeasurementTask,
-    T2RamseyMeasurementTask,
-    T2EchoMeasurementTask,
-    MistMeasurementTask,
-)
-from zcu_tools.library import ModuleLibrary
-from zcu_tools.notebook.utils import make_sweep
-from zcu_tools.device import GlobalDeviceManager
+from typing import Dict, List, cast
+from joblib import Parallel, delayed
+from tqdm.auto import tqdm
+import qutip as qt
+from scqubits.core.fluxonium import Fluxonium
+from scqubits.core.oscillator import Oscillator
+from scqubits.core.hilbert_space import HilbertSpace
 ```
 
 ```python
-ml = ModuleLibrary()
+from zcu_tools.utils.datasaver import load_data
 
-predictor = FluxoniumPredictor(r"../result/Q12_2D[3]/Q4/params.json")
+filepath = r"../Database/SA/R_freq_1.hdf5"
+signals, fpts, _, cfg = load_data(filepath, return_cfg=True)
 
-GlobalDeviceManager.register_device("flux_yoko", Mock())
+fpts *= 1e-9
+amps = np.abs(signals)
+
+drive_freq = 1e-3 * cfg["readout"]["pulse_cfg"]["freq"]
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+ax1.plot(fpts, amps)
+ax1.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
+ax1.set_title(f"Drive frequency: {drive_freq:.2f} GHz")
+ax1.set_ylim(0.0, None)
+ax2.plot(fpts, amps)
+ax2.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
+ax2.set_ylim(0.0, 0.03)
+plt.show(fig)
 ```
 
 ```python
-ml.register_module(
-    qub_probe_pulse={
-        "waveform": {"style": "const", "length": 1.0},
-        "ch": 0,
-        "nqz": 2,
-        "freq": 1000,
-        "gain": 0.1,
-    },
-    pi_pulse={
-        "waveform": {"style": "const", "length": 0.5},
-        "ch": 0,
-        "nqz": 2,
-        "freq": 1000,
-        "gain": 0.2,
-    },
-    pi2_pulse={
-        "waveform": {"style": "const", "length": 0.5},
-        "ch": 0,
-        "nqz": 2,
-        "freq": 1000,
-        "gain": 0.1,
-    },
-    mist_pulse={
-        "waveform": {"style": "const", "length": 1.0},
-        "ch": 0,
-        "nqz": 2,
-        "freq": 1000,
-        "gain": 0.1,
-    },
-    readout_dpm={
-        "type": "base",
-        "pulse_cfg": {
-            "waveform": {"style": "const", "length": 1.0},
-            "ch": 0,
-            "nqz": 2,
-            "freq": 1000,
-            "gain": 1.0,
-        },
-        "ro_cfg": {
-            "ro_ch": 0,
-            "ro_length": 1.0,
-            "triger_offset": 0.5,
-        },
-    },
+from zcu_tools.utils.datasaver import load_data
+
+filepath = r"../Database/SA/R_freq_2.hdf5"
+signals, fpts, _, cfg = load_data(filepath, return_cfg=True)
+
+fpts *= 1e-9
+amps = np.abs(signals)
+
+drive_freq = 1e-3 * cfg["readout"]["pulse_cfg"]["freq"]
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+ax1.plot(fpts, amps)
+ax1.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
+ax1.set_title(f"Drive frequency: {drive_freq:.2f} GHz")
+ax1.set_ylim(0.0, None)
+ax2.plot(fpts, amps)
+ax2.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
+ax2.set_ylim(0.0, 0.01)
+plt.show(fig)
+```
+
+# Mist Simulation
+
+```python
+params = (5.0, 1.0, 1.0)
+
+flx = 0.5
+qub_dim = 40
+qub_cutoff = 50
+max_photon = 500
+kappa = 5.2  # MHz
+
+r_f = 5.0  # GHz
+
+g = 50e-3  # GHz
+```
+
+# Single Coupling
+
+```python
+from zcu_tools.simulate.fluxonium.branch.floquet import FloquetBranchAnalysis
+
+amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), 1e-3 * kappa)
+photons = (amps / (2 * g)) ** 2
+
+
+def calc_energies(branchs: List[int]) -> Dict[int, np.ndarray]:
+    avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
+
+    fb_analysis = FloquetBranchAnalysis(
+        params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
+    )
+
+    fbasis_n = Parallel(n_jobs=-1)(
+        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
+        for photon in tqdm(photons, desc="Computing Floquet basis")
+    )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
+
+    branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs)
+    branch_energies = fb_analysis.calc_branch_energies(fbasis_n, branch_infos)
+
+    return {k: np.asarray(v) for k, v in branch_energies.items()}
+
+
+branchs = list(range(25))
+branch_energies = calc_energies(branchs)
+
+
+resonator = Oscillator(r_f, truncated_dim=30)
+fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
+hilbertspace = HilbertSpace([fluxonium, resonator])
+hilbertspace.add_interaction(
+    g=g,
+    op1=(fluxonium.n_operator(), fluxonium),
+    op2=(resonator.annihilation_operator() + resonator.creation_operator(), resonator),
+    add_hc=False,
 )
+E_n0 = hilbertspace.eigenvals(evals_count=qub_dim * 15)
+
+hilbertspace.generate_lookup(ordering="LX")
+
+
+def calc_E_n0_ij(i: int, j: int) -> np.ndarray:
+    i_dressed = hilbertspace.dressed_index((i, 0))
+    j_dressed = hilbertspace.dressed_index((j, 0))
+
+    return E_n0[j_dressed] - E_n0[i_dressed]
+
 ```
 
 ```python
 %matplotlib widget
-flx_values = np.linspace(-1, 3.0, 31)
+from zcu_tools.notebook.analysis.mist.branch import round_to_nearest
 
-executor = (
-    FluxDepExecutor(
-        flx_values=flx_values,
-        flux_dev_name="flux_yoko",
-        flux_dev_cfg={
-            "type": "YOKOGS200",
-            "address": "...",
-            "label": "flux_dev",
-        },
-        env_dict={
-            "soccfg": Mock(),
-            "soc": Mock(),
-            "ml": ml,
-            "predictor": predictor,
-        },
-    )
-    .add_measurement(
-        "qubit_freq",
-        QubitFreqMeasurementTask(
-            detune_sweep=make_sweep(-7, 7, 101),
-            cfg_maker=lambda ctx, ml: (qub_pulse := ml.get_module("qub_probe_pulse"))
-            and {
-                "qub_pulse": {
-                    **qub_pulse,
-                    "gain": min(1.0, qub_pulse["gain"] * ctx.env_dict["gain_factor"]),
-                },
-                "readout": "readout_dpm",
-                "relax_delay": 0.0,
-                "reps": 1000,
-                "rounds": 100,
-            },
-            earlystop_snr=20,
-        ),
-    )
-    .add_measurement(
-        "lenrabi",
-        LenRabiMeasurementTask(
-            length_sweep=make_sweep(0.0, 2.0, 101),
-            ref_pi_product=0.2 * 0.5,
-            cfg_maker=lambda ctx, ml: (pi_pulse := ml.get_module("pi_pulse"))
-            and {
-                "rabi_pulse": {
-                    **pi_pulse,
-                    "freq": ctx.env_dict["qubit_freq"],
-                    "gain": min(1.0, pi_pulse["gain"] * ctx.env_dict["gain_factor"]),
-                },
-                "readout": "readout_dpm",
-                "relax_delay": 0.0,
-                "reps": 1000,
-                "rounds": 100,
-            },
-            earlystop_snr=20,
-        ),
-    )
-    .add_measurement(
-        "t1",
-        T1MeasurementTask(
-            length_sweep=make_sweep(0.0, 15.0, 101),
-            cfg_maker=lambda ctx, ml: (pi_pulse := ml.get_module("pi_pulse"))
-            and {
-                "rabi_pulse": {
-                    **pi_pulse,
-                    "freq": ctx.env_dict["qubit_freq"],
-                    "gain": min(1.0, pi_pulse["gain"] * ctx.env_dict["gain_factor"]),
-                },
-                "readout": "readout_dpm",
-                "relax_delay": 0.0,
-                "reps": 1000,
-                "rounds": 100,
-            },
-            earlystop_snr=20,
-        ),
-    )
-    .add_measurement(
-        "t2ramsey",
-        T2RamseyMeasurementTask(
-            length_sweep=make_sweep(0.0, 10.0, 101),
-            activate_detune=1.0,
-            cfg_maker=lambda ctx, ml: (pi2_pulse := ml.get_module("pi2_pulse"))
-            and {
-                "pi2_pulse": {
-                    **pi2_pulse,
-                    "freq": ctx.env_dict["qubit_freq"],
-                    "gain": min(1.0, pi2_pulse["gain"] * ctx.env_dict["gain_factor"]),
-                },
-                "readout": "readout_dpm",
-                "relax_delay": 0.0,
-                "reps": 1000,
-                "rounds": 100,
-            },
-            earlystop_snr=20,
-        ),
-    )
-    .add_measurement(
-        "t2echo",
-        T2EchoMeasurementTask(
-            length_sweep=make_sweep(0.0, 10.0, 101),
-            activate_detune=1.0,
-            cfg_maker=lambda ctx, ml: (pi_pulse := ml.get_module("pi_pulse"))
-            and (pi2_pulse := ml.get_module("pi2_pulse"))
-            and {
-                "pi_pulse": {
-                    **pi_pulse,
-                    "freq": ctx.env_dict["qubit_freq"],
-                    "gain": min(1.0, pi_pulse["gain"] * ctx.env_dict["gain_factor"]),
-                },
-                "pi2_pulse": {
-                    **pi2_pulse,
-                    "freq": ctx.env_dict["qubit_freq"],
-                    "gain": min(1.0, pi2_pulse["gain"] * ctx.env_dict["gain_factor"]),
-                },
-                "readout": "readout_dpm",
-                "relax_delay": 0.0,
-                "reps": 1000,
-                "rounds": 100,
-            },
-            earlystop_snr=20,
-        ),
-    )
-    .add_measurement(
-        "mist",
-        MistMeasurementTask(
-            gain_sweep=make_sweep(0.0, 1.0, 101),
-            cfg_maker=lambda ctx, ml: (pi_pulse := ml.get_module("pi_pulse"))
-            and {
-                "mist_pulse": "mist_pulse",
-                "pi_pulse": {
-                    **pi_pulse,
-                    "freq": ctx.env_dict["qubit_freq"],
-                    "gain": min(1.0, pi_pulse["gain"] * ctx.env_dict["gain_factor"]),
-                },
-                "readout": "readout_dpm",
-                "relax_delay": 0.0,
-                "reps": 1000,
-                "rounds": 100,
-            },
-        ),
-    )
-)
-_, fig = executor.run()
-plt.close(fig)
+fig, ax = plt.subplots()
+
+transitions = {}
+E_01 = branch_energies[1] - branch_energies[0]
+E_01 += calc_E_n0_ij(0, 1) - E_01[0]
+for i in (0, 1):
+    for j in range(i + 1, np.max(branchs)):
+        E_ij = branch_energies[j] - branch_energies[i]
+        E_ij += calc_E_n0_ij(i, j) - E_ij[0]
+
+        E_ij_mod = round_to_nearest(E_01, E_ij, r_f)
+
+        transitions[f"{i} → {j}"] = E_ij_mod
+
+
+ax.set_ylim(0.0, 1e3 * E_01[0] + 250)
+# ax.set_ylim(0.0, 1e3 * r_f + 250)
+# ax.axhline(1e3 * r_f, color="black", linestyle="--")
+
+
+def calc_default_xy(photons: np.ndarray, E_ij: np.ndarray) -> tuple[float, float]:
+    y = np.median(E_ij).item()
+    x = photons[np.argmin(np.abs(E_ij - y))]
+    return x, y
+
+
+ylim = ax.get_ylim()
+for name, E_ij in transitions.items():
+    E_ij = 1e3 * E_ij
+
+    mask = np.bitwise_and(E_ij > ylim[0], E_ij < ylim[1])
+    if np.any(mask):
+        (line,) = ax.plot(photons, E_ij)
+        ax.annotate(
+            name,
+            xy=calc_default_xy(photons[mask], E_ij[mask]),
+            xytext=(5, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=7,
+            color=line.get_color(),
+            bbox=dict(
+                boxstyle="round,pad=0.3",
+                fc="white",
+                alpha=0.9,
+                ec="none",
+            ),
+        )
+
+
+plt.show(fig)
+# savefig(fig, f"{image_dir}/ac_stark_populations.png", dpi=300)
+# plt.close(fig)
 ```
 
 ```python
-# executor.save("./test")
+idx = np.argmin(np.abs(photons - 1))
+chi = (
+    branch_energies[1][idx]
+    - branch_energies[1][0]
+    - branch_energies[0][idx]
+    + branch_energies[0][0]
+)
+print(f"chi = {1e3 * chi: .2f} MHz")
+```
+
+# Dual Coupling
+
+```python
+g1 = 0.4 * g  # GHz
+g2 = -0.4 * g  # GHz
+```
+
+```python
+from zcu_tools.simulate.fluxonium.branch.floquet import (
+    FloquetDualCouplingBranchAnalysis,
+)
+
+amps = np.arange(0.0, (abs(g1) + abs(g2)) * np.sqrt(max_photon), 1e-3 * kappa)
+photons = (amps / (abs(g1) + abs(g2))) ** 2
+
+
+def calc_energies(branchs: List[int]) -> Dict[int, np.ndarray]:
+    avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
+
+    fb_analysis = FloquetDualCouplingBranchAnalysis(
+        params, r_f, g1, g2, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
+    )
+
+    fbasis_n = Parallel(n_jobs=-1)(
+        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
+        for photon in tqdm(photons, desc="Computing Floquet basis")
+    )
+    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
+
+    branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs)
+    branch_energies = fb_analysis.calc_branch_energies(fbasis_n, branch_infos)
+
+    return {k: np.asarray(v) for k, v in branch_energies.items()}
+
+
+branchs = list(range(25))
+branch_energies = calc_energies(branchs)
+
+
+resonator = Oscillator(r_f, truncated_dim=10)
+fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
+hilbertspace = HilbertSpace([fluxonium, resonator])
+hilbertspace.add_interaction(
+    g=g1,
+    op1=(fluxonium.n_operator(), fluxonium),
+    op2=(resonator.annihilation_operator() + resonator.creation_operator(), resonator),
+    add_hc=False,
+)
+hilbertspace.add_interaction(
+    g=g2,
+    op1=(1j * fluxonium.phi_operator(), fluxonium),
+    op2=(resonator.annihilation_operator() - resonator.creation_operator(), resonator),
+    add_hc=False,
+)
+E_n0 = hilbertspace.eigenvals(evals_count=qub_dim * 10)
+
+hilbertspace.generate_lookup(ordering="LX")
+
+
+def calc_E_n0_ij(i: int, j: int) -> np.ndarray:
+    i_dressed = hilbertspace.dressed_index((i, 0))
+    j_dressed = hilbertspace.dressed_index((j, 0))
+
+    return E_n0[j_dressed] - E_n0[i_dressed]
+
+```
+
+```python
+%matplotlib widget
+from zcu_tools.notebook.analysis.mist.branch import round_to_nearest
+
+fig, ax = plt.subplots()
+
+transitions = {}
+E_01 = branch_energies[1] - branch_energies[0]
+E_01 += calc_E_n0_ij(0, 1) - E_01[0]
+for i in (0, 1):
+    for j in range(i + 1, np.max(branchs)):
+        E_ij = branch_energies[j] - branch_energies[i]
+        E_ij += calc_E_n0_ij(i, j) - E_ij[0]
+
+        E_ij_mod = round_to_nearest(E_01, E_ij, r_f)
+
+        transitions[f"{i} → {j}"] = E_ij_mod
+
+
+ax.set_ylim(1e3 * E_01[0] - 250, 1e3 * E_01[0] + 250)
+
+
+def calc_default_xy(photons: np.ndarray, E_ij: np.ndarray) -> tuple[float, float]:
+    y = np.median(E_ij).item()
+    x = photons[np.argmin(np.abs(E_ij - y))]
+    return x, y
+
+
+ylim = ax.get_ylim()
+for name, E_ij in transitions.items():
+    E_ij = 1e3 * E_ij
+
+    mask = np.bitwise_and(E_ij > ylim[0], E_ij < ylim[1])
+    if np.any(mask):
+        (line,) = ax.plot(photons, E_ij)
+        ax.annotate(
+            name,
+            xy=calc_default_xy(photons[mask], E_ij[mask]),
+            xytext=(5, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=7,
+            color=line.get_color(),
+            bbox=dict(
+                boxstyle="round,pad=0.3",
+                fc="white",
+                alpha=0.9,
+                ec="none",
+            ),
+        )
+
+
+plt.show(fig)
+# savefig(fig, f"{image_dir}/ac_stark_populations.png", dpi=300)
+```
+
+```python
+idx = np.argmin(np.abs(photons - 1))
+chi = (
+    branch_energies[1][idx]
+    - branch_energies[1][0]
+    - branch_energies[0][idx]
+    + branch_energies[0][0]
+)
+print(f"chi = {1e3 * chi: .2f} MHz")
 ```
 
 ```python

@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Mapping, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
-from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import (
     format_sweep1D,
@@ -18,9 +17,11 @@ from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     sweep2array,
 )
-from zcu_tools.experiment.v2.runner import HardTask, SoftTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -34,85 +35,82 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAFluxResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+JPAFluxResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class JPAFluxTaskConfig(TaskConfig, ModularProgramCfg):
+class JPAFluxModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
-    dev: Mapping[str, DeviceInfo]
+
+class JPAFluxCfg(ModularProgramCfg, TaskCfg):
+    modules: JPAFluxModuleCfg
+    sweep: dict[str, SweepCfg]
 
 
-class JPAFluxExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: JPAFluxTaskConfig) -> JPAFluxResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class JPAFluxExp(AbsExperiment[JPAFluxResult, JPAFluxCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> JPAFluxResult:
+        _cfg = check_type(deepcopy(cfg), JPAFluxCfg)
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_flux")
+        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "jpa_flux")
 
-        jpa_flxs = sweep2array(cfg["sweep"]["jpa_flux"], allow_array=True)
+        jpa_flxs = sweep2array(_cfg["sweep"]["jpa_flux"], allow_array=True)
 
-        cfg["sweep"] = {"ge": make_ge_sweep()}
+        modules = _cfg["modules"]
+        _cfg["sweep"] = {"ge": make_ge_sweep()}
         Pulse.set_param(
-            cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
         with LivePlotter1D("JPA Flux value (a.u.)", "Signal Difference") as viewer:
+
+            def measure_fn(ctx, update_hook):
+                modules = ctx.cfg["modules"]
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("pi_pulse", modules["pi_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                    ),
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="JPA Flux value",
-                    sweep_values=jpa_flxs.tolist(),
-                    update_cfg_fn=lambda i, ctx, flx: set_flux_in_dev_cfg(
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    dtype=np.float64,
+                ).scan(
+                    "JPA Flux value",
+                    jpa_flxs.tolist(),
+                    before_each=lambda i, ctx, flx: set_flux_in_dev_cfg(
                         ctx.cfg["dev"], flx, label="jpa_flux_dev"
                     ),
-                    sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                )
-                            )
-                            and (
-                                prog.acquire(
-                                    soc,
-                                    progress=False,
-                                    callback=update_hook,
-                                    record_statistic=True,
-                                ),
-                                prog.get_covariance(),
-                                prog.get_median(),
-                            )
-                        ),
-                        raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
-                    ),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    jpa_flxs, np.abs(np.asarray(ctx.data))
-                ),
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(jpa_flxs, np.abs(ctx.root_data)),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (jpa_flxs, signals)
 
         return jpa_flxs, signals
 
-    def analyze(
-        self, result: Optional[JPAFluxResultType] = None
-    ) -> Tuple[float, Figure]:
+    def analyze(self, result: Optional[JPAFluxResult] = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -143,7 +141,7 @@ class JPAFluxExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[JPAFluxResultType] = None,
+        result: Optional[JPAFluxResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/flux",
         **kwargs,
@@ -163,7 +161,7 @@ class JPAFluxExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAFluxResultType:
+    def load(self, filepath: str, **kwargs) -> JPAFluxResult:
         signals, jpa_flxs, _ = load_data(filepath, **kwargs)
         assert jpa_flxs is not None
         assert len(jpa_flxs.shape) == 1 and len(signals.shape) == 1

@@ -1,1 +1,1 @@
-from .pyro import make_proxy
+from .pyro import make_soc_proxy

@@ -1,8 +1,9 @@
-from typing import Any, Optional
+from __future__ import annotations
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from typing_extensions import Optional, Sequence, Union
 
 from ..base import AbsLivePlotter
 from ..segments import ScatterSegment
@@ -16,18 +17,31 @@ class LivePlotterScatter(JupyterPlotMixin, AbsLivePlotter):
         ylabel: str,
         *,
         segment_kwargs: Optional[dict] = None,
-        **kwargs,
+        existed_axes: Optional[list[list[Axes]]] = None,
+        auto_close: bool = True,
+        disable: bool = False,
     ) -> None:
         if segment_kwargs is None:
             segment_kwargs = {}
         segment = ScatterSegment(xlabel, ylabel, **segment_kwargs)
-        super().__init__([[segment]], **kwargs)
+        super().__init__(
+            [[segment]],
+            existed_axes=existed_axes,
+            auto_close=auto_close,
+            disable=disable,
+        )
 
     def update(
         self,
         xs: NDArray[np.float64],
         ys: NDArray[np.float64],
-        colors: Optional[NDArray[Any]] = None,
+        colors: Union[
+            Sequence[str],
+            Sequence[tuple[float, float, float]],
+            Sequence[tuple[float, float, float, float]],
+            NDArray[np.float64],
+            None,
+        ] = None,
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:

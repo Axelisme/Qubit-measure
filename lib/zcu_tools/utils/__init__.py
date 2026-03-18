@@ -1,4 +1,6 @@
-from typing import Any, Literal, Mapping, MutableMapping
+from __future__ import annotations
+
+from typing_extensions import Any, Literal, Mapping, MutableMapping
 
 from . import datasaver, fitting, process, tomography
 
@@ -12,8 +14,8 @@ def deepupdate(
     深度更新字典 `d`，將字典 `u` 的內容合併進去。
 
     Args:
-        d (Dict[str, Any]): 目標字典，將被更新。
-        u (Dict[str, Any]): 更新內容的來源字典。
+        d (dict[str, Any]): 目標字典，將被更新。
+        u (dict[str, Any]): 更新內容的來源字典。
         behavior (Literal["error", "force", "ignore"], optional):
             定義當鍵衝突時的行為：
             - "error": 拋出 KeyError。

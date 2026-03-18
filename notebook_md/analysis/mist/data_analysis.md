@@ -7,7 +7,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.18.1
+      jupytext_version: 1.19.1
   kernelspec:
     display_name: .venv
     language: python
@@ -30,16 +30,17 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import plotly.graph_objects as go
 
 
 %autoreload 2
 import zcu_tools.experiment.v2 as ze
 from zcu_tools.notebook.persistance import load_result
-from zcu_tools.simulate import mA2flx
+from zcu_tools.simulate import mA2flx, flx2mA
 ```
 
 ```python
-qub_name = "Q12_2D[5]/Q4"
+qub_name = "Q12_2D[6]/Q1"
 
 result_dir = Path(f"../../../result/{qub_name}")
 image_dir = result_dir / "image" / "mist_data_analysis" / "-4.000mA"
@@ -63,9 +64,9 @@ if "sample_f" in allows:
 
 ```python
 filepath = (
-    r"../../../Database/Q12_2D[5]/Q4/Q4_dispersive_shift_gain0.050@-4.000mA_1.hdf5"
+    r"../../../Database/Q12_2D[5]/Q1/Q1_dispersive_shift_gain0.050@-2.600mA_3.hdf5"
 )
-exp = ze.twotone.dispersive.DispersiveExperiment()
+exp = ze.twotone.dispersive.DispersiveExp()
 exp.load(filepath)
 
 chi, kappa, fig = exp.analyze()
@@ -74,16 +75,32 @@ fig.savefig(image_dir / "dispersive_shift.png")
 plt.close(fig)
 ```
 
+# CKP
+
+```python
+filepath = [
+    r"../../../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ckp@1.800mA_ground_2.hdf5",
+    r"../../../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ckp@1.800mA_excited_2.hdf5",
+]
+exp = ze.twotone.ckp.CKP_Exp()
+exp.load(filepath)
+
+chi, kappa, readout_f, fig = exp.analyze()
+plt.show(fig)
+fig.savefig(image_dir / "dispersive_shift.png")
+plt.close(fig)
+```
+
 # AC stark shift
 
 ```python
-filepath = r"../../../Database/Q12_2D[5]/Q4/Q4_ac_stark@-4.000mA_1.hdf5"
-# signals, pdrs, fpts = load_data(filepath)
-# fpts /= 1e6
+filepath = (
+    r"../../../Database/Q12_2D[6]/Q1/2026/01/Data_0131/Q1_ac_stark@1.800mA_1.hdf5"
+)
 
-exp = ze.twotone.ac_stark.AcStarkExperiment()
+exp = ze.twotone.ac_stark.AcStarkExp()
 exp.load(filepath)
-ac_coeff, fig = exp.analyze(chi=chi, kappa=kappa, cutoff=0.01)
+ac_coeff, fig = exp.analyze(chi=chi, kappa=kappa, cutoff=0.1)
 
 plt.show(fig)
 fig.savefig(image_dir / "ac_stark.png")
@@ -101,7 +118,7 @@ filepath = (
     # "../../../Database/Q12_2D[5]/Q4/Q4_mist_e_singleshot_short@-0.650mA_2.hdf5"
 )
 
-exp = ze.twotone.singleshot.mist.MISTPowerDepSingleShot()
+exp = ze.singleshot.mist.PowerExp()
 exp.load(filepath)
 fig = exp.analyze(
     ac_coeff=ac_coeff,
@@ -114,28 +131,10 @@ fig.savefig(image_dir / (filepath.split("/")[-1].split("@")[0] + ".png"))
 plt.close(fig)
 ```
 
-## overnight
-
-```python
-filepath = "../../../Database/Q12_2D[5]/Q4/Q4_mist_overnight@-4.000mA_6.hdf5"
-
-exp = ze.twotone.singleshot.mist_overnight.MISTPowerDepOvernight()
-exp.load(filepath)
-fig = exp.analyze(
-    ac_coeff=ac_coeff,
-)
-
-plt.show(fig)
-fig.savefig(f"{image_dir}/mist_overnight.png")
-plt.close(fig)
-```
-
 # Power dep over flux
 
 ```python
-sim_filepath = (
-    f"../../../result/{qub_name}/data/branch_floquet/populations_over_flx.npz"
-)
+sim_filepath = f"{result_dir}/data/branch_floquet/populations_over_flx.npz"
 # sim_filepath = r"../../result/Q12_2D[3]/Q4/branch_populations.npz"
 
 
@@ -147,29 +146,80 @@ with np.load(sim_filepath) as data:
 ```
 
 ```python
-filepath = (
-    r"..\..\..\Database\Q12_2D[4]\Q4\2025\11\Data_1114\Q4_mist_flux_bare@4.000mA_1.hdf5"
-)
+filepaths = [
+    r"../../../Database/Q12_2D[5]/Q1/Q1_mist_over_flux@-7.000mA_1.hdf5",
+    r"../../../Database/Q12_2D[5]/Q1/Q1_autofluxdep_onlyfreq@-2.500mA_mist_g_signals_g_2.hdf5",
+    # r"../../../Database/Q12_2D[5]/Q1/Q1_mist_over_flux@-2.600mA_1.hdf5",
+    # r"../../../Database/Q12_2D[5]/Q1/Q1_autofluxdep_onlyfreq@-2.500mA_mist_e_signals_e_2.hdf5",
+]
+e_filepaths = [
+    r"../../../Database/Q12_2D[5]/Q1/Q1_autofluxdep_onlyfreq@-2.500mA_mist_e_signals_e_2.hdf5"
+]
 
-
-exp = ze.twotone.mist.flux_dep.MistFluxDepExperiment()
-As, pdrs, signals = exp.load(filepath)
-fig = exp.analyze(mA_c=mA_c, period=period, ac_coeff=ac_coeff)
+# ac_coeff = 1e4
+map_flxs = 1 - sim_flxs
 
 from zcu_tools.notebook.analysis.mist.branch import plot_cn_with_mist
+from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
+from plotly.subplots import make_subplots
+
+exp = ze.mist.flux_dep.FluxDepExp()
+
+# fig = go.Figure()
+fig = make_subplots(rows=2, cols=1, vertical_spacing=0.1)
+for filepath in filepaths:
+    exp.load(filepath)
+    fig = exp.analyze(
+        mA_c=mA_c,
+        period=period,
+        ac_coeff=ac_coeff,
+        fig=fig,
+        secondary_xaxis=False,
+        auto_range=False,
+        row=1,
+        col=1,
+    )
+for filepath in e_filepaths:
+    exp.load(filepath)
+    fig = exp.analyze(
+        mA_c=mA_c,
+        period=period,
+        ac_coeff=ac_coeff,
+        fig=fig,
+        secondary_xaxis=False,
+        auto_range=False,
+        row=2,
+        col=1,
+    )
 
 plot_cn_with_mist(
     fig,
     flxs=sim_flxs,
     photons=sim_photons,
     populations_over_flx=sim_populations,
-    critical_levels={0: 2.0, 1: 3.0},
-    mist_flxs=mA2flx(As, mA_c, period),
+    critical_levels={0: 0.5, 1: 1.5},
+    mist_flxs=map_flxs,
+    row=1,
+    col=1,
 )
+if e_filepaths:
+    plot_cn_with_mist(
+        fig,
+        flxs=sim_flxs,
+        photons=sim_photons,
+        populations_over_flx=sim_populations,
+        critical_levels={0: 0.5, 1: 1.5},
+        mist_flxs=map_flxs,
+        row=2,
+        col=1,
+    )
 
+add_secondary_xaxis(fig, map_flxs, flx2mA(map_flxs, mA_c, period), row=2, col=1)
 
 fig.update_layout(height=800)
-fig.write_image(image_dir / "branch_floquet/mist_over_flux_with_simulation.png")
+fig.write_image(
+    result_dir / "image" / "branch_floquet" / "mist_over_flux_with_simulation.png"
+)
 fig.show()
 ```
 

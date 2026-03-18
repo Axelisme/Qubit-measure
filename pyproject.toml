@@ -4,21 +4,10 @@ version = "0.1.0"
 description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["numpy", "tqdm", "matplotlib", "typing-extensions"]
+dependencies = ["numpy", "tqdm", "matplotlib", "typing-extensions", "typeguard"]
 
 [project.optional-dependencies]
-client = [
-    "zcu-tools[fit]",
-    "qick @ git+https://github.com/openquantumhardware/qick.git",
-    "labber @ git+https://github.com/Axelisme/labber_api.git",
-    "numpy==1.23.5",
-    "matplotlib==3.9",
-    "pyyaml",
-    "dill",
-    "pyvisa",
-    "pyro4",
-]
-server = ["dill", "numpy==1.23.5"]
+server = ["numpy==1.23.5"]
 fit = [
     "h5py",
     "ipykernel",
@@ -38,16 +27,29 @@ fit = [
     "jupytext",
     "scikit-optimize",
 ]
+client = [
+    "zcu-tools[fit]",
+    "qick @ git+https://github.com/openquantumhardware/qick.git",
+    "labber @ git+https://github.com/Axelisme/labber_api.git",
+    "numpy==1.23.5",
+    "matplotlib==3.9",
+    "pyyaml",
+    "pyvisa",
+    "pyro4",
+]
+design = ["qiskit_metal"]
 gdrive = [
     "google-api-python-client",
     "google-auth-httplib2",
     "google-auth-oauthlib",
     "python-dotenv",
 ]
+all = ["zcu_tools[client,design,gdrive]"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
 
 [tool.setuptools]
 package-dir = { "" = "lib" }
@@ -65,3 +67,13 @@ reportMissingTypeStubs = "none"
 [tool.jupytext]
 notebook_metadata_filter = "-all"
 cell_metadata_filter = "-all"
+
+[tool.uv]
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+[tool.uv.extra-build-dependencies]
+pyaedt = ["pip"]

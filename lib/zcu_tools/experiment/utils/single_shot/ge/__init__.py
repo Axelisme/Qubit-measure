@@ -1,11 +1,13 @@
-from typing import Literal, Optional, Tuple
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
+from typing_extensions import Literal, Optional
 
-from .base import fidelity_func
+from .base import GE_FitResult, fidelity_func
 from .center import fit_ge_by_center
 from .manual import fit_ge_manual
 from .pca import fit_ge_by_pca
@@ -14,8 +16,8 @@ NUM_BINS = 201
 
 
 def singleshot_visualize(
-    signals: np.ndarray, plot_center: bool = True
-) -> Tuple[Figure, Axes]:
+    signals: NDArray[np.complex128], plot_center: bool = True
+) -> tuple[Figure, Axes]:
     """
     Visualize single-shot measurements in IQ plane.
 
@@ -23,7 +25,7 @@ def singleshot_visualize(
 
     Parameters
     ----------
-    signals : np.ndarray
+    signals : NDArray
         Complex array of measurement signals. If 1D, it will be reshaped to 2D.
         For 2D arrays, first dimension represents different measurement sets (e.g., ground and excited states).
     plot_center : bool, default=True
@@ -31,7 +33,7 @@ def singleshot_visualize(
 
     Returns
     -------
-    Tuple[plt.Figure, plt.Axes]
+    tuple[plt.Figure, plt.Axes]
         Figure and axes objects of the created plot.
     """
     fig, ax = plt.subplots()
@@ -82,11 +84,11 @@ def singleshot_visualize(
 
 
 def singleshot_ge_analysis(
-    signals: np.ndarray,
+    signals: NDArray[np.complex128],
     angle: Optional[float] = None,
     backend: Literal["center", "regression", "pca"] = "pca",
     **kwargs,
-) -> Tuple[float, float, float, np.ndarray, dict, Figure]:
+) -> tuple[float, NDArray[np.float64], GE_FitResult, Figure]:
     """
     Analyze ground and excited state signals to determine classification parameters.
 
@@ -95,7 +97,7 @@ def singleshot_ge_analysis(
 
     Parameters
     ----------
-    signals : np.ndarray
+    signals : NDArray
         Complex array of shape (2, N) containing measurement signals.
         First row should contain ground state signals, second row excited state signals.
     angle : float, default=None
@@ -108,7 +110,7 @@ def singleshot_ge_analysis(
 
     Returns
     -------
-    Tuple[float, float, float, np.ndarray]
+    tuple[float, float, float, np.ndarray]
         A tuple containing:
         - fidelity: The assignment fidelity between ground and excited states (0.5-1.0)
         - threshold: The optimal threshold value for state discrimination
@@ -127,6 +129,7 @@ def singleshot_ge_analysis(
 
 
 __all__ = [
+    "GE_FitResult",
     "fidelity_func",
     "singleshot_ge_analysis",
     "singleshot_visualize",

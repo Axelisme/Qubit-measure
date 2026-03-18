@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import os
 from itertools import product
-from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from tqdm.auto import tqdm
+from typing_extensions import Any, Optional, Union
 
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate.fluxonium import calculate_chi_sweep
@@ -17,9 +19,9 @@ DESIGN_EVALS_COUNT = 15
 
 
 def generate_params_table(
-    EJ: Union[float, np.ndarray, Tuple[float, float]],
-    EC: Union[float, np.ndarray, Tuple[float, float]],
-    EL: Union[float, np.ndarray, Tuple[float, float]],
+    EJ: Union[float, np.ndarray, tuple[float, float]],
+    EC: Union[float, np.ndarray, tuple[float, float]],
+    EL: Union[float, np.ndarray, tuple[float, float]],
     flx: float = 0.5,
     precision: float = 0.1,
 ) -> pd.DataFrame:
@@ -40,16 +42,19 @@ def generate_params_table(
         EJ = np.array([EJ])
     elif isinstance(EJ, tuple):
         EJ = np.arange(EJ[0], EJ[1], precision)
+    assert isinstance(EJ, np.ndarray)
 
     if isinstance(EC, float):
         EC = np.array([EC])
     elif isinstance(EC, tuple):
         EC = np.arange(EC[0], EC[1], precision)
+    assert isinstance(EC, np.ndarray)
 
     if isinstance(EL, float):
         EL = np.array([EL])
     elif isinstance(EL, tuple):
         EL = np.arange(EL[0], EL[1], precision)
+    assert isinstance(EL, np.ndarray)
 
     return pd.DataFrame(
         [
@@ -72,9 +77,9 @@ def calculate_esys(params_table: pd.DataFrame) -> None:
     會在 params_table 中新增一個 "esys" 欄位
     """
 
-    import scqubits as scq  # lazy import
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-    fluxonium = scq.Fluxonium(
+    fluxonium = Fluxonium(
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
 
@@ -120,9 +125,9 @@ def calculate_m01(params_table: pd.DataFrame) -> None:
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
 
-    import scqubits as scq  # lazy import
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-    fluxonium = scq.Fluxonium(
+    fluxonium = Fluxonium(
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
 
@@ -138,11 +143,11 @@ def calculate_m01(params_table: pd.DataFrame) -> None:
 
 
 def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) -> None:
-    params_list = params_table.to_dict(orient="records")
+    params_list = np.asarray(params_table.to_dict(orient="records"), dtype=object)
 
-    import scqubits as scq  # lazy import
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-    def update_fn(fluxonium: scq.Fluxonium, row: Dict[str, Any]) -> None:
+    def update_fn(fluxonium: Fluxonium, row: dict[str, Any]) -> None:
         fluxonium.flux = row["flx"]
         fluxonium.EJ = row["EJ"]
         fluxonium.EC = row["EC"]
@@ -179,7 +184,7 @@ def calculate_snr(
 
 def calculate_t1(
     params_table: pd.DataFrame,
-    noise_channels: List[Tuple[str, Dict[str, Any]]],
+    noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
 ) -> None:
     """
@@ -191,14 +196,15 @@ def calculate_t1(
     if "esys" not in params_table.columns:
         raise ValueError("This function requires esys to be calculated")
 
-    import scqubits as scq  # lazy import
+    import scqubits.settings as scq
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
 
-    fluxonium = scq.Fluxonium(
+    fluxonium = Fluxonium(
         1.0, 1.0, 1.0, flux=0.5, cutoff=DESIGN_CUTOFF, truncated_dim=DESIGN_EVALS_COUNT
     )
 
     # Suppress the warning when calculating t1
-    old, scq.settings.T1_DEFAULT_WARNING = scq.settings.T1_DEFAULT_WARNING, False
+    old, scq.T1_DEFAULT_WARNING = scq.T1_DEFAULT_WARNING, False
 
     def calc_single_t1(row):
         fluxonium.flux = row["flx"]
@@ -214,11 +220,11 @@ def calculate_t1(
 
     params_table["t1"] = params_table.apply(calc_single_t1, axis=1)
 
-    scq.settings.T1_DEFAULT_WARNING = old
+    scq.T1_DEFAULT_WARNING = old
 
 
 def avoid_collision(
-    params_table: pd.DataFrame, avoid_freqs: List[float], threshold: float = 0.3
+    params_table: pd.DataFrame, avoid_freqs: list[float], threshold: float = 0.3
 ) -> None:
     """
     計算每個參數組合下的 collision, 需要已經計算過 esys 的params_table
@@ -304,9 +310,9 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
 
     # 預設隱藏valid=False的點
     fig.for_each_trace(
-        lambda trace: trace.update(visible="legendonly")
-        if trace.name == "False"
-        else ()
+        lambda trace: (
+            trace.update(visible="legendonly") if trace.name == "False" else ()
+        )
     )
 
     fig.update_layout(
@@ -324,7 +330,7 @@ def plot_scan_results(params_table: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def annotate_best_point(fig, data: pd.DataFrame) -> Tuple[float, float, float]:
+def annotate_best_point(fig, data: pd.DataFrame) -> tuple[float, float, float]:
     """
     Find and plot the best snr's param on the plot, the equation of snr is:
         snr = snr * sqrt(T1)
@@ -359,7 +365,7 @@ def annotate_best_point(fig, data: pd.DataFrame) -> Tuple[float, float, float]:
 def add_real_sample(
     fig: go.Figure,
     chip_name: str,
-    noise_channels: List[Tuple[str, Dict[str, Any]]],
+    noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
     flx: float = 0.5,
     result_dir: Optional[str] = None,
@@ -404,11 +410,12 @@ def add_real_sample(
     )
     snr = np.sort(snrs)[-3]
 
-    import scqubits as scq  # lazy import
+    import scqubits.settings as scq
+    from scqubits.core.fluxonium import Fluxonium  # lazy import
 
     # calculate t1
-    fluxonium = scq.Fluxonium(*param, flux=flx, cutoff=DESIGN_CUTOFF, truncated_dim=2)
-    scq.settings.T1_DEFAULT_WARNING = False
+    fluxonium = Fluxonium(*param, flux=flx, cutoff=DESIGN_CUTOFF, truncated_dim=2)
+    scq.T1_DEFAULT_WARNING = False
     predict_t1 = 1e-3 * fluxonium.t1_effective(
         noise_channels=noise_channels,
         common_noise_options=dict(i=1, j=0, T=Temp),

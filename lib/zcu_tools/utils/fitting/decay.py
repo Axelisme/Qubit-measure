@@ -1,6 +1,8 @@
-from typing import Optional, Tuple, cast
+from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import Optional, cast
 
 from .base import (
     batch_fit_func,
@@ -16,10 +18,15 @@ from .base import (
 
 
 def fit_decay(
-    xs: np.ndarray,
-    real_signals: np.ndarray,
-    fit_params: Optional[Tuple[float, float, float]] = None,
-) -> Tuple[float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
+    xs: NDArray[np.float64],
+    real_signals: NDArray[np.float64],
+    fit_params: Optional[tuple[float, float, float]] = None,
+) -> tuple[
+    float,
+    float,
+    NDArray[np.float64],
+    tuple[tuple[float, ...], NDArray[np.float64]],
+]:
     """return [t1, t1err, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fitexp(xs, real_signals, fitparams=fit_params)
 
@@ -31,14 +38,14 @@ def fit_decay(
 
 
 def fit_dual_decay(
-    xs: np.ndarray, real_signals: np.ndarray
-) -> Tuple[
+    xs: NDArray[np.float64], real_signals: NDArray[np.float64]
+) -> tuple[
     float,
     float,
     float,
     float,
-    np.ndarray,
-    Tuple[Tuple[float, ...], np.ndarray],
+    NDArray[np.float64],
+    tuple[tuple[float, ...], NDArray[np.float64]],
 ]:
     """return [t1, t1err, t1b, t1berr, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fit_dualexp(xs, real_signals)
@@ -64,12 +71,13 @@ def fit_dual_decay(
 
 
 def fit_ge_decay(
-    times: np.ndarray,
-    g_populations: np.ndarray,
-    e_populations: np.ndarray,
+    times: NDArray[np.float64],
+    g_populations: NDArray[np.float64],
+    e_populations: NDArray[np.float64],
     share_t1: bool = True,
-) -> Tuple[
-    Tuple[float, float, np.ndarray, tuple], Tuple[float, float, np.ndarray, tuple]
+) -> tuple[
+    tuple[float, float, NDArray[np.float64], tuple],
+    tuple[float, float, NDArray[np.float64], tuple],
 ]:
     """return [(g_t1, g_t1err, g_fit_signals, g_params), (e_t1, e_t1err, e_fit_signals, e_params)]"""
     g_params, g_pCov = fitexp(times, g_populations)  # (y0, yscale, decay)
@@ -99,8 +107,9 @@ def fit_ge_decay(
         g_pCov, e_pCov = ge_pcov
 
     g_t1 = g_params[2]
-    g_t1err = np.sqrt(g_pCov[2, 2])
     e_t1 = e_params[2]
+    # TODO: handle the error of the shared t1, consider the correlation between the two t1s
+    g_t1err = np.sqrt(g_pCov[2, 2])
     e_t1err = np.sqrt(e_pCov[2, 2])
 
     if g_t1 > 0.8 * np.max(times) or g_t1 < 3 * (times[1] - times[0]):
@@ -120,11 +129,16 @@ def fit_ge_decay(
 
 
 def fit_decay_fringe(
-    xs: np.ndarray,
-    real_signals: np.ndarray,
-    fit_params: Optional[Tuple[float, ...]] = None,
-) -> Tuple[
-    float, float, float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]
+    xs: NDArray[np.float64],
+    real_signals: NDArray[np.float64],
+    fit_params: Optional[tuple[float, ...]] = None,
+) -> tuple[
+    float,
+    float,
+    float,
+    float,
+    NDArray[np.float64],
+    tuple[tuple[float, ...], NDArray[np.float64]],
 ]:
     """return [t2f, t2ferr, detune, detune_err, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fitdecaycos(xs, real_signals, fitparams=fit_params)
@@ -136,16 +150,18 @@ def fit_decay_fringe(
     detune: float = pOpt[2]
     detune_err: float = np.sqrt(pCov[2, 2])
 
-    pOpt = cast(Tuple[float, float, float, float, float], tuple(pOpt))
+    pOpt = cast(tuple[float, float, float, float, float], tuple(pOpt))
 
     return t2f, t2ferr, detune, detune_err, fit_signals, (pOpt, pCov)
 
 
 def fit_gauss_decay(
-    xs: np.ndarray,
-    real_signals: np.ndarray,
-    fit_params: Optional[Tuple[float, ...]] = None,
-) -> Tuple[float, float, np.ndarray, Tuple[Tuple[float, ...], np.ndarray]]:
+    xs: NDArray[np.float64],
+    real_signals: NDArray[np.float64],
+    fit_params: Optional[tuple[float, ...]] = None,
+) -> tuple[
+    float, float, NDArray[np.float64], tuple[tuple[float, ...], NDArray[np.float64]]
+]:
     """return [t2g, t2gerr, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fit_gauss(
         xs, real_signals, fitparams=fit_params, fixedparams=[None, None, 0.0, None]
@@ -161,6 +177,6 @@ def fit_gauss_decay(
     t2 = np.sqrt(2) * sigma
     t2_err = np.sqrt(2) * sigma_err
 
-    pOpt = cast(Tuple[float, float, float, float, float], tuple(pOpt))
+    pOpt = cast(tuple[float, float, float, float, float], tuple(pOpt))
 
     return t2, t2_err, fit_signals, (pOpt, pCov)

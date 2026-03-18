@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from math import sqrt
 
 import scipy.constants as sc
@@ -8,6 +10,7 @@ PHI0 = sc.hbar / (2 * sc.e)
 def C2EC(C: float) -> float:
     """C: fF -> EC: GHz"""
     return sc.e**2 / (2 * sc.h * C * 1e-15) * 1e-9
+
 
 def invC2EC(invC: float) -> float:
     """invC: 1/fF -> EC: GHz"""

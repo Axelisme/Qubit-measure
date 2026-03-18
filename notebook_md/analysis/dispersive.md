@@ -7,7 +7,7 @@ jupyter:
       extension: .md
       format_name: markdown
       format_version: '1.3'
-      jupytext_version: 1.18.1
+      jupytext_version: 1.19.1
   kernelspec:
     display_name: .venv
     language: python
@@ -29,30 +29,38 @@ jupyter:
 from pathlib import Path
 
 import numpy as np
+from joblib import Parallel, delayed
+import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
+from scipy.ndimage import gaussian_filter1d
 
 %autoreload 2
-from zcu_tools.experiment.v2.onetone import FluxDepExperiment
+from zcu_tools.experiment.v2.onetone import FluxDepExp
+from zcu_tools.meta_tool import MetaDict
 import zcu_tools.notebook.persistance as zp
 import zcu_tools.notebook.analysis.dispersive as zd
 from zcu_tools.simulate import mA2flx, flx2mA
 from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flx
 from zcu_tools.notebook.analysis.plot import plot_dispersive_shift
 from zcu_tools.notebook.analysis.fluxdep import InteractiveLines
+from zcu_tools.utils.fitting.resonance import (
+    fit_edelay,
+    remove_edelay,
+    fit_circle_params,
+    calc_phase,
+)
 ```
 
 ```python
-chip_name = "Q12_2D[5]"
-qub_name = "Q1"
+qub_name = "Q12_2D[6]/Q1"
 
-result_dir = Path(f"../../result/{chip_name}/{qub_name}")
+result_dir = Path(f"../../result/{qub_name}")
 param_path = result_dir / "params.json"
 ```
 
 ```python
 _, params, mA_c, period, allows, _ = zp.load_result(str(param_path))
 
-# mA_c = 4.46
-# mA_c, _, period = (4.395142504148789, -0.3432768475307726, 9.476838703359125)
 
 mA_e = mA_c + period / 2
 
@@ -64,13 +72,17 @@ if "r_f" in allows:
     print(f"r_f = {r_f}")
 ```
 
+```python
+md = MetaDict(json_path=f"{result_dir}/meta_info.json", read_only=True)
+```
+
 # Plot with Onetone
 
 ```python
-onetone_path = r"../../Database/Q12_2D[5]/Q1/s002_onetone_flux_Q0_015.hdf5"
+onetone_path = r"../../Database/Q12_2D[6]/Q1/2026/01/Data_0130/R1_flux_2.hdf5"
 
 
-exp = FluxDepExperiment()
+exp = FluxDepExp()
 sp_As, sp_fpts, signals = exp.load(onetone_path)
 sp_fpts *= 1e-3  # MHz to GHz
 
@@ -90,17 +102,6 @@ mA_c, mA_e, period
 ```
 
 ```python
-from zcu_tools.utils.fitting.resonance import (
-    fit_edelay,
-    remove_edelay,
-    fit_circle_params,
-    calc_phase,
-)
-from joblib import Parallel, delayed
-import matplotlib.pyplot as plt
-from tqdm.auto import tqdm
-from scipy.ndimage import gaussian_filter1d
-
 edelays = Parallel(n_jobs=-1)(
     delayed(fit_edelay)(sp_fpts, signal) for signal in tqdm(signals)
 )
@@ -109,6 +110,7 @@ edelay = np.median(edelays).item()
 
 rot_signals = remove_edelay(sp_fpts, signals, edelay)
 rot_signals = gaussian_filter1d(rot_signals, len(sp_fpts) // 30, axis=1)
+rot_signals = np.asarray(rot_signals, dtype=np.complex128)
 
 circle_param = np.median(
     [fit_circle_params(rot_signal.real, rot_signal.imag) for rot_signal in rot_signals],
@@ -124,31 +126,39 @@ phases = calc_phase(rot_signals, circle_param[0], circle_param[1], axis=1)
 norm_phases = (phases - np.min(phases, axis=1, keepdims=True)) / np.ptp(
     phases, axis=1, keepdims=True
 )
-
 norm_phases = np.diff(norm_phases, axis=1, prepend=norm_phases[0, 0])
-norm_phases = np.clip(norm_phases, -5 * np.std(norm_phases), 5 * np.std(norm_phases))
+norm_phases = norm_phases / np.std(norm_phases, axis=1, keepdims=True)
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4))
 ax1.imshow(
-    np.abs(signals.T),
+    np.abs(signals).T,
     aspect="auto",
-    extent=[sp_flxs.min(), sp_flxs.max(), sp_fpts.min(), sp_fpts.max()],
+    extent=[sp_flxs[0], sp_flxs[-1], sp_fpts[0], sp_fpts[-1]],
+    interpolation="none",
 )
+ax1.axvline(1.0, color="b", linestyle="--")
+ax1.axvline(0.5, color="r", linestyle="--")
 ax2.plot(sp_flxs, edelays)
 ax2.axhline(edelay, color="k", linestyle="--")
+ax2.axvline(1.0, color="b", linestyle="--")
+ax2.axvline(0.5, color="r", linestyle="--")
+ax2.set_xlim(sp_flxs[0], sp_flxs[-1])
 ax2.grid()
 ax3.imshow(
     np.abs(norm_phases).T,
     aspect="auto",
-    extent=[sp_flxs.min(), sp_flxs.max(), sp_fpts.min(), sp_fpts.max()],
+    extent=[sp_flxs[0], sp_flxs[-1], sp_fpts[0], sp_fpts[-1]],
+    interpolation="none",
 )
+ax3.axvline(1.0, color="b", linestyle="--")
+ax3.axvline(0.5, color="r", linestyle="--")
 plt.show()
 plt.close(fig)
 ```
 
 ```python
-# r_f = 5.345
-best_g = 0.1
+r_f = 1e-3 * md.r_f
+best_g = 0.06
 ```
 
 ```python

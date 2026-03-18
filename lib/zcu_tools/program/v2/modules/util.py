@@ -1,9 +1,24 @@
-import warnings
-from typing import Union
+from __future__ import annotations
 
-from qick.asm_v2 import QickParam
+import warnings
+
+from qick.asm_v2 import AbsQickProgram, QickParam
+from typing_extensions import Optional, Union
 
 from ..utils import param2str
+
+
+def round_timestamp(
+    prog: AbsQickProgram,
+    t: Union[float, QickParam],
+    gen_ch: Optional[int] = None,
+    ro_ch: Optional[int] = None,
+    take_ceil: bool = True,
+) -> float:
+    cycles_t = prog.us2cycles(t, gen_ch=gen_ch, ro_ch=ro_ch, as_float=True)
+    if take_ceil:
+        cycles_t = 0.99 + cycles_t
+    return prog.cycles2us(cycles_t, gen_ch=gen_ch, ro_ch=ro_ch)
 
 
 def calc_max_length(

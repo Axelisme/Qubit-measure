@@ -2,75 +2,88 @@ from __future__ import annotations
 
 import warnings
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from numpy.typing import NDArray
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import OneToneProgram, OneToneProgramCfg
+from zcu_tools.program.v2 import ModularProgramCfg, OneToneProgram
+from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
-from .runner import HardTask, TaskConfig, run_task
-
-LookbackResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+LookbackResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class LookbackTaskConfig(TaskConfig, OneToneProgramCfg): ...
+class LookbackModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
+    init_pulse: NotRequired[PulseCfg]
+    readout: PulseReadoutCfg
+
+
+class LookbackCfg(ModularProgramCfg, TaskCfg):
+    modules: LookbackModuleCfg
 
 
 def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class LookbackExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: LookbackTaskConfig) -> LookbackResultType:
-        cfg = deepcopy(cfg)
+class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> LookbackResult:
+        _cfg = check_type(deepcopy(cfg), LookbackCfg)
 
-        if cfg.setdefault("reps", 1) != 1:
+        if _cfg.setdefault("reps", 1) != 1:
             warnings.warn("reps is not 1 in config, this will be ignored.")
-            cfg["reps"] = 1
+            _cfg["reps"] = 1
 
-        prog = OneToneProgram(soccfg, cfg)
-        Ts = prog.get_time_axis(ro_index=0) + cfg["readout"]["ro_cfg"]["trig_offset"]
+        prog = OneToneProgram(soccfg, _cfg)
+        Ts = (
+            prog.get_time_axis(ro_index=0)
+            + _cfg["modules"]["readout"]["ro_cfg"]["trig_offset"]
+        )
         assert isinstance(Ts, np.ndarray)
 
         with LivePlotter1D("Time (us)", "Amplitude") as viewer:
+
+            def measure_fn(ctx, update_hook):
+                return OneToneProgram(soccfg, ctx.cfg).acquire_decimated(
+                    soc, progress=False, callback=update_hook
+                )
+
             signals = run_task(
-                task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        OneToneProgram(soccfg, ctx.cfg).acquire_decimated(
-                            soc, progress=False, callback=update_hook
-                        )
-                    ),
+                task=Task(
+                    measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0].dot([1, 1j]),
                     result_shape=(len(Ts),),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    Ts, lookback_signal2real(ctx.data)
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(
+                    Ts, lookback_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = dict(cfg)
+        self.last_cfg = _cfg
         self.last_result = (Ts, signals)
 
         return Ts, signals
 
     def analyze(
         self,
-        result: Optional[LookbackResultType] = None,
+        result: Optional[LookbackResult] = None,
         *,
         ratio: float = 0.3,
         smooth: Optional[float] = None,
         ro_cfg: Optional[dict] = None,
         plot_fit: bool = True,
-    ) -> Tuple[float, Figure]:
+    ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -115,7 +128,7 @@ class LookbackExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[LookbackResultType] = None,
+        result: Optional[LookbackResult] = None,
         comment: Optional[str] = None,
         tag: str = "lookback",
         **kwargs,
@@ -135,7 +148,7 @@ class LookbackExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> LookbackResultType:
+    def load(self, filepath: str, **kwargs) -> LookbackResult:
         signals, Ts, _ = load_data(filepath, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1

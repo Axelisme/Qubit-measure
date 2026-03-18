@@ -1,11 +1,24 @@
+from __future__ import annotations
+
 import json
 import os
 from copy import deepcopy
-from typing import Optional, Union
+from pathlib import Path
 
 from matplotlib.figure import Figure
+from typing_extensions import TYPE_CHECKING, Any, Mapping, Optional, Union
 
+from zcu_tools.device import DeviceInfo, GlobalDeviceManager
+from zcu_tools.device.sgs100a import RohdeSchwarzSGS100A
+from zcu_tools.device.yoko import YOKOGS200
 from zcu_tools.program import SweepCfg
+
+if TYPE_CHECKING:
+    try:
+        # in case pyvisa is not installed, use Any as ResourceManager to pass type checking
+        from pyvisa import ResourceManager
+    except ImportError:
+        from typing_extensions import Any as ResourceManager
 
 
 def make_sweep(
@@ -89,7 +102,7 @@ def get_ip_address(iface: str) -> str:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             return socket.inet_ntoa(
-                fcntl.ioctl(
+                fcntl.ioctl(  # type: ignore
                     s.fileno(),
                     0x8915,  # SIOCGIFADDR
                     struct.pack("256s", bytes(iface[:15], "utf-8")),
@@ -99,7 +112,7 @@ def get_ip_address(iface: str) -> str:
             raise OSError(f"Interface {iface} not found or has no IPv4 address.")
 
 
-def make_comment(cfg: dict, comment: str = "") -> str:
+def make_comment(cfg: Mapping[str, Any], comment: Optional[str] = None) -> str:
     """
     Generate a formatted comment string from a configuration dictionary.
 
@@ -111,12 +124,35 @@ def make_comment(cfg: dict, comment: str = "") -> str:
         str: A formatted comment string.
     """
     # pretty convert cfg to string
-    cfg = deepcopy(cfg)
-    cfg["comment"] = comment
+    cfg = dict(deepcopy(cfg))
+    if comment is not None:
+        cfg["comment"] = comment
 
     return json.dumps(cfg, indent=2)
 
 
-def savefig(fig: Figure, filepath: str) -> None:
+def savefig(fig: Figure, filepath: str, **kwargs) -> None:
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    fig.savefig(filepath)
+    fig.savefig(filepath, **kwargs)
+
+
+def dump_device_info(path: Union[str, Path]) -> None:
+    with open(str(path), "w") as f:
+        json.dump(GlobalDeviceManager.get_all_info(), f, indent=2)
+
+
+def reconnect_devices(dev_info: Mapping[str, DeviceInfo]) -> ResourceManager:
+    from pyvisa import ResourceManager
+
+    resource_manager = ResourceManager()
+    for name, info in dev_info.items():
+        device_type = info["type"]
+        if device_type == "YOKOGS200":
+            device = YOKOGS200(info["address"], resource_manager)
+        elif device_type == "RohdeSchwarzSGS100A":
+            device = RohdeSchwarzSGS100A(info["address"], resource_manager)
+        else:
+            raise ValueError(f"Not supported device type: {device_type}")
+        GlobalDeviceManager.register_device(name, device)
+
+    return resource_manager

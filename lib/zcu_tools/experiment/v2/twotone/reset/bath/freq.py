@@ -1,108 +1,117 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
-    Pulse,
-    PulseCfg,
     Readout,
     ReadoutCfg,
     Reset,
     ResetCfg,
     sweep2param,
 )
+from zcu_tools.program.v2.modules import BathResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-FreqGainResultType = Tuple[
+FreqGainResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
 
-class FreqGainTaskConfig(TaskConfig, ModularProgramCfg):
+class FreqGainModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    tested_reset: ResetCfg
+    tested_reset: BathResetCfg
     readout: ReadoutCfg
+
+
+class FreqGainCfg(ModularProgramCfg, TaskCfg):
+    modules: FreqGainModuleCfg
+    sweep: dict[str, SweepCfg]
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class FreqGainExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: FreqGainTaskConfig) -> FreqGainResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqGainResult:
+        _cfg = check_type(deepcopy(cfg), FreqGainCfg)
 
         # Check that reset pulse is dual pulse type
-        if cfg["tested_reset"]["type"] != "bath":
-            raise ValueError("This experiment only supports bath reset")
-
-        assert "sweep" in cfg
-        cfg["sweep"] = {
-            "gain": cfg["sweep"]["gain"],
-            "freq": cfg["sweep"]["freq"],
+        modules = _cfg["modules"]
+        _cfg["sweep"] = {
+            "gain": _cfg["sweep"]["gain"],
+            "freq": _cfg["sweep"]["freq"],
         }
 
-        gains = sweep2array(cfg["sweep"]["gain"])  # predicted gain points
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+        gains = sweep2array(_cfg["sweep"]["gain"])  # predicted gain points
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
 
         Reset.set_param(
-            cfg["tested_reset"], "res_gain", sweep2param("gain", cfg["sweep"]["gain"])
+            modules["tested_reset"],
+            "res_gain",
+            sweep2param("gain", _cfg["sweep"]["gain"]),
         )
         Reset.set_param(
-            cfg["tested_reset"], "res_freq", sweep2param("freq", cfg["sweep"]["freq"])
+            modules["tested_reset"],
+            "res_freq",
+            sweep2param("freq", _cfg["sweep"]["freq"]),
         )
 
         with LivePlotter2D(
             "Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)"
         ) as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Reset("tested_reset", ctx.cfg["tested_reset"]),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Reset("tested_reset", modules["tested_reset"]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
                     ),
                     result_shape=(len(gains), len(fpts)),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    fpts, gains, bathreset_signal2real(ctx.data).T
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(
+                    fpts, gains, bathreset_signal2real(ctx.root_data).T
                 ),
             )
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (gains, fpts, signals)
 
         return gains, fpts, signals
 
     def analyze(
         self,
-        result: Optional[FreqGainResultType] = None,
+        result: Optional[FreqGainResult] = None,
         smooth: float = 1.0,
         find: Literal["min", "max", "med"] = "min",
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -151,7 +160,7 @@ class FreqGainExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqGainResultType] = None,
+        result: Optional[FreqGainResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/bath/freq_gain",
         **kwargs,
@@ -172,7 +181,7 @@ class FreqGainExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> FreqGainResultType:
+    def load(self, filepath: str, **kwargs) -> FreqGainResult:
         signals, gains, fpts = load_data(filepath, **kwargs)
         assert gains is not None and fpts is not None
         assert len(gains.shape) == 1 and len(fpts.shape) == 1

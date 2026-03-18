@@ -1,25 +1,36 @@
+from __future__ import annotations
+
 import time
 import warnings
-from typing import Literal, Optional
 
 import numpy as np
 from tqdm.auto import tqdm
+from typeguard import check_type
+from typing_extensions import Literal, Optional
 
 from .base import BaseDevice, DeviceInfo
 
 STATUS_MAP = {"on": "1", "off": "0"}
-STATUS_MAP_INV = {"1": "on", "0": "off"}
 MODE_MAPS = {"voltage": "VOLT", "current": "CURR"}
-MODE_MAPS_INV = {"VOLT": "voltage", "CURR": "current"}
+DEFAULT_RAMPSTEP = {
+    "voltage": 1e-4,
+    "current": 1e-8,
+}
 
 
-class YOKOGS200Info(DeviceInfo):
+STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
+MODE_MAPS_INV = {v: k for k, v in MODE_MAPS.items()}
+
+
+class YOKOGS200Info(DeviceInfo, closed=True):
+    type: Literal["YOKOGS200"]
     output: Literal["on", "off"]
     mode: Literal["voltage", "current"]
     value: float
+    rampstep: float
 
 
-class YOKOGS200(BaseDevice[YOKOGS200Info]):
+class YOKOGS200(BaseDevice):
     # Initializes session for device.
     # address: address of device, rm: VISA resource manager
     def __init__(self, address: str, rm) -> None:
@@ -27,13 +38,7 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
         mode = self.get_mode()
 
-        if mode == "voltage":
-            self._rampstep = 1e-4
-        elif mode == "current":
-            self._rampstep = 1e-8
-        else:
-            raise ValueError(f"Unknown mode {mode}")
-
+        self._rampstep = DEFAULT_RAMPSTEP[mode]
         self._rampinterval = 0.01
 
     # ==========================================================================#
@@ -177,8 +182,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         self.write(f":SOURce:FUNCtion {MODE_MAPS[mode]}")
 
         # update rampstep
-        if rampstep is not None:
-            self._rampstep = rampstep
+        if rampstep is None:
+            rampstep = DEFAULT_RAMPSTEP[mode]
+        self._rampstep = rampstep
 
     # ==========================================================================#
 
@@ -213,7 +219,9 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
 
     # ==========================================================================#
 
-    def _setup(self, cfg: YOKOGS200Info, *, progress: bool = True) -> None:
+    def _setup(self, cfg: YOKOGS200Info, /, progress: bool = True) -> None:
+        cfg = check_type(cfg, YOKOGS200Info)  # runtime check
+
         if self.get_output() != "on" and cfg["output"] == "on":
             warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")
 
@@ -233,15 +241,18 @@ class YOKOGS200(BaseDevice[YOKOGS200Info]):
         elif cur_mode == "voltage":
             self.set_voltage(value, progress=progress)
         else:
-            raise RuntimeError(f"Unknown mode {cur_mode} in device {self.address}")
+            raise ValueError(f"Unknown mode {cur_mode} in device {self.address}")
+
+        self._rampstep = cfg["rampstep"]
 
     def get_info(self) -> YOKOGS200Info:
         return YOKOGS200Info(
             {
-                "type": self.__class__.__name__,
+                "type": "YOKOGS200",
                 "address": self.address,
                 "output": self.get_output(),
                 "mode": self.get_mode(),
                 "value": self._get_level(),
+                "rampstep": self._rampstep,
             }
         )

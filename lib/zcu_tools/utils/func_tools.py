@@ -1,8 +1,17 @@
+from __future__ import annotations
+
 import time
 from contextlib import contextmanager
-from typing import Callable, ClassVar, Generator, Generic, Optional, overload
 
-from typing_extensions import ParamSpec
+from typing_extensions import (
+    Callable,
+    ClassVar,
+    Generator,
+    Generic,
+    Optional,
+    ParamSpec,
+    overload,
+)
 
 P = ParamSpec("P")
 

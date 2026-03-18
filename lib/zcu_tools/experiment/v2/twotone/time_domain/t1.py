@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,13 +8,16 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task, SoftTask
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.utils import round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
     ModularProgramCfg,
@@ -33,71 +35,147 @@ from zcu_tools.utils.fitting import fit_decay, fit_dual_decay
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-T1ResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+T1Result: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # (times, signals)
 
 
-class T1TaskConfig(TaskConfig, ModularProgramCfg):
+class T1ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1Experiment(AbsExperiment):
+class T1Cfg(ModularProgramCfg, TaskCfg):
+    modules: T1ModuleCfg
+    sweep: dict[str, SweepCfg]
+
+
+class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     """T1 relaxation time measurement.
 
     Applies a π pulse and then waits for a variable time before readout
     to measure the qubit's energy relaxation.
     """
 
-    def run(self, soc, soccfg, cfg: T1TaskConfig) -> T1ResultType:
-        cfg = deepcopy(cfg)
+    def _run_non_uniform(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
+        _cfg = check_type(deepcopy(cfg), T1Cfg)
 
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        len_sweep = _cfg["sweep"]["length"]
+        del _cfg["sweep"]["length"]
 
-        ts = sweep2array(cfg["sweep"]["length"])
+        if isinstance(len_sweep, dict):
+            ts = (
+                np.linspace(
+                    len_sweep["start"] ** (1 / 1.3),
+                    len_sweep["stop"] ** (1 / 1.3),
+                    len_sweep["expts"],
+                )
+                ** 1.3
+            )
+        else:
+            ts = np.asarray(len_sweep)
+        ts = round_zcu_time(ts, soccfg)
+        ts = np.unique(ts)
+
+        def measure_fn(ctx, update_hook):
+            rounds = ctx.cfg.pop("rounds", 1)
+            ctx.cfg["rounds"] = 1
+            modules = ctx.cfg["modules"]
+
+            acc_signals = np.zeros_like(ts, dtype=np.complex128)
+            for ir in range(rounds):
+                for i, t1_delay in enumerate(ts):
+                    raw_i = ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset("reset", modules.get("reset")),
+                            Pulse("pi_pulse", modules["pi_pulse"]),
+                            Delay("t1_delay", delay=t1_delay),
+                            Readout("readout", modules["readout"]),
+                        ],
+                    ).acquire(soc, progress=False)
+
+                    acc_signals[i] += raw_i[0][0].dot([1, 1j])
+
+                update_hook(ir, acc_signals / (ir + 1))
+
+            return acc_signals / rounds
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
-                task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                Delay(
-                                    name="t1_delay",
-                                    delay=sweep2param(
-                                        "length", ctx.cfg["sweep"]["length"]
-                                    ),
-                                ),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: raw,
                     result_shape=(len(ts),),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.root_data)),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (ts, signals)
 
         return ts, signals
 
+    def _run_uniform(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
+        _cfg = check_type(deepcopy(cfg), T1Cfg)
+
+        ts = sweep2array(_cfg["sweep"]["length"])
+
+        with LivePlotter1D(
+            "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
+        ) as viewer:
+            signals = run_task(
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("pi_pulse", modules["pi_pulse"]),
+                                    Delay(
+                                        name="t1_delay",
+                                        delay=sweep2param(
+                                            "length", ctx.cfg["sweep"]["length"]
+                                        ),
+                                    ),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    ),
+                    result_shape=(len(ts),),
+                ),
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.root_data)),
+            )
+
+        # record last cfg and result
+        self.last_cfg = _cfg
+        self.last_result = (ts, signals)
+
+        return ts, signals
+
+    def run(self, soc, soccfg, cfg: dict[str, Any], uniform: bool = True) -> T1Result:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        if uniform:
+            return self._run_uniform(soc, soccfg, cfg)
+        else:
+            return self._run_non_uniform(soc, soccfg, cfg)
+
     def analyze(
-        self, result: Optional[T1ResultType] = None, *, dual_exp: bool = False
-    ) -> Tuple[float, float, Figure]:
+        self, result: Optional[T1Result] = None, *, dual_exp: bool = False
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -110,22 +188,26 @@ class T1Experiment(AbsExperiment):
             t1, t1err, t1b, t1berr, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
         else:
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
+            t1b = 0.0
+            t1berr = 0.0
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-        ax.plot(xs, y_fit, label="fit")
+        ax.plot(xs, real_signals, label="data", ls="-", marker="o", markersize=5)
+        ax.plot(xs, y_fit, label="fit", c="orange", zorder=1)
+
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
         if dual_exp:
             t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
             ax.plot(xs, ft.expfunc(xs, *pOpt[:3]), linestyle="--", label="t1b fit")
-            ax.set_title(f"T1 = {t1_str}, T1b = {t1b_str}", fontsize=15)
+            title = f"$T_1$ = {t1_str}, " + r"$T_{1b}$ = " + f"{t1b_str}"
         else:
-            ax.set_title(f"T1 = {t1_str}", fontsize=15)
-        ax.set_xlabel("Time (us)")
-        ax.set_ylabel("Signal Real (a.u.)")
-        ax.legend()
+            title = f"$T_1$ = {t1_str}"
+        ax.set_title(title, fontsize=14)
+        ax.set_xlabel("Delay Time (us)", fontsize=14)
+        ax.set_ylabel("Signal (a.u.)", fontsize=14)
+        ax.legend(loc="upper right")
         ax.grid(True)
 
         fig.tight_layout()
@@ -135,7 +217,7 @@ class T1Experiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1Result] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1",
         **kwargs,
@@ -154,7 +236,7 @@ class T1Experiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1ResultType:
+    def load(self, filepath: str, **kwargs) -> T1Result:
         signals, Ts, _ = load_data(filepath, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1
@@ -171,58 +253,65 @@ class T1Experiment(AbsExperiment):
         return Ts, signals
 
 
-class T1WithToneTaskConfig(TaskConfig, ModularProgramCfg):
+class T1WithToneModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     test_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1WithToneExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: T1WithToneTaskConfig) -> T1ResultType:
-        cfg = deepcopy(cfg)
+class T1WithToneProgramCfg(ModularProgramCfg):
+    modules: T1WithToneModuleCfg
 
-        assert "sweep" in cfg
+
+class T1WithToneTaskConfig(T1WithToneProgramCfg, TaskCfg):
+    sweep: dict[str, SweepCfg]
+
+
+class T1WithToneExp(AbsExperiment):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        _cfg = check_type(deepcopy(cfg), T1WithToneTaskConfig)
+        modules = _cfg["modules"]
 
         Pulse.set_param(
-            cfg["test_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
+            modules["test_pulse"],
+            "length",
+            sweep2param("length", _cfg["sweep"]["length"]),
         )
 
-        ts = sweep2array(cfg["sweep"]["length"])
+        ts = sweep2array(_cfg["sweep"]["length"])
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
-                task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", cfg.get("reset", {"type": "none"})),
-                                Pulse(name="pi_pulse", cfg=cfg["pi_pulse"]),
-                                Pulse(name="test_pulse", cfg=cfg["test_pulse"]),
-                                Readout("readout", cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset("reset", modules.get("reset")),
+                            Pulse(name="pi_pulse", cfg=modules["pi_pulse"]),
+                            Pulse(name="test_pulse", cfg=modules["test_pulse"]),
+                            Readout("readout", modules["readout"]),
+                        ],
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(ts),),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(ts, t1_signal2real(ctx.data)),
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(ts, t1_signal2real(ctx.root_data)),
             )
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (ts, signals)
 
         return ts, signals
 
     def analyze(
-        self, result: Optional[T1ResultType] = None, *, dual_exp: bool = False
-    ) -> Tuple[float, float, Figure]:
+        self, result: Optional[T1Result] = None, *, dual_exp: bool = False
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -232,13 +321,17 @@ class T1WithToneExperiment(AbsExperiment):
         real_signals = t1_signal2real(signals)
 
         if dual_exp:
-            t1, t1err, t1b, t1berr, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
+            t1b, t1berr, t1, t1err, y_fit, (pOpt, _) = fit_dual_decay(xs, real_signals)
         else:
             t1, t1err, y_fit, (pOpt, _) = fit_decay(xs, real_signals)
+            t1b = 0.0
+            t1berr = 0.0
 
         t1_str = f"{t1:.2f}us ± {t1err:.2f}us"
         if dual_exp:
             t1b_str = f"{t1b:.2f}us ± {t1berr:.2f}us"
+        else:
+            t1b_str = "N/A"
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
@@ -262,7 +355,7 @@ class T1WithToneExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[T1ResultType] = None,
+        result: Optional[T1Result] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1_with_tone",
         **kwargs,
@@ -281,7 +374,7 @@ class T1WithToneExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1ResultType:
+    def load(self, filepath: str, **kwargs) -> T1Result:
         signals, Ts, _ = load_data(filepath, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1
@@ -299,7 +392,7 @@ class T1WithToneExperiment(AbsExperiment):
 
 
 # (values, times, signals)
-T1SweepResultType = Tuple[
+T1SweepResultType = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -308,72 +401,76 @@ def t1_sweep_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.flo
     return rotate2real(signals).real
 
 
-class T1WithToneSweepTaskConfig(TaskConfig, ModularProgramCfg):
-    reset: NotRequired[ResetCfg]
-    pi_pulse: PulseCfg
-    test_pulse: PulseCfg
-    readout: ReadoutCfg
+class T1WithToneSweepProgramCfg(ModularProgramCfg):
+    modules: T1WithToneModuleCfg
 
 
-class T1WithToneSweepExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: T1WithToneSweepTaskConfig) -> T1SweepResultType:
-        cfg = deepcopy(cfg)
+class T1WithToneSweepTaskConfig(T1WithToneSweepProgramCfg, TaskCfg):
+    sweep: dict[str, SweepCfg]
 
-        assert "sweep" in cfg
-        gain_sweep = cfg["sweep"]["gain"]
-        cfg["sweep"] = {"length": cfg["sweep"]["length"]}
+
+class T1WithToneSweepExp(AbsExperiment):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> T1SweepResultType:
+        _cfg = check_type(deepcopy(cfg), T1WithToneSweepTaskConfig)
+        modules = _cfg["modules"]
+
+        gain_sweep = _cfg["sweep"]["gain"]
+        _cfg["sweep"] = {"length": _cfg["sweep"]["length"]}
 
         Pulse.set_param(
-            cfg["test_pulse"], "length", sweep2param("length", cfg["sweep"]["length"])
+            modules["test_pulse"],
+            "length",
+            sweep2param("length", _cfg["sweep"]["length"]),
         )
 
         gains = sweep2array(gain_sweep, allow_array=True)  # predicted
-        ts = sweep2array(cfg["sweep"]["length"])  # predicted times
+        ts = sweep2array(_cfg["sweep"]["length"])  # predicted times
 
         with LivePlotter2DwithLine(
             "gain", "Time (us)", line_axis=1, num_lines=5
         ) as viewer:
             signals = run_task(
-                task=SoftTask(
-                    sweep_name="gain",
-                    sweep_values=gains.tolist(),
-                    update_cfg_fn=lambda _, ctx, gain: Pulse.set_param(
-                        ctx.cfg["test_pulse"], "gain", gain
-                    ),
-                    sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset(
-                                        "reset", ctx.cfg.get("reset", {"type": "none"})
-                                    ),
-                                    Pulse(name="pi_pulse", cfg=ctx.cfg["pi_pulse"]),
-                                    Pulse(name="test_pulse", cfg=ctx.cfg["test_pulse"]),
-                                    Readout("readout", cfg=ctx.cfg["readout"]),
-                                ],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        ),
-                        result_shape=(len(ts),),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
+                        soccfg,
+                        ctx.cfg,
+                        modules=[
+                            Reset(
+                                "reset",
+                                ctx.cfg["modules"].get("reset"),
+                            ),
+                            Pulse(name="pi_pulse", cfg=ctx.cfg["modules"]["pi_pulse"]),
+                            Pulse(
+                                name="test_pulse",
+                                cfg=ctx.cfg["modules"]["test_pulse"],
+                            ),
+                            Readout("readout", cfg=ctx.cfg["modules"]["readout"]),
+                        ],
+                    ).acquire(soc, progress=False, callback=update_hook),
+                    result_shape=(len(ts),),
+                ).scan(
+                    "gain",
+                    gains.tolist(),
+                    before_each=lambda _, ctx, gain: Pulse.set_param(
+                        ctx.cfg["modules"]["test_pulse"], "gain", gain
                     ),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    gains, ts, t1_sweep_tone_signal2real(np.asarray(ctx.data))
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(
+                    gains, ts, t1_sweep_tone_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (gains, ts, signals)
 
         return gains, ts, signals
 
     def analyze(
         self, result: Optional[T1SweepResultType] = None
-    ) -> Tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Figure]:
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"

@@ -1,11 +1,12 @@
-from typing import Tuple
+from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
 
 
 def quadratic_fit(
-    xs: np.ndarray, ys: np.ndarray
-) -> Tuple[float, float, float, float, float, float]:
+    xs: NDArray[np.float64], ys: NDArray[np.float64]
+) -> tuple[float, float, float, float, float, float]:
     """
     Fit a quadratic function to the data.
 
@@ -34,8 +35,8 @@ def quadratic_fit(
 
 
 def quadratic_fit_wo_a(
-    xs: np.ndarray, ys: np.ndarray
-) -> Tuple[float, float, float, float, float]:
+    xs: NDArray[np.float64], ys: NDArray[np.float64]
+) -> tuple[float, float, float, float, float]:
     """
     Fit a modified quadratic function to the data.
 
@@ -65,7 +66,7 @@ def quadratic_fit_wo_a(
 
 def encode_params(
     a: float, b: float, c: float, d: float, e: float, f: float
-) -> Tuple[float, float, float, float, float]:
+) -> tuple[float, float, float, float, float]:
     """
     Encode the parameters of the quadratic function into some anti-crossing properties
 
@@ -111,7 +112,7 @@ def encode_params(
 
 def retrieve_params(
     cx: float, cy: float, width: float, m1: float, m2: float
-) -> Tuple[float, float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float]:
     """
     Retrieve the parameters from some anti-crossing properties
 

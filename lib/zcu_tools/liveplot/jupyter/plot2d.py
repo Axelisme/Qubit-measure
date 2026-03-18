@@ -1,8 +1,9 @@
-from typing import Literal, Optional, Union
+from __future__ import annotations
 
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
+from typing_extensions import Literal, Optional, Union
 
 from ..base import AbsLivePlotter
 from ..segments import Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment
@@ -17,7 +18,9 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         *,
         uniform: bool = True,
         segment_kwargs: Optional[dict] = None,
-        **kwargs,
+        existed_axes: Optional[list[list[Axes]]] = None,
+        auto_close: bool = True,
+        disable: bool = False,
     ) -> None:
         if segment_kwargs is None:
             segment_kwargs = {}
@@ -27,7 +30,12 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
         else:
             segment = PlotNonUniform2DSegment(xlabel, ylabel, **segment_kwargs)
 
-        super().__init__([[segment]], **kwargs)
+        super().__init__(
+            [[segment]],
+            existed_axes=existed_axes,
+            auto_close=auto_close,
+            disable=disable,
+        )
 
     def update(
         self,
@@ -65,6 +73,7 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         title: Optional[str] = None,
         uniform: bool = True,
         segment2d_kwargs: Optional[dict] = None,
+        segment1d_line_kwargs: Optional[list[dict]] = None,
         **kwargs,
     ) -> None:
         if segment2d_kwargs is None:
@@ -82,6 +91,11 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
             dict(marker="None", alpha=0.3, color="red") for _ in range(num_lines)
         ]
         line_kwargs[-1].update(label="current line", marker=".", alpha=1.0, color="C0")
+
+        if segment1d_line_kwargs is not None:
+            assert len(segment1d_line_kwargs) == num_lines
+            for lk, sk in zip(line_kwargs, segment1d_line_kwargs):
+                lk.update(sk)
 
         segment1d = Plot1DSegment(
             xlabel1d, "", title=title, num_lines=num_lines, line_kwargs=line_kwargs

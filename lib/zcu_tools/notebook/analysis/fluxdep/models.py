@@ -6,12 +6,14 @@ This module provides functions for calculating physical models related to
 flux-dependent spectroscopy, including energy calculations and transition models.
 """
 
-from typing import Any, Dict, Tuple
+from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
+from typing_extensions import Any
 
 
-def count_max_evals(allows: Dict[str, Any]) -> int:
+def count_max_evals(allows: dict[str, Any]) -> int:
     evals_count = 0
     for name, lvl in allows.items():
         if not isinstance(lvl, list) or len(lvl) == 0 or name == "r_f":
@@ -23,8 +25,8 @@ def count_max_evals(allows: Dict[str, Any]) -> int:
 
 
 def energy2linearform(
-    energies: np.ndarray, allows: Dict[str, Any]
-) -> Tuple[np.ndarray, np.ndarray]:
+    energies: NDArray[np.float64], allows: dict[str, Any]
+) -> tuple[np.ndarray, np.ndarray]:
     """
     將能量E轉換為線性形式B,C的躍遷頻率,使得aE的能量對應到|aB+C|的躍遷頻率,其中a可以是任意實數
 
@@ -68,22 +70,25 @@ def energy2linearform(
         Cs[:, idx] = 2 * allows["sample_f"] - allows["r_f"]
         idx += 1
 
-    for i, j in allows.get("transitions2", []):  # E = 0.5 * E_ji
-        Bs[:, idx] = 0.5 * (energies[:, j] - energies[:, i])
-        Cs[:, idx] = 0.0
-        idx += 1
+    for n in range(2, M):
+        # Transition N
+        for i, j in allows.get(f"transitions{n}", []):  # E = E_ji / n
+            Bs[:, idx] = (energies[:, j] - energies[:, i]) / n
+            Cs[:, idx] = 0.0
+            idx += 1
 
-    for i, j in allows.get("mirror2", []):  # E = 2 * sample_f - 0.5 * E_ji
-        Bs[:, idx] = -0.5 * (energies[:, j] - energies[:, i])
-        Cs[:, idx] = 2 * allows["sample_f"]
-        idx += 1
+        # Mirror N
+        for i, j in allows.get(f"mirror{n}", []):  # E = 2 * sample_f - E_ji / n
+            Bs[:, idx] = -(energies[:, j] - energies[:, i]) / n
+            Cs[:, idx] = 2 * allows["sample_f"]
+            idx += 1
 
     return Bs, Cs
 
 
 def energy2transition(
-    energies: np.ndarray, allows: Dict[str, Any]
-) -> Tuple[np.ndarray, list]:
+    energies: NDArray[np.float64], allows: dict[str, Any]
+) -> tuple[NDArray[np.float64], list[str]]:
     """
     將能量E轉換為躍遷頻率。
 
@@ -112,9 +117,10 @@ def energy2transition(
         names.append(f"{i} -> {j} mirror blue")
     for i, j in allows.get("mirror red", []):  # E = 2 * sample_f - r_f + E_ji
         names.append(f"{i} -> {j} mirror red")
-    for i, j in allows.get("transitions2", []):  # E = 0.5 * E_ji
-        names.append(f"2 {i} -> {j}")
-    for i, j in allows.get("mirror2", []):  # E = sample_f - 0.5 * E_ji
-        names.append(f"2 {i} -> {j} mirror")
+    for n in range(2, M):
+        for i, j in allows.get(f"transitions{n}", []):  # E = E_ji / n
+            names.append(f"{n} {i} -> {j}")
+        for i, j in allows.get(f"mirror{n}", []):  # E = 2 * sample_f - E_ji / n
+            names.append(f"{n} {i} -> {j} mirror")
 
     return fs, names

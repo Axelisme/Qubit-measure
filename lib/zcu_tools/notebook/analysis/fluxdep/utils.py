@@ -1,8 +1,10 @@
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from numpy.typing import NDArray
+from typing_extensions import Any, Callable, Optional, Self, Union
 
 from zcu_tools.simulate import mA2flx
 
@@ -11,8 +13,12 @@ from .processing import cast2real_and_norm
 
 
 def add_secondary_xaxis(
-    fig: go.Figure, flxs: np.ndarray, mAs: np.ndarray, num_ticks: int = 12, **kwargs
-):
+    fig: go.Figure,
+    flxs: NDArray[np.float64],
+    mAs: NDArray[np.float64],
+    num_ticks: int = 12,
+    **fig_kwargs,
+) -> None:
     # Choose a small number of evenly spaced tick positions by index
     n = flxs.shape[0]
     if n <= num_ticks:
@@ -36,7 +42,7 @@ def add_secondary_xaxis(
             showlegend=False,
             zorder=0,
         ),
-        **kwargs,
+        **fig_kwargs,
     )
     fig.update_layout(
         xaxis2=dict(
@@ -60,8 +66,8 @@ class FluxDependVisualizer:
         return self.fig
 
     def add_secondary_xaxis(
-        self, flxs: np.ndarray, mAs: np.ndarray
-    ) -> "FluxDependVisualizer":
+        self, flxs: NDArray[np.float64], mAs: NDArray[np.float64]
+    ) -> Self:
         add_secondary_xaxis(self.fig, flxs, mAs)
         return self
 
@@ -75,8 +81,8 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
 
     def update_limits(
         self,
-        xrange: Tuple[Union[float, None], Union[float, None]],
-        yrange: Tuple[Union[float, None], Union[float, None]],
+        xrange: tuple[Union[float, None], Union[float, None]],
+        yrange: tuple[Union[float, None], Union[float, None]],
     ) -> None:
         self.xlimits = [
             self.xlimits[0] if xrange[0] is None else min(self.xlimits[0], xrange[0]),
@@ -87,9 +93,7 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
             self.ylimits[1] if yrange[1] is None else max(self.ylimits[1], yrange[1]),
         ]
 
-    def plot_background(
-        self, spects: Dict[str, Dict[str, Any]]
-    ) -> "FreqFluxDependVisualizer":
+    def plot_background(self, spects: dict[str, dict[str, Any]]) -> Self:
         # Add heatmap traces for each spectrum in spects
         for name, spect in spects.items():
             # Get corresponding data and range
@@ -97,8 +101,8 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
             flx_mask = np.any(~np.isnan(signals), axis=1)
             fpt_mask = np.any(~np.isnan(signals), axis=0)
             signals = signals[flx_mask, :][:, fpt_mask]
-            values = spect["spectrum"]["mAs"][flx_mask]
-            fpts = spect["spectrum"]["fpts"][fpt_mask]
+            values: NDArray[np.float64] = spect["spectrum"]["mAs"][flx_mask]
+            fpts: NDArray[np.float64] = spect["spectrum"]["fpts"][fpt_mask]
 
             # Normalize data
             norm_signals = cast2real_and_norm(signals)
@@ -125,8 +129,11 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
         return self
 
     def plot_simulation_lines(
-        self, flxs: np.ndarray, energies: np.ndarray, allows: Dict[str, Any]
-    ) -> "FreqFluxDependVisualizer":
+        self,
+        flxs: NDArray[np.float64],
+        energies: NDArray[np.float64],
+        allows: dict[str, Any],
+    ) -> Self:
         fs, labels = energy2transition(energies, allows)
 
         for i, label in enumerate(labels):
@@ -137,8 +144,8 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
         return self
 
     def plot_points(
-        self, flxs: np.ndarray, ys: np.ndarray, **kwargs
-    ) -> "FreqFluxDependVisualizer":
+        self, flxs: NDArray[np.float64], ys: NDArray[np.float64], **kwargs
+    ) -> Self:
         self.fig.add_trace(
             go.Scatter(
                 x=flxs,
@@ -155,10 +162,12 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
         return self
 
     def plot_sample_points(
-        self, sample_table: pd.DataFrame, convert_fn: Callable[[float], float]
-    ) -> "FreqFluxDependVisualizer":
-        xs = convert_fn(sample_table["calibrated mA"])
-        ys = sample_table["Freq (MHz)"] * 1e-3  # GHz
+        self,
+        sample_table: pd.DataFrame,
+        convert_fn: Callable[[NDArray[np.float64]], NDArray[np.float64]],
+    ) -> Self:
+        xs = convert_fn(np.asarray(sample_table["calibrated mA"]))
+        ys = np.asarray(sample_table["Freq (MHz)"]) * 1e-3  # GHz
         labels = [
             ", ".join(
                 [
@@ -175,14 +184,14 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
 
         return self
 
-    def add_constant_freq(self, freq: float, name: str) -> "FreqFluxDependVisualizer":
+    def add_constant_freq(self, freq: float, name: str) -> Self:
         self.fig.add_hline(y=freq, line_dash="dash", name=name)
 
         self.update_limits((None, None), (freq - 1e-6, freq + 1e-6))
 
         return self
 
-    def auto_derive_limits(self) -> "FreqFluxDependVisualizer":
+    def auto_derive_limits(self) -> Self:
         self.fig.update_layout(
             xaxis=dict(range=self.xlimits),
             yaxis=dict(range=self.ylimits),

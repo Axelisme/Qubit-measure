@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
-from zcu_tools.experiment.v2.runner import HardTask, TaskConfig, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -24,73 +25,82 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
+from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (lens, signals)
-DualToneResetLengthResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+LengthResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class LengthTaskConfig(TaskConfig, ModularProgramCfg):
+class LengthModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    init_pulse: PulseCfg
-    tested_reset: ResetCfg
+    init_pulse: NotRequired[PulseCfg]
+    tested_reset: TwoPulseResetCfg
     readout: ReadoutCfg
 
 
-class LengthExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: LengthTaskConfig) -> DualToneResetLengthResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class LengthCfg(ModularProgramCfg, TaskCfg):
+    modules: LengthModuleCfg
+    sweep: dict[str, SweepCfg]
+
+
+class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> LengthResult:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        _cfg = check_type(deepcopy(cfg), LengthCfg)
 
         # Check that reset pulse is dual pulse type
-        if cfg["tested_reset"]["type"] != "two_pulse":
-            raise ValueError("This experiment only supports dual-tone reset")
+        modules = _cfg["modules"]
 
-        # Canonicalise sweep section to single-axis form
-        assert "sweep" in cfg
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        lens = sweep2array(_cfg["sweep"]["length"])  # predicted pulse lengths
 
-        lens = sweep2array(cfg["sweep"]["length"])  # predicted pulse lengths
+        pulse1_cfg = modules["tested_reset"]["pulse1_cfg"]  # type: ignore
+        pulse2_cfg = modules["tested_reset"]["pulse2_cfg"]  # type: ignore
 
-        # Attach length sweep parameter to both reset pulses
-        Reset.set_param(
-            cfg["tested_reset"], "length", sweep2param("length", cfg["sweep"]["length"])
-        )
+        len_diff = pulse2_cfg["waveform"]["length"] - pulse1_cfg["waveform"]["length"]
+        len1_span = sweep2param("length", _cfg["sweep"]["length"])
+
+        Pulse.set_param(pulse1_cfg, "length", len1_span)
+        Pulse.set_param(pulse2_cfg, "length", len1_span + len_diff)
 
         with LivePlotter1D("Length (us)", "Amplitude") as viewer:
             signals = run_task(
-                task=HardTask(
+                task=Task(
                     measure_fn=lambda ctx, update_hook: (
-                        ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", ctx.cfg.get("reset", {"type": "none"})),
-                                Pulse("init_pulse", ctx.cfg.get("init_pulse")),
-                                Reset("tested_reset", ctx.cfg["tested_reset"]),
-                                Readout("readout", ctx.cfg["readout"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    Pulse("init_pulse", modules.get("init_pulse")),
+                                    Reset("tested_reset", modules["tested_reset"]),
+                                    Readout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
                     ),
                     result_shape=(len(lens),),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    lens, reset_length_signal2real(ctx.data)
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(
+                    lens, reset_length_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (lens, signals)
 
         return lens, signals
 
-    def analyze(self, result: Optional[DualToneResetLengthResultType] = None) -> Figure:
+    def analyze(self, result: Optional[LengthResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -121,7 +131,7 @@ class LengthExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[DualToneResetLengthResultType] = None,
+        result: Optional[LengthResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/reset/dual_tone/length",
         **kwargs,
@@ -141,7 +151,7 @@ class LengthExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> DualToneResetLengthResultType:
+    def load(self, filepath: str, **kwargs) -> LengthResult:
         signals, lens, _ = load_data(filepath, **kwargs)
         assert lens is not None
         assert len(lens.shape) == 1 and len(signals.shape) == 1

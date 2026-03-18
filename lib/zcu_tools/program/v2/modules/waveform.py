@@ -1,28 +1,60 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Callable, ClassVar, Dict, Literal, Type, Union, cast
 
 from qick.asm_v2 import QickParam
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import (
+    Callable,
+    ClassVar,
+    Literal,
+    NotRequired,
+    Type,
+    TypeAlias,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from ..base import MyProgramV2
 
 
-class WaveformCfg(TypedDict):
-    style: Literal["const", "cosine", "gauss", "drag", "flat_top", "padding"]
+class ConstWaveformCfg(TypedDict, closed=True):
+    style: Literal["const"]
     length: Union[float, QickParam]
 
-    sigma: NotRequired[float]  # guassian sigma
-    delta: NotRequired[float]  # drag delta
-    alpha: NotRequired[float]  # drag alpha
-    raise_waveform: NotRequired[WaveformCfg]  # flat top
 
-    # for padding pulse
-    pre_length: NotRequired[Union[float, QickParam]]
-    post_length: NotRequired[Union[float, QickParam]]
-    pre_gain: NotRequired[Union[float, QickParam]]
-    post_gain: NotRequired[Union[float, QickParam]]
+class CosineWaveformCfg(TypedDict, closed=True):
+    style: Literal["cosine"]
+    length: float
+
+
+class GaussWaveformCfg(TypedDict, closed=True):
+    style: Literal["gauss"]
+    length: float
+    sigma: float
+
+
+class DragWaveformCfg(TypedDict, closed=True):
+    style: Literal["drag"]
+    length: float
+    sigma: float
+    delta: float
+    alpha: float
+
+
+class FlatTopWaveformCfg(TypedDict, closed=True):
+    style: Literal["flat_top"]
+    length: Union[float, QickParam]
+    raise_waveform: Union[CosineWaveformCfg, GaussWaveformCfg, DragWaveformCfg]
+
+
+WaveformCfg: TypeAlias = Union[
+    ConstWaveformCfg,
+    CosineWaveformCfg,
+    GaussWaveformCfg,
+    DragWaveformCfg,
+    FlatTopWaveformCfg,
+]
 
 
 class QickWaveformKwargs(TypedDict):
@@ -55,7 +87,7 @@ class AbsWaveform(ABC):
 
 
 class Waveform(AbsWaveform):
-    SUPPORTED_STYLES: ClassVar[Dict[str, Type[AbsWaveform]]] = {}
+    SUPPORTED_STYLES: ClassVar[dict[str, Type[AbsWaveform]]] = {}
 
     @classmethod
     def register_waveform(
@@ -108,10 +140,6 @@ class Waveform(AbsWaveform):
         return self.waveform.waveform_cfg
 
 
-class ConstWaveformCfg(WaveformCfg):
-    style: Literal["const"]
-
-
 @Waveform.register_waveform("const")
 class ConstWaveform(AbsWaveform):
     @classmethod
@@ -139,27 +167,34 @@ class ConstWaveform(AbsWaveform):
         }
 
 
-class CosineWaveformCfg(WaveformCfg):
-    style: Literal["cosine"]
-    length: float
-
-
 @Waveform.register_waveform("cosine")
 class CosineWaveform(AbsWaveform):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
         prog.add_cosine(ch, self.name, length=self.waveform_cfg["length"], **kwargs)
+
+    @classmethod
+    def set_param(
+        cls,
+        waveform_cfg: WaveformCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
+    ) -> CosineWaveformCfg:
+        wav_cfg = cast(CosineWaveformCfg, waveform_cfg)
+
+        if param_name == "length":
+            if isinstance(param_value, QickParam):
+                raise ValueError("Cosine waveform length must be a float value")
+            wav_cfg["length"] = param_value
+        else:
+            raise ValueError(f"Unknown parameter: {param_name}")
+
+        return wav_cfg
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return {
             "style": "arb",
             "envelope": self.name,
         }
-
-
-class GaussWaveformCfg(WaveformCfg):
-    style: Literal["gauss"]
-    sigma: float
-    length: float
 
 
 @Waveform.register_waveform("gauss")
@@ -174,19 +209,40 @@ class GaussWaveform(AbsWaveform):
             **kwargs,
         )
 
+    @classmethod
+    def set_param(
+        cls,
+        waveform_cfg: WaveformCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
+    ) -> GaussWaveformCfg:
+        wav_cfg = cast(GaussWaveformCfg, waveform_cfg)
+
+        if isinstance(param_value, QickParam):
+            raise ValueError(f"Gauss waveform {param_name} must not be a QickParam")
+
+        if param_name == "length":
+            if "sigma" not in wav_cfg or "length" not in wav_cfg:
+                raise ValueError(
+                    "Set Gauss waveform length must provide reference length and sigma"
+                )
+            sigma_ratio = wav_cfg["sigma"] / wav_cfg["length"]
+            wav_cfg["length"] = param_value
+            wav_cfg["sigma"] = sigma_ratio * param_value
+        elif param_name == "sigma":
+            wav_cfg["sigma"] = param_value
+        elif param_name == "only_length":
+            wav_cfg["length"] = param_value
+        else:
+            raise ValueError(f"Unknown parameter: {param_name}")
+
+        return wav_cfg
+
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return {
             "style": "arb",
             "envelope": self.name,
         }
-
-
-class DragWaveformCfg(WaveformCfg):
-    style: Literal["drag"]
-    sigma: float
-    delta: float
-    alpha: float
-    length: float
 
 
 @Waveform.register_waveform("drag")
@@ -203,16 +259,44 @@ class DragWaveform(AbsWaveform):
             **kwargs,
         )
 
+    @classmethod
+    def set_param(
+        cls,
+        waveform_cfg: WaveformCfg,
+        param_name: str,
+        param_value: Union[float, QickParam],
+    ) -> DragWaveformCfg:
+        wav_cfg = cast(DragWaveformCfg, waveform_cfg)
+
+        if isinstance(param_value, QickParam):
+            raise ValueError(f"Drag waveform {param_name} must not be a QickParam")
+
+        if param_name == "length":
+            if "sigma" not in wav_cfg or "length" not in wav_cfg:
+                raise ValueError(
+                    "Set Drag waveform length must provide reference length and sigma"
+                )
+            sigma_ratio = wav_cfg["sigma"] / wav_cfg["length"]
+            wav_cfg["length"] = param_value
+            wav_cfg["sigma"] = sigma_ratio * param_value
+        elif param_name == "sigma":
+            wav_cfg["sigma"] = param_value
+        elif param_name == "delta":
+            wav_cfg["delta"] = param_value
+        elif param_name == "alpha":
+            wav_cfg["alpha"] = param_value
+        elif param_name == "only_length":
+            wav_cfg["length"] = param_value
+        else:
+            raise ValueError(f"Unknown parameter: {param_name}")
+
+        return wav_cfg
+
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return {
             "style": "arb",
             "envelope": self.name,
         }
-
-
-class FlatTopWaveformCfg(WaveformCfg):
-    style: Literal["flat_top"]
-    raise_waveform: WaveformCfg
 
 
 @Waveform.register_waveform("flat_top")

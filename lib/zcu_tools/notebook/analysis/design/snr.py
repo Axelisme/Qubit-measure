@@ -1,13 +1,14 @@
-from typing import Tuple
+from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
 
 from zcu_tools.simulate.fluxonium.branch.floquet import calc_branch_infos
 
 
 def calc_snr(
     params, r_f, g, flx, qub_dim, qub_cutoff, max_photon, rf_w
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     branchs = [0, 1]
 
     amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), rf_w)

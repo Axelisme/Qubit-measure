@@ -1,26 +1,30 @@
+from __future__ import annotations
+
 from functools import wraps
-from token import OP
-from typing import Callable, List, Optional, Sequence, Tuple, cast
 
 import numpy as np
 import scipy as sp
+from numpy.typing import NDArray
+from typing_extensions import Callable, Optional, Sequence, TypeVar, cast
+
+Y_DataType = TypeVar("Y_DataType", bound=np.generic)
 
 
 def with_fixed_params(
-    fitfunc: Callable[..., np.ndarray],
+    fitfunc: Callable[..., NDArray[Y_DataType]],
     init_p: Sequence[Optional[float]],
-    bounds: Optional[Tuple[Sequence[float], Sequence[float]]],
+    bounds: Optional[tuple[Sequence[float], Sequence[float]]],
     fixedparams: Sequence[Optional[float]],
-) -> Tuple[
-    Callable[..., np.ndarray],
+) -> tuple[
+    Callable[..., NDArray[Y_DataType]],
     Sequence[Optional[float]],
-    Optional[Tuple[Sequence[float], Sequence[float]]],
+    Optional[tuple[Sequence[float], Sequence[float]]],
 ]:
     fixedparams_array = np.asarray(fixedparams, dtype=np.float64)  # convert None to nan
     non_fixed_idxs = np.isnan(fixedparams_array)
 
     @wraps(fitfunc)
-    def wrapped_func(xs: np.ndarray, *args) -> np.ndarray:
+    def wrapped_func(xs: NDArray, *args) -> NDArray:
         if len(args) != np.sum(non_fixed_idxs):
             raise ValueError(
                 f"Expected {np.sum(non_fixed_idxs)} arguments, got {len(args)}."
@@ -44,30 +48,32 @@ def with_fixed_params(
 
 
 def add_fixed_params_back(
-    pOpt: List[float], pCov: np.ndarray, fixedparams: Sequence[Optional[float]]
-) -> Tuple[List[float], np.ndarray]:
+    pOpt: list[float], pCov: NDArray[np.float64], fixedparams: Sequence[Optional[float]]
+) -> tuple[list[float], NDArray[np.float64]]:
     _fixedparams = np.asarray(fixedparams, dtype=float)
     non_fixed_idxs = np.isnan(_fixedparams)
 
     pOpt_full = _fixedparams.copy()
     pOpt_full[non_fixed_idxs] = pOpt
 
-    pCov_full = np.zeros((len(_fixedparams), len(_fixedparams)))
-    pCov_full[:, non_fixed_idxs][non_fixed_idxs] = pCov
+    pCov_full = np.zeros((_fixedparams.size, _fixedparams.size))
+    idx = np.where(non_fixed_idxs)[0]
+    for i, row in enumerate(idx):
+        for j, col in enumerate(idx):
+            pCov_full[row, col] = pCov[i, j]
 
     return list(pOpt_full), pCov_full
 
 
 def fit_func(
-    xdata: np.ndarray,
-    ydata: np.ndarray,
-    fitfunc: Callable[..., np.ndarray],
+    xdata: NDArray,
+    ydata: NDArray[Y_DataType],
+    fitfunc: Callable[..., NDArray[Y_DataType]],
     init_p: Optional[Sequence[Optional[float]]] = None,
-    bounds: Optional[Tuple[Sequence[float], Sequence[float]]] = None,
+    bounds: Optional[tuple[Sequence[float], Sequence[float]]] = None,
     fixedparams: Optional[Sequence[Optional[float]]] = None,
-    estimate_sigma: bool = True,
     **kwargs,
-) -> Tuple[List[float], np.ndarray]:
+) -> tuple[list[float], NDArray[np.float64]]:
     if fixedparams is not None and any([p is not None for p in fixedparams]):
         if init_p is None:
             raise ValueError(
@@ -78,11 +84,8 @@ def fit_func(
             fitfunc, init_p, bounds, fixedparams
         )
 
-    # estimate the sigma
-    if estimate_sigma:
-        sigma = np.std(np.diff(ydata)) / np.sqrt(2)
-        kwargs.setdefault("sigma", np.full_like(ydata, sigma))
-        kwargs.setdefault("absolute_sigma", True)
+    if bounds is None:
+        bounds = (-np.inf, np.inf)  # type: ignore
 
     try:
         pOpt, pCov = sp.optimize.curve_fit(
@@ -101,15 +104,15 @@ def fit_func(
 
 
 def batch_fit_func(
-    list_xdata: List[np.ndarray],
-    list_ydata: List[np.ndarray],
-    fitfunc: Callable[..., np.ndarray],
-    list_init_p: List[Sequence[float]],
-    shared_idxs: List[int],
-    list_bounds: Optional[List[Tuple[List[float], List[float]]]] = None,
-    fixedparams: Optional[List[Optional[float]]] = None,
+    list_xdata: list[NDArray],
+    list_ydata: list[NDArray[Y_DataType]],
+    fitfunc: Callable[..., NDArray[Y_DataType]],
+    list_init_p: list[Sequence[float]],
+    shared_idxs: list[int],
+    list_bounds: Optional[list[tuple[list[float], list[float]]]] = None,
+    fixedparams: Optional[list[Optional[float]]] = None,
     **kwargs,
-) -> Tuple[List[List[float]], List[np.ndarray]]:
+) -> tuple[list[list[float]], list[NDArray[np.float64]]]:
     n_groups = len(list_xdata)
     n_params_total = len(list_init_p[0])  # 總參數個數（以第一組為準）
 
@@ -124,11 +127,11 @@ def batch_fit_func(
 
     def build_batch_params(
         list_p0: Sequence[Sequence[float]],
-        list_bounds: Optional[Sequence[Tuple[Sequence[float], Sequence[float]]]],
+        list_bounds: Optional[Sequence[tuple[Sequence[float], Sequence[float]]]],
         fixedparams: Optional[Sequence[Optional[float]]],
-    ) -> Tuple[
-        List[float],
-        Optional[Tuple[Sequence[float], Sequence[float]]],
+    ) -> tuple[
+        list[float],
+        Optional[tuple[Sequence[float], Sequence[float]]],
         Optional[Sequence[Optional[float]]],
     ]:
         nonlocal _shared_idxs, local_idxs
@@ -166,19 +169,19 @@ def batch_fit_func(
         return batch_p0, batch_bounds, fixedparams
 
     def build_total_params(
-        batch_params: Tuple[float, ...],
-    ) -> Tuple[List[List[float]], List[List[int]]]:
+        batch_params: tuple[float, ...],
+    ) -> tuple[list[list[float]], list[list[int]]]:
         total_indices = []
         total_params = []
         for i in range(n_groups):
-            group_indices: List[Optional[int]] = [None] * n_params_total
+            group_indices: list[Optional[int]] = [None] * n_params_total
             for j, share_idx in enumerate(_shared_idxs):
                 group_indices[share_idx] = j
             for j, local_idx in enumerate(local_idxs):
                 group_indices[local_idx] = j + i * n_local + n_shared
             assert all([gi is not None for gi in group_indices])
 
-            _group_indices = cast(List[int], group_indices)
+            _group_indices = cast(list[int], group_indices)
             total_indices.append(_group_indices)
             total_params.append([batch_params[i] for i in _group_indices])
         return total_params, total_indices
@@ -227,15 +230,17 @@ def batch_fit_func(
 
 
 def assign_init_p(
-    fitparams: List[Optional[float]], init_p: Sequence[float]
-) -> List[Optional[float]]:
+    fitparams: list[Optional[float]], init_p: Sequence[float]
+) -> list[Optional[float]]:
     for i, p in enumerate(init_p):
         if fitparams[i] is None:
             fitparams[i] = p
     return fitparams
 
 
-def fit_line(xdata: np.ndarray, ydata: np.ndarray) -> Tuple[float, float]:
+def fit_line(
+    xdata: NDArray[np.float64], ydata: NDArray[np.float64]
+) -> tuple[float, float]:
     """params: [a, b] -> y = a * x + b"""
     a, b, *_ = sp.stats.linregress(xdata, ydata)
 

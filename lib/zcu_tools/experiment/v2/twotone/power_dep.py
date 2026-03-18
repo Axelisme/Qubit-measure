@@ -1,75 +1,75 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
+from typeguard import check_type
+from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter2D
-from zcu_tools.program.v2 import TwoToneProgram, TwoToneProgramCfg, sweep2param
+from zcu_tools.program import SweepCfg
+from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
-from ..runner import HardTask, TaskConfig, run_task
-
-PowerDepResultType = Tuple[
+PowerResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
 
-def pdrdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+def pdr_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class PowerDepTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+class PowerCfg(TwoToneCfg, TaskCfg):
+    sweep: dict[str, SweepCfg]
 
 
-class PowerDepExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: PowerDepTaskConfig) -> PowerDepResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PowerResult:
+        _cfg = check_type(deepcopy(cfg), PowerCfg)
 
         # Ensure gain is the outer loop for better visualization
-        assert "sweep" in cfg
-        cfg["sweep"] = {
-            "gain": cfg["sweep"]["gain"],
-            "freq": cfg["sweep"]["freq"],
+        _cfg["sweep"] = {
+            "gain": _cfg["sweep"]["gain"],
+            "freq": _cfg["sweep"]["freq"],
         }
 
-        pdrs = sweep2array(cfg["sweep"]["gain"])  # predicted pulse gains
-        fpts = sweep2array(cfg["sweep"]["freq"])  # predicted frequency points
+        pdrs = sweep2array(_cfg["sweep"]["gain"])  # predicted pulse gains
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
 
         # Attach both sweep parameters to the qubit pulse
-        cfg["qub_pulse"]["gain"] = sweep2param("gain", cfg["sweep"]["gain"])
-        cfg["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
+        modules = _cfg["modules"]
+        modules["qub_pulse"]["gain"] = sweep2param("gain", _cfg["sweep"]["gain"])
+        modules["qub_pulse"]["freq"] = sweep2param("freq", _cfg["sweep"]["freq"])
 
         with LivePlotter2D("Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
             signals = run_task(
-                task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
-                        )
-                    ),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(pdrs), len(fpts)),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    pdrs, fpts, pdrdep_signal2real(ctx.data)
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(
+                    pdrs, fpts, pdr_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (pdrs, fpts, signals)
 
         return pdrs, fpts, signals
 
     def analyze(
         self,
-        result: Optional[PowerDepResultType] = None,
+        result: Optional[PowerResult] = None,
     ) -> None:
         raise NotImplementedError(
             "Analysis not implemented for two-tone power dependence"
@@ -78,7 +78,7 @@ class PowerDepExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[PowerDepResultType] = None,
+        result: Optional[PowerResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/power_dep",
         **kwargs,
@@ -99,7 +99,7 @@ class PowerDepExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> PowerDepResultType:
+    def load(self, filepath: str, **kwargs) -> PowerResult:
         signals2D, fpts, pdrs = load_data(filepath, **kwargs)
         assert fpts is not None and pdrs is not None
         assert len(fpts.shape) == 1 and len(pdrs.shape) == 1

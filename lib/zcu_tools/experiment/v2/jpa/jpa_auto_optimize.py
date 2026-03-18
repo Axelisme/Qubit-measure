@@ -2,30 +2,28 @@ from __future__ import annotations
 
 from copy import deepcopy
 from pathlib import Path
-from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
+from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
-from typing_extensions import NotRequired
+from typeguard import check_type
+from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
 
-from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
     make_ge_sweep,
     set_flux_in_dev_cfg,
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
 )
-from zcu_tools.experiment.v2.runner import (
-    HardTask,
-    SoftTask,
-    TaskConfig,
-    TaskContextView,
-    run_task,
-)
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot
+from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -41,29 +39,36 @@ from zcu_tools.utils.datasaver import load_data, save_data
 
 from .jpa_optimizer import JPAOptimizer
 
-JPAOptimizeResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+JPAOptimizeResult: TypeAlias = tuple[
+    NDArray[np.float64], NDArray[np.int32], NDArray[np.float64]
+]
 
 
-class JPAOptTaskConfig(TaskConfig, ModularProgramCfg):
+class JPAOptModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class JPAAutoOptimizeExperiment(AbsExperiment):
+class JPAOptCfg(ModularProgramCfg, TaskCfg):
+    modules: JPAOptModuleCfg
+    sweep: dict[str, SweepCfg]
+
+
+class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
     def run(
-        self, soc, soccfg, cfg: JPAOptTaskConfig, num_points: int
-    ) -> JPAOptimizeResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
+        self, soc, soccfg, cfg: dict[str, Any], num_points: int
+    ) -> JPAOptimizeResult:
+        _cfg = check_type(deepcopy(cfg), JPAOptCfg)
 
-        assert "sweep" in cfg
-        flx_sweep = cfg["sweep"]["jpa_flux"]
-        fpt_sweep = cfg["sweep"]["jpa_freq"]
-        pdr_sweep = cfg["sweep"]["jpa_power"]
+        flx_sweep = _cfg["sweep"]["jpa_flux"]
+        fpt_sweep = _cfg["sweep"]["jpa_freq"]
+        pdr_sweep = _cfg["sweep"]["jpa_power"]
 
-        cfg["sweep"] = {"ge": make_ge_sweep()}
+        modules = _cfg["modules"]
+        _cfg["sweep"] = {"ge": make_ge_sweep()}
         Pulse.set_param(
-            cfg["pi_pulse"], "on/off", sweep2param("ge", cfg["sweep"]["ge"])
+            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
         optimizer = JPAOptimizer(flx_sweep, fpt_sweep, pdr_sweep, num_points)
@@ -72,12 +77,12 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
 
-        def update_fn(i, ctx: TaskContextView, _) -> None:
-            ctx.env_dict["index"] = i
+        def update_fn(i, ctx: TaskState, _) -> None:
+            ctx.env["index"] = i
 
             last_snr = None
             if i > 0:
-                last_snr = np.abs(ctx.data[i - 1])
+                last_snr = np.abs(ctx.root_data[i - 1])
             cur_params = optimizer.next_params(i, last_snr)
 
             if cur_params is None:
@@ -123,27 +128,17 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             ),
         ) as viewer:
 
-            def plot_fn(ctx: TaskContextView) -> None:
-                idx: int = ctx.env_dict["index"]
-                snrs = np.abs(ctx.data)  # (num_points, )
+            def plot_fn(ctx: TaskState) -> None:
+                idx: int = ctx.env["index"]
+                snrs = np.abs(ctx.root_data)  # (num_points, )
 
                 cur_flx, cur_fpt, cur_pdr = params[idx, :]
-
-                # Assign colors based on phase using matplotlib color cycle
-                prop_cycle = plt.rcParams["axes.prop_cycle"]
-                cycle_colors = prop_cycle.by_key()["color"]
-                colors = np.array(
-                    [
-                        cycle_colors[(p - 1) % len(cycle_colors)]
-                        if p > 0
-                        else "lightgray"
-                        for p in phases
-                    ]
-                )
 
                 fig.suptitle(
                     f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flx:.2g} (mA), Freq: {1e-3 * cur_fpt:.4g} (GHz), Power: {cur_pdr:.2g} (dBm)"
                 )
+
+                colors = phases
 
                 viewer.get_plotter("iter_scatter").update(
                     np.arange(num_points), snrs, colors=colors, refresh=False
@@ -159,68 +154,72 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
                 )
                 viewer.refresh()
 
-            results = run_task(
-                task=SoftTask(
-                    sweep_name="Iteration",
-                    sweep_values=list(range(num_points)),
-                    update_cfg_fn=update_fn,
-                    sub_task=HardTask(
-                        measure_fn=lambda ctx, update_hook: (
-                            (
-                                prog := ModularProgramV2(
-                                    soccfg,
-                                    ctx.cfg,
-                                    modules=[
-                                        Reset(
-                                            "reset",
-                                            ctx.cfg.get("reset", {"type": "none"}),
-                                        ),
-                                        Pulse("pi_pulse", ctx.cfg["pi_pulse"]),
-                                        Readout("readout", ctx.cfg["readout"]),
-                                    ],
-                                )
-                            )
-                            and (
-                                prog.acquire(
-                                    soc,
-                                    progress=False,
-                                    callback=update_hook,
-                                    record_statistic=True,
-                                ),
-                                prog.get_covariance(),
-                                prog.get_median(),
-                            )
-                        ),
-                        raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+            def measure_fn(
+                ctx: TaskState, update_hook: Callable
+            ) -> tuple[
+                list[NDArray[np.float64]],
+                list[NDArray[np.float64]],
+                list[NDArray[np.float64]],
+            ]:
+                modules = ctx.cfg["modules"]
+                prog = ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("pi_pulse", modules["pi_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                )
+                tracker = PCATracker()
+                avg_d = prog.acquire(
+                    soc,
+                    progress=False,
+                    callback=lambda i, avg_d: update_hook(
+                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
                     ),
+                    statistic_trackers=[tracker],
+                )
+                return avg_d, [tracker.covariance], [tracker.rough_median]
+
+            results = run_task(
+                task=Task(
+                    measure_fn=measure_fn,
+                    raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
+                    dtype=np.float64,
+                ).scan(
+                    "Iteration",
+                    list(range(num_points)),
+                    before_each=update_fn,
                 ),
-                init_cfg=cfg,
-                update_hook=plot_fn,
+                init_cfg=_cfg,
+                on_update=plot_fn,
             )
             signals = np.asarray(results)
 
         plt.close(fig)
 
-        self.last_cfg = cfg
-        self.last_result = (params, signals)
+        self.last_cfg = _cfg
+        self.last_result = (params, phases, signals)
 
-        return params, signals
+        return params, phases, signals
 
     def analyze(
-        self, result: Optional[JPAOptimizeResultType] = None
-    ) -> Tuple[float, float, float, Figure]:
+        self, result: Optional[JPAOptimizeResult] = None
+    ) -> tuple[float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        params, signals = result
+        params, phases, signals = result
         snrs = np.abs(signals)
 
         max_id = np.nanargmax(snrs)
         max_snr = float(snrs[max_id])
         best_params = params[max_id, :]
 
-        # fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=config.figsize)
+        colors = phases
+
         figsize = (8, 5)
         fig = plt.figure(figsize=figsize)
         gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
@@ -232,7 +231,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         ax_freq = fig.add_subplot(gs[1, 1])
         ax_power = fig.add_subplot(gs[2, 1])
 
-        ax_iter.scatter(np.arange(len(snrs)), snrs, s=1)
+        ax_iter.scatter(np.arange(len(snrs)), snrs, c=colors, s=1)
         ax_iter.axhline(max_snr, color="r", ls="--", label=f"best = {max_snr:.2g}")
         ax_iter.scatter([max_id], [max_snr], color="r", marker="*")
         ax_iter.set_xlabel("Iteration")
@@ -241,7 +240,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         ax_iter.grid(True)
 
         def plot_ax(ax, param_idx, label_name) -> None:
-            ax.scatter(params[:, param_idx], snrs, s=1)
+            ax.scatter(params[:, param_idx], snrs, c=colors, s=1)
             best_value = best_params[param_idx]
             ax.axvline(best_value, color="r", ls="--", label=f"best = {best_value:.2g}")
             ax.scatter([best_value], [max_snr], color="r", marker="*")
@@ -256,10 +255,38 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
 
         return float(best_params[0]), float(best_params[1]), float(best_params[2]), fig
 
+    def plot_sample_params(self, result: Optional[JPAOptimizeResult] = None) -> Figure:
+        if result is None:
+            result = self.last_result
+        assert result is not None, "no result found"
+
+        params, phases, signals = result
+        snrs = np.abs(signals)
+
+        max_snr = np.nanmax(snrs)
+        alphas = snrs / max(max_snr, 1e-12)
+
+        fig = plt.figure()
+        ax = fig.add_subplot(projection="3d")
+        assert isinstance(ax, Axes3D)
+
+        cmap = plt.get_cmap("viridis")
+        norm = Normalize(vmin=float(np.nanmin(phases)), vmax=float(np.nanmax(phases)))
+        colors = cmap(norm(phases))
+        colors[:, 3] = alphas
+
+        ax.scatter(params[:, 0], params[:, 1], params[:, 2], c=colors, s=0.1)  # type: ignore
+
+        ax.set_xlabel("Flux value")
+        ax.set_ylabel("Freq (MHz)")
+        ax.set_zlabel("Power (dBm)")
+
+        return fig
+
     def save(
         self,
         filepath: str,
-        result: Optional[JPAOptimizeResultType] = None,
+        result: Optional[JPAOptimizeResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/auto_optimize",
         **kwargs,
@@ -268,7 +295,7 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             result = self.last_result
         assert result is not None, "no result found"
 
-        params, signals = result
+        params, phases, signals = result
 
         _filepath = Path(filepath)
 
@@ -289,6 +316,15 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
         )
 
         save_data(
+            filepath=str(_filepath.with_name(_filepath.name + "_phases")),
+            x_info=x_info,
+            z_info={"name": "Phase", "unit": "a.u.", "values": phases},
+            comment=comment,
+            tag=tag + "/phases",
+            **kwargs,
+        )
+
+        save_data(
             filepath=str(_filepath.with_name(_filepath.name + "_signals")),
             x_info=x_info,
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
@@ -297,12 +333,14 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAOptimizeResultType:
+    def load(self, filepath: str, **kwargs) -> JPAOptimizeResult:
         _filepath = Path(filepath)
 
         # Load params (iterations x 3)
         params_data, iters, param_types = load_data(
-            str(_filepath.with_name(_filepath.name + "_params")), **kwargs
+            str(_filepath.with_name(_filepath.name + "_params")),
+            **kwargs,
+            return_cfg=False,
         )
         assert iters is not None and param_types is not None
         assert len(iters.shape) == 1 and len(param_types.shape) == 1
@@ -310,18 +348,30 @@ class JPAAutoOptimizeExperiment(AbsExperiment):
 
         params = params_data.T  # transpose back (num_points, 3)
 
+        phases, iters_ph, _ = load_data(
+            str(_filepath.with_name(_filepath.name + "_phases")),
+            **kwargs,
+            return_cfg=False,
+        )
+        assert iters_ph is not None
+        assert len(iters_ph.shape) == 1
+        assert phases.shape[0] == params.shape[0]
+
         # Load signals
         signals, iters_sig, _ = load_data(
-            str(_filepath.with_name(_filepath.name + "_signals")), **kwargs
+            str(_filepath.with_name(_filepath.name + "_signals")),
+            **kwargs,
+            return_cfg=False,
         )
         assert iters_sig is not None
         assert len(signals.shape) == 1
         assert signals.shape[0] == params.shape[0]
 
+        phases = phases.astype(np.int32)
         params = params.astype(np.float64)
-        signals = signals.astype(np.complex128)
+        signals = signals.astype(np.float64)
 
         self.last_cfg = None
-        self.last_result = (params, signals)
+        self.last_result = (params, phases, signals)
 
-        return params, signals
+        return params, phases, signals

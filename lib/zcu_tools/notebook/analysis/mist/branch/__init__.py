@@ -1,18 +1,30 @@
-from typing import Dict, List, Tuple
+from __future__ import annotations
 
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from plotly.subplots import make_subplots
+from typing_extensions import Mapping, Optional
+
+
+def round_to_nearest(
+    E_01: NDArray[np.float64], E_ij: NDArray[np.float64], r_f: float
+) -> NDArray[np.float64]:
+    round_E_ij = (E_ij - E_01[0] + 0.5 * r_f) % r_f - 0.5 * r_f + E_01[0]
+    round_E_ij[np.abs(np.diff(round_E_ij, prepend=round_E_ij[0])) > r_f / 2] = np.nan
+    return round_E_ij
 
 
 def plot_chi_and_snr_over_photon(
-    photons: np.ndarray,
-    chi_over_n: np.ndarray,
-    snrs: np.ndarray,
+    photons: NDArray[np.float64],
+    chi_over_n: NDArray[np.float64],
+    snrs: NDArray[np.float64],
     qub_name: str,
     flx: float,
-) -> Tuple[plt.Figure, Tuple[plt.Axes, plt.Axes]]:
+) -> tuple[Figure, tuple[Axes, Axes]]:
     best_n = photons[np.argsort(snrs)[-3]]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
@@ -34,13 +46,15 @@ def plot_chi_and_snr_over_photon(
 
 
 def plot_populations_over_photon(
-    branchs: List[int], photons: np.ndarray, branch_populations: Dict[int, List[float]]
+    branchs: list[int],
+    photons: NDArray[np.float64],
+    branch_populations: Mapping[int, NDArray[np.float64]],
 ) -> go.Figure:
     fig = go.Figure()
 
     for b in branchs:
         pop_b = branch_populations[b]
-        if np.ptp(pop_b) > 1.0:
+        if np.ptp(pop_b) > 1.0 or b in [0, 1]:
             color = None
             name = f"Branch {b}"
             showlegend = True
@@ -71,9 +85,73 @@ def plot_populations_over_photon(
     return fig
 
 
+def calc_transitions(
+    branch_energies: Mapping[int, NDArray[np.float64]],
+    transitions: Optional[list[tuple[int, int]]] = None,
+    threshold: float = 50e-3,  # GHz
+) -> dict[tuple[int, int], NDArray[np.float64]]:
+    E_01 = branch_energies[1] - branch_energies[0]
+    all_transitions = list(branch_energies.keys())
+
+    if transitions is None:
+        transitions = []
+        for i in (0, 1):
+            for j in all_transitions:
+                if j <= i:
+                    continue
+                E_ij = branch_energies[j] - branch_energies[i]
+                if np.min(np.abs(E_ij - E_01)) < threshold:
+                    transitions.append((i, j))
+        if len(transitions) == 0:
+            raise ValueError("No transitions found")
+
+    E_ijs = {}
+    for i, j in transitions:
+        E_ij = branch_energies[j] - branch_energies[i]
+        E_ijs[(i, j)] = E_ij
+
+    return E_ijs
+
+
+def plot_transition_over_photon(
+    photons: NDArray[np.float64],
+    transitions: dict[str, NDArray[np.float64]],
+    threshold: float = 50e-3,  # GHz
+) -> go.Figure:
+    fig = go.Figure()
+
+    E_01 = transitions["0 → 1"]
+
+    for name, E_ij in transitions.items():
+        opacity = np.clip(1.0 - np.nanmin(np.abs(E_ij - E_01)) / threshold, 0.1, 1)
+        fig.add_trace(
+            go.Scatter(
+                x=photons,
+                y=E_ij,
+                mode="lines",
+                name=name,
+                line=dict(
+                    color=None, width=2, dash=None, shape="linear", simplify=True
+                ),
+                opacity=opacity,
+            )
+        )
+
+    fig.update_layout(
+        title="Branch Energies",
+        title_x=0.51,
+        xaxis_title="Photons",
+        yaxis_title="Energy",
+        showlegend=True,
+        yaxis_range=[E_01.min() - threshold, E_01.max() + threshold],
+    )
+
+    return fig
+
+
 def calc_critical_photons(
-    photons: np.ndarray,
-    populations: np.ndarray,
+    photons: NDArray[np.float64],
+    populations: NDArray[np.float64],
     critical_level: float,
 ) -> np.ndarray:
     critical_idx = np.argmax(populations >= critical_level, axis=-1)
@@ -85,26 +163,28 @@ def calc_critical_photons(
 
 
 def plot_cn_over_flx(
-    flxs: np.ndarray,
-    photons: np.ndarray,
-    populations_over_flx: np.ndarray,
-    critical_levels: Dict[int, float],
+    flxs: NDArray[np.float64],
+    photons: NDArray[np.float64],
+    populations_over_flx: NDArray[np.float64],
+    critical_levels: dict[int, float],
 ) -> go.Figure:
     # plot the critical photon number as a function of flux
     fig = make_subplots(
         rows=2,
         cols=1,
         subplot_titles=("Ground State", "Excited State"),
-        vertical_spacing=0.1,
+        vertical_spacing=0.01,
     )
 
     for i, critical_level in enumerate(critical_levels.values()):
         pop = populations_over_flx[:, i, :]
         cn = calc_critical_photons(photons, pop, critical_level)
 
+        clip_pop = np.clip(pop, 0, critical_level)
+
         fig.add_trace(
             go.Heatmap(
-                z=pop.T,
+                z=clip_pop.T,
                 x=flxs,
                 y=photons,
                 colorscale="Viridis",
@@ -137,18 +217,34 @@ def plot_cn_over_flx(
 
 def plot_cn_with_mist(
     fig,
-    flxs: np.ndarray,
-    photons: np.ndarray,
-    populations_over_flx: np.ndarray,
-    critical_levels: Dict[int, float],
-    mist_flxs: np.ndarray,
+    flxs: NDArray[np.float64],
+    photons: NDArray[np.float64],
+    populations_over_flx: NDArray[np.float64],
+    critical_levels: dict[int, float],
+    mist_flxs: NDArray[np.float64],
+    fill_alpha: float = 0.2,
+    **fig_kwargs,
 ):
     flxs = np.concatenate([flxs, 1 - flxs[::-1]])
     populations_over_flx = np.concatenate(
         [populations_over_flx, populations_over_flx[::-1, ...]], axis=0
     )
 
-    colors = ["blue", "red", "green", "yellow", "purple", "orange", "brown", "pink"]
+    # Define colors with RGB values for fill support
+    colors_rgb = {
+        "blue": (0, 0, 255),
+        "red": (255, 0, 0),
+        "green": (0, 128, 0),
+        "yellow": (255, 255, 0),
+        "purple": (128, 0, 128),
+        "orange": (255, 165, 0),
+        "brown": (139, 69, 19),
+        "pink": (255, 192, 203),
+    }
+    color_names = list(colors_rgb.keys())
+
+    y_max = photons.max()
+
     for b, critical_level in critical_levels.items():
         b_populations = populations_over_flx[:, b, :]
 
@@ -161,16 +257,36 @@ def plot_cn_with_mist(
 
         cn = calc_critical_photons(photons, b_populations, critical_level)
 
+        color_name = color_names[b % len(color_names)]
+        r, g, b_val = colors_rgb[color_name]
+        fill_color = f"rgba({r}, {g}, {b_val}, {fill_alpha})"
+
+        # Add invisible upper boundary trace
+        fig.add_trace(
+            go.Scatter(
+                x=mist_flxs,
+                y=np.full_like(mist_flxs, y_max),
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+            ),
+            **fig_kwargs,
+        )
+
+        # Add curve with fill to the upper boundary
         fig.add_trace(
             go.Scatter(
                 x=mist_flxs,
                 y=cn,
                 mode="markers+lines",
-                marker=dict(color=colors[b], size=6),
-                line=dict(color=colors[b]),
+                marker=dict(color=color_name, size=1),
+                line=dict(color=color_name),
                 name=f"Branch {b}",
-                # showlegend=False,
-            )
+                fill="tonexty",
+                fillcolor=fill_color,
+            ),
+            **fig_kwargs,
         )
     fig.update_xaxes(title_text="Flux", range=[mist_flxs.min(), mist_flxs.max()])
     fig.update_yaxes(title_text="Photon Number", range=[photons.min(), photons.max()])

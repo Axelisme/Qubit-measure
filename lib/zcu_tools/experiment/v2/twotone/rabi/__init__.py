@@ -1,4 +1,2 @@
-from .amp_rabi import AmpRabiExperiment
-from .len_rabi import LenRabiExperiment
-
-__all__ = ["AmpRabiExperiment", "LenRabiExperiment"]
+from .amp_rabi import AmpRabiExp
+from .len_rabi import LenRabiExp

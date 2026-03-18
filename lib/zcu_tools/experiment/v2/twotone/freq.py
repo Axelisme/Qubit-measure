@@ -1,76 +1,74 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from typing import Literal, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from typeguard import check_type
+from typing_extensions import Any, Literal, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, sweep2array
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlotter1D
-from zcu_tools.program.v2 import TwoToneProgram, TwoToneProgramCfg, sweep2param
+from zcu_tools.program import SweepCfg
+from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
-from zcu_tools.utils.process import rotate2real, minus_background
+from zcu_tools.utils.process import minus_background, rotate2real
 
-from ..runner import HardTask, TaskConfig, run_task
-
-FreqResultType = Tuple[NDArray[np.float64], NDArray[np.complex128]]
+FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals))
 
 
-class FreqTaskConfig(TaskConfig, TwoToneProgramCfg): ...
+class FreqCfg(TwoToneCfg, TaskCfg):
+    sweep: dict[str, SweepCfg]
 
 
-class FreqExperiment(AbsExperiment):
-    def run(self, soc, soccfg, cfg: FreqTaskConfig) -> FreqResultType:
-        cfg = deepcopy(cfg)  # prevent in-place modification
-
-        # canonicalise sweep section to single-axis form «{'freq': ...}»
-        assert "sweep" in cfg
+class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
 
         # predicted sweep points before FPGA coercion
-        fpts = sweep2array(cfg["sweep"]["freq"])  # MHz
+        fpts = sweep2array(_cfg["sweep"]["freq"])  # MHz
 
         # bind sweep parameter as *QickParam* so it is executed by FPGA
-        cfg["qub_pulse"]["freq"] = sweep2param("freq", cfg["sweep"]["freq"])
+        modules = _cfg["modules"]
+        modules["qub_pulse"]["freq"] = sweep2param("freq", _cfg["sweep"]["freq"])
 
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
-                task=HardTask(
-                    measure_fn=lambda ctx, update_hook: (
-                        TwoToneProgram(soccfg, ctx.cfg).acquire(
-                            soc, progress=False, callback=update_hook
-                        )
-                    ),
+                task=Task(
+                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
+                        soccfg, ctx.cfg
+                    ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(fpts),),
                 ),
-                init_cfg=cfg,
-                update_hook=lambda ctx: viewer.update(
-                    fpts, qubfreq_signal2real(ctx.data)
+                init_cfg=_cfg,
+                on_update=lambda ctx: viewer.update(
+                    fpts, qubfreq_signal2real(ctx.root_data)
                 ),
             )
 
         # cache
-        self.last_cfg = cfg
+        self.last_cfg = _cfg
         self.last_result = (fpts, signals)
 
         return fpts, signals
 
     def analyze(
         self,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqResult] = None,
         *,
         model_type: Literal["lor", "sinc"] = "lor",
         plot_fit: bool = True,
-    ) -> Tuple[float, float, Figure]:
+    ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -106,7 +104,7 @@ class FreqExperiment(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[FreqResultType] = None,
+        result: Optional[FreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/freq",
         **kwargs,
@@ -126,7 +124,7 @@ class FreqExperiment(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> FreqResultType:
+    def load(self, filepath: str, **kwargs) -> FreqResult:
         signals, fpts, _ = load_data(filepath, **kwargs)
         assert fpts is not None
         assert len(fpts.shape) == 1 and len(signals.shape) == 1
