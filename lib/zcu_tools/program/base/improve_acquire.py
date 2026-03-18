@@ -3,13 +3,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 import numpy as np
+from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
 from typing_extensions import Callable, Optional, TypeAlias, Union, cast
 
-try:
-    from numpy.typing import NDArray
-except:
-    NDArray = List
 
 class TypedAcquireMixin(AcquireMixin):
     """
