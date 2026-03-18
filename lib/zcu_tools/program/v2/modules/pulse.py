@@ -160,7 +160,6 @@ class Pulse(Module, tag="pulse"):
         cfg.setdefault("block_mode", True)
 
         if isinstance(cfg["waveform"], str):
-            wav_name = cfg["waveform"]
-            cfg["waveform"] = ml.get_waveform(wav_name, dict(name=wav_name))
+            cfg["waveform"] = ml.get_waveform(cfg["waveform"])
 
         return cast(PulseCfg, cfg)

@@ -154,6 +154,10 @@ class ModuleLibrary(SyncFile):
     def get_waveform(
         self, name: str, override_cfg: Optional[dict[str, Any]] = None
     ) -> WaveformCfg:
+        if name not in self.waveforms:
+            raise ValueError(
+                f"Waveform {name} not found, available waveforms: {list(self.waveforms.keys())}"
+            )
         waveform = deepcopy(self.waveforms[name])
         if override_cfg is not None:
             deepupdate(cast(dict, waveform), override_cfg, behavior="force")
