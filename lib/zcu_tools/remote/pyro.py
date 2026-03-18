@@ -15,7 +15,7 @@ def setup_pyro4() -> None:
     # use dill instead of pickle
     Pyro4.config.SERIALIZER = "pickle"  # type: ignore
     # Pyro4.config.SERIALIZER = "dill"  # type: ignore
-    Pyro4.config.SERIALIZERS_ACCEPTED = set(["dill", "pickle"])  # type: ignore
+    Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])  # type: ignore
     Pyro4.config.DILL_PROTOCOL_VERSION = 5
     Pyro4.config.PICKLE_PROTOCOL_VERSION = 4  # type: ignore
     Pyro4.config.REQUIRE_EXPOSE = False  # type: ignore
