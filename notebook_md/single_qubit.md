@@ -197,7 +197,7 @@ jpa_sgs.get_info()
 ```python
 # ml, md = em.new_flux(md.cur_A, unit="A")
 # ml, md = em.new_flux(md.cur_A, clone_from=(ml, md), unit="A")
-ml, md = em.use_flux(label="031620_0.000mA")
+ml, md = em.use_flux(label="031713_3.276mA")
 ml, md
 ```
 
@@ -882,8 +882,8 @@ exp_cfg = {
             # "gain": md.pi_gain,
             # "mixer_freq": md.q_f,
         },
-        "readout": "readout_rf",
-        # "readout": "readout_dpm",
+        # "readout": "readout_rf",
+        "readout": "readout_dpm",
     },
     "relax_delay": 30.5,  # us
     # "relax_delay": 5 * t1,  # us
@@ -2436,7 +2436,7 @@ plt.close(fig)
 t2ramsey_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     # filepath=os.path.join(database_path, f"{filename}@{em.label}"),
-    comment=make_comment(cfg, f"detune = {detune:.3f}MHz\nt2r = {t2r:.3f}us"),
+    comment=make_comment(cfg, f"detune = {detune:.3f}MHz\nt2r = {md.t2r:.3f}us"),
 )
 ```
 
@@ -2466,7 +2466,7 @@ exp_cfg = {
     },
     "relax_delay": 50.5,  # us
     # "relax_delay": 5 * t1,  # us
-    "sweep": make_sweep(0.0, 50.1, 101),
+    "sweep": make_sweep(0.01, 50.1, 101),
     # "sweep": make_sweep(0.01*t1, 5 * t1, 51),
 }
 cfg = ml.make_cfg(exp_cfg, reps=100, rounds=100)
@@ -2632,7 +2632,54 @@ t2echo_exp.save(
 )
 ```
 
-## Save Sample
+## CPMG
+
+```python
+import gc
+
+plt.close("all")
+gc.collect()
+```
+
+```python
+%matplotlib widget
+times = list(range(1, 21, 1))
+times.reverse()
+exp_cfg = {
+    "modules": {
+        # "reset": "reset_120",
+        "pi_pulse": "pi_len",
+        "pi2_pulse": {
+            **ml.get_module("pi2_len"),
+            "phase": 90,  # Y/2 gate
+        },
+        "readout": "readout_dpm",
+    },
+    "relax_delay": 30.0,  # us
+    # "relax_delay": 5 * t1,  # us
+    "sweep": {
+        "times": times,
+        "length": make_sweep(0.0, 40, 201),
+    },
+}
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
+
+cpmg_exp = ze.twotone.time_domain.CPMG_Exp()
+_ = cpmg_exp.run(soc, soccfg, cfg)
+```
+
+```python
+_, _, fig = cpmg_exp.analyze()
+```
+
+```python
+cpmg_exp.save(
+    filepath=os.path.join(database_path, f"{qub_name}_cpmg@{em.label}"),
+    comment=make_comment(cfg),
+)
+```
+
+# Save Sample
 
 ```python
 from datetime import datetime
@@ -2651,49 +2698,6 @@ sample_table.add_sample(
         "Tcomment": "Manual Added",
         "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
-)
-```
-
-## CPMG
-
-```python
-ml.get_module("pi_len")["waveform"]["length"]
-```
-
-```python
-%matplotlib widget
-exp_cfg = {
-    "modules": {
-        # "reset": "reset_120",
-        "pi_pulse": "pi_amp",
-        "pi2_pulse": {
-            **ml.get_module("pi2_amp"),
-            "phase": 90,  # Y/2 gate
-        },
-        "readout": "readout_dpm",
-    },
-    "relax_delay": 40.0,  # us
-    # "relax_delay": 5 * t1,  # us
-    "sweep": {
-        "times": list(range(1, 101, 10)),
-        "length": make_sweep(0.0, 15, 31),
-    },
-}
-cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=10)
-
-cpmg_exp = ze.twotone.time_domain.CPMG_Exp()
-_ = cpmg_exp.run(soc, soccfg, cfg)
-```
-
-```python
-_, _, fig = cpmg_exp.analyze()
-```
-
-```python
-cpmg_exp.save(
-    # filepath=os.path.join(database_path, f"{qub_name}_t2echo@{em.label}"),
-    filepath=os.path.join(database_path, f"{qub_name}_cpmg@{em.label}"),
-    comment=make_comment(cfg),
 )
 ```
 
