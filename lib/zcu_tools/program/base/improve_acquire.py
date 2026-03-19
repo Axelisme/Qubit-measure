@@ -3,15 +3,11 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 import numpy as np
+from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
-from typing_extensions import Callable, Optional, TypeAlias, Union, cast
+from typing_extensions import Callable, List, Optional, TypeAlias, Union, cast
 
-try:
-    from numpy.typing import NDArray
-    CallbackType: TypeAlias = Callable[[int, list[NDArray[np.float64]]], None]
-except Exception:
-    NDArray = list
-    CallbackType: TypeAlias = Callable
+CallbackType: TypeAlias = Callable[[int, List[NDArray[np.float64]]], None]
 
 
 class TypedAcquireMixin(AcquireMixin):
@@ -19,7 +15,7 @@ class TypedAcquireMixin(AcquireMixin):
     Add type checking to the AcquireMixin class
     """
 
-    def get_raw(self) -> Optional[list[NDArray[np.int64]]]:
+    def get_raw(self) -> Optional[List[NDArray[np.int64]]]:
         return super().get_raw()
 
     def get_time_axis(
@@ -28,21 +24,21 @@ class TypedAcquireMixin(AcquireMixin):
         return super().get_time_axis(ro_index, length_only)
 
     def _summarize_accumulated(
-        self, rounds_buf: list[NDArray[np.float64]]
-    ) -> list[NDArray[np.float64]]:
+        self, rounds_buf: List[NDArray[np.float64]]
+    ) -> List[NDArray[np.float64]]:
         return super()._summarize_accumulated(rounds_buf)
 
     def _summarize_decimated(
-        self, rounds_buf: list[NDArray[np.float64]]
-    ) -> list[NDArray[np.float64]]:
+        self, rounds_buf: List[NDArray[np.float64]]
+    ) -> List[NDArray[np.float64]]:
         return super()._summarize_decimated(rounds_buf)
 
     def _average_buf(  # type: ignore
         self,
-        d_reps: list[NDArray[np.float64]],
+        d_reps: List[NDArray[np.float64]],
         length_norm: bool = True,
         remove_offset: bool = True,
-    ) -> list[NDArray[np.float64]]:
+    ) -> List[NDArray[np.float64]]:
         return super()._average_buf(
             d_reps,  # type: ignore
             length_norm=length_norm,
@@ -50,14 +46,14 @@ class TypedAcquireMixin(AcquireMixin):
         )
 
     def _process_accumulated(  # type: ignore
-        self, acc_buf: list[NDArray[np.float64]]
-    ) -> list[NDArray[np.float64]]:
+        self, acc_buf: List[NDArray[np.float64]]
+    ) -> List[NDArray[np.float64]]:
         return super()._process_accumulated(acc_buf)  # type: ignore
 
-    def acquire(self, *args, **kwargs) -> list[NDArray[np.float64]]:
+    def acquire(self, *args, **kwargs) -> List[NDArray[np.float64]]:
         return super().acquire(*args, **kwargs)  # type: ignore
 
-    def acquire_decimated(self, *args, **kwargs) -> list[NDArray[np.float64]]:
+    def acquire_decimated(self, *args, **kwargs) -> List[NDArray[np.float64]]:
         return super().acquire_decimated(*args, **kwargs)  # type: ignore
 
 
@@ -79,7 +75,7 @@ class StatisticMixin(TypedAcquireMixin):
 
         trackers = self.acquire_params.get("statistic_trackers")
         if trackers is not None:
-            trackers = cast(list[AbsStatisticTracker], trackers)
+            trackers = cast(List[AbsStatisticTracker], trackers)
             if self.acquire_params["type"] != "accumulated":
                 raise NotImplementedError(
                     "Statistic is not implemented for type other than accumulated"
@@ -108,7 +104,7 @@ class StatisticMixin(TypedAcquireMixin):
     def acquire(
         self,
         *args,
-        statistic_trackers: Optional[list[AbsStatisticTracker]] = None,
+        statistic_trackers: Optional[List[AbsStatisticTracker]] = None,
         **kwargs,
     ):
         ro_chs = self.ro_chs  # type: ignore
@@ -148,7 +144,6 @@ class EarlyStopMixin(TypedAcquireMixin):
             assert self.rounds_pbar is not None
             self.rounds_pbar.close()
         return not_finish and not self.early_stop
-
 
 
 class CallbackMixin(StatisticMixin):
@@ -230,7 +225,7 @@ class SingleShotMixin(TypedAcquireMixin):
 
         return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
 
-    def _process_accumulated(self, acc_buf) -> list[NDArray[np.float64]]:
+    def _process_accumulated(self, acc_buf) -> List[NDArray[np.float64]]:
         assert self.acquire_params is not None
         if self.acquire_params["threshold"] is not None:
             d_reps = [np.zeros_like(d) for d in acc_buf]
@@ -265,12 +260,12 @@ class SingleShotMixin(TypedAcquireMixin):
 
     def _apply_classification(
         self,
-        acc_buf: list[NDArray[np.float64]],
+        acc_buf: List[NDArray[np.float64]],
         g_center: complex,
         e_center: complex,
         population_radius: float,
         remove_offset: bool,
-    ) -> list[NDArray[np.float64]]:
+    ) -> List[NDArray[np.float64]]:
         shots = []
         for i_ch, (ro_ch, ro) in enumerate(self.ro_chs.items()):  # type: ignore
             avg = acc_buf[i_ch] / ro["length"]
