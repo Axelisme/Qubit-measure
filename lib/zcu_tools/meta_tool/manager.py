@@ -91,24 +91,28 @@ class ExperimentManager:
         self, value: Optional[float] = None, unit: Literal["A", "V", "K"] = "A"
     ) -> str:
 
+        UNIT_RANGES = {
+            "A": [
+                ("mA", 100e-3, 1e3),  # 100 mA
+                ("A", float("inf"), 1),
+            ],
+            "V": [
+                ("mV", 100e-3, 1e3),  # 100 mV
+                ("V", float("inf"), 1),
+            ],
+            "K": [
+                ("mK", 1000e-3, 1e3),  # 1000 mK
+                ("K", float("inf"), 1),
+            ],
+        }
+
         if value is not None:
-            if unit == "A":
-                if value <= 0.1:  # 100 mA
-                    united_value = f"{value * 1e3:.3f}mA"  # convert to mA
-                else:
-                    united_value = f"{value:.3f}A"
-            elif unit == "V":
-                if value <= 0.1:  # 100 mV
-                    united_value = f"{value * 1e3:.3f}mV"  # convert to mV
-                else:
-                    united_value = f"{value:.3f}V"
-            elif unit == "K":
-                if value <= 1.0:  # 1000 mK
-                    united_value = f"{value * 1e3:.3f}mK"  # convert to mK
-                else:
-                    united_value = f"{value:.3f}K"
-            else:
-                raise ValueError(f"Invalid unit: {unit}")
+            for unit_suffix, max_value, scale in UNIT_RANGES[unit]:
+                if value <= max_value:
+                    united_value = f"{value * scale:.3f}{unit_suffix}"
+                    break
+            else:  # fallback for extremely large values
+                united_value = f"{value:.3e}{unit}"
         else:
             united_value = "NoValue"
 

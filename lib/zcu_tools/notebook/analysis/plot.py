@@ -22,22 +22,22 @@ PLOT_EVALS_COUNT = 15
 
 def plot_matrix_elements(
     params: tuple[float, float, float],
-    flxs: NDArray[np.float64],
+    fluxs: NDArray[np.float64],
     show_idxs: list[tuple[int, int]],
-    mAs: Optional[NDArray[np.float64]] = None,
+    dev_values: Optional[NDArray[np.float64]] = None,
     spectrum_data: Optional[SpectrumData] = None,
 ) -> tuple[go.Figure, SpectrumData]:
     need_dim = max(max(i, j) for i, j in show_idxs) + 1
 
     spectrum_data, matrix_elements = calculate_n_oper_vs_flx(
-        params, flxs, return_dim=need_dim, spectrum_data=spectrum_data
+        params, fluxs, return_dim=need_dim, spectrum_data=spectrum_data
     )
 
     fig = go.Figure()
     for i, j in show_idxs:
         fig.add_trace(
             go.Scatter(
-                x=flxs,
+                x=fluxs,
                 y=np.abs(matrix_elements[:, i, j]),
                 mode="lines",
                 name=f"{i}-{j}",
@@ -52,33 +52,39 @@ def plot_matrix_elements(
     )
 
     # Add a secondary top x-axis using provided mAs as tick labels
-    if mAs is not None:
-        add_secondary_xaxis(fig, flxs, mAs)
+    if dev_values is not None:
+        add_secondary_xaxis(fig, fluxs, dev_values)
 
     return fig, spectrum_data
 
 
 def plot_dispersive_shift(
     params: tuple[float, float, float],
-    flxs: NDArray[np.float64],
-    r_f: float,
+    fluxs: NDArray[np.float64],
+    bare_rf: float,
     g: float,
-    mAs: Optional[NDArray[np.float64]] = None,
+    dev_values: Optional[NDArray[np.float64]] = None,
     upto: int = 2,
 ) -> go.Figure:
     fig = go.Figure()
 
-    chi = calculate_chi_vs_flx(params, flxs, r_f, g, res_dim=upto + 2)
+    chi = calculate_chi_vs_flx(params, fluxs, bare_rf, g, res_dim=upto + 2)
+
     fig.add_hline(y=0.0, line_color="black", line_width=2, line_dash="dash")
+
+    abs_mean = 0.0
     for i in range(upto):
+        diff_chi = chi[:, i + 1] - chi[:, i]
         fig.add_trace(
             go.Scatter(
-                x=flxs,
-                y=(chi[:, i + 1] - chi[:, i]) * 1e3,
+                x=fluxs,
+                y=diff_chi * 1e3,
                 mode="lines",
                 name=f"chi_n{i}",
             )
         )
+        abs_mean += np.mean(np.abs(diff_chi))
+    abs_mean /= upto
 
     fig.update_layout(
         title=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
@@ -87,23 +93,25 @@ def plot_dispersive_shift(
         yaxis_title="Chi (MHz)",
     )
 
-    if mAs is not None:
-        add_secondary_xaxis(fig, flxs, mAs)
+    if dev_values is not None:
+        add_secondary_xaxis(fig, fluxs, dev_values)
+
+    fig.update_yaxes(range=[-abs_mean * 5e3, abs_mean * 5e3])
 
     return fig
 
 
 def plot_t1s(
     params: tuple[float, float, float],
-    flxs: NDArray[np.float64],
+    fluxs: NDArray[np.float64],
     noise_channels,
     Temp: float,
-    mAs: Optional[NDArray[np.float64]] = None,
+    dev_values: Optional[NDArray[np.float64]] = None,
 ) -> tuple[go.Figure, NDArray[np.float64]]:
     fig = go.Figure()
 
     t1s = calculate_eff_t1_vs_flx(
-        flxs,
+        fluxs,
         noise_channels=noise_channels,
         Temp=Temp,
         params=params,
@@ -111,7 +119,7 @@ def plot_t1s(
         evals_count=PLOT_EVALS_COUNT,
     )
 
-    fig.add_trace(go.Scatter(x=flxs, y=t1s, mode="lines", name="t1"))
+    fig.add_trace(go.Scatter(x=fluxs, y=t1s, mode="lines", name="t1"))
     fig.update_layout(
         title=dict(
             text=f"EJ/EC/EL = {params[0]:.3f}/{params[1]:.3f}/{params[2]:.3f}",
@@ -123,26 +131,29 @@ def plot_t1s(
     )
     fig.update_yaxes(exponentformat="power")
 
-    if mAs is not None:
-        add_secondary_xaxis(fig, flxs, mAs)
+    if dev_values is not None:
+        add_secondary_xaxis(fig, fluxs, dev_values)
 
     return fig, t1s
 
 
 def plot_transitions(
     params: tuple[float, float, float],
-    flxs: NDArray[np.float64],
+    fluxs: NDArray[np.float64],
     show_idxs: list[tuple[int, int]],
     ref_freqs: Optional[list[float]] = None,
 ) -> go.Figure:
     fig = go.Figure()
 
-    _, energies = calculate_energy_vs_flx(params, flxs)
+    _, energies = calculate_energy_vs_flx(params, fluxs)
 
     for i, j in show_idxs:
         fig.add_trace(
             go.Scatter(
-                x=flxs, y=energies[:, j] - energies[:, i], mode="lines", name=f"{i}-{j}"
+                x=fluxs,
+                y=energies[:, j] - energies[:, i],
+                mode="lines",
+                name=f"{i}-{j}",
             )
         )
     if ref_freqs is not None:
@@ -159,7 +170,7 @@ def plot_transitions(
 
 
 def plot_mist_condition(
-    flxs: NDArray[np.float64],
+    fluxs: NDArray[np.float64],
     energies: NDArray[np.float64],
     r_f: float,
     max_level: Optional[int] = None,
@@ -185,15 +196,15 @@ def plot_mist_condition(
     fig = go.Figure()
     fig.add_trace(
         go.Scatter(
-            x=flxs,
-            y=np.zeros_like(flxs),
+            x=fluxs,
+            y=np.zeros_like(fluxs),
             name="0",
             line=dict(width=4, color="blue"),
         )
     )
     plot_without_discontinuities(
         fig,
-        flxs,
+        fluxs,
         calc_mod_transition(energies[:, 1] - energies[:, 0]),
         name="1",
         line=dict(width=4, color="red"),
@@ -202,7 +213,7 @@ def plot_mist_condition(
         transition = energies[:, j] - energies[:, 0]
         plot_without_discontinuities(
             fig,
-            flxs,
+            fluxs,
             calc_mod_transition(transition),
             line=dict(width=1, color="black", dash="dot"),
             customdata=np.floor_divide(transition, r_f),

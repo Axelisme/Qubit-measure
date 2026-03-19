@@ -15,18 +15,18 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.optimize import least_squares
 from tqdm.auto import tqdm, trange
-from typing_extensions import Any
 
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
+from zcu_tools.notebook.persistance import TransitionDict
 
 from .models import count_max_evals, energy2linearform
 
 
 def search_in_database(
-    flxs: NDArray[np.float64],
-    fpts: NDArray[np.float64],
+    fluxs: NDArray[np.float64],
+    freqs: NDArray[np.float64],
     datapath: str,
-    allows: dict[str, Any],
+    transitions: TransitionDict,
     EJb: tuple[float, float],
     ECb: tuple[float, float],
     ELb: tuple[float, float],
@@ -35,19 +35,19 @@ def search_in_database(
 ) -> tuple[tuple[float, float, float], Figure]:
     # Load data from database
     with File(datapath, "r") as file:
-        f_flxs = file["flxs"][:]  # (f_flxs, ) # type: ignore[index]
+        f_fluxs = file["flxs"][:]  # (f_flxs, ) # type: ignore[index]
         f_params = file["params"][:]  # (N, 3) # type: ignore[index]
         f_energies = file["energies"][:]  # (N, f_flxs, M) # type: ignore[index]
-    assert isinstance(f_flxs, np.ndarray)
+    assert isinstance(f_fluxs, np.ndarray)
     assert isinstance(f_params, np.ndarray)
     assert isinstance(f_energies, np.ndarray)
 
     # Interpolate points
-    flxs = np.mod(flxs, 1.0)
-    sf_energies = np.empty((f_params.shape[0], len(flxs), f_energies.shape[2]))
+    fluxs = np.mod(fluxs, 1.0)
+    sf_energies = np.empty((f_params.shape[0], len(fluxs), f_energies.shape[2]))
     for n in range(f_params.shape[0]):
         for m in range(f_energies.shape[2]):
-            sf_energies[n, :, m] = np.interp(flxs, f_flxs, f_energies[n, :, m])
+            sf_energies[n, :, m] = np.interp(fluxs, f_fluxs, f_energies[n, :, m])
 
     # Initialize variables
     best_idx = 0
@@ -254,8 +254,8 @@ def search_in_database(
     # search function define done
     # ------------------------------------------------------------
 
-    def process_energy(i, fuzzy) -> tuple[int, float, float]:
-        nonlocal f_params, sf_energies, fpts, allows
+    def process_energy(i: int, fuzzy: bool) -> tuple[int, float, float]:
+        nonlocal f_params, sf_energies, freqs, transitions
         assert isinstance(f_params, np.ndarray)
 
         param = f_params[i]
@@ -264,10 +264,10 @@ def search_in_database(
         if a_min > a_max:
             return i, np.inf, 1.0
 
-        Bs, Cs = energy2linearform(sf_energies[i], allows)
+        Bs, Cs = energy2linearform(sf_energies[i], transitions)
         if fuzzy:
-            return i, *smart_fuzzy_search(fpts, Bs, Cs, a_min, a_max)
-        return i, *candidate_breakpoint_search(fpts, Bs, Cs, a_min, a_max)
+            return i, *smart_fuzzy_search(freqs, Bs, Cs, a_min, a_max)
+        return i, *candidate_breakpoint_search(freqs, Bs, Cs, a_min, a_max)
 
     try:
         for i, dist, factor in Parallel(  # type: ignore[reportGeneralTypeIssues]
@@ -300,12 +300,12 @@ def search_in_database(
         f"Best Distance: {best_dist:.2g}, EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}"
     )
 
-    p_fpts = find_close_points(fpts, sf_energies[best_idx], best_factor, allows)
+    p_freqs = find_close_points(freqs, sf_energies[best_idx], best_factor, transitions)
 
     # Frequency comparison plot
     ax_freq = fig.add_subplot(gs[:, 0])
-    ax_freq.scatter(flxs, fpts, label="Target", color="blue", marker="o")
-    ax_freq.scatter(flxs, p_fpts, label="Predicted", color="red", marker="x")
+    ax_freq.scatter(fluxs, freqs, label="Target", color="blue", marker="o")
+    ax_freq.scatter(fluxs, p_freqs, label="Predicted", color="red", marker="x")
     ax_freq.set_ylabel("Frequency (GHz)")
     ax_freq.set_xlabel("Flux")
     ax_freq.legend()
@@ -322,7 +322,7 @@ def search_in_database(
 
         ax_param.scatter(f_params[:, i] * factors, dists, s=2)
         ax_param.scatter([best_params[i]], [best_dist], color="red", s=50, marker="*")
-        ax_param.set_ylim(0.0, np.nanmax(dists[np.isfinite(dists)]) * 1.1)
+        ax_param.set_ylim(0.0, np.max(dists[np.isfinite(dists)]) * 1.1)
 
     plt.show()
 
@@ -330,14 +330,14 @@ def search_in_database(
 
 
 def fit_spectrum(
-    flxs: NDArray[np.float64],
-    fpts: NDArray[np.float64],
+    fluxs: NDArray[np.float64],
+    freqs: NDArray[np.float64],
     init_params: tuple[float, float, float],
-    allows: dict[str, Any],
+    transitions: TransitionDict,
     param_b: tuple[tuple[float, float], tuple[float, float], tuple[float, float]],
     maxfun: int = 1000,
 ) -> tuple[float, float, float]:
-    evals_count = count_max_evals(allows)
+    max_lvl = count_max_evals(transitions)
 
     pbar = tqdm(desc="Distance: nan", total=maxfun)
 
@@ -350,15 +350,15 @@ def fit_spectrum(
 
     # 使用 least_squares 進行參數最佳化
     def residuals(params) -> np.ndarray:
-        nonlocal flxs, allows, fpts
+        nonlocal fluxs, transitions, freqs
 
         # 計算能量並轉成線性形式
         _, energies = calculate_energy_vs_flx(
-            params, flxs, cutoff=45, evals_count=evals_count
+            params, fluxs, cutoff=45, evals_count=max_lvl
         )
-        Bs, Cs = energy2linearform(energies, allows)
+        Bs, Cs = energy2linearform(energies, transitions)
         # 計算每個點的最小誤差
-        dists = np.min(np.abs(fpts[:, None] - np.abs(Bs + Cs)), axis=1)
+        dists = np.min(np.abs(freqs[:, None] - np.abs(Bs + Cs)), axis=1)
 
         update_pbar(params, np.mean(dists))
 

@@ -26,7 +26,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.simulate import mA2flx
+from zcu_tools.simulate import value2flx
 from zcu_tools.utils.datasaver import load_data, save_data
 
 FluxDepResult: TypeAlias = tuple[
@@ -125,8 +125,8 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         self,
         result: Optional[FluxDepResult] = None,
         *,
-        mA_c: Optional[float] = None,
-        period: Optional[float] = None,
+        flx_half: Optional[float] = None,
+        flx_period: Optional[float] = None,
         ac_coeff: Optional[float] = None,
         fig: Optional[go.Figure] = None,
         secondary_xaxis: bool = True,
@@ -139,8 +139,8 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
         dev_values, pdrs, signals = result
 
-        if mA_c is not None and period is not None:
-            xs = mA2flx(dev_values, mA_c, period)
+        if flx_half is not None and flx_period is not None:
+            xs = value2flx(dev_values, flx_half, flx_period)
         else:
             xs = dev_values
 
@@ -149,7 +149,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         if fig is None:
             fig = go.Figure()
 
-        if mA_c is not None and period is not None:
+        if flx_half is not None and flx_period is not None:
             xlabel = r"$\phi$ (a.u.)"
         else:
             xlabel = r"$A$ (mA)"
@@ -169,7 +169,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         )
 
         if secondary_xaxis:
-            assert mA_c is not None and period is not None
+            assert flx_half is not None and flx_period is not None
             add_secondary_xaxis(fig, xs, dev_values, **fig_kwargs)
 
         if auto_range:

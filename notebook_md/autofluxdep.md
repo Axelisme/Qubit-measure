@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: .venv
+    display_name: zcu-tools (3.9.25)
     language: python
     name: python3
 ---
@@ -83,9 +83,9 @@ GlobalDeviceManager.setup_devices(dev_info, progress=True)
 
 ```python
 preditor = FluxoniumPredictor.from_file(f"{result_dir}/params.json")
-preditor.A_c = md.mA_c
-preditor.period = 2 * abs(md.mA_e - md.mA_c)
-preditor.update_bias(md.bias)
+preditor.flx_half = md.flx_half
+preditor.flx_period = 2 * abs(md.flx_int - md.flx_half)
+preditor.update_bias(md.flx_bias)
 ```
 
 # Start Measurement

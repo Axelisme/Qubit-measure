@@ -1,64 +1,71 @@
 from __future__ import annotations
 
+import time
+
+
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output, display
 from matplotlib.animation import FuncAnimation
 from numpy.typing import NDArray
+from tqdm.auto import tqdm
+from typing_extensions import Optional
 
 from ..processing import cast2real_and_norm, diff_mirror
 
 
 class InteractiveLines:
     TRACK_INFO = {
-        "red": "<span style='color:red'>正在移動紅線</span>",
-        "blue": "<span style='color:blue'>正在移動藍線</span>",
-        "none": "<span style='color:gray'>未選擇線條</span>",
+        "half flux": "<span style='color:red'>正在移動half flux(紅線)</span>",
+        "integer flux": "<span style='color:blue'>正在移動integer flux(藍線)</span>",
+        "none": "<span style='color:gray'>未選擇</span>",
     }
 
     def __init__(
         self,
-        spectrum: NDArray,
-        mAs: NDArray[np.float64],
-        fpts: NDArray[np.float64],
-        mA_c=None,
-        mA_e=None,
+        signals: NDArray,
+        dev_values: NDArray[np.float64],
+        freqs: NDArray[np.float64],
+        flx_half: Optional[float] = None,
+        flx_int: Optional[float] = None,
     ) -> None:
         plt.ioff()  # 避免立即顯示圖表
         self.fig_main, self.ax_main = plt.subplots(figsize=(4, 3))
-        self.fig_zoom, self.ax_zoom = plt.subplots(figsize=(4, 3))
+        self.fig_loss, self.ax_loss = plt.subplots(figsize=(4, 3))
         self.fig_main.tight_layout()
-        self.fig_zoom.tight_layout()
+        self.fig_loss.tight_layout()
         plt.ion()
 
         # 初始化線的位置
-        spect_center = (mAs[0] + mAs[-1]) / 2
-        self.mA_c = spect_center if mA_c is None else mA_c
-        self.mA_e = mAs[-5] if mA_e is None else mA_e
-        if mA_c is not None and mA_e is not None:
-            period = 2 * abs(self.mA_e - self.mA_c)
+        flx_center = (dev_values[0] + dev_values[-1]) / 2
+        self.flx_half = flx_center if flx_half is None else flx_half
+        self.flx_int = dev_values[-5] if flx_int is None else flx_int
+        if flx_half is not None and flx_int is not None:
+            fix_period = 2 * abs(self.flx_int - self.flx_half)
 
-            # fold the mA_c and mA_e to the closest point to the spect_center
-            self.mA_c = (
-                self.mA_c - round((self.mA_c - spect_center) / period, 0) * period
+            # fold the flx_half and flx_int to the closest point to the spect_center
+            self.flx_half = (
+                self.flx_half
+                - round((self.flx_half - flx_center) / fix_period, 0) * fix_period
             )
-            self.mA_e = (
-                self.mA_e - round((self.mA_e - spect_center) / period, 0) * period
+            self.flx_int = (
+                self.flx_int
+                - round((self.flx_int - flx_center) / fix_period, 0) * fix_period
             )
-        self.mA_c = float(self.mA_c)
-        self.mA_e = float(self.mA_e)
+        self.flx_half = float(self.flx_half)
+        self.flx_int = float(self.flx_int)
 
-        self.mAs = mAs
-        self.fpts = fpts
-        self.spectrum = spectrum
+        self.dev_values = dev_values
+        self.freqs = freqs
+        self.signals = signals
 
         # 僅使用振幅 (magnitude) 模式，預設為 False
         self.only_use_magnitude: bool = False
 
         # 根據 only_use_magnitude 計算顯示用資料
         self.real_signals = cast2real_and_norm(
-            spectrum, use_phase=not self.only_use_magnitude
+            signals, use_phase=not self.only_use_magnitude
         )
 
         self.mouse_x = None
@@ -70,9 +77,9 @@ class InteractiveLines:
         self._mouse_moved = False
 
         self.create_widgets()
-        self.create_background(mAs, fpts, self.real_signals)
-        self.create_lines(mAs)
-        self.create_zoom(mAs, fpts, self.real_signals)
+        self.create_background(dev_values, freqs, self.real_signals)
+        self.create_lines(dev_values)
+        self.create_loss(dev_values, freqs, self.real_signals)
 
         # 顯示 widget
         display(
@@ -80,8 +87,8 @@ class InteractiveLines:
                 [
                     widgets.HBox(
                         [
-                            self.red_button,
-                            self.blue_button,
+                            self.flx_half_button,
+                            self.flx_int_button,
                             self.auto_align_button,
                             self.swap_button,
                             self.finish_button,
@@ -95,20 +102,20 @@ class InteractiveLines:
                             self.only_use_magnitude_checkbox,
                         ]
                     ),
-                    widgets.HBox([self.fig_main.canvas, self.fig_zoom.canvas]),
+                    widgets.HBox([self.fig_main.canvas, self.fig_loss.canvas]),
                 ]
             )
         )
 
     def create_widgets(self) -> None:
         """創建 ipywidgets 控件"""
-        self.red_button = widgets.Button(
-            description="選擇紅線",
+        self.flx_half_button = widgets.Button(
+            description="選擇half flux(紅線)",
             button_style="danger",
             tooltip="選擇紅色線進行移動",
         )
-        self.blue_button = widgets.Button(
-            description="選擇藍線",
+        self.flx_int_button = widgets.Button(
+            description="選擇integer flux(藍線)",
             button_style="info",
             tooltip="選擇藍色線進行移動",
         )
@@ -128,21 +135,19 @@ class InteractiveLines:
         self.swap_button = widgets.Button(
             description="交換線條",
             button_style="warning",
-            tooltip="交換紅線與藍線的位置",
+            tooltip="交換half flux(紅線)與integer flux(藍線)的位置",
         )
         self.auto_align_button = widgets.Button(
             description="自動對齊",
             button_style="primary",
-            tooltip="自動找到mirror loss最小的位置並對齊線條",
+            tooltip="自動找到mirror loss最小的位置並移動",
         )
         self.position_text = widgets.HTML(value=self.get_info())
-        self.status_text = widgets.HTML(
-            value="<span style='color:gray'>未選擇線條</span>"
-        )
+        self.status_text = widgets.HTML(value="<span style='color:gray'>未選擇</span>")
 
         # 綁定事件
-        self.red_button.on_click(self.set_picked_red)
-        self.blue_button.on_click(self.set_picked_blue)
+        self.flx_half_button.on_click(self.set_picked_half_flux)
+        self.flx_int_button.on_click(self.set_picked_int_flux)
         self.finish_button.on_click(self.on_finish)
         self.swap_button.on_click(self.swap_lines)
         self.auto_align_button.on_click(self.auto_align_lines)
@@ -152,36 +157,38 @@ class InteractiveLines:
             self.on_toggle_magnitude, names="value"
         )
 
-    def create_background(self, mAs, fpts, amps) -> None:
+    def create_background(self, dev_values, freqs, real_signals) -> None:
         """創建背景圖片"""
         # 儲存圖像控制柄以便之後更新資料
-        dx = (mAs[-1] - mAs[0]) / (len(mAs) - 1)
-        dy = (fpts[-1] - fpts[0]) / (len(fpts) - 1)
+        dx = (dev_values[-1] - dev_values[0]) / (len(dev_values) - 1)
+        dy = (freqs[-1] - freqs[0]) / (len(freqs) - 1)
         self.main_im = self.ax_main.imshow(
-            amps.T,
+            real_signals.T,
             aspect="auto",
             origin="lower",
             interpolation="none",
             extent=(
-                mAs[0] - dx / 2,
-                mAs[-1] + dx / 2,
-                fpts[0] - dy / 2,
-                fpts[-1] + dy / 2,
+                dev_values[0] - dx / 2,
+                dev_values[-1] + dx / 2,
+                freqs[0] - dy / 2,
+                freqs[-1] + dy / 2,
             ),
         )
 
-        self.ax_main.set_xlim(mAs[0], mAs[-1])
-        self.ax_main.set_ylim(fpts[0], fpts[-1])
+        self.ax_main.set_xlim(dev_values[0], dev_values[-1])
+        self.ax_main.set_ylim(freqs[0], freqs[-1])
 
-    def create_lines(self, mAs) -> None:
+    def create_lines(self, dev_values) -> None:
         """創建兩條垂直線"""
         # 創建兩條垂直線
-        self.rline = self.ax_main.axvline(x=self.mA_c, color="r", linestyle="--")
-        self.bline = self.ax_main.axvline(x=self.mA_e, color="b", linestyle="--")
+        self.half_line = self.ax_main.axvline(
+            x=self.flx_half, color="r", linestyle="--"
+        )
+        self.int_line = self.ax_main.axvline(x=self.flx_int, color="b", linestyle="--")
 
         # 設置變數
         self.picked = None
-        self.min_dist = 0.01 * abs(mAs[-1] - mAs[0])
+        self.min_flx_dist = 0.01 * abs(dev_values[-1] - dev_values[0])
         self.is_finished = False
         self.active_line = None  # 用來跟踪目前正在移動的線
 
@@ -198,70 +205,70 @@ class InteractiveLines:
             cache_frame_data=False,
         )
 
-    def create_zoom(self, mAs, fpts, amps) -> None:
-        """創建放大視圖"""
-        self.ax_zoom.set_title(f"mirror loss: {None}")
+    def create_loss(self, dev_values, freqs, real_signals) -> None:
+        """創建mirror loss視圖"""
+        self.ax_loss.set_title(f"mirror loss: {None}")
 
-        dx = (mAs[-1] - mAs[0]) / (len(mAs) - 1)
-        dy = (fpts[-1] - fpts[0]) / (len(fpts) - 1)
-        self.zoom_im = self.ax_zoom.imshow(
-            amps.T,
+        dx = (dev_values[-1] - dev_values[0]) / (len(dev_values) - 1)
+        dy = (freqs[-1] - freqs[0]) / (len(freqs) - 1)
+        self.loss_im = self.ax_loss.imshow(
+            real_signals.T,
             aspect="auto",
             origin="lower",
             interpolation="none",
             extent=(
-                mAs[0] - dx / 2,
-                mAs[-1] + dx / 2,
-                fpts[0] - dy / 2,
-                fpts[-1] + dy / 2,
+                dev_values[0] - dx / 2,
+                dev_values[-1] + dx / 2,
+                freqs[0] - dy / 2,
+                freqs[-1] + dy / 2,
             ),
         )
-        self.ax_zoom.set_xticks([])
-        self.ax_zoom.set_yticks([])
+        self.ax_loss.set_xticks([])
+        self.ax_loss.set_yticks([])
 
         # show red spot at center
-        x = self.mA_c
-        y = 0.5 * (fpts[0] + fpts[-1])
-        self.zoom_dot = self.ax_zoom.plot([x], [y], "ro")[0]
+        x = self.flx_half
+        y = 0.5 * (freqs[0] + freqs[-1])
+        self.loss_dot = self.ax_loss.plot([x], [y], "ro")[0]
 
-        self.anim_zoom = FuncAnimation(
-            self.fig_zoom,
-            self.update_zoom_view,
+        self.anim_loss = FuncAnimation(
+            self.fig_loss,
+            self.update_loss_view,
             interval=500,
             blit=True,
             cache_frame_data=False,
         )
 
     def get_info(self) -> str:
-        return f"紅線: {self.mA_c:.2e}, 藍線: {self.mA_e:.2e}, 週期：{2 * abs(self.mA_e - self.mA_c):.2e}"
+        return f"half flux: {self.flx_half:.2e}, integer flux: {self.flx_int:.2e}, flux period: {2 * abs(self.flx_int - self.flx_half):.2e}"
 
-    def set_picked_red(self, _) -> None:
-        """選擇紅線"""
+    def set_picked_half_flux(self, _) -> None:
+        """選擇half flux(紅線)"""
         if self.is_finished:
             return
 
-        if self.active_line == self.rline:
+        if self.active_line == self.half_line:
             # 如果已經在移動紅線, 則停止移動
             self.stop_tracking()
         else:
             # 開始移動紅線
-            self.active_line = self.rline
-            self.picked = self.rline
-            self.status_text.value = self.TRACK_INFO["red"]
+            self.active_line = self.half_line
+            self.picked = self.half_line
+            self.status_text.value = self.TRACK_INFO["half flux"]
 
-    def set_picked_blue(self, _) -> None:
-        """選擇藍線"""
+    def set_picked_int_flux(self, _) -> None:
+        """選擇integer flux(藍線)"""
         if self.is_finished:
             return
 
-        if self.active_line == self.bline:
+        if self.active_line == self.int_line:
             # 如果已經在移動藍線, 則停止移動
             self.stop_tracking()
         else:
             # 開始移動藍線
-            self.active_line = self.bline
-            self.picked = self.bline
-            self.status_text.value = self.TRACK_INFO["blue"]
+            self.active_line = self.int_line
+            self.picked = self.int_line
+            self.status_text.value = self.TRACK_INFO["integer flux"]
 
     def stop_tracking(self) -> None:
         """停止追蹤滑鼠"""
@@ -270,7 +277,7 @@ class InteractiveLines:
         self.status_text.value = self.TRACK_INFO["none"]
 
     def swap_lines(self, _) -> None:
-        """交換紅線與藍線的位置"""
+        """交換half flux線與integer flux線的位置"""
         if self.is_finished:
             return
 
@@ -278,13 +285,11 @@ class InteractiveLines:
         self.stop_tracking()
 
         # 交換線條的位置
-        temp_mA_c = self.mA_c
-        self.mA_c = self.mA_e
-        self.mA_e = temp_mA_c
+        self.flx_half, self.flx_int = self.flx_int, self.flx_half
 
         # 更新線條的視覺位置
-        self.rline.set_xdata([self.mA_c])
-        self.bline.set_xdata([self.mA_e])
+        self.half_line.set_xdata([self.flx_half])
+        self.int_line.set_xdata([self.flx_int])
 
         # 更新位置文字
         self.position_text.value = self.get_info()
@@ -301,20 +306,20 @@ class InteractiveLines:
         self.stop_tracking()
 
         # 計算搜索範圍：總寬度的二十分之一
-        total_width = abs(self.mAs[-1] - self.mAs[0])
+        total_width = abs(self.dev_values[-1] - self.dev_values[0])
         search_width = total_width / 20
 
         # 為紅線和藍線分別找到最佳位置
-        best_red_pos = self._find_best_position(self.mA_c, search_width)
-        best_blue_pos = self._find_best_position(self.mA_e, search_width)
+        best_flx_half = self._find_best_position(self.flx_half, search_width)
+        best_flx_int = self._find_best_position(self.flx_int, search_width)
 
         # 更新線條位置
-        self.mA_c = best_red_pos
-        self.mA_e = best_blue_pos
+        self.flx_half = best_flx_half
+        self.flx_int = best_flx_int
 
         # 更新線條的視覺位置
-        self.rline.set_xdata([self.mA_c])
-        self.bline.set_xdata([self.mA_e])
+        self.half_line.set_xdata([self.flx_half])
+        self.int_line.set_xdata([self.flx_int])
 
         # 更新位置文字
         self.position_text.value = self.get_info()
@@ -325,25 +330,32 @@ class InteractiveLines:
     def _find_best_position(self, current_pos: float, search_width: float) -> float:
         """在給定範圍內找到mirror loss最小的位置"""
         # 計算半格精度
-        precision = 0.25 * (self.mAs.max() - self.mAs.min()) / len(self.mAs)
+        precision = (
+            0.25
+            * (self.dev_values.max() - self.dev_values.min())
+            / len(self.dev_values)
+        )
 
         # 定義搜索範圍
-        left_bound = max(self.mAs.min(), current_pos - search_width / 2)
-        right_bound = min(self.mAs.max(), current_pos + search_width / 2)
+        left_bound = max(self.dev_values.min(), current_pos - search_width / 2)
+        right_bound = min(self.dev_values.max(), current_pos + search_width / 2)
 
         # 創建候選位置，只考慮半格的整數倍
         # 將邊界轉換為相對於起始點的格數
-        left_steps = int(np.floor((left_bound - self.mAs.min()) / precision))
-        right_steps = int(np.ceil((right_bound - self.mAs.min()) / precision))
+        left_steps = int(np.floor((left_bound - self.dev_values.min()) / precision))
+        right_steps = int(np.ceil((right_bound - self.dev_values.min()) / precision))
 
         # 生成候選位置
         candidates = [
-            self.mAs.min() + i * precision for i in range(left_steps, right_steps + 1)
+            self.dev_values.min() + i * precision
+            for i in range(left_steps, right_steps + 1)
         ]
 
         # 確保候選位置在有效範圍內
         candidates = [
-            pos for pos in candidates if self.mAs.min() <= pos <= self.mAs.max()
+            pos
+            for pos in candidates
+            if self.dev_values.min() <= pos <= self.dev_values.max()
         ]
 
         # 如果沒有有效的候選位置，返回當前位置
@@ -354,14 +366,16 @@ class InteractiveLines:
         min_loss = float("inf")
 
         real_signals = cast2real_and_norm(
-            self.spectrum, use_phase=not self.only_use_magnitude
+            self.signals, use_phase=not self.only_use_magnitude
         )
 
         # 對每個候選位置計算mirror loss
-        for candidate in candidates:
+        pbar = None
+        start_t = time.time()
+        for i, candidate in enumerate(candidates):
             # 計算該位置的mirror loss
             # 總是使用spectrum來計算(包含phase資訊)
-            diff_amps = diff_mirror(self.mAs, real_signals, candidate)
+            diff_amps = diff_mirror(self.dev_values, real_signals, candidate)
             valid_amps = diff_amps[diff_amps != 0.0]
 
             # 確保有有效的數據點
@@ -373,6 +387,17 @@ class InteractiveLines:
                     min_loss = mirror_loss
                     best_pos = candidate
 
+            if pbar is None:
+                if time.time() - start_t > 0.5:  # 如果計算超過0.5秒，才顯示進度條
+                    pbar = tqdm(
+                        candidates, desc="Auto-aligning", unit="pos", leave=False
+                    )
+                    pbar.update(i + 1)
+            else:
+                pbar.update(1)
+        if pbar is not None:
+            pbar.close()
+
         return best_pos
 
     def onclick(self, event) -> None:
@@ -380,12 +405,8 @@ class InteractiveLines:
         if self.is_finished or event.inaxes != self.ax_main:
             return
 
-        # 判斷點擊了哪條線
-        red_x = self.rline.get_xdata()[0]
-        blue_x = self.bline.get_xdata()[0]
-
-        red_dist = abs(event.xdata - red_x)
-        blue_dist = abs(event.xdata - blue_x)
+        flx_half_dist = abs(event.xdata - self.half_line.get_xdata()[0])
+        flx_int_dist = abs(event.xdata - self.int_line.get_xdata()[0])
 
         # 如果已經有活動的線條, 點擊任何位置都停止追蹤
         if self.active_line is not None:
@@ -393,10 +414,10 @@ class InteractiveLines:
             return
 
         # 選擇最近的線
-        if red_dist < blue_dist and red_dist < 3 * self.min_dist:
-            self.set_picked_red(None)
-        elif blue_dist <= red_dist and blue_dist < 3 * self.min_dist:
-            self.set_picked_blue(None)
+        if flx_half_dist < flx_int_dist and flx_half_dist < 3 * self.min_flx_dist:
+            self.set_picked_half_flux(None)
+        elif flx_int_dist <= flx_half_dist and flx_int_dist < 3 * self.min_flx_dist:
+            self.set_picked_int_flux(None)
 
     def onmove(self, event) -> None:
         """滑鼠移動事件"""
@@ -420,34 +441,34 @@ class InteractiveLines:
         if self.picked is None or x is None or y is None:
             return []
 
-        other_line = self.bline if self.picked is self.rline else self.rline
+        other_line = self.int_line if self.picked is self.half_line else self.half_line
         other_x = other_line.get_xdata()[0]
 
         # 確保線之間保持最小距離
-        if x > other_x and x - other_x < self.min_dist:
-            x = other_x + self.min_dist
-        elif x < other_x and other_x - x < self.min_dist:
-            x = other_x - self.min_dist
+        if x > other_x and x - other_x < self.min_flx_dist:
+            x = other_x + self.min_flx_dist
+        elif x < other_x and other_x - x < self.min_flx_dist:
+            x = other_x - self.min_flx_dist
 
         # 更新線的位置
         if self.conjugate_checkbox.value:
             # 同步移動
             dx = x - self.picked.get_xdata()[0]
             # 更新兩條線的位置
-            self.rline.set_xdata([self.rline.get_xdata()[0] + dx])
-            self.bline.set_xdata([self.bline.get_xdata()[0] + dx])
+            self.half_line.set_xdata([self.half_line.get_xdata()[0] + dx])
+            self.int_line.set_xdata([self.int_line.get_xdata()[0] + dx])
         else:
             # 單獨移動
             self.picked.set_xdata([x])
 
         # 更新位置文字
-        self.mA_c = self.rline.get_xdata()[0]
-        self.mA_e = self.bline.get_xdata()[0]
+        self.flx_half = self.half_line.get_xdata()[0]
+        self.flx_int = self.int_line.get_xdata()[0]
         self.position_text.value = self.get_info()
 
-        return [self.rline, self.bline]
+        return [self.half_line, self.int_line]
 
-    def update_zoom_view(self, _) -> list:
+    def update_loss_view(self, _) -> list:
         """更新放大視圖"""
         x, y = self.mouse_x, self.mouse_y
 
@@ -459,24 +480,24 @@ class InteractiveLines:
         self._mouse_moved = False
 
         # 總是使用spectrum來計算(包含phase資訊)
-        diff_amps = diff_mirror(self.mAs, self.spectrum, x)
-        self.zoom_im.set_data(diff_amps.T)
-        self.zoom_im.autoscale()
+        mirror_loss = diff_mirror(self.dev_values, self.signals, x)
+        self.loss_im.set_data(mirror_loss.T)
+        self.loss_im.autoscale()
 
-        mirror_loss = np.mean(diff_amps[diff_amps != 0.0])
+        mirror_loss = np.mean(mirror_loss[mirror_loss != 0.0])
 
         # set axis limits to simulate zoom
-        Dx = 0.3 * abs(self.mAs[-1] - self.mAs[0])
-        Dy = 0.3 * abs(self.fpts[-1] - self.fpts[0])
-        self.ax_zoom.set_xlim(x - Dx, x + Dx)
-        self.ax_zoom.set_ylim(y - Dy, y + Dy)
-        self.ax_zoom.set_title(f"mirror loss: {mirror_loss:.4f}")
+        Dx = 0.3 * abs(self.dev_values[-1] - self.dev_values[0])
+        Dy = 0.3 * abs(self.freqs[-1] - self.freqs[0])
+        self.ax_loss.set_xlim(x - Dx, x + Dx)
+        self.ax_loss.set_ylim(y - Dy, y + Dy)
+        self.ax_loss.set_title(f"mirror loss: {mirror_loss:.4f}")
 
-        self.zoom_dot.set_xdata([x])
-        self.zoom_dot.set_ydata([y])
-        self.zoom_dot.set_color("r" if self.active_line is self.rline else "b")
+        self.loss_dot.set_xdata([x])
+        self.loss_dot.set_ydata([y])
+        self.loss_dot.set_color("r" if self.active_line is self.half_line else "b")
 
-        return [self.zoom_im, self.zoom_dot]
+        return [self.loss_im, self.loss_dot]
 
     def on_finish(self, _) -> None:
         """完成按鈕的回調函數"""
@@ -491,15 +512,15 @@ class InteractiveLines:
         self.active_line = None
         # 停止動畫
         self.anim_main.event_source.stop()
-        self.anim_zoom.event_source.stop()
+        self.anim_loss.event_source.stop()
         plt.close(self.fig_main)
-        plt.close(self.fig_zoom)
+        plt.close(self.fig_loss)
 
     def get_positions(self, finish: bool = True) -> tuple[float, float]:
         """運行交互式選擇器並返回兩條線的位置"""
         if not self.is_finished and finish:
             self.finish_interactive()
-        return float(self.mA_c), float(self.mA_e)
+        return float(self.flx_half), float(self.flx_int)
 
     def on_toggle_magnitude(self, change) -> None:
         """切換是否僅使用振幅資料的顯示模式"""
@@ -514,7 +535,7 @@ class InteractiveLines:
 
         # 重新計算要顯示的資料
         self.real_signals = cast2real_and_norm(
-            self.spectrum, use_phase=not self.only_use_magnitude
+            self.signals, use_phase=not self.only_use_magnitude
         )
 
         self.main_im.set_data(self.real_signals.T)

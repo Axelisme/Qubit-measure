@@ -8,32 +8,30 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
-from typing_extensions import Optional, Tuple
+from typing_extensions import Optional
 
 
 def cast2real_and_norm(
     signals: NDArray, use_phase: bool = True, sigma: float = 1
-) -> np.ndarray:
-    """
-    Convert complex signals to real with maximum snr
-    """
+) -> NDArray[np.float64]:
+    """Convert complex signals to real with maximum snr"""
 
     if use_phase:
         signals = signals - np.ma.mean(signals, axis=1, keepdims=True)
         signals = gaussian_filter1d(signals, sigma=sigma, axis=1)
-        amps = np.abs(signals)
-        amps /= np.ma.std(amps, axis=1, keepdims=True)
+        real_signals = np.abs(signals)
+        real_signals /= np.ma.std(real_signals, axis=1, keepdims=True)
     else:
-        amps = np.abs(signals)
-        amps = gaussian_filter1d(amps, sigma=sigma, axis=1)
+        real_signals = np.abs(signals)
+        real_signals = gaussian_filter1d(real_signals, sigma=sigma, axis=1)
 
-    return amps
+    return real_signals
 
 
 def spectrum2d_findpoint(
-    mAs: NDArray[np.float64],
-    fpts: NDArray[np.float64],
-    amps: NDArray[np.float64],
+    dev_values: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    real_signals: NDArray[np.float64],
     threshold: float,
     weight: Optional[np.ndarray] = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
@@ -42,19 +40,21 @@ def spectrum2d_findpoint(
     """
 
     if weight is not None:
-        amps = amps * weight
+        real_signals = real_signals * weight
 
     s_mAs = []
     s_fpts = []
-    for i in range(amps.shape[0]):
-        peaks, _ = find_peaks(amps[i, :], height=threshold, width=(1, None), distance=5)
+    for i in range(real_signals.shape[0]):
+        peaks, _ = find_peaks(
+            real_signals[i, :], height=threshold, width=(1, None), distance=5
+        )
 
         # If too many peaks, take the top 3
         if len(peaks) > 3:
-            peaks = peaks[np.argsort(amps[i, peaks])[-3:]]
+            peaks = peaks[np.argsort(real_signals[i, peaks])[-3:]]
 
-        s_mAs.extend(mAs[i] * np.ones(len(peaks)))
-        s_fpts.extend(fpts[peaks])
+        s_mAs.extend(dev_values[i] * np.ones(len(peaks)))
+        s_fpts.extend(freqs[peaks])
     return np.array(s_mAs), np.array(s_fpts)
 
 

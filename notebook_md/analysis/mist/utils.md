@@ -22,7 +22,7 @@ from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 qub_name = "Si001"
 
 loadpath = f"../../../result/{qub_name}/params.json"
-_, params, mA_c, period, allows, data_dict = load_result(loadpath)
+_, params, flx_half, period, allows, data_dict = load_result(loadpath)
 
 print(f"EJ: {params[0]:.3f} GHz, EC: {params[1]:.3f} GHz, EL: {params[2]:.3f} GHz")
 

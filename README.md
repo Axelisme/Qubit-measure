@@ -121,7 +121,7 @@ python sync.py md2nb # 建立預設notebook
   * 使用 `ExperimentManager.use_flux(...)` 從先前的磁通掃描結果讀入 `ModuleLibrary (ml)` 與 `MetaDict (md)`，並以 `FluxoniumPredictor` 載入 `params.json` 中的參數，作為接下來自動掃描的預測模型。
 
 * **設定磁通掃描與任務組合**  
-  * 透過 `FluxDepExecutor` 設定一組磁通掃描點（例如 `flx_values = np.linspace(...)`），並加入多個任務：  
+  * 透過 `FluxDepExecutor` 設定一組磁通掃描點（例如 `dev_values = np.linspace(...)`），並加入多個任務：  
     * `QubitFreqTask`：尋找每個磁通點的量子位共振頻率。  
     * `LenRabiTask`：自動調整 Rabi pulse 長度與增益，以得到穩定的 \(\pi\) 脈衝。  
     * `T1Task`、`T2RamseyTask`、`T2EchoTask`：自動量測壽命與相干時間。  
@@ -155,7 +155,7 @@ python sync.py md2nb # 建立預設notebook
   * 讀取原始 flux 依賴光譜（HDF5，通常由 one-tone / flux 掃描實驗產生），並利用互動工具 `InteractiveLines`、`InteractiveFindPoints` 手動挑選共振點。  
   * 使用事先透過 `script/generate_data.py` 產生的 Fluxonium 模擬資料庫（預設存於 `Database/simulation/fluxonium_*.h5`，內含隨機掃描的 \((E_J, E_C, E_L)\) 參數與對應能階），搭配 `calculate_energy_vs_flx` 搜尋最佳的 \(E_J, E_C, E_L\) 參數，使模擬能階與實驗點對齊。  
   * 產生並儲存：  
-    * `result/<qub_name>/params.json`：包含最佳擬合參數、磁通中心 `mA_c`、週期 `period`、以及允許的躍遷集合 `allows`。  
+    * `result/<qub_name>/params.json`：包含最佳擬合參數、磁通中心 `flx_half`、週期 `flx_period`、以及允許的躍遷集合 `allows`。  
     * `data/fluxdep/spectrums.hdf5` 與 `selected_points.npz`：整理好的光譜與手動選點資料。  
     * 對應的圖檔與網頁（`image/fluxdep_fit/*.png`、`web/fluxdep_fit/*.html`）。
 

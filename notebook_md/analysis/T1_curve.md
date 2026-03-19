@@ -47,7 +47,7 @@ from zcu_tools.notebook.analysis.t1_curve import (
     find_proper_Temp,
     charge_spectral_density,
 )
-from zcu_tools.simulate import flx2mA, mA2flx
+from zcu_tools.simulate import flx2value, value2flx
 from zcu_tools.simulate.fluxonium import (
     calculate_eff_t1_with,
     calculate_percell_t1_vs_flx,
@@ -70,10 +70,10 @@ os.makedirs(image_dir, exist_ok=True)
 
 ```python
 loadpath = f"{result_dir}/params.json"
-_, params, mA_c, period, allows, results = load_result(loadpath)
+_, params, flx_half, period, allows, results = load_result(loadpath)
 EJ, EC, EL = params
 
-# mA_c = 3.81
+# flx_half = 3.81
 
 print(allows)
 
@@ -112,13 +112,13 @@ s_T1errs = 1e3 * freqs_df["T1err (us)"].values  # type: ignore
 s_mAs, s_fpts, s_T1s, s_T1errs = tuple(
     np.array(a) for a in zip(*sorted(zip(s_mAs, s_fpts, s_T1s, s_T1errs)))
 )
-s_flxs = mA2flx(s_mAs, mA_c, period)
+s_flxs = value2flx(s_mAs, flx_half, period)
 
 freqs_df.head(10)
 ```
 
 ```python
-fig, _ = plot_sample_t1(s_mAs, s_T1s, s_T1errs, mA_c, period)
+fig, _ = plot_sample_t1(s_mAs, s_T1s, s_T1errs, flx_half, period)
 fig.savefig(f"{image_dir}/T1s.png")
 plt.show()
 ```
@@ -127,7 +127,7 @@ plt.show()
 
 ```python
 t_flxs = np.linspace(0.0, 1.0, 100)
-t_mAs = flx2mA(t_flxs, mA_c, period)
+t_mAs = flx2value(t_flxs, flx_half, period)
 ```
 
 ```python
@@ -148,7 +148,16 @@ s_spectrum_data = fluxonium.get_spectrum_vs_paramvals(
 ```python
 Temp = 60e-3
 
-plot_args = (s_mAs, s_T1s, s_T1errs, mA_c, period, fluxonium, t_spectrum_data, t_flxs)
+plot_args = (
+    s_mAs,
+    s_T1s,
+    s_T1errs,
+    flx_half,
+    period,
+    fluxonium,
+    t_spectrum_data,
+    t_flxs,
+)
 ```
 
 ## Q_cap
@@ -371,7 +380,7 @@ fig, ax = plot_eff_t1_with_sample(
     s_T1s,
     s_T1errs,
     1 / (1 / t1_effs + 1 / percell_t1s),
-    mA_c,
+    flx_half,
     period,
     t_flxs,
     label=noise_label,
@@ -391,7 +400,7 @@ fig, ax = plot_eff_t1_with_sample(
     s_T1s,
     s_T1errs,
     t1_effs,
-    mA_c,
+    flx_half,
     period,
     t_flxs,
     label=noise_label,

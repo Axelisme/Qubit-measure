@@ -3,7 +3,7 @@ from __future__ import annotations
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import display
+from IPython.display import display, clear_output
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
@@ -13,14 +13,14 @@ from typing_extensions import Any
 class InteractiveOneTone:
     def __init__(
         self,
-        mAs: NDArray[np.float64],
-        fpts: NDArray[np.float64],
-        spectrum: NDArray,
+        signals: NDArray[np.complex128],
+        dev_values: NDArray[np.float64],
+        freqs: NDArray[np.float64],
         threshold: float = 1.0,
     ) -> None:
-        self.mAs = mAs
-        self.fpts = fpts
-        self.spectrum = spectrum
+        self.signals = signals
+        self.dev_values = dev_values
+        self.freqs = freqs
         self.is_finished = False
 
         plt.ioff()  # to avoid showing the plot immediately
@@ -60,30 +60,46 @@ class InteractiveOneTone:
     def init_plots(self, threshold: float) -> None:
         """初始化圖表"""
         # 顯示2D頻譜
-        self.amps2d = np.abs(self.spectrum)  # (fpts, mAs)
+        self.real_signals = np.abs(self.signals)  # (mAs, fpts)
 
-        self.max_idx = np.argmax(np.mean(self.amps2d, axis=1))
+        abs_grad = (
+            np.abs(self.signals[:, 1:] - self.signals[:, :-1])
+            / (self.freqs[1:] - self.freqs[:-1])[None]
+        )
+        rel_grad = abs_grad / (
+            np.clip(np.abs(self.signals[:, 1:] + self.signals[:, :-1]), 1e-12, None)
+        )
+        rel_grad = gaussian_filter1d(rel_grad, sigma=1, axis=1)
+
+        self.max_freq_idx = np.argmax(np.mean(rel_grad, axis=0))
+
         self.img = self.axes[0].imshow(
-            self.amps2d,
+            self.real_signals.T,
             aspect="auto",
             origin="lower",
-            extent=(self.mAs[0], self.mAs[-1], self.fpts[0], self.fpts[-1]),
+            extent=(
+                self.dev_values[0],
+                self.dev_values[-1],
+                self.freqs[0],
+                self.freqs[-1],
+            ),
         )
         self.line = self.axes[0].axhline(
-            self.fpts[self.max_idx],
+            self.freqs[self.max_freq_idx],
             color="red",
             label="max fpts",
         )
 
         # 顯示1D切面
-        self.amps = self.amps2d[self.max_idx, :]  # (mAs,)
+        self.real_signals_slice = self.real_signals[:, self.max_freq_idx]  # (mAs,)
 
-        self.smoothed_amps = gaussian_filter1d(
-            np.max(self.amps) - self.amps, sigma=1
-        )  # smooth the signal
-        self.smoothed_amps /= np.std(self.smoothed_amps)  # normalize the signal
+        self.smoothed_real_signals = gaussian_filter1d(
+            np.max(self.real_signals_slice) - self.real_signals_slice, sigma=1
+        )
+        self.smoothed_real_signals /= np.std(self.smoothed_real_signals)
 
-        (self.curve,) = self.axes[1].plot(self.mAs, self.smoothed_amps)
+        (self.curve,) = self.axes[1].plot(self.dev_values, self.smoothed_real_signals)
+        self.axes[1].set_xlim(self.dev_values[0], self.dev_values[-1])
 
         # 找峰值並顯示
         self.update_peaks(threshold)
@@ -97,11 +113,11 @@ class InteractiveOneTone:
         """更新峰值點"""
 
         # 找出峰值
-        peaks, _ = find_peaks(self.smoothed_amps, prominence=threshold)
+        peaks, _ = find_peaks(self.smoothed_real_signals, prominence=threshold)
 
         # 獲取對應的 mAs 和 fpts
-        self.s_mAs = self.mAs[peaks]
-        self.s_fpts = np.full_like(self.s_mAs, self.fpts[self.max_idx])
+        self.s_dev_values = self.dev_values[peaks]
+        self.s_freqs = np.full_like(self.s_dev_values, self.freqs[self.max_freq_idx])
 
         # 更新圖表上的峰值標記
         if hasattr(self, "scatter1"):
@@ -111,12 +127,16 @@ class InteractiveOneTone:
 
         # 在上圖中標記所選點
         self.scatter1 = self.axes[0].scatter(
-            self.s_mAs, self.s_fpts, color="red", s=30, zorder=5
+            self.s_dev_values, self.s_freqs, color="red", s=30, zorder=5
         )
 
         # 在下圖中標記峰值
         self.scatter2 = self.axes[1].scatter(
-            self.s_mAs, self.smoothed_amps[peaks], color="red", s=30, zorder=5
+            self.s_dev_values,
+            self.smoothed_real_signals[peaks],
+            color="red",
+            s=30,
+            zorder=5,
         )
 
         # 更新圖表
@@ -134,8 +154,11 @@ class InteractiveOneTone:
         plt.close(self.fig)
         self.is_finished = True
 
-    def get_positions(self) -> tuple[np.ndarray, np.ndarray]:
+        # also clear the output
+        clear_output(wait=False)
+
+    def get_positions(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         """返回找到的點位置"""
         if not self.is_finished:
             self.on_finish(None)
-        return self.s_mAs, self.s_fpts
+        return self.s_dev_values, self.s_freqs

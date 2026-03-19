@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import os
 from copy import deepcopy
 from pathlib import Path
@@ -127,6 +128,8 @@ def make_comment(cfg: Mapping[str, Any], comment: Optional[str] = None) -> str:
     cfg = dict(deepcopy(cfg))
     if comment is not None:
         cfg["comment"] = comment
+
+    cfg["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
 
     return json.dumps(cfg, indent=2)
 

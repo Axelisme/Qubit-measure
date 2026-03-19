@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 from scipy.optimize import minimize
 from typing_extensions import TYPE_CHECKING, Callable, Optional, Union
 
-from zcu_tools.simulate import flx2mA, mA2flx
+from zcu_tools.simulate import flx2value, value2flx
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flx_with
 
 if TYPE_CHECKING:
@@ -28,9 +28,9 @@ def format_exponent(n: float) -> str:
     return rf"${base} \times 10^{{{clean_exp}}}$"
 
 
-def freq2omega(fpts: NDArray[np.float64]) -> NDArray[np.float64]:
+def freq2omega(freqs: NDArray[np.float64]) -> NDArray[np.float64]:
     """GHz -> rad/ns"""
-    return 2 * np.pi * fpts
+    return 2 * np.pi * freqs
 
 
 def charge_spectral_density(omega, Temp: float, EC: float):
@@ -87,14 +87,14 @@ def calc_Qcap_vs_omega(
 
 def calc_Qind_vs_omega(
     params: tuple[float, float, float],
-    fpts: NDArray[np.float64],
+    freqs: NDArray[np.float64],
     T1s: NDArray[np.float64],
     phi_elements: NDArray[np.float64],
     T1errs: Optional[NDArray[np.float64]] = None,
     Temp: float = 20e-3,
 ) -> Union[NDArray[np.float64], tuple[NDArray[np.float64], NDArray[np.float64]]]:
     """fpts: GHz, T1s: ns, guess_Temp: K"""
-    omegas = freq2omega(fpts)
+    omegas = freq2omega(freqs)
 
     EJ, EC, EL = params
 
@@ -129,13 +129,13 @@ def find_proper_Temp(
 
 
 def plot_Q_vs_omega(
-    fpts: NDArray[np.float64],
+    freqs: NDArray[np.float64],
     Q_vs_omega: NDArray[np.float64],
     Q_vs_omega_err: NDArray[np.float64],
     Qname: str = r"$Q_{cap}$",
 ) -> tuple[Figure, Axes]:
-    """fpts: GHz, Q_vs_omega: ns/rad, Q_vs_omega_err: ns/rad"""
-    omegas = freq2omega(fpts)
+    """freqs: GHz, Q_vs_omega: ns/rad, Q_vs_omega_err: ns/rad"""
+    omegas = freq2omega(freqs)
 
     fig, ax = plt.subplots()
     ax.errorbar(omegas, Q_vs_omega, yerr=Q_vs_omega_err, fmt=".", label="data")
@@ -152,26 +152,26 @@ def plot_Q_vs_omega(
 
 def add_Q_fit(
     ax: Axes,
-    fpts: NDArray[np.float64],
+    freqs: NDArray[np.float64],
     Q_vs_omega: NDArray[np.float64],
-    w_range: Optional[tuple[Optional[float], Optional[float]]] = None,
+    omega_range: Optional[tuple[Optional[float], Optional[float]]] = None,
     fit_constant: bool = False,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """fpts: GHz, Q_vs_omega: ns/rad, w_range: (GHz, GHz)"""
-    omegas = freq2omega(fpts)
+    """freqs: GHz, Q_vs_omega: ns/rad, omega_range: (rad/ns, rad/ns)"""
+    omegas = freq2omega(freqs)
 
-    if w_range is not None:
+    if omega_range is not None:
         fit_idxs = np.arange(len(omegas))
-        if w_range[0] is not None:
-            fit_idxs = fit_idxs[omegas[fit_idxs] >= w_range[0]]
-        if w_range[1] is not None:
-            fit_idxs = fit_idxs[omegas[fit_idxs] <= w_range[1]]
+        if omega_range[0] is not None:
+            fit_idxs = fit_idxs[omegas[fit_idxs] >= omega_range[0]]
+        if omega_range[1] is not None:
+            fit_idxs = fit_idxs[omegas[fit_idxs] <= omega_range[1]]
         if len(fit_idxs) == 0:
             raise ValueError("No omega in the range")
         omegas = omegas[fit_idxs]
         Q_vs_omega = Q_vs_omega[fit_idxs]
     else:
-        w_range = (None, None)
+        omega_range = (None, None)
 
     if fit_constant:  # if fit_constant is True, fit a constant
         mean_Q = np.exp(np.mean(np.log(Q_vs_omega)))
@@ -248,16 +248,17 @@ def plot_t1_vs_m01(
 
 
 def plot_sample_t1(
-    s_mAs: NDArray[np.float64],
+    s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
-    mA_c: float,
-    period: float,
+    flx_half: float,
+    flx_period: float,
+    xlabel: str = "Current (mA)",
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
 
-    s_flxs = mA2flx(s_mAs, mA_c=mA_c, period=period)
+    s_flxs = value2flx(s_dev_values, flx_half, flx_period)
 
     ax.errorbar(s_flxs, s_T1s, yerr=s_T1errs, fmt=".", label="Current")
 
@@ -269,46 +270,47 @@ def plot_sample_t1(
     ax2 = ax.secondary_xaxis(
         "top",
         functions=(
-            partial(flx2mA, mA_c=mA_c, period=period),
-            partial(mA2flx, mA_c=mA_c, period=period),
+            partial(flx2value, flx_half=flx_half, flx_period=flx_period),
+            partial(value2flx, flx_half=flx_half, flx_period=flx_period),
         ),
     )
-    ax2.set_xlabel("Current (mA)", fontsize=14)
+    ax2.set_xlabel(xlabel, fontsize=14)
 
     return fig, ax
 
 
 def plot_t1_with_sample(
-    s_mAs: NDArray[np.float64],
+    s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
-    mA_c: float,
-    period: float,
+    flx_half: float,
+    flx_period: float,
     fluxonium: Fluxonium,
     spectrum_data: SpectrumData,
-    t_flxs: NDArray[np.float64],
+    t_fluxs: NDArray[np.float64],
     *,
     name: str,
     noise_name: str,
-    values: list[
+    noise_values: list[
         Union[float, Callable[[NDArray[np.float64], float], NDArray[np.float64]]]
     ],
     Temp: float,
+    xlabel: str = "Current (mA)",
     **other_noise_options: dict,
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
-    s_flxs = mA2flx(s_mAs, mA_c=mA_c, period=period)
+    s_flxs = value2flx(s_dev_values, flx_half, flx_period)
 
     t1_effs = [
         calculate_eff_t1_vs_flx_with(
-            t_flxs,
+            t_fluxs,
             noise_channels=[(noise_name, {name: v})],  # type: ignore
             Temp=Temp,
             fluxonium=fluxonium,
             spectrum_data=spectrum_data,
             **other_noise_options,
         )
-        for v in values
+        for v in noise_values
     ]
 
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
@@ -322,9 +324,9 @@ def plot_t1_with_sample(
         "Q_ind": r"$Q_{ind}$",
     }[name]
 
-    for v, t1_eff in zip(values, t1_effs):
+    for v, t1_eff in zip(noise_values, t1_effs):
         label = f"{nname}(w)" if callable(v) else f"{nname} = {format_exponent(v)}"
-        ax.plot(t_flxs, t1_eff, label=label, linestyle="--")
+        ax.plot(t_fluxs, t1_eff, label=label, linestyle="--")
 
     range = np.ptp(s_flxs)
     ax.set_xlim(s_flxs.min() - 0.01 * range, s_flxs.max() + 0.01 * range)
@@ -337,36 +339,37 @@ def plot_t1_with_sample(
     ax2 = ax.secondary_xaxis(
         "top",
         functions=(
-            partial(flx2mA, mA_c=mA_c, period=period),
-            partial(mA2flx, mA_c=mA_c, period=period),
+            partial(flx2value, flx_half=flx_half, flx_period=flx_period),
+            partial(value2flx, flx_half=flx_half, flx_period=flx_period),
         ),
     )
-    ax2.set_xlabel(r"Current (mA)", fontsize=14)
+    ax2.set_xlabel(xlabel, fontsize=14)
 
     return fig, ax
 
 
 def plot_eff_t1_with_sample(
-    s_mAs: NDArray[np.float64],
+    s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
     t1_effs: NDArray[np.float64],
-    mA_c: float,
-    period: float,
-    t_flxs: NDArray[np.float64],
+    flx_half: float,
+    flx_period: float,
+    t_fluxs: NDArray[np.float64],
     *,
     label: str = r"$t_1^{eff}$",
     title: Optional[str] = None,
+    xlabel: str = "Current (mA)",
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     if title is not None:
         fig.suptitle(title)
 
-    s_flxs = mA2flx(s_mAs, mA_c=mA_c, period=period)
+    s_flxs = value2flx(s_dev_values, flx_half, flx_period)
     ax.errorbar(s_flxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
 
-    ax.plot(t_flxs, t1_effs, label=label, linestyle="--")
+    ax.plot(t_fluxs, t1_effs, label=label, linestyle="--")
 
     range = np.ptp(s_flxs)
     ax.set_xlim(s_flxs.min() - 0.01 * range, s_flxs.max() + 0.01 * range)
@@ -380,10 +383,10 @@ def plot_eff_t1_with_sample(
     ax2 = ax.secondary_xaxis(
         "top",
         functions=(
-            partial(flx2mA, mA_c=mA_c, period=period),
-            partial(mA2flx, mA_c=mA_c, period=period),
+            partial(flx2value, flx_half=flx_half, flx_period=flx_period),
+            partial(value2flx, flx_half=flx_half, flx_period=flx_period),
         ),
     )
-    ax2.set_xlabel(r"Current (mA)", fontsize=14)
+    ax2.set_xlabel(xlabel, fontsize=14)
 
     return fig, ax

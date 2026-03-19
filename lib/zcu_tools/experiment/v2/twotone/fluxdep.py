@@ -88,8 +88,8 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
     def analyze(
         self,
         result: Optional[FreqFluxResult] = None,
-        mA_c: Optional[float] = None,
-        mA_e: Optional[float] = None,
+        flx_half: Optional[float] = None,
+        flx_int: Optional[float] = None,
     ) -> InteractiveLines:
         if result is None:
             result = self.last_result
@@ -100,7 +100,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         signals2D = minus_background(signals2D, axis=1)
 
         actline = InteractiveLines(
-            signals2D, mAs=values, fpts=fpts, mA_c=mA_c, mA_e=mA_e
+            signals2D, values, fpts, flx_half=flx_half, flx_int=flx_int
         )
 
         return actline
@@ -115,7 +115,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
 
         values, fpts, signals2D = result
 
-        point_selector = InteractiveFindPoints(signals2D.T, mAs=values, fpts=fpts)
+        point_selector = InteractiveFindPoints(signals2D, values, fpts)
 
         return point_selector
 

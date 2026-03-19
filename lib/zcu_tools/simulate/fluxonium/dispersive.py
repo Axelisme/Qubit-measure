@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 def calculate_dispersive(
-    params: tuple[float, float, float], flx: float, r_f: float, g: float
+    params: tuple[float, float, float], flux: float, bare_rf: float, g: float
 ) -> tuple[float, float]:
     """
     Calculate the dispersive shift of ground and excited state
@@ -24,8 +24,8 @@ def calculate_dispersive(
     from scqubits.core.hilbert_space import HilbertSpace
     from scqubits.core.oscillator import Oscillator
 
-    resonator = Oscillator(r_f, truncated_dim=resonator_dim)
-    fluxonium = Fluxonium(*params, flux=flx, cutoff=cutoff, truncated_dim=evals_count)
+    resonator = Oscillator(bare_rf, truncated_dim=resonator_dim)
+    fluxonium = Fluxonium(*params, flux=flux, cutoff=cutoff, truncated_dim=evals_count)
     hilbertspace = HilbertSpace([resonator, fluxonium])
     hilbertspace.add_interaction(
         g=g, op1=resonator.creation_operator, op2=fluxonium.n_operator, add_hc=True
@@ -49,7 +49,7 @@ def calculate_dispersive_sweep(
     sweep_list: NDArray[np.float64],
     update_fn: Callable[[Fluxonium, Any], None],
     g: float,
-    r_f: float,
+    bare_rf: float,
     progress: bool = True,
     res_dim: int = 5,
     qub_cutoff: int = 30,
@@ -66,7 +66,7 @@ def calculate_dispersive_sweep(
     from scqubits.core.oscillator import Oscillator
     from scqubits.core.param_sweep import ParameterSweep
 
-    resonator = Oscillator(r_f, truncated_dim=res_dim)
+    resonator = Oscillator(bare_rf, truncated_dim=res_dim)
     fluxonium = Fluxonium(
         *(1.0, 1.0, 1.0), flux=0.5, cutoff=qub_cutoff, truncated_dim=qub_dim
     )
@@ -103,8 +103,8 @@ def calculate_dispersive_sweep(
 
 def calculate_dispersive_vs_flx(
     params: tuple[float, float, float],
-    flxs: NDArray[np.float64],
-    r_f: float,
+    fluxs: NDArray[np.float64],
+    bare_rf: float,
     g: float,
     progress: bool = True,
     res_dim: int = 10,
@@ -123,10 +123,10 @@ def calculate_dispersive_vs_flx(
         fluxonium.EL = params[2]
 
     return calculate_dispersive_sweep(
-        flxs,
+        fluxs,
         update_hilbertspace,
         g,
-        r_f,
+        bare_rf,
         progress,
         res_dim,
         qub_cutoff,
@@ -139,7 +139,7 @@ def calculate_chi_sweep(
     sweep_list: Union[NDArray, list],
     update_fn: Callable[[Fluxonium, Any], None],
     g: float,
-    r_f: float,
+    bare_rf: float,
     progress: bool = True,
     resonator_dim: int = 5,
     cutoff: int = 30,
@@ -153,8 +153,9 @@ def calculate_chi_sweep(
     from scqubits.core.fluxonium import Fluxonium
     from scqubits.core.hilbert_space import HilbertSpace
     from scqubits.core.oscillator import Oscillator
+    from scqubits.core.param_sweep import ParameterSweep
 
-    resonator = Oscillator(r_f, truncated_dim=resonator_dim)
+    resonator = Oscillator(bare_rf, truncated_dim=resonator_dim)
     fluxonium = Fluxonium(
         *(1.0, 1.0, 1.0), flux=0.5, cutoff=cutoff, truncated_dim=evals_count
     )
@@ -183,8 +184,8 @@ def calculate_chi_sweep(
 
 def calculate_chi_vs_flx(
     params: tuple[float, float, float],
-    flxs: NDArray[np.float64],
-    r_f: float,
+    fluxs: NDArray[np.float64],
+    bare_rf: float,
     g: float,
     progress: bool = True,
     res_dim: int = 5,
@@ -204,10 +205,10 @@ def calculate_chi_vs_flx(
         fluxonium.EL = params[2]
 
     return calculate_chi_sweep(
-        flxs,
+        fluxs,
         update_hilbertspace,
         g,
-        r_f,
+        bare_rf,
         progress,
         res_dim,
         qub_cutoff,

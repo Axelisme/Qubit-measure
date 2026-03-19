@@ -5,7 +5,7 @@ from copy import deepcopy
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Mapping, Optional, TypeAlias
+from typing_extensions import Any, Mapping, Optional, TypeAlias, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
@@ -81,8 +81,8 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
     def analyze(
         self,
         result: Optional[FluxDepResult] = None,
-        mA_c: Optional[float] = None,
-        mA_e: Optional[float] = None,
+        flx_half: Optional[float] = None,
+        flx_int: Optional[float] = None,
     ) -> InteractiveLines:
         if result is None:
             result = self.last_result
@@ -92,10 +92,10 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
         actline = InteractiveLines(
             signals2D,
-            mAs=values,
-            fpts=fpts,
-            mA_c=mA_c,
-            mA_e=mA_e,
+            dev_values=values,
+            freqs=fpts,
+            flx_half=flx_half,
+            flx_int=flx_int,
         )
 
         return actline
@@ -116,28 +116,27 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
-            y_info={"name": "Flux device value", "unit": "a.u.", "values": values},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
+            x_info={"name": "Flux device value", "unit": "a.u.", "values": values},
+            y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
             tag=tag,
             **kwargs,
         )
 
     def load(self, filepath: str, **kwargs) -> FluxDepResult:
-        signals2D, fpts, values = load_data(filepath, **kwargs)
-        assert fpts is not None and values is not None
+        signals2D, values, fpts, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        assert fpts is not None
         assert len(fpts.shape) == 1 and len(values.shape) == 1
-        assert signals2D.shape == (len(fpts), len(values))
+        assert signals2D.shape == (len(values), len(fpts))
 
         fpts = fpts * 1e-6  # Hz -> MHz
-        signals2D = signals2D.T  # transpose back
 
         values = values.astype(np.float64)
         fpts = fpts.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = cast(FluxDepCfg, cfg)
         self.last_result = (values, fpts, signals2D)
 
         return values, fpts, signals2D

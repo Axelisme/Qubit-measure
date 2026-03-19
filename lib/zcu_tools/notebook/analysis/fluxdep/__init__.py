@@ -14,4 +14,9 @@ from .onetone import InteractiveOneTone
 
 # Data processing
 from .processing import spectrum2d_findpoint
-from .utils import FluxDependVisualizer, FreqFluxDependVisualizer, add_secondary_xaxis
+from .utils import (
+    FluxDependVisualizer,
+    FreqFluxDependVisualizer,
+    add_secondary_xaxis,
+    derive_bound,
+)

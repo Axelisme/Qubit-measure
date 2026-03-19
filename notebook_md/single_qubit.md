@@ -126,18 +126,18 @@ flux_yoko.set_mode("current", rampstep=1e-6)
 ```
 
 ```python
-md.cur_A = flux_yoko.get_current()
-md.cur_A * 1e3
-# md.cur_V = flux_yoko.get_voltage()
-# md.cur_V
+md.cur_value = flux_yoko.get_current()
+md.cur_value * 1e3
+# md.cur_value = flux_yoko.get_voltage()
+# md.cur_value
 ```
 
 ```python
-# md.cur_A = 1.8e-3
-# md.cur_A = md.mA_e
-flux_yoko.set_current(current=md.cur_A)
-# md.cur_V = 0.0
-# flux_yoko.set_voltage(voltage=md.cur_V)
+# md.cur_value = 1.8e-3
+# md.cur_value = md.flx_int
+flux_yoko.set_current(current=md.cur_value)
+# md.cur_value = 0.0
+# flux_yoko.set_voltage(voltage=md.cur_value)
 ```
 
 ### JPA Flux
@@ -195,8 +195,8 @@ jpa_sgs.get_info()
 # Initial Experiment Folder
 
 ```python
-# ml, md = em.new_flux(md.cur_A, unit="A")
-# ml, md = em.new_flux(md.cur_A, clone_from=(ml, md), unit="A")
+# ml, md = em.new_flux(md.cur_value, unit="A")
+# ml, md = em.new_flux(md.cur_value, clone_from=(ml, md), unit="A")
 ml, md = em.use_flux(label="031713_3.276mA")
 ml, md
 ```
@@ -372,10 +372,10 @@ res_pdr_exp.save(
 ## Flux dependence
 
 ```python
-md.cur_A = -7e-3
-1e3 * flux_yoko.set_current(md.cur_A)
-# md.cur_V = 0.0
-# flux_yoko.set_voltage(md.cur_V)
+md.cur_value = -7e-3
+1e3 * flux_yoko.set_current(md.cur_value)
+# md.cur_value = 0.0
+# flux_yoko.set_voltage(md.cur_value)
 ```
 
 ```python
@@ -429,21 +429,21 @@ res_flux_exp.save(
 ```python
 %matplotlib widget
 actline = res_flux_exp.analyze(
-    # mA_c=preditor.A_c, mA_e=preditor.A_c + 0.5 * preditor.period
+    # flx_half=preditor.A_c, flx_int=preditor.A_c + 0.5 * preditor.period
 )
 ```
 
 ```python
-md.mA_c, md.mA_e = actline.get_positions()
-md.mA_c, md.mA_e, 2 * abs(md.mA_e - md.mA_c)
+md.flx_half, md.flx_int = actline.get_positions()
+md.flx_half, md.flx_int, 2 * abs(md.flx_int - md.flx_half)
 ```
 
 ```python
-# md.cur_A = md.mA_e
-md.cur_A = (1.0 - 0.5) * (md.mA_e - md.mA_c) / 0.5 + md.mA_c
-1e3 * flux_yoko.set_current(md.cur_A)
-# md.cur_V = mA_c
-# flux_yoko.set_voltage(md.cur_V)
+# md.cur_value = md.flx_int
+md.cur_value = (1.0 - 0.5) * (md.flx_int - md.flx_half) / 0.5 + md.flx_half
+1e3 * flux_yoko.set_current(md.cur_value)
+# md.cur_value = flx_half
+# flux_yoko.set_voltage(md.cur_value)
 ```
 
 ## Set readout pulse
@@ -771,29 +771,29 @@ sample_table = SampleTable(f"{result_dir}/samples.csv")
 
 ```python
 preditor = FluxoniumPredictor.from_file(f"{result_dir}/params.json")
-preditor.A_c = md.mA_c
-preditor.period = 2 * abs(md.mA_e - md.mA_c)
-preditor.update_bias(md.bias)
+preditor.flx_half = md.flx_half
+preditor.flx_period = 2 * abs(md.flx_int - md.flx_half)
+preditor.update_bias(md.flx_bias)
 ```
 
 # Twotone Frequency
 
 ```python
 # print(preditor.predict_freq(preditor.flx_to_A(0.53)))
-# md.cur_A = 1.8e-3
-# md.cur_A = preditor.flx_to_A(0.84)
-# md.cur_A = flux_yoko.get_current()
-# 1e3 * flux_yoko.set_current(md.cur_A)
-# md.cur_V = 0.0
-# flux_yoko.set_voltage(md.cur_V)
+# md.cur_value = 1.8e-3
+# md.cur_value = preditor.flx_to_A(0.84)
+# md.cur_value = flux_yoko.get_current()
+# 1e3 * flux_yoko.set_current(md.cur_value)
+# md.cur_value = 0.0
+# flux_yoko.set_voltage(md.cur_value)
 
 # ml, md = em.use_flux(label="031620_0.000mA")
-ml, md = em.new_flux(value=md.cur_A, clone_from=(ml, md), unit="A")
+ml, md = em.new_flux(value=md.cur_value, clone_from=(ml, md), unit="A")
 ```
 
 ```python
-md.q_f = preditor.predict_freq(md.cur_A, transition=(0, 1))
-# q_f = preditor.predict_freq(md.cur_V, transition=(0, 1))
+md.q_f = preditor.predict_freq(md.cur_value, transition=(0, 1))
+# q_f = preditor.predict_freq(md.cur_value, transition=(0, 1))
 md.q_f
 ```
 
@@ -849,14 +849,14 @@ qub_freq_exp.save(
 ```
 
 ```python
-md.bias = preditor.calculate_bias(md.cur_A, md.q_f)
-md.bias * 1e3
-# bias = preditor.calculate_bias(md.cur_V, q_f)
+md.flx_bias = preditor.calculate_bias(md.cur_value, md.q_f)
+md.flx_bias * 1e3
+# bias = preditor.calculate_bias(md.cur_value, q_f)
 # bias
 ```
 
 ```python
-preditor.update_bias(md.bias)
+preditor.update_bias(md.flx_bias)
 ```
 
 # Rabi
@@ -1004,10 +1004,10 @@ ml.register_module(
 # Reset
 
 ```python
-# md.cur_A = 0.0e-3
-# 1e3 * flux_dev.set_current(md.cur_A)
-# md.cur_V = -12.61
-# flux_yoko.set_voltage(md.cur_V)
+# md.cur_value = 0.0e-3
+# 1e3 * flux_dev.set_current(md.cur_value)
+# md.cur_value = -12.61
+# flux_yoko.set_voltage(md.cur_value)
 ```
 
 ## One Pulse
@@ -1191,8 +1191,8 @@ jpa_sgs.output_off()
 
 ```python
 reset1_trans = (0, 3)
-md.reset_f1 = preditor.predict_freq(md.cur_A, transition=reset1_trans)
-# md.reset_f1 = preditor.predict_freq(md.cur_V, transition=reset1_trans)
+md.reset_f1 = preditor.predict_freq(md.cur_value, transition=reset1_trans)
+# md.reset_f1 = preditor.predict_freq(md.cur_value, transition=reset1_trans)
 md.reset_f1
 ```
 
@@ -1248,9 +1248,9 @@ dualreset_freq1_exp.save(
 ```
 
 ```python
-bias = preditor.calculate_bias(md.cur_A, md.reset_f1, transition=reset1_trans)
+bias = preditor.calculate_bias(md.cur_value, md.reset_f1, transition=reset1_trans)
 bias * 1e3
-# bias = preditor.calculate_bias(md.cur_V, md.reset_f1, transition=reset1_trans)
+# bias = preditor.calculate_bias(md.cur_value, md.reset_f1, transition=reset1_trans)
 # bias
 ```
 
@@ -1262,8 +1262,8 @@ preditor.update_bias(bias)
 
 ```python
 reset2_trans = (3, 1)
-md.reset_f2 = abs(md.r_f + preditor.predict_freq(md.cur_A, transition=reset2_trans))
-# md.reset_f2 = abs(md.r_f + preditor.predict_freq(md.cur_V, transition=reset2_trans))
+md.reset_f2 = abs(md.r_f + preditor.predict_freq(md.cur_value, transition=reset2_trans))
+# md.reset_f2 = abs(md.r_f + preditor.predict_freq(md.cur_value, transition=reset2_trans))
 md.reset_f2
 ```
 
@@ -1727,10 +1727,10 @@ bathreset_rabicheck_exp.save(
 # Flux Dependence
 
 ```python
-md.cur_A = 5e-3
-1e3 * flux_yoko.set_current(md.cur_A)
-# md.cur_V = 1.75
-# flux_yoko.set_voltage(md.cur_V)
+md.cur_value = 5e-3
+1e3 * flux_yoko.set_current(md.cur_value)
+# md.cur_value = 1.75
+# flux_yoko.set_voltage(md.cur_value)
 ```
 
 ```python
@@ -1747,7 +1747,7 @@ exp_cfg = {
         # "reset": "reset_120",
         "qub_pulse": {
             "type": "pulse",
-            "waveform": ml.get_waveform("qub_flat", {"length": 5.0}),
+            "waveform": ml.get_waveform("qub_flat", {"length": 2.0}),
             "ch": md.qub_4_5_ch,
             "nqz": 2,
             "gain": 0.1,
@@ -1763,7 +1763,7 @@ exp_cfg = {
         },
     },
     "sweep": {
-        "flux": make_sweep(-5e-3, 5e-3, 121),
+        "flux": make_sweep(5e-3, -5e-3, 121),
         # "flux": make_sweep(-4.0, -3.0, 201),
         "freq": make_sweep(4500, 6100, step=0.25),
     },
@@ -1786,12 +1786,12 @@ qub_flux_exp.save(
 
 ```python
 %matplotlib widget
-actline = qub_flux_exp.analyze(mA_c=md.mA_c, mA_e=md.mA_e)
+actline = qub_flux_exp.analyze(flx_half=md.flx_half, flx_int=md.flx_int)
 ```
 
 ```python
-md.mA_c, md.mA_e = actline.get_positions()
-md.mA_c, md.mA_e
+md.flx_half, md.flx_int = actline.get_positions()
+md.flx_half, md.flx_int
 ```
 
 # Other TwoTone
@@ -2687,7 +2687,7 @@ from datetime import datetime
 
 sample_table.add_sample(
     **{
-        "calibrated mA": md.cur_A,
+        "calibrated mA": md.cur_value,
         "Freq (MHz)": md.q_f,
         "T1 (us)": md.t1,
         "T1err (us)": md.t1err,
@@ -3233,14 +3233,14 @@ ml.register_waveform(
 ## Single Trace
 
 ```python
-# md.cur_A = 1.162e-3
-1e3 * flux_yoko.set_current(current=md.cur_A)
-# md.cur_V = 0.0
-# flux_yoko.set_voltage(voltage=md.cur_V)
+# md.cur_value = 1.162e-3
+1e3 * flux_yoko.set_current(current=md.cur_value)
+# md.cur_value = 0.0
+# flux_yoko.set_voltage(voltage=md.cur_value)
 ```
 
 ```python
-preditor.A_to_flx(md.cur_A)
+preditor.A_to_flx(md.cur_value)
 ```
 
 ```python

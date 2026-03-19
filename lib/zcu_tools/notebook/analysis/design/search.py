@@ -386,7 +386,7 @@ def add_real_sample(
         result_dir = os.path.join("..", "..", "result")
 
     result_path = os.path.join(result_dir, chip_name, "params.json")
-    _, param, mA_c, _, _, result = load_result(result_path)
+    _, param, flx_half, _, _, result = load_result(result_path)
 
     # unpack result
     r_f, g = result["dispersive"]["r_f"], result["dispersive"]["g"]
@@ -394,7 +394,7 @@ def add_real_sample(
     # load freq data
     freq_path = os.path.join(result_dir, chip_name, "sample.csv")
     freq_df = pd.read_csv(freq_path)
-    idx = np.argmin(np.abs(freq_df["calibrated mA"] - mA_c))
+    idx = np.argmin(np.abs(freq_df["calibrated mA"] - flx_half))
     t1 = freq_df["T1 (us)"].iloc[idx]
 
     # calculate chi

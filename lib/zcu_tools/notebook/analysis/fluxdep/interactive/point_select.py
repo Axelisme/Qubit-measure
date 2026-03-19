@@ -7,27 +7,34 @@ import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import clear_output, display
 from matplotlib.patches import Ellipse
-from numpy import ndarray
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional
+from typing_extensions import Optional
 
-from ..processing import cast2real_and_norm, downsample_points
+from zcu_tools.notebook.persistance import SpectrumResult
+from zcu_tools.notebook.analysis.fluxdep.processing import (
+    cast2real_and_norm,
+    downsample_points,
+)
 
 
 class InteractiveSelector:
     def __init__(
         self,
-        s_pects: dict[str, Any],
+        spectrums: dict[str, SpectrumResult],
         selected: Optional[NDArray[np.bool_]] = None,
         brush_width: float = 0.05,
     ) -> None:
-        self.s_spects = s_pects
+        self.spectrums = spectrums
 
-        self.s_mAs = np.concatenate([s["points"]["mAs"] for s in s_pects.values()])
-        self.s_fpts = np.concatenate([s["points"]["fpts"] for s in s_pects.values()])
+        self.s_fluxs = np.concatenate(
+            [s["points"]["fluxs"] for s in spectrums.values()]
+        )
+        self.s_freqs = np.concatenate(
+            [s["points"]["freqs"] for s in spectrums.values()]
+        )
 
         self.selected = (
-            selected if selected is not None else np.ones_like(self.s_mAs, dtype=bool)
+            selected if selected is not None else np.ones_like(self.s_fluxs, dtype=bool)
         )
         self.filter_mask = np.ones_like(self.selected, dtype=bool)
 
@@ -40,8 +47,8 @@ class InteractiveSelector:
 
         self.set_plot_limit()
         self.create_widgets(brush_width)
-        self.init_background(s_pects)
-        self.init_points(self.s_mAs, self.s_fpts, self.selected)
+        self.init_background(spectrums)
+        self.init_points(self.s_fluxs, self.s_freqs, self.selected)
 
         self.fig.canvas.mpl_connect("button_press_event", self.on_press)
 
@@ -100,8 +107,8 @@ class InteractiveSelector:
         if self.is_finished:
             return
 
-        sel_x = self.s_mAs[self.selected] / (self.mA_bound[1] - self.mA_bound[0])
-        sel_y = self.s_fpts[self.selected] / (self.fpt_bound[1] - self.fpt_bound[0])
+        sel_x = self.s_fluxs[self.selected] / (self.flux_bound[1] - self.flux_bound[0])
+        sel_y = self.s_freqs[self.selected] / (self.freq_bound[1] - self.freq_bound[0])
         thresh = self.thresh_slider.value
 
         self.filter_mask = downsample_points(sel_x, sel_y, thresh)
@@ -120,52 +127,52 @@ class InteractiveSelector:
 
         self.apply_filter_and_redraw()
 
-    def init_background(self, s_pects) -> None:
+    def init_background(self, s_pects: dict[str, SpectrumResult]) -> None:
         for spect in s_pects.values():
             # Get corresponding data and range
-            signals = spect["spectrum"]["data"] ** 1.5
-            flx_mask = np.any(~np.isnan(signals), axis=1)
-            fpt_mask = np.any(~np.isnan(signals), axis=0)
-            signals = signals[flx_mask, :][:, fpt_mask]
+            signals = spect["spectrum"]["signals"] ** 1.5  # improve contrast
+            flux_mask = np.any(~np.isnan(signals), axis=1)
+            freq_mask = np.any(~np.isnan(signals), axis=0)
+            signals = signals[flux_mask, :][:, freq_mask]
 
             # Normalize data
-            amps = cast2real_and_norm(signals)
+            real_signals = cast2real_and_norm(signals)
 
             # Add heatmap trace
-            sp_mAs = spect["spectrum"]["mAs"][flx_mask]
-            sp_fpts = spect["spectrum"]["fpts"][fpt_mask]
+            sp_fluxs = spect["spectrum"]["fluxs"][flux_mask]
+            sp_freqs = spect["spectrum"]["freqs"][freq_mask]
             self.ax.imshow(
-                amps.T,
+                real_signals.T,
                 aspect="auto",
                 origin="lower",
                 interpolation="none",
-                extent=(sp_mAs[0], sp_mAs[-1], sp_fpts[0], sp_fpts[-1]),
+                extent=(sp_fluxs[0], sp_fluxs[-1], sp_freqs[0], sp_freqs[-1]),
             )
 
-    def init_points(self, s_mAs, s_fpts, selected) -> None:
+    def init_points(self, s_fluxs, s_freqs, selected) -> None:
         self.scatter = self.ax.scatter(
-            s_mAs, s_fpts, c=selected.astype(float), s=2, vmax=1, vmin=0
+            s_fluxs, s_freqs, c=selected.astype(float), s=2, vmax=1, vmin=0
         )
 
     def set_plot_limit(self) -> None:
-        spect_list = [s["spectrum"] for s in self.s_spects.values()]
-        sp_mAs = np.concatenate([s["mAs"] for s in spect_list])
-        sp_fpts = np.concatenate([s["fpts"] for s in spect_list])
-        self.mA_bound = (
-            min(np.nanmin(sp_mAs), self.s_mAs.min()),
-            max(np.nanmax(sp_mAs), self.s_mAs.max()),
+        spect_list = [s["spectrum"] for s in self.spectrums.values()]
+        sp_fluxs = np.concatenate([s["fluxs"] for s in spect_list])
+        sp_freqs = np.concatenate([s["freqs"] for s in spect_list])
+        self.flux_bound = (
+            min(np.nanmin(sp_fluxs), self.s_fluxs.min()),
+            max(np.nanmax(sp_fluxs), self.s_fluxs.max()),
         )
-        self.fpt_bound = (
-            min(np.nanmin(sp_fpts), self.s_fpts.min()),
-            max(np.nanmax(sp_fpts), self.s_fpts.max()),
+        self.freq_bound = (
+            min(np.nanmin(sp_freqs), self.s_freqs.min()),
+            max(np.nanmax(sp_freqs), self.s_freqs.max()),
         )
 
         # Set x and y axis range
-        self.ax.set_xlim(self.mA_bound[0], self.mA_bound[1])
-        self.ax.set_ylim(self.fpt_bound[0], self.fpt_bound[1])
+        self.ax.set_xlim(self.flux_bound[0], self.flux_bound[1])
+        self.ax.set_ylim(self.freq_bound[0], self.freq_bound[1])
 
-    def get_cur_selected(self) -> np.ndarray:
-        cur_selected = np.zeros_like(self.selected)
+    def get_cur_selected(self) -> NDArray[np.bool_]:
+        cur_selected = np.zeros_like(self.selected, dtype=bool)
         cur_selected[np.where(self.selected)[0][self.filter_mask]] = True
         return cur_selected
 
@@ -173,8 +180,8 @@ class InteractiveSelector:
         self.scatter.set_array(self.get_cur_selected().astype(float))
 
     def toggle_near_mask(self, x, y, width):
-        x_d = np.abs(self.s_mAs - x) / (self.mA_bound[1] - self.mA_bound[0])
-        y_d = np.abs(self.s_fpts - y) / (self.fpt_bound[1] - self.fpt_bound[0])
+        x_d = np.abs(self.s_fluxs - x) / (self.flux_bound[1] - self.flux_bound[0])
+        y_d = np.abs(self.s_freqs - y) / (self.freq_bound[1] - self.freq_bound[0])
         toggle_mask = x_d**2 + y_d**2 <= width**2
 
         self.selected[toggle_mask] = self.operation_tb.value == "Select"
@@ -189,12 +196,18 @@ class InteractiveSelector:
         self.is_finished = True
         plt.close(self.fig)
 
-    def get_positions(self, finish: bool = True) -> tuple[ndarray, ndarray, np.ndarray]:
+    def get_positions(
+        self, finish: bool = True
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
         if not self.is_finished and finish:
             self.finish_interactive()
 
         cur_selected = self.get_cur_selected()
-        return (self.s_mAs[cur_selected], self.s_fpts[cur_selected], cur_selected)
+        return (
+            self.s_fluxs[cur_selected],
+            self.s_freqs[cur_selected],
+            cur_selected,
+        )
 
     def on_press(self, event) -> None:
         if event.inaxes != self.ax or self.is_finished:
@@ -219,8 +232,8 @@ class InteractiveSelector:
             self.temp_circle_timer = None
 
         # 計算圓圈的寬度和高度（考慮座標軸比例）
-        x_range = self.mA_bound[1] - self.mA_bound[0]
-        y_range = self.fpt_bound[1] - self.fpt_bound[0]
+        x_range = self.flux_bound[1] - self.flux_bound[0]
+        y_range = self.freq_bound[1] - self.freq_bound[0]
 
         # 根據當前模式決定顏色
         circle_color = "yellow" if self.operation_tb.value == "Select" else "black"
