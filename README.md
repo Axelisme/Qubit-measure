@@ -36,9 +36,8 @@ ZCU-Tools 可以根據您的不同需求安裝不同的依賴項。
 在要連接到 ZCU216 的上運行：
 
 ```bash
-pip install ".[server]"
-# or
-uv sync --extra server
+cd Qubit-measure
+git clone https://github.com/openquantumhardware/qick.git
 ```
 
 **注意**: `qick` 庫需要手動安裝，請參考其[官方儲存庫](https://github.com/openquantumhardware/qick.git)。
