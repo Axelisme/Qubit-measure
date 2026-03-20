@@ -149,7 +149,11 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
 
         cfg_temp = dict(cfg_temp)
         del cfg_temp["sweep_range"]
-        deepupdate(cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}})
+        deepupdate(
+            cfg_temp,
+            {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}},
+            behavior="force",
+        )
         cfg = check_type(cfg_temp, T1Cfg)
 
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore

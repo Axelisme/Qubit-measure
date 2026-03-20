@@ -165,7 +165,11 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotterDict])
 
         cfg_temp = dict(cfg_temp)
         del cfg_temp["sweep_range"]
-        deepupdate(cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}})
+        deepupdate(
+            cfg_temp,
+            {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}},
+            behavior="force",
+        )
         cfg_temp["activate_detune"] = self.detune_ratio / len_sweep["step"]  # type: ignore
         cfg = check_type(cfg_temp, T2EchoCfg)
 

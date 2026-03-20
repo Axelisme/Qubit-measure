@@ -165,6 +165,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         deepupdate(
             cast(dict, cfg_temp),
             {"dev": ctx.cfg["dev"], "sweep": {"length": self.length_sweep}},
+            behavior="force",
         )
         cfg = check_type(cfg_temp, LenRabiCfg)
 

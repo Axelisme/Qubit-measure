@@ -132,6 +132,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         deepupdate(
             cast(dict, cfg_temp),
             {"dev": ctx.cfg["dev"], "sweep": {"gain": self.gain_sweep}},
+            behavior="force",
         )
         cfg = check_type(cfg_temp, MistCfg)
 

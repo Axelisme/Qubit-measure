@@ -125,6 +125,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         deepupdate(
             cast(dict, cfg_temp),
             {"dev": ctx.cfg["dev"], "sweep": {"detune": self.detune_sweep}},
+            behavior="force",
         )
         center_freq = cast(float, cfg_temp["modules"]["qub_pulse"]["freq"])
         Pulse.set_param(

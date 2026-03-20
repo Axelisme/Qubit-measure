@@ -172,7 +172,11 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
 
         cfg_temp = dict(cfg_temp)
         del cfg_temp["sweep_range"]  # type: ignore
-        deepupdate(cfg_temp, {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}})
+        deepupdate(
+            cfg_temp,
+            {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}},
+            behavior="force",
+        )
         cfg_temp["activate_detune"] = self.detune_ratio / len_sweep["step"]
         cfg = check_type(cfg_temp, T2RamseyCfg)
 
