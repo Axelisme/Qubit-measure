@@ -7,27 +7,12 @@ import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import Any, Literal, Optional, overload
 
-from zcu_tools.config import config
 
-KEYWORD = "Database"
-
-
-def create_datafolder(root_dir: str, prefix: str = "") -> str:
-    """
-    Create a data folder structure based on the current date.
-
-    Args:
-        root_dir (str): The root directory where the data folder will be created.
-        prefix (str, optional): An optional prefix for the folder structure. Defaults to "".
-
-    Returns:
-        str: The absolute path to the created data folder.
-    """
-    root_dir = os.path.abspath(os.path.join(root_dir, KEYWORD))
+def create_datafolder(database_dir: str, name: str = "") -> str:
+    database_dir = os.path.abspath(database_dir)
     yy, mm, dd = datetime.today().strftime("%Y-%m-%d").split("-")
-    save_dir = os.path.join(root_dir, prefix, os.path.join(yy, mm, f"Data_{mm}{dd}"))
-    if not config.DATASAVER_DRY_RUN:
-        os.makedirs(save_dir, exist_ok=True)
+    save_dir = os.path.join(database_dir, name, os.path.join(yy, mm, f"Data_{mm}{dd}"))
+    os.makedirs(save_dir, exist_ok=True)
     return save_dir
 
 
@@ -124,10 +109,6 @@ def save_local_data(
 
     filepath = remove_ext(filepath)  # because labber will add .hdf5 automatically
 
-    if config.DATASAVER_DRY_RUN:
-        print("DRY RUN: Save data to ", filepath)
-        return
-
     import Labber  # type: ignore
 
     fObj = Labber.createLogFile_ForData(filepath, log_channels, step_channels)
@@ -171,10 +152,6 @@ def load_local_data(
     import h5py
 
     filepath = format_ext(filepath)
-
-    if config.DATASAVER_DRY_RUN:
-        print("DRY RUN: Load data from ", filepath)
-        return np.array([]), np.array([]), None
 
     def parser_data(
         data: NDArray[np.float64],
@@ -241,10 +218,6 @@ def load_local_cfg(filepath: str) -> dict[str, Any]:
 
     filepath = format_ext(filepath)
 
-    if config.DATASAVER_DRY_RUN:
-        print("DRY RUN: Load data from ", filepath)
-        return {}
-
     with h5py.File(filepath, "r") as file:
         cfg = json.loads(file.attrs["comment"])  # type: ignore
     assert isinstance(cfg, dict)
@@ -265,10 +238,6 @@ def upload_to_server(filepath: str, server_ip: str, port: int) -> bool:
         bool: True if upload succeeded, False otherwise.
     """
     import requests
-
-    if config.DATASAVER_DRY_RUN:
-        print(f"DRY RUN: Upload {filepath} to {server_ip}:{port}")
-        return True
 
     filepath = os.path.abspath(filepath)
     url = f"http://{server_ip}:{port}/upload"
@@ -293,10 +262,6 @@ def download_from_server(filepath: str, server_ip: str, port: int) -> None:
         port (int): The port number of the server.
     """
     import requests
-
-    if config.DATASAVER_DRY_RUN:
-        print(f"DRY RUN: Download {filepath} from {server_ip}:{port}")
-        return
 
     url = f"http://{server_ip}:{port}/download"
     response = requests.post(url, json={"path": filepath})

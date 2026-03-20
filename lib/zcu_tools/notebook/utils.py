@@ -6,6 +6,7 @@ import os
 from copy import deepcopy
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from typing_extensions import TYPE_CHECKING, Any, Mapping, Optional, Union
 
@@ -134,9 +135,12 @@ def make_comment(cfg: Mapping[str, Any], comment: Optional[str] = None) -> str:
     return json.dumps(cfg, indent=2)
 
 
-def savefig(fig: Figure, filepath: str, **kwargs) -> None:
+def savefig(fig: Figure, filepath: str, close_after: bool = True, **kwargs) -> None:
+    """Save a matplotlib figure, creating parent directories if necessary. close the figure after saving to free memory."""
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     fig.savefig(filepath, **kwargs)
+    if close_after:
+        plt.close(fig)
 
 
 def dump_device_info(path: Union[str, Path]) -> None:
