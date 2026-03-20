@@ -14,6 +14,7 @@ jupyter:
 
 ```python
 %load_ext autoreload
+import os
 from pprint import pprint
 from pathlib import Path
 import json
@@ -36,12 +37,13 @@ chip_name = "Q3_2D[2]"
 res_name = "R1"
 qub_name = "Q1"
 
-result_dir = f"../result/{chip_name}/{qub_name}"
-
+result_dir = os.path.join("..", "result", chip_name, qub_name)
 database_path = create_datafolder(
-    str(Path.cwd().parent), prefix=str(Path(chip_name, qub_name))
+    database_dir=os.path.join("..", "Database"),
+    name=os.path.join(chip_name, qub_name),
 )
-em = ExperimentManager(f"{result_dir}/exps")
+
+em = ExperimentManager(os.path.join(result_dir, "exps"))
 ml, md = em.use_flux(label="031713_3.276mA", readonly=True)
 ```
 
@@ -65,7 +67,7 @@ soc.get_sample_rates()
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.yoko import YOKOGS200
 
-dev_info_path = f"{result_dir}/exps/031713_3.276mA/device_info.json"
+dev_info_path = os.path.join(em.flx_dir, "device_info.json")
 
 with open(dev_info_path, "r") as f:
     dev_info = json.load(f)
@@ -81,7 +83,7 @@ GlobalDeviceManager.setup_devices(dev_info, progress=True)
 # Initial Tools
 
 ```python
-preditor = FluxoniumPredictor.from_file(f"{result_dir}/params.json")
+preditor = FluxoniumPredictor.from_file(os.path.join(result_dir, "params.json"))
 # preditor.flx_half = md.flx_half
 # preditor.flx_period = 2 * abs(md.flx_int - md.flx_half)
 # preditor.update_bias(md.flx_bias)
@@ -283,7 +285,7 @@ executor = (
             # ),
         )
     )
-    .record_animation(f"{em.flx_dir}/{filename}.mp4")
+    .record_animation(os.path.join(em.flx_dir, f"{filename}.mp4"))
 )
 _ = executor.run(
     dev_cfg={
