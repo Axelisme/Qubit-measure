@@ -27,6 +27,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    SoftDelay,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -367,20 +368,16 @@ class AcStarkRamseyExp(AbsExperiment):
                         Reset("reset", modules.get("reset")),
                         NonBlocking(
                             [
-                                Delay(
-                                    "wait_delay",
-                                    delay=ctx.cfg["wait_delay"],
-                                    hard_delay=False,
-                                ),
+                                SoftDelay("wait_delay", delay=ctx.cfg["wait_delay"]),
                                 Pulse("pi2_pulse1", modules["pi2_pulse"]),
-                                Delay("t2_delay", delay=t2r_spans, hard_delay=False),
+                                SoftDelay("t2_delay", delay=t2r_spans),
                                 Pulse(
                                     name="pi2_pulse2",
-                                    cfg=PulseCfg(
+                                    cfg={  # type: ignore[dict-item]
                                         **modules["pi2_pulse"],
-                                        phase=modules["pi2_pulse"]["phase"]
+                                        "phase": modules["pi2_pulse"]["phase"]
                                         + 360 * detune * t2r_spans,
-                                    ),
+                                    },
                                 ),
                             ]
                         ),

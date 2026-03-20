@@ -71,6 +71,10 @@ class AbsWaveform(ABC):
 
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None: ...
 
+    @property
+    def length(self) -> Union[float, QickParam]:
+        return self.waveform_cfg["length"]
+
     @classmethod
     def set_param(
         cls,
@@ -128,6 +132,10 @@ class Waveform(AbsWaveform):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
         self.waveform.create(prog, ch, **kwargs)
 
+    @property
+    def length(self) -> Union[float, QickParam]:
+        return self.waveform.length
+
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return self.waveform.to_wav_kwargs()
 
@@ -160,6 +168,10 @@ class ConstWaveform(AbsWaveform):
 
         return wav_cfg
 
+    @property
+    def length(self) -> Union[float, QickParam]:
+        return self.waveform_cfg["length"]
+
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return {
             "style": "const",
@@ -189,6 +201,10 @@ class CosineWaveform(AbsWaveform):
             raise ValueError(f"Unknown parameter: {param_name}")
 
         return wav_cfg
+
+    @property
+    def length(self) -> float:
+        return cast(CosineWaveformCfg, self.waveform_cfg)["length"]
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return {
@@ -237,6 +253,10 @@ class GaussWaveform(AbsWaveform):
             raise ValueError(f"Unknown parameter: {param_name}")
 
         return wav_cfg
+
+    @property
+    def length(self) -> float:
+        return cast(GaussWaveformCfg, self.waveform_cfg)["length"]
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return {
@@ -292,6 +312,10 @@ class DragWaveform(AbsWaveform):
 
         return wav_cfg
 
+    @property
+    def length(self) -> float:
+        return cast(DragWaveformCfg, self.waveform_cfg)["length"]
+
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return {
             "style": "arb",
@@ -340,6 +364,10 @@ class FlatTopWaveform(AbsWaveform):
             raise ValueError(f"Unknown parameter: {param_name}")
 
         return wav_cfg
+
+    @property
+    def length(self) -> Union[float, QickParam]:
+        return self.waveform_cfg["length"]
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         wav_cfg = cast(FlatTopWaveformCfg, self.waveform_cfg)

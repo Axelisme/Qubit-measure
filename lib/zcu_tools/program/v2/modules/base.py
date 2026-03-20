@@ -13,10 +13,10 @@ from typing_extensions import (
     Type,
     TypedDict,
     Union,
-    cast,
 )
 
 from ..base import MyProgramV2
+from .util import round_timestamp
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
@@ -76,16 +76,33 @@ class Module(ABC):
 
 class Delay(Module):
     def __init__(
-        self,
-        name: str,
-        delay: Union[float, QickParam],
-        absolute: bool = False,
-        hard_delay: bool = True,
+        self, name: str, delay: Union[float, QickParam], absolute: bool = False
     ) -> None:
         self.name = name
         self.delay = delay
         self.absolute = absolute
-        self.hard_delay = hard_delay
+
+    def init(self, prog: MyProgramV2) -> None:
+        pass
+
+    def run(
+        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+    ) -> Union[float, QickParam]:
+        delay_t = self.delay if self.absolute else t + self.delay
+        delay_t = round_timestamp(prog, delay_t)
+
+        prog.delay(t=delay_t, tag=self.name)
+
+        return 0.0  # reset reference time
+
+
+class SoftDelay(Module):
+    def __init__(
+        self, name: str, delay: Union[float, QickParam], absolute: bool = False
+    ) -> None:
+        self.name = name
+        self.delay = delay
+        self.absolute = absolute
 
     def init(self, prog: MyProgramV2) -> None:
         pass
@@ -95,11 +112,7 @@ class Delay(Module):
     ) -> Union[float, QickParam]:
         delay_t = self.delay if self.absolute else t + self.delay
 
-        if self.hard_delay:
-            prog.delay(t=delay_t, tag=self.name)
-            return 0.0  # reset reference time
-
-        return delay_t
+        return round_timestamp(prog, delay_t)
 
 
 class NonBlocking(Module):
@@ -116,10 +129,10 @@ class NonBlocking(Module):
         cur_t = t
         for module in self.modules:
             new_cur_t = module.run(prog, cur_t)
-            if new_cur_t == 0.0 or new_cur_t < cur_t:
+            if new_cur_t < cur_t:
                 warnings.warn(
                     "Find time reset in NonBlocking module. "
-                    "Maybe you should set Delay to hard_delay=False.",
+                    "Maybe you should set SoftDelay instead of Delay.",
                 )
             cur_t = new_cur_t
         return t  # non-block returns initial time

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 
-from qick.asm_v2 import AbsQickProgram, QickParam
+from qick.asm_v2 import AbsQickProgram, QickParam, to_int
 from typing_extensions import Optional, Union
 
 from ..utils import param2str
@@ -15,9 +15,11 @@ def round_timestamp(
     ro_ch: Optional[int] = None,
     take_ceil: bool = True,
 ) -> float:
+    # as_float=True is important to avoid rounding error
     cycles_t = prog.us2cycles(t, gen_ch=gen_ch, ro_ch=ro_ch, as_float=True)
     if take_ceil:
-        cycles_t = 0.99 + cycles_t
+        cycles_t = 0.9999 + cycles_t
+    cycles_t = to_int(cycles_t, 1, parname="length")  # rounding here
     return prog.cycles2us(cycles_t, gen_ch=gen_ch, ro_ch=ro_ch)
 
 

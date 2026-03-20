@@ -60,8 +60,8 @@ class Reset(Module):
     def init(self, prog: MyProgramV2) -> None:
         self.reset.init(prog)
 
-    def total_length(self) -> Union[float, QickParam]:
-        return self.reset.total_length()
+    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+        return self.reset.total_length(prog)
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
@@ -90,7 +90,7 @@ class NoneReset(AbsReset, tag="none"):
 
     def init(self, prog: MyProgramV2) -> None: ...
 
-    def total_length(self) -> Union[float, QickParam]:
+    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
         return 0.0
 
     def run(
@@ -124,8 +124,8 @@ class PulseReset(AbsReset, tag="pulse"):
     def init(self, prog: MyProgramV2) -> None:
         self.reset_pulse.init(prog)
 
-    def total_length(self) -> Union[float, QickParam]:
-        return self.reset_pulse.total_length()
+    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+        return self.reset_pulse.total_length(prog)
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
@@ -167,17 +167,17 @@ class TwoPulseReset(AbsReset, tag="two_pulse"):
         self.reset_pulse1.init(prog)
         self.reset_pulse2.init(prog)
 
-    def total_length(self) -> Union[float, QickParam]:
+    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
         return calc_max_length(
-            self.reset_pulse1.total_length(), self.reset_pulse2.total_length()
+            self.reset_pulse1.total_length(prog), self.reset_pulse2.total_length(prog)
         )
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        t = self.reset_pulse1.run(prog, t)
-        t = self.reset_pulse2.run(prog, t)
-        return t
+        self.reset_pulse1.run(prog, t)
+        self.reset_pulse2.run(prog, t)
+        return t + self.total_length(prog)
 
     @staticmethod
     def set_param(
@@ -232,19 +232,21 @@ class BathReset(AbsReset, tag="bath"):
         self.res_pulse.init(prog)
         self.pi2_pulse.init(prog)
 
-    def total_length(self) -> Union[float, QickParam]:
-        max_length = calc_max_length(
-            self.qub_pulse.total_length(), self.res_pulse.total_length()
+    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+        return calc_max_length(
+            self.qub_pulse.total_length(prog),
+            self.res_pulse.total_length(prog) + self.pi2_pulse.total_length(prog),
         )
-        return max_length + self.pi2_pulse.total_length()
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        t = self.qub_pulse.run(prog, t)
-        t = self.res_pulse.run(prog, t)
-        t = self.pi2_pulse.run(prog, t)
-        return t
+        cur_t = t
+        cur_t = self.qub_pulse.run(prog, cur_t)
+        cur_t = self.res_pulse.run(prog, cur_t)
+        cur_t = self.pi2_pulse.run(prog, cur_t)
+
+        return t + self.total_length(prog)
 
     @staticmethod
     def set_param(

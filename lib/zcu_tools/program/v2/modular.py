@@ -49,7 +49,7 @@ class ModularProgramV2(MyProgramV2):
         for module in self.modules:
             t = module.run(self, t)
             # self.append_macro(PrintTimeStamp(module.name, gen_chs=[0], ro_chs=[0]))
-        self.delay(t=t + 0.03)
+        self.delay(t=t)
 
 
 class BaseCustomProgramV2(ModularProgramV2):

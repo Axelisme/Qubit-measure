@@ -18,7 +18,7 @@ from typing_extensions import (
 from ..base import MyProgramV2
 from .base import Module, ModuleCfg
 from .pulse import Pulse, PulseCfg, Waveform, check_block_mode
-from .util import calc_max_length
+from .util import calc_max_length, round_timestamp
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
@@ -54,8 +54,8 @@ class Readout(Module):
     def init(self, prog: MyProgramV2) -> None:
         self.readout.init(prog)
 
-    def total_length(self) -> Union[float, QickParam]:
-        return self.readout.total_length()
+    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+        return self.readout.total_length(prog)
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
@@ -93,8 +93,12 @@ class DirectReadout(AbsReadout, tag="direct"):
             gen_ch=self.cfg.get("gen_ch"),
         )
 
-    def total_length(self) -> Union[float, QickParam]:
-        return self.cfg["trig_offset"] + self.cfg["ro_length"]
+    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+        return round_timestamp(
+            prog,
+            round_timestamp(prog, self.cfg["trig_offset"])
+            + round_timestamp(prog, self.cfg["ro_length"], ro_ch=self.cfg["ro_ch"]),
+        )
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
@@ -151,6 +155,7 @@ class PulseReadout(AbsReadout, tag="pulse"):
         self.pulse = Pulse(name=f"{name}_pulse", cfg=self.pulse_cfg)
         self.ro_window = DirectReadout(name=f"{name}_adc", cfg=self.ro_cfg)
 
+        # ro_window is always non-blocking
         check_block_mode(self.pulse.name, self.pulse_cfg, want_block=True)
 
     @classmethod
@@ -177,16 +182,18 @@ class PulseReadout(AbsReadout, tag="pulse"):
         self.pulse.init(prog)
         self.ro_window.init(prog)
 
-    def total_length(self) -> Union[float, QickParam]:
-        return calc_max_length(self.ro_window.total_length(), self.pulse.total_length())
+    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+        return calc_max_length(
+            self.ro_window.total_length(prog), self.pulse.total_length(prog)
+        )
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        t = self.ro_window.run(prog, t)
-        t = self.pulse.run(prog, t)
+        self.ro_window.run(prog, t)  # non-blocking
+        self.pulse.run(prog, t)
 
-        return t + self.total_length()
+        return t + self.total_length(prog)
 
     @staticmethod
     def auto_fill(

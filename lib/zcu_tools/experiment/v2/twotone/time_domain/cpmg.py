@@ -41,6 +41,7 @@ from zcu_tools.program.v2 import (
     Repeat,
     Reset,
     ResetCfg,
+    check_block_mode,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -94,6 +95,20 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
 
+        pi2_pulse = _cfg["modules"]["pi2_pulse"]
+        pi_pulse = _cfg["modules"]["pi_pulse"]
+        check_block_mode("pi2_pulse", pi2_pulse, want_block=False)
+        check_block_mode("pi_pulse", pi_pulse, want_block=False)
+
+        min_interval = np.min(ts) / np.max(times)
+        if min_interval < (
+            pi2_pulse["waveform"]["length"] + pi_pulse["waveform"]["length"]
+        ):
+            raise ValueError(
+                "The interval is too short to measure the CPMG signal",
+                f"min_interval: {min_interval}, pi2_pulse_length: {pi2_pulse['waveform']['length']}, pi_pulse_length: {pi_pulse['waveform']['length']}",
+            )
+
         def measure_fn(ctx: TaskState, update_hook: Callable[[int, Any], None]):
             cfg = ctx.cfg
             modules = cfg["modules"]
@@ -127,7 +142,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 task=Task(measure_fn=measure_fn, result_shape=(len(ts),)).scan(
                     "times",
                     times.tolist(),
-                    before_each=lambda _, ctx, time: ctx.env.update(time=time),
+                    before_each=lambda _, ctx, time: ctx.env.update(time=int(time)),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

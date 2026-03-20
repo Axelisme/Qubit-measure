@@ -103,13 +103,16 @@ class Pulse(Module, tag="pulse"):
         if "mixer_freq" in cfg:
             prog.pulse_registry.check_valid_mixer_freq(name, cfg)
 
-    def total_length(self) -> float:
+    def total_length(self, prog: MyProgramV2) -> float:
         if self.cfg is None:
             return 0.0
-        return (
-            self.cfg["pre_delay"]
-            + self.cfg["waveform"]["length"]
-            + self.cfg["post_delay"]
+        return round_timestamp(
+            prog,
+            (
+                round_timestamp(prog, self.cfg["pre_delay"])
+                + round_timestamp(prog, self.waveform.length, gen_ch=self.cfg["ch"])
+                + round_timestamp(prog, self.cfg["post_delay"])
+            ),
         )
 
     # -----------------------
@@ -125,9 +128,10 @@ class Pulse(Module, tag="pulse"):
         prog.pulse(cfg["ch"], self.pulse_name, t=t + cfg["pre_delay"], tag=self.name)
 
         if cfg["block_mode"]:  # default
-            return t + round_timestamp(prog, self.total_length(), gen_ch=cfg["ch"])
+            return t + self.total_length(prog)
         else:
-            return t  # no block, return the start time as the end time
+            # no block, return the start time as the end time
+            return t
 
     @staticmethod
     def set_param(

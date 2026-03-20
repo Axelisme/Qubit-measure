@@ -15,6 +15,8 @@ from .modules import (
     Repeat,
     Reset,
     ResetCfg,
+    SoftDelay,
+    SoftRepeat,
     WaveformCfg,
     check_block_mode,
 )
