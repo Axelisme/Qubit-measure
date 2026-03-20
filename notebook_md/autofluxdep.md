@@ -17,7 +17,6 @@ jupyter:
 from pprint import pprint
 from pathlib import Path
 import json
-from datetime import datetime
 from collections import OrderedDict
 
 import numpy as np
@@ -33,7 +32,7 @@ from zcu_tools.program.v2 import PulseCfg
 ```
 
 ```python
-chip_name = "Test"
+chip_name = "Q3_2D[2]"
 res_name = "R1"
 qub_name = "Q1"
 
@@ -43,7 +42,7 @@ database_path = create_datafolder(
     str(Path.cwd().parent), prefix=str(Path(chip_name, qub_name))
 )
 em = ExperimentManager(f"{result_dir}/exps")
-ml, md = em.use_flux(label="0305_1.800mA", readonly=True)
+ml, md = em.use_flux(label="031713_3.276mA", readonly=True)
 ```
 
 # Connect ZCU216
@@ -66,7 +65,7 @@ soc.get_sample_rates()
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.yoko import YOKOGS200
 
-dev_info_path = f"{result_dir}/device_info.json"
+dev_info_path = f"{result_dir}/exps/031713_3.276mA/device_info.json"
 
 with open(dev_info_path, "r") as f:
     dev_info = json.load(f)
@@ -83,20 +82,28 @@ GlobalDeviceManager.setup_devices(dev_info, progress=True)
 
 ```python
 preditor = FluxoniumPredictor.from_file(f"{result_dir}/params.json")
-preditor.flx_half = md.flx_half
-preditor.flx_period = 2 * abs(md.flx_int - md.flx_half)
-preditor.update_bias(md.flx_bias)
+# preditor.flx_half = md.flx_half
+# preditor.flx_period = 2 * abs(md.flx_int - md.flx_half)
+# preditor.update_bias(md.flx_bias)
 ```
 
 # Start Measurement
 
 ```python
-flux_yoko.set_current(1.20e-3)  # Set to initial flux bias
+flux_yoko.set_current(3.4e-3)  # Set to initial flux bias
+```
+
+```python
+import gc
+import matplotlib.pyplot as plt
+
+plt.close("all")
+gc.collect()
 ```
 
 ```python
 %matplotlib widget
-flx_values = np.linspace(1.5e-3, 1.8e-3, 151)
+flx_values = np.linspace(3.4e-3, 0e-3, 151)
 
 filename = f"{qub_name}_autofluxdep"
 
@@ -112,7 +119,7 @@ executor = (
     .add_measurements(
         OrderedDict(
             qubit_freq=zefd.QubitFreqTask(
-                detune_sweep=make_sweep(-2.5, 2.5, step=0.025),
+                detune_sweep=make_sweep(-6, 2.5, step=0.025),
                 cfg_maker=lambda ctx, ml: (
                     (info := ctx.env["info"])
                     and (pred_qf := info["predict_freq"])
@@ -121,14 +128,15 @@ executor = (
                         {
                             "modules": {
                                 "qub_pulse": {
+                                    "type": "pulse",
                                     "waveform": ml.get_waveform(
-                                        "qub_flat", {"length": 6}
+                                        "qub_flat", {"length": 5}
                                     ),
-                                    "ch": md.qub_1_4_ch,
+                                    "ch": md.qub_4_5_ch,
                                     "nqz": 2 if pred_qf > 2000 else 1,
                                     "gain": min(
                                         1.0,
-                                        (0.003 / info["m_ratio"])
+                                        (0.01 / info["m_ratio"])
                                         * (prev_pi_product / ref_pi_len),
                                     ),
                                     "freq": pred_qf,
@@ -145,7 +153,7 @@ executor = (
                 earlystop_snr=50,
             ),
             lenrabi=zefd.LenRabiTask(
-                length_sweep=make_sweep(0.03, 1.0, 201),
+                length_sweep=make_sweep(0.03, 2.0, 151),
                 cfg_maker=lambda ctx, ml: (
                     (info := ctx.env["info"])
                     and (cur_qf := info.get("qubit_freq"))
@@ -190,7 +198,7 @@ executor = (
                             "relax_delay": max(1.0, 3 * prev_t1),
                             "reps": 1000,
                             "rounds": 10,
-                            "sweep_range": (0.5, max(1.0, 10 * prev_t1)),
+                            "sweep_range": (0.5, max(1.0, 5 * prev_t1)),
                         }
                     )
                 ),
@@ -204,16 +212,18 @@ executor = (
                     and (cur_t1 := info.get("smooth_t1", md.t1))
                     and (prev_t2r := info.last.get("smooth_t2r", md.t2r))
                     and (cur_pi2_pulse := info.get("pi2_pulse"))
-                    and {
-                        "modules": {
-                            "pi2_pulse": cur_pi2_pulse,
-                            "readout": "readout_dpm",
-                        },
-                        "relax_delay": max(1.0, 3 * cur_t1),
-                        "reps": 1000,
-                        "rounds": 10,
-                        "sweep_range": (0, 2 * prev_t2r),
-                    }
+                    and ml.make_cfg(
+                        {
+                            "modules": {
+                                "pi2_pulse": cur_pi2_pulse,
+                                "readout": "readout_dpm",
+                            },
+                            "relax_delay": max(1.0, 3 * cur_t1),
+                            "reps": 1000,
+                            "rounds": 10,
+                            "sweep_range": (0, 2.5 * prev_t2r),
+                        }
+                    )
                 ),
                 earlystop_snr=20,
             ),
@@ -226,55 +236,65 @@ executor = (
                     and (prev_t2e := info.last.get("smooth_t2e", md.t2e))
                     and (cur_pi_pulse := info.get("pi_pulse"))
                     and (cur_pi2_pulse := info.get("pi2_pulse"))
-                    and {
-                        "modules": {
-                            "pi_pulse": cur_pi_pulse,
-                            "pi2_pulse": cur_pi2_pulse,
-                            "readout": "readout_dpm",
-                        },
-                        "relax_delay": max(1.0, 3 * cur_t1),
-                        "reps": 1000,
-                        "rounds": 10,
-                        "sweep_range": (0, 2 * prev_t2e),
-                    }
+                    and ml.make_cfg(
+                        {
+                            "modules": {
+                                "pi_pulse": cur_pi_pulse,
+                                "pi2_pulse": cur_pi2_pulse,
+                                "readout": "readout_dpm",
+                            },
+                            "relax_delay": max(1.0, 3 * cur_t1),
+                            "reps": 1000,
+                            "rounds": 10,
+                            "sweep_range": (0, 2.5 * prev_t2e),
+                        }
+                    )
                 ),
                 earlystop_snr=20,
             ),
-            mist_e=zefd.MistTask(
-                gain_sweep=make_sweep(0.0, (100 / md.ac_stark_coeff) ** 0.5, 151),
-                cfg_maker=lambda ctx, ml: (
-                    (info := ctx.env["info"])
-                    and (cur_t1 := info.get("smooth_t1", md.t1))
-                    and (cur_pi_pulse := info.get("pi_pulse"))
-                    and {
-                        "modules": {
-                            "mist_pulse": {
-                                "waveform": ml.get_waveform(
-                                    "mist_waveform",
-                                    {"length": 5.0 / (2 * np.pi * md.rf_w) + 0.3},
-                                ),
-                                "ch": md.res_ch,
-                                "nqz": 2,
-                                "freq": md.readout_f,
-                                "post_delay": 10 / (2 * np.pi * md.rf_w),
-                            },
-                            "pi_pulse": cur_pi_pulse,
-                            "readout": "readout_dpm",
-                        },
-                        "relax_delay": max(1.0, 3 * cur_t1),
-                        "reps": 2000,
-                        "rounds": 10,
-                    }
-                ),
-            ),
+            # mist_e=zefd.MistTask(
+            #     gain_sweep=make_sweep(0.0, (100 / md.ac_stark_coeff) ** 0.5, 151),
+            #     cfg_maker=lambda ctx, ml: (
+            #         (info := ctx.env["info"])
+            #         and (cur_t1 := info.get("smooth_t1", md.t1))
+            #         and (cur_pi_pulse := info.get("pi_pulse"))
+            #         and ml.make_cfg(
+            #             {
+            #                 "modules": {
+            #                     "mist_pulse": {
+            #                         "waveform": ml.get_waveform(
+            #                             "mist_waveform",
+            #                             {"length": 5.0 / (2 * np.pi * md.rf_w) + 0.3},
+            #                         ),
+            #                         "ch": md.res_ch,
+            #                         "nqz": 2,
+            #                         "freq": md.r_f,
+            #                         "post_delay": 10 / (2 * np.pi * md.rf_w),
+            #                     },
+            #                     "pi_pulse": cur_pi_pulse,
+            #                     "readout": "readout_dpm",
+            #                 },
+            #                 "relax_delay": max(1.0, 3 * cur_t1),
+            #                 "reps": 2000,
+            #                 "rounds": 10,
+            #             }
+            #         )
+            #     ),
+            # ),
         )
     )
     .record_animation(f"{em.flx_dir}/{filename}.mp4")
 )
 _ = executor.run(
-    dev_cfg={"flux_yoko": flux_yoko.get_info()},  # type: ignore
+    dev_cfg={
+        "flux_yoko": {
+            **flux_yoko.get_info(),
+            "label": "flux_dev",
+        }
+    },
     predictor=preditor.clone(),
     env_dict={"soccfg": soccfg, "soc": soc, "ml": ml.clone()},
+    # retry_time=0,
 )
 ```
 
@@ -291,7 +311,7 @@ md.clone(dst_path=snapshot_dir / "meta_info.json")
 
 executor.save(
     filepath=str(filepath),
-    comment=datetime.now().strftime("Autofluxdep run at %Y-%m-%d %H:%M:%S"),
+    comment=f"Autofluxdep snapeshot: {snapshot_dir}",
 )
 del executor
 ```

@@ -101,7 +101,7 @@ resource_manager = pyvisa.ResourceManager()
 ```
 
 ```python
-# dump_device_info(f"{em.flx_dir}/device_info.json")
+dump_device_info(f"{em.flx_dir}/device_info.json")
 ```
 
 ## YOKOGS200
@@ -134,7 +134,7 @@ md.cur_value * 1e3
 
 ```python
 # md.cur_value = 1.8e-3
-# md.cur_value = md.flx_int
+md.cur_value = md.flx_int
 flux_yoko.set_current(current=md.cur_value)
 # md.cur_value = 0.0
 # flux_yoko.set_voltage(voltage=md.cur_value)
@@ -3237,10 +3237,6 @@ ml.register_waveform(
 1e3 * flux_yoko.set_current(current=md.cur_value)
 # md.cur_value = 0.0
 # flux_yoko.set_voltage(voltage=md.cur_value)
-```
-
-```python
-preditor.A_to_flx(md.cur_value)
 ```
 
 ```python
