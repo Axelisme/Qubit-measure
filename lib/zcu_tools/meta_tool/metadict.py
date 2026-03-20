@@ -47,8 +47,8 @@ class MetaDict(SyncFile):
 
         md = self.__class__(dst_path, read_only=read_only)
         md._data = deepcopy(self._data)
-        md.update_modify_time()
-        md.dump()
+        if dst_path is not None:
+            md.dump()
 
         return md
 

@@ -71,7 +71,8 @@ class ModuleLibrary(SyncFile):
         ml = ModuleLibrary(dst_path, read_only=False)
         ml.waveforms = deepcopy(self.waveforms)
         ml.modules = deepcopy(self.modules)
-        ml.dump()
+        if dst_path is not None:
+            ml.dump()
 
         return ml
 
