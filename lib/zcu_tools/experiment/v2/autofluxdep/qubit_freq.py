@@ -154,6 +154,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         if mean_err < 0.3 * np.ptp(fit_signals):
             bias = predictor.calculate_bias(flx, fit_freq)
             predictor.update_bias(bias)
+            print(bias)
 
         # if fitting is bad, disgard it
         if mean_err > 0.2 * np.ptp(fit_signals):
@@ -165,10 +166,18 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
             success = False
 
         if success:
+            cur_factor = kappa / float(cfg["modules"]["qub_pulse"]["gain"])
+            prev_factor = info.last.get("qfw_factor", cur_factor)
+            num_step = max(1, info["flx_idx"] - info.last.get("qubfreq_success_idx", 0))
+            weight = 0.7**num_step
+            smooth_factor = (1 - weight) * cur_factor + weight * prev_factor
+
             info.update(
                 qubit_freq=fit_freq,
                 fit_detune=detune,
                 fit_kappa=kappa,
+                qfw_factor=smooth_factor,
+                qubfreq_success_idx=info["flx_idx"],
             )
 
         with MinIntervalFunc.force_execute():

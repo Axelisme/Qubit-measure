@@ -106,31 +106,40 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         ):
             raise ValueError(
                 "The interval is too short to measure the CPMG signal",
-                f"min_interval: {min_interval}, pi2_pulse_length: {pi2_pulse['waveform']['length']}, pi_pulse_length: {pi_pulse['waveform']['length']}",
+                f"min_interval: {min_interval:.2g}, ",
+                f"pi2_pulse_length: {pi2_pulse['waveform']['length']:.2g}, ",
+                f"pi_pulse_length: {pi_pulse['waveform']['length']:.2g}",
             )
 
         def measure_fn(ctx: TaskState, update_hook: Callable[[int, Any], None]):
             cfg = ctx.cfg
             modules = cfg["modules"]
+            pi2_pulse = modules["pi2_pulse"]
+            pi_pulse = modules["pi_pulse"]
+            dpulse_len = (
+                pi_pulse["waveform"]["length"] - pi2_pulse["waveform"]["length"]
+            )
+
             interval = cpmg_spans / ctx.env["time"]
+
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
-                    Pulse("pi2_pulse1", modules["pi2_pulse"], pulse_name="pi2_pulse"),
-                    Delay("initial_cpmg_delay", delay=0.5 * interval),
+                    Pulse("pi2_pulse1", pi2_pulse, pulse_name="pi2_pulse"),
+                    Delay("first_cpmg_delay", 0.5 * interval - 0.5 * dpulse_len),
                     Repeat(
                         name="cpmg_pi_loop",
                         n=ctx.env["time"] - 1,
                         sub_module=[
-                            Pulse("pi_pulse", modules["pi_pulse"]),
-                            Delay("interval_cpmg_delay", delay=interval),
+                            Pulse("pi_pulse", pi_pulse, pulse_name="pi_pulse"),
+                            Delay("inner_cpmg_delay", interval),
                         ],
                     ),
-                    Pulse("last_pi_pulse", modules["pi_pulse"], pulse_name="pi_pulse"),
-                    Delay("final_cpmg_delay", delay=0.5 * interval),
-                    Pulse("pi2_pulse2", modules["pi2_pulse"], pulse_name="pi2_pulse"),
+                    Pulse("last_pi_pulse", pi_pulse, pulse_name="pi_pulse"),
+                    Delay("last_cpmg_delay", 0.5 * interval + 0.5 * dpulse_len),
+                    Pulse("pi2_pulse2", pi2_pulse, pulse_name="pi2_pulse"),
                     Readout("readout", modules["readout"]),
                 ],
             ).acquire(soc, progress=False, callback=update_hook)

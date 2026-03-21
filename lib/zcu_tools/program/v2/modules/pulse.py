@@ -44,12 +44,17 @@ def check_block_mode(name: str, cfg: PulseCfg, want_block: bool) -> None:
 
 class Pulse(Module, tag="pulse"):
     def __init__(
-        self, name: str, cfg: Optional[PulseCfg], pulse_name: Optional[str] = None
+        self,
+        name: str,
+        cfg: Optional[PulseCfg],
+        pulse_name: Optional[str] = None,
+        tag: Optional[str] = None,
     ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
 
         self.pulse_name = name if pulse_name is None else pulse_name
+        self.tag = tag
 
     def init(self, prog: MyProgramV2) -> None:
         if self.cfg is None:
@@ -103,7 +108,7 @@ class Pulse(Module, tag="pulse"):
         if "mixer_freq" in cfg:
             prog.pulse_registry.check_valid_mixer_freq(name, cfg)
 
-    def total_length(self, prog: MyProgramV2) -> float:
+    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
         if self.cfg is None:
             return 0.0
         return round_timestamp(
@@ -125,7 +130,7 @@ class Pulse(Module, tag="pulse"):
         if cfg is None:
             return t
 
-        prog.pulse(cfg["ch"], self.pulse_name, t=t + cfg["pre_delay"], tag=self.name)
+        prog.pulse(cfg["ch"], self.pulse_name, t=t + cfg["pre_delay"], tag=self.tag)
 
         if cfg["block_mode"]:  # default
             return t + self.total_length(prog)

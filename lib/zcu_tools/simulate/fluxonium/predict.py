@@ -93,7 +93,7 @@ class FluxoniumPredictor:
                     cur_value - 0.25 * self.flx_period,
                     cur_value + 0.25 * self.flx_period,
                 ],
-                xtol=1e-4 * self.flx_period,
+                xtol=1e-5 * self.flx_period,
                 maxiter=100,
             )
             if result.converged:

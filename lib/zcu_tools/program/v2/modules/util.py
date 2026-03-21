@@ -2,25 +2,47 @@ from __future__ import annotations
 
 import warnings
 
-from qick.asm_v2 import AbsQickProgram, QickParam, to_int
+import numpy as np
+from qick.asm_v2 import QickProgramV2, QickParam
 from typing_extensions import Optional, Union
 
 from ..utils import param2str
 
 
+def get_fclk(
+    prog: QickProgramV2, gen_ch: Optional[int] = None, ro_ch: Optional[int] = None
+):
+    # TODO: a better way to get fclk for tproc?
+    if gen_ch is not None and ro_ch is not None:
+        raise RuntimeError("can't specify both gen_ch and ro_ch!")
+    if gen_ch is not None:
+        return prog.soccfg["gens"][gen_ch]["f_fabric"]
+    elif ro_ch is not None:
+        return prog.soccfg["readouts"][ro_ch]["f_output"]
+    else:
+        return prog.soccfg["tprocs"][0]["f_time"]
+
+
 def round_timestamp(
-    prog: AbsQickProgram,
+    prog: QickProgramV2,
     t: Union[float, QickParam],
     gen_ch: Optional[int] = None,
     ro_ch: Optional[int] = None,
     take_ceil: bool = True,
-) -> float:
-    # as_float=True is important to avoid rounding error
-    cycles_t = prog.us2cycles(t, gen_ch=gen_ch, ro_ch=ro_ch, as_float=True)
-    if take_ceil:
-        cycles_t = 0.9999 + cycles_t
-    cycles_t = to_int(cycles_t, 1, parname="length")  # rounding here
-    return prog.cycles2us(cycles_t, gen_ch=gen_ch, ro_ch=ro_ch)
+) -> Union[float, QickParam]:
+    fclk = get_fclk(prog, gen_ch=gen_ch, ro_ch=ro_ch)
+
+    round_fn = np.ceil if take_ceil else np.floor
+
+    # TODO: non-hacky way to round QickParam timestamps?
+    cycles_t = t * fclk
+    if isinstance(cycles_t, QickParam):
+        cycles_t.start = int(round_fn(cycles_t.start))
+        cycles_t.spans = {k: int(round_fn(v)) for k, v in cycles_t.spans.items()}
+    else:
+        cycles_t = int(round_fn(cycles_t))
+
+    return cycles_t / fclk
 
 
 def calc_max_length(

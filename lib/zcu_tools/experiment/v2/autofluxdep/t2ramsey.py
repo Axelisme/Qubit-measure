@@ -347,7 +347,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
         assert t2r_stored.shape == (len(flx_t2r),)
         assert np.array_equal(flx_values, flx_t2r)
 
-        length = length_stored[0].astype(np.float64) * 1e6
+        length = length_stored.astype(np.float64) * 1e6
         raw_signals = signals_stored.T.astype(np.complex128)
         t2r = t2r_stored.astype(np.float64) * 1e6
         t2r_err = t2r_err.astype(np.float64)
