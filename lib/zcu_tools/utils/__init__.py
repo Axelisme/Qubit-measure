@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing_extensions import Any, Literal, Mapping, MutableMapping
 
-from . import datasaver, fitting, process, tomography
+from . import datasaver, fitting, math, process, tomography
 
 
 def deepupdate(
@@ -73,6 +73,7 @@ __all__ = [
     "numpy2number",
     "datasaver",
     "fitting",
+    "math",
     "process",
     "tomography",
 ]

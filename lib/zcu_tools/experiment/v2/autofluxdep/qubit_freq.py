@@ -22,6 +22,7 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.func_tools import MinIntervalFunc
+from zcu_tools.utils.math import IDWInterpolationModel
 from zcu_tools.utils.process import rotate2real
 
 from .executor import FluxDepInfoDict, MeasurementTask, T_RootResult
@@ -107,6 +108,8 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         self.init_cfg = deepcopy(ctx.cfg)
         self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
+        self.freq_err_pred = IDWInterpolationModel()
+
     def run(self, ctx: TaskState[QubitFreqResult, T_RootResult]) -> None:
         predictor: FluxoniumPredictor = ctx.env["predictor"]
         info: FluxDepInfoDict = ctx.env["info"]
@@ -115,7 +118,8 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
 
         flx = info["flx_value"]
         predict_freq = predictor.predict_freq(flx)
-        info["predict_freq"] = predict_freq
+        corrected_freq = predict_freq + self.freq_err_pred.predict(flx)
+        info["predict_freq"] = corrected_freq
 
         cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
         if cfg_temp is None:
@@ -150,11 +154,9 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         success = True
         mean_err = float(np.mean(np.abs(real_signals - fit_signals)))
 
-        # calibrate if good enough
         if mean_err < 0.3 * np.ptp(fit_signals):
-            bias = predictor.calculate_bias(flx, fit_freq)
-            predictor.update_bias(bias)
-            print(bias)
+            freq_error = fit_freq - predict_freq
+            self.freq_err_pred.update(flx, freq_error)
 
         # if fitting is bad, disgard it
         if mean_err > 0.2 * np.ptp(fit_signals):
