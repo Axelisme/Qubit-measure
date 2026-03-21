@@ -118,8 +118,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
 
         flx = info["flx_value"]
         predict_freq = predictor.predict_freq(flx)
-        corrected_freq = predict_freq + self.freq_err_pred.predict(flx)
-        info["predict_freq"] = corrected_freq
+        info["predict_freq"] = predict_freq + self.freq_err_pred.predict(flx)
 
         cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
         if cfg_temp is None:
@@ -157,6 +156,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         if mean_err < 0.3 * np.ptp(fit_signals):
             freq_error = fit_freq - predict_freq
             self.freq_err_pred.update(flx, freq_error)
+            print(freq_error)
 
         # if fitting is bad, disgard it
         if mean_err > 0.2 * np.ptp(fit_signals):

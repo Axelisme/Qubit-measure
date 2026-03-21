@@ -18,7 +18,7 @@ from .matrix_element import (
     calculate_n_oper_vs_flx,
     calculate_system_n_oper_vs_flx,
 )
-from .predict import FluxoniumPredictor, FreqErrorPredictor
+from .predict import FluxoniumPredictor
 
 __all__ = [
     # coherence
@@ -42,5 +42,4 @@ __all__ = [
     "calculate_system_n_oper_vs_flx",
     # predict
     "FluxoniumPredictor",
-    "FreqErrorPredictor",
 ]
