@@ -14,7 +14,7 @@ STATUS_MAP = {"on": "1", "off": "0"}
 MODE_MAPS = {"voltage": "VOLT", "current": "CURR"}
 DEFAULT_RAMPSTEP = {
     "voltage": 1e-4,
-    "current": 1e-8,
+    "current": 1e-7,
 }
 
 
