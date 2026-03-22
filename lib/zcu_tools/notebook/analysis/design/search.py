@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from tqdm.auto import tqdm
-from typing_extensions import Any, Optional, Union
+from typing_extensions import Any, Union
 
 from zcu_tools.notebook.persistance import load_result
 from zcu_tools.simulate.fluxonium import calculate_chi_sweep
@@ -167,7 +167,7 @@ def calculate_snr(
     def _calc_single_snr(row) -> float:
         _, snrs = calc_ge_snr(
             params=(row["EJ"], row["EC"], row["EL"]),
-            flx=row["flx"],
+            flux=row["flx"],
             r_f=r_f,
             rf_w=rf_w,
             g=g,
@@ -364,43 +364,44 @@ def annotate_best_point(fig, data: pd.DataFrame) -> tuple[float, float, float]:
 
 def add_real_sample(
     fig: go.Figure,
-    chip_name: str,
+    result_dir: str,
     noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
-    flx: float = 0.5,
-    result_dir: Optional[str] = None,
+    flux: float = 0.5,
     rf_w: float = 7e-3,
     max_photon: int = 70,
 ) -> None:
-    """
-    Add a real chip sample to the plot
 
-    Args:
-        fig: plotly figure
-        chip_name: chip name
-        t1_info: t1 info
-        flx: flux
-        result_dir: result directory, default to "../../result"
-    """
-    if result_dir is None:
-        result_dir = os.path.join("..", "..", "result")
+    result_path = os.path.join(result_dir, "params.json")
+    result_dict = load_result(result_path)
 
-    result_path = os.path.join(result_dir, chip_name, "params.json")
-    _, param, flx_half, _, _, result = load_result(result_path)
+    dispersive_dict = result_dict.get("dispersive")
+    assert dispersive_dict is not None
+
+    fluxdepfit_dict = result_dict.get("fluxdep_fit")
+    assert fluxdepfit_dict is not None
 
     # unpack result
-    r_f, g = result["dispersive"]["r_f"], result["dispersive"]["g"]
+    name = result_dict["name"]
+    params = (
+        fluxdepfit_dict["params"]["EJ"],
+        fluxdepfit_dict["params"]["EC"],
+        fluxdepfit_dict["params"]["EL"],
+    )
+    r_f = dispersive_dict["bare_rf"]
+    g = dispersive_dict["g"]
+    flx_half = fluxdepfit_dict["flx_half"]
 
     # load freq data
-    freq_path = os.path.join(result_dir, chip_name, "sample.csv")
-    freq_df = pd.read_csv(freq_path)
+    sample_path = os.path.join(result_dir, "sample.csv")
+    freq_df = pd.read_csv(sample_path)
     idx = np.argmin(np.abs(freq_df["calibrated mA"] - flx_half))
     t1 = freq_df["T1 (us)"].iloc[idx]
 
     # calculate chi
     _, snrs = calc_ge_snr(
-        params=param,
-        flx=flx,
+        params=params,
+        flux=flux,
         r_f=r_f,
         rf_w=rf_w,
         g=g,
@@ -414,7 +415,7 @@ def add_real_sample(
     from scqubits.core.fluxonium import Fluxonium  # lazy import
 
     # calculate t1
-    fluxonium = Fluxonium(*param, flux=flx, cutoff=DESIGN_CUTOFF, truncated_dim=2)
+    fluxonium = Fluxonium(*params, flux=flux, cutoff=DESIGN_CUTOFF, truncated_dim=2)
     scq.T1_DEFAULT_WARNING = False
     predict_t1 = 1e-3 * fluxonium.t1_effective(
         noise_channels=noise_channels,
@@ -429,8 +430,8 @@ def add_real_sample(
         x1=snr,
         y1=predict_t1,
         line=dict(color="red", width=1, dash="dot"),
-        name=chip_name,
-        legendgroup=chip_name,
+        name=name,
+        legendgroup=name,
         showlegend=True,
     )
 
@@ -440,15 +441,15 @@ def add_real_sample(
         y=[t1],
         mode="markers+text",
         marker=dict(symbol="x", size=5, color="black"),
-        text=[chip_name],
+        text=[name],
         textposition="top center",
-        hovertemplate=f"<b>{chip_name}</b><br>"
+        hovertemplate=f"<b>{name}</b><br>"
         + f"SNR: {snr:.2f}<br>"
         + f"T1: {t1:.2f} us<br>"
-        + f"EJ: {param[0]:.3f} GHz<br>"
-        + f"EC: {param[1]:.3f} GHz<br>"
-        + f"EL: {param[2]:.3f} GHz",
-        legendgroup=chip_name,
+        + f"EJ: {params[0]:.3f} GHz<br>"
+        + f"EC: {params[1]:.3f} GHz<br>"
+        + f"EL: {params[2]:.3f} GHz",
+        legendgroup=name,
         showlegend=False,
     )
 
@@ -458,6 +459,6 @@ def add_real_sample(
         y=[predict_t1],
         mode="markers",
         marker=dict(symbol="x", size=5, color="red"),
-        legendgroup=chip_name,
+        legendgroup=name,
         showlegend=False,
     )

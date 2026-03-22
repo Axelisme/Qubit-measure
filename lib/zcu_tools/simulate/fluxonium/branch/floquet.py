@@ -153,7 +153,7 @@ def calc_branch_infos(
 
 def calc_ge_snr(
     params: tuple[float, float, float],
-    flx: float,
+    flux: float,
     r_f: float,
     rf_w: float,
     g: float,
@@ -172,7 +172,7 @@ def calc_ge_snr(
         params=params,
         r_f=r_f,
         g=g,
-        flx=flx,
+        flx=flux,
         qub_dim=qub_dim,
         qub_cutoff=qub_cutoff,
         photons=photons,
