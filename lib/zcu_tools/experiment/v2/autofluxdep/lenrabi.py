@@ -211,8 +211,9 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
             info["pi2_length"] = pi2_len
             info["pi_pulse"] = deepcopy(rabi_pulse)
             info["pi_pulse"]["waveform"]["length"] = pi_len
-            info["pi2_pulse"] = deepcopy(rabi_pulse)
-            info["pi2_pulse"]["waveform"]["length"] = pi2_len
+            if pi2_len > 0.03:  # skip if pi2_len is too short to be reliable
+                info["pi2_pulse"] = deepcopy(rabi_pulse)
+                info["pi2_pulse"]["waveform"]["length"] = pi2_len
             info["smooth_pi_product"] = smooth_pi_product
             info["lenrabi_success_idx"] = info["flx_idx"]
 
