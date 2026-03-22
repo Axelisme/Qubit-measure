@@ -17,7 +17,6 @@ from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    Delay,
     ModularProgramCfg,
     ModularProgramV2,
     NonBlocking,
@@ -29,6 +28,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SoftDelay,
     sweep2param,
+    check_block_mode,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
@@ -103,8 +103,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)
         modules = _cfg["modules"]
 
-        if modules["stark_pulse1"].get("block_mode", True):
-            raise ValueError("Stark pulse 1 must not in block mode")
+        check_block_mode("stark_pulse1", modules["stark_pulse1"], want_block=False)
 
         gain_sweep = _cfg["sweep"].pop("gain")
 
@@ -324,11 +323,8 @@ class AcStarkRamseyModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class AcStarkRamseyProgramCfg(ModularProgramCfg):
+class AcStarkRamseyCfg(ModularProgramCfg, TaskCfg):
     modules: AcStarkRamseyModuleCfg
-
-
-class AcStarkRamseyTaskConfig(AcStarkRamseyProgramCfg, TaskCfg):
     wait_delay: float
     sweep: dict[str, SweepCfg]
 
@@ -337,7 +333,7 @@ class AcStarkRamseyExp(AbsExperiment):
     def run(
         self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
     ) -> AcStarkResult:
-        _cfg = check_type(deepcopy(cfg), AcStarkRamseyTaskConfig)
+        _cfg = check_type(deepcopy(cfg), AcStarkRamseyCfg)
 
         gain_sweep = _cfg["sweep"].pop("gain")
 

@@ -17,7 +17,7 @@ from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveLines,
 )
 from zcu_tools.program import SweepCfg
-from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param, Pulse
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
@@ -41,18 +41,18 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
     ) -> FreqFluxResult:
         _cfg = check_type(deepcopy(cfg), FreqFluxCfg)
 
-        flx_sweep = _cfg["sweep"]["flux"]
-        fpt_sweep = _cfg["sweep"]["freq"]
+        values_sweep = _cfg["sweep"]["flux"]
+        freqs_sweep = _cfg["sweep"]["freq"]
 
-        # Remove flux from sweep dict - will be handled by soft loop
-        _cfg["sweep"] = {"freq": fpt_sweep}
+        # Remove flux from sweep dict - will be handled by scan
+        _cfg["sweep"] = {"freq": freqs_sweep}
 
-        dev_values = sweep2array(flx_sweep, allow_array=True)
-        fpts = sweep2array(fpt_sweep)  # predicted frequency points
+        dev_values = sweep2array(values_sweep, allow_array=True)
+        freqs = sweep2array(freqs_sweep)  # predicted frequency points
 
         # Frequency is swept by FPGA (hard sweep)
         modules = _cfg["modules"]
-        modules["qub_pulse"]["freq"] = sweep2param("freq", fpt_sweep)
+        Pulse.set_param(modules["qub_pulse"], "freq", sweep2param("freq", freqs_sweep))
 
         with LivePlotter2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2
@@ -62,7 +62,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
                         soccfg, ctx.cfg
                     ).acquire(soc, progress=False, callback=update_hook),
-                    result_shape=(len(fpts),),
+                    result_shape=(len(freqs),),
                 )
                 .auto_retry(max_retries=fail_retry)
                 .scan(
@@ -74,16 +74,16 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    dev_values, fpts, freqflux_signal2real(np.asarray(ctx.root_data))
+                    dev_values, freqs, freqflux_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = _cfg
-        self.last_result = (dev_values, fpts, signals)
+        self.last_result = (dev_values, freqs, signals)
 
-        return dev_values, fpts, signals
+        return dev_values, freqs, signals
 
     def analyze(
         self,
