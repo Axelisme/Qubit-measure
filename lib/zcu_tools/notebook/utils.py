@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import gc
 import json
-import time
 import os
+import time
 from copy import deepcopy
 from pathlib import Path
 
@@ -21,6 +22,11 @@ if TYPE_CHECKING:
         from pyvisa import ResourceManager
     except ImportError:
         from typing_extensions import Any as ResourceManager
+
+
+def gc_collect() -> None:
+    plt.close("all")
+    gc.collect()
 
 
 def make_sweep(
