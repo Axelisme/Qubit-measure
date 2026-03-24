@@ -4,13 +4,13 @@ from functools import partial
 
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy as sp
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.optimize import minimize
 from typing_extensions import TYPE_CHECKING, Callable, Optional, Union
 
+from zcu_tools.notebook.analysis.t1_curve.utils import format_exponent
 from zcu_tools.simulate import flx2value, value2flx
 from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flx_with
 
@@ -19,102 +19,8 @@ if TYPE_CHECKING:
     from scqubits.core.storage import SpectrumData
 
 
-def format_exponent(n: float) -> str:
-    # 將數字轉為標準科學記號字串，例如 "1.30e+03"
-    a = "{:.2e}".format(n)
-    base, exp = a.split("e")
-    # 移除指數部分的正號與多餘的 0 (例如 +03 變成 3)
-    clean_exp = int(exp)
-    return rf"${base} \times 10^{{{clean_exp}}}$"
-
-
-def freq2omega(freqs: NDArray[np.float64]) -> NDArray[np.float64]:
-    """GHz -> rad/ns"""
-    return 2 * np.pi * freqs
-
-
-def charge_spectral_density(omega, Temp: float, EC: float):
-    """omega: rad/ns, EC: GHz, T: K"""
-    therm_ratio = calc_therm_ratio(omega, Temp)
-    return (
-        2
-        * 8
-        * EC
-        * (1 / np.tanh(0.5 * np.abs(therm_ratio)))
-        / (1 + np.exp(-therm_ratio))
-    )
-
-
-def inductive_spectral_density(omega, Temp: float, EL: float):
-    """omega: rad/ns, EL: GHz, T: K"""
-    therm_ratio = calc_therm_ratio(omega, Temp)
-    return (
-        2 * EL * (1 / np.tanh(0.5 * np.abs(therm_ratio))) / (1 + np.exp(-therm_ratio))
-    )
-
-
-def calc_therm_ratio(omega, T: float):
-    """omega: rad/ns, T: K"""
-    return (sp.constants.hbar * omega * 1e9) / (sp.constants.k * T)
-
-
-def calc_Qcap_vs_omega(
-    params: tuple[float, float, float],
-    freqs: NDArray[np.float64],
-    T1s: NDArray[np.float64],
-    n_elements: NDArray[np.float64],
-    T1errs: Optional[NDArray[np.float64]] = None,
-    Temp: float = 20e-3,
-) -> Union[NDArray[np.float64], tuple[NDArray[np.float64], NDArray[np.float64]]]:
-    """fpts: GHz, T1s: ns, guess_Temp: K"""
-    omegas = freq2omega(freqs)
-
-    EJ, EC, EL = params
-
-    # calculate Qcap vs omega
-    other_factors = charge_spectral_density(omegas, Temp, EC) + charge_spectral_density(
-        -omegas, Temp, EC
-    )
-    Qcap_vs_omega = T1s * np.abs(n_elements) ** 2 * other_factors
-
-    if T1errs is not None:
-        Qcap_vs_omega_err = T1errs * np.abs(n_elements) ** 2 * other_factors
-
-        return Qcap_vs_omega, Qcap_vs_omega_err
-    else:
-        return Qcap_vs_omega
-
-
-def calc_Qind_vs_omega(
-    params: tuple[float, float, float],
-    freqs: NDArray[np.float64],
-    T1s: NDArray[np.float64],
-    phi_elements: NDArray[np.float64],
-    T1errs: Optional[NDArray[np.float64]] = None,
-    Temp: float = 20e-3,
-) -> Union[NDArray[np.float64], tuple[NDArray[np.float64], NDArray[np.float64]]]:
-    """fpts: GHz, T1s: ns, guess_Temp: K"""
-    omegas = freq2omega(freqs)
-
-    EJ, EC, EL = params
-
-    # calculate Qind vs omega
-    other_factors = inductive_spectral_density(
-        omegas, Temp, EL
-    ) + inductive_spectral_density(-omegas, Temp, EL)
-    Qind_vs_omega = T1s * np.abs(phi_elements) ** 2 * other_factors
-
-    if T1errs is not None:
-        Qind_vs_omega_err = T1errs * np.abs(phi_elements) ** 2 * other_factors
-
-        return Qind_vs_omega, Qind_vs_omega_err
-    else:
-        return Qind_vs_omega
-
-
 def find_proper_Temp(
-    guess_Temp: float,
-    calc_Q_fn: Callable[[float], NDArray[np.float64]],
+    guess_Temp: float, calc_Q_fn: Callable[[float], NDArray[np.float64]]
 ) -> float:
     """use scipy.optimize.minimize to find the proper Temp, the proper Temp is the one that minimizes the difference between all Q values"""
 
@@ -129,14 +35,12 @@ def find_proper_Temp(
 
 
 def plot_Q_vs_omega(
-    freqs: NDArray[np.float64],
+    omegas: NDArray[np.float64],
     Q_vs_omega: NDArray[np.float64],
     Q_vs_omega_err: NDArray[np.float64],
     Qname: str = r"$Q_{cap}$",
 ) -> tuple[Figure, Axes]:
-    """freqs: GHz, Q_vs_omega: ns/rad, Q_vs_omega_err: ns/rad"""
-    omegas = freq2omega(freqs)
-
+    """omegas: rad/ns, Q_vs_omega: ns/rad, Q_vs_omega_err: ns/rad"""
     fig, ax = plt.subplots()
     ax.errorbar(omegas, Q_vs_omega, yerr=Q_vs_omega_err, fmt=".", label="data")
 
@@ -152,13 +56,12 @@ def plot_Q_vs_omega(
 
 def add_Q_fit(
     ax: Axes,
-    freqs: NDArray[np.float64],
+    omegas: NDArray[np.float64],
     Q_vs_omega: NDArray[np.float64],
     omega_range: Optional[tuple[Optional[float], Optional[float]]] = None,
     fit_constant: bool = False,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """freqs: GHz, Q_vs_omega: ns/rad, omega_range: (rad/ns, rad/ns)"""
-    omegas = freq2omega(freqs)
+    """omegas: rad/ns, Q_vs_omega: ns/rad, omega_range: (rad/ns, rad/ns)"""
 
     if omega_range is not None:
         fit_idxs = np.arange(len(omegas))
@@ -193,12 +96,13 @@ def add_Q_fit(
     return np.copy(omegas), fit_Qs
 
 
-def plot_t1_vs_m01(
+def plot_t1_vs_elements(
     dipoles: NDArray[np.float64],
     T1s: NDArray[np.float64],
     T1errs: Optional[NDArray[np.float64]] = None,
-    op_name: str = "d_{01}",
+    dipole_name: str = "d_{01}",
     Q_name: str = r"$Q_{cap}$",
+    product2val: Callable[[float], float] = lambda x: x,
 ) -> tuple[Figure, Axes]:
     """T1s: ns, Q_factors: ns/rad"""
     fig, ax = plt.subplots()
@@ -231,16 +135,18 @@ def plot_t1_vs_m01(
             np.log(ylim[1]) - np.log(ylim[0]),
         )
     )
-    text_x = np.exp(np.mean(np.log(dipoles)) + 0.5)
+    text_x = np.exp(0.5 * (np.max(np.log(dipoles)) + np.min(np.log(dipoles))))
     idx = np.argmin(np.abs(dipoles - text_x))
     yup = up_ys[idx] * 1.01
-    ydown = down_ys[idx] * 0.75
+    ydown = down_ys[idx] * 0.90
 
     text_kwargs = dict(rotation=angle, color="k", ha="right", va="bottom")
-    ax.text(text_x, yup, f"{Q_name} = {format_exponent(up_Q)}", **text_kwargs)
-    ax.text(text_x, ydown, f"{Q_name} = {format_exponent(down_Q)}", **text_kwargs)
+    up_Q_str = format_exponent(product2val(up_Q))
+    down_Q_str = format_exponent(product2val(down_Q))
+    ax.text(text_x, yup, f"{Q_name} = {up_Q_str}", **text_kwargs)
+    ax.text(text_x, ydown, f"{Q_name} = {down_Q_str}", **text_kwargs)
 
-    ax.set_xlabel(rf"$|{op_name}|^2$")
+    ax.set_xlabel(rf"$|{dipole_name}|^2$")
     ax.set_ylabel(r"$T_1$ (ns)")
     ax.grid()
 

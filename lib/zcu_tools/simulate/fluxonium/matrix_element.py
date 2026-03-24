@@ -11,9 +11,9 @@ if TYPE_CHECKING:
 
 def calculate_n_oper(
     params: tuple[float, float, float],
-    flx: float,
+    flux: float,
     return_dim: int = 4,
-    esys: Optional[tuple[NDArray[np.float64], NDArray[np.float64]]] = None,
+    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
 ) -> NDArray[np.float64]:
     """
     Calculate the matrix elements of the fluxonium
@@ -23,7 +23,7 @@ def calculate_n_oper(
 
     from scqubits.core.fluxonium import Fluxonium
 
-    fluxonium = Fluxonium(*params, flux=flx, cutoff=cutoff, truncated_dim=return_dim)
+    fluxonium = Fluxonium(*params, flux=flux, cutoff=cutoff, truncated_dim=return_dim)
     if esys is None:
         esys = fluxonium.eigensys(evals_count=return_dim)
 
@@ -34,15 +34,15 @@ def calculate_n_oper(
 
 def calculate_n_oper_vs_flx(
     params: tuple[float, float, float],
-    flxs: NDArray[np.float64],
+    fluxs: NDArray[np.float64],
     return_dim: int = 4,
     spectrum_data: Optional[SpectrumData] = None,
-) -> tuple[SpectrumData, NDArray[np.float64]]:
+) -> tuple[SpectrumData, NDArray[np.complex128]]:
     """
     Calculate the matrix elements of the fluxonium vs. a parameter
     """
 
-    if spectrum_data is None:
+    if spectrum_data is None or spectrum_data.matrixelem_table is None:
         cutoff = 40
 
         from scqubits.core.fluxonium import Fluxonium
@@ -53,7 +53,7 @@ def calculate_n_oper_vs_flx(
         spectrum_data = fluxonium.get_matelements_vs_paramvals(
             operator="n_operator",
             param_name="flux",
-            param_vals=flxs,
+            param_vals=fluxs,
             evals_count=return_dim,
         )
     matrix_elements = spectrum_data.matrixelem_table
@@ -63,13 +63,13 @@ def calculate_n_oper_vs_flx(
 
 def calculate_system_n_oper_vs_flx(
     params: tuple[float, float, float],
-    flxs: NDArray[np.float64],
-    r_f: float,
+    fluxs: NDArray[np.float64],
+    bare_rf: float,
     g: float,
     return_dim: int = 4,
     progress: bool = True,
     sweep: Optional[ParameterSweep] = None,
-) -> tuple[ParameterSweep, NDArray[np.float64]]:
+) -> tuple[ParameterSweep, NDArray[np.complex128]]:
     """
     Calculate the matrix elements of the system over a parameter sweep
     """
@@ -86,7 +86,7 @@ def calculate_system_n_oper_vs_flx(
         from scqubits.core.param_sweep import ParameterSweep
         from scqubits.utils.spectrum_utils import identity_wrap
 
-        resonator = Oscillator(r_f, truncated_dim=res_dim)
+        resonator = Oscillator(bare_rf, truncated_dim=res_dim)
         fluxonium = Fluxonium(*params, flux=0.5, cutoff=cutoff, truncated_dim=qub_dim)
         hilbertspace = HilbertSpace([resonator, fluxonium])
         hilbertspace.add_interaction(
@@ -100,7 +100,7 @@ def calculate_system_n_oper_vs_flx(
         scq_settings.PROGRESSBAR_DISABLED = not progress
         sweep = ParameterSweep(
             hilbertspace,
-            {"params": flxs},
+            {"params": fluxs},
             update_hilbertspace=update_hilbertspace,
             evals_count=res_dim * qub_dim,
             subsys_update_info={"params": [fluxonium]},
@@ -137,3 +137,112 @@ def calculate_system_n_oper_vs_flx(
     sweep.add_sweep(get_n_oper, "n_oper")
 
     return sweep, sweep["n_oper"]
+
+def calculate_phi_oper(
+    params: tuple[float, float, float],
+    flux: float,
+    return_dim: int = 4,
+    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+) -> NDArray[np.complex128]:
+    """
+    Calculate the matrix elements of the phi operator
+    """
+
+    from scqubits.core.fluxonium import Fluxonium
+
+    cutoff = 30
+
+    fluxonium = Fluxonium(*params, flux=flux, cutoff=cutoff, truncated_dim=return_dim)
+    if esys is None:
+        esys = fluxonium.eigensys(evals_count=return_dim)
+
+    matrix_elements = fluxonium.phi_operator(energy_esys=esys)
+
+    return matrix_elements[:return_dim, :return_dim]
+
+
+def calculate_phi_oper_vs_flx(
+    params: tuple[float, float, float],
+    fluxs: NDArray[np.float64],
+    return_dim: int = 4,
+    spectrum_data: Optional[SpectrumData] = None,
+) -> tuple[SpectrumData, NDArray[np.complex128]]:
+    """
+    Calculate the matrix elements of the phi operator vs. a parameter
+    """
+
+    cutoff = 40
+
+    from scqubits.core.fluxonium import Fluxonium
+
+    fluxonium = Fluxonium(*params, flux=0.5, cutoff=cutoff, truncated_dim=return_dim)
+    phi_oper = fluxonium.phi_operator(energy_esys=False)
+
+    if spectrum_data is None or spectrum_data.matrixelem_table is None:
+        spectrum_data = fluxonium.get_matelements_vs_paramvals(
+            operator=phi_oper,
+            param_name="flux",
+            param_vals=fluxs,
+            evals_count=return_dim,
+        )
+    matrix_elements = spectrum_data.matrixelem_table
+
+    return spectrum_data, matrix_elements[:, :return_dim, :return_dim]
+
+
+def calculate_sin_phi_oper(
+    params: tuple[float, float, float],
+    flux: float,
+    return_dim: int = 4,
+    esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
+    alpha: float = 1.0,
+    beta: float = 0.0,
+) -> NDArray[np.complex128]:
+    """
+    Calculate the matrix elements of the sin(phi/2) operator
+    """
+
+    from scqubits.core.fluxonium import Fluxonium
+
+    cutoff = 30
+
+    fluxonium = Fluxonium(*params, flux=flux, cutoff=cutoff, truncated_dim=return_dim)
+    if esys is None:
+        esys = fluxonium.eigensys(evals_count=return_dim)
+
+    matrix_elements = fluxonium.sin_phi_operator(
+        alpha=alpha, beta=beta, energy_esys=esys
+    )
+
+    return matrix_elements[:return_dim, :return_dim]
+
+
+def calculate_sin_phi_oper_vs_flx(
+    params: tuple[float, float, float],
+    fluxs: NDArray[np.float64],
+    return_dim: int = 4,
+    spectrum_data: Optional[SpectrumData] = None,
+    alpha: float = 1.0,
+    beta: float = 0.0,
+) -> tuple[SpectrumData, NDArray[np.complex128]]:
+    """
+    Calculate the matrix elements of the sin(phi/2) operator vs. a parameter
+    """
+
+    cutoff = 40
+
+    from scqubits.core.fluxonium import Fluxonium
+
+    fluxonium = Fluxonium(*params, flux=0.5, cutoff=cutoff, truncated_dim=return_dim)
+    sin_phi_oper = fluxonium.sin_phi_operator(alpha=alpha, beta=beta, energy_esys=False)
+
+    if spectrum_data is None or spectrum_data.matrixelem_table is None:
+        spectrum_data = fluxonium.get_matelements_vs_paramvals(
+            operator=sin_phi_oper,
+            param_name="flux",
+            param_vals=fluxs,
+            evals_count=return_dim,
+        )
+    matrix_elements = spectrum_data.matrixelem_table
+
+    return spectrum_data, matrix_elements[:, :return_dim, :return_dim]

@@ -26,7 +26,7 @@ def percell(
     Een: NDArray[np.float64],
     Vec_en: NDArray[np.complex128],
     Vec_n: NDArray[np.complex128],
-    r_f: float,
+    bare_rf: float,
     kappa: float,
     Temp: float,
     ns: NDArray[np.int64],
@@ -35,6 +35,8 @@ def percell(
 ) -> NDArray[np.float64]:
     """
     Calculate the transition rate of 0-1 caused by percell effect.
+
+    Egn, Een, bare_rf, kappa: GHz, Temp: K
     """
 
     from scqubits.utils.spectrum_utils import identity_wrap
@@ -42,7 +44,7 @@ def percell(
     beta_hbar = sc.hbar / (sc.k * Temp) * 1e9
 
     def P_res(n: NDArray[np.int64]) -> NDArray[np.float64]:
-        return (1 - np.exp(-beta_hbar * r_f)) * np.exp(-n * beta_hbar * r_f)
+        return (1 - np.exp(-beta_hbar * bare_rf)) * np.exp(-n * beta_hbar * bare_rf)
 
     def n_th(w_j: NDArray[np.float64]) -> NDArray[np.float64]:
         return 1 / (np.exp(beta_hbar * w_j) - 1)
@@ -91,13 +93,17 @@ def percell(
 
 
 def calculate_percell_t1_vs_flx(
-    flxs: NDArray[np.float64],
-    r_f: float,
+    fluxs: NDArray[np.float64],
+    bare_rf: float,
     kappa: float,
     g: float,
     Temp: float,
     params: tuple[float, float, float],
 ) -> NDArray[np.float64]:
+    """
+    bare_rf, kappa, g: GHz, Temp: K, params: GHz -> ns
+    """
+
     Nf = 10
     Nr = 10
     ns = np.arange(0, Nr)
@@ -108,7 +114,7 @@ def calculate_percell_t1_vs_flx(
     from scqubits.core.param_sweep import ParameterSweep
 
     fluxonium = Fluxonium(*params, flux=0.0, cutoff=40, truncated_dim=Nf)
-    resonator = Oscillator(E_osc=r_f, truncated_dim=Nr)
+    resonator = Oscillator(E_osc=bare_rf, truncated_dim=Nr)
     hilbertspace = HilbertSpace([fluxonium, resonator])
     hilbertspace.add_interaction(
         g=g, op1=fluxonium.n_operator, op2=resonator.creation_operator, add_hc=True
@@ -119,7 +125,7 @@ def calculate_percell_t1_vs_flx(
 
     sweep = ParameterSweep(
         hilbertspace=hilbertspace,
-        paramvals_by_name={"flux": flxs},
+        paramvals_by_name={"flux": fluxs},
         update_hilbertspace=update_hilbertspace,
         evals_count=Nf * Nr,
         subsys_update_info={"flux": [fluxonium]},
@@ -162,7 +168,7 @@ def calculate_percell_t1_vs_flx(
             Een,
             Vec_en,
             Vec_n,
-            r_f=r_f,
+            bare_rf=bare_rf,
             kappa=kappa,
             Temp=Temp,
             ns=ns,

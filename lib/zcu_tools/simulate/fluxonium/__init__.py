@@ -16,6 +16,10 @@ from .energies import calculate_energy, calculate_energy_vs_flx
 from .matrix_element import (
     calculate_n_oper,
     calculate_n_oper_vs_flx,
+    calculate_phi_oper,
+    calculate_phi_oper_vs_flx,
+    calculate_sin_phi_oper,
+    calculate_sin_phi_oper_vs_flx,
     calculate_system_n_oper_vs_flx,
 )
 from .predict import FluxoniumPredictor
@@ -40,6 +44,10 @@ __all__ = [
     "calculate_n_oper",
     "calculate_n_oper_vs_flx",
     "calculate_system_n_oper_vs_flx",
+    "calculate_sin_phi_oper",
+    "calculate_sin_phi_oper_vs_flx",
+    "calculate_phi_oper",
+    "calculate_phi_oper_vs_flx",
     # predict
     "FluxoniumPredictor",
 ]
