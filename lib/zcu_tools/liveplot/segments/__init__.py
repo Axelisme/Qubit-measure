@@ -4,9 +4,13 @@ from .plot2d import Plot2DSegment, PlotNonUniform2DSegment
 from .scatter import ScatterSegment
 
 __all__ = [
+    # base
     "AbsSegment",
+    # plot1d
     "Plot1DSegment",
+    # plot2d
     "Plot2DSegment",
     "PlotNonUniform2DSegment",
+    # scatter
     "ScatterSegment",
 ]

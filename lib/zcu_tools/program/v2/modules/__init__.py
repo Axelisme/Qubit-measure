@@ -4,7 +4,7 @@ import qick.asm_v2 as qick_asm_v2
 
 from .base import Delay, Module, ModuleCfg, NonBlocking, SoftDelay
 from .loop import Repeat, SoftRepeat
-from .pulse import Pulse, PulseCfg, check_block_mode
+from .pulse import Pulse, PulseCfg
 from .readout import (
     DirectReadout,
     DirectReadoutCfg,

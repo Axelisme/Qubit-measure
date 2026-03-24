@@ -69,11 +69,14 @@ def numpy2number(obj: Any) -> Any:
 
 
 __all__ = [
-    "deepupdate",
-    "numpy2number",
-    "datasaver",
+    # modules
     "fitting",
     "math",
     "process",
     "tomography",
+    # utils
+    "deepupdate",
+    # datasaver
+    "numpy2number",
+    "datasaver",
 ]

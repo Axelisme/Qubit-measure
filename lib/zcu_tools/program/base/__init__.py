@@ -25,4 +25,11 @@ class MyProgram(ImproveAcquireMixin):
         super().__init__(soccfg, cfg=cfg, **kwargs)
 
 
-__all__ = ["MyProgram", "SweepCfg", "AbsStatisticTracker"]
+__all__ = [
+    # base
+    "MyProgram",
+    # sweep
+    "SweepCfg",
+    # statistic tracker
+    "AbsStatisticTracker",
+]

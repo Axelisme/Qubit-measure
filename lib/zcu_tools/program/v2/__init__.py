@@ -5,13 +5,13 @@ from .modules import (
     Delay,
     DirectReadout,
     DirectReadoutCfg,
-    PulseReadout,
-    PulseReadoutCfg,
     Module,
     ModuleCfg,
     NonBlocking,
     Pulse,
     PulseCfg,
+    PulseReadout,
+    PulseReadoutCfg,
     Readout,
     ReadoutCfg,
     Repeat,
@@ -20,7 +20,6 @@ from .modules import (
     SoftDelay,
     SoftRepeat,
     WaveformCfg,
-    check_block_mode,
 )
 from .onetone import OneToneCfg, OneToneProgram
 from .twotone import TwoToneCfg, TwoToneProgram

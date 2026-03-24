@@ -129,8 +129,16 @@ def singleshot_ge_analysis(
 
 
 __all__ = [
+    # base
     "GE_FitResult",
     "fidelity_func",
+    # center
+    "fit_ge_by_center",
+    # manual
+    "fit_ge_manual",
+    # pca
+    "fit_ge_by_pca",
+    # singleshot
     "singleshot_ge_analysis",
     "singleshot_visualize",
 ]

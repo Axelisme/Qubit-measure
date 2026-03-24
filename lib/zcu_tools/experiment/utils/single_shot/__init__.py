@@ -129,9 +129,14 @@ def fit_singleshot2d(
 
 
 __all__ = [
+    # gaussian 2d
+    "fit_gauss_2d",
+    "fit_gauss_2d_bayesian",
+    # ge
     "GE_FitResult",
     "fidelity_func",
     "singleshot_ge_analysis",
-    "fit_singleshot2d",
     "singleshot_visualize",
+    # single shot
+    "fit_singleshot2d",
 ]
