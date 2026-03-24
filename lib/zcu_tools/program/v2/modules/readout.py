@@ -17,7 +17,7 @@ from typing_extensions import (
 
 from ..base import MyProgramV2
 from .base import Module, ModuleCfg
-from .pulse import Pulse, PulseCfg, Waveform, check_block_mode
+from .pulse import Pulse, PulseCfg, Waveform
 from .util import calc_max_length, round_timestamp
 
 if TYPE_CHECKING:
@@ -48,8 +48,11 @@ class AbsReadout(Module, tag="readout"): ...
 
 class Readout(Module):
     def __init__(self, name: str, cfg: ReadoutCfg) -> None:
-        self.name = name
         self.readout = cast(Readout, Module.parse(cfg["type"])(name, cfg))
+
+    @property
+    def name(self) -> str:
+        return self.readout.name
 
     def init(self, prog: MyProgramV2) -> None:
         self.readout.init(prog)
@@ -154,9 +157,6 @@ class PulseReadout(AbsReadout, tag="pulse"):
 
         self.pulse = Pulse(name=f"{name}_pulse", cfg=self.pulse_cfg)
         self.ro_window = DirectReadout(name=f"{name}_adc", cfg=self.ro_cfg)
-
-        # ro_window is always non-blocking
-        check_block_mode(self.pulse.name, self.pulse_cfg, want_block=True)
 
     @classmethod
     def set_param(

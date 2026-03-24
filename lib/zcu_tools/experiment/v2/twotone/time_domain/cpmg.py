@@ -41,7 +41,6 @@ from zcu_tools.program.v2 import (
     Repeat,
     Reset,
     ResetCfg,
-    check_block_mode,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -82,6 +81,9 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> CPMG_Result:
         _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
 
+        pi2_pulse = _cfg["modules"]["pi2_pulse"]
+        pi_pulse = _cfg["modules"]["pi_pulse"]
+
         times_sweep = _cfg["sweep"]["times"]
         length_sweep = _cfg["sweep"]["length"]
         _cfg["sweep"].pop("times")  # type: ignore
@@ -94,11 +96,6 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
-
-        pi2_pulse = _cfg["modules"]["pi2_pulse"]
-        pi_pulse = _cfg["modules"]["pi_pulse"]
-        check_block_mode("pi2_pulse", pi2_pulse, want_block=False)
-        check_block_mode("pi_pulse", pi_pulse, want_block=False)
 
         min_interval = np.min(lengths) / np.max(times)
         if min_interval < (
@@ -132,17 +129,32 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        Pulse("pi2_pulse1", pi2_pulse, pulse_name="pi2_pulse"),
+                        Pulse(
+                            "pi2_pulse1",
+                            pi2_pulse,
+                            pulse_name="pi2_pulse",
+                            block_mode=False,
+                        ),
                         Delay("first_cpmg_delay", 0.5 * interval - 0.5 * dpulse_len),
                         Repeat(
                             name="cpmg_pi_loop",
                             n=ctx.env["time"] - 1,
                             sub_module=[
-                                Pulse("pi_pulse", pi_pulse, pulse_name="pi_pulse"),
+                                Pulse(
+                                    "pi_pulse",
+                                    pi_pulse,
+                                    pulse_name="pi_pulse",
+                                    block_mode=False,
+                                ),
                                 Delay("inner_cpmg_delay", interval),
                             ],
                         ),
-                        Pulse("last_pi_pulse", pi_pulse, pulse_name="pi_pulse"),
+                        Pulse(
+                            "last_pi_pulse",
+                            pi_pulse,
+                            pulse_name="pi_pulse",
+                            block_mode=False,
+                        ),
                         Delay("last_cpmg_delay", 0.5 * interval + 0.5 * dpulse_len),
                         Pulse("pi2_pulse2", pi2_pulse, pulse_name="pi2_pulse"),
                         Readout("readout", modules["readout"]),

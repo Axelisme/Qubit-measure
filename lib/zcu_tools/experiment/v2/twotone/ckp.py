@@ -86,8 +86,6 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         _cfg = check_type(deepcopy(cfg), CKP_Cfg)
         modules = _cfg["modules"]
 
-        if modules["res_pulse"].get("block_mode", True):
-            raise ValueError("Resonator pulse must not in block mode")
 
         _cfg["sweep"] = {
             "ge": make_ge_sweep(),
@@ -152,7 +150,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                     modules=[
                         Reset("reset", modules.get("reset")),
                         Pulse("pi_pulse", modules["pi_pulse"]),
-                        Pulse("res_pulse", modules["res_pulse"]),
+                        Pulse("res_pulse", modules["res_pulse"], block_mode=False),
                         Pulse("qub_pulse", modules["qub_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],

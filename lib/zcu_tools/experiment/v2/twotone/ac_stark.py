@@ -28,7 +28,6 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     SoftDelay,
     sweep2param,
-    check_block_mode,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fitlor
@@ -103,7 +102,6 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)
         modules = _cfg["modules"]
 
-        check_block_mode("stark_pulse1", modules["stark_pulse1"], want_block=False)
 
         gain_sweep = _cfg["sweep"].pop("gain")
 
@@ -138,7 +136,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                                 ctx.cfg,
                                 modules=[
                                     Reset("reset", modules.get("reset")),
-                                    Pulse("stark_pulse1", modules["stark_pulse1"]),
+                                    Pulse(
+                                        "stark_pulse1",
+                                        modules["stark_pulse1"],
+                                        block_mode=False,
+                                    ),
                                     Pulse("stark_pulse2", modules["stark_pulse2"]),
                                     Readout("readout", modules["readout"]),
                                 ],

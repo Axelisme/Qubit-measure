@@ -14,7 +14,7 @@ from typing_extensions import (
 
 from ..base import MyProgramV2
 from .base import Module, ModuleCfg
-from .pulse import Pulse, PulseCfg, check_block_mode
+from .pulse import Pulse, PulseCfg
 from .util import calc_max_length
 
 if TYPE_CHECKING:
@@ -119,7 +119,6 @@ class PulseReset(AbsReset, tag="pulse"):
         self.name = name
         pulse_cfg = cfg["pulse_cfg"]
         self.reset_pulse = Pulse(name=f"{name}_pulse", cfg=pulse_cfg)
-        check_block_mode(self.reset_pulse.name, pulse_cfg, want_block=True)
 
     def init(self, prog: MyProgramV2) -> None:
         self.reset_pulse.init(prog)
@@ -157,11 +156,10 @@ class TwoPulseReset(AbsReset, tag="two_pulse"):
         pulse1_cfg = cfg["pulse1_cfg"]
         pulse2_cfg = cfg["pulse2_cfg"]
 
-        self.reset_pulse1 = Pulse(name=f"{name}_pulse1", cfg=pulse1_cfg)
+        self.reset_pulse1 = Pulse(
+            name=f"{name}_pulse1", cfg=pulse1_cfg, block_mode=False
+        )
         self.reset_pulse2 = Pulse(name=f"{name}_pulse2", cfg=pulse2_cfg)
-
-        check_block_mode(self.reset_pulse1.name, pulse1_cfg, want_block=False)
-        check_block_mode(self.reset_pulse2.name, pulse2_cfg, want_block=True)
 
     def init(self, prog: MyProgramV2) -> None:
         self.reset_pulse1.init(prog)
@@ -219,13 +217,11 @@ class BathReset(AbsReset, tag="bath"):
         cavity_tone_cfg = cfg["cavity_tone_cfg"]
         pi2_cfg = cfg["pi2_cfg"]
 
-        self.qub_pulse = Pulse(name=f"{name}_qub_pulse", cfg=qubit_tone_cfg)
+        self.qub_pulse = Pulse(
+            name=f"{name}_qub_pulse", cfg=qubit_tone_cfg, block_mode=False
+        )
         self.res_pulse = Pulse(name=f"{name}_res_pulse", cfg=cavity_tone_cfg)
         self.pi2_pulse = Pulse(name=f"{name}_pi2_pulse", cfg=pi2_cfg)
-
-        check_block_mode(self.qub_pulse.name, qubit_tone_cfg, want_block=False)
-        check_block_mode(self.res_pulse.name, cavity_tone_cfg, want_block=True)
-        check_block_mode(self.pi2_pulse.name, pi2_cfg, want_block=True)
 
     def init(self, prog: MyProgramV2) -> None:
         self.qub_pulse.init(prog)
@@ -241,9 +237,8 @@ class BathReset(AbsReset, tag="bath"):
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        cur_t = t
-        cur_t = self.qub_pulse.run(prog, cur_t)
-        cur_t = self.res_pulse.run(prog, cur_t)
+        self.qub_pulse.run(prog, t)  # non-blocking
+        cur_t = self.res_pulse.run(prog, t)
         cur_t = self.pi2_pulse.run(prog, cur_t)
 
         return t + self.total_length(prog)

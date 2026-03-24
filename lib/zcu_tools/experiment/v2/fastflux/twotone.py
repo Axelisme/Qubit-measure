@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
@@ -24,7 +24,6 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
     sweep2param,
-    check_block_mode,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
@@ -56,18 +55,14 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         _cfg = check_type(deepcopy(cfg), TwotoneCfg)
         modules = _cfg["modules"]
 
-        check_block_mode("flux_pulse", modules["flux_pulse"], want_block=False)
-
         # uniform in square space
         gains = sweep2array(_cfg["sweep"]["gain"])  # predicted gains
         freqs = sweep2array(_cfg["sweep"]["freq"])  # predicted frequencies
 
-        Pulse.set_param(
-            modules["flux_pulse"], "gain", sweep2param("gain", _cfg["sweep"]["gain"])
-        )
-        Pulse.set_param(
-            modules["qub_pulse"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
-        )
+        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
+        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+        Pulse.set_param(modules["flux_pulse"], "gain", gain_param)
+        Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
 
         with LivePlotter2D("Flux Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
             signals = run_task(
@@ -80,7 +75,11 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
                                 ctx.cfg,
                                 modules=[
                                     Reset("reset", modules.get("reset")),
-                                    Pulse("flux_pulse", modules["flux_pulse"]),
+                                    Pulse(
+                                        "flux_pulse",
+                                        modules["flux_pulse"],
+                                        block_mode=False,
+                                    ),
                                     Pulse("qub_pulse", modules["qub_pulse"]),
                                     Readout("readout", modules["readout"]),
                                 ],

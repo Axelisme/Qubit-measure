@@ -24,7 +24,6 @@ class PulseCfg(ModuleCfg, closed=True):
     gain: Union[float, QickParam]
     pre_delay: Union[float, QickParam]
     post_delay: Union[float, QickParam]
-    block_mode: bool
 
     mixer_freq: NotRequired[float]
     mux_freqs: NotRequired[list[float]]
@@ -35,11 +34,7 @@ class PulseCfg(ModuleCfg, closed=True):
     ro_ch: NotRequired[int]
 
 
-def check_block_mode(name: str, cfg: PulseCfg, want_block: bool) -> None:
-    if cfg["block_mode"] != want_block:
-        warnings.warn(
-            f"{name} block_mode is {cfg['block_mode']}, this may not be what you want"
-        )
+
 
 
 class Pulse(Module, tag="pulse"):
@@ -49,12 +44,14 @@ class Pulse(Module, tag="pulse"):
         cfg: Optional[PulseCfg],
         pulse_name: Optional[str] = None,
         tag: Optional[str] = None,
+        block_mode: bool = True,
     ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
 
         self.pulse_name = name if pulse_name is None else pulse_name
         self.tag = tag
+        self.block_mode = block_mode
 
     def init(self, prog: MyProgramV2) -> None:
         if self.cfg is None:
@@ -132,7 +129,7 @@ class Pulse(Module, tag="pulse"):
 
         prog.pulse(cfg["ch"], self.pulse_name, t=t + cfg["pre_delay"], tag=self.tag)
 
-        if cfg["block_mode"]:  # default
+        if self.block_mode:  # default
             return t + self.total_length(prog)
         else:
             # no block, return the start time as the end time
@@ -166,7 +163,6 @@ class Pulse(Module, tag="pulse"):
         cfg.setdefault("phase", 0.0)
         cfg.setdefault("pre_delay", 0.0)
         cfg.setdefault("post_delay", 0.0)
-        cfg.setdefault("block_mode", True)
 
         if isinstance(cfg["waveform"], str):
             cfg["waveform"] = ml.get_waveform(cfg["waveform"])

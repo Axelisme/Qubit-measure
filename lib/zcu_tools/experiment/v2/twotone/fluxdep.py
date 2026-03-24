@@ -17,7 +17,7 @@ from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveLines,
 )
 from zcu_tools.program import SweepCfg
-from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param, Pulse
+from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import minus_background
 
@@ -40,6 +40,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         self, soc, soccfg, cfg: dict[str, Any], fail_retry: int = 0
     ) -> FreqFluxResult:
         _cfg = check_type(deepcopy(cfg), FreqFluxCfg)
+        modules = _cfg["modules"]
 
         values_sweep = _cfg["sweep"]["flux"]
         freqs_sweep = _cfg["sweep"]["freq"]
@@ -51,8 +52,8 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         freqs = sweep2array(freqs_sweep)  # predicted frequency points
 
         # Frequency is swept by FPGA (hard sweep)
-        modules = _cfg["modules"]
-        Pulse.set_param(modules["qub_pulse"], "freq", sweep2param("freq", freqs_sweep))
+        freq_param = sweep2param("freq", freqs_sweep)
+        Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
 
         with LivePlotter2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2

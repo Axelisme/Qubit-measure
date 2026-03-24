@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
@@ -17,26 +17,24 @@ from typing_extensions import (
     cast,
 )
 
-
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Delay,
     ModularProgramCfg,
     ModularProgramV2,
     NonBlocking,
-    SoftDelay,
-    Delay,
     Pulse,
     PulseCfg,
     Readout,
     ReadoutCfg,
     Reset,
     ResetCfg,
+    SoftDelay,
     sweep2param,
-    check_block_mode,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
@@ -68,8 +66,6 @@ class DistortionExp(AbsExperiment):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> DistortionResult:
         _cfg = check_type(deepcopy(cfg), DistortionCfg)
 
-        check_block_mode("flux_pulse", _cfg["modules"]["flux_pulse"], want_block=False)
-
         # force length be the outer loop
         _cfg["sweep"] = {
             "length": _cfg["sweep"]["length"],
@@ -94,7 +90,11 @@ class DistortionExp(AbsExperiment):
                         Reset("reset", modules.get("reset")),
                         NonBlocking(
                             [
-                                Pulse("flux_pulse", modules["flux_pulse"]),
+                                Pulse(
+                                    "flux_pulse",
+                                    modules["flux_pulse"],
+                                    block_mode=False,
+                                ),
                                 SoftDelay("wait_time", delay=length_params),
                                 Pulse(
                                     "pi2_pulse1", modules["pi2_pulse"], tag="pi2_pulse1"

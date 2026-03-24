@@ -96,8 +96,6 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)  # prevent in-place modification
         modules = _cfg["modules"]
 
-        if modules["stark_pulse1"].get("block_mode", True):
-            raise ValueError("Stark pulse 1 must be in block mode")
 
         gain_sweep = _cfg["sweep"].pop("gain")
 
@@ -181,7 +179,9 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                     modules=[
                         Reset("reset", modules.get("reset")),
                         Pulse("init_pulse", modules.get("init_pulse")),
-                        Pulse("stark_pulse1", modules["stark_pulse1"]),
+                        Pulse(
+                            "stark_pulse1", modules["stark_pulse1"], block_mode=False
+                        ),
                         Pulse("stark_pulse2", modules["stark_pulse2"]),
                         Readout("readout", modules["readout"]),
                     ],
