@@ -46,9 +46,13 @@ class ExperimentManager:
         flx_dir.mkdir(parents=True, exist_ok=True)
         if clone_from is not None:
             if isinstance(clone_from, str):
-                src_folder = Path(clone_from)
-                ml = ModuleLibrary(src_folder / "module_cfg.yaml", read_only=True)
-                md = MetaDict(src_folder / "meta_info.json", read_only=True)
+                src_folder = self.exp_dir / clone_from
+                if not src_folder.is_dir():
+                    raise FileNotFoundError(
+                        f"Source context '{clone_from}' not found. Available: {self.list_contexts()}"
+                    )
+                ml = ModuleLibrary(src_folder / "module_cfg.yaml", readonly=True)
+                md = MetaDict(src_folder / "meta_info.json", readonly=True)
             else:
                 (ml, md) = clone_from
             ml = ml.clone(dst_path=flx_dir / "module_cfg.yaml")
@@ -70,8 +74,8 @@ class ExperimentManager:
 
         self._label = label
 
-        ml = ModuleLibrary(flx_dir / "module_cfg.yaml", read_only=readonly)
-        md = MetaDict(flx_dir / "meta_info.json", read_only=readonly)
+        ml = ModuleLibrary(flx_dir / "module_cfg.yaml", readonly=readonly)
+        md = MetaDict(flx_dir / "meta_info.json", readonly=readonly)
 
         return ml, md
 

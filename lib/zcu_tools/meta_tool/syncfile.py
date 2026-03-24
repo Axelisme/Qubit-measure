@@ -48,10 +48,11 @@ def auto_sync(
 
 
 class SyncFile(ABC):
-    def __init__(self, path: Optional[Union[str, Path]] = None) -> None:
+    def __init__(self, path: Optional[Union[str, Path]] = None, readonly=False) -> None:
         self._path = Path(path) if path is not None else None
         self._modify_time = 0
         self._dirty = False
+        self._readonly = readonly
 
         if path is not None and Path(path).exists():
             self.load()
@@ -61,6 +62,10 @@ class SyncFile(ABC):
 
     @abstractmethod
     def _dump(self, path: str) -> None: ...
+
+    def _check_can_write(self) -> None:
+        if self._readonly:
+            raise RuntimeError(f"{self.__class__.__name__} is read-only")
 
     def update_modify_time(self) -> None:
         assert self._path is not None
@@ -77,6 +82,7 @@ class SyncFile(ABC):
 
     def dump(self) -> None:
         assert self._path is not None
+        self._check_can_write()
         self._dump(str(self._path))
         self.update_modify_time()
         self._dirty = False
@@ -87,9 +93,9 @@ class SyncFile(ABC):
 
         if self._path.exists():
             mtime = self._path.stat().st_mtime_ns
-            if self._dirty:
+            if self._dirty and not self._readonly:
                 self.dump()
             elif mtime >= self._modify_time:
                 self.load()
-        else:
+        elif not self._readonly:
             self.dump()

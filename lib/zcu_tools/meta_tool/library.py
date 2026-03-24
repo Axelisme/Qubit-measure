@@ -55,30 +55,25 @@ ModuleDumper.add_representer(dict, ModuleDumper.represent_dict)
 
 class ModuleLibrary(SyncFile):
     def __init__(
-        self, cfg_path: Optional[Union[str, Path]] = None, read_only: bool = False
+        self, cfg_path: Optional[Union[str, Path]] = None, readonly: bool = False
     ) -> None:
         self.waveforms: dict[str, WaveformCfg] = {}
         self.modules: dict[str, ModuleCfg] = {}
-        self.read_only = read_only
 
-        super().__init__(cfg_path)
+        super().__init__(cfg_path, readonly=readonly)
 
     @auto_sync("read")
     def clone(self, dst_path: Optional[Union[str, Path]] = None) -> ModuleLibrary:
         if dst_path is not None and Path(dst_path).exists():
             raise FileExistsError(f"Destination path {dst_path} already exists")
 
-        ml = ModuleLibrary(dst_path, read_only=False)
+        ml = self.__class__(dst_path, readonly=False)
         ml.waveforms = deepcopy(self.waveforms)
         ml.modules = deepcopy(self.modules)
         if dst_path is not None:
             ml.dump()
 
         return ml
-
-    def check_can_write(self) -> None:
-        if self.read_only:
-            raise RuntimeError("ModuleLibrary is read-only")
 
     def _load(self, path: str) -> None:
         with open(path, "r") as f:
@@ -88,8 +83,6 @@ class ModuleLibrary(SyncFile):
         self.modules = cfg["modules"]
 
     def _dump(self, path: str) -> None:
-        self.check_can_write()
-
         dump_cfg = dict(waveforms=self.waveforms, modules=self.modules)
         dump_cfg = numpy2number(deepcopy(dump_cfg))
 
@@ -123,8 +116,7 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("write")
     def register_waveform(self, **wav_kwargs) -> None:
-        self.check_can_write()
-
+        self._check_can_write()
         wav_kwargs = deepcopy(wav_kwargs)
 
         # filter out non-waveform attributes
@@ -138,8 +130,7 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("write")
     def register_module(self, **mod_kwargs) -> None:
-        self.check_can_write()
-
+        self._check_can_write()
         mod_kwargs = deepcopy(mod_kwargs)
 
         changed = False
@@ -179,8 +170,7 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("write")
     def update_module(self, name: str, override_cfg: dict[str, Any]) -> None:
-        self.check_can_write()
-
+        self._check_can_write()
         deepupdate(
             cast(dict, self.modules[name]), deepcopy(override_cfg), behavior="force"
         )

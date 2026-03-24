@@ -31,21 +31,20 @@ class MetaDict(SyncFile):
     _PROTECTED_KEYS = ["dump", "load", "sync", "update_modify_time", "clone"]
 
     def __init__(
-        self, json_path: Optional[Union[str, Path]] = None, read_only: bool = False
+        self, json_path: Optional[Union[str, Path]] = None, readonly: bool = False
     ) -> None:
         self._data = {}
-        self._read_only = read_only
 
-        super().__init__(json_path)
+        super().__init__(json_path, readonly=readonly)
 
     @auto_sync("read")
     def clone(
-        self, dst_path: Optional[Union[str, Path]] = None, read_only=False
+        self, dst_path: Optional[Union[str, Path]] = None, readonly: bool = False
     ) -> Self:
         if dst_path is not None and Path(dst_path).exists():
             raise FileExistsError(f"Destination path {dst_path} already exists")
 
-        md = self.__class__(dst_path, read_only=read_only)
+        md = self.__class__(dst_path, readonly=readonly)
         md._data = deepcopy(self._data)
         if dst_path is not None:
             md.dump()
@@ -92,7 +91,7 @@ class MetaDict(SyncFile):
             object.__setattr__(self, name, value)
             return
 
-        if self._read_only:
+        if self._readonly:
             raise AttributeError("MetaDict is read-only")
 
         self.sync()
@@ -105,7 +104,7 @@ class MetaDict(SyncFile):
             object.__delattr__(self, name)
             return
 
-        if self._read_only:
+        if self._readonly:
             raise AttributeError("MetaDict is read-only")
 
         self.sync()
