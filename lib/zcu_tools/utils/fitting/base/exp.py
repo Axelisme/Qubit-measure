@@ -18,11 +18,17 @@ def fitexp(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
     fitparams: Optional[Sequence[Optional[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
 ) -> tuple[tuple[float, float, float], NDArray[np.float64]]:
     """return (y0, yscale, decay_time), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 3
     fitparams = list(fitparams)
+
+    if fixedparams is not None and len(fixedparams) != 3:
+        raise ValueError(
+            "Fixed parameters must be a list of three elements: [y0, yscale, decay_time]"
+        )
 
     # guess initial parameters
     if any([p is None for p in fitparams]):
@@ -41,7 +47,7 @@ def fitexp(
         [np.inf, 2 * np.abs(fitparams[1]), np.inf],
     )
 
-    return fit_func(xdata, ydata, expfunc, fitparams, bounds)  # type: ignore
+    return fit_func(xdata, ydata, expfunc, fitparams, bounds, fixedparams=fixedparams)  # type: ignore
 
 
 def dual_expfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
@@ -54,11 +60,17 @@ def fit_dualexp(
     xdata: NDArray[np.float64],
     ydata: NDArray[np.float64],
     fitparams: Optional[Sequence[Optional[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
 ) -> tuple[tuple[float, float, float, float, float], NDArray[np.float64]]:
     """return (y0, yscale1, decay_time1, yscale2, decay_time2), (pOpt, pCov)"""
     if fitparams is None:
         fitparams = [None] * 5
     fitparams = list(fitparams)
+
+    if fixedparams is not None and len(fixedparams) != 5:
+        raise ValueError(
+            "Fixed parameters must be a list of five elements: [y0, yscale1, decay_time1, yscale2, decay_time2]"
+        )
 
     # guess initial parameters
     if any([p is None for p in fitparams]):
@@ -94,4 +106,6 @@ def fit_dualexp(
         [np.inf, 2 * np.abs(fitparams[1]), np.inf, 2 * np.abs(fitparams[3]), np.inf],
     )
 
-    return fit_func(xdata, ydata, dual_expfunc, fitparams, bounds)  # type: ignore
+    return fit_func(
+        xdata, ydata, dual_expfunc, fitparams, bounds, fixedparams=fixedparams
+    )  # type: ignore

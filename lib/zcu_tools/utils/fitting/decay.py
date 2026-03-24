@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Optional, cast
+from typing_extensions import Optional, Sequence
 
 from .base import (
     batch_fit_func,
@@ -21,14 +21,15 @@ def fit_decay(
     xs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
     fit_params: Optional[tuple[float, float, float]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
 ) -> tuple[
     float,
     float,
     NDArray[np.float64],
-    tuple[tuple[float, ...], NDArray[np.float64]],
+    tuple[tuple[float, float, float], NDArray[np.float64]],
 ]:
     """return [t1, t1err, fit_signals, (pOpt, pCov)]"""
-    pOpt, pCov = fitexp(xs, real_signals, fitparams=fit_params)
+    pOpt, pCov = fitexp(xs, real_signals, fitparams=fit_params, fixedparams=fixedparams)
 
     fit_signals = expfunc(xs, *pOpt)
 
@@ -38,17 +39,22 @@ def fit_decay(
 
 
 def fit_dual_decay(
-    xs: NDArray[np.float64], real_signals: NDArray[np.float64]
+    xs: NDArray[np.float64],
+    real_signals: NDArray[np.float64],
+    fit_params: Optional[Sequence[Optional[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
 ) -> tuple[
     float,
     float,
     float,
     float,
     NDArray[np.float64],
-    tuple[tuple[float, ...], NDArray[np.float64]],
+    tuple[tuple[float, float, float, float, float], NDArray[np.float64]],
 ]:
     """return [t1, t1err, t1b, t1berr, fit_signals, (pOpt, pCov)]"""
-    pOpt, pCov = fit_dualexp(xs, real_signals)
+    pOpt, pCov = fit_dualexp(
+        xs, real_signals, fitparams=fit_params, fixedparams=fixedparams
+    )
 
     # make sure t1 is the longer one
     if pOpt[4] > pOpt[2]:
@@ -74,14 +80,20 @@ def fit_ge_decay(
     times: NDArray[np.float64],
     g_populations: NDArray[np.float64],
     e_populations: NDArray[np.float64],
+    fit_params: Optional[Sequence[Optional[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
     share_t1: bool = True,
 ) -> tuple[
-    tuple[float, float, NDArray[np.float64], tuple],
-    tuple[float, float, NDArray[np.float64], tuple],
+    tuple[float, float, NDArray[np.float64], tuple[float, float, float]],
+    tuple[float, float, NDArray[np.float64], tuple[float, float, float]],
 ]:
     """return [(g_t1, g_t1err, g_fit_signals, g_params), (e_t1, e_t1err, e_fit_signals, e_params)]"""
-    g_params, g_pCov = fitexp(times, g_populations)  # (y0, yscale, decay)
-    e_params, e_pCov = fitexp(times, e_populations)  # (y0, yscale, decay)
+    g_params, g_pCov = fitexp(
+        times, g_populations, fitparams=fit_params, fixedparams=fixedparams
+    )  # (y0, yscale, decay)
+    e_params, e_pCov = fitexp(
+        times, e_populations, fitparams=fit_params, fixedparams=fixedparams
+    )  # (y0, yscale, decay)
 
     if share_t1:
         shared_idxs = [2]
@@ -103,7 +115,8 @@ def fit_ge_decay(
                 ),
             ],
         )
-        g_params, e_params = tuple(ge_params[0]), tuple(ge_params[1])
+        g_params = (ge_params[0][0], ge_params[0][1], ge_params[0][2])
+        e_params = (ge_params[1][0], ge_params[1][1], ge_params[1][2])
         g_pCov, e_pCov = ge_pcov
 
     g_t1 = g_params[2]
@@ -131,17 +144,20 @@ def fit_ge_decay(
 def fit_decay_fringe(
     xs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
-    fit_params: Optional[tuple[float, ...]] = None,
+    fit_params: Optional[Sequence[Optional[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
 ) -> tuple[
     float,
     float,
     float,
     float,
     NDArray[np.float64],
-    tuple[tuple[float, ...], NDArray[np.float64]],
+    tuple[tuple[float, float, float, float, float], NDArray[np.float64]],
 ]:
     """return [t2f, t2ferr, detune, detune_err, fit_signals, (pOpt, pCov)]"""
-    pOpt, pCov = fitdecaycos(xs, real_signals, fitparams=fit_params)
+    pOpt, pCov = fitdecaycos(
+        xs, real_signals, fitparams=fit_params, fixedparams=fixedparams
+    )
 
     fit_signals = decaycos(xs, *pOpt)
 
@@ -150,7 +166,7 @@ def fit_decay_fringe(
     detune: float = pOpt[2]
     detune_err: float = np.sqrt(pCov[2, 2])
 
-    pOpt = cast(tuple[float, float, float, float, float], tuple(pOpt))
+    pOpt = (pOpt[0], pOpt[1], pOpt[2], pOpt[3], pOpt[4])
 
     return t2f, t2ferr, detune, detune_err, fit_signals, (pOpt, pCov)
 
@@ -158,13 +174,17 @@ def fit_decay_fringe(
 def fit_gauss_decay(
     xs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
-    fit_params: Optional[tuple[float, ...]] = None,
+    fit_params: Optional[Sequence[Optional[float]]] = None,
+    fixedparams: Optional[Sequence[Optional[float]]] = None,
 ) -> tuple[
-    float, float, NDArray[np.float64], tuple[tuple[float, ...], NDArray[np.float64]]
+    float,
+    float,
+    NDArray[np.float64],
+    tuple[tuple[float, float, float, float, float], NDArray[np.float64]],
 ]:
     """return [t2g, t2gerr, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fit_gauss(
-        xs, real_signals, fitparams=fit_params, fixedparams=[None, None, 0.0, None]
+        xs, real_signals, fitparams=fit_params, fixedparams=fixedparams
     )
 
     fit_signals = gauss_func(xs, *pOpt)
@@ -177,6 +197,6 @@ def fit_gauss_decay(
     t2 = np.sqrt(2) * sigma
     t2_err = np.sqrt(2) * sigma_err
 
-    pOpt = cast(tuple[float, float, float, float, float], tuple(pOpt))
+    pOpt = (pOpt[0], pOpt[1], pOpt[2], pOpt[3], pOpt[4])
 
     return t2, t2_err, fit_signals, (pOpt, pCov)
