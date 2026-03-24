@@ -44,7 +44,7 @@ database_path = create_datafolder(
 )
 
 em = ExperimentManager(os.path.join(result_dir, "exps"))
-ml, md = em.use_flux(label="031713_3.276mA", readonly=True)
+ml, md = em.use_flux(label="032023_0.122mA", readonly=True)
 ```
 
 # Connect ZCU216
@@ -86,13 +86,13 @@ GlobalDeviceManager.setup_devices(dev_info, progress=True)
 preditor = FluxoniumPredictor.from_file(os.path.join(result_dir, "params.json"))
 # preditor.flx_half = md.flx_half
 # preditor.flx_period = 2 * abs(md.flx_int - md.flx_half)
-# preditor.update_bias(md.flx_bias)
+preditor.update_bias(md.flx_bias)
 ```
 
 # Start Measurement
 
 ```python
-flux_yoko.set_current(3.4e-3)  # Set to initial flux bias
+flux_yoko.set_current(0.122e-3)  # Set to initial flux bias
 ```
 
 ```python
@@ -105,27 +105,33 @@ gc.collect()
 
 ```python
 %matplotlib widget
-flx_values = np.linspace(3.4e-3, 0e-3, 151)
+flx_values = np.linspace(0.122e-3, -3.5e-3, 101)
 
 filename = f"{qub_name}_autofluxdep"
 
-pi_pulse = cast(PulseCfg, ml.get_module("pi_amp"))
-pi_product = pi_pulse["waveform"]["length"] * pi_pulse["gain"]
-ref_pi_len = 1.2 * pi_pulse["waveform"]["length"]
-
 # snapshot of execution code
 measure_code: str = In[-1]  # noqa: F821 # type: ignore
+
+pi_pulse = cast(PulseCfg, ml.get_module("pi_amp"))
+pi_len = pi_pulse["waveform"]["length"]
+pi_product = pi_len * pi_pulse["gain"]
+
+readout_cfg = ml.get_module("readout_dpm")
+readout_freq = readout_cfg["pulse_cfg"]["freq"]
+readout_gain = readout_cfg["pulse_cfg"]["gain"]
+
 
 executor = (
     zefd.FluxDepExecutor(flx_values=flx_values)
     .add_measurements(
         OrderedDict(
             qubit_freq=zefd.QubitFreqTask(
-                detune_sweep=make_sweep(-6, 2.5, step=0.025),
+                detune_sweep=make_sweep(-15, 15, step=0.2),
                 cfg_maker=lambda ctx, ml: (
                     (info := ctx.env["info"])
                     and (pred_qf := info["predict_freq"])
-                    and (prev_pi_product := info.last.get("pi_product", pi_product))
+                    and (prev_factor := info.last.get("qfw_factor", md.qf_w / 0.2))
+                    and (opt_readout := info.last.get("opt_readout", readout_cfg))
                     and ml.make_cfg(
                         {
                             "modules": {
@@ -134,68 +140,94 @@ executor = (
                                     "waveform": ml.get_waveform(
                                         "qub_flat", {"length": 5}
                                     ),
-                                    "ch": md.qub_4_5_ch,
-                                    "nqz": 2 if pred_qf > 2000 else 1,
-                                    "gain": min(
-                                        1.0,
-                                        (0.01 / info["m_ratio"])
-                                        * (prev_pi_product / ref_pi_len),
-                                    ),
+                                    "ch": md.qub_1_4_ch,
+                                    "nqz": 2,
+                                    "gain": min(1.0, 1.5 / prev_factor),
                                     "freq": pred_qf,
                                     # "mixer_freq": cur_qf,
                                 },
-                                "readout": "readout_dpm",
+                                "readout": opt_readout,
                             },
                             "relax_delay": 0.1,
                             "reps": 1000,
-                            "rounds": 10,
+                            "rounds": 100,
                         }
                     )
                 ),
                 earlystop_snr=50,
             ),
             lenrabi=zefd.LenRabiTask(
-                length_sweep=make_sweep(0.03, 2.0, 151),
+                num_expts=101,
                 cfg_maker=lambda ctx, ml: (
                     (info := ctx.env["info"])
                     and (cur_qf := info.get("qubit_freq"))
                     and (prev_t1 := info.last.get("smooth_t1", md.t1))
-                    and (prev_pi_product := info.last.get("pi_product", pi_product))
+                    and (prev_pi_len := info.last.get("pi_length", pi_len))
+                    and (prev_pi_pd := info.last.get("smooth_pi_product", pi_product))
+                    and (opt_readout := info.last.get("opt_readout", readout_cfg))
                     and ml.make_cfg(
                         {
                             "modules": {
                                 "rabi_pulse": {
                                     **pi_pulse,
-                                    "nqz": 2 if cur_qf > 2000 else 1,
+                                    "nqz": 2,
                                     "freq": cur_qf,
-                                    "gain": min(
-                                        1.0,
-                                        (pi_pulse["gain"] / info["m_ratio"])
-                                        * (prev_pi_product / ref_pi_len),
-                                    ),
+                                    "gain": min(1.0, prev_pi_pd / (1.5 * pi_len)),
                                     # "mixer_freq": cur_qf,
                                 },
-                                "readout": "readout_dpm",
+                                "readout": opt_readout,
                             },
                             "relax_delay": 3 * prev_t1,
                             "reps": 1000,
                             "rounds": 10,
+                            "sweep_range": (0.05, max(5 * prev_pi_len, 0.5)),
                         }
                     )
                 ),
                 earlystop_snr=30,
             ),
-            t1=zefd.T1Task(
-                num_expts=151,
+            ro_opt=zefd.RO_OptTask(
+                freq_expts=10,
+                gain_expts=10,
                 cfg_maker=lambda ctx, ml: (
                     (info := ctx.env["info"])
                     and (prev_t1 := info.last.get("smooth_t1", md.t1))
+                    and (prev_best_freq := info.last.get("best_ro_freq", readout_freq))
+                    and (prev_best_gain := info.last.get("best_ro_gain", readout_gain))
                     and (cur_pi_pulse := info.get("pi_pulse"))
                     and ml.make_cfg(
                         {
                             "modules": {
                                 "pi_pulse": cur_pi_pulse,
-                                "readout": "readout_dpm",
+                                "readout": readout_cfg,
+                            },
+                            "relax_delay": 3 * prev_t1,
+                            "reps": 1000,
+                            "rounds": 10,
+                            "freq_range": (
+                                prev_best_freq - 0.2 * md.rf_w,
+                                prev_best_freq + 0.2 * md.rf_w,
+                            ),
+                            "gain_range": (
+                                max(0.0, prev_best_gain - 0.05),
+                                min(1.0, prev_best_gain + 0.05),
+                            ),
+                        }
+                    )
+                ),
+            ),
+            t1=zefd.T1Task(
+                num_expts=101,
+                cfg_maker=lambda ctx, ml: (
+                    (info := ctx.env["info"])
+                    and (prev_t1 := info.last.get("smooth_t1", md.t1))
+                    and (cur_pi_pulse := info.get("pi_pulse"))
+                    and (opt_readout := info.last.get("opt_readout", readout_cfg))
+                    and ml.make_cfg(
+                        {
+                            "modules": {
+                                "pi_pulse": cur_pi_pulse,
+                                "readout": opt_readout,
                             },
                             "relax_delay": max(1.0, 3 * prev_t1),
                             "reps": 1000,
@@ -207,18 +239,19 @@ executor = (
                 earlystop_snr=20,
             ),
             t2ramsey=zefd.T2RamseyTask(
-                num_expts=151,
+                num_expts=121,
                 detune_ratio=0.05,
                 cfg_maker=lambda ctx, ml: (
                     (info := ctx.env["info"])
                     and (cur_t1 := info.get("smooth_t1", md.t1))
                     and (prev_t2r := info.last.get("smooth_t2r", md.t2r))
                     and (cur_pi2_pulse := info.get("pi2_pulse"))
+                    and (opt_readout := info.last.get("opt_readout", readout_cfg))
                     and ml.make_cfg(
                         {
                             "modules": {
                                 "pi2_pulse": cur_pi2_pulse,
-                                "readout": "readout_dpm",
+                                "readout": opt_readout,
                             },
                             "relax_delay": max(1.0, 3 * cur_t1),
                             "reps": 1000,
@@ -230,7 +263,7 @@ executor = (
                 earlystop_snr=20,
             ),
             t2echo=zefd.T2EchoTask(
-                num_expts=151,
+                num_expts=121,
                 detune_ratio=0.05,
                 cfg_maker=lambda ctx, ml: (
                     (info := ctx.env["info"])
@@ -238,12 +271,13 @@ executor = (
                     and (prev_t2e := info.last.get("smooth_t2e", md.t2e))
                     and (cur_pi_pulse := info.get("pi_pulse"))
                     and (cur_pi2_pulse := info.get("pi2_pulse"))
+                    and (opt_readout := info.last.get("opt_readout", readout_cfg))
                     and ml.make_cfg(
                         {
                             "modules": {
                                 "pi_pulse": cur_pi_pulse,
                                 "pi2_pulse": cur_pi2_pulse,
-                                "readout": "readout_dpm",
+                                "readout": opt_readout,
                             },
                             "relax_delay": max(1.0, 3 * cur_t1),
                             "reps": 1000,
@@ -254,35 +288,6 @@ executor = (
                 ),
                 earlystop_snr=20,
             ),
-            # mist_e=zefd.MistTask(
-            #     gain_sweep=make_sweep(0.0, (100 / md.ac_stark_coeff) ** 0.5, 151),
-            #     cfg_maker=lambda ctx, ml: (
-            #         (info := ctx.env["info"])
-            #         and (cur_t1 := info.get("smooth_t1", md.t1))
-            #         and (cur_pi_pulse := info.get("pi_pulse"))
-            #         and ml.make_cfg(
-            #             {
-            #                 "modules": {
-            #                     "mist_pulse": {
-            #                         "waveform": ml.get_waveform(
-            #                             "mist_waveform",
-            #                             {"length": 5.0 / (2 * np.pi * md.rf_w) + 0.3},
-            #                         ),
-            #                         "ch": md.res_ch,
-            #                         "nqz": 2,
-            #                         "freq": md.r_f,
-            #                         "post_delay": 10 / (2 * np.pi * md.rf_w),
-            #                     },
-            #                     "pi_pulse": cur_pi_pulse,
-            #                     "readout": "readout_dpm",
-            #                 },
-            #                 "relax_delay": max(1.0, 3 * cur_t1),
-            #                 "reps": 2000,
-            #                 "rounds": 10,
-            #             }
-            #         )
-            #     ),
-            # ),
         )
     )
     .record_animation(os.path.join(em.flx_dir, f"{filename}.mp4"))
@@ -296,7 +301,7 @@ _ = executor.run(
     },
     predictor=preditor.clone(),
     env_dict={"soccfg": soccfg, "soc": soc, "ml": ml.clone()},
-    # retry_time=0,
+    retry_time=0,
 )
 ```
 
