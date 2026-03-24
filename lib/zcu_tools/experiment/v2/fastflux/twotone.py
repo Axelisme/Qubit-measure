@@ -28,7 +28,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-# (amps, freqs, signals2D)
+# (gains, freqs, signals2D)
 TwoToneResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
@@ -69,21 +69,19 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
                 task=Task(
                     measure_fn=lambda ctx, update_hook: (
                         (modules := ctx.cfg["modules"])
-                        and (
-                            prog := ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    Pulse(
-                                        "flux_pulse",
-                                        modules["flux_pulse"],
-                                        block_mode=False,
-                                    ),
-                                    Pulse("qub_pulse", modules["qub_pulse"]),
-                                    Readout("readout", modules["readout"]),
-                                ],
-                            )
+                        and ModularProgramV2(
+                            soccfg,
+                            ctx.cfg,
+                            modules=[
+                                Reset("reset", modules.get("reset")),
+                                Pulse(
+                                    "flux_pulse",
+                                    modules["flux_pulse"],
+                                    block_mode=False,
+                                ),
+                                Pulse("qub_pulse", modules["qub_pulse"]),
+                                Readout("readout", modules["readout"]),
+                            ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(gains), len(freqs)),
