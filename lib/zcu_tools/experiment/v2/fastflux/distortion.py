@@ -3,9 +3,20 @@ from __future__ import annotations
 from copy import deepcopy
 
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
+
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
@@ -16,14 +27,16 @@ from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
     NonBlocking,
+    SoftDelay,
+    Delay,
     Pulse,
     PulseCfg,
     Readout,
     ReadoutCfg,
     Reset,
     ResetCfg,
-    SoftDelay,
     sweep2param,
+    check_block_mode,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
@@ -47,90 +60,147 @@ class DistortionModuleCfg(TypedDict, closed=True):
 
 class DistortionCfg(ModularProgramCfg, TaskCfg):
     modules: DistortionModuleCfg
-    pi2_interval: float
+    readout_t: float
     sweep: dict[str, SweepCfg]
 
 
 class DistortionExp(AbsExperiment):
-    def run(
-        self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
-    ) -> DistortionResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> DistortionResult:
         _cfg = check_type(deepcopy(cfg), DistortionCfg)
 
-        # uniform in square space
-        gains = sweep2array(_cfg["sweep"]["gain"])
+        check_block_mode("flux_pulse", _cfg["modules"]["flux_pulse"], want_block=False)
+
+        # force length be the outer loop
+        _cfg["sweep"] = {
+            "length": _cfg["sweep"]["length"],
+            "phase": _cfg["sweep"]["phase"],
+        }
+
         lengths = sweep2array(_cfg["sweep"]["length"])
+        phases = sweep2array(_cfg["sweep"]["phase"])
 
-        gain_params = sweep2param("gain", _cfg["sweep"]["gain"])
-        wait_params = sweep2param("length", _cfg["sweep"]["length"])
+        length_params = sweep2param("length", _cfg["sweep"]["length"])
+        phase_params = sweep2param("phase", _cfg["sweep"]["phase"])
 
-        Pulse.set_param(_cfg["modules"]["flux_pulse"], "gain", gain_params)
-
-        with LivePlotter2D("Flux Pulse Gain (a.u.)", "Time (us)") as viewer:
+        with LivePlotter2D("Time (us)", "Phase (deg)") as viewer:
 
             def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
+                nonlocal lengths, phases
                 modules = ctx.cfg["modules"]
-                return ModularProgramV2(
+                prog = ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
                         NonBlocking(
                             [
-                                SoftDelay("wait_time", delay=wait_params),
-                                Pulse("pi2_pulse1", modules["pi2_pulse"]),
-                                SoftDelay("pi2_interval", ctx.cfg["pi2_interval"]),
+                                Pulse("flux_pulse", modules["flux_pulse"]),
+                                SoftDelay("wait_time", delay=length_params),
                                 Pulse(
-                                    name="pi2_pulse2",
-                                    cfg={  # type: ignore[dict-item]
-                                        **modules["pi2_pulse"],
-                                        "phase": modules["pi2_pulse"]["phase"]
-                                        + 360 * detune * wait_params,
-                                    },
+                                    "pi2_pulse1", modules["pi2_pulse"], tag="pi2_pulse1"
                                 ),
                             ]
                         ),
-                        Pulse("flux_pulse", modules["flux_pulse"]),
+                        Delay("readout_t", ctx.cfg["readout_t"]),
+                        Pulse(
+                            name="pi2_pulse2",
+                            cfg={  # type: ignore[dict-item]
+                                **modules["pi2_pulse"],
+                                "phase": phase_params,
+                            },
+                            tag="pi2_pulse2",
+                        ),
                         Readout("readout", modules["readout"]),
                     ],
-                ).acquire(soc, progress=False, callback=update_hook)
+                )
+
+                # get actual values after program generation, in case there are some adjustments
+                true_ts = cast(
+                    NDArray[np.float64],
+                    prog.get_time_param("pi2_pulse1", "t", as_array=True),
+                )
+                lengths = true_ts - true_ts[0] + lengths[0]
+                phases = cast(
+                    NDArray[np.float64],
+                    prog.get_pulse_param("pi2_pulse2", "phase", as_array=True),
+                )
+
+                return prog.acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
                 task=Task(
-                    measure_fn=measure_fn, result_shape=(len(gains), len(lengths))
+                    measure_fn=measure_fn, result_shape=(len(lengths), len(phases))
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    gains, lengths, distortion_signal2real(ctx.root_data)
+                    lengths, phases, distortion_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
         self.last_cfg = _cfg
-        self.last_result = (gains, lengths, signals)
+        self.last_result = (lengths, phases, signals)
 
-        return gains, lengths, signals
+        return lengths, phases, signals
 
     def analyze(
-        self,
-        result: Optional[DistortionResult] = None,
-        *,
-        detune: float = 0.0,
-        cutoff: Optional[float] = None,
-    ) -> None:
+        self, cfg: dict[str, Any], result: Optional[DistortionResult] = None
+    ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
 
-        gains, lengths, signals = result
+        lengths, phases, signals2D = result
 
-        # apply cutoff if provided
-        if cutoff is not None:
-            valid_indices = np.where(gains < cutoff)[0]
-            gains = gains[valid_indices]
-            signals = signals[valid_indices, :]
+        real_signals = distortion_signal2real(signals2D)
 
-        raise NotImplementedError
+        _cfg = check_type(cfg, DistortionCfg)
+        modules = _cfg["modules"]
+
+        # align to center of pi/2 pulse
+        pi2_len = modules["pi2_pulse"]["waveform"]["length"]
+        lengths = lengths + pi2_len / 2 - 0.025
+
+        flux_pulse = modules["flux_pulse"]
+        start_t = flux_pulse["pre_delay"]
+        end_t = start_t + flux_pulse["waveform"]["length"]
+
+        I_values = np.mean(real_signals * np.cos(np.deg2rad(phases))[None], axis=1)
+        Q_values = np.mean(real_signals * np.sin(np.deg2rad(phases))[None], axis=1)
+        init_phases = np.unwrap(np.arctan2(I_values, Q_values))
+        detunes = np.gradient(init_phases, lengths) / (2 * np.pi)
+
+        saturated_idxs = np.argsort(np.abs(detunes))[int(len(detunes) * 0.9) :]
+        flux_detune = np.mean(detunes[saturated_idxs])
+        ideal_lengths = np.linspace(lengths[0], lengths[-1], 1000)
+        ideal_curve = np.zeros_like(ideal_lengths)
+        ideal_curve[(ideal_lengths >= start_t) & (ideal_lengths <= end_t)] = flux_detune
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
+        ax1.imshow(
+            real_signals.T,
+            extent=(lengths[0], lengths[-1], phases[0], phases[-1]),
+            aspect="auto",
+            interpolation="none",
+            cmap="RdBu_r",
+        )
+        ax1.set_ylabel("Phase (deg)")
+
+        ax2.plot(ideal_lengths, ideal_curve, "g-", label="Ideal Detune")
+        ax2.plot(lengths, detunes, ".-")
+        ax2.set_ylabel("Detune (MHz)")
+        ax2.set_xlabel("Wait Time (us)")
+
+        ax2.axvspan(
+            start_t - pi2_len / 2, start_t + pi2_len / 2, color="gray", alpha=0.3
+        )
+        ax1.axvline(start_t, color="black", linestyle="--")
+        ax2.axvspan(end_t - pi2_len / 2, end_t + pi2_len / 2, color="gray", alpha=0.3)
+        ax1.axvline(end_t, color="black", linestyle="--")
+
+        fig.tight_layout()
+
+        return fig
 
     def save(
         self,
@@ -144,12 +214,12 @@ class DistortionExp(AbsExperiment):
             result = self.last_result
         assert result is not None, "No result found"
 
-        gains, lengths, signals2D = result
+        lengths, phases, signals2D = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Flux Pulse Gain", "unit": "a.u.", "values": gains},
-            y_info={"name": "Wait Time", "unit": "s", "values": lengths * 1e-6},
+            x_info={"name": "Wait Time", "unit": "s", "values": lengths * 1e-6},
+            y_info={"name": "Phase", "unit": "deg", "values": phases},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
             tag=tag,
@@ -157,19 +227,19 @@ class DistortionExp(AbsExperiment):
         )
 
     def load(self, filepath: str, **kwargs) -> DistortionResult:
-        signals2D, gains, lengths = load_data(filepath, **kwargs)
-        assert gains is not None and lengths is not None
-        assert len(gains.shape) == 1 and len(lengths.shape) == 1
-        assert signals2D.shape == (len(lengths), len(gains))
+        signals2D, lengths, phases = load_data(filepath, **kwargs)
+        assert phases is not None and lengths is not None
+        assert len(phases.shape) == 1 and len(lengths.shape) == 1
+        assert signals2D.shape == (len(phases), len(lengths))
 
         lengths = lengths * 1e6  # s -> us
         signals2D = signals2D.T  # transpose back
 
-        gains = gains.astype(np.float64)
+        phases = phases.astype(np.float64)
         lengths = lengths.astype(np.float64)
-        signals2D = signals2D.astype(np.complex128)
+        signals2D = signals2D.T.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (gains, lengths, signals2D)
+        self.last_result = (lengths, phases, signals2D)
 
-        return gains, lengths, signals2D
+        return lengths, phases, signals2D

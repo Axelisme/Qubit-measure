@@ -22,7 +22,7 @@ class TwoToneProgram(BaseCustomProgramV2):
         modules = cfg["modules"]
         return [
             Reset("reset", cfg=modules.get("reset")),
-            Pulse("init_pulse", cfg=modules.get("init_pulse")),
-            Pulse("qubit_pulse", cfg=modules["qub_pulse"]),
+            Pulse("init_pulse", cfg=modules.get("init_pulse"), tag="init_pulse"),
+            Pulse("qubit_pulse", cfg=modules["qub_pulse"], tag="qub_pulse"),
             Readout("readout", cfg=modules["readout"]),
         ]

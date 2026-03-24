@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
@@ -10,7 +12,6 @@ from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
-from zcu_tools.experiment.v2.utils import wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -51,9 +52,7 @@ class TwotoneCfg(ModularProgramCfg, TaskCfg):
 
 
 class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
-    def run(
-        self, soc, soccfg, cfg: dict[str, Any], *, earlystop_snr: Optional[float] = None
-    ) -> TwoToneResult:
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> TwoToneResult:
         _cfg = check_type(deepcopy(cfg), TwotoneCfg)
         modules = _cfg["modules"]
 
@@ -71,8 +70,6 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         )
 
         with LivePlotter2D("Flux Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
-            ax = viewer.get_ax()
-
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: (
@@ -88,19 +85,7 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
                                     Readout("readout", modules["readout"]),
                                 ],
                             )
-                        ).acquire(
-                            soc,
-                            progress=False,
-                            callback=wrap_earlystop_check(
-                                prog,
-                                update_hook,
-                                earlystop_snr,
-                                signal2real_fn=twotone_signal2real,
-                                after_check=lambda snr: ax.set_title(
-                                    f"snr = {snr:.1f}"
-                                ),
-                            ),
-                        )
+                        ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(gains), len(freqs)),
                 ),
@@ -116,12 +101,31 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
 
         return gains, freqs, signals
 
-    def analyze(self, result: Optional[TwoToneResult] = None) -> None:
+    def analyze(self, result: Optional[TwoToneResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
 
-        raise NotImplementedError
+        gains, freqs, signals2D = result
+
+        real_signals = twotone_signal2real(signals2D)
+
+        fig, ax = plt.subplots()
+
+        ax.imshow(
+            real_signals.T,
+            extent=[gains[0], gains[-1], freqs[0], freqs[-1]],
+            aspect="auto",
+            origin="lower",
+            interpolation="none",
+            cmap="RdBu_r",
+        )
+        ax.set_xlabel("Flux Pulse Gain (a.u.)")
+        ax.set_ylabel("Frequency (MHz)")
+
+        fig.tight_layout()
+
+        return fig
 
     def save(
         self,

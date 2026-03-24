@@ -14,7 +14,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
-from zcu_tools.experiment.v2.utils import snr_as_signal
+from zcu_tools.experiment.v2.utils import snr_as_signal, round_zcu_time
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -22,8 +22,8 @@ from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
     PulseCfg,
-    Readout,
-    ReadoutCfg,
+    PulseReadout,
+    PulseReadoutCfg,
     Reset,
     ResetCfg,
     sweep2param,
@@ -36,7 +36,7 @@ LengthResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 class LengthModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     qub_pulse: PulseCfg
-    readout: ReadoutCfg
+    readout: PulseReadoutCfg
 
 
 class LengthCfg(ModularProgramCfg, TaskCfg):
@@ -61,12 +61,14 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         )
 
         lengths = sweep2array(length_sweep)  # predicted readout lengths
+        lengths = round_zcu_time(
+            lengths, soccfg, gen_ch=modules["readout"]["ro_cfg"]["ro_ch"]
+        )
 
         # set initial readout length and adjust pulse length
-        Readout.set_param(
-            modules["readout"], "ro_length", sweep2param("length", length_sweep)
-        )
-        Readout.set_param(modules["readout"], "length", lengths.max() + 0.11)
+        ro_length_params = sweep2param("length", length_sweep)
+        PulseReadout.set_param(modules["readout"], "ro_length", ro_length_params)
+        PulseReadout.set_param(modules["readout"], "length", lengths.max() + 0.11)
 
         with LivePlotter1D("Readout Length (us)", "SNR") as viewer:
 
@@ -78,7 +80,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                     modules=[
                         Reset("reset", modules.get("reset")),
                         Pulse("qub_pulse", modules["qub_pulse"]),
-                        Readout("readout", modules["readout"]),
+                        PulseReadout("readout", modules["readout"]),
                     ],
                 )
                 tracker = PCATracker()
@@ -100,7 +102,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                 ).scan(
                     "length",
                     lengths.tolist(),
-                    before_each=lambda _, ctx, length: Readout.set_param(
+                    before_each=lambda _, ctx, length: PulseReadout.set_param(
                         ctx.cfg["modules"]["readout"], "ro_length", length
                     ),
                 ),

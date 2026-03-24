@@ -21,6 +21,6 @@ class OneToneProgram(BaseCustomProgramV2):
         modules = cfg["modules"]
         return [
             Reset("reset", cfg=modules.get("reset")),
-            Pulse("init_pulse", cfg=modules.get("init_pulse")),
+            Pulse("init_pulse", cfg=modules.get("init_pulse"), tag="init_pulse"),
             Readout("readout", cfg=modules["readout"]),
         ]

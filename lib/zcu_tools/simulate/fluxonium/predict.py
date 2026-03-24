@@ -83,21 +83,21 @@ class FluxoniumPredictor:
 
         # Step 1: Use root_scalar to find one valid fit_A
         try:
+            bracket = [
+                cur_value - 0.25 * self.flx_period,
+                cur_value + 0.25 * self.flx_period,
+            ]
             result = root_scalar(
                 freq_diff_func,
                 x0=cur_value,
                 x1=cur_value + 0.1 * self.flx_period,
                 method="secant",
-                bracket=[
-                    cur_value - 0.25 * self.flx_period,
-                    cur_value + 0.25 * self.flx_period,
-                ],
+                bracket=bracket,
                 xtol=1e-5 * self.flx_period,
                 maxiter=100,
             )
-            if result.converged:
-                fit_value = result.root
-            else:
+            fit_value = result.root
+            if not result.converged or fit_value > bracket[1] or fit_value < bracket[0]:
                 fit_value = cur_value
         except Exception:
             fit_value = cur_value

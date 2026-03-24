@@ -9,7 +9,7 @@ from .base import assign_init_p, fit_func
 
 # sinusoidal function
 def cosfunc(x: NDArray[np.float64], *p: float) -> NDArray[np.float64]:
-    """p = [y0, yscale, freq, phase]"""
+    """p = [y0, yscale, freq (1/x), phase (deg)]"""
     y0, yscale, freq, phase = p
     return y0 + yscale * np.cos(2 * np.pi * (freq * x + phase / 360))
 
@@ -20,7 +20,7 @@ def fitcos(
     fitparams: Optional[Sequence[Optional[float]]] = None,
     fixedparams: Optional[Sequence[Optional[float]]] = None,
 ) -> tuple[list[float], NDArray[np.float64]]:
-    """fitparams = [y0, yscale, freq, phase]"""
+    """fitparams = [y0, yscale, freq (1/x), phase (deg)]"""
     if fitparams is None:
         fitparams = [None] * 4
     fitparams = list(fitparams)

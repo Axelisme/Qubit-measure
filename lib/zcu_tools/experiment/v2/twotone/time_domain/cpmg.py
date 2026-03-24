@@ -83,14 +83,14 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
 
         times_sweep = _cfg["sweep"]["times"]
-        len_sweep = _cfg["sweep"]["length"]
+        length_sweep = _cfg["sweep"]["length"]
         _cfg["sweep"].pop("times")  # type: ignore
 
         times = sweep2array(times_sweep, allow_array=True)
-        ts = sweep2array(len_sweep)  # predicted times
-        ts = round_zcu_time(ts, soccfg)
+        lengths = sweep2array(length_sweep)  # predicted times
+        lengths = round_zcu_time(lengths, soccfg)
 
-        cpmg_spans = sweep2param("length", len_sweep)
+        cpmg_spans = sweep2param("length", length_sweep)
 
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
@@ -100,7 +100,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         check_block_mode("pi2_pulse", pi2_pulse, want_block=False)
         check_block_mode("pi_pulse", pi_pulse, want_block=False)
 
-        min_interval = np.min(ts) / np.max(times)
+        min_interval = np.min(lengths) / np.max(times)
         if min_interval < (
             pi2_pulse["waveform"]["length"] + pi_pulse["waveform"]["length"]
         ):
@@ -111,60 +111,65 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 f"pi_pulse_length: {pi_pulse['waveform']['length']:.2g}",
             )
 
-        def measure_fn(ctx: TaskState, update_hook: Callable[[int, Any], None]):
-            cfg = ctx.cfg
-            modules = cfg["modules"]
-            pi2_pulse = modules["pi2_pulse"]
-            pi_pulse = modules["pi_pulse"]
-            dpulse_len = (
-                pi_pulse["waveform"]["length"] - pi2_pulse["waveform"]["length"]
-            )
-
-            interval = cpmg_spans / ctx.env["time"]
-
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("pi2_pulse1", pi2_pulse, pulse_name="pi2_pulse"),
-                    Delay("first_cpmg_delay", 0.5 * interval - 0.5 * dpulse_len),
-                    Repeat(
-                        name="cpmg_pi_loop",
-                        n=ctx.env["time"] - 1,
-                        sub_module=[
-                            Pulse("pi_pulse", pi_pulse, pulse_name="pi_pulse"),
-                            Delay("inner_cpmg_delay", interval),
-                        ],
-                    ),
-                    Pulse("last_pi_pulse", pi_pulse, pulse_name="pi_pulse"),
-                    Delay("last_cpmg_delay", 0.5 * interval + 0.5 * dpulse_len),
-                    Pulse("pi2_pulse2", pi2_pulse, pulse_name="pi2_pulse"),
-                    Readout("readout", modules["readout"]),
-                ],
-            ).acquire(soc, progress=False, callback=update_hook)
-
         with LivePlotter2DwithLine(
             "Number of Pi", "Time (us)", line_axis=1, num_lines=2, title="CPMG"
         ) as viewer:
+
+            def measure_fn(ctx: TaskState, update_hook: Callable[[int, Any], None]):
+                nonlocal lengths
+                cfg = ctx.cfg
+                modules = cfg["modules"]
+                pi2_pulse = modules["pi2_pulse"]
+                pi_pulse = modules["pi_pulse"]
+                dpulse_len = (
+                    pi_pulse["waveform"]["length"] - pi2_pulse["waveform"]["length"]
+                )
+
+                interval = cpmg_spans / ctx.env["time"]
+
+                prog = ModularProgramV2(
+                    soccfg,
+                    cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("pi2_pulse1", pi2_pulse, pulse_name="pi2_pulse"),
+                        Delay("first_cpmg_delay", 0.5 * interval - 0.5 * dpulse_len),
+                        Repeat(
+                            name="cpmg_pi_loop",
+                            n=ctx.env["time"] - 1,
+                            sub_module=[
+                                Pulse("pi_pulse", pi_pulse, pulse_name="pi_pulse"),
+                                Delay("inner_cpmg_delay", interval),
+                            ],
+                        ),
+                        Pulse("last_pi_pulse", pi_pulse, pulse_name="pi_pulse"),
+                        Delay("last_cpmg_delay", 0.5 * interval + 0.5 * dpulse_len),
+                        Pulse("pi2_pulse2", pi2_pulse, pulse_name="pi2_pulse"),
+                        Readout("readout", modules["readout"]),
+                    ],
+                )
+
+                return prog.acquire(soc, progress=False, callback=update_hook)
+
+            def update_fn(i, ctx: TaskState, time):
+                ctx.env.update(time=int(time))
+
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(ts),)).scan(
-                    "times",
-                    times.tolist(),
-                    before_each=lambda _, ctx, time: ctx.env.update(time=int(time)),
+                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)).scan(
+                    "times", times.tolist(), before_each=update_fn
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    times, ts, cpmg_signal2real(np.asarray(ctx.root_data))
+                    times, lengths, cpmg_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = _cfg
-        self.last_result = (times, ts, signals)
+        self.last_result = (times, lengths, signals)
 
-        return times, ts, signals
+        return times, lengths, signals
 
     def analyze(
         self, result: Optional[CPMG_Result] = None

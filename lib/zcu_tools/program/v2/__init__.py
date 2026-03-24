@@ -5,6 +5,8 @@ from .modules import (
     Delay,
     DirectReadout,
     DirectReadoutCfg,
+    PulseReadout,
+    PulseReadoutCfg,
     Module,
     ModuleCfg,
     NonBlocking,

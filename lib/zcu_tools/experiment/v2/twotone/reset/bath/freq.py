@@ -18,6 +18,8 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
+    Pulse,
+    PulseCfg,
     Readout,
     ReadoutCfg,
     Reset,
@@ -35,6 +37,7 @@ FreqGainResult: TypeAlias = tuple[
 
 class FreqGainModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
+    init_pulse: NotRequired[PulseCfg]
     tested_reset: BathResetCfg
     readout: ReadoutCfg
 
@@ -86,6 +89,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
                                 ctx.cfg,
                                 modules=[
                                     Reset("reset", modules.get("reset")),
+                                    Pulse("init_pulse", modules.get("init_pulse")),
                                     Reset("tested_reset", modules["tested_reset"]),
                                     Readout("readout", modules["readout"]),
                                 ],
