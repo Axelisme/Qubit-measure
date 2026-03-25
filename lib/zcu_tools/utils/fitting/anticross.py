@@ -106,8 +106,8 @@ def fit_hyperbolic(
 
 def fit_anticross(
     xs: NDArray[np.float64],
-    fpts1: NDArray[np.float64],
-    fpts2: NDArray[np.float64],
+    freqs1: NDArray[np.float64],
+    freqs2: NDArray[np.float64],
     horizontal_line: bool = False,
 ) -> tuple[
     float,
@@ -124,24 +124,24 @@ def fit_anticross(
 
     Args:
         xs: x coordinates of the data
-        fpts1: fpts of the first line
-        fpts2: fpts of the second line
+        freqs1: freqs of the first line
+        freqs2: freqs of the second line
 
 
     Returns:
-        center_x, center_y, g, m1, m2, fit_fpts1, fit_fpts2, params:
+        center_x, center_y, g, m1, m2, fit_freqs1, fit_freqs2, params:
     """
 
     # ax^2 + bx + cy^2 + dy + exy + f = 0
-    params = fit_hyperbolic(xs, fpts1, fpts2, horizontal_line=horizontal_line)
+    params = fit_hyperbolic(xs, freqs1, freqs2, horizontal_line=horizontal_line)
 
-    fit_fpts1, fit_fpts2 = get_predict_ys(xs, *params)
+    fit_freqs1, fit_freqs2 = get_predict_ys(xs, *params)
 
-    return *encode_params(*params), fit_fpts1, fit_fpts2, params
+    return *encode_params(*params), fit_freqs1, fit_freqs2, params
 
 
 def fit_anticross2d(
-    xs: NDArray[np.float64], fpts: NDArray[np.float64], signals: NDArray[np.complex128]
+    xs: NDArray[np.float64], freqs: NDArray[np.float64], signals: NDArray[np.complex128]
 ) -> tuple[float, float, float, float, float]:
     MAX_ITER = 1000
 
@@ -159,8 +159,8 @@ def fit_anticross2d(
 
     # guess the initial parameters
     cx = np.sum(xs[:, None] * amps) / np.sum(amps)
-    cy = fpts[np.argmin(np.max(amps, axis=1))]
-    width = (fpts.max() - fpts.min()) / 100
+    cy = freqs[np.argmin(np.max(amps, axis=1))]
+    width = (freqs.max() - freqs.min()) / 100
     m1 = 0.0
     m2 = 1.0
 
@@ -170,13 +170,13 @@ def fit_anticross2d(
     def loss_fn(cx: float, cy: float, width: float, m1: float, m2: float) -> float:
         update_pbar(cx, cy, width)
 
-        fit_fpts1, fit_fpts2 = get_predict_ys(
+        fit_freqs1, fit_freqs2 = get_predict_ys(
             xs, *retrieve_params(cx, cy, width, m1, m2)
         )
 
         # 用線性插值取得每個 rf_0 對應的 signal
-        vals1 = [np.interp(f, fpts, amps[i]) for i, f in enumerate(fit_fpts1)]
-        vals2 = [np.interp(f, fpts, amps[i]) for i, f in enumerate(fit_fpts2)]
+        vals1 = [np.interp(f, freqs, amps[i]) for i, f in enumerate(fit_freqs1)]
+        vals2 = [np.interp(f, freqs, amps[i]) for i, f in enumerate(fit_freqs2)]
         return float(-np.nanmean(vals1) - np.nanmean(vals2))
 
     fit_kwargs = dict(

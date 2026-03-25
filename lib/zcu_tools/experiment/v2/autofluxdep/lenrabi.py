@@ -11,7 +11,6 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import (
-    round_zcu_time,
     sweep2array,
     wrap_earlystop_check,
 )
@@ -183,9 +182,8 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
 
         real_signals = lenrabi_signal2real(ctx.value["raw_signals"])
 
-        self.lengths = sweep2array(len_sweep)
-        self.lengths = round_zcu_time(
-            self.lengths, ctx.env["soccfg"], gen_ch=rabi_pulse["ch"]
+        self.lengths = sweep2array(
+            len_sweep, "time", {"soccfg": ctx.env["soccfg"], "gen_ch": rabi_pulse["ch"]}
         )
 
         pi_len, pi2_len, rabi_freq, mean_err, fit_signals = auto_fit_lenrabi(
@@ -206,7 +204,9 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
 
             cur_pi_product = pi_len * rabi_pulse["gain"]
             prev_pi_product = info.last.get("smooth_pi_product", cur_pi_product)
-            num_step = max(1, info["flx_idx"] - info.last.get("lenrabi_success_idx", 0))
+            num_step = max(
+                1, info["flux_idx"] - info.last.get("lenrabi_success_idx", 0)
+            )
             weight = 0.7**num_step
             smooth_pi_product = (1 - weight) * cur_pi_product + weight * prev_pi_product
 
@@ -218,7 +218,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
                 info["pi2_pulse"] = deepcopy(rabi_pulse)
                 info["pi2_pulse"]["waveform"]["length"] = pi2_len
             info["smooth_pi_product"] = smooth_pi_product
-            info["lenrabi_success_idx"] = info["flx_idx"]
+            info["lenrabi_success_idx"] = info["flux_idx"]
 
         with MinIntervalFunc.force_execute():
             ctx.set_value(
@@ -262,22 +262,22 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         )
 
     def update_plotter(self, plotters, ctx: TaskState, signals) -> None:
-        flx_values = ctx.env["flx_values"]
+        flux_values = ctx.env["flux_values"]
 
         self.pi_line.set_xdata([ctx.env["info"].get("pi_length", np.nan)])
         plotters["rabi_curve"].update(
-            flx_values,
+            flux_values,
             self.lengths,
             lenrabi_fluxdep_signal2real(signals["raw_signals"]),
             refresh=False,
         )
 
-    def save(self, filepath, flx_values, result, comment, prefix_tag) -> None:
+    def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
 
-        np.savez_compressed(filepath, flx_values=flx_values, **result)
+        np.savez_compressed(filepath, flux_values=flux_values, **result)
 
-        x_info = {"name": "Flux value", "unit": "a.u.", "values": flx_values}
+        x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
 
         # signals
         save_data(
@@ -342,41 +342,41 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         # main container (has pi2_length and rabi_freq)
         data = np.load(filepath)
 
-        flx_values = data["flx_values"]
+        flux_values = data["flux_values"]
         pi2_length = data["pi2_length"]
         rabi_freq = data["rabi_freq"]
         success_main = data["success"]
 
         # signals
-        signals_stored, flx_sig, len_idxs = load_data(
+        signals_stored, flux_sig, len_idxs = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs
         )
-        assert flx_sig is not None and len_idxs is not None
-        assert np.array_equal(flx_values, flx_sig)
-        assert signals_stored.shape == (len(len_idxs), len(flx_sig))
+        assert flux_sig is not None and len_idxs is not None
+        assert np.array_equal(flux_values, flux_sig)
+        assert signals_stored.shape == (len(len_idxs), len(flux_sig))
 
-        length_stored, flx_len, _ = load_data(
+        length_stored, flux_len, _ = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_length")), **kwargs
         )
-        assert flx_len is not None
-        assert length_stored.shape == (len(flx_len), len(len_idxs))
-        assert np.array_equal(flx_values, flx_len)
+        assert flux_len is not None
+        assert length_stored.shape == (len(flux_len), len(len_idxs))
+        assert np.array_equal(flux_values, flux_len)
 
         # pi_length
-        pi_length_data, flx_pi, _ = load_data(
+        pi_length_data, flux_pi, _ = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_pi_length")), **kwargs
         )
-        assert flx_pi is not None
-        assert pi_length_data.shape == (len(flx_pi), len(len_idxs))
-        assert np.array_equal(flx_values, flx_pi)
+        assert flux_pi is not None
+        assert pi_length_data.shape == (len(flux_pi), len(len_idxs))
+        assert np.array_equal(flux_values, flux_pi)
 
         # success
-        success_data, flx_succ, _ = load_data(
+        success_data, flux_succ, _ = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_success")), **kwargs
         )
-        assert flx_succ is not None
-        assert success_data.shape == (len(flx_succ), len(len_idxs))
-        assert np.array_equal(flx_values, flx_succ)
+        assert flux_succ is not None
+        assert success_data.shape == (len(flux_succ), len(len_idxs))
+        assert np.array_equal(flux_values, flux_succ)
 
         assert (
             pi2_length.shape
@@ -399,6 +399,6 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
             "pi2_length": pi2_length,
             "rabi_freq": rabi_freq,
             "success": success,
-            "flx_values": flx_values,
+            "flux_values": flux_values,
             "lengths": len_idxs,
         }

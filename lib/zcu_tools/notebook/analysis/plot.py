@@ -7,11 +7,11 @@ from typing_extensions import TYPE_CHECKING, Any, Optional
 
 from zcu_tools.notebook.analysis.fluxdep.utils import add_secondary_xaxis
 from zcu_tools.simulate.fluxonium import (
-    calculate_eff_t1_vs_flx,
-    calculate_energy_vs_flx,
-    calculate_n_oper_vs_flx,
+    calculate_eff_t1_vs_flux,
+    calculate_energy_vs_flux,
+    calculate_n_oper_vs_flux,
 )
-from zcu_tools.simulate.fluxonium.dispersive import calculate_chi_vs_flx
+from zcu_tools.simulate.fluxonium.dispersive import calculate_chi_vs_flux
 
 if TYPE_CHECKING:
     from scqubits.core.storage import SpectrumData
@@ -29,7 +29,7 @@ def plot_matrix_elements(
 ) -> tuple[go.Figure, SpectrumData]:
     need_dim = max(max(i, j) for i, j in show_idxs) + 1
 
-    spectrum_data, matrix_elements = calculate_n_oper_vs_flx(
+    spectrum_data, matrix_elements = calculate_n_oper_vs_flux(
         params, fluxs, return_dim=need_dim, spectrum_data=spectrum_data
     )
 
@@ -68,7 +68,7 @@ def plot_dispersive_shift(
 ) -> go.Figure:
     fig = go.Figure()
 
-    chi = calculate_chi_vs_flx(params, fluxs, bare_rf, g, res_dim=upto + 2)
+    chi = calculate_chi_vs_flux(params, fluxs, bare_rf, g, res_dim=upto + 2)
 
     fig.add_hline(y=0.0, line_color="black", line_width=2, line_dash="dash")
 
@@ -110,7 +110,7 @@ def plot_t1s(
 ) -> tuple[go.Figure, NDArray[np.float64]]:
     fig = go.Figure()
 
-    t1s = calculate_eff_t1_vs_flx(
+    t1s = calculate_eff_t1_vs_flux(
         fluxs,
         noise_channels=noise_channels,
         Temp=Temp,
@@ -145,7 +145,7 @@ def plot_transitions(
 ) -> go.Figure:
     fig = go.Figure()
 
-    _, energies = calculate_energy_vs_flx(params, fluxs)
+    _, energies = calculate_energy_vs_flux(params, fluxs)
 
     for i, j in show_idxs:
         fig.add_trace(

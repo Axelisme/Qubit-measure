@@ -13,7 +13,7 @@ from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import make_ge_sweep, round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
 from zcu_tools.liveplot import LivePlotter1D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -63,23 +63,35 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
     ) -> T1WithToneResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T1WithToneCfg)
+        modules = _cfg["modules"]
 
-        len_sweep = _cfg["sweep"]["length"]
+        length_sweep = _cfg["sweep"]["length"]
 
         if uniform:
-            assert isinstance(len_sweep, dict)
-            ts = sweep2array(len_sweep)
-            ts = round_zcu_time(ts, soccfg)
-            _cfg["sweep"] = {"length": len_sweep, "ge": make_ge_sweep()}
+            assert isinstance(length_sweep, dict)
+            lengths = sweep2array(
+                length_sweep,
+                "time",
+                {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+            )
+            _cfg["sweep"] = {"length": length_sweep, "ge": make_ge_sweep()}
         else:
-            if isinstance(len_sweep, dict):
-                ts = np.geomspace(
-                    len_sweep["start"], len_sweep["stop"], len_sweep["expts"]
+            if isinstance(length_sweep, dict):
+                lengths = np.geomspace(
+                    length_sweep["start"],
+                    length_sweep["stop"],
+                    length_sweep["expts"],
+                    dtype=np.float64,
                 )
             else:
-                ts = np.asarray(len_sweep)
-            ts = round_zcu_time(ts, soccfg)
-            ts = np.unique(ts)
+                lengths = np.asarray(length_sweep, dtype=np.float64)
+            lengths = sweep2array(
+                lengths,
+                "time",
+                {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+                allow_array=True,
+            )
+            lengths = np.unique(lengths)
             _cfg["sweep"] = {"ge": make_ge_sweep()}
 
         fig, axs = make_plot_frame(1, 2, figsize=(12, 5))
@@ -122,10 +134,10 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 populations = calc_populations(np.asarray(ctx.root_data))  # (N, 2, 3)
 
                 viewer.get_plotter("init_g").update(
-                    ts, populations[:, 0].T, refresh=False
+                    lengths, populations[:, 0].T, refresh=False
                 )
                 viewer.get_plotter("init_e").update(
-                    ts, populations[:, 1].T, refresh=False
+                    lengths, populations[:, 1].T, refresh=False
                 )
 
                 viewer.refresh()
@@ -171,14 +183,18 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                     return prog_maker(ctx.cfg, len_param).acquire(**acquire_kwargs)
                 else:
                     return measure_with_sweep(
-                        ctx, prog_maker, ts.tolist(), sweep_shape=(2,), **acquire_kwargs
+                        ctx,
+                        prog_maker,
+                        lengths.tolist(),
+                        sweep_shape=(2,),
+                        **acquire_kwargs,
                     )
 
             populations = run_task(
                 task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(len(ts), 2, 2),
+                    result_shape=(len(lengths), 2, 2),
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
@@ -188,9 +204,9 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
 
         # record last cfg and result
         self.last_cfg = _cfg
-        self.last_result = (ts, populations)
+        self.last_result = (lengths, populations)
 
-        return ts, populations
+        return lengths, populations
 
     def analyze(
         self,

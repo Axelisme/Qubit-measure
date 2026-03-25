@@ -101,7 +101,7 @@ def calculate_dispersive_sweep(
     return tuple(rf_list)
 
 
-def calculate_dispersive_vs_flx(
+def calculate_dispersive_vs_flux(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     bare_rf: float,
@@ -182,7 +182,7 @@ def calculate_chi_sweep(
     return sweep["chi"]["subsys1":0, "subsys2":1]
 
 
-def calculate_chi_vs_flx(
+def calculate_chi_vs_flux(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     bare_rf: float,
@@ -195,7 +195,7 @@ def calculate_chi_vs_flx(
     """
     Calculate the dispersive shift of ground and excited state vs. flux
     Returns:
-        chi: NDArray[np.float64], shape: (len(flxs), res_dim)
+        chi: NDArray[np.float64], shape: (len(fluxs), res_dim)
     """
 
     def update_hilbertspace(fluxonium: Fluxonium, flux: float) -> None:

@@ -20,6 +20,7 @@ from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
     PulseCfg,
+    PulseReset,
     Readout,
     ReadoutCfg,
     Reset,
@@ -54,16 +55,17 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
-
-        lens = sweep2array(_cfg["sweep"]["length"])  # predicted pulse lengths
-
-        # Check that reset pulse is single pulse type
         modules = _cfg["modules"]
-        Reset.set_param(
-            modules["tested_reset"],
-            "length",
-            sweep2param("length", _cfg["sweep"]["length"]),
+
+        reset_cfg = modules["tested_reset"]
+        lengths = sweep2array(
+            _cfg["sweep"]["length"],
+            "time",
+            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse_cfg"]["ch"]},
         )
+
+        length_param = sweep2param("length", _cfg["sweep"]["length"])
+        PulseReset.set_param(modules["tested_reset"], "length", length_param)
 
         with LivePlotter1D("Length (us)", "Amplitude") as viewer:
             signals = run_task(
@@ -77,25 +79,25 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),
-                                    Reset("tested_reset", modules["tested_reset"]),
+                                    PulseReset("tested_reset", modules["tested_reset"]),
                                     Readout("readout", modules["readout"]),
                                 ],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),
-                    result_shape=(len(lens),),
+                    result_shape=(len(lengths),),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    lens, reset_length_signal2real(ctx.root_data)
+                    lengths, reset_length_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
         self.last_cfg = _cfg
-        self.last_result = (lens, signals)
+        self.last_result = (lengths, signals)
 
-        return lens, signals
+        return lengths, signals
 
     def analyze(self, result: Optional[LengthResult] = None) -> Figure:
         if result is None:

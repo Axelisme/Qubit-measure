@@ -56,15 +56,18 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         e_center: complex,
         radius: float,
     ) -> PreFreqResult:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), PreFreqCfg)  # prevent in-place modification
         modules = _cfg["modules"]
 
-        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "freq")
-        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted amplitudes
-
-        Pulse.set_param(
-            modules["init_pulse"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
+        freqs = sweep2array(
+            _cfg["sweep"]["freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["init_pulse"]["ch"]},
         )
+
+        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+        Pulse.set_param(modules["init_pulse"], "freq", freq_param)
 
         with LivePlotter1D(
             "Pre Pulse Frequency",
@@ -105,20 +108,20 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(len(fpts), 2),
+                    result_shape=(len(freqs), 2),
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    fpts, calc_populations(ctx.root_data).T
+                    freqs, calc_populations(ctx.root_data).T
                 ),
             )
 
         # record the last result
         self.last_cfg = _cfg
-        self.last_result = (fpts, signals)
+        self.last_result = (freqs, signals)
 
-        return fpts, signals
+        return freqs, signals
 
     def analyze(
         self,
@@ -130,7 +133,7 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts, populations = result
+        freqs, populations = result
 
         populations = calc_populations(populations)
 
@@ -141,9 +144,9 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         fig, ax = plt.subplots(figsize=(6, 6))
 
         plot_kwargs = dict(ls="-", marker="o", markersize=1)
-        ax.plot(fpts, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
-        ax.plot(fpts, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
-        ax.plot(fpts, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
+        ax.plot(freqs, populations[:, 0], color="blue", label="Ground", **plot_kwargs)  # type: ignore
+        ax.plot(freqs, populations[:, 1], color="red", label="Excited", **plot_kwargs)  # type: ignore
+        ax.plot(freqs, populations[:, 2], color="green", label="Other", **plot_kwargs)  # type: ignore
         ax.set_xlabel("Frequency (MHz)", fontsize=14)
         ax.set_ylabel("Population", fontsize=14)
         ax.grid(True)
@@ -157,18 +160,18 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         filepath: str,
         result: Optional[PreFreqResult] = None,
         comment: Optional[str] = None,
-        tag: str = "singleshot/mist/pdr",
+        tag: str = "singleshot/mist/gain",
         **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts, populations = result
+        freqs, populations = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "PrePulse frequency", "unit": "Hz", "values": 1e6 * fpts},
+            x_info={"name": "PrePulse frequency", "unit": "Hz", "values": 1e6 * freqs},
             y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
             z_info={"name": "Population", "unit": "a.u.", "values": populations.T},
             comment=comment,
@@ -177,11 +180,11 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PreFreqResult:
-        populations, fpts, _ = load_data(filepath, **kwargs)
+        populations, freqs, _ = load_data(filepath, **kwargs)
 
-        fpts = fpts / 1e6  # convert to MHz
+        freqs = freqs / 1e6  # convert to MHz
 
         self.last_cfg = None
-        self.last_result = (fpts, populations)
+        self.last_result = (freqs, populations)
 
-        return fpts, populations
+        return freqs, populations

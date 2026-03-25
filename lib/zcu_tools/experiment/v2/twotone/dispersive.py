@@ -47,19 +47,21 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> DispersiveResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), DispersiveCfg)
+        modules = _cfg["modules"]
 
         _cfg["sweep"] = {"ge": make_ge_sweep(), "freq": _cfg["sweep"]["freq"]}
 
-        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
+        freqs = sweep2array(
+            _cfg["sweep"]["freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+        )
 
         # Set with/without π gain for qubit pulse
-        modules = _cfg["modules"]
-        Pulse.set_param(
-            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
-        )
-        Readout.set_param(
-            modules["readout"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
-        )
+        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+        Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
+        Readout.set_param(modules["readout"], "freq", freq_param)
 
         with LivePlotter1D(
             "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2)
@@ -69,19 +71,19 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
                         soccfg, ctx.cfg
                     ).acquire(soc, progress=False, callback=update_hook),
-                    result_shape=(2, len(fpts)),
+                    result_shape=(2, len(freqs)),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    fpts, dispersive_signal2real(ctx.root_data)
+                    freqs, dispersive_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
         self.last_cfg = _cfg
-        self.last_result = (fpts, signals)
+        self.last_result = (freqs, signals)
 
-        return fpts, signals
+        return freqs, signals
 
     def analyze(
         self, result: Optional[DispersiveResult] = None
@@ -90,23 +92,23 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts, signals = result
+        freqs, signals = result
         g_signals, e_signals = signals[0, :], signals[1, :]
         g_amps, e_amps = np.abs(g_signals), np.abs(e_signals)
 
-        g_edelay = fit_edelay(fpts, g_signals)
-        e_edelay = fit_edelay(fpts, e_signals)
+        g_edelay = fit_edelay(freqs, g_signals)
+        e_edelay = fit_edelay(freqs, e_signals)
         edelay = 0.5 * (g_edelay + e_edelay)
 
-        model = get_proper_model(fpts, g_signals)
-        g_params = model.fit(fpts, g_signals, edelay=edelay)
-        e_params = model.fit(fpts, e_signals, edelay=edelay)
+        model = get_proper_model(freqs, g_signals)
+        g_params = model.fit(freqs, g_signals, edelay=edelay)
+        e_params = model.fit(freqs, e_signals, edelay=edelay)
 
         g_freq, g_kappa = g_params["freq"], g_params["kappa"]
         e_freq, e_kappa = e_params["freq"], e_params["kappa"]
 
-        g_fit = np.abs(model.calc_signals(fpts, **g_params))  # type: ignore
-        e_fit = np.abs(model.calc_signals(fpts, **e_params))  # type: ignore
+        g_fit = np.abs(model.calc_signals(freqs, **g_params))  # type: ignore
+        e_fit = np.abs(model.calc_signals(freqs, **e_params))  # type: ignore
 
         # Calculate dispersive shift and average linewidth
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
@@ -125,10 +127,10 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         # Plot data and fits
         label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_kappa:.1f} MHz"
         label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_kappa:.1f} MHz"
-        ax_main.scatter(fpts, g_amps, marker=".", c="b")
-        ax_main.scatter(fpts, e_amps, marker=".", c="r")
-        ax_main.plot(fpts, g_fit, "b-", alpha=0.7, label=label_g)
-        ax_main.plot(fpts, e_fit, "r-", alpha=0.7, label=label_e)
+        ax_main.scatter(freqs, g_amps, marker=".", c="b")
+        ax_main.scatter(freqs, e_amps, marker=".", c="r")
+        ax_main.plot(freqs, g_fit, "b-", alpha=0.7, label=label_g)
+        ax_main.plot(freqs, e_fit, "r-", alpha=0.7, label=label_e)
 
         # Mark resonance frequencies
         ax_main.axvline(g_freq, color="b", ls="--", alpha=0.7)
@@ -146,7 +148,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             color: str,
             label: str,
         ) -> None:
-            rot_signals = remove_edelay(fpts, signals, edelay)
+            rot_signals = remove_edelay(freqs, signals, edelay)
             norm_signals, norm_circle_params = normalize_signal(
                 rot_signals, params_dict["circle_params"], params_dict["a0"]
             )
@@ -191,11 +193,11 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts, signals = result
+        freqs, signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
             y_info={"name": "Amplitude", "unit": "None", "values": np.array([0, 1])},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
@@ -204,17 +206,17 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> DispersiveResult:
-        signals, fpts, _ = load_data(filepath, **kwargs)
-        assert len(fpts.shape) == 1
-        assert signals.shape == (len(fpts), 2)
+        signals, freqs, _ = load_data(filepath, **kwargs)
+        assert len(freqs.shape) == 1
+        assert signals.shape == (len(freqs), 2)
 
-        fpts = fpts * 1e-6  # Hz -> MHz
+        freqs = freqs * 1e-6  # Hz -> MHz
         signals = signals.T  # transpose back
 
-        fpts = fpts.astype(np.float64)
+        freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (fpts, signals)
+        self.last_result = (freqs, signals)
 
-        return fpts, signals
+        return freqs, signals

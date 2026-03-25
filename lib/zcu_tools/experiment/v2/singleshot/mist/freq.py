@@ -55,15 +55,18 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
         e_center: complex,
         radius: float,
     ) -> FreqResult:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), FreqCfg)  # prevent in-place modification
         modules = _cfg["modules"]
 
-        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "freq")
-        freqs = sweep2array(_cfg["sweep"]["freq"])  # predicted amplitudes
-
-        Pulse.set_param(
-            modules["probe_pulse"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
+        freqs = sweep2array(
+            _cfg["sweep"]["freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
         )
+
+        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+        Pulse.set_param(modules["probe_pulse"], "freq", freq_param)
 
         with LivePlotter1D(
             "Pulse freq",

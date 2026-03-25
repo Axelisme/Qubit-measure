@@ -92,7 +92,7 @@ def percell(
     return Percell_total
 
 
-def calculate_percell_t1_vs_flx(
+def calculate_percell_t1_vs_flux(
     fluxs: NDArray[np.float64],
     bare_rf: float,
     kappa: float,
@@ -120,8 +120,8 @@ def calculate_percell_t1_vs_flx(
         g=g, op1=fluxonium.n_operator, op2=resonator.creation_operator, add_hc=True
     )
 
-    def update_hilbertspace(flx: float) -> None:
-        fluxonium.flux = flx
+    def update_hilbertspace(flux: float) -> None:
+        fluxonium.flux = flux
 
     sweep = ParameterSweep(
         hilbertspace=hilbertspace,

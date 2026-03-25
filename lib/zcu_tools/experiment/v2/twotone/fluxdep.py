@@ -43,17 +43,19 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         _cfg = check_type(deepcopy(cfg), FreqFluxCfg)
         modules = _cfg["modules"]
 
-        values_sweep = _cfg["sweep"]["flux"]
-        freqs_sweep = _cfg["sweep"]["freq"]
+        value_sweep = _cfg["sweep"]["flux"]
+        freq_sweep = _cfg["sweep"]["freq"]
 
         # Remove flux from sweep dict - will be handled by scan
-        _cfg["sweep"] = {"freq": freqs_sweep}
+        _cfg["sweep"] = {"freq": freq_sweep}
 
-        dev_values = sweep2array(values_sweep, allow_array=True)
-        freqs = sweep2array(freqs_sweep)  # predicted frequency points
+        dev_values = sweep2array(value_sweep, allow_array=True)
+        freqs = sweep2array(
+            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]}
+        )
 
         # Frequency is swept by FPGA (hard sweep)
-        freq_param = sweep2param("freq", freqs_sweep)
+        freq_param = sweep2param("freq", freq_sweep)
         Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
 
         with LivePlotter2DwithLine(
@@ -70,8 +72,8 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
                 .scan(
                     "flux",
                     dev_values.tolist(),
-                    before_each=lambda _, ctx, flx: set_flux_in_dev_cfg(
-                        ctx.cfg["dev"], flx
+                    before_each=lambda _, ctx, flux: set_flux_in_dev_cfg(
+                        ctx.cfg["dev"], flux
                     ),
                 ),
                 init_cfg=_cfg,
@@ -90,19 +92,19 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
     def analyze(
         self,
         result: Optional[FreqFluxResult] = None,
-        flx_half: Optional[float] = None,
-        flx_int: Optional[float] = None,
+        flux_half: Optional[float] = None,
+        flux_int: Optional[float] = None,
     ) -> InteractiveLines:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, fpts, signals2D = result
+        values, freqs, signals2D = result
 
         signals2D = minus_background(signals2D, axis=1)
 
         actline = InteractiveLines(
-            signals2D, values, fpts, flx_half=flx_half, flx_int=flx_int
+            signals2D, values, freqs, flux_half=flux_half, flux_int=flux_int
         )
 
         return actline
@@ -115,9 +117,9 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, fpts, signals2D = result
+        values, freqs, signals2D = result
 
-        point_selector = InteractiveFindPoints(signals2D, values, fpts)
+        point_selector = InteractiveFindPoints(signals2D, values, freqs)
 
         return point_selector
 
@@ -133,12 +135,12 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        values, fpts, signals2D = result
+        values, freqs, signals2D = result
 
         save_data(
             filepath=filepath,
             x_info={"name": "Flux device value", "unit": "a.u.", "values": values},
-            y_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            y_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
             tag=tag,
@@ -146,18 +148,18 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FreqFluxResult:
-        signals2D, values, fpts, cfg = load_data(filepath, return_cfg=True, **kwargs)
-        assert values is not None and fpts is not None
-        assert len(values.shape) == 1 and len(fpts.shape) == 1
-        assert signals2D.shape == (len(values), len(fpts))
+        signals2D, values, freqs, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        assert values is not None and freqs is not None
+        assert len(values.shape) == 1 and len(freqs.shape) == 1
+        assert signals2D.shape == (len(values), len(freqs))
 
-        fpts = fpts * 1e-6  # Hz -> MHz
+        freqs = freqs * 1e-6  # Hz -> MHz
 
         values = values.astype(np.float64)
-        fpts = fpts.astype(np.float64)
+        freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
         self.last_cfg = cast(FreqFluxCfg, cfg)
-        self.last_result = (values, fpts, signals2D)
+        self.last_result = (values, freqs, signals2D)
 
-        return values, fpts, signals2D
+        return values, freqs, signals2D

@@ -34,8 +34,8 @@ class ExperimentManager:
         if label is None:
             label = self._auto_label(value, unit)
 
-        flx_dir = self.exp_dir / label
-        if (flx_dir / "meta_info.json").exists():
+        flux_dir = self.exp_dir / label
+        if (flux_dir / "meta_info.json").exists():
             raise FileExistsError(
                 f"Context '{label}' already exists. "
                 "Use use_flux() to load it, or provide a different label."
@@ -43,7 +43,7 @@ class ExperimentManager:
 
         self._label = label
 
-        flx_dir.mkdir(parents=True, exist_ok=True)
+        flux_dir.mkdir(parents=True, exist_ok=True)
         if clone_from is not None:
             if isinstance(clone_from, str):
                 src_folder = self.exp_dir / clone_from
@@ -55,27 +55,27 @@ class ExperimentManager:
                 md = MetaDict(src_folder / "meta_info.json", readonly=True)
             else:
                 (ml, md) = clone_from
-            ml = ml.clone(dst_path=flx_dir / "module_cfg.yaml")
-            md = md.clone(dst_path=flx_dir / "meta_info.json")
+            ml = ml.clone(dst_path=flux_dir / "module_cfg.yaml")
+            md = md.clone(dst_path=flux_dir / "meta_info.json")
         else:
-            ml = ModuleLibrary(flx_dir / "module_cfg.yaml")
-            md = MetaDict(flx_dir / "meta_info.json")
+            ml = ModuleLibrary(flux_dir / "module_cfg.yaml")
+            md = MetaDict(flux_dir / "meta_info.json")
 
         return ml, md
 
     def use_flux(
         self, label: str, readonly: bool = False
     ) -> tuple[ModuleLibrary, MetaDict]:
-        flx_dir = self.exp_dir / label
-        if not (flx_dir / "meta_info.json").exists():
+        flux_dir = self.exp_dir / label
+        if not (flux_dir / "meta_info.json").exists():
             raise FileNotFoundError(
                 f"Folder '{label}' not found. Available: {self.list_contexts()}"
             )
 
         self._label = label
 
-        ml = ModuleLibrary(flx_dir / "module_cfg.yaml", readonly=readonly)
-        md = MetaDict(flx_dir / "meta_info.json", readonly=readonly)
+        ml = ModuleLibrary(flux_dir / "module_cfg.yaml", readonly=readonly)
+        md = MetaDict(flux_dir / "meta_info.json", readonly=readonly)
 
         return ml, md
 
@@ -88,7 +88,7 @@ class ExperimentManager:
         return self._label
 
     @property
-    def flx_dir(self) -> Path:
+    def flux_dir(self) -> Path:
         return self.exp_dir / self.label
 
     def _auto_label(

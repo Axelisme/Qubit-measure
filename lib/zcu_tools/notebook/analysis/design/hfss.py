@@ -15,11 +15,11 @@ def analyze_1d_sweep(
     data = pd.read_csv(result_path)
 
     params = np.asarray(data[param_name].values)
-    fpts1 = 1e-9 * np.asarray(data["re(Mode(1)) []"].values)
-    fpts2 = 1e-9 * np.asarray(data["re(Mode(2)) []"].values)
+    freqs1 = 1e-9 * np.asarray(data["re(Mode(1)) []"].values)
+    freqs2 = 1e-9 * np.asarray(data["re(Mode(2)) []"].values)
 
-    dist1 = np.abs(fpts1 - ref_freq)
-    dist2 = np.abs(fpts2 - ref_freq)
+    dist1 = np.abs(freqs1 - ref_freq)
+    dist2 = np.abs(freqs2 - ref_freq)
     dist = np.where(dist1 < dist2, dist1, dist2)
 
     max_idx = np.argmax(dist)
@@ -51,8 +51,8 @@ def analyze_xy_sweep(
 
     Xs = np.asarray(data["Arm_X [mm]"].values)
     Ys = np.asarray(data["Pad_Y [um]"].values)
-    fpts1 = 1e-9 * np.asarray(data["re(Mode(1)) []"].values)
-    fpts2 = 1e-9 * np.asarray(data["re(Mode(2)) []"].values)
+    freqs1 = 1e-9 * np.asarray(data["re(Mode(1)) []"].values)
+    freqs2 = 1e-9 * np.asarray(data["re(Mode(2)) []"].values)
 
     # reorganize data to 2D array
     xs = np.unique(Xs)
@@ -66,14 +66,14 @@ def analyze_xy_sweep(
             raise ValueError("Unrecognized data order")
         else:
             print("force order: (x, y)")
-            fpts1 = fpts1.reshape(len_y, len_x).T.flatten()
-            fpts2 = fpts2.reshape(len_y, len_x).T.flatten()
-    fpts1 = fpts1.reshape(len_x, len_y)
-    fpts2 = fpts2.reshape(len_x, len_y)
+            freqs1 = freqs1.reshape(len_y, len_x).T.flatten()
+            freqs2 = freqs2.reshape(len_y, len_x).T.flatten()
+    freqs1 = freqs1.reshape(len_x, len_y)
+    freqs2 = freqs2.reshape(len_x, len_y)
 
     # calculate min distance to reference frequency
-    dist1 = np.abs(fpts1 - ref_freq)
-    dist2 = np.abs(fpts2 - ref_freq)
+    dist1 = np.abs(freqs1 - ref_freq)
+    dist2 = np.abs(freqs2 - ref_freq)
     dist = np.where(dist1 < dist2, dist1, dist2)
 
     # find points which are the maximum distance in both x and y direction
@@ -123,21 +123,21 @@ def fit_hfss_anticross(
     data = pd.read_csv(result_path)
 
     Ljs = np.asarray(data["Lj [nH]"].values)
-    fpts1 = 1e-9 * np.asarray(data["re(Mode(1)) []"].values)
-    fpts2 = 1e-9 * np.asarray(data["re(Mode(2)) []"].values)
+    freqs1 = 1e-9 * np.asarray(data["re(Mode(1)) []"].values)
+    freqs2 = 1e-9 * np.asarray(data["re(Mode(2)) []"].values)
 
     aqf = 1 / np.sqrt(Ljs)
-    cx, cy, width, m1, m2, fit_fpts1, fit_fpts2, _ = fit_anticross(
-        aqf, fpts1, fpts2, horizontal_line=True
+    cx, cy, width, m1, m2, fit_freqs1, fit_freqs2, _ = fit_anticross(
+        aqf, freqs1, freqs2, horizontal_line=True
     )
     c_freq = cy
     c_Lj = 1 / cx**2
 
     fig, ax = plt.subplots()
-    ax.plot(Ljs, fpts1, marker=".")
-    ax.plot(Ljs, fpts2, marker=".")
-    ax.plot(Ljs, fit_fpts1, label="fitting")
-    ax.plot(Ljs, fit_fpts2)
+    ax.plot(Ljs, freqs1, marker=".")
+    ax.plot(Ljs, freqs2, marker=".")
+    ax.plot(Ljs, fit_freqs1, label="fitting")
+    ax.plot(Ljs, fit_freqs2)
     ax.plot(Ljs, cy + m1 * (aqf - cx), "r--")
     ax.plot(Ljs, cy + m2 * (aqf - cx), "b--")
     ax.plot(

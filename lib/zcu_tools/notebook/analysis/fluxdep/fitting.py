@@ -16,8 +16,8 @@ from numpy.typing import NDArray
 from scipy.optimize import least_squares
 from tqdm.auto import tqdm, trange
 
-from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
 from zcu_tools.notebook.persistance import TransitionDict
+from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 from .models import count_max_evals, energy2linearform
 
@@ -35,9 +35,9 @@ def search_in_database(
 ) -> tuple[tuple[float, float, float], Figure]:
     # Load data from database
     with File(datapath, "r") as file:
-        f_fluxs = file["flxs"][:]  # (f_flxs, ) # type: ignore[index]
+        f_fluxs = file["fluxs"][:]  # (f_fluxs, ) # type: ignore[index]
         f_params = file["params"][:]  # (N, 3) # type: ignore[index]
-        f_energies = file["energies"][:]  # (N, f_flxs, M) # type: ignore[index]
+        f_energies = file["energies"][:]  # (N, f_fluxs, M) # type: ignore[index]
     assert isinstance(f_fluxs, np.ndarray)
     assert isinstance(f_params, np.ndarray)
     assert isinstance(f_energies, np.ndarray)
@@ -58,12 +58,12 @@ def search_in_database(
 
     idx_bar = trange(f_params.shape[0], desc="Searching...")
 
-    def find_close_points(fpts, energies, factor, allows) -> np.ndarray:
+    def find_close_points(freqs, energies, factor, allows) -> np.ndarray:
         Bs, Cs = energy2linearform(energies, allows)
         fs = np.abs(factor * Bs + Cs)
-        dists = np.abs(fs - fpts[:, None])
+        dists = np.abs(fs - freqs[:, None])
         min_idx = np.argmin(dists, axis=1)
-        return fs[range(len(fpts)), min_idx]
+        return fs[range(len(freqs)), min_idx]
 
     # ------------------------------------------------------------
     # define the search functions
@@ -353,7 +353,7 @@ def fit_spectrum(
         nonlocal fluxs, transitions, freqs
 
         # 計算能量並轉成線性形式
-        _, energies = calculate_energy_vs_flx(
+        _, energies = calculate_energy_vs_flux(
             params, fluxs, cutoff=45, evals_count=max_lvl
         )
         Bs, Cs = energy2linearform(energies, transitions)

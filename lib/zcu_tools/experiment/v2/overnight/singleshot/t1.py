@@ -11,7 +11,7 @@ from typing_extensions import Callable, NotRequired, Optional, TypedDict
 
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
-from zcu_tools.experiment.v2.utils import make_ge_sweep, round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
@@ -231,6 +231,7 @@ class T1Task(
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         cfg["sweep"] = {"ge": make_ge_sweep(), "length": cfg["sweep"]["length"]}
 
+        # initial values, may be rounded later
         self.lengths = sweep2array(cfg["sweep"]["length"])
 
         def measure_t1_fn(ctx: TaskState, update_hook: Callable):
@@ -268,7 +269,9 @@ class T1Task(
     def init(
         self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar: bool = False
     ) -> None:
-        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
+        self.lengths = sweep2array(
+            ctx.cfg["sweep"]["length"], "time", {"soccfg": ctx.env["soccfg"]}
+        )
 
         self.task.init(ctx.child("populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
@@ -359,7 +362,9 @@ class T1WithToneTask(
     def init(
         self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar: bool = False
     ) -> None:
-        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
+        self.lengths = sweep2array(
+            ctx.cfg["sweep"]["length"], "time", {"soccfg": ctx.env["soccfg"]}
+        )
 
         self.task.init(ctx.child("populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
 

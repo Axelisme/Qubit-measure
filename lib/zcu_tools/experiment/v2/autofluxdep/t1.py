@@ -10,11 +10,7 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
-from zcu_tools.experiment.v2.utils import (
-    round_zcu_time,
-    sweep2array,
-    wrap_earlystop_check,
-)
+from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment, make_sweep
@@ -147,8 +143,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
         cfg_temp = check_type(cfg_temp, T1CfgTemplate)
 
         len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
-        self.lengths = sweep2array(len_sweep)
-        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
+        self.lengths = sweep2array(len_sweep, "time", {"soccfg": ctx.env["soccfg"]})
 
         cfg_temp = dict(cfg_temp)
         del cfg_temp["sweep_range"]
@@ -223,22 +218,22 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
         )
 
     def update_plotter(self, plotters, ctx: TaskState, signals: T1Result) -> None:
-        flx_values = ctx.env["flx_values"]
+        flux_values = ctx.env["flux_values"]
         info: FluxDepInfoDict = ctx.env["info"]
 
         real_signals = t1_fluxdep_signal2real(signals["raw_signals"])
 
-        plotters["t1"].update(flx_values, signals["t1"], refresh=False)
+        plotters["t1"].update(flux_values, signals["t1"], refresh=False)
         plotters["t1_curve"].update(
-            self.lengths, real_signals[info["flx_idx"]], refresh=False
+            self.lengths, real_signals[info["flux_idx"]], refresh=False
         )
 
-    def save(self, filepath, flx_values, result, comment, prefix_tag) -> None:
+    def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
 
-        np.savez_compressed(filepath, flx_values=flx_values, **result)
+        np.savez_compressed(filepath, flux_values=flux_values, **result)
 
-        x_info = {"name": "Flux value", "unit": "a.u.", "values": flx_values}
+        x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
 
         # signals
         save_data(
@@ -289,29 +284,29 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
     def load(cls, filepath: str, **kwargs) -> dict:
         data = np.load(filepath)
 
-        flx_values = data["flx_values"]
+        flux_values = data["flux_values"]
         success = data["success"]
 
-        signals_stored, flx_sig, len_idxs = load_data(
+        signals_stored, flux_sig, len_idxs = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs
         )
-        assert flx_sig is not None and len_idxs is not None
-        assert np.array_equal(flx_values, flx_sig)
-        assert signals_stored.shape == (len(len_idxs), len(flx_values))
+        assert flux_sig is not None and len_idxs is not None
+        assert np.array_equal(flux_values, flux_sig)
+        assert signals_stored.shape == (len(len_idxs), len(flux_values))
 
-        length_stored, flx_len, _ = load_data(
+        length_stored, flux_len, _ = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_length")), **kwargs
         )
-        assert flx_len is not None
-        assert length_stored.shape == (len(flx_len), len(len_idxs))
-        assert np.array_equal(flx_values, flx_len)
+        assert flux_len is not None
+        assert length_stored.shape == (len(flux_len), len(len_idxs))
+        assert np.array_equal(flux_values, flux_len)
 
-        t1_stored, flx_t1, _ = load_data(
+        t1_stored, flux_t1, _ = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_t1")), **kwargs
         )
-        assert flx_t1 is not None
-        assert t1_stored.shape == (len(flx_t1),)
-        assert np.array_equal(flx_values, flx_t1)
+        assert flux_t1 is not None
+        assert t1_stored.shape == (len(flux_t1),)
+        assert np.array_equal(flux_values, flux_t1)
 
         length = length_stored[0].astype(np.float64) * 1e6  # back to us
         raw_signals = signals_stored.T.astype(np.complex128)
@@ -325,6 +320,6 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
             "t1": t1,
             "t1_err": t1_err,
             "success": success,
-            "flx_values": flx_values,
+            "flux_values": flux_values,
             "lengths": length_stored[0],
         }

@@ -44,28 +44,28 @@ def ckp_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 def get_resonance_freq(
-    xs: NDArray[np.float64], fpts: NDArray[np.float64], amps: NDArray[np.float64]
+    xs: NDArray[np.float64], freqs: NDArray[np.float64], amps: NDArray[np.float64]
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     s_xs = []
-    s_fpts = []
+    s_freqs = []
 
     prev_freq = np.nan
     for x, amp in zip(xs, amps):
         if np.any(np.isnan(amp)):
             continue
 
-        param, _ = fitlor(fpts, amp)
+        param, _ = fitlor(freqs, amp)
         curr_freq = param[3]
 
-        if abs(curr_freq - prev_freq) > 0.1 * (fpts[-1] - fpts[0]):
+        if abs(curr_freq - prev_freq) > 0.1 * (freqs[-1] - freqs[0]):
             continue
 
         prev_freq = curr_freq
 
         s_xs.append(x)
-        s_fpts.append(curr_freq)
+        s_freqs.append(curr_freq)
 
-    return np.array(s_xs), np.array(s_fpts)
+    return np.array(s_xs), np.array(s_freqs)
 
 
 class CKP_ModuleCfg(TypedDict, closed=True):
@@ -86,7 +86,6 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         _cfg = check_type(deepcopy(cfg), CKP_Cfg)
         modules = _cfg["modules"]
 
-
         _cfg["sweep"] = {
             "ge": make_ge_sweep(),
             "res_freq": _cfg["sweep"]["res_freq"],
@@ -94,22 +93,23 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         }
 
         # uniform in square space
-        res_freqs = sweep2array(_cfg["sweep"]["res_freq"])
-        qub_freqs = sweep2array(_cfg["sweep"]["qub_freq"])
+        res_freqs = sweep2array(
+            _cfg["sweep"]["res_freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["res_pulse"]["ch"]},
+        )
+        qub_freqs = sweep2array(
+            _cfg["sweep"]["qub_freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+        )
 
-        Pulse.set_param(
-            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
-        )
-        Pulse.set_param(
-            modules["res_pulse"],
-            "freq",
-            sweep2param("res_freq", _cfg["sweep"]["res_freq"]),
-        )
-        Pulse.set_param(
-            modules["qub_pulse"],
-            "freq",
-            sweep2param("qub_freq", _cfg["sweep"]["qub_freq"]),
-        )
+        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+        res_freq_param = sweep2param("res_freq", _cfg["sweep"]["res_freq"])
+        qub_freq_param = sweep2param("qub_freq", _cfg["sweep"]["qub_freq"])
+        Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
+        Pulse.set_param(modules["res_pulse"], "freq", res_freq_param)
+        Pulse.set_param(modules["qub_pulse"], "freq", qub_freq_param)
 
         fig, axs = make_plot_frame(1, 2, figsize=(10, 4))
 

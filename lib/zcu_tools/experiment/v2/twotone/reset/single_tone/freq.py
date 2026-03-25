@@ -20,6 +20,8 @@ from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
     PulseCfg,
+    PulseReset,
+    PulseResetCfg,
     Readout,
     ReadoutCfg,
     Reset,
@@ -30,7 +32,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import rotate2real
 
-# (fpts, signals)
+# (freqs, signals)
 FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
@@ -41,7 +43,7 @@ def reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 class FreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
-    tested_reset: ResetCfg
+    tested_reset: PulseResetCfg
     readout: ReadoutCfg
 
 
@@ -54,13 +56,17 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), FreqCfg)
-
-        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
-
         modules = _cfg["modules"]
-        Reset.set_param(
-            modules["tested_reset"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
+
+        reset_cfg = modules["tested_reset"]
+        freqs = sweep2array(
+            _cfg["sweep"]["freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse_cfg"]["ch"]},
         )
+
+        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+        PulseReset.set_param(reset_cfg, "freq", freq_param)
 
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
@@ -74,25 +80,25 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),
-                                    Reset("tested_reset", modules["tested_reset"]),
+                                    PulseReset("tested_reset", modules["tested_reset"]),
                                     Readout("readout", modules["readout"]),
                                 ],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),
-                    result_shape=(len(fpts),),
+                    result_shape=(len(freqs),),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    fpts, reset_signal2real(ctx.root_data)
+                    freqs, reset_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
         self.last_cfg = _cfg
-        self.last_result = (fpts, signals)
+        self.last_result = (freqs, signals)
 
-        return fpts, signals
+        return freqs, signals
 
     def analyze(
         self, result: Optional[FreqResult] = None
@@ -101,23 +107,23 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts, signals = result
+        freqs, signals = result
 
         # Discard NaNs (possible early abort)
         val_mask = ~np.isnan(signals)
-        fpts = fpts[val_mask]
+        freqs = freqs[val_mask]
         signals = signals[val_mask]
 
         real_signals = reset_signal2real(signals)
 
         freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(
-            fpts, real_signals, type="lor"
+            freqs, real_signals, type="lor"
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
-        ax.plot(fpts, real_signals, label="signal", marker="o", markersize=3)
-        ax.plot(fpts, y_fit, label=f"fit, κ = {kappa:.1g} MHz")
+        ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
+        ax.plot(freqs, y_fit, label=f"fit, κ = {kappa:.1g} MHz")
         label = f"f_reset = {freq:.5g} ± {freq_err:.1g} MHz"
         ax.axvline(freq, color="r", ls="--", label=label)
         ax.set_xlabel("Frequency (MHz)")
@@ -142,11 +148,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts, signals = result
+        freqs, signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,
@@ -154,17 +160,17 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FreqResult:
-        signals, fpts, _ = load_data(filepath, **kwargs)
-        assert fpts is not None
-        assert len(fpts.shape) == 1 and len(signals.shape) == 1
-        assert fpts.shape == signals.shape
+        signals, freqs, _ = load_data(filepath, **kwargs)
+        assert freqs is not None
+        assert len(freqs.shape) == 1 and len(signals.shape) == 1
+        assert freqs.shape == signals.shape
 
-        fpts = fpts * 1e-6  # Hz -> MHz
+        freqs = freqs * 1e-6  # Hz -> MHz
 
-        fpts = fpts.astype(np.float64)
+        freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (fpts, signals)
+        self.last_result = (freqs, signals)
 
-        return fpts, signals
+        return freqs, signals

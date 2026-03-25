@@ -1,6 +1,6 @@
 from .base import (
     add_Q_fit,
-    calculate_eff_t1_vs_flx_with,
+    calculate_eff_t1_vs_flux_with,
     find_proper_Temp,
     plot_eff_t1_with_sample,
     plot_Q_vs_omega,

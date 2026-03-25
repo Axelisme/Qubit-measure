@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Mapping, Optional, TypeAlias
+from typing_extensions import Any, Mapping, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
@@ -16,37 +16,52 @@ from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
-from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param
+from zcu_tools.program.v2 import (
+    ModularProgramCfg,
+    ModularProgramV2,
+    PulseReadout,
+    PulseReadoutCfg,
+    Reset,
+    ResetCfg,
+    sweep2param,
+)
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPACheckResult: TypeAlias = tuple[
+CheckResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
 
-def jpa_check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
+class CheckModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
+    readout: PulseReadoutCfg
 
-class JPACheckCfg(OneToneCfg, TaskCfg):
+class CheckCfg(ModularProgramCfg, TaskCfg):
+    modules: CheckModuleCfg
     dev: Mapping[str, DeviceInfo]
     sweep: dict[str, SweepCfg]
 
 
-class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
+class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
     OUTPUT_MAP = {0: "off", 1: "on"}
 
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> JPACheckResult:
-        _cfg = check_type(deepcopy(cfg), JPACheckCfg)
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> CheckResult:
+        _cfg = check_type(deepcopy(cfg), CheckCfg)
+        modules = _cfg["modules"]
 
         _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "freq")
 
-        fpts = sweep2array(_cfg["sweep"]["freq"])  # predicted frequency points
-
-        modules = _cfg["modules"]
-        Readout.set_param(
-            modules["readout"], "freq", sweep2param("freq", _cfg["sweep"]["freq"])
+        freqs = sweep2array(
+            _cfg["sweep"]["freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["readout"]["pulse_cfg"]["ch"]},
         )
+
+        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+        PulseReadout.set_param(modules["readout"], "freq", freq_param)
 
         outputs = np.array([0, 1])
 
@@ -55,10 +70,20 @@ class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
         ) as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=lambda ctx, update_hook: OneToneProgram(
-                        soccfg, ctx.cfg
-                    ).acquire(soc, progress=False, callback=update_hook),
-                    result_shape=(len(fpts),),
+                    measure_fn=lambda ctx, update_hook: (
+                        (modules := ctx.cfg["modules"])
+                        and (
+                            ModularProgramV2(
+                                soccfg,
+                                ctx.cfg,
+                                modules=[
+                                    Reset("reset", modules.get("reset")),
+                                    PulseReadout("readout", modules["readout"]),
+                                ],
+                            ).acquire(soc, progress=False, callback=update_hook)
+                        )
+                    ),
+                    result_shape=(len(freqs),),
                 ).scan(
                     "JPA on/off",
                     outputs.tolist(),
@@ -70,30 +95,30 @@ class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    fpts, jpa_check_signal2real(np.asarray(ctx.root_data))
+                    freqs, check_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = _cfg
-        self.last_result = (outputs, fpts, signals)
+        self.last_result = (outputs, freqs, signals)
 
-        return outputs, fpts, signals
+        return outputs, freqs, signals
 
-    def analyze(self, result: Optional[JPACheckResult] = None) -> Figure:
+    def analyze(self, result: Optional[CheckResult] = None) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        outputs, fpts, signals2D = result
+        outputs, freqs, signals2D = result
 
-        real_signals = jpa_check_signal2real(signals2D)
+        real_signals = check_signal2real(signals2D)
 
         fig, ax = plt.subplots(figsize=config.figsize)
         for i, output in enumerate(outputs):
             ax.plot(
-                fpts,
+                freqs,
                 real_signals[i, :],
                 label=f"JPA {self.OUTPUT_MAP[output]}",
                 marker="o",
@@ -111,7 +136,7 @@ class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[JPACheckResult] = None,
+        result: Optional[CheckResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/check",
         **kwargs,
@@ -120,11 +145,11 @@ class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        outputs, fpts, signals2D = result
+        outputs, freqs, signals2D = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Frequency", "unit": "Hz", "values": fpts * 1e6},
+            x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
             y_info={"name": "JPA Output", "unit": "a.u.", "values": outputs},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2D},
             comment=comment,
@@ -132,19 +157,19 @@ class JPACheckExp(AbsExperiment[JPACheckResult, JPACheckCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPACheckResult:
-        signals2D, fpts, outputs = load_data(filepath, **kwargs)
-        assert fpts is not None and outputs is not None
-        assert len(fpts.shape) == 1 and len(outputs.shape) == 1
-        assert signals2D.shape == (len(outputs), len(fpts))
+    def load(self, filepath: str, **kwargs) -> CheckResult:
+        signals2D, freqs, outputs = load_data(filepath, **kwargs)
+        assert freqs is not None and outputs is not None
+        assert len(freqs.shape) == 1 and len(outputs.shape) == 1
+        assert signals2D.shape == (len(outputs), len(freqs))
 
-        fpts = fpts * 1e-6  # Hz -> MHz
+        freqs = freqs * 1e-6  # Hz -> MHz
 
         outputs = outputs.astype(np.float64)
-        fpts = fpts.astype(np.float64)
+        freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (outputs, fpts, signals2D)
+        self.last_result = (outputs, freqs, signals2D)
 
-        return outputs, fpts, signals2D
+        return outputs, freqs, signals2D

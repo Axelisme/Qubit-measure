@@ -13,12 +13,12 @@ def calc_overlay(
     photons: NDArray[np.float64],
     r_f: float,
     g: float,
-    flx: float,
+    flux: float,
     qub_dim=30,
     qub_cutoff=40,
 ) -> NDArray[np.float64]:
     f_analysis = FloquetBranchAnalysis(
-        params, r_f, g, flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
+        params, r_f, g, flux, qub_dim=qub_dim, qub_cutoff=qub_cutoff
     )
 
     def calc_max_overlay(states, target_state):
@@ -40,7 +40,7 @@ def plot_overlay(
     fig: go.Figure,
     name: str,
     overlay: NDArray[np.float64],
-    sim_flxs: NDArray[np.float64],
+    sim_fluxs: NDArray[np.float64],
     sim_photons: NDArray[np.float64],
     threshold: float,
     row: int = 1,
@@ -57,14 +57,14 @@ def plot_overlay(
 
     fig.add_trace(
         go.Heatmap(
-            z=overlay.T, x=sim_flxs, y=sim_photons, colorscale="Greys", showscale=False
+            z=overlay.T, x=sim_fluxs, y=sim_photons, colorscale="Greys", showscale=False
         ),
         row=row,
         col=col,
     )
     fig.add_trace(
         go.Scatter(
-            x=sim_flxs,
+            x=sim_fluxs,
             y=crit_ns,
             mode="lines",
             line=line_kwargs,

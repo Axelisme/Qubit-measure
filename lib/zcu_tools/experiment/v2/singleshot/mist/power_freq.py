@@ -64,10 +64,20 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         gain_sweep = _cfg["sweep"]["gain"]
         _cfg["sweep"] = {"freq": freq_sweep}
 
-        Pulse.set_param(modules["probe_pulse"], "freq", sweep2param("freq", freq_sweep))
+        gains = sweep2array(
+            gain_sweep,
+            "gain",
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+            allow_array=True,
+        )
+        freqs = sweep2array(
+            freq_sweep,
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+        )
 
-        gains = sweep2array(gain_sweep, allow_array=True)
-        freqs = sweep2array(freq_sweep)
+        freq_param = sweep2param("freq", freq_sweep)
+        Pulse.set_param(modules["probe_pulse"], "freq", freq_param)
 
         fig, axs = make_plot_frame(3, 1, figsize=(12, 6))
 
@@ -218,7 +228,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         filepath: str,
         result: Optional[FreqPowerResult] = None,
         comment: Optional[str] = None,
-        tag: str = "singleshot/mist/pdr_freq",
+        tag: str = "singleshot/mist/gain_freq",
         **kwargs,
     ) -> None:
         if result is None:

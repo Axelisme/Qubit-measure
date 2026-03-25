@@ -17,7 +17,7 @@ def make_hilbertspace(
     qub_cutoff: int,
     res_dim: int,
     g: float,
-    flx: float = 0.5,
+    flux: float = 0.5,
 ) -> "HilbertSpace":
     # lazy import
     from scqubits.core.fluxonium import Fluxonium
@@ -25,7 +25,7 @@ def make_hilbertspace(
     from scqubits.core.oscillator import Oscillator
 
     resonator = Oscillator(r_f, truncated_dim=res_dim)
-    fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
+    fluxonium = Fluxonium(*params, flux=flux, cutoff=qub_cutoff, truncated_dim=qub_dim)
     hilbertspace = HilbertSpace([fluxonium, resonator])
     hilbertspace.add_interaction(
         g=g, op1=fluxonium.n_operator, op2=resonator.creation_operator, add_hc=True
@@ -93,7 +93,7 @@ def calc_branch_population(
 
 
 def calc_branch_population_over_flux(
-    flxs: NDArray[np.float64],
+    fluxs: NDArray[np.float64],
     params: tuple[float, float, float],
     r_f: float,
     qub_dim: int,
@@ -112,19 +112,19 @@ def calc_branch_population_over_flux(
     hilbertspace = make_hilbertspace(params, r_f, qub_dim, qub_cutoff, res_dim, g)
     fluxonium, resonator = hilbertspace.subsystem_list
 
-    def update_hilbertspace(flx: float) -> None:
-        fluxonium.flux = flx  # type: ignore
+    def update_hilbertspace(flux: float) -> None:
+        fluxonium.flux = flux  # type: ignore
 
     bra_array = make_bra_array(hilbertspace, qub_dim, res_dim)
 
     # batching to reduce memory usage
     populations_list = []
-    for i in trange(0, len(flxs), batch_size, desc="Batch"):
-        batched_flxs = flxs[i : i + batch_size]
+    for i in trange(0, len(fluxs), batch_size, desc="Batch"):
+        batched_fluxs = fluxs[i : i + batch_size]
 
         sweep = ParameterSweep(
             hilbertspace=hilbertspace,
-            paramvals_by_name={"flux": batched_flxs},
+            paramvals_by_name={"flux": batched_fluxs},
             update_hilbertspace=update_hilbertspace,
             evals_count=qub_dim * res_dim,
             subsys_update_info={"flux": [fluxonium]},

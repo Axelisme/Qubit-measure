@@ -24,6 +24,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    TwoPulseReset,
     sweep2param,
 )
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
@@ -35,7 +36,7 @@ def dual_reset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
     return np.abs(minus_background(signals))
 
 
-# (fpts1, fpts2, signals_2d)
+# (freqs1, freqs2, signals_2d)
 FreqResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
@@ -56,25 +57,30 @@ class FreqCfg(ModularProgramCfg, TaskCfg):
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def run_soft(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
-
-        # Check that reset pulse is dual pulse type
         modules = _cfg["modules"]
 
-        fpt1_sweep = _cfg["sweep"]["freq1"]
-        fpt2_sweep = _cfg["sweep"]["freq2"]
-        _cfg["sweep"] = {"freq1": fpt1_sweep}
+        freq1_sweep = _cfg["sweep"]["freq1"]
+        freq2_sweep = _cfg["sweep"]["freq2"]
+        _cfg["sweep"] = {"freq1": freq1_sweep}  # remove freq2 from sweep
 
-        fpts1 = sweep2array(fpt1_sweep)  # predicted frequency points
-        fpts2 = sweep2array(fpt2_sweep)  # predicted frequency points
-
-        Reset.set_param(
-            modules["tested_reset"], "freq1", sweep2param("freq1", fpt1_sweep)
+        reset_cfg = modules["tested_reset"]
+        freqs1 = sweep2array(
+            freq1_sweep,
+            "freq",
+            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse1_cfg"]["ch"]},
+        )
+        freqs2 = sweep2array(
+            freq2_sweep,
+            "freq",
+            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse2_cfg"]["ch"]},
+            allow_array=True,
         )
 
+        freq1_param = sweep2param("freq1", freq1_sweep)
+        TwoPulseReset.set_param(modules["tested_reset"], "freq1", freq1_param)
+
         with LivePlotter2DwithLine(
-            "Frequency1 (MHz)",
-            "Frequency2 (MHz)",
-            line_axis=0,
+            "Frequency1 (MHz)", "Frequency2 (MHz)", line_axis=0
         ) as viewer:
             signals = run_task(
                 task=Task(
@@ -87,38 +93,39 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),
-                                    Reset("tested_reset", modules["tested_reset"]),
+                                    TwoPulseReset(
+                                        "tested_reset", modules["tested_reset"]
+                                    ),
                                     Readout("readout", modules["readout"]),
                                 ],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),
-                    result_shape=(len(fpts1),),
+                    result_shape=(len(freqs1),),
                 ).scan(
                     "freq2",
-                    fpts2.tolist(),
-                    before_each=lambda _, ctx, fpt2: Reset.set_param(
-                        ctx.cfg["modules"]["tested_reset"], "freq2", fpt2
+                    freqs2.tolist(),
+                    before_each=lambda _, ctx, freq2: Reset.set_param(
+                        ctx.cfg["modules"]["tested_reset"], "freq2", freq2
                     ),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    fpts1, fpts2, dual_reset_signal2real(np.asarray(ctx.root_data).T)
+                    freqs1, freqs2, dual_reset_signal2real(np.asarray(ctx.root_data).T)
                 ),
             )
             signals = np.asarray(signals).T
 
         # Cache results
         self.last_cfg = _cfg
-        self.last_result = (fpts1, fpts2, signals)
+        self.last_result = (freqs1, freqs2, signals)
 
-        return fpts1, fpts2, signals
+        return freqs1, freqs2, signals
 
     def run_hard(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
-
-        # Check that reset pulse is dual pulse type
         modules = _cfg["modules"]
+
 
         # Ensure freq1 is the outer loop for better visualization
         _cfg["sweep"] = {
@@ -126,19 +133,22 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             "freq2": _cfg["sweep"]["freq2"],
         }
 
-        fpts1 = sweep2array(_cfg["sweep"]["freq1"])
-        fpts2 = sweep2array(_cfg["sweep"]["freq2"])
+        reset_cfg = modules["tested_reset"]
+        freqs1 = sweep2array(
+            _cfg["sweep"]["freq1"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse1_cfg"]["ch"]},
+        )
+        freqs2 = sweep2array(
+            _cfg["sweep"]["freq2"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse2_cfg"]["ch"]},
+        )
 
-        Reset.set_param(
-            modules["tested_reset"],
-            "freq1",
-            sweep2param("freq1", _cfg["sweep"]["freq1"]),
-        )
-        Reset.set_param(
-            modules["tested_reset"],
-            "freq2",
-            sweep2param("freq2", _cfg["sweep"]["freq2"]),
-        )
+        freq1_param = sweep2param("freq1", _cfg["sweep"]["freq1"])
+        freq2_param = sweep2param("freq2", _cfg["sweep"]["freq2"])
+        TwoPulseReset.set_param(modules["tested_reset"], "freq1", freq1_param)
+        TwoPulseReset.set_param(modules["tested_reset"], "freq2", freq2_param)
 
         with LivePlotter2D("Frequency1 (MHz)", "Frequency2 (MHz)") as viewer:
             signals = run_task(
@@ -152,26 +162,28 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),
-                                    Reset("tested_reset", modules["tested_reset"]),
+                                    TwoPulseReset(
+                                        "tested_reset", modules["tested_reset"]
+                                    ),
                                     Readout("readout", modules["readout"]),
                                 ],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),
-                    result_shape=(len(fpts1), len(fpts2)),
+                    result_shape=(len(freqs1), len(freqs2)),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    fpts1, fpts2, dual_reset_signal2real(ctx.root_data)
+                    freqs1, freqs2, dual_reset_signal2real(ctx.root_data)
                 ),
             )
             signals = np.asarray(signals)
 
         # Cache results
         self.last_cfg = _cfg
-        self.last_result = (fpts1, fpts2, signals)
+        self.last_result = (freqs1, freqs2, signals)
 
-        return fpts1, fpts2, signals
+        return freqs1, freqs2, signals
 
     def run(
         self,
@@ -199,7 +211,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts1, fpts2, signals = result
+        freqs1, freqs2, signals = result
 
         # Apply smoothing for peak finding
         signals_smooth = gaussian_filter(signals, smooth)
@@ -210,8 +222,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         else:
             amps = np.abs(minus_background(signals_smooth))
 
-        freq1_opt = fpts1[np.argmax(np.max(amps, axis=1))]
-        freq2_opt = fpts2[np.argmax(np.max(amps, axis=0))]
+        freq1_opt = freqs1[np.argmax(np.max(amps, axis=1))]
+        freq2_opt = freqs2[np.argmax(np.max(amps, axis=0))]
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
@@ -221,7 +233,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             aspect="auto",
             origin="lower",
             interpolation="none",
-            extent=(fpts1[0], fpts1[-1], fpts2[0], fpts2[-1]),
+            extent=(freqs1[0], freqs1[-1], freqs2[0], freqs2[-1]),
         )
         peak_label = f"({freq1_opt:.1f}, {freq2_opt:.1f}) MHz"
         ax.scatter(freq1_opt, freq2_opt, color="r", s=40, marker="*", label=peak_label)
@@ -248,12 +260,12 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts1, fpts2, signals = result
+        freqs1, freqs2, signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Frequency1", "unit": "Hz", "values": fpts1 * 1e6},
-            y_info={"name": "Frequency2", "unit": "Hz", "values": fpts2 * 1e6},
+            x_info={"name": "Frequency1", "unit": "Hz", "values": freqs1 * 1e6},
+            y_info={"name": "Frequency2", "unit": "Hz", "values": freqs2 * 1e6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,
@@ -261,20 +273,20 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FreqResult:
-        signals, fpts1, fpts2 = load_data(filepath, **kwargs)
-        assert fpts1 is not None and fpts2 is not None
-        assert len(fpts1.shape) == 1 and len(fpts2.shape) == 1
-        assert signals.shape == (len(fpts2), len(fpts1))
+        signals, freqs1, freqs2 = load_data(filepath, **kwargs)
+        assert freqs1 is not None and freqs2 is not None
+        assert len(freqs1.shape) == 1 and len(freqs2.shape) == 1
+        assert signals.shape == (len(freqs2), len(freqs1))
 
-        fpts1 = fpts1 * 1e-6  # Hz -> MHz
-        fpts2 = fpts2 * 1e-6  # Hz -> MHz
+        freqs1 = freqs1 * 1e-6  # Hz -> MHz
+        freqs2 = freqs2 * 1e-6  # Hz -> MHz
         signals = signals.T  # transpose back
 
-        fpts1 = fpts1.astype(np.float64)
-        fpts2 = fpts2.astype(np.float64)
+        freqs1 = freqs1.astype(np.float64)
+        freqs2 = freqs2.astype(np.float64)
         signals = signals.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (fpts1, fpts2, signals)
+        self.last_result = (freqs1, freqs2, signals)
 
-        return fpts1, fpts2, signals
+        return freqs1, freqs2, signals

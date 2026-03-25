@@ -15,7 +15,7 @@ from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
-from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_qubit_freq
 from zcu_tools.utils.process import minus_background, rotate2real
@@ -35,13 +35,18 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), FreqCfg)
+        modules = _cfg["modules"]
 
         # predicted sweep points before FPGA coercion
-        fpts = sweep2array(_cfg["sweep"]["freq"])  # MHz
+        freqs = sweep2array(
+            _cfg["sweep"]["freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+        )
 
         # bind sweep parameter as *QickParam* so it is executed by FPGA
-        modules = _cfg["modules"]
-        modules["qub_pulse"]["freq"] = sweep2param("freq", _cfg["sweep"]["freq"])
+        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+        Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
 
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
@@ -49,19 +54,19 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
                         soccfg, ctx.cfg
                     ).acquire(soc, progress=False, callback=update_hook),
-                    result_shape=(len(fpts),),
+                    result_shape=(len(freqs),),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    fpts, qubfreq_signal2real(ctx.root_data)
+                    freqs, qubfreq_signal2real(ctx.root_data)
                 ),
             )
 
         # cache
         self.last_cfg = _cfg
-        self.last_result = (fpts, signals)
+        self.last_result = (freqs, signals)
 
-        return fpts, signals
+        return freqs, signals
 
     def analyze(
         self,
@@ -74,23 +79,23 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts, signals = result
+        freqs, signals = result
 
         # discard NaNs (possible early abort)
         val_mask = ~np.isnan(signals)
-        fpts = fpts[val_mask]
+        freqs = freqs[val_mask]
         signals = signals[val_mask]
 
         y = rotate2real(signals).real
 
-        freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(fpts, y, model_type)
+        freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(freqs, y, model_type)
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.plot(fpts, y, label="signal", marker="o", markersize=3)
+        ax.plot(freqs, y, label="signal", marker="o", markersize=3)
         if plot_fit:
-            ax.plot(fpts, y_fit, label=f"fit, kappa={kappa:.1g} MHz")
+            ax.plot(freqs, y_fit, label=f"fit, kappa={kappa:.1g} MHz")
             label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"
             ax.axvline(freq, color="r", ls="--", label=label)
         ax.set_xlabel("Frequency (MHz)")
@@ -114,11 +119,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        fpts, signals = result
+        freqs, signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Frequency", "unit": "MHz", "values": fpts},
+            x_info={"name": "Frequency", "unit": "MHz", "values": freqs},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,
@@ -126,15 +131,15 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FreqResult:
-        signals, fpts, _ = load_data(filepath, **kwargs)
-        assert fpts is not None
-        assert len(fpts.shape) == 1 and len(signals.shape) == 1
-        assert fpts.shape == signals.shape
+        signals, freqs, _ = load_data(filepath, **kwargs)
+        assert freqs is not None
+        assert len(freqs.shape) == 1 and len(signals.shape) == 1
+        assert freqs.shape == signals.shape
 
-        fpts = fpts.astype(np.float64)
+        freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (fpts, signals)
+        self.last_result = (freqs, signals)
 
-        return fpts, signals
+        return freqs, signals

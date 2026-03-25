@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 
-
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,8 +26,8 @@ class InteractiveLines:
         signals: NDArray,
         dev_values: NDArray[np.float64],
         freqs: NDArray[np.float64],
-        flx_half: Optional[float] = None,
-        flx_int: Optional[float] = None,
+        flux_half: Optional[float] = None,
+        flux_int: Optional[float] = None,
     ) -> None:
         plt.ioff()  # 避免立即顯示圖表
         self.fig_main, self.ax_main = plt.subplots(figsize=(4, 3))
@@ -38,23 +37,23 @@ class InteractiveLines:
         plt.ion()
 
         # 初始化線的位置
-        flx_center = (dev_values[0] + dev_values[-1]) / 2
-        self.flx_half = flx_center if flx_half is None else flx_half
-        self.flx_int = dev_values[-5] if flx_int is None else flx_int
-        if flx_half is not None and flx_int is not None:
-            fix_period = 2 * abs(self.flx_int - self.flx_half)
+        flux_center = (dev_values[0] + dev_values[-1]) / 2
+        self.flux_half = flux_center if flux_half is None else flux_half
+        self.flux_int = dev_values[-5] if flux_int is None else flux_int
+        if flux_half is not None and flux_int is not None:
+            fix_period = 2 * abs(self.flux_int - self.flux_half)
 
-            # fold the flx_half and flx_int to the closest point to the spect_center
-            self.flx_half = (
-                self.flx_half
-                - round((self.flx_half - flx_center) / fix_period, 0) * fix_period
+            # fold the flux_half and flux_int to the closest point to the spect_center
+            self.flux_half = (
+                self.flux_half
+                - round((self.flux_half - flux_center) / fix_period, 0) * fix_period
             )
-            self.flx_int = (
-                self.flx_int
-                - round((self.flx_int - flx_center) / fix_period, 0) * fix_period
+            self.flux_int = (
+                self.flux_int
+                - round((self.flux_int - flux_center) / fix_period, 0) * fix_period
             )
-        self.flx_half = float(self.flx_half)
-        self.flx_int = float(self.flx_int)
+        self.flux_half = float(self.flux_half)
+        self.flux_int = float(self.flux_int)
 
         self.dev_values = dev_values
         self.freqs = freqs
@@ -87,8 +86,8 @@ class InteractiveLines:
                 [
                     widgets.HBox(
                         [
-                            self.flx_half_button,
-                            self.flx_int_button,
+                            self.flux_half_button,
+                            self.flux_int_button,
                             self.auto_align_button,
                             self.swap_button,
                             self.finish_button,
@@ -109,12 +108,12 @@ class InteractiveLines:
 
     def create_widgets(self) -> None:
         """創建 ipywidgets 控件"""
-        self.flx_half_button = widgets.Button(
+        self.flux_half_button = widgets.Button(
             description="選擇half flux(紅線)",
             button_style="danger",
             tooltip="選擇紅色線進行移動",
         )
-        self.flx_int_button = widgets.Button(
+        self.flux_int_button = widgets.Button(
             description="選擇integer flux(藍線)",
             button_style="info",
             tooltip="選擇藍色線進行移動",
@@ -146,8 +145,8 @@ class InteractiveLines:
         self.status_text = widgets.HTML(value="<span style='color:gray'>未選擇</span>")
 
         # 綁定事件
-        self.flx_half_button.on_click(self.set_picked_half_flux)
-        self.flx_int_button.on_click(self.set_picked_int_flux)
+        self.flux_half_button.on_click(self.set_picked_half_flux)
+        self.flux_int_button.on_click(self.set_picked_int_flux)
         self.finish_button.on_click(self.on_finish)
         self.swap_button.on_click(self.swap_lines)
         self.auto_align_button.on_click(self.auto_align_lines)
@@ -182,13 +181,13 @@ class InteractiveLines:
         """創建兩條垂直線"""
         # 創建兩條垂直線
         self.half_line = self.ax_main.axvline(
-            x=self.flx_half, color="r", linestyle="--"
+            x=self.flux_half, color="r", linestyle="--"
         )
-        self.int_line = self.ax_main.axvline(x=self.flx_int, color="b", linestyle="--")
+        self.int_line = self.ax_main.axvline(x=self.flux_int, color="b", linestyle="--")
 
         # 設置變數
         self.picked = None
-        self.min_flx_dist = 0.01 * abs(dev_values[-1] - dev_values[0])
+        self.min_flux_dist = 0.01 * abs(dev_values[-1] - dev_values[0])
         self.is_finished = False
         self.active_line = None  # 用來跟踪目前正在移動的線
 
@@ -227,7 +226,7 @@ class InteractiveLines:
         self.ax_loss.set_yticks([])
 
         # show red spot at center
-        x = self.flx_half
+        x = self.flux_half
         y = 0.5 * (freqs[0] + freqs[-1])
         self.loss_dot = self.ax_loss.plot([x], [y], "ro")[0]
 
@@ -240,7 +239,7 @@ class InteractiveLines:
         )
 
     def get_info(self) -> str:
-        return f"half flux: {self.flx_half:.2e}, integer flux: {self.flx_int:.2e}, flux period: {2 * abs(self.flx_int - self.flx_half):.2e}"
+        return f"half flux: {self.flux_half:.2e}, integer flux: {self.flux_int:.2e}, flux period: {2 * abs(self.flux_int - self.flux_half):.2e}"
 
     def set_picked_half_flux(self, _) -> None:
         """選擇half flux(紅線)"""
@@ -285,11 +284,11 @@ class InteractiveLines:
         self.stop_tracking()
 
         # 交換線條的位置
-        self.flx_half, self.flx_int = self.flx_int, self.flx_half
+        self.flux_half, self.flux_int = self.flux_int, self.flux_half
 
         # 更新線條的視覺位置
-        self.half_line.set_xdata([self.flx_half])
-        self.int_line.set_xdata([self.flx_int])
+        self.half_line.set_xdata([self.flux_half])
+        self.int_line.set_xdata([self.flux_int])
 
         # 更新位置文字
         self.position_text.value = self.get_info()
@@ -310,16 +309,16 @@ class InteractiveLines:
         search_width = total_width / 20
 
         # 為紅線和藍線分別找到最佳位置
-        best_flx_half = self._find_best_position(self.flx_half, search_width)
-        best_flx_int = self._find_best_position(self.flx_int, search_width)
+        best_flux_half = self._find_best_position(self.flux_half, search_width)
+        best_flux_int = self._find_best_position(self.flux_int, search_width)
 
         # 更新線條位置
-        self.flx_half = best_flx_half
-        self.flx_int = best_flx_int
+        self.flux_half = best_flux_half
+        self.flux_int = best_flux_int
 
         # 更新線條的視覺位置
-        self.half_line.set_xdata([self.flx_half])
-        self.int_line.set_xdata([self.flx_int])
+        self.half_line.set_xdata([self.flux_half])
+        self.int_line.set_xdata([self.flux_int])
 
         # 更新位置文字
         self.position_text.value = self.get_info()
@@ -405,8 +404,8 @@ class InteractiveLines:
         if self.is_finished or event.inaxes != self.ax_main:
             return
 
-        flx_half_dist = abs(event.xdata - self.half_line.get_xdata()[0])
-        flx_int_dist = abs(event.xdata - self.int_line.get_xdata()[0])
+        flux_half_dist = abs(event.xdata - self.half_line.get_xdata()[0])
+        flux_int_dist = abs(event.xdata - self.int_line.get_xdata()[0])
 
         # 如果已經有活動的線條, 點擊任何位置都停止追蹤
         if self.active_line is not None:
@@ -414,9 +413,9 @@ class InteractiveLines:
             return
 
         # 選擇最近的線
-        if flx_half_dist < flx_int_dist and flx_half_dist < 3 * self.min_flx_dist:
+        if flux_half_dist < flux_int_dist and flux_half_dist < 3 * self.min_flux_dist:
             self.set_picked_half_flux(None)
-        elif flx_int_dist <= flx_half_dist and flx_int_dist < 3 * self.min_flx_dist:
+        elif flux_int_dist <= flux_half_dist and flux_int_dist < 3 * self.min_flux_dist:
             self.set_picked_int_flux(None)
 
     def onmove(self, event) -> None:
@@ -445,10 +444,10 @@ class InteractiveLines:
         other_x = other_line.get_xdata()[0]
 
         # 確保線之間保持最小距離
-        if x > other_x and x - other_x < self.min_flx_dist:
-            x = other_x + self.min_flx_dist
-        elif x < other_x and other_x - x < self.min_flx_dist:
-            x = other_x - self.min_flx_dist
+        if x > other_x and x - other_x < self.min_flux_dist:
+            x = other_x + self.min_flux_dist
+        elif x < other_x and other_x - x < self.min_flux_dist:
+            x = other_x - self.min_flux_dist
 
         # 更新線的位置
         if self.conjugate_checkbox.value:
@@ -462,8 +461,8 @@ class InteractiveLines:
             self.picked.set_xdata([x])
 
         # 更新位置文字
-        self.flx_half = self.half_line.get_xdata()[0]
-        self.flx_int = self.int_line.get_xdata()[0]
+        self.flux_half = self.half_line.get_xdata()[0]
+        self.flux_int = self.int_line.get_xdata()[0]
         self.position_text.value = self.get_info()
 
         return [self.half_line, self.int_line]
@@ -520,7 +519,7 @@ class InteractiveLines:
         """運行交互式選擇器並返回兩條線的位置"""
         if not self.is_finished and finish:
             self.finish_interactive()
-        return float(self.flx_half), float(self.flx_int)
+        return float(self.flux_half), float(self.flux_int)
 
     def on_toggle_magnitude(self, change) -> None:
         """切換是否僅使用振幅資料的顯示模式"""

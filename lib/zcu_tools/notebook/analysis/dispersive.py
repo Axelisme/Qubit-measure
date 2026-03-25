@@ -6,13 +6,13 @@ import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import plotly.graph_objects as go
-from IPython.display import display, clear_output
+from IPython.display import clear_output, display
 from numpy.typing import NDArray
 from scipy.optimize import minimize
 from tqdm.auto import tqdm
 from typing_extensions import Callable, Optional
 
-from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flx
+from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flux
 
 
 def search_proper_g(
@@ -111,7 +111,7 @@ def search_proper_g(
         step: int = default_step,
     ) -> tuple[np.ndarray, ...]:
         # Calculate the dispersive shift using provided parameters
-        return calculate_dispersive_vs_flx(
+        return calculate_dispersive_vs_flux(
             params,
             sp_fluxs[::step],
             r_f,
@@ -122,7 +122,7 @@ def search_proper_g(
             qub_dim=qub_dim,
         )
 
-    flx_step = step_input.value
+    flux_step = step_input.value
     rf_0, rf_1 = get_dispersive(g_init, bare_rf)
 
     # Create figure and axes
@@ -139,8 +139,8 @@ def search_proper_g(
         cmap="viridis",
     )
 
-    (line_g,) = ax.plot(sp_fluxs[::flx_step], 1e3 * rf_0, "b-", label="Ground state")
-    (line_e,) = ax.plot(sp_fluxs[::flx_step], 1e3 * rf_1, "r-", label="Excited state")
+    (line_g,) = ax.plot(sp_fluxs[::flux_step], 1e3 * rf_0, "b-", label="Ground state")
+    (line_e,) = ax.plot(sp_fluxs[::flux_step], 1e3 * rf_1, "r-", label="Excited state")
     line_bare = ax.axhline(
         y=1e3 * bare_rf, color="k", linestyle="--", label="Bare resonator"
     )
@@ -156,19 +156,19 @@ def search_proper_g(
         cur_g = 1e-3 * g_MHz_slider.value
         cur_rf = 1e-3 * rf_MHz_slider.value
 
-        flx_step = step_input.value
+        flux_step = step_input.value
         rf_0, rf_1 = get_dispersive(
             cur_g,
             cur_rf,
             qub_dim_input.value,
             qub_cutoff_input.value,
             res_dim_input.value,
-            flx_step,
+            flux_step,
         )
 
         # Update the lines
-        line_g.set_data(sp_fluxs[::flx_step], 1e3 * rf_0)
-        line_e.set_data(sp_fluxs[::flx_step], 1e3 * rf_1)
+        line_g.set_data(sp_fluxs[::flux_step], 1e3 * rf_0)
+        line_e.set_data(sp_fluxs[::flux_step], 1e3 * rf_1)
         line_bare.set_ydata([1e3 * cur_rf])
 
         # Update the title with current values
@@ -243,7 +243,7 @@ def auto_fit_dispersive(
         update_pbar(g, bare_rf)
 
         # only use 4 states to calculate the ground state dispersive shift for speed
-        rf_0, rf_1 = calculate_dispersive_vs_flx(
+        rf_0, rf_1 = calculate_dispersive_vs_flux(
             params, sp_fluxs, bare_rf, g, progress=False, res_dim=4
         )
 

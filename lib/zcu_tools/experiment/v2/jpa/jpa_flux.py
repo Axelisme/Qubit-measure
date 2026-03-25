@@ -30,33 +30,31 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAFluxResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+FluxResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class JPAFluxModuleCfg(TypedDict, closed=True):
+class FluxModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class JPAFluxCfg(ModularProgramCfg, TaskCfg):
-    modules: JPAFluxModuleCfg
+class FluxCfg(ModularProgramCfg, TaskCfg):
+    modules: FluxModuleCfg
     sweep: dict[str, SweepCfg]
 
 
-class JPAFluxExp(AbsExperiment[JPAFluxResult, JPAFluxCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> JPAFluxResult:
-        _cfg = check_type(deepcopy(cfg), JPAFluxCfg)
-
-        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "jpa_flux")
-
-        jpa_flxs = sweep2array(_cfg["sweep"]["jpa_flux"], allow_array=True)
-
+class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FluxResult:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_flux")
+        _cfg = check_type(deepcopy(cfg), FluxCfg)
         modules = _cfg["modules"]
-        _cfg["sweep"] = {"ge": make_ge_sweep()}
-        Pulse.set_param(
-            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
-        )
+
+        jpa_fluxs = sweep2array(_cfg["sweep"]["jpa_flux"], allow_array=True)
+
+        _cfg["sweep"] = {"ge": make_ge_sweep()}  # remove jpa_flux from sweep
+        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+        Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
 
         with LivePlotter1D("JPA Flux value (a.u.)", "Signal Difference") as viewer:
 
@@ -89,36 +87,36 @@ class JPAFluxExp(AbsExperiment[JPAFluxResult, JPAFluxCfg]):
                     dtype=np.float64,
                 ).scan(
                     "JPA Flux value",
-                    jpa_flxs.tolist(),
-                    before_each=lambda i, ctx, flx: set_flux_in_dev_cfg(
-                        ctx.cfg["dev"], flx, label="jpa_flux_dev"
+                    jpa_fluxs.tolist(),
+                    before_each=lambda i, ctx, flux: set_flux_in_dev_cfg(
+                        ctx.cfg["dev"], flux, label="jpa_flux_dev"
                     ),
                 ),
                 init_cfg=_cfg,
-                on_update=lambda ctx: viewer.update(jpa_flxs, np.abs(ctx.root_data)),
+                on_update=lambda ctx: viewer.update(jpa_fluxs, np.abs(ctx.root_data)),
             )
             signals = np.asarray(signals)
 
         # record last cfg and result
         self.last_cfg = _cfg
-        self.last_result = (jpa_flxs, signals)
+        self.last_result = (jpa_fluxs, signals)
 
-        return jpa_flxs, signals
+        return jpa_fluxs, signals
 
-    def analyze(self, result: Optional[JPAFluxResult] = None) -> tuple[float, Figure]:
+    def analyze(self, result: Optional[FluxResult] = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        jpa_flxs, signals = result
+        jpa_fluxs, signals = result
         signals = gaussian_filter1d(signals, sigma=1)
         snrs = np.abs(signals)
 
         max_idx = np.argmax(snrs)
-        best_jpa_flux = jpa_flxs[max_idx]
+        best_jpa_flux = jpa_fluxs[max_idx]
 
         fig, ax = plt.subplots(figsize=config.figsize)
-        ax.plot(jpa_flxs, snrs, label="signal difference")
+        ax.plot(jpa_fluxs, snrs, label="signal difference")
         ax.axvline(
             best_jpa_flux,
             color="r",
@@ -136,7 +134,7 @@ class JPAFluxExp(AbsExperiment[JPAFluxResult, JPAFluxCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[JPAFluxResult] = None,
+        result: Optional[FluxResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/flux",
         **kwargs,
@@ -145,27 +143,27 @@ class JPAFluxExp(AbsExperiment[JPAFluxResult, JPAFluxCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        jpa_flxs, signals = result
+        jpa_fluxs, signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "JPA Flux value", "unit": "a.u.", "values": jpa_flxs},
+            x_info={"name": "JPA Flux value", "unit": "a.u.", "values": jpa_fluxs},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAFluxResult:
-        signals, jpa_flxs, _ = load_data(filepath, **kwargs)
-        assert jpa_flxs is not None
-        assert len(jpa_flxs.shape) == 1 and len(signals.shape) == 1
-        assert jpa_flxs.shape == signals.shape
+    def load(self, filepath: str, **kwargs) -> FluxResult:
+        signals, jpa_fluxs, _ = load_data(filepath, **kwargs)
+        assert jpa_fluxs is not None
+        assert len(jpa_fluxs.shape) == 1 and len(signals.shape) == 1
+        assert jpa_fluxs.shape == signals.shape
 
-        jpa_flxs = jpa_flxs.astype(np.float64)
+        jpa_fluxs = jpa_fluxs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (jpa_flxs, signals)
+        self.last_result = (jpa_fluxs, signals)
 
-        return jpa_flxs, signals
+        return jpa_fluxs, signals

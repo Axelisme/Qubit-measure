@@ -42,22 +42,22 @@ AutoOptResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 class ReadoutOptimizer:
     def __init__(
         self,
-        fpt_sweep: SweepCfg,
-        pdr_sweep: SweepCfg,
-        len_sweep: SweepCfg,
+        freq_sweep: SweepCfg,
+        gain_sweep: SweepCfg,
+        length_sweep: SweepCfg,
         num_points: int,
     ) -> None:
         self.num_points = num_points
 
-        fpts = sweep2array(fpt_sweep, allow_array=True)
-        pdrs = sweep2array(pdr_sweep, allow_array=True)
-        lens = sweep2array(len_sweep, allow_array=True)
+        freqs = sweep2array(freq_sweep, allow_array=True)
+        gains = sweep2array(gain_sweep, allow_array=True)
+        lengths = sweep2array(length_sweep, allow_array=True)
 
         self.optimizer = Optimizer(
             dimensions=[
-                Real(name="freq", low=fpts.min(), high=fpts.max()),
-                Real(name="gain", low=pdrs.min(), high=pdrs.max()),
-                Real(name="length", low=lens.min(), high=lens.max()),
+                Real(name="freq", low=freqs.min(), high=freqs.max()),
+                Real(name="gain", low=gains.min(), high=gains.max()),
+                Real(name="length", low=lengths.min(), high=lengths.max()),
             ],
             n_initial_points=num_points // 2,
             initial_point_generator="lhs",
@@ -99,8 +99,8 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any], num_points: int) -> AutoOptResult:
         _cfg = check_type(deepcopy(cfg), AutoOptCfg)
 
-        fpt_sweep = _cfg["sweep"]["freq"]
-        pdr_sweep = _cfg["sweep"]["gain"]
+        freq_sweep = _cfg["sweep"]["freq"]
+        gain_sweep = _cfg["sweep"]["gain"]
         len_sweep = _cfg["sweep"]["length"]
         _cfg["sweep"] = {"ge": make_ge_sweep()}
 
@@ -109,7 +109,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
             modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
-        optimizer = ReadoutOptimizer(fpt_sweep, pdr_sweep, len_sweep, num_points)
+        optimizer = ReadoutOptimizer(freq_sweep, gain_sweep, len_sweep, num_points)
 
         # (num_points, [freq, gain, length])
         params = np.full((num_points, 3), np.nan, dtype=np.float64)

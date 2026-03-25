@@ -306,9 +306,9 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        pdr_sweep = cfg["sweep"]["gain"]
+        gain_sweep = cfg["sweep"]["gain"]
 
-        self.gains = sweep2array(pdr_sweep)
+        self.gains = sweep2array(gain_sweep)  # initial values, may be rounded later
 
         def measure_mist_fn(ctx: TaskState, update_hook: Callable):
             cfg = deepcopy(ctx.cfg)
@@ -339,13 +339,21 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         self.task = Task[T_RootResult, list[NDArray[np.float64]], np.float64](
             measure_fn=measure_mist_fn,
             raw2signal_fn=lambda raw: raw[0][0],
-            result_shape=(pdr_sweep["expts"], 2),
+            result_shape=(gain_sweep["expts"], 2),
             dtype=np.float64,
         )
 
     def init(
         self, ctx: TaskState[MistResult, T_RootResult], dynamic_pbar: bool = False
     ) -> None:
+        self.gains = sweep2array(
+            self.gains,
+            "gain",
+            {
+                "soccfg": ctx.env["soccfg"],
+                "gen_ch": self.cfg["modules"]["probe_pulse"]["ch"],
+            },
+        )
         self.task.init(ctx.child("populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
     def run(self, ctx: TaskState[MistResult, T_RootResult]) -> None:

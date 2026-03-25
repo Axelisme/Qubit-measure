@@ -55,7 +55,7 @@ def calculate_eff_t1(
     )
 
 
-def calculate_eff_t1_vs_flx_with(
+def calculate_eff_t1_vs_flux_with(
     fluxs: NDArray[np.float64],
     noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
@@ -71,8 +71,8 @@ def calculate_eff_t1_vs_flx_with(
     pbar = None
 
     eff_t1s = np.zeros_like(fluxs, dtype=np.float64)
-    for i, flx in enumerate(fluxs):
-        fluxonium.flux = flx
+    for i, flux in enumerate(fluxs):
+        fluxonium.flux = flux
 
         esys = None
         if spectrum_data is not None:
@@ -97,7 +97,7 @@ def calculate_eff_t1_vs_flx_with(
     return 2 * np.pi * eff_t1s
 
 
-def calculate_eff_t1_vs_flx(
+def calculate_eff_t1_vs_flux(
     fluxs: NDArray[np.float64],
     noise_channels: list[tuple[str, dict[str, Any]]],
     Temp: float,
@@ -116,6 +116,6 @@ def calculate_eff_t1_vs_flx(
         subtract_ground=True,
         get_eigenstates=True,
     )
-    return calculate_eff_t1_vs_flx_with(
+    return calculate_eff_t1_vs_flux_with(
         fluxs, noise_channels, Temp, fluxonium, spectrum_data, **other_options
     )

@@ -8,7 +8,7 @@ from .base import fitlor, fitsinc, lorfunc, sincfunc
 
 
 def fit_qubit_freq(
-    fpts: NDArray[np.float64],
+    freqs: NDArray[np.float64],
     real_signals: NDArray[np.float64],
     type: Literal["lor", "sinc"] = "lor",
 ) -> tuple[
@@ -21,8 +21,8 @@ def fit_qubit_freq(
 ]:
     """[freq, freq_err, kappa, kappa_err, fit_singals, (pOpt, pCov)]"""
     if type == "lor":
-        pOpt, pCov = fitlor(fpts, real_signals)
-        fit_singals = lorfunc(fpts, *pOpt)
+        pOpt, pCov = fitlor(freqs, real_signals)
+        fit_singals = lorfunc(freqs, *pOpt)
 
         freq = pOpt[3]
         kappa = 2 * pOpt[4]
@@ -30,8 +30,8 @@ def fit_qubit_freq(
         kappa_err = 2 * np.sqrt(np.diag(pCov))[4]
 
     elif type == "sinc":
-        pOpt, pCov = fitsinc(fpts, real_signals)
-        fit_singals = sincfunc(fpts, *pOpt)
+        pOpt, pCov = fitsinc(freqs, real_signals)
+        fit_singals = sincfunc(freqs, *pOpt)
 
         freq = pOpt[3]
         kappa = 1.2067 * pOpt[4]  # sinc function hwm is 1.2067 * gamma

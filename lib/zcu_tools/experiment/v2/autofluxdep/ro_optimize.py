@@ -22,8 +22,8 @@ from zcu_tools.program.v2 import (
     ModularProgramV2,
     Pulse,
     PulseCfg,
-    Readout,
-    ReadoutCfg,
+    PulseReadout,
+    PulseReadoutCfg,
     Reset,
     ResetCfg,
     sweep2param,
@@ -45,7 +45,7 @@ def ro_opt_fluxdep_signal2real(signals: NDArray[np.float64]) -> NDArray[np.float
 class RO_OptModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
-    readout: ReadoutCfg
+    readout: PulseReadoutCfg
 
 
 class RO_OptCfgTemplate(ModularProgramCfg, TaskCfg):
@@ -100,10 +100,10 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
             gain_sweep = cfg["sweep"]["gain"]
             cfg["sweep"] = {"ge": ge_sweep, "freq": freq_sweep, "gain": gain_sweep}
             Pulse.set_param(modules["pi_pulse"], "on/off", sweep2param("ge", ge_sweep))
-            Readout.set_param(
+            PulseReadout.set_param(
                 modules["readout"], "freq", sweep2param("freq", freq_sweep)
             )
-            Readout.set_param(
+            PulseReadout.set_param(
                 modules["readout"], "gain", sweep2param("gain", gain_sweep)
             )
             prog = ModularProgramV2(
@@ -112,7 +112,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
-                    Readout("readout", modules["readout"]),
+                    PulseReadout("readout", modules["readout"]),
                 ],
             )
             tracker = PCATracker()
@@ -126,8 +126,8 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
             )
             return avg_d, [tracker.covariance], [tracker.rough_median]
 
-        self.freqs = np.linspace(0, 1, freq_expts)
-        self.gains = np.linspace(0, 1, gain_expts)
+        self.freqs = np.linspace(0, 1, freq_expts)  # initial array
+        self.gains = np.linspace(0, 1, gain_expts)  # initial array
         self.task = Task[
             T_RootResult,
             tuple[
@@ -159,8 +159,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
 
         freq_sweep = make_sweep(*cfg_temp["freq_range"], self.freq_expts)
         gain_sweep = make_sweep(*cfg_temp["gain_range"], self.gain_expts)
-        self.freqs = sweep2array(freq_sweep)
-        self.gains = sweep2array(gain_sweep)
+
 
         cfg_temp = dict(cfg_temp)
         del cfg_temp["freq_range"]
@@ -172,8 +171,25 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
         )
         cfg = check_type(cfg_temp, RO_OptCfg)
 
-        readout_cfg = deepcopy(cfg["modules"]["readout"])
-        self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
+        self.freqs = sweep2array(
+            freq_sweep,
+            "freq",
+            {
+                "soccfg": ctx.env["soccfg"],
+                "gen_ch": cfg["modules"]["readout"]["pulse_cfg"]["ch"],
+                "ro_ch": cfg["modules"]["readout"]["ro_cfg"]["ro_ch"],
+            },
+        )
+        self.gains = sweep2array(
+            gain_sweep,
+            "gain",
+            {
+                "soccfg": ctx.env["soccfg"],
+                "gen_ch": cfg["modules"]["readout"]["pulse_cfg"]["ch"],
+            },
+        )
+
+        self.task.run(ctx.child("raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
@@ -188,8 +204,9 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
         info["best_ro_freq"] = best_freq
         info["best_ro_gain"] = best_gain
 
-        Readout.set_param(readout_cfg, "freq", best_freq)
-        Readout.set_param(readout_cfg, "gain", best_gain)
+        readout_cfg = deepcopy(cfg["modules"]["readout"])
+        PulseReadout.set_param(readout_cfg, "freq", best_freq)
+        PulseReadout.set_param(readout_cfg, "gain", best_gain)
 
         info["opt_readout"] = readout_cfg
 
@@ -234,7 +251,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
 
     def update_plotter(self, plotters, ctx: TaskState, signals: RO_OptResult) -> None:
         info: FluxDepInfoDict = ctx.env["info"]
-        i = info["flx_idx"]
+        i = info["flux_idx"]
 
         real_signals = ro_opt_signal2real(signals["raw_signals"][i])
 
@@ -243,16 +260,16 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
         )
         plotters["snr"].update(self.freqs, self.gains, real_signals, refresh=False)
 
-    def save(self, filepath, flx_values, result, comment, prefix_tag) -> None:
+    def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
 
-        np.savez_compressed(filepath, flx_values=flx_values, **result)
+        np.savez_compressed(filepath, flux_values=flux_values, **result)
 
     @classmethod
     def load(cls, filepath: str, **kwargs) -> dict:
         data = np.load(filepath)
 
-        flx_values = data["flx_values"]
+        flux_values = data["flux_values"]
         raw_signals = data["raw_signals"]
         freqs = data["freqs"]
         gains = data["gains"]
@@ -260,7 +277,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
         best_gain = data["best_gain"]
 
         return {
-            "flx_values": flx_values,
+            "flux_values": flux_values,
             "raw_signals": raw_signals,
             "freqs": freqs,
             "gains": gains,

@@ -65,6 +65,7 @@ class DistortionCfg(ModularProgramCfg, TaskCfg):
 class DistortionExp(AbsExperiment):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> DistortionResult:
         _cfg = check_type(deepcopy(cfg), DistortionCfg)
+        modules = _cfg["modules"]
 
         # force length be the outer loop
         _cfg["sweep"] = {
@@ -72,8 +73,12 @@ class DistortionExp(AbsExperiment):
             "phase": _cfg["sweep"]["phase"],
         }
 
-        lengths = sweep2array(_cfg["sweep"]["length"])
-        phases = sweep2array(_cfg["sweep"]["phase"])
+        lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
+        phases = sweep2array(
+            _cfg["sweep"]["phase"],
+            "phase",
+            {"soccfg": soccfg, "gen_ch": modules["pi2_pulse"]["ch"]},
+        )
 
         length_params = sweep2param("length", _cfg["sweep"]["length"])
         phase_params = sweep2param("phase", _cfg["sweep"]["phase"])
@@ -81,9 +86,8 @@ class DistortionExp(AbsExperiment):
         with LivePlotter2D("Time (us)", "Phase (deg)") as viewer:
 
             def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
-                nonlocal lengths, phases
                 modules = ctx.cfg["modules"]
-                prog = ModularProgramV2(
+                return ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
@@ -112,20 +116,7 @@ class DistortionExp(AbsExperiment):
                         ),
                         Readout("readout", modules["readout"]),
                     ],
-                )
-
-                # get actual values after program generation, in case there are some adjustments
-                true_ts = cast(
-                    NDArray[np.float64],
-                    prog.get_time_param("pi2_pulse1", "t", as_array=True),
-                )
-                lengths = true_ts - true_ts[0] + lengths[0]
-                phases = cast(
-                    NDArray[np.float64],
-                    prog.get_pulse_param("pi2_pulse2", "phase", as_array=True),
-                )
-
-                return prog.acquire(soc, progress=False, callback=update_hook)
+                ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
                 task=Task(

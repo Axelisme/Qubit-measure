@@ -74,9 +74,9 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
 
         X90_pulse = deepcopy(modules["X90_pulse"])
 
-        times = sweep2array(_cfg["sweep"]["times"], allow_array=True)  # predicted
+        time_sweep: SweepCfg = _cfg["sweep"].pop("times")  # type: ignore
 
-        del _cfg["sweep"]["times"]  # type: ignore
+        times = sweep2array(time_sweep, allow_array=True)
 
         with LivePlotter1D(
             "Times", "Signal", segment_kwargs=dict(show_grid=True)

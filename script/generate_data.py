@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 from scqubits.core.fluxonium import Fluxonium
 from tqdm.auto import tqdm
 from typing_extensions import Any, cast
-from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
+from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 # parameters
 data_path = "Database/simulation/fluxonium_all.h5"
@@ -37,7 +37,7 @@ scq_settings.PROGRESSBAR_DISABLED = True
 
 cutoff = 40
 evals_count = 15
-flxs = np.linspace(0.0, 0.5, 120)
+fluxs = np.linspace(0.0, 0.5, 120)
 
 
 fluxonium = Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=cutoff)
@@ -45,14 +45,14 @@ fluxonium = Fluxonium(1.0, 1.0, 1.0, flux=0.0, cutoff=cutoff)
 
 def dump_data(
     filepath: str,
-    flxs: NDArray[np.float64],
+    fluxs: NDArray[np.float64],
     params: NDArray[np.float64],
     energies: NDArray[np.float64],
     Ebounds: NDArray[np.float64],
 ) -> None:
     with h5.File(filepath, "w") as f:
         f.create_dataset("Ebounds", data=Ebounds)
-        f.create_dataset("flxs", data=flxs)
+        f.create_dataset("fluxs", data=fluxs)
         f.create_dataset("params", data=params)
         f.create_dataset("energies", data=energies)
 
@@ -211,7 +211,7 @@ if DRY_RUN:
     energies = [np.random.randn(evals_count) for _ in range(num_sample)]
 else:
     energies = [
-        calculate_energy_vs_flx((EJ, EC, EL), flxs, cutoff, evals_count)[1]
+        calculate_energy_vs_flux((EJ, EC, EL), fluxs, cutoff, evals_count)[1]
         for EJ, EC, EL in tqdm(params, desc="Calculating")
     ]
 
@@ -220,7 +220,7 @@ scq_settings.PROGRESSBAR_DISABLED = False
 
 # we can flip the data around 0.5 to make the other half
 # since the fluxonium is symmetric
-flxs = np.concatenate([flxs, 1.0 - flxs[::-1]])
+fluxs = np.concatenate([fluxs, 1.0 - fluxs[::-1]])
 for i in range(len(params)):
     energies[i] = np.concatenate([energies[i], energies[i][::-1]])
 
@@ -232,4 +232,4 @@ if DRY_RUN:
     data_path = data_path.replace(".h5", "_dryrun.h5")
 
 os.makedirs(os.path.dirname(data_path), exist_ok=True)
-dump_data(data_path, flxs, params, energies, Ebounds)
+dump_data(data_path, fluxs, params, energies, Ebounds)

@@ -16,6 +16,8 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    BathReset,
+    BathResetCfg,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -41,7 +43,7 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 class PhaseModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     init_pulse: NotRequired[PulseCfg]
-    tested_reset: ResetCfg
+    tested_reset: BathResetCfg
     readout: ReadoutCfg
 
 
@@ -52,19 +54,21 @@ class PhaseCfg(ModularProgramCfg, TaskCfg):
 
 class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> PhaseResult:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "phase")
         _cfg = check_type(deepcopy(cfg), PhaseCfg)
-
-        # Check that reset pulse is dual pulse type
         modules = _cfg["modules"]
-        if modules["tested_reset"]["type"] != "bath":
-            raise ValueError("This experiment only supports bath reset")
 
-        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "phase")
-
-        phases = sweep2array(_cfg["sweep"]["phase"])  # predicted phase points
+        phases = sweep2array(
+            _cfg["sweep"]["phase"],
+            "phase",
+            {
+                "soccfg": soccfg,
+                "gen_ch": modules["tested_reset"]["pi2_cfg"]["ch"],
+            },
+        )
 
         phase_param = sweep2param("phase", _cfg["sweep"]["phase"])
-        Reset.set_param(modules["tested_reset"], "pi2_phase", phase_param)
+        BathReset.set_param(modules["tested_reset"], "pi2_phase", phase_param)
 
         with LivePlotter1D("Phase (deg)", "Signal (a.u.)") as viewer:
             signals = run_task(
@@ -77,7 +81,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                             modules=[
                                 Reset("reset", modules.get("reset")),
                                 Pulse("init_pulse", modules.get("init_pulse")),
-                                Reset("tested_reset", modules["tested_reset"]),
+                                BathReset("tested_reset", modules["tested_reset"]),
                                 Readout("readout", modules["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)

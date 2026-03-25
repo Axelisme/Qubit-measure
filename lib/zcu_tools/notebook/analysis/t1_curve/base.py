@@ -11,8 +11,8 @@ from scipy.optimize import minimize
 from typing_extensions import TYPE_CHECKING, Callable, Optional, Union
 
 from zcu_tools.notebook.analysis.t1_curve.utils import format_exponent
-from zcu_tools.simulate import flx2value, value2flx
-from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flx_with
+from zcu_tools.simulate import flux2value, value2flux
+from zcu_tools.simulate.fluxonium import calculate_eff_t1_vs_flux_with
 
 if TYPE_CHECKING:
     from scqubits.core.fluxonium import Fluxonium
@@ -157,16 +157,16 @@ def plot_sample_t1(
     s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
-    flx_half: float,
-    flx_period: float,
+    flux_half: float,
+    flux_period: float,
     xlabel: str = "Current (mA)",
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
 
-    s_flxs = value2flx(s_dev_values, flx_half, flx_period)
+    s_fluxs = value2flux(s_dev_values, flux_half, flux_period)
 
-    ax.errorbar(s_flxs, s_T1s, yerr=s_T1errs, fmt=".", label="Current")
+    ax.errorbar(s_fluxs, s_T1s, yerr=s_T1errs, fmt=".", label="Current")
 
     ax.grid()
     ax.set_xlabel(r"$\phi_{ext}/\phi_0$", fontsize=14)
@@ -176,8 +176,8 @@ def plot_sample_t1(
     ax2 = ax.secondary_xaxis(
         "top",
         functions=(
-            partial(flx2value, flx_half=flx_half, flx_period=flx_period),
-            partial(value2flx, flx_half=flx_half, flx_period=flx_period),
+            partial(flux2value, flux_half=flux_half, flux_period=flux_period),
+            partial(value2flux, flux_half=flux_half, flux_period=flux_period),
         ),
     )
     ax2.set_xlabel(xlabel, fontsize=14)
@@ -189,8 +189,8 @@ def plot_t1_with_sample(
     s_dev_values: NDArray[np.float64],
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
-    flx_half: float,
-    flx_period: float,
+    flux_half: float,
+    flux_period: float,
     fluxonium: Fluxonium,
     spectrum_data: SpectrumData,
     t_fluxs: NDArray[np.float64],
@@ -205,10 +205,10 @@ def plot_t1_with_sample(
     **other_noise_options: dict,
 ) -> tuple[Figure, Axes]:
     """T1s: ns"""
-    s_flxs = value2flx(s_dev_values, flx_half, flx_period)
+    s_fluxs = value2flux(s_dev_values, flux_half, flux_period)
 
     t1_effs = [
-        calculate_eff_t1_vs_flx_with(
+        calculate_eff_t1_vs_flux_with(
             t_fluxs,
             noise_channels=[(noise_name, {name: v})],  # type: ignore
             Temp=Temp,
@@ -222,7 +222,7 @@ def plot_t1_with_sample(
     fig, ax = plt.subplots(constrained_layout=True, figsize=(8, 4))
     fig.suptitle(f"Temperature = {Temp * 1e3:.2f} mK")
 
-    ax.errorbar(s_flxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
+    ax.errorbar(s_fluxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
 
     nname = {
         "Q_cap": r"$Q_{cap}$",
@@ -234,8 +234,8 @@ def plot_t1_with_sample(
         label = f"{nname}(w)" if callable(v) else f"{nname} = {format_exponent(v)}"
         ax.plot(t_fluxs, t1_eff, label=label, linestyle="--")
 
-    range = np.ptp(s_flxs)
-    ax.set_xlim(s_flxs.min() - 0.01 * range, s_flxs.max() + 0.01 * range)
+    range = np.ptp(s_fluxs)
+    ax.set_xlim(s_fluxs.min() - 0.01 * range, s_fluxs.max() + 0.01 * range)
     ax.set_xlabel(r"$\phi_{ext}/\phi_0$")
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
     ax.set_yscale("log")
@@ -245,8 +245,8 @@ def plot_t1_with_sample(
     ax2 = ax.secondary_xaxis(
         "top",
         functions=(
-            partial(flx2value, flx_half=flx_half, flx_period=flx_period),
-            partial(value2flx, flx_half=flx_half, flx_period=flx_period),
+            partial(flux2value, flux_half=flux_half, flux_period=flux_period),
+            partial(value2flux, flux_half=flux_half, flux_period=flux_period),
         ),
     )
     ax2.set_xlabel(xlabel, fontsize=14)
@@ -259,8 +259,8 @@ def plot_eff_t1_with_sample(
     s_T1s: NDArray[np.float64],
     s_T1errs: NDArray[np.float64],
     t1_effs: NDArray[np.float64],
-    flx_half: float,
-    flx_period: float,
+    flux_half: float,
+    flux_period: float,
     t_fluxs: NDArray[np.float64],
     *,
     label: str = r"$t_1^{eff}$",
@@ -272,13 +272,13 @@ def plot_eff_t1_with_sample(
     if title is not None:
         fig.suptitle(title)
 
-    s_flxs = value2flx(s_dev_values, flx_half, flx_period)
-    ax.errorbar(s_flxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
+    s_fluxs = value2flux(s_dev_values, flux_half, flux_period)
+    ax.errorbar(s_fluxs, s_T1s, yerr=s_T1errs, fmt=".", label="T1")
 
     ax.plot(t_fluxs, t1_effs, label=label, linestyle="--")
 
-    range = np.ptp(s_flxs)
-    ax.set_xlim(s_flxs.min() - 0.01 * range, s_flxs.max() + 0.01 * range)
+    range = np.ptp(s_fluxs)
+    ax.set_xlim(s_fluxs.min() - 0.01 * range, s_fluxs.max() + 0.01 * range)
     ax.set_ylim(0.5 * s_T1s.min(), 3.0 * s_T1s.max())
     ax.set_xlabel(r"$\phi_{ext}/\phi_0$")
     ax.set_ylabel(r"$T_1$ (ns)", fontsize=14)
@@ -289,8 +289,8 @@ def plot_eff_t1_with_sample(
     ax2 = ax.secondary_xaxis(
         "top",
         functions=(
-            partial(flx2value, flx_half=flx_half, flx_period=flx_period),
-            partial(value2flx, flx_half=flx_half, flx_period=flx_period),
+            partial(flux2value, flux_half=flux_half, flux_period=flux_period),
+            partial(value2flux, flux_half=flux_half, flux_period=flux_period),
         ),
     )
     ax2.set_xlabel(xlabel, fontsize=14)

@@ -56,15 +56,22 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
     ) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
-
-        # Check that reset pulse is dual pulse type
         modules = _cfg["modules"]
 
-        lens = sweep2array(_cfg["sweep"]["length"])  # predicted frequency points
+        # TODO: align qubit pulse length with cavity pulse length
+        lengths = sweep2array(
+            _cfg["sweep"]["length"],
+            "time",
+            {
+                "soccfg": soccfg,
+                "gen_ch": modules["tested_reset"]["qubit_tone_cfg"]["ch"],
+            },
+        )
 
-        len_spans = sweep2param("length", _cfg["sweep"]["length"])
-        Reset.set_param(modules["tested_reset"], "length", len_spans)
-        Reset.set_param(modules["tested_reset"], "pi2_phase", 360 * detune * len_spans)
+        length_param = sweep2param("length", _cfg["sweep"]["length"])
+        phase_param = 360 * detune * length_param
+        Reset.set_param(modules["tested_reset"], "length", length_param)
+        Reset.set_param(modules["tested_reset"], "pi2_phase", phase_param)
 
         with LivePlotter1D("Length (us)", "Signal (a.u.)") as viewer:
             signals = run_task(
@@ -84,19 +91,19 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),
-                    result_shape=(len(lens),),
+                    result_shape=(len(lengths),),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    lens, bathreset_signal2real(ctx.root_data)
+                    lengths, bathreset_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
         self.last_cfg = _cfg
-        self.last_result = (lens, signals)
+        self.last_result = (lengths, signals)
 
-        return lens, signals
+        return lengths, signals
 
     def analyze(self, result: Optional[LengthResult] = None) -> Figure:
         if result is None:

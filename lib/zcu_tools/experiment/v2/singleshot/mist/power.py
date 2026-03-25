@@ -59,11 +59,14 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         _cfg = check_type(deepcopy(cfg), PowerCfg)  # prevent in-place modification
         modules = _cfg["modules"]
 
-        pdrs = sweep2array(_cfg["sweep"]["gain"])  # predicted amplitudes
-
-        Pulse.set_param(
-            modules["probe_pulse"], "gain", sweep2param("gain", _cfg["sweep"]["gain"])
+        gains = sweep2array(
+            _cfg["sweep"]["gain"],
+            "gain",
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
         )
+
+        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
+        Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
 
         with LivePlotter1D(
             "Pulse gain",
@@ -103,20 +106,20 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(len(pdrs), 2),
+                    result_shape=(len(gains), 2),
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    pdrs, calc_populations(ctx.root_data).T
+                    gains, calc_populations(ctx.root_data).T
                 ),
             )
 
         # record the last result
         self.last_cfg = _cfg
-        self.last_result = (pdrs, signals)
+        self.last_result = (gains, signals)
 
-        return pdrs, signals
+        return gains, signals
 
     def analyze(
         self,
@@ -130,7 +133,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        pdrs, populations = result
+        gains, populations = result
 
         populations = calc_populations(populations)
 
@@ -139,10 +142,10 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             populations = np.clip(populations, 0.0, 1.0)
 
         if ac_coeff is None:
-            xs = pdrs
+            xs = gains
             xlabel = "probe gain (a.u.)"
         else:
-            xs = ac_coeff * pdrs**2
+            xs = ac_coeff * gains**2
             xlabel = r"$\bar n$"
 
         fig, ax = plt.subplots(figsize=(6, 6))
@@ -166,18 +169,18 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         filepath: str,
         result: Optional[PowerResult] = None,
         comment: Optional[str] = None,
-        tag: str = "singleshot/mist/pdr",
+        tag: str = "singleshot/mist/gain",
         **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        pdrs, populations = result
+        gains, populations = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Drive gain", "unit": "a.u.", "values": pdrs},
+            x_info={"name": "Drive gain", "unit": "a.u.", "values": gains},
             y_info={"name": "GE population", "unit": "a.u.", "values": [0, 1]},
             z_info={"name": "Population", "unit": "a.u.", "values": populations.T},
             comment=comment,
@@ -186,12 +189,12 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PowerResult:
-        populations, pdrs, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        populations, gains, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
 
-        pdrs = pdrs.astype(np.float64)
+        gains = gains.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
         self.last_cfg = cast(PowerCfg, cfg)
-        self.last_result = (pdrs, populations)
+        self.last_result = (gains, populations)
 
-        return pdrs, populations
+        return gains, populations

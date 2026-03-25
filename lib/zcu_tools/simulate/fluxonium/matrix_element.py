@@ -32,7 +32,7 @@ def calculate_n_oper(
     return matrix_elements[:return_dim, :return_dim]
 
 
-def calculate_n_oper_vs_flx(
+def calculate_n_oper_vs_flux(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     return_dim: int = 4,
@@ -61,7 +61,7 @@ def calculate_n_oper_vs_flx(
     return spectrum_data, matrix_elements[:, :return_dim, :return_dim]
 
 
-def calculate_system_n_oper_vs_flx(
+def calculate_system_n_oper_vs_flux(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     bare_rf: float,
@@ -93,8 +93,8 @@ def calculate_system_n_oper_vs_flx(
             g=g, op1=resonator.creation_operator, op2=fluxonium.n_operator, add_hc=True
         )
 
-        def update_hilbertspace(flx: float) -> None:
-            fluxonium.flux = flx
+        def update_hilbertspace(flux: float) -> None:
+            fluxonium.flux = flux
 
         old = scq_settings.PROGRESSBAR_DISABLED
         scq_settings.PROGRESSBAR_DISABLED = not progress
@@ -161,7 +161,7 @@ def calculate_phi_oper(
     return matrix_elements[:return_dim, :return_dim]
 
 
-def calculate_phi_oper_vs_flx(
+def calculate_phi_oper_vs_flux(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     return_dim: int = 4,
@@ -217,7 +217,7 @@ def calculate_sin_phi_oper(
     return matrix_elements[:return_dim, :return_dim]
 
 
-def calculate_sin_phi_oper_vs_flx(
+def calculate_sin_phi_oper_vs_flux(
     params: tuple[float, float, float],
     fluxs: NDArray[np.float64],
     return_dim: int = 4,

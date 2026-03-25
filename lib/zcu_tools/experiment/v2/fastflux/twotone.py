@@ -56,8 +56,16 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         modules = _cfg["modules"]
 
         # uniform in square space
-        gains = sweep2array(_cfg["sweep"]["gain"])  # predicted gains
-        freqs = sweep2array(_cfg["sweep"]["freq"])  # predicted frequencies
+        gains = sweep2array(
+            _cfg["sweep"]["gain"],
+            "gain",
+            {"soccfg": soccfg, "gen_ch": modules["flux_pulse"]["ch"]},
+        )
+        freqs = sweep2array(
+            _cfg["sweep"]["freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+        )
 
         gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
         freq_param = sweep2param("freq", _cfg["sweep"]["freq"])

@@ -12,7 +12,7 @@ from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, Ty
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
-from zcu_tools.experiment.v2.utils import round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -58,10 +58,11 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2EchoCfg)
 
-        ts = sweep2array(_cfg["sweep"]["length"])
-        ts = round_zcu_time(ts, soccfg)
+        lengths = sweep2array(
+            _cfg["sweep"]["length"], "time", {"soccfg": soccfg, "scaler": 0.5}
+        )
 
-        t2e_spans = sweep2param("length", _cfg["sweep"]["length"])
+        t2e_params = sweep2param("length", _cfg["sweep"]["length"])
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Echo"}
@@ -77,15 +78,15 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("pi2_pulse1", modules["pi2_pulse"]),
-                                    Delay("t2e_delay1", delay=0.5 * t2e_spans),
+                                    Delay("t2e_delay1", delay=0.5 * t2e_params),
                                     Pulse("pi_pulse", modules["pi_pulse"]),
-                                    Delay("t2e_delay2", delay=0.5 * t2e_spans),
+                                    Delay("t2e_delay2", delay=0.5 * t2e_params),
                                     Pulse(
                                         name="pi2_pulse2",
                                         cfg={
                                             **modules["pi2_pulse"],
                                             "phase": modules["pi2_pulse"]["phase"]
-                                            + 360 * detune * t2e_spans,
+                                            + 360 * detune * t2e_params,
                                         },  # type: ignore
                                     ),
                                     Readout("readout", modules["readout"]),
@@ -93,19 +94,19 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),
-                    result_shape=(len(ts),),
+                    result_shape=(len(lengths),),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    ts, t2echo_signal2real(ctx.root_data)
+                    lengths, t2echo_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
         self.last_cfg = _cfg
-        self.last_result = (ts, signals)
+        self.last_result = (lengths, signals)
 
-        return ts, signals
+        return lengths, signals
 
     def analyze(
         self,

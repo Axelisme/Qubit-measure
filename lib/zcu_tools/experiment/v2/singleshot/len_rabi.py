@@ -40,19 +40,20 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
     ) -> LenRabiResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)  # avoid in-place modification
-
         modules = _cfg["modules"]
+
         assert modules["qub_pulse"]["waveform"]["style"] in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
 
-        lens = sweep2array(_cfg["sweep"]["length"])  # predicted
-
-        Pulse.set_param(
-            modules["qub_pulse"],
-            "length",
-            sweep2param("length", _cfg["sweep"]["length"]),
+        lengths = sweep2array(
+            _cfg["sweep"]["length"],
+            "time",
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
+
+        length_param = sweep2param("length", _cfg["sweep"]["length"])
+        Pulse.set_param(modules["qub_pulse"], "length", length_param)
 
         with LivePlotter1D(
             "Length (us)",
@@ -82,20 +83,20 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(len(lens), 2),
+                    result_shape=(len(lengths), 2),
                     dtype=np.float64,
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    lens, calc_populations(ctx.root_data).T
+                    lengths, calc_populations(ctx.root_data).T
                 ),
             )
 
         # record last cfg and result
         self.last_cfg = _cfg
-        self.last_result = (lens, populations)
+        self.last_result = (lengths, populations)
 
-        return lens, populations
+        return lengths, populations
 
     def analyze(
         self,

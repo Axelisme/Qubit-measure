@@ -7,7 +7,7 @@ from zcu_tools.simulate.fluxonium.branch.floquet import calc_branch_infos
 
 
 def calc_snr(
-    params, r_f, g, flx, qub_dim, qub_cutoff, max_photon, rf_w
+    params, r_f, g, flux, qub_dim, qub_cutoff, max_photon, rf_w
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
     branchs = [0, 1]
 
@@ -19,7 +19,7 @@ def calc_snr(
         params=params,
         r_f=r_f,
         g=g,
-        flx=flx,
+        flux=flux,
         qub_dim=qub_dim,
         qub_cutoff=qub_cutoff,
         photons=photons,

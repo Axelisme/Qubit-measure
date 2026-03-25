@@ -23,7 +23,7 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
-from zcu_tools.experiment.v2.utils import make_ge_sweep, round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
 from zcu_tools.liveplot import (
     LivePlotter1D,
     LivePlotter2D,
@@ -80,21 +80,32 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         _cfg = check_type(deepcopy(cfg), T1WithToneSweepCfg)
         modules = _cfg["modules"]
 
-        len_sweep = _cfg["sweep"]["length"]
+        length_sweep = _cfg["sweep"]["length"]
         sweep_name = list(_cfg["sweep"].keys())[0]
         x_sweep = _cfg["sweep"][sweep_name]
 
-        ge_sweep = make_ge_sweep()
-        _cfg["sweep"] = {"ge": ge_sweep, "length": len_sweep}
+        if sweep_name not in ["gain", "freq"]:
+            raise ValueError(f"Unsupported sweep key: {sweep_name}")
 
-        xs = sweep2array(x_sweep, allow_array=True)
-        ts = sweep2array(len_sweep)  # predicted times
-        ts = round_zcu_time(ts, soccfg, gen_ch=modules["probe_pulse"]["ch"])
+        ge_sweep = make_ge_sweep()
+        _cfg["sweep"] = {"ge": ge_sweep, "length": length_sweep}
+
+        xs = sweep2array(
+            x_sweep,
+            sweep_name,  # type: ignore
+            round_info={"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+            allow_array=True,
+        )
+        lengths = sweep2array(
+            length_sweep,
+            "time",
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+        )
 
         ge_param = sweep2param("ge", ge_sweep)
-        len_param = sweep2param("length", len_sweep)
+        length_param = sweep2param("length", length_sweep)
         Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
-        Pulse.set_param(modules["probe_pulse"], "length", len_param)
+        Pulse.set_param(modules["probe_pulse"], "length", length_param)
 
         fig, axs = make_plot_frame(4, 2, figsize=(12, 10))
         axs[3][0].set_ylim(0.0, 1.0)
@@ -148,28 +159,28 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 populations = calc_populations(np.asarray(ctx.root_data))
 
                 viewer.get_plotter("gg_2d").update(
-                    xs, ts, populations[:, 0, :, 0], refresh=False
+                    xs, lengths, populations[:, 0, :, 0], refresh=False
                 )
                 viewer.get_plotter("ge_2d").update(
-                    xs, ts, populations[:, 0, :, 1], refresh=False
+                    xs, lengths, populations[:, 0, :, 1], refresh=False
                 )
                 viewer.get_plotter("go_2d").update(
-                    xs, ts, populations[:, 0, :, 2], refresh=False
+                    xs, lengths, populations[:, 0, :, 2], refresh=False
                 )
                 viewer.get_plotter("g_1d").update(
-                    ts, populations[i, 0].T, refresh=False
+                    lengths, populations[i, 0].T, refresh=False
                 )
                 viewer.get_plotter("eg_2d").update(
-                    xs, ts, populations[:, 1, :, 0], refresh=False
+                    xs, lengths, populations[:, 1, :, 0], refresh=False
                 )
                 viewer.get_plotter("ee_2d").update(
-                    xs, ts, populations[:, 1, :, 1], refresh=False
+                    xs, lengths, populations[:, 1, :, 1], refresh=False
                 )
                 viewer.get_plotter("eo_2d").update(
-                    xs, ts, populations[:, 1, :, 2], refresh=False
+                    xs, lengths, populations[:, 1, :, 2], refresh=False
                 )
                 viewer.get_plotter("e_1d").update(
-                    ts, populations[i, 1].T, refresh=False
+                    lengths, populations[i, 1].T, refresh=False
                 )
 
                 viewer.refresh()
@@ -183,7 +194,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                     modules=[
                         Reset("reset", modules.get("reset")),
                         Pulse("pi_pulse", modules["pi_pulse"]),
-                        Pulse("test_pulse", modules["probe_pulse"]),
+                        Pulse("probe_pulse", modules["probe_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
                 ).acquire(
@@ -199,7 +210,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
-                    result_shape=(2, len(ts), 2),
+                    result_shape=(2, len(lengths), 2),
                     dtype=np.float64,
                 ).scan(
                     sweep_name,
@@ -214,9 +225,9 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
 
         # record last cfg and result
         self.last_cfg = _cfg
-        self.last_result = (xs, ts, populations)
+        self.last_result = (xs, lengths, populations)
 
-        return xs, ts, populations
+        return xs, lengths, populations
 
     def analyze(
         self,

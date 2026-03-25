@@ -22,20 +22,20 @@ def generate_params_table(
     EJ: Union[float, np.ndarray, tuple[float, float]],
     EC: Union[float, np.ndarray, tuple[float, float]],
     EL: Union[float, np.ndarray, tuple[float, float]],
-    flx: float = 0.5,
+    flux: float = 0.5,
     precision: float = 0.1,
 ) -> pd.DataFrame:
     """
-    Create a table with columns: flx, EJ, EC, EL
+    Create a table with columns: flux, EJ, EC, EL
 
     Args:
         EJ: EJ float or np.ndarray
         EC: EC float or np.ndarray
         EL: EL float or np.ndarray
-        flx: flux value
+        flux: flux value
 
     Returns:
-        DataFrame with columns: flx, EJ, EC, EL
+        DataFrame with columns: flux, EJ, EC, EL
     """
 
     if isinstance(EJ, float):
@@ -59,7 +59,7 @@ def generate_params_table(
     return pd.DataFrame(
         [
             {
-                "flx": flx,
+                "flux": flux,
                 "EJ": eJ,
                 "EC": eC,
                 "EL": eL,
@@ -86,7 +86,7 @@ def calculate_esys(params_table: pd.DataFrame) -> None:
     def calc_single_esys(row):
         nonlocal fluxonium
 
-        fluxonium.flux = row["flx"]
+        fluxonium.flux = row["flux"]
         fluxonium.EJ = row["EJ"]
         fluxonium.EC = row["EC"]
         fluxonium.EL = row["EL"]
@@ -132,7 +132,7 @@ def calculate_m01(params_table: pd.DataFrame) -> None:
     )
 
     def calc_single_m01(row):
-        fluxonium.flux = row["flx"]
+        fluxonium.flux = row["flux"]
         fluxonium.EJ = row["EJ"]
         fluxonium.EC = row["EC"]
         fluxonium.EL = row["EL"]
@@ -148,7 +148,7 @@ def calculate_dipersive_shift(params_table: pd.DataFrame, g: float, r_f: float) 
     from scqubits.core.fluxonium import Fluxonium  # lazy import
 
     def update_fn(fluxonium: Fluxonium, row: dict[str, Any]) -> None:
-        fluxonium.flux = row["flx"]
+        fluxonium.flux = row["flux"]
         fluxonium.EJ = row["EJ"]
         fluxonium.EC = row["EC"]
         fluxonium.EL = row["EL"]
@@ -167,7 +167,7 @@ def calculate_snr(
     def _calc_single_snr(row) -> float:
         _, snrs = calc_ge_snr(
             params=(row["EJ"], row["EC"], row["EL"]),
-            flux=row["flx"],
+            flux=row["flux"],
             r_f=r_f,
             rf_w=rf_w,
             g=g,
@@ -207,7 +207,7 @@ def calculate_t1(
     old, scq.T1_DEFAULT_WARNING = scq.T1_DEFAULT_WARNING, False
 
     def calc_single_t1(row):
-        fluxonium.flux = row["flx"]
+        fluxonium.flux = row["flux"]
         fluxonium.EJ = row["EJ"]
         fluxonium.EC = row["EC"]
         fluxonium.EL = row["EL"]
@@ -390,12 +390,12 @@ def add_real_sample(
     )
     r_f = dispersive_dict["bare_rf"]
     g = dispersive_dict["g"]
-    flx_half = fluxdepfit_dict["flx_half"]
+    flux_half = fluxdepfit_dict["flux_half"]
 
     # load freq data
     sample_path = os.path.join(result_dir, "sample.csv")
     freq_df = pd.read_csv(sample_path)
-    idx = np.argmin(np.abs(freq_df["calibrated mA"] - flx_half))
+    idx = np.argmin(np.abs(freq_df["calibrated mA"] - flux_half))
     t1 = freq_df["T1 (us)"].iloc[idx]
 
     # calculate chi

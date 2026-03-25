@@ -126,22 +126,22 @@ class JPAOptimizer:
 
     def __init__(
         self,
-        flx_sweep: SweepCfg,
-        fpt_sweep: SweepCfg,
-        pdr_sweep: SweepCfg,
+        flux_sweep: SweepCfg,
+        freq_sweep: SweepCfg,
+        gain_sweep: SweepCfg,
         total_points: int,
     ) -> None:
         # Initialize bounds
         self.bounds = ParameterBounds(
-            flux=(flx_sweep["start"], flx_sweep["stop"]),
-            freq=(fpt_sweep["start"], fpt_sweep["stop"]),
-            power=(pdr_sweep["start"], pdr_sweep["stop"]),
+            flux=(flux_sweep["start"], flux_sweep["stop"]),
+            freq=(freq_sweep["start"], freq_sweep["stop"]),
+            power=(gain_sweep["start"], gain_sweep["stop"]),
         )
 
         # Calculate budget allocation
         phase1_budget = total_points // 2
         num_flux_points = self._calculate_flux_grid_size(
-            flx_sweep, fpt_sweep, pdr_sweep, phase1_budget
+            flux_sweep, freq_sweep, gain_sweep, phase1_budget
         )
         budget_per_flux = phase1_budget // num_flux_points
 
@@ -193,23 +193,23 @@ class JPAOptimizer:
 
     def _calculate_flux_grid_size(
         self,
-        flx_sweep: SweepCfg,
-        fpt_sweep: SweepCfg,
-        pdr_sweep: SweepCfg,
+        flux_sweep: SweepCfg,
+        freq_sweep: SweepCfg,
+        gain_sweep: SweepCfg,
         phase1_budget: int,
     ) -> int:
         """Calculate the number of flux grid points based on sweep ratios."""
-        n_flx = max(1, flx_sweep["expts"])
-        n_fpt = max(1, fpt_sweep["expts"])
-        n_pdr = max(1, pdr_sweep["expts"])
+        n_flux = max(1, flux_sweep["expts"])
+        n_freq = max(1, freq_sweep["expts"])
+        n_gain = max(1, gain_sweep["expts"])
 
         # Scale factor to map total product of expts to phase1_budget
-        # n_flx_eff * n_fpt_eff * n_pdr_eff ~= phase1_budget
+        # n_flux_eff * n_freq_eff * n_gain_eff ~= phase1_budget
         # where n_i_eff = k * n_i
-        total_expts_prod = n_flx * n_fpt * n_pdr
+        total_expts_prod = n_flux * n_freq * n_gain
         k = (phase1_budget / total_expts_prod) ** (1 / 3)
 
-        return max(2, int(round(k * n_flx)))
+        return max(2, int(round(k * n_flux)))
 
     # =========================================================================
     # LHS Sampling
@@ -718,11 +718,11 @@ class JPAOptimizer:
         return self.budget.remaining
 
     @property
-    def num_flx_points(self) -> int:
+    def num_flux_points(self) -> int:
         return len(self.phase1.flux_grid)
 
     @property
-    def budget_per_flx(self) -> int:
+    def budget_per_flux(self) -> int:
         return self.budget.per_flux_slice
 
     @property
@@ -947,8 +947,8 @@ if __name__ == "__main__":
     optimizer = JPAOptimizer(flux_sweep, freq_sweep, power_sweep, total_points)
 
     print(f"Phase 1 budget: {optimizer.phase1_budget}")
-    print(f"Number of flux slices: {optimizer.num_flx_points}")
-    print(f"Budget per flux slice: {optimizer.budget_per_flx} (100% LHS)")
+    print(f"Number of flux slices: {optimizer.num_flux_points}")
+    print(f"Budget per flux slice: {optimizer.budget_per_flux} (100% LHS)")
     print(f"Remaining budget for phase 2+: {optimizer.remaining_budget}")
     print("=" * 60)
 

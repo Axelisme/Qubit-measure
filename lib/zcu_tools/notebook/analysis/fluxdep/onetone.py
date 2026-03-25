@@ -3,7 +3,7 @@ from __future__ import annotations
 import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import display, clear_output
+from IPython.display import clear_output, display
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
@@ -60,7 +60,7 @@ class InteractiveOneTone:
     def init_plots(self, threshold: float) -> None:
         """初始化圖表"""
         # 顯示2D頻譜
-        self.real_signals = np.abs(self.signals)  # (mAs, fpts)
+        self.real_signals = np.abs(self.signals)  # (mAs, freqs)
 
         abs_grad = (
             np.abs(self.signals[:, 1:] - self.signals[:, :-1])
@@ -87,7 +87,7 @@ class InteractiveOneTone:
         self.line = self.axes[0].axhline(
             self.freqs[self.max_freq_idx],
             color="red",
-            label="max fpts",
+            label="max freqs",
         )
 
         # 顯示1D切面
@@ -115,7 +115,7 @@ class InteractiveOneTone:
         # 找出峰值
         peaks, _ = find_peaks(self.smoothed_real_signals, prominence=threshold)
 
-        # 獲取對應的 mAs 和 fpts
+        # 獲取對應的 mAs 和 freqs
         self.s_dev_values = self.dev_values[peaks]
         self.s_freqs = np.full_like(self.s_dev_values, self.freqs[self.max_freq_idx])
 

@@ -54,15 +54,15 @@ class JPAOptCfg(ModularProgramCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
-class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
+class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
     def run(
         self, soc, soccfg, cfg: dict[str, Any], num_points: int
     ) -> JPAOptimizeResult:
         _cfg = check_type(deepcopy(cfg), JPAOptCfg)
 
-        flx_sweep = _cfg["sweep"]["jpa_flux"]
-        fpt_sweep = _cfg["sweep"]["jpa_freq"]
-        pdr_sweep = _cfg["sweep"]["jpa_power"]
+        flux_sweep = _cfg["sweep"]["jpa_flux"]
+        freq_sweep = _cfg["sweep"]["jpa_freq"]
+        gain_sweep = _cfg["sweep"]["jpa_power"]
 
         modules = _cfg["modules"]
         _cfg["sweep"] = {"ge": make_ge_sweep()}
@@ -70,7 +70,7 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
-        optimizer = JPAOptimizer(flx_sweep, fpt_sweep, pdr_sweep, num_points)
+        optimizer = JPAOptimizer(flux_sweep, freq_sweep, gain_sweep, num_points)
 
         # (num_points, [flux, freq, power])
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
@@ -131,10 +131,10 @@ class JPAAutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 idx: int = ctx.env["index"]
                 snrs = np.abs(ctx.root_data)  # (num_points, )
 
-                cur_flx, cur_fpt, cur_pdr = params[idx, :]
+                cur_flux, cur_freq, cur_gain = params[idx, :]
 
                 fig.suptitle(
-                    f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flx:.2g} (mA), Freq: {1e-3 * cur_fpt:.4g} (GHz), Power: {cur_pdr:.2g} (dBm)"
+                    f"Iteration {idx}, Phase {phases[idx]}, Flux: {1e3 * cur_flux:.2g} (mA), Freq: {1e-3 * cur_freq:.4g} (GHz), Power: {cur_gain:.2g} (dBm)"
                 )
 
                 colors = phases

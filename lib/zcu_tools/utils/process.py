@@ -295,14 +295,14 @@ def peak_n_avg(
 
 
 def rotate_phase(
-    fpts: NDArray[np.float64], signals: NDArray[np.complex128], phase_slope: float
+    freqs: NDArray[np.float64], signals: NDArray[np.complex128], phase_slope: float
 ) -> NDArray[np.complex128]:
     """
     Rotate the phase of complex signals based on frequency points
 
     Parameters
     ----------
-    fpts : ndarray
+    freqs : ndarray
         Frequency points array
     signals : ndarray
         Complex signal array to be phase-rotated
@@ -317,11 +317,11 @@ def rotate_phase(
     Notes
     -----
     This function applies a frequency-dependent phase rotation to complex signals.
-    The rotation angle is calculated as: angle = fpts * phase_slope * π/180
+    The rotation angle is calculated as: angle = freqs * phase_slope * π/180
     """
     Is, Qs = signals.real, signals.imag
 
-    angles = fpts * phase_slope * np.pi / 180
+    angles = freqs * phase_slope * np.pi / 180
     Is_rot = Is * np.cos(angles) - Qs * np.sin(angles)
     Qs_rot = Is * np.sin(angles) + Qs * np.cos(angles)
 

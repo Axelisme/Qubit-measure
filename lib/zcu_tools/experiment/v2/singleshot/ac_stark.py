@@ -46,28 +46,30 @@ AcStarkResult: TypeAlias = tuple[
 
 
 def get_resonance_freq(
-    xs: NDArray[np.float64], fpts: NDArray[np.float64], populations: NDArray[np.float64]
+    xs: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    populations: NDArray[np.float64],
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     s_xs = []
-    s_fpts = []
+    s_freqs = []
 
     prev_freq = np.nan
     for x, pop in zip(xs, populations):
         if np.any(np.isnan(pop)):
             continue
 
-        param, _ = fitlor(fpts, pop)
+        param, _ = fitlor(freqs, pop)
         curr_freq = param[3]
 
-        if abs(curr_freq - prev_freq) > 0.1 * (fpts[-1] - fpts[0]):
+        if abs(curr_freq - prev_freq) > 0.1 * (freqs[-1] - freqs[0]):
             continue
 
         prev_freq = curr_freq
 
         s_xs.append(x)
-        s_fpts.append(curr_freq)
+        s_freqs.append(curr_freq)
 
-    return np.array(s_xs), np.array(s_fpts)
+    return np.array(s_xs), np.array(s_freqs)
 
 
 class AcStarkModuleCfg(TypedDict, closed=True):
@@ -96,15 +98,21 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)  # prevent in-place modification
         modules = _cfg["modules"]
 
-
-        gain_sweep = _cfg["sweep"].pop("gain")
+        gain_sweep = _cfg["sweep"].pop("gain")  # remove gain from sweep
 
         # uniform in square space
-        freqs = sweep2array(_cfg["sweep"]["freq"])  # predicted frequencies
+        freqs = sweep2array(
+            _cfg["sweep"]["freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["stark_pulse2"]["ch"]},
+        )
         gains = np.sqrt(
             np.linspace(
                 gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
             )
+        )
+        gains = sweep2array(
+            gains, "gain", {"soccfg": soccfg, "gen_ch": modules["stark_pulse1"]["ch"]}
         )
 
         freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
@@ -269,7 +277,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         fig, ax1 = plt.subplots()
         assert isinstance(fig, Figure)
 
-        # Use NonUniformImage for better visualization with pdr^2 as x-axis
+        # Use NonUniformImage for better visualization with gain^2 as x-axis
         im = NonUniformImage(ax1, cmap="RdBu_r", interpolation="nearest")
         im.set_data(avg_n, freqs, populations.T)
         im.set_extent((avg_n[0], avg_n[-1], freqs[0], freqs[-1]))
@@ -282,15 +290,15 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         # Plot the resonance frequencies and fitted curve
         ax1.plot(ac_coeff * s_gains2, s_freqs, ".", c="k")
 
-        # Fit curve in terms of pdr^2
+        # Fit curve in terms of gain^2
         label = r"$\bar n$" + f" = {ac_coeff:.2g} " + r"$gain^2$"
         gain_fit = ac_coeff * x2_fit
         ax1.plot(gain_fit, y_fit, "-", label=label, color="y")
 
-        # Create secondary x-axis for pdr^2 (Readout Gain²)
+        # Create secondary x-axis for gain^2 (Readout Gain²)
         ax2 = ax1.twiny()
 
-        # main x-axis: avg_n, secondary x-axis: pdr^2
+        # main x-axis: avg_n, secondary x-axis: gain^2
         # avg_n = ac_coeff * gains^2
         ax1.set_xticks(ax1.get_xticks())
         # ax1.set_xticklabels([f"{avg_n:.1f}" for avg_n in ax1.get_xticks()])
@@ -348,7 +356,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
 
         max_p = np.max(populations).item()
 
-        # Use NonUniformImage for better visualization with pdr^2 as x-axis
+        # Use NonUniformImage for better visualization with gain^2 as x-axis
         im = NonUniformImage(ax1, cmap="RdBu_r", interpolation="nearest")
         im.set_data(photons, freqs, populations[..., 0].T)
         im.set_extent((photons[0], photons[-1], freqs[0], freqs[-1]))

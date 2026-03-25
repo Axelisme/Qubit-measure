@@ -6,38 +6,38 @@ from typing_extensions import overload
 
 
 @overload
-def value2flx(
-    value: float, flx_half: float, flx_period: float, fold: bool = False
+def value2flux(
+    value: float, flux_half: float, flux_period: float, fold: bool = False
 ) -> float: ...
 
 
 @overload
-def value2flx(
-    value: NDArray[np.float64], flx_half: float, flx_period: float, fold: bool = False
+def value2flux(
+    value: NDArray[np.float64], flux_half: float, flux_period: float, fold: bool = False
 ) -> NDArray[np.float64]: ...
 
 
-def value2flx(value, flx_half: float, flx_period: float, fold: bool = False):
-    flxs = (value - flx_half) / flx_period + 0.5
+def value2flux(value, flux_half: float, flux_period: float, fold: bool = False):
+    fluxs = (value - flux_half) / flux_period + 0.5
     if fold:
-        flxs = np.mod(flxs, 1)
-        flxs = np.where(flxs > 0.5, 1 - flxs, flxs)
+        fluxs = np.mod(fluxs, 1)
+        fluxs = np.where(fluxs > 0.5, 1 - fluxs, fluxs)
 
-    return flxs
-
-
-@overload
-def flx2value(flxs: float, flx_half: float, flx_period: float) -> float: ...
+    return fluxs
 
 
 @overload
-def flx2value(
-    flxs: NDArray[np.float64], flx_half: float, flx_period: float
+def flux2value(fluxs: float, flux_half: float, flux_period: float) -> float: ...
+
+
+@overload
+def flux2value(
+    fluxs: NDArray[np.float64], flux_half: float, flux_period: float
 ) -> NDArray[np.float64]: ...
 
 
-def flx2value(flxs, flx_half: float, flx_period: float):
-    return (flxs - 0.5) * flx_period + flx_half
+def flux2value(fluxs, flux_half: float, flux_period: float):
+    return (fluxs - 0.5) * flux_period + flux_half
 
 
-__all__ = ["value2flx", "flx2value"]
+__all__ = ["value2flux", "flux2value"]

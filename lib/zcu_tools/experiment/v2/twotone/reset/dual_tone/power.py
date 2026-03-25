@@ -24,12 +24,13 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    TwoPulseReset,
     sweep2param,
 )
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
-# (pdrs1, pdrs2, signals_2d)
+# (gains1, gains2, signals_2d)
 PowerResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
@@ -60,24 +61,27 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             "gain2": _cfg["sweep"]["gain2"],
         }
 
-        pdrs1 = sweep2array(_cfg["sweep"]["gain1"])  # predicted amplitudes
-        pdrs2 = sweep2array(_cfg["sweep"]["gain2"])  # predicted amplitudes
-
-        Reset.set_param(
-            modules["tested_reset"],
-            "gain1",
-            sweep2param("gain1", _cfg["sweep"]["gain1"]),
+        reset_cfg = modules["tested_reset"]
+        gains1 = sweep2array(
+            _cfg["sweep"]["gain1"],
+            "gain",
+            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse1_cfg"]["ch"]},
         )
-        Reset.set_param(
-            modules["tested_reset"],
-            "gain2",
-            sweep2param("gain2", _cfg["sweep"]["gain2"]),
+        gains2 = sweep2array(
+            _cfg["sweep"]["gain2"],
+            "gain",
+            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse2_cfg"]["ch"]},
         )
 
-        def dual_reset_pdr_signal2real(signals: NDArray) -> np.ndarray:
+        gain1_param = sweep2param("gain1", _cfg["sweep"]["gain1"])
+        gain2_param = sweep2param("gain2", _cfg["sweep"]["gain2"])
+        TwoPulseReset.set_param(modules["tested_reset"], "gain1", gain1_param)
+        TwoPulseReset.set_param(modules["tested_reset"], "gain2", gain2_param)
+
+        def dual_reset_gain_signal2real(signals: NDArray) -> np.ndarray:
             # Choose reference point based on sweep direction (use minimum power point)
-            ref_i = 0 if pdrs1[0] < pdrs1[-1] else -1
-            ref_j = 0 if pdrs2[0] < pdrs2[-1] else -1
+            ref_i = 0 if gains1[0] < gains1[-1] else -1
+            ref_j = 0 if gains2[0] < gains2[-1] else -1
             return np.abs(signals - signals[ref_i, ref_j])
 
         with LivePlotter2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
@@ -92,25 +96,27 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),
-                                    Reset("tested_reset", modules["tested_reset"]),
+                                    TwoPulseReset(
+                                        "tested_reset", modules["tested_reset"]
+                                    ),
                                     Readout("readout", modules["readout"]),
                                 ],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),
-                    result_shape=(len(pdrs1), len(pdrs2)),
+                    result_shape=(len(gains1), len(gains2)),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    pdrs1, pdrs2, dual_reset_pdr_signal2real(ctx.root_data)
+                    gains1, gains2, dual_reset_gain_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
         self.last_cfg = _cfg
-        self.last_result = (pdrs1, pdrs2, signals)
+        self.last_result = (gains1, gains2, signals)
 
-        return pdrs1, pdrs2, signals
+        return gains1, gains2, signals
 
     def analyze(
         self,
@@ -124,22 +130,22 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        pdrs1, pdrs2, signals = result
+        gains1, gains2, signals = result
 
         # Apply smoothing for peak finding
         signals_smooth = gaussian_filter(signals, smooth)
 
-        ref_i = 0 if pdrs1[0] < pdrs1[-1] else -1
-        ref_j = 0 if pdrs2[0] < pdrs2[-1] else -1
+        ref_i = 0 if gains1[0] < gains1[-1] else -1
+        ref_j = 0 if gains2[0] < gains2[-1] else -1
         amp2D = np.abs(signals_smooth - signals_smooth[ref_i, ref_j])
 
         # Determine if we should look for max or min
         if amp2D[0, 0] < np.mean(amp2D):
-            gain1_opt = pdrs1[np.argmax(np.max(amp2D, axis=1))]
-            gain2_opt = pdrs2[np.argmax(np.max(amp2D, axis=0))]
+            gain1_opt = gains1[np.argmax(np.max(amp2D, axis=1))]
+            gain2_opt = gains2[np.argmax(np.max(amp2D, axis=0))]
         else:
-            gain1_opt = pdrs1[np.argmin(np.min(amp2D, axis=1))]
-            gain2_opt = pdrs2[np.argmin(np.min(amp2D, axis=0))]
+            gain1_opt = gains1[np.argmin(np.min(amp2D, axis=1))]
+            gain2_opt = gains2[np.argmin(np.min(amp2D, axis=0))]
             amp2D = np.mean(amp2D) - amp2D
 
         fig, ax = plt.subplots(figsize=config.figsize)
@@ -150,7 +156,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             aspect="auto",
             origin="lower",
             interpolation="none",
-            extent=(pdrs1[0], pdrs1[-1], pdrs2[0], pdrs2[-1]),
+            extent=(gains1[0], gains1[-1], gains2[0], gains2[-1]),
         )
         peak_label = f"({gain1_opt:.1f}, {gain2_opt:.1f}) a.u."
         ax.scatter(gain1_opt, gain2_opt, color="r", s=40, marker="*", label=peak_label)
@@ -177,12 +183,12 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        pdrs1, pdrs2, signals = result
+        gains1, gains2, signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Power1", "unit": "a.u.", "values": pdrs1},
-            y_info={"name": "Power2", "unit": "a.u.", "values": pdrs2},
+            x_info={"name": "Power1", "unit": "a.u.", "values": gains1},
+            y_info={"name": "Power2", "unit": "a.u.", "values": gains2},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,
@@ -190,18 +196,18 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PowerResult:
-        signals, pdrs1, pdrs2 = load_data(filepath, **kwargs)
-        assert pdrs1 is not None and pdrs2 is not None
-        assert len(pdrs1.shape) == 1 and len(pdrs2.shape) == 1
-        assert signals.shape == (len(pdrs2), len(pdrs1))
+        signals, gains1, gains2 = load_data(filepath, **kwargs)
+        assert gains1 is not None and gains2 is not None
+        assert len(gains1.shape) == 1 and len(gains2.shape) == 1
+        assert signals.shape == (len(gains2), len(gains1))
 
         signals = signals.T  # transpose back
 
-        pdrs1 = pdrs1.astype(np.float64)
-        pdrs2 = pdrs2.astype(np.float64)
+        gains1 = gains1.astype(np.float64)
+        gains2 = gains2.astype(np.float64)
         signals = signals.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (pdrs1, pdrs2, signals)
+        self.last_result = (gains1, gains2, signals)
 
-        return pdrs1, pdrs2, signals
+        return gains1, gains2, signals

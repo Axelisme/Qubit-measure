@@ -11,7 +11,7 @@ from typing_extensions import Callable, NotRequired, TypedDict
 
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
-from zcu_tools.experiment.v2.utils import round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
@@ -159,18 +159,19 @@ class T1Task(
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         len_sweep = cfg["sweep"]["length"]
 
-        self.lengths = sweep2array(len_sweep)
+        # initial values, may be rounded later
+        self.lengths = sweep2array(len_sweep, allow_array=True)
 
         def measure_t1_fn(ctx: TaskState, update_hook: Callable):
             modules = ctx.cfg["modules"]
-            t1_span = sweep2param("length", ctx.cfg["sweep"]["length"])
+            t1_param = sweep2param("length", ctx.cfg["sweep"]["length"])
             return ModularProgramV2(
                 ctx.env["soccfg"],
                 ctx.cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
-                    Delay("t1_delay", delay=t1_span),
+                    Delay("t1_delay", delay=t1_param),
                     Readout("readout", modules["readout"]),
                 ],
             ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
@@ -181,7 +182,7 @@ class T1Task(
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
-        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
+        self.lengths = sweep2array(self.lengths, "time", {"soccfg": ctx.env["soccfg"]})
 
         self.task.init(ctx.child("signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
@@ -229,7 +230,7 @@ class T1WithToneTask(
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         len_sweep = cfg["sweep"]["length"]
 
-        self.lengths = sweep2array(len_sweep)
+        self.lengths = sweep2array(len_sweep)  # initial values, may be rounded later
 
         def measure_t1_fn(ctx: TaskState, update_hook: Callable):
             cfg = deepcopy(ctx.cfg)
@@ -257,7 +258,14 @@ class T1WithToneTask(
         )
 
     def init(self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar=False) -> None:
-        self.lengths = round_zcu_time(self.lengths, ctx.env["soccfg"])
+        self.lengths = sweep2array(
+            self.lengths,
+            "time",
+            {
+                "soccfg": ctx.env["soccfg"],
+                "gen_ch": self.cfg["modules"]["probe_pulse"]["ch"],
+            },
+        )
 
         self.task.init(ctx.child("signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
 

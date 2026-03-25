@@ -24,6 +24,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    TwoPulseReset,
     sweep2param,
 )
 from zcu_tools.program.v2.modules import TwoPulseResetCfg
@@ -54,20 +55,24 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
-
-        # Check that reset pulse is dual pulse type
         modules = _cfg["modules"]
 
-        lens = sweep2array(_cfg["sweep"]["length"])  # predicted pulse lengths
+        pulse1_cfg = modules["tested_reset"]["pulse1_cfg"]
+        pulse2_cfg = modules["tested_reset"]["pulse2_cfg"]
 
-        pulse1_cfg = modules["tested_reset"]["pulse1_cfg"]  # type: ignore
-        pulse2_cfg = modules["tested_reset"]["pulse2_cfg"]  # type: ignore
+        lengths = sweep2array(
+            _cfg["sweep"]["length"],
+            "time",
+            {"soccfg": soccfg, "gen_ch": pulse1_cfg["ch"]},
+        )
 
-        len_diff = pulse2_cfg["waveform"]["length"] - pulse1_cfg["waveform"]["length"]
-        len1_span = sweep2param("length", _cfg["sweep"]["length"])
+        length_diff = (
+            pulse2_cfg["waveform"]["length"] - pulse1_cfg["waveform"]["length"]
+        )
+        length1_param = sweep2param("length", _cfg["sweep"]["length"])
 
-        Pulse.set_param(pulse1_cfg, "length", len1_span)
-        Pulse.set_param(pulse2_cfg, "length", len1_span + len_diff)
+        Pulse.set_param(pulse1_cfg, "length", length1_param)
+        Pulse.set_param(pulse2_cfg, "length", length1_param + length_diff)
 
         with LivePlotter1D("Length (us)", "Amplitude") as viewer:
             signals = run_task(
@@ -81,25 +86,27 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),
-                                    Reset("tested_reset", modules["tested_reset"]),
+                                    TwoPulseReset(
+                                        "tested_reset", modules["tested_reset"]
+                                    ),
                                     Readout("readout", modules["readout"]),
                                 ],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),
-                    result_shape=(len(lens),),
+                    result_shape=(len(lengths),),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    lens, reset_length_signal2real(ctx.root_data)
+                    lengths, reset_length_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
         self.last_cfg = _cfg
-        self.last_result = (lens, signals)
+        self.last_result = (lengths, signals)
 
-        return lens, signals
+        return lengths, signals
 
     def analyze(self, result: Optional[LengthResult] = None) -> Figure:
         if result is None:

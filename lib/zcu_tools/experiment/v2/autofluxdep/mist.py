@@ -91,6 +91,8 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
 
+        self.gains = sweep2array(gain_sweep)  # initial array, may be rounded later
+
         def measure_fn(
             ctx: TaskState, update_hook: Optional[Callable]
         ) -> list[NDArray[np.float64]]:
@@ -136,6 +138,15 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         )
         cfg = check_type(cfg_temp, MistCfg)
 
+        self.gains = sweep2array(
+            cfg["sweep"]["gain"],
+            "gain",
+            {
+                "soccfg": ctx.env["soccfg"],
+                "gen_ch": cfg["modules"]["mist_pulse"]["ch"],
+            },
+        )
+
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.value["raw_signals"]
@@ -173,27 +184,27 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         )
 
     def update_plotter(self, plotters, ctx: TaskState, signals: MistResult) -> None:
-        flx_values: NDArray[np.float64] = ctx.env["flx_values"]
-        gains: NDArray[np.float64] = sweep2array(self.gain_sweep)
+        flux_values: NDArray[np.float64] = ctx.env["flux_values"]
 
-        # shape: (flx, gains)
+        # shape: (flux, gains)
         mist_signals = mist_fluxdep_signal2real(signals["raw_signals"])
 
-        plotters["mist"].update(flx_values, gains, mist_signals, refresh=False)
+        plotters["mist"].update(flux_values, self.gains, mist_signals, refresh=False)
 
-    def save(self, filepath, flx_values, result, comment, prefix_tag) -> None:
+    def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
 
-        gains = sweep2array(self.gain_sweep)
-        np.savez_compressed(filepath, flx_values=flx_values, gains=gains, **result)
+        np.savez_compressed(
+            filepath, flux_values=flux_values, gains=self.gains, **result
+        )
 
-        x_info = {"name": "Flux value", "unit": "a.u.", "values": flx_values}
+        x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
 
-        # raw_signals: (flx, gains)
+        # raw_signals: (flux, gains)
         save_data(
             filepath=str(filepath.with_name(filepath.name + "_signals")),
             x_info=x_info,
-            y_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
+            y_info={"name": "Readout Gain", "unit": "a.u.", "values": self.gains},
             z_info={
                 "name": "Signal",
                 "unit": "a.u.",
@@ -207,13 +218,13 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
     def load(cls, filepath: str, **kwargs) -> dict:
         data = np.load(filepath)
 
-        flx_values = data["flx_values"]
+        flux_values = data["flux_values"]
         gains = data["gains"]
         raw_signals = data["raw_signals"]
         success = data["success"]
 
-        assert raw_signals.shape == (len(flx_values), len(gains))
-        assert success.shape == (len(flx_values),)
+        assert raw_signals.shape == (len(flux_values), len(gains))
+        assert success.shape == (len(flux_values),)
 
         raw_signals = raw_signals.astype(np.complex128)
         success = np.asarray(success, dtype=np.bool_)
@@ -221,6 +232,6 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         return {
             "raw_signals": raw_signals,
             "success": success,
-            "flx_values": flx_values,
+            "flux_values": flux_values,
             "gains": gains,
         }

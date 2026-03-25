@@ -12,7 +12,7 @@ from typing_extensions import Any, Optional, TypeAlias, cast
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
@@ -41,27 +41,22 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             "This method only supports const and flat_top pulse style"
         )
 
-        lengths = sweep2array(_cfg["sweep"]["length"])  # predicted
-
-        Pulse.set_param(
-            modules["qub_pulse"],
-            "length",
-            sweep2param("length", _cfg["sweep"]["length"]),
+        # initial values, may be rounded later
+        lengths = sweep2array(
+            _cfg["sweep"]["length"],
+            "time",
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
+
+        length_param = sweep2param("length", _cfg["sweep"]["length"])
+        Pulse.set_param(modules["qub_pulse"], "length", length_param)
 
         with LivePlotter1D("Length (us)", "Signal") as viewer:
 
             def measure_fn(ctx: TaskState, update_hook):
-                nonlocal lengths
-                prog = TwoToneProgram(soccfg, ctx.cfg)
-
-                # get actual lengths after program generation, in case there are some adjustments
-                lengths = cast(
-                    NDArray[np.float64],
-                    prog.get_pulse_param("qub_pulse", "length", as_array=True),
+                return TwoToneProgram(soccfg, ctx.cfg).acquire(
+                    soc, progress=False, callback=update_hook
                 )
-
-                return prog.acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
                 task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)),
@@ -83,21 +78,19 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         length_sweep = _cfg["sweep"].pop("length")
 
-        lengths = sweep2array(length_sweep)  # predicted
-        lengths = round_zcu_time(lengths, soccfg, gen_ch=modules["qub_pulse"]["ch"])
+        lengths = sweep2array(
+            length_sweep,
+            "time",
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+        )
         lengths = np.unique(lengths)  # remove duplicates
 
         with LivePlotter1D("Length (us)", "Signal") as viewer:
 
             def measure_fn(ctx: TaskState, update_hook):
-                nonlocal lengths
-                prog = TwoToneProgram(soccfg, ctx.cfg)
-
-                # get actual lengths after program generation, in case there are some adjustments
-                true_t = float(prog.get_time_param("pi2_pulse1", "t"))
-                lengths[ctx.env["scan_index"]] = true_t
-
-                return prog.acquire(soc, progress=False, callback=update_hook)
+                return TwoToneProgram(soccfg, ctx.cfg).acquire(
+                    soc, progress=False, callback=update_hook
+                )
 
             def update_fn(i, ctx: TaskState, length):
                 ctx.env["scan_index"] = i

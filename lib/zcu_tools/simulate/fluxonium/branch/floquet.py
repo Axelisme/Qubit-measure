@@ -14,7 +14,7 @@ class FloquetBranchAnalysis:
         params: tuple[float, float, float],
         r_f: float,
         g: float,
-        flx: float = 0.5,
+        flux: float = 0.5,
         qub_dim: int = 40,
         qub_cutoff: int = 60,
         esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
@@ -25,7 +25,7 @@ class FloquetBranchAnalysis:
         from scqubits.core.fluxonium import Fluxonium  # lazy import
 
         fluxonium = Fluxonium(
-            *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
+            *params, flux=flux, cutoff=qub_cutoff, truncated_dim=qub_dim
         )
         if esys is None:
             esys = fluxonium.eigensys(evals_count=qub_dim)
@@ -126,7 +126,7 @@ def calc_branch_infos(
     params: tuple[float, float, float],
     r_f: float,
     g: float,
-    flx: float,
+    flux: float,
     qub_dim: int,
     qub_cutoff: int,
     photons: NDArray[np.float64],
@@ -135,7 +135,7 @@ def calc_branch_infos(
     esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
 ) -> tuple[dict[int, list[int]], list[qt.FloquetBasis]]:
     fb_analysis = FloquetBranchAnalysis(
-        params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff, esys=esys
+        params, r_f, g, flux=flux, qub_dim=qub_dim, qub_cutoff=qub_cutoff, esys=esys
     )
 
     fbasis_n = Parallel(n_jobs=-1)(
@@ -172,7 +172,7 @@ def calc_ge_snr(
         params=params,
         r_f=r_f,
         g=g,
-        flx=flux,
+        flux=flux,
         qub_dim=qub_dim,
         qub_cutoff=qub_cutoff,
         photons=photons,
@@ -206,7 +206,7 @@ class FloquetWithTLSBranchAnalysis:
         g: float,
         E_tls: float,
         g_tls: float,
-        flx: float = 0.5,
+        flux: float = 0.5,
         qub_dim: int = 40,
         qub_cutoff: int = 60,
         esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
@@ -217,7 +217,7 @@ class FloquetWithTLSBranchAnalysis:
         from scqubits.core.fluxonium import Fluxonium  # lazy import
 
         fluxonium = Fluxonium(
-            *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
+            *params, flux=flux, cutoff=qub_cutoff, truncated_dim=qub_dim
         )
         if esys is None:
             esys = fluxonium.eigensys(evals_count=qub_dim)
@@ -328,7 +328,7 @@ def calc_branch_infos_with_tls(
     g: float,
     E_tls: float,
     g_tls: float,
-    flx: float,
+    flux: float,
     qub_dim: int,
     qub_cutoff: int,
     photons: NDArray[np.float64],
@@ -342,7 +342,7 @@ def calc_branch_infos_with_tls(
         g,
         E_tls,
         g_tls,
-        flx=flx,
+        flux=flux,
         qub_dim=qub_dim,
         qub_cutoff=qub_cutoff,
         esys=esys,
@@ -368,7 +368,7 @@ class FloquetDualCouplingBranchAnalysis:
         r_f: float,
         g1: float,
         g2: float,
-        flx: float = 0.5,
+        flux: float = 0.5,
         qub_dim: int = 40,
         qub_cutoff: int = 60,
         esys: Optional[tuple[NDArray[np.float64], NDArray[np.complex128]]] = None,
@@ -380,7 +380,7 @@ class FloquetDualCouplingBranchAnalysis:
         from scqubits.core.fluxonium import Fluxonium  # lazy import
 
         fluxonium = Fluxonium(
-            *params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim
+            *params, flux=flux, cutoff=qub_cutoff, truncated_dim=qub_dim
         )
         if esys is None:
             esys = fluxonium.eigensys(evals_count=qub_dim)

@@ -16,22 +16,22 @@ class FluxoniumPredictor:
     def __init__(
         self,
         params: tuple[float, float, float],
-        flx_half: float,
-        flx_period: float,
-        flx_bias: float,
+        flux_half: float,
+        flux_period: float,
+        flux_bias: float,
     ) -> None:
         self.params = params
-        self.flx_half = flx_half
-        self.flx_period = flx_period
+        self.flux_half = flux_half
+        self.flux_period = flux_period
 
-        self.flx_bias = flx_bias
+        self.flux_bias = flux_bias
 
         from scqubits.core.fluxonium import Fluxonium  # lazy import
 
         self.fluxonium = Fluxonium(*self.params, flux=0.5, cutoff=40, truncated_dim=2)
 
     @classmethod
-    def from_file(cls, result_path: str, flx_bias: float = 0.0) -> FluxoniumPredictor:
+    def from_file(cls, result_path: str, flux_bias: float = 0.0) -> FluxoniumPredictor:
         from zcu_tools.notebook.persistance import load_result
 
         result_dict = load_result(result_path)
@@ -44,27 +44,27 @@ class FluxoniumPredictor:
             fluxdepfit_dict["params"]["EC"],
             fluxdepfit_dict["params"]["EL"],
         )
-        flx_half = fluxdepfit_dict["flx_half"]
-        flx_period = fluxdepfit_dict["flx_period"]
+        flux_half = fluxdepfit_dict["flux_half"]
+        flux_period = fluxdepfit_dict["flux_period"]
 
-        return cls(params, flx_half, flx_period, flx_bias)
+        return cls(params, flux_half, flux_period, flux_bias)
 
     def clone(self) -> FluxoniumPredictor:
         return FluxoniumPredictor(
-            self.params, self.flx_half, self.flx_period, self.flx_bias
+            self.params, self.flux_half, self.flux_period, self.flux_bias
         )
 
-    def value_to_flx(self, cur_value: float) -> float:
-        return (cur_value + self.flx_bias - self.flx_half) / self.flx_period + 0.5
+    def value_to_flux(self, cur_value: float) -> float:
+        return (cur_value + self.flux_bias - self.flux_half) / self.flux_period + 0.5
 
-    def flx_to_value(self, cur_flx: float) -> float:
-        return (cur_flx - 0.5) * self.flx_period + self.flx_half - self.flx_bias
+    def flux_to_value(self, cur_flux: float) -> float:
+        return (cur_flux - 0.5) * self.flux_period + self.flux_half - self.flux_bias
 
     def calculate_bias(
         self, cur_value: float, cur_freq: float, transition: tuple[int, int] = (0, 1)
     ) -> float:
         """
-        Calibrate the flx_half of the fluxonium qubit by a given current and frequency.
+        Calibrate the flux_half of the fluxonium qubit by a given current and frequency.
 
         This method finds a bias such that the predicted frequency matches cur_freq,
         and among all equivalent solutions (periodic and mirror symmetry), returns
@@ -84,16 +84,16 @@ class FluxoniumPredictor:
         # Step 1: Use root_scalar to find one valid fit_A
         try:
             bracket = [
-                cur_value - 0.25 * self.flx_period,
-                cur_value + 0.25 * self.flx_period,
+                cur_value - 0.25 * self.flux_period,
+                cur_value + 0.25 * self.flux_period,
             ]
             result = root_scalar(
                 freq_diff_func,
                 x0=cur_value,
-                x1=cur_value + 0.1 * self.flx_period,
+                x1=cur_value + 0.1 * self.flux_period,
                 method="secant",
                 bracket=bracket,
-                xtol=1e-5 * self.flx_period,
+                xtol=1e-5 * self.flux_period,
                 maxiter=100,
             )
             fit_value = result.root
@@ -103,8 +103,8 @@ class FluxoniumPredictor:
             fit_value = cur_value
 
         # Step 2: Compute initial bias and corresponding flux
-        bias0 = fit_value - cur_value + self.flx_bias
-        phi0 = (cur_value + bias0 - self.flx_half) / self.flx_period + 0.5
+        bias0 = fit_value - cur_value + self.flux_bias
+        phi0 = (cur_value + bias0 - self.flux_half) / self.flux_period + 0.5
 
         # Step 3: Enumerate equivalent flux candidates (periodic + mirror symmetry)
         # Periodic: phi0 + n
@@ -116,10 +116,10 @@ class FluxoniumPredictor:
             candidate_fluxes.append(1 - phi0 + n)  # mirror equivalents
 
         # Step 4: Convert each candidate flux to candidate bias
-        # From value_to_flx: flx = (cur_value + bias - flx_half) / flx_period + 0.5
-        # Solve for bias: bias = (flx - 0.5) * flx_period + flx_half - cur_value
+        # From value_to_flux: flux = (cur_value + bias - flux_half) / flux_period + 0.5
+        # Solve for bias: bias = (flux - 0.5) * flux_period + flux_half - cur_value
         candidate_biases = [
-            (phi - 0.5) * self.flx_period + self.flx_half - cur_value
+            (phi - 0.5) * self.flux_period + self.flux_half - cur_value
             for phi in candidate_fluxes
         ]
 
@@ -128,11 +128,11 @@ class FluxoniumPredictor:
 
         return best_bias
 
-    def update_bias(self, flx_bias: float) -> None:
-        self.flx_bias = flx_bias
+    def update_bias(self, flux_bias: float) -> None:
+        self.flux_bias = flux_bias
 
     def _predict_freq(self, cur_value: float, transition: tuple[int, int]) -> float:
-        flux = self.value_to_flx(cur_value)
+        flux = self.value_to_flux(cur_value)
 
         self.fluxonium.flux = flux
         energies = self.fluxonium.eigenvals(evals_count=max(*transition) + 5)
@@ -172,7 +172,7 @@ class FluxoniumPredictor:
         transition: tuple[int, int],
         operator: Literal["phi", "n"],
     ) -> float:
-        flux = self.value_to_flx(cur_value)
+        flux = self.value_to_flux(cur_value)
 
         self.fluxonium.flux = flux
         if operator == "n":

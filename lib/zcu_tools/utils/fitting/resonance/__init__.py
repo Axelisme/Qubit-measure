@@ -19,7 +19,7 @@ from .transmission import TransmissionModel
 
 
 def get_proper_model(
-    fpts: NDArray[np.float64], signals: NDArray[np.complex128]
+    freqs: NDArray[np.float64], signals: NDArray[np.complex128]
 ) -> Union[HangerModel, TransmissionModel]:
     background = 0.5 * (np.abs(signals[0]) + np.abs(signals[-1]))
     magnitudes = np.abs(signals)

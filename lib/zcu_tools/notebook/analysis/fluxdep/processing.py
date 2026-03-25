@@ -43,7 +43,7 @@ def spectrum2d_findpoint(
         real_signals = real_signals * weight
 
     s_mAs = []
-    s_fpts = []
+    s_freqs = []
     for i in range(real_signals.shape[0]):
         peaks, _ = find_peaks(
             real_signals[i, :], height=threshold, width=(1, None), distance=5
@@ -54,8 +54,8 @@ def spectrum2d_findpoint(
             peaks = peaks[np.argsort(real_signals[i, peaks])[-3:]]
 
         s_mAs.extend(dev_values[i] * np.ones(len(peaks)))
-        s_fpts.extend(freqs[peaks])
-    return np.array(s_mAs), np.array(s_fpts)
+        s_freqs.extend(freqs[peaks])
+    return np.array(s_mAs), np.array(s_freqs)
 
 
 def downsample_points(

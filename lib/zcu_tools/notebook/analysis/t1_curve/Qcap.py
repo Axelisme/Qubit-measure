@@ -79,7 +79,7 @@ def calc_Qcap_vs_omega(
     T1errs: Optional[NDArray[np.float64]] = None,
     Temp: float = 20e-3,
 ) -> Union[NDArray[np.float64], tuple[NDArray[np.float64], NDArray[np.float64]]]:
-    """fpts: GHz, T1s: ns, guess_Temp: K -> 1"""
+    """freqs: GHz, T1s: ns, guess_Temp: K -> 1"""
     EJ, EC, EL = params
 
     dipoles = calc_cap_dipole(params, n_elements, omegas, Temp)

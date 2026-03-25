@@ -85,6 +85,9 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
+        # initial array, may be rounded later
+        self.detunes = sweep2array(self.detune_sweep)
+
         self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=lambda ctx, update_hook: (
                 prog := TwoToneProgram(ctx.env["soccfg"], ctx.cfg)
@@ -113,11 +116,9 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         predictor: FluxoniumPredictor = ctx.env["predictor"]
         info: FluxDepInfoDict = ctx.env["info"]
 
-        detunes = sweep2array(self.detune_sweep)
-
-        flx = info["flx_value"]
-        predict_freq = predictor.predict_freq(flx)
-        info["predict_freq"] = predict_freq + self.freq_err_pred.predict(flx)
+        flux = info["flux_value"]
+        predict_freq = predictor.predict_freq(flux)
+        info["predict_freq"] = predict_freq + self.freq_err_pred.predict(flux)
 
         cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
         if cfg_temp is None:
@@ -137,6 +138,15 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         )
         cfg = check_type(cfg_temp, QubitFreqCfg)
 
+        self.detunes = sweep2array(
+            cfg["sweep"]["detune"],
+            "freq",
+            {
+                "soccfg": ctx.env["soccfg"],
+                "gen_ch": cfg["modules"]["qub_pulse"]["ch"],
+            },
+        )
+
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.value["raw_signals"]
@@ -145,7 +155,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         real_signals = qubitfreq_signal2real(raw_signals)
 
         detune, freq_err, kappa, kappa_err, fit_signals, _ = fit_qubit_freq(
-            detunes, real_signals
+            self.detunes, real_signals
         )
         fit_freq = center_freq + detune
 
@@ -154,12 +164,12 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
 
         if mean_err < 0.2 * np.ptp(fit_signals):
             freq_error = fit_freq - predict_freq
-            bias = predictor.calculate_bias(flx, fit_freq)
+            bias = predictor.calculate_bias(flux, fit_freq)
             predictor.update_bias(bias)
 
-            self.freq_err_pred.update(flx, freq_error)
+            self.freq_err_pred.update(flux, freq_error)
             self.freq_err_pred.move(
-                (fit_freq - predictor.predict_freq(flx)) - freq_error
+                (fit_freq - predictor.predict_freq(flux)) - freq_error
             )
 
         # if fitting is bad, disgard it
@@ -174,7 +184,9 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         if success:
             cur_factor = kappa / float(cfg["modules"]["qub_pulse"]["gain"])
             prev_factor = info.last.get("qfw_factor", cur_factor)
-            num_step = max(1, info["flx_idx"] - info.last.get("qubfreq_success_idx", 0))
+            num_step = max(
+                1, info["flux_idx"] - info.last.get("qubfreq_success_idx", 0)
+            )
             weight = 0.7**num_step
             smooth_factor = (1 - weight) * cur_factor + weight * prev_factor
 
@@ -183,7 +195,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
                 fit_detune=detune,
                 fit_kappa=kappa,
                 qfw_factor=smooth_factor,
-                qubfreq_success_idx=info["flx_idx"],
+                qubfreq_success_idx=info["flux_idx"],
             )
 
         with MinIntervalFunc.force_execute():
@@ -240,30 +252,31 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
     def update_plotter(
         self, plotters, ctx: TaskState, signals: QubitFreqResult
     ) -> None:
-        flx_values = ctx.env["flx_values"]
+        flux_values = ctx.env["flux_values"]
 
         self.freq_line.set_xdata([ctx.env["info"].get("fit_detune", np.nan)])
-        plotters["fit_freq"].update(flx_values, signals["fit_freq"], refresh=False)
+        plotters["fit_freq"].update(flux_values, signals["fit_freq"], refresh=False)
         plotters["detune"].update(
-            flx_values,
-            sweep2array(self.detune_sweep),
+            flux_values,
+            self.detunes,
             qubitfreq_fluxdep_signal2real(signals["raw_signals"]),
             refresh=False,
         )
 
-    def save(self, filepath, flx_values, result, comment, prefix_tag) -> None:
+    def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
 
-        detunes = sweep2array(self.detune_sweep)
-        np.savez_compressed(filepath, flx_values=flx_values, detunes=detunes, **result)
+        np.savez_compressed(
+            filepath, flux_values=flux_values, detunes=self.detunes, **result
+        )
 
-        x_info = {"name": "Flux value", "unit": "a.u.", "values": flx_values}
+        x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
 
         # signals
         save_data(
             filepath=str(filepath.with_name(filepath.name + "_signals")),
             x_info=x_info,
-            y_info={"name": "Detune", "unit": "Hz", "values": 1e6 * detunes},
+            y_info={"name": "Detune", "unit": "Hz", "values": 1e6 * self.detunes},
             z_info={
                 "name": "Signal",
                 "unit": "a.u.",
@@ -312,44 +325,46 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
     def load(cls, filepath: str, **kwargs) -> dict:
         data = np.load(filepath)
 
-        flx_values: NDArray[np.float64] = data["flx_values"]
+        flux_values: NDArray[np.float64] = data["flux_values"]
         detunes: NDArray[np.float64] = data["detunes"]
         fit_detune: NDArray[np.float64] = data["fit_detune"]
         fit_freq_err: NDArray[np.float64] = data["fit_freq_err"]
         fit_kappa: NDArray[np.float64] = data["fit_kappa"]
         fit_kappa_err: NDArray[np.float64] = data["fit_kappa_err"]
 
-        signals_stored, flx_sig, detunes_sig = load_data(
+        signals_stored, flux_sig, detunes_sig = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs
         )
-        assert flx_sig is not None and detunes_sig is not None
-        assert np.array_equal(flx_values, flx_sig)
+        assert flux_sig is not None and detunes_sig is not None
+        assert np.array_equal(flux_values, flux_sig)
         assert np.array_equal(detunes, detunes_sig)
-        assert signals_stored.shape == (len(detunes), len(flx_values))
+        assert signals_stored.shape == (len(detunes), len(flux_values))
 
-        predict_freq_data, flx_predict, _ = load_data(
+        predict_freq_data, flux_predict, _ = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_predict_freq")),
             **kwargs,
         )
-        fit_freq_data, flx_fit, _ = load_data(
+        fit_freq_data, flux_fit, _ = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_fit_freq")), **kwargs
         )
-        success_data, flx_success, _ = load_data(
+        success_data, flux_success, _ = load_data(
             str(Path(filepath).with_name(Path(filepath).name + "_success")), **kwargs
         )
 
         assert (
-            flx_predict is not None and flx_fit is not None and flx_success is not None
+            flux_predict is not None
+            and flux_fit is not None
+            and flux_success is not None
         )
         assert (
             predict_freq_data.shape
             == fit_freq_data.shape
             == success_data.shape
-            == (len(flx_values),)
+            == (len(flux_values),)
         )
-        assert np.array_equal(flx_values, flx_predict)
-        assert np.array_equal(flx_values, flx_fit)
-        assert np.array_equal(flx_values, flx_success)
+        assert np.array_equal(flux_values, flux_predict)
+        assert np.array_equal(flux_values, flux_fit)
+        assert np.array_equal(flux_values, flux_success)
 
         raw_signals = signals_stored.T.astype(np.complex128)
         predict_freq = predict_freq_data.astype(np.float64)

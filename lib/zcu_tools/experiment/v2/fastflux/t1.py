@@ -11,7 +11,7 @@ from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, 
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
-from zcu_tools.experiment.v2.utils import round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -63,9 +63,13 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         modules = _cfg["modules"]
 
         # uniform in square space
-        gains = sweep2array(_cfg["sweep"]["gain"])  # predicted gains
-        lengths = sweep2array(_cfg["sweep"]["length"])  # predicted lengths
-        lengths = round_zcu_time(lengths, soccfg)
+        lf_ch = modules["flux_pulse"]["ch"]
+        gains = sweep2array(
+            _cfg["sweep"]["gain"], "gain", {"soccfg": soccfg, "gen_ch": lf_ch}
+        )
+        lengths = sweep2array(
+            _cfg["sweep"]["length"], "time", {"soccfg": soccfg, "gen_ch": lf_ch}
+        )
 
         gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
         length_param = sweep2param("length", _cfg["sweep"]["length"])
@@ -74,10 +78,8 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         with LivePlotter2D("Flux Pulse Gain (a.u.)", "Time (us)") as viewer:
 
             def measure_fn(ctx, update_hook):
-                nonlocal lengths
-
                 modules = ctx.cfg["modules"]
-                prog = ModularProgramV2(
+                return ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
@@ -91,16 +93,8 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                         Pulse("pi_pulse", modules["pi_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
-                )
+                ).acquire(soc, progress=False, callback=update_hook)
 
-                # get actual values after program generation, in case there are some adjustments
-                true_lengths = cast(
-                    NDArray[np.float64],
-                    prog.get_time_param("t1_delay", "t", as_array=True),
-                )
-                lengths = true_lengths - true_lengths[0] + lengths[0]
-
-                return prog.acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
                 task=Task(

@@ -7,7 +7,7 @@ import re
 import h5py as h5
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Any, TypedDict, NotRequired, Optional, cast
+from typing_extensions import Any, NotRequired, Optional, TypedDict, cast
 
 
 def format_rawdata(
@@ -34,9 +34,9 @@ class TransitionDict(TypedDict, extra_items=list[tuple[int, int]]):
 
 class FluxDepFitResult(TypedDict):
     params: dict[str, float]
-    flx_half: float
-    flx_int: float
-    flx_period: float
+    flux_half: float
+    flux_int: float
+    flux_period: float
     plot_transitions: TransitionDict
 
 
@@ -104,9 +104,9 @@ class PointsData(TypedDict):
 
 
 class SpectrumResult(TypedDict):
-    flx_half: float
-    flx_int: float
-    flx_period: float
+    flux_half: float
+    flux_int: float
+    flux_period: float
     spectrum: SpectrumData
     points: PointsData
 
@@ -118,9 +118,9 @@ def dump_spectrums(
     with h5.File(path, mode) as f:
         for name, spectrum in spectrums.items():
             grp = f.create_group(name)
-            grp.create_dataset("flx_half", data=spectrum["flx_half"])
-            grp.create_dataset("flx_int", data=spectrum["flx_int"])
-            grp.create_dataset("flx_period", data=spectrum["flx_period"])
+            grp.create_dataset("flux_half", data=spectrum["flux_half"])
+            grp.create_dataset("flux_int", data=spectrum["flux_int"])
+            grp.create_dataset("flux_period", data=spectrum["flux_period"])
 
             spect_data = spectrum["spectrum"]
             spect_grp = grp.create_group("spectrum")
@@ -147,9 +147,9 @@ def load_spectrums(path: str) -> dict[str, SpectrumResult]:
             assert isinstance(spect_grp, h5.Group)
             assert isinstance(points_grp, h5.Group)
             spectrums[name] = SpectrumResult(
-                flx_half=grp["flx_half"][()],  # type: ignore
-                flx_int=grp["flx_int"][()],  # type: ignore
-                flx_period=grp["flx_period"][()],  # type: ignore
+                flux_half=grp["flux_half"][()],  # type: ignore
+                flux_int=grp["flux_int"][()],  # type: ignore
+                flux_period=grp["flux_period"][()],  # type: ignore
                 spectrum={
                     "dev_values": spect_grp["dev_values"][()],  # type: ignore
                     "fluxs": spect_grp["fluxs"][()],  # type: ignore

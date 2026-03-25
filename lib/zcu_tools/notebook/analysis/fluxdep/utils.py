@@ -109,11 +109,11 @@ class FreqFluxDependVisualizer(FluxDependVisualizer):
             # Get corresponding data and range
             spect_data = spectrum["spectrum"]
             signals = spect_data["signals"]
-            flx_mask = np.any(~np.isnan(signals), axis=1)
-            fpt_mask = np.any(~np.isnan(signals), axis=0)
-            signals = signals[flx_mask, :][:, fpt_mask]
-            fluxs: NDArray[np.float64] = spect_data["fluxs"][flx_mask]
-            freqs: NDArray[np.float64] = spect_data["freqs"][fpt_mask]
+            flux_mask = np.any(~np.isnan(signals), axis=1)
+            freq_mask = np.any(~np.isnan(signals), axis=0)
+            signals = signals[flux_mask, :][:, freq_mask]
+            fluxs: NDArray[np.float64] = spect_data["fluxs"][flux_mask]
+            freqs: NDArray[np.float64] = spect_data["freqs"][freq_mask]
 
             # Normalize data
             real_signals = cast2real_and_norm(signals)

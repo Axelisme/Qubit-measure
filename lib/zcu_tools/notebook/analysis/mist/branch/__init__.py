@@ -23,12 +23,12 @@ def plot_chi_and_snr_over_photon(
     chi_over_n: NDArray[np.float64],
     snrs: NDArray[np.float64],
     qub_name: str,
-    flx: float,
+    flux: float,
 ) -> tuple[Figure, tuple[Axes, Axes]]:
     best_n = photons[np.argsort(snrs)[-3]]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-    ax1.set_title(f"{qub_name} at flux = {flx:.1f}")
+    ax1.set_title(f"{qub_name} at flux = {flux:.1f}")
     ax1.plot(photons, np.abs(chi_over_n))
     ax1.set_ylabel(r"$|\chi_{01}|$ [GHz]")
     ax1.grid()
@@ -162,10 +162,10 @@ def calc_critical_photons(
     return photons[critical_idx]
 
 
-def plot_cn_over_flx(
-    flxs: NDArray[np.float64],
+def plot_cn_over_flux(
+    fluxs: NDArray[np.float64],
     photons: NDArray[np.float64],
-    populations_over_flx: NDArray[np.float64],
+    populations_over_flux: NDArray[np.float64],
     critical_levels: dict[int, float],
 ) -> go.Figure:
     # plot the critical photon number as a function of flux
@@ -177,7 +177,7 @@ def plot_cn_over_flx(
     )
 
     for i, critical_level in enumerate(critical_levels.values()):
-        pop = populations_over_flx[:, i, :]
+        pop = populations_over_flux[:, i, :]
         cn = calc_critical_photons(photons, pop, critical_level)
 
         clip_pop = np.clip(pop, 0, critical_level)
@@ -185,7 +185,7 @@ def plot_cn_over_flx(
         fig.add_trace(
             go.Heatmap(
                 z=clip_pop.T,
-                x=flxs,
+                x=fluxs,
                 y=photons,
                 colorscale="Viridis",
                 zmin=0,
@@ -198,7 +198,7 @@ def plot_cn_over_flx(
 
         fig.add_trace(
             go.Scatter(
-                x=flxs,
+                x=fluxs,
                 y=cn,
                 mode="markers+lines",
                 marker=dict(color="red", size=6),
@@ -217,17 +217,17 @@ def plot_cn_over_flx(
 
 def plot_cn_with_mist(
     fig,
-    flxs: NDArray[np.float64],
+    fluxs: NDArray[np.float64],
     photons: NDArray[np.float64],
-    populations_over_flx: NDArray[np.float64],
+    populations_over_flux: NDArray[np.float64],
     critical_levels: dict[int, float],
-    mist_flxs: NDArray[np.float64],
+    mist_fluxs: NDArray[np.float64],
     fill_alpha: float = 0.2,
     **fig_kwargs,
 ):
-    flxs = np.concatenate([flxs, 1 - flxs[::-1]])
-    populations_over_flx = np.concatenate(
-        [populations_over_flx, populations_over_flx[::-1, ...]], axis=0
+    fluxs = np.concatenate([fluxs, 1 - fluxs[::-1]])
+    populations_over_flux = np.concatenate(
+        [populations_over_flux, populations_over_flux[::-1, ...]], axis=0
     )
 
     # Define colors with RGB values for fill support
@@ -246,11 +246,11 @@ def plot_cn_with_mist(
     y_max = photons.max()
 
     for b, critical_level in critical_levels.items():
-        b_populations = populations_over_flx[:, b, :]
+        b_populations = populations_over_flux[:, b, :]
 
         b_populations = np.array(
             [
-                np.interp(np.mod(mist_flxs, 1.0), flxs, b_population)
+                np.interp(np.mod(mist_fluxs, 1.0), fluxs, b_population)
                 for b_population in b_populations.T
             ]
         ).T
@@ -264,8 +264,8 @@ def plot_cn_with_mist(
         # Add invisible upper boundary trace
         fig.add_trace(
             go.Scatter(
-                x=mist_flxs,
-                y=np.full_like(mist_flxs, y_max),
+                x=mist_fluxs,
+                y=np.full_like(mist_fluxs, y_max),
                 mode="lines",
                 line=dict(width=0),
                 showlegend=False,
@@ -277,7 +277,7 @@ def plot_cn_with_mist(
         # Add curve with fill to the upper boundary
         fig.add_trace(
             go.Scatter(
-                x=mist_flxs,
+                x=mist_fluxs,
                 y=cn,
                 mode="markers+lines",
                 marker=dict(color=color_name, size=1),
@@ -288,5 +288,5 @@ def plot_cn_with_mist(
             ),
             **fig_kwargs,
         )
-    fig.update_xaxes(title_text="Flux", range=[mist_flxs.min(), mist_flxs.max()])
+    fig.update_xaxes(title_text="Flux", range=[mist_fluxs.min(), mist_fluxs.max()])
     fig.update_yaxes(title_text="Photon Number", range=[photons.min(), photons.max()])

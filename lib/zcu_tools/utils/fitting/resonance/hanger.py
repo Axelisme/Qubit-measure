@@ -55,7 +55,7 @@ class HangerModel:
     @classmethod
     def calc_signals(
         cls,
-        fpts: NDArray[np.float64],
+        freqs: NDArray[np.float64],
         freq: float,
         Ql: float,
         Qc: float,
@@ -66,27 +66,27 @@ class HangerModel:
     ) -> NDArray[np.complex128]:
         return (
             a0
-            * np.exp(-1j * 2 * np.pi * fpts * edelay)
+            * np.exp(-1j * 2 * np.pi * freqs * edelay)
             * (
                 1
-                - np.exp(1j * phi) * (Ql / abs(Qc)) / (1 + 2j * Ql * (fpts / freq - 1))
+                - np.exp(1j * phi) * (Ql / abs(Qc)) / (1 + 2j * Ql * (freqs / freq - 1))
             )
         )
 
     @classmethod
     def fit(
         cls,
-        fpts: NDArray[np.float64],
+        freqs: NDArray[np.float64],
         signals: NDArray[np.complex128],
         edelay: Optional[float] = None,
     ) -> HangerParams:
         """dict[freq, kappa, Ql, Qc, Qi, phi, a0, edelay, circle_params]"""
         if edelay is None:
-            edelay = fit_edelay(fpts, signals)
+            edelay = fit_edelay(freqs, signals)
 
-        rot_signals = remove_edelay(fpts, signals, edelay)
+        rot_signals = remove_edelay(freqs, signals, edelay)
         circle_params = fit_circle_params(rot_signals.real, rot_signals.imag)
-        freq, Ql, theta0 = fit_resonant_params(fpts, rot_signals, circle_params)
+        freq, Ql, theta0 = fit_resonant_params(freqs, rot_signals, circle_params)
         a0 = calc_background_signals(circle_params, theta0)
         _, (norm_xc, norm_yc, norm_r0) = normalize_signal(
             rot_signals, circle_params, a0
@@ -109,7 +109,7 @@ class HangerModel:
         )
 
     @classmethod
-    def visualize_fit(cls, fpts, signals, param_dict: HangerParams) -> Figure:
+    def visualize_fit(cls, freqs, signals, param_dict: HangerParams) -> Figure:
         freq = param_dict["freq"]
         kappa = param_dict["kappa"]
         theta0 = param_dict["theta0"]
@@ -121,8 +121,8 @@ class HangerModel:
         edelay = param_dict["edelay"]
         circle_params = param_dict["circle_params"]
 
-        fit_signals = cls.calc_signals(fpts, freq, Ql, Qc, phi, a0, edelay)
-        rot_signals = remove_edelay(fpts, signals, edelay)
+        fit_signals = cls.calc_signals(freqs, freq, Ql, Qc, phi, a0, edelay)
+        rot_signals = remove_edelay(freqs, signals, edelay)
         norm_signals, norm_circle_params = normalize_signal(
             rot_signals, circle_params, a0
         )
@@ -156,16 +156,16 @@ class HangerModel:
         ax1.set_xlabel(r"$Re(S_{21})$")
         ax1.set_ylabel(r"$Im(S_{21})$")
 
-        ax2.plot(fpts, calc_phase(rot_signals, xc, yc), ".", label="data")
-        ax2.plot(fpts, phase_func(fpts, freq, Ql, theta0), label="fit")
+        ax2.plot(freqs, calc_phase(rot_signals, xc, yc), ".", label="data")
+        ax2.plot(freqs, phase_func(freqs, freq, Ql, theta0), label="fit")
         ax2.axvline(freq, color="k", linestyle="--")
         ax2.grid()
         ax2.legend(fontsize=12)
         ax2.set_xlabel("Frequency (MHz)")
         ax2.set_ylabel("Phase (rad)")
 
-        ax3.plot(fpts, np.abs(signals), ".")
-        ax3.plot(fpts, np.abs(fit_signals))
+        ax3.plot(freqs, np.abs(signals), ".")
+        ax3.plot(freqs, np.abs(fit_signals))
         ax3.axvline(freq, color="k", linestyle="--", label=base_info)
         ax3.text(
             0.85,

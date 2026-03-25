@@ -20,13 +20,8 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.v2.runner import (
-    Task,
-    TaskCfg,
-    TaskState,
-    run_task,
-)
-from zcu_tools.experiment.v2.utils import round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -79,19 +74,18 @@ class CPMG_Cfg(ModularProgramCfg, TaskCfg):
 class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> CPMG_Result:
         _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
+        modules = _cfg["modules"]
 
-        pi2_pulse = _cfg["modules"]["pi2_pulse"]
-        pi_pulse = _cfg["modules"]["pi_pulse"]
+        pi2_pulse = modules["pi2_pulse"]
+        pi_pulse = modules["pi_pulse"]
 
-        times_sweep = _cfg["sweep"]["times"]
-        length_sweep = _cfg["sweep"]["length"]
-        _cfg["sweep"].pop("times")  # type: ignore
+        time_sweep: SweepCfg = _cfg["sweep"].pop("times")  # type: ignore
 
-        times = sweep2array(times_sweep, allow_array=True)
-        lengths = sweep2array(length_sweep)  # predicted times
-        lengths = round_zcu_time(lengths, soccfg)
+        # TODO: convert times and length sweeps to arrays in different time
+        times = sweep2array(time_sweep, allow_array=True)
+        lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
 
-        cpmg_spans = sweep2param("length", length_sweep)
+        cpmg_spans = sweep2param("length", _cfg["sweep"]["length"])
 
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")

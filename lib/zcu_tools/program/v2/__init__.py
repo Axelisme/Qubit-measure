@@ -2,6 +2,8 @@ from . import modules, utils
 from .base import MyProgramV2, ProgramV2Cfg
 from .modular import ModularProgramCfg, ModularProgramV2
 from .modules import (
+    BathReset,
+    BathResetCfg,
     Delay,
     DirectReadout,
     DirectReadoutCfg,
@@ -12,6 +14,8 @@ from .modules import (
     PulseCfg,
     PulseReadout,
     PulseReadoutCfg,
+    PulseReset,
+    PulseResetCfg,
     Readout,
     ReadoutCfg,
     Repeat,
@@ -19,6 +23,8 @@ from .modules import (
     ResetCfg,
     SoftDelay,
     SoftRepeat,
+    TwoPulseReset,
+    TwoPulseResetCfg,
     WaveformCfg,
 )
 from .onetone import OneToneCfg, OneToneProgram

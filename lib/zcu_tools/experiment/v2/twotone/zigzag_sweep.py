@@ -56,14 +56,10 @@ class ZigZagModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class ZigZagSweepCfg(TypedDict, closed=True):
-    times: Union[SweepCfg, Sequence]
-    gain: SweepCfg
-
 
 class ZigZagCfg(ModularProgramCfg, TaskCfg):
     modules: ZigZagModuleCfg
-    sweep: ZigZagSweepCfg
+    sweep: dict[str, SweepCfg]
 
 
 class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
@@ -93,7 +89,11 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         if x_key not in self.SWEEP_MAP:
             raise ValueError(f"Unsupported sweep key: {x_key}")
         x_info = self.SWEEP_MAP[x_key]
-        values: NDArray[np.float64] = sweep2array(_cfg["sweep"][x_key])  # predicted
+        values = sweep2array(
+            _cfg["sweep"][x_key],
+            x_key,  # type: ignore
+            {"soccfg": soccfg, "gen_ch": modules[repeat_on]["ch"]},  # type: ignore
+        )
 
         if repeat_on not in modules:
             raise ValueError(f"Repeat on pulse {repeat_on} not found")

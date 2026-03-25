@@ -60,17 +60,19 @@ class PowerDepOvernightExp(
     def run(
         self, soc, soccfg, cfg: dict[str, Any], *, num_times=50, fail_retry=3
     ) -> PowerDepOvernightResult:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), PowerDepOvernightCfg)
         modules = _cfg["modules"]
 
-        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "gain")
-
         iters = np.arange(num_times, dtype=np.int64)
-        pdrs = sweep2array(_cfg["sweep"]["gain"])  # predicted amplitudes
-
-        Pulse.set_param(
-            modules["probe_pulse"], "gain", sweep2param("gain", _cfg["sweep"]["gain"])
+        gains = sweep2array(
+            _cfg["sweep"]["gain"],
+            "gain",
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
         )
+
+        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
+        Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
 
         with LivePlotter2DwithLine(
             "Pulse gain", "Iteration", line_axis=1, title="MIST Overnight"
@@ -90,14 +92,14 @@ class PowerDepOvernightExp(
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
-                    result_shape=(len(pdrs),),
+                    result_shape=(len(gains),),
                 )
                 .auto_retry(max_retries=fail_retry)
                 .repeat("repeat_over_time", num_times, _cfg["interval"]),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     iters.astype(np.float64),
-                    pdrs,
+                    gains,
                     mist_overnight_signal2real(np.asarray(ctx.root_data)),
                 ),
             )
@@ -105,9 +107,9 @@ class PowerDepOvernightExp(
 
         # record the last result
         self.last_cfg = _cfg
-        self.last_result = (iters, pdrs, signals)
+        self.last_result = (iters, gains, signals)
 
-        return iters, pdrs, signals
+        return iters, gains, signals
 
     def analyze(
         self,
@@ -121,7 +123,7 @@ class PowerDepOvernightExp(
             result = self.last_result
         assert result is not None, "no result found"
 
-        _, pdrs, signals = result
+        _, gains, signals = result
 
         if g0 is None:
             g0 = np.mean(signals[:, 0])
@@ -129,10 +131,10 @@ class PowerDepOvernightExp(
         abs_diff = np.abs(signals - g0)
 
         if ac_coeff is None:
-            xs = pdrs
+            xs = gains
             xlabel = "probe gain (a.u.)"
         else:
-            xs = ac_coeff * pdrs**2
+            xs = ac_coeff * gains**2
             xlabel = r"$\bar n$"
 
         fig, ax = plt.subplots(figsize=config.figsize)
@@ -156,18 +158,18 @@ class PowerDepOvernightExp(
         filepath: str,
         result: Optional[PowerDepOvernightResult] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/mist/pdr_overnight",
+        tag: str = "twotone/mist/gain_overnight",
         **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
-        iters, pdrs, overnight_signals = result
+        iters, gains, overnight_signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": pdrs},
+            x_info={"name": "Drive Power (a.u.)", "unit": "a.u.", "values": gains},
             y_info={"name": "Iteration", "unit": "None", "values": iters},
             z_info={"name": "Signal", "unit": "a.u.", "values": overnight_signals},
             comment=comment,
@@ -176,16 +178,16 @@ class PowerDepOvernightExp(
         )
 
     def load(self, filepath: str, **kwargs) -> PowerDepOvernightResult:
-        overnight_signals, pdrs, iters = load_data(filepath, **kwargs)
-        assert pdrs is not None and iters is not None
-        assert len(pdrs.shape) == 1 and len(iters.shape) == 1
-        assert overnight_signals.shape == (len(iters), len(pdrs))
+        overnight_signals, gains, iters = load_data(filepath, **kwargs)
+        assert gains is not None and iters is not None
+        assert len(gains.shape) == 1 and len(iters.shape) == 1
+        assert overnight_signals.shape == (len(iters), len(gains))
 
         iters = iters.astype(np.int64)
-        pdrs = pdrs.astype(np.float64)
+        gains = gains.astype(np.float64)
         overnight_signals = overnight_signals.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (iters, pdrs, overnight_signals)
+        self.last_result = (iters, gains, overnight_signals)
 
-        return iters, pdrs, overnight_signals
+        return iters, gains, overnight_signals

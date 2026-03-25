@@ -29,34 +29,32 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAPowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+PowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class JPAPowerModuleCfg(TypedDict, closed=True):
+class PowerModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class JPAPowerCfg(ModularProgramCfg, TaskCfg):
-    modules: JPAPowerModuleCfg
+class PowerCfg(ModularProgramCfg, TaskCfg):
+    modules: PowerModuleCfg
     sweep: dict[str, SweepCfg]
 
 
-class JPAPowerExp(AbsExperiment[JPAPowerResult, JPAPowerCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> JPAPowerResult:
-        _cfg = check_type(deepcopy(cfg), JPAPowerCfg)
-
-        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "jpa_power")
+class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PowerResult:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_power")
+        _cfg = check_type(deepcopy(cfg), PowerCfg)
+        modules = _cfg["modules"]
 
         jpa_powers = sweep2array(_cfg["sweep"]["jpa_power"], allow_array=True)
         np.random.shuffle(jpa_powers[1:-1])
 
-        modules = _cfg["modules"]
         _cfg["sweep"] = {"ge": make_ge_sweep()}
-        Pulse.set_param(
-            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
-        )
+        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+        Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
 
         with LivePlotterScatter("Power (dBm)", "Signal Difference") as viewer:
 
@@ -90,8 +88,8 @@ class JPAPowerExp(AbsExperiment[JPAPowerResult, JPAPowerCfg]):
                 ).scan(
                     "power (dBm)",
                     jpa_powers.tolist(),
-                    before_each=lambda i, ctx, pdr: set_power_in_dev_cfg(
-                        ctx.cfg["dev"], pdr, label="jpa_rf_dev"
+                    before_each=lambda i, ctx, gain: set_power_in_dev_cfg(
+                        ctx.cfg["dev"], gain, label="jpa_rf_dev"
                     ),
                 ),
                 init_cfg=_cfg,
@@ -105,7 +103,7 @@ class JPAPowerExp(AbsExperiment[JPAPowerResult, JPAPowerCfg]):
 
         return jpa_powers, signals
 
-    def analyze(self, result: Optional[JPAPowerResult] = None) -> tuple[float, Figure]:
+    def analyze(self, result: Optional[PowerResult] = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -135,7 +133,7 @@ class JPAPowerExp(AbsExperiment[JPAPowerResult, JPAPowerCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[JPAPowerResult] = None,
+        result: Optional[PowerResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/power",
         **kwargs,
@@ -155,7 +153,7 @@ class JPAPowerExp(AbsExperiment[JPAPowerResult, JPAPowerCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAPowerResult:
+    def load(self, filepath: str, **kwargs) -> PowerResult:
         signals, jpa_powers, _ = load_data(filepath, **kwargs)
         assert jpa_powers is not None
         assert len(jpa_powers.shape) == 1 and len(signals.shape) == 1

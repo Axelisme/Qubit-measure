@@ -29,34 +29,33 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
-JPAFreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
+FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class JPAFreqModuleCfg(TypedDict, closed=True):
+class FreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class JPAFreqCfg(ModularProgramCfg, TaskCfg):
-    modules: JPAFreqModuleCfg
+class FreqCfg(ModularProgramCfg, TaskCfg):
+    modules: FreqModuleCfg
     sweep: dict[str, SweepCfg]
 
 
-class JPAFreqExp(AbsExperiment[JPAFreqResult, JPAFreqCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> JPAFreqResult:
-        _cfg = check_type(deepcopy(cfg), JPAFreqCfg)
+class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
+        modules = _cfg["modules"]
 
         _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "jpa_freq")
 
         jpa_freqs = sweep2array(_cfg["sweep"]["jpa_freq"], allow_array=True)
         np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
 
-        modules = _cfg["modules"]
         _cfg["sweep"] = {"ge": make_ge_sweep()}
-        Pulse.set_param(
-            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
-        )
+        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+        Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
 
         with LivePlotterScatter("JPA Frequency (MHz)", "Signal Difference") as viewer:
 
@@ -105,7 +104,7 @@ class JPAFreqExp(AbsExperiment[JPAFreqResult, JPAFreqCfg]):
 
         return jpa_freqs, signals
 
-    def analyze(self, result: Optional[JPAFreqResult] = None) -> tuple[float, Figure]:
+    def analyze(self, result: Optional[FreqResult] = None) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -136,7 +135,7 @@ class JPAFreqExp(AbsExperiment[JPAFreqResult, JPAFreqCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[JPAFreqResult] = None,
+        result: Optional[FreqResult] = None,
         comment: Optional[str] = None,
         tag: str = "jpa/freq",
         **kwargs,
@@ -156,7 +155,7 @@ class JPAFreqExp(AbsExperiment[JPAFreqResult, JPAFreqCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> JPAFreqResult:
+    def load(self, filepath: str, **kwargs) -> FreqResult:
         signals, jpa_freqs, _ = load_data(filepath, **kwargs)
         assert jpa_freqs is not None
         assert len(jpa_freqs.shape) == 1 and len(signals.shape) == 1

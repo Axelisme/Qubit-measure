@@ -12,7 +12,7 @@ from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
-from zcu_tools.experiment.v2.utils import round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -57,10 +57,9 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2RamseyCfg)
 
-        ts = sweep2array(_cfg["sweep"]["length"])
-        ts = round_zcu_time(ts, soccfg)
+        lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
 
-        t2r_spans = sweep2param("length", _cfg["sweep"]["length"])
+        t2r_param = sweep2param("length", _cfg["sweep"]["length"])
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Ramsey"}
@@ -75,32 +74,32 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                             modules=[
                                 Reset("reset", modules.get("reset")),
                                 Pulse("pi2_pulse1", modules["pi2_pulse"]),
-                                Delay("t2_delay", delay=t2r_spans),
+                                Delay("t2_delay", delay=t2r_param),
                                 Pulse(
                                     name="pi2_pulse2",
                                     cfg={
                                         **modules["pi2_pulse"],
                                         "phase": modules["pi2_pulse"]["phase"]
-                                        + 360 * detune * t2r_spans,
+                                        + 360 * detune * t2r_param,
                                     },  # type: ignore[dict-item]
                                 ),
                                 Readout("readout", modules["readout"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
-                    result_shape=(len(ts),),
+                    result_shape=(len(lengths),),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    ts, t2ramsey_signal2real(ctx.root_data)
+                    lengths, t2ramsey_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
         self.last_cfg = _cfg
-        self.last_result = (ts, signals)
+        self.last_result = (lengths, signals)
 
-        return ts, signals
+        return lengths, signals
 
     def analyze(
         self, result: Optional[T2RamseyResult] = None, *, fit_fringe: bool = True

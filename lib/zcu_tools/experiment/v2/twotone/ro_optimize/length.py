@@ -14,12 +14,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
-from zcu_tools.experiment.v2.utils import (
-    make_ge_sweep,
-    round_zcu_time,
-    snr_as_signal,
-    sweep2array,
-)
+from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -65,14 +60,20 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
         )
 
-        lengths = sweep2array(length_sweep)  # predicted readout lengths
-        lengths = round_zcu_time(
-            lengths, soccfg, gen_ch=modules["readout"]["ro_cfg"]["ro_ch"]
+        readout_cfg = modules["readout"]
+        lengths = sweep2array(
+            length_sweep,
+            "time",
+            {
+                "soccfg": soccfg,
+                "gen_ch": readout_cfg["pulse_cfg"]["ch"],
+                "ro_ch": readout_cfg["ro_cfg"]["ro_ch"],
+            },
         )
 
         # set initial readout length and adjust pulse length
-        ro_length_params = sweep2param("length", length_sweep)
-        PulseReadout.set_param(modules["readout"], "ro_length", ro_length_params)
+        length_params = sweep2param("length", length_sweep)
+        PulseReadout.set_param(modules["readout"], "ro_length", length_params)
         PulseReadout.set_param(modules["readout"], "length", lengths.max() + 0.11)
 
         with LivePlotter1D("Readout Length (us)", "SNR") as viewer:

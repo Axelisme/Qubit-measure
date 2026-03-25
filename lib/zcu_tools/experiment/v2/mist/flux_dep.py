@@ -27,7 +27,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.simulate import value2flx
+from zcu_tools.simulate import value2flux
 from zcu_tools.utils.datasaver import load_data, save_data
 
 FluxDepResult: TypeAlias = tuple[
@@ -68,16 +68,19 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         _cfg = check_type(deepcopy(cfg), FluxDepCfg)
         modules = _cfg["modules"]
 
-        flx_sweep = _cfg["sweep"]["flux"]
-        _cfg["sweep"] = {"gain": _cfg["sweep"]["gain"]}
+        flux_sweep = _cfg["sweep"]["flux"]
+        _cfg["sweep"] = {"gain": _cfg["sweep"]["gain"]}  # remove flux from sweep
 
         # predict sweep points
-        values = sweep2array(flx_sweep)
-        gains = sweep2array(_cfg["sweep"]["gain"])
-
-        Pulse.set_param(
-            modules["probe_pulse"], "gain", sweep2param("gain", _cfg["sweep"]["gain"])
+        values = sweep2array(flux_sweep, allow_array=True)
+        gains = sweep2array(
+            _cfg["sweep"]["gain"],
+            "gain",
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
         )
+
+        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
+        Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
 
         with LivePlotter2DwithLine(
             "Flux device value",
@@ -126,8 +129,8 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         self,
         result: Optional[FluxDepResult] = None,
         *,
-        flx_half: Optional[float] = None,
-        flx_period: Optional[float] = None,
+        flux_half: Optional[float] = None,
+        flux_period: Optional[float] = None,
         ac_coeff: Optional[float] = None,
         fig: Optional[go.Figure] = None,
         secondary_xaxis: bool = True,
@@ -138,10 +141,10 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        dev_values, pdrs, signals = result
+        dev_values, gains, signals = result
 
-        if flx_half is not None and flx_period is not None:
-            xs = value2flx(dev_values, flx_half, flx_period)
+        if flux_half is not None and flux_period is not None:
+            xs = value2flux(dev_values, flux_half, flux_period)
         else:
             xs = dev_values
 
@@ -150,17 +153,17 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         if fig is None:
             fig = go.Figure()
 
-        if flx_half is not None and flx_period is not None:
+        if flux_half is not None and flux_period is not None:
             xlabel = r"$\phi$ (a.u.)"
         else:
             xlabel = r"$A$ (mA)"
         fig.update_xaxes(title_text=xlabel, title_font_size=14)
 
         if ac_coeff is None:
-            ys = pdrs
+            ys = gains
             ylabel = "probe gain (a.u.)"
         else:
-            ys = ac_coeff * pdrs**2
+            ys = ac_coeff * gains**2
             ylabel = r"$\bar n$"
         fig.update_yaxes(title_text=ylabel, title_font_size=12)
 
@@ -170,7 +173,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         )
 
         if secondary_xaxis:
-            assert flx_half is not None and flx_period is not None
+            assert flux_half is not None and flux_period is not None
             add_secondary_xaxis(fig, xs, dev_values, **fig_kwargs)
 
         if auto_range:

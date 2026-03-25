@@ -68,7 +68,7 @@ class MeasurementTask(
     def save(
         self,
         filepath: str,
-        flx_values: NDArray[np.float64],
+        flux_values: NDArray[np.float64],
         result: T_Result,
         comment: Optional[str],
         prefix_tag: str,
@@ -131,10 +131,10 @@ class FluxDepBatchTask(BatchTask):
 
 
 class FluxDepExecutor:
-    def __init__(self, flx_values: NDArray[np.float64]) -> None:
+    def __init__(self, flux_values: NDArray[np.float64]) -> None:
         super().__init__()
 
-        self.flx_values = flx_values
+        self.flux_values = flux_values
 
         self.record_path = None
         self.measurements: dict[str, MeasurementTask] = OrderedDict()
@@ -258,26 +258,26 @@ class FluxDepExecutor:
         cfg = FluxDepCfg(dev=dev_cfg)
 
         env_dict.update(
-            flx_values=self.flx_values,
+            flux_values=self.flux_values,
             predictor=predictor,
             info=FluxDepInfoDict(),
         )
 
-        def update_fn(i: int, ctx: TaskState, flx: float) -> None:
+        def update_fn(i: int, ctx: TaskState, flux: float) -> None:
             info: FluxDepInfoDict = ctx.env["info"]
             predictor: FluxoniumPredictor = ctx.env["predictor"]
 
             info.clear()  # clear current info dict
 
-            info["flx_value"] = flx
-            info["flx_idx"] = i
+            info["flux_value"] = flux
+            info["flux_idx"] = i
 
-            info["cur_m"] = predictor.predict_matrix_element(flx)
+            info["cur_m"] = predictor.predict_matrix_element(flux)
             info["m_ratio"] = info["cur_m"] / info.first["cur_m"]
 
-            set_flux_in_dev_cfg(ctx.cfg["dev"], flx, label="flux_dev")
+            set_flux_in_dev_cfg(ctx.cfg["dev"], flux, label="flux_dev")
 
-        set_flux_in_dev_cfg(cfg["dev"], self.flx_values[0], label="flux_dev")
+        set_flux_in_dev_cfg(cfg["dev"], self.flux_values[0], label="flux_dev")
         GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
         with matplotlib.rc_context(
@@ -293,7 +293,7 @@ class FluxDepExecutor:
                             retry_time=retry_time,
                         ).scan(
                             "flux",
-                            self.flx_values.tolist(),
+                            self.flux_values.tolist(),
                             before_each=update_fn,
                         ),
                         init_cfg=cfg,
@@ -334,7 +334,7 @@ class FluxDepExecutor:
         for ms_name, ms in self.measurements.items():
             ms.save(
                 str(_filepath.with_name(_filepath.name + f"_{ms_name}")),
-                self.flx_values,
+                self.flux_values,
                 result[ms_name],
                 comment,
                 prefix_tag + f"/{ms_name}",
