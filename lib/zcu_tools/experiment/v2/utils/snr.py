@@ -5,37 +5,17 @@ from functools import wraps
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
-from typing_extensions import TYPE_CHECKING, Any, Callable, Optional, Sequence, TypeVar
+from typing_extensions import Any, Callable, Optional, Sequence, TypeVar
 
-if TYPE_CHECKING:
-    from qick import QickConfig
-
-from zcu_tools.experiment.v2.runner import Result, default_raw2signal_fn
-from zcu_tools.program.v2 import ModularProgramV2, PulseCfg
+from zcu_tools.experiment.v2.runner import default_raw2signal_fn
+from zcu_tools.program.v2 import ModularProgramV2
 from zcu_tools.utils.func_tools import min_interval
-
-
-def round_zcu_time(
-    us: NDArray[np.float64], soccfg: QickConfig, gen_ch: Optional[int] = None
-) -> NDArray[np.float64]:
-    @np.vectorize
-    def _convert_time(t: float) -> float:
-        return soccfg.cycles2us(soccfg.us2cycles(t, gen_ch=gen_ch), gen_ch=gen_ch)
-
-    return _convert_time(us)
 
 
 def estimate_snr(real_signals: NDArray[np.float64]) -> float:
     smooth_signals = gaussian_filter(real_signals, sigma=1)
     noise = np.mean(np.abs(real_signals - smooth_signals))
     return float((np.max(smooth_signals) - np.min(smooth_signals)) / noise)
-
-
-def set_pulse_freq(pulse_cfg: PulseCfg, freq: float) -> PulseCfg:
-    pulse_cfg["freq"] = freq
-    if "mixer_freq" in pulse_cfg:
-        pulse_cfg["mixer_freq"] = freq
-    return pulse_cfg
 
 
 def snr_as_signal(
@@ -101,16 +81,3 @@ def wrap_earlystop_check(
         check_snr(raw)
 
     return wrapped_callback_fn
-
-
-T_Result = TypeVar("T_Result", bound=Result)
-
-
-def merge_result_list(results: Sequence[T_Result]) -> T_Result:
-    assert isinstance(results, list) and len(results) > 0
-    if isinstance(results[0], dict):
-        return {
-            name: merge_result_list([r[name] for r in results])  # type: ignore
-            for name in results[0]
-        }
-    return np.asarray(results)  # type: ignore

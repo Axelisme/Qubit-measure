@@ -21,10 +21,9 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
-from zcu_tools.experiment.v2.utils import round_zcu_time
+from zcu_tools.experiment.v2.utils import make_ge_sweep, round_zcu_time, sweep2array
 from zcu_tools.liveplot import (
     LivePlotter1D,
     LivePlotter2D,

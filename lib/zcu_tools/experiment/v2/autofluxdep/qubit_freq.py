@@ -9,9 +9,8 @@ from typeguard import check_type
 from typing_extensions import Any, Callable, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
-from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
-from zcu_tools.experiment.v2.utils import wrap_earlystop_check
+from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment

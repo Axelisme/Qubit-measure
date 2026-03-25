@@ -9,8 +9,9 @@ from typing_extensions import Any, Mapping, Optional, TypeAlias
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import OneToneCfg, OneToneProgram, Readout, sweep2param

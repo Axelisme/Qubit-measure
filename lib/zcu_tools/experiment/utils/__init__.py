@@ -5,7 +5,7 @@ from .device import (
     set_output_in_dev_cfg,
     set_power_in_dev_cfg,
 )
-from .sweep import check_time_sweep, format_sweep1D, make_ge_sweep, sweep2array
+from .sweep import format_sweep1D
 
 __all__ = [
     # device
@@ -15,8 +15,5 @@ __all__ = [
     "set_output_in_dev_cfg",
     "set_power_in_dev_cfg",
     # sweep
-    "check_time_sweep",
     "format_sweep1D",
-    "make_ge_sweep",
-    "sweep2array",
 ]

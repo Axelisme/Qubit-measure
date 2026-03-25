@@ -14,14 +14,13 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, T
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
-    make_ge_sweep,
     set_flux_in_dev_cfg,
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
 )
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
-from zcu_tools.experiment.v2.utils import snr_as_signal
+from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal
 from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (

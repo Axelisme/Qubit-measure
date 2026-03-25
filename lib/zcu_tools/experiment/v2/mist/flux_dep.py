@@ -10,8 +10,9 @@ from typing_extensions import Any, Mapping, NotRequired, Optional, TypeAlias, Ty
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg, sweep2array
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 from zcu_tools.program import SweepCfg

@@ -11,8 +11,8 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (

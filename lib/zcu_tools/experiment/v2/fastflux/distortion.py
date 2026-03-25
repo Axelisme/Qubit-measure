@@ -18,8 +18,8 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import sweep2array
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (

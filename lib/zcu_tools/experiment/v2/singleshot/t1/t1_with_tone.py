@@ -11,9 +11,9 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D, make_ge_sweep, sweep2array
+from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import round_zcu_time
+from zcu_tools.experiment.v2.utils import make_ge_sweep, round_zcu_time, sweep2array
 from zcu_tools.liveplot import LivePlotter1D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (

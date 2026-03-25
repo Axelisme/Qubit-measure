@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 from numpy.typing import NDArray
-from typing_extensions import Mapping, Optional, Sequence, TypeVar, Union, cast
+from typing_extensions import Mapping, TypeVar, Union, cast
 
 from zcu_tools.program import SweepCfg
 
@@ -44,60 +42,3 @@ def format_sweep1D(sweep: Union[Mapping[str, T], T], name: str) -> dict[str, T]:
         return dict(sweep)
     else:
         raise ValueError(sweep)
-
-
-def check_time_sweep(
-    soccfg, ts, gen_ch: Optional[int] = None, ro_ch: Optional[int] = None
-) -> None:
-    """
-    Check if time points are duplicated when converted to machine cycles.
-
-    This function converts the given time points to cycles using the soccfg
-    and checks if any cycles are duplicated, which would indicate that the
-    sweep step size is too small.
-
-    Args:
-        soccfg: SocCfg object containing the system configuration
-        ts: list of time points in microseconds (us)
-        gen_ch: Generator channel number (optional)
-        ro_ch: Readout channel number (optional)
-
-    Returns:
-        None
-    """
-    cycles = [soccfg.us2cycles(t, gen_ch=gen_ch, ro_ch=ro_ch) for t in ts]
-    if len(set(cycles)) != len(ts):
-        warnings.warn(
-            "Some time points are duplicated, you sweep step may be too small"
-        )
-
-
-def sweep2array(
-    sweep: Union[SweepCfg, Sequence, NDArray], allow_array: bool = False
-) -> NDArray:
-    """
-    Convert sweep parameter to a numpy array.
-
-    This function converts different sweep parameter formats into a numpy array
-    of values to sweep through.
-
-    Args:
-        sweep: Dictionary with 'start', 'step', and 'expts' keys defining the sweep,
-               or a list/array of explicit sweep values
-        allow_array: Whether to allow direct array input for custom sweeps (default: False)
-
-    Returns:
-        numpy.ndarray: Array of sweep values
-    """
-    if isinstance(sweep, dict):
-        return sweep["start"] + np.arange(sweep["expts"]) * sweep["step"]
-    elif isinstance(sweep, list) or isinstance(sweep, np.ndarray):
-        if not allow_array:
-            raise ValueError("Custom sweep is not allowed")
-        return np.asarray(sweep)
-    else:
-        raise ValueError("Invalid sweep format")
-
-
-def make_ge_sweep() -> SweepCfg:
-    return {"start": 0.0, "stop": 1.0, "expts": 2, "step": 0.5}

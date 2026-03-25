@@ -13,7 +13,6 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import make_ge_sweep, sweep2array
 from zcu_tools.experiment.v2.runner import (
     Task,
     TaskCfg,
@@ -21,7 +20,7 @@ from zcu_tools.experiment.v2.runner import (
     run_task,
 )
 from zcu_tools.experiment.v2.tracker import PCATracker
-from zcu_tools.experiment.v2.utils import snr_as_signal
+from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
