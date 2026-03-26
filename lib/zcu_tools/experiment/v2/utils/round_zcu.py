@@ -65,8 +65,10 @@ def round_zcu_phase(
     scaler: float = 1.0,
 ) -> T_Value:
     def _convert_phase(p: float) -> float:
+        num_2pi = int(scaler * p / 360.0)
         return (
-            soccfg.reg2deg(
+            360.0 * num_2pi  # restore the wrapped-around phase to the original value
+            + soccfg.reg2deg(
                 soccfg.deg2reg(scaler * p, gen_ch=gen_ch, ro_ch=ro_ch),
                 gen_ch=gen_ch,
                 ro_ch=ro_ch,
@@ -121,13 +123,9 @@ def sweep2array(
 
     if isinstance(sweep, dict):
         round_start = apply_round(sweep["start"])
-        round_step = apply_round(sweep["step"])
-        if round_step <= 1e-12:
-            warnings.warn(
-                f"Sweep step is too small: {round_step:.3g}, you should consider using a less expts or larger range"
-            )
+        round_span = apply_round(sweep["stop"] - sweep["start"])
 
-        return round_start + np.arange(sweep["expts"]) * round_step
+        return round_start + np.linspace(0, round_span, sweep["expts"])
     elif isinstance(sweep, list) or isinstance(sweep, np.ndarray):
         if not allow_array:
             raise ValueError("Custom sweep is not allowed")

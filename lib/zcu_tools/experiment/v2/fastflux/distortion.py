@@ -7,15 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
@@ -38,6 +30,7 @@ from zcu_tools.program.v2 import (
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
+
 
 # (amps, freqs, signals2D)
 DistortionResult: TypeAlias = tuple[
@@ -105,7 +98,7 @@ class DistortionExp(AbsExperiment):
                                 ),
                             ]
                         ),
-                        Delay("readout_t", ctx.cfg["readout_t"]),
+                        SoftDelay("readout_t", ctx.cfg["readout_t"]),
                         Pulse(
                             name="pi2_pulse2",
                             cfg={  # type: ignore[dict-item]
@@ -129,43 +122,68 @@ class DistortionExp(AbsExperiment):
             )
 
         # Cache results
-        self.last_cfg = _cfg
-        self.last_result = (lengths, phases, signals)
+        self.last_cfg: Optional[dict] = deepcopy(cfg)
+        self.last_result: Optional[DistortionResult] = (lengths, phases, signals)
 
         return lengths, phases, signals
 
     def analyze(
-        self, cfg: dict[str, Any], result: Optional[DistortionResult] = None
+        self,
+        cfg: Optional[dict[str, Any]] = None,
+        result: Optional[DistortionResult] = None,
+        timeFly: Optional[float] = None,
     ) -> Figure:
+        if cfg is None:
+            cfg = self.last_cfg
+        assert cfg is not None, "No config found"
+        _cfg = check_type(deepcopy(cfg), DistortionCfg)
+        modules = _cfg["modules"]
+
+        flux_pulse = modules["flux_pulse"]
+        pi2_len = float(modules["pi2_pulse"]["waveform"]["length"])
+
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
 
         lengths, phases, signals2D = result
 
+        # align to center of pi/2 pulse
+        lengths = lengths + pi2_len / 2
+
         real_signals = distortion_signal2real(signals2D)
 
-        _cfg = check_type(cfg, DistortionCfg)
-        modules = _cfg["modules"]
+        thetas = np.deg2rad(phases)
+        X = np.column_stack([np.ones_like(thetas), np.cos(thetas), np.sin(thetas)])
+        X_inv = np.linalg.pinv(X)
+        coeffs = X_inv @ real_signals.T
+        init_phases = np.unwrap(np.arctan2(coeffs[2], coeffs[1]))
+        detunes = -np.gradient(init_phases, lengths) / (2 * np.pi)
 
-        # align to center of pi/2 pulse
-        pi2_len = modules["pi2_pulse"]["waveform"]["length"]
-        lengths = lengths + pi2_len / 2 - 0.025
+        sort_idxs = np.argsort(np.abs(detunes))
+        mean_background = np.mean(detunes[sort_idxs[: int(len(detunes) * 0.1)]])
+        mean_topdetune = np.mean(detunes[sort_idxs[int(len(detunes) * 0.9) :]])
+        if timeFly is None:
+            detune_ratios = (detunes - mean_background) / (
+                mean_topdetune - mean_background
+            )
+            top_idx = np.argmax(detune_ratios)
+            candidate_mask = detune_ratios[:top_idx] < 0.5
+            if not np.any(candidate_mask):
+                offset = float(lengths[0])
+            else:
+                offset = lengths[np.nonzero(candidate_mask)[0][-1]]
+            timeFly = offset - float(flux_pulse["pre_delay"])
+        assert timeFly is not None
 
-        flux_pulse = modules["flux_pulse"]
-        start_t = flux_pulse["pre_delay"]
-        end_t = start_t + flux_pulse["waveform"]["length"]
+        start_t = float(flux_pulse["pre_delay"]) + timeFly
+        end_t = start_t + float(flux_pulse["waveform"]["length"])
 
-        I_values = np.mean(real_signals * np.cos(np.deg2rad(phases))[None], axis=1)
-        Q_values = np.mean(real_signals * np.sin(np.deg2rad(phases))[None], axis=1)
-        init_phases = np.unwrap(np.arctan2(I_values, Q_values))
-        detunes = np.gradient(init_phases, lengths) / (2 * np.pi)
-
-        saturated_idxs = np.argsort(np.abs(detunes))[int(len(detunes) * 0.9) :]
-        flux_detune = np.mean(detunes[saturated_idxs])
         ideal_lengths = np.linspace(lengths[0], lengths[-1], 1000)
-        ideal_curve = np.zeros_like(ideal_lengths)
-        ideal_curve[(ideal_lengths >= start_t) & (ideal_lengths <= end_t)] = flux_detune
+        ideal_curve = np.full_like(ideal_lengths, mean_background)
+        ideal_curve[(ideal_lengths >= start_t) & (ideal_lengths <= end_t)] = (
+            mean_topdetune
+        )
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
         ax1.imshow(

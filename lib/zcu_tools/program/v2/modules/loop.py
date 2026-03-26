@@ -3,10 +3,11 @@ from __future__ import annotations
 import qick.asm_v2 as qasm
 from qick.asm_v2 import QickParam
 from typing_extensions import Union
+from zcu_tools.config import config
 
 from ..base import MyProgramV2
 from .base import Module
-from .util import round_timestamp
+from ..utils import PrintTimeStamp
 
 
 class Repeat(Module):
@@ -45,6 +46,10 @@ class Repeat(Module):
         prog.append_macro(qasm.OpenLoop(name=self.name, n=self.n))
         cur_t = 0.0
         for mod in self.sub_module:
+            if config.DEBUG_MODE:
+                prog.append_macro(
+                    PrintTimeStamp(f"{mod.__class__.__name__}({mod.name})", prefix="\t")
+                )
             cur_t = mod.run(prog, cur_t)
         prog.delay(t=cur_t)
         prog.append_macro(qasm.CloseLoop())

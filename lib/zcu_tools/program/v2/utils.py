@@ -38,10 +38,12 @@ class PrintTimeStamp(Macro):
 
     def __init__(
         self,
+        name: str,
         prefix: str = "",
         gen_chs: Optional[list[int]] = None,
         ro_chs: Optional[list[int]] = None,
     ) -> None:
+        self.name = name
         self.prefix = prefix
         self.gen_chs = gen_chs
         self.ro_chs = ro_chs
@@ -57,10 +59,12 @@ class PrintTimeStamp(Macro):
         if ro_chs is None:
             ro_chs = list(range(len(prog._ro_ts)))
 
-        print(self.prefix)
+        print(self.prefix + self.name)
         for ch in gen_chs:
             t = prog._gen_ts[ch]
-            print(f"\tgen[{ch}] " + param2str(t))
+            if t != 0.0 or self.gen_chs is not None:
+                print(self.prefix + f"\tgen[{ch}] " + param2str(t))
         for ch in ro_chs:
             t = prog._ro_ts[ch]
-            print(f"\t ro[{ch}] " + param2str(t))
+            if t != 0.0 or self.ro_chs is not None:
+                print(self.prefix + f"\t ro[{ch}] " + param2str(t))

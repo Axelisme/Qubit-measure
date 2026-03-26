@@ -3,9 +3,12 @@ from __future__ import annotations
 from qick import QickConfig
 from typing_extensions import Any, Mapping, NotRequired, Sequence, cast
 
+from zcu_tools.config import config
+
 from ..base import SweepCfg
 from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module
+from .utils import PrintTimeStamp
 
 
 class ModularProgramCfg(ProgramV2Cfg):
@@ -43,12 +46,15 @@ class ModularProgramV2(MyProgramV2):
             module.init(self)
 
     def _body(self, cfg: ModularProgramCfg) -> None:
-        from .utils import PrintTimeStamp
 
         t = 0.0
         for module in self.modules:
+            if config.DEBUG_MODE:
+                self.append_macro(
+                    PrintTimeStamp(f"{module.__class__.__name__}({module.name})")
+                )
             t = module.run(self, t)
-            # self.append_macro(PrintTimeStamp(module.name, gen_chs=[0], ro_chs=[0]))
+
         self.delay(t=t)
 
 

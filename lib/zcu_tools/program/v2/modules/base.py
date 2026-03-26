@@ -15,8 +15,11 @@ from typing_extensions import (
     Union,
 )
 
+from zcu_tools.config import config
+
 from ..base import MyProgramV2
 from .util import round_timestamp
+from ..utils import PrintTimeStamp
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
@@ -63,7 +66,8 @@ class Module(ABC):
     def auto_fill(cfg: Union[str, dict[str, Any]], ml: ModuleLibrary) -> ModuleCfg:
         raise NotImplementedError("auto_fill is not implemented for this module")
 
-    def __init__(self, *args, **kwargs) -> None: ...
+    def __init__(self, *args, **kwargs) -> None:
+        self.name = "UnnamedModule"
 
     @abstractmethod
     def init(self, prog: MyProgramV2) -> None: ...
@@ -118,6 +122,7 @@ class SoftDelay(Module):
 class NonBlocking(Module):
     def __init__(self, modules: Sequence[Module]) -> None:
         self.modules = modules
+        self.name = "[" + ", ".join(module.name for module in modules) + "]"
 
     def init(self, prog: MyProgramV2) -> None:
         for module in self.modules:
@@ -128,6 +133,12 @@ class NonBlocking(Module):
     ) -> Union[float, QickParam]:
         cur_t = t
         for module in self.modules:
+            if config.DEBUG_MODE:
+                prog.append_macro(
+                    PrintTimeStamp(
+                        f"{module.__class__.__name__}({module.name})", prefix="\t"
+                    )
+                )
             new_cur_t = module.run(prog, cur_t)
             if new_cur_t < cur_t:
                 warnings.warn(
@@ -135,4 +146,5 @@ class NonBlocking(Module):
                     "Maybe you should set SoftDelay instead of Delay.",
                 )
             cur_t = new_cur_t
+
         return t  # non-block returns initial time

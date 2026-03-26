@@ -24,9 +24,12 @@ if TYPE_CHECKING:
         from typing_extensions import Any as ResourceManager
 
 
-def gc_collect() -> None:
+def gc_collect(verbose: bool = True) -> None:
+    """Clear all matplotlib figures and run garbage collection to free memory."""
     plt.close("all")
-    gc.collect()
+    gc_num = gc.collect()
+    if verbose:
+        print(f"Garbage collection done. Collected {gc_num} objects.")
 
 
 def make_sweep(
