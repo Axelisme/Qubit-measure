@@ -9,13 +9,12 @@ from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
 
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    Delay,
     ModularProgramCfg,
     ModularProgramV2,
     NonBlocking,
@@ -29,54 +28,80 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
+from zcu_tools.utils.fitting import fitlor
 from zcu_tools.utils.process import rotate2real
 
-
-# (amps, freqs, signals2D)
-DistortionResult: TypeAlias = tuple[
+# (lengths, freqs, signals2D)
+FreqResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
 
-def distortion_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+def freq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class DistortionModuleCfg(TypedDict, closed=True):
+def get_resonance_freq(
+    xs: NDArray[np.float64], freqs: NDArray[np.float64], amps: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    s_xs = []
+    s_freqs = []
+
+    prev_freq = np.nan
+    for x, amp in zip(xs, amps):
+        if np.any(np.isnan(amp)):
+            continue
+
+        param, _ = fitlor(freqs, amp)
+        curr_freq = param[3]
+
+        if abs(curr_freq - prev_freq) > 0.1 * (freqs[-1] - freqs[0]):
+            continue
+
+        prev_freq = curr_freq
+
+        s_xs.append(x)
+        s_freqs.append(curr_freq)
+
+    return np.array(s_xs), np.array(s_freqs)
+
+
+class FreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     flux_pulse: PulseCfg
-    pi2_pulse: PulseCfg
+    qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class DistortionCfg(ModularProgramCfg, TaskCfg):
-    modules: DistortionModuleCfg
+class FreqCfg(ModularProgramCfg, TaskCfg):
+    modules: FreqModuleCfg
     readout_t: float
     sweep: dict[str, SweepCfg]
 
 
-class DistortionExp(AbsExperiment):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> DistortionResult:
-        _cfg = check_type(deepcopy(cfg), DistortionCfg)
+class FreqExp(AbsExperiment):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
 
         # force length be the outer loop
         _cfg["sweep"] = {
             "length": _cfg["sweep"]["length"],
-            "phase": _cfg["sweep"]["phase"],
+            "freq": _cfg["sweep"]["freq"],
         }
 
         lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
-        phases = sweep2array(
-            _cfg["sweep"]["phase"],
-            "phase",
-            {"soccfg": soccfg, "gen_ch": modules["pi2_pulse"]["ch"]},
+        freqs = sweep2array(
+            _cfg["sweep"]["freq"],
+            "freq",
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
         length_params = sweep2param("length", _cfg["sweep"]["length"])
-        phase_params = sweep2param("phase", _cfg["sweep"]["phase"])
+        freq_params = sweep2param("freq", _cfg["sweep"]["freq"])
+        Pulse.set_param(modules["qub_pulse"], "freq", freq_params)
 
-        with LivePlotter2D("Time (us)", "Phase (deg)") as viewer:
+        with LivePlotter2D("Time (us)", "Frequency (MHz)") as viewer:
 
             def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
                 modules = ctx.cfg["modules"]
@@ -93,125 +118,107 @@ class DistortionExp(AbsExperiment):
                                     block_mode=False,
                                 ),
                                 SoftDelay("wait_time", delay=length_params),
-                                Pulse(
-                                    "pi2_pulse1", modules["pi2_pulse"], tag="pi2_pulse1"
-                                ),
+                                Pulse("qub_pulse", modules["qub_pulse"]),
                             ]
                         ),
                         SoftDelay("readout_t", ctx.cfg["readout_t"]),
-                        Pulse(
-                            name="pi2_pulse2",
-                            cfg={  # type: ignore[dict-item]
-                                **modules["pi2_pulse"],
-                                "phase": phase_params,
-                            },
-                            tag="pi2_pulse2",
-                        ),
                         Readout("readout", modules["readout"]),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
                 task=Task(
-                    measure_fn=measure_fn, result_shape=(len(lengths), len(phases))
+                    measure_fn=measure_fn, result_shape=(len(lengths), len(freqs))
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    lengths, phases, distortion_signal2real(ctx.root_data)
+                    lengths, freqs, freq_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
         self.last_cfg: Optional[dict] = deepcopy(cfg)
-        self.last_result: Optional[DistortionResult] = (lengths, phases, signals)
+        self.last_result: Optional[FreqResult] = (lengths, freqs, signals)
 
-        return lengths, phases, signals
+        return lengths, freqs, signals
 
     def analyze(
         self,
         cfg: Optional[dict[str, Any]] = None,
-        result: Optional[DistortionResult] = None,
+        result: Optional[FreqResult] = None,
         timeFly: Optional[float] = None,
     ) -> tuple[float, Figure]:
         if cfg is None:
             cfg = self.last_cfg
         assert cfg is not None, "No config found"
-        _cfg = check_type(deepcopy(cfg), DistortionCfg)
+        _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
 
         flux_pulse = modules["flux_pulse"]
-        pi2_len = float(modules["pi2_pulse"]["waveform"]["length"])
+        qub_len = float(modules["qub_pulse"]["waveform"]["length"])
 
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
 
-        lengths, phases, signals2D = result
+        lengths, freqs, signals = result
 
-        # align to center of pi/2 pulse
-        lengths = lengths + pi2_len / 2
+        # align to center of qubit pulse
+        lengths = lengths + qub_len / 2
 
-        real_signals = distortion_signal2real(signals2D)
+        amps = freq_signal2real(signals)
+        s_lengths, s_freqs = get_resonance_freq(lengths, freqs, amps)
 
-        thetas = np.deg2rad(phases)
-        X = np.column_stack([np.ones_like(thetas), np.cos(thetas), np.sin(thetas)])
-        X_inv = np.linalg.pinv(X)
-        coeffs = X_inv @ real_signals.T
-        init_phases = np.unwrap(np.arctan2(coeffs[2], coeffs[1]))
-        detunes = -np.gradient(init_phases, lengths) / (2 * np.pi)
-
-        sort_idxs = np.argsort(np.abs(detunes))
-        mean_background = np.mean(detunes[sort_idxs[: int(len(detunes) * 0.1)]])
-        mean_topdetune = np.mean(detunes[sort_idxs[int(len(detunes) * 0.9) :]])
+        sort_idxs = np.argsort(np.abs(s_freqs))
+        mean_background = np.mean(s_freqs[sort_idxs[: int(len(s_freqs) * 0.1)]])
+        mean_topdetune = np.mean(s_freqs[sort_idxs[int(len(s_freqs) * 0.9) :]])
         if timeFly is None:
-            detune_ratios = (detunes - mean_background) / (
+            detune_ratios = (s_freqs - mean_background) / (
                 mean_topdetune - mean_background
             )
             top_idx = np.argmax(detune_ratios)
             candidate_mask = detune_ratios[:top_idx] < 0.5
             if not np.any(candidate_mask):
-                offset = float(lengths[0])
+                offset = float(s_lengths[0])
             else:
-                offset = lengths[np.nonzero(candidate_mask)[0][-1]]
+                offset = s_lengths[np.nonzero(candidate_mask)[0][-1]]
             timeFly = offset - float(flux_pulse["pre_delay"])
         assert timeFly is not None
 
         start_t = float(flux_pulse["pre_delay"]) + timeFly
         end_t = start_t + float(flux_pulse["waveform"]["length"])
 
-        ideal_lengths = np.linspace(lengths[0], lengths[-1], 1000)
+        ideal_lengths = np.linspace(s_lengths[0], s_lengths[-1], 1000)
         ideal_curve = np.full_like(ideal_lengths, mean_background)
         ideal_curve[(ideal_lengths >= start_t) & (ideal_lengths <= end_t)] = (
             mean_topdetune
         )
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 4), sharex=True)
-        ax1.imshow(
-            real_signals.T,
-            extent=(lengths[0], lengths[-1], phases[0], phases[-1]),
+        fig, ax = plt.subplots(figsize=config.figsize)
+        assert isinstance(fig, Figure)
+
+        ax.imshow(
+            amps.T,
+            extent=(lengths[0], lengths[-1], freqs[0], freqs[-1]),
             aspect="auto",
             interpolation="none",
             cmap="RdBu_r",
         )
-        ax1.set_ylabel("Phase (deg)")
 
-        ax2.plot(ideal_lengths, ideal_curve, "g-", label="Ideal")
-        ax2.plot(lengths, detunes, ".-")
-        ax2.set_ylabel("Detune (MHz)")
-        ax2.set_xlabel("Wait Time (us)")
+        # Plot the resonance frequencies and fitted curve
+        ax.plot(s_lengths, s_freqs, ".", c="k")
+        ax.plot(ideal_lengths, ideal_curve, "g-", label="Ideal")
 
-        ax2.axvspan(
-            start_t - pi2_len / 2,
-            start_t + pi2_len / 2,
-            color="gray",
-            alpha=0.3,
-            label=f"timeFly: {timeFly:.2f} us",
+        label = f"timeFly: {timeFly:.2f} us"
+        plot_kwargs = dict(color="gray", alpha=0.3)
+        ax.axvspan(
+            start_t - qub_len / 2, start_t + qub_len / 2, label=label, **plot_kwargs
         )
-        ax1.axvline(start_t, color="black", linestyle="--")
-        ax2.axvspan(end_t - pi2_len / 2, end_t + pi2_len / 2, color="gray", alpha=0.3)
-        ax1.axvline(end_t, color="black", linestyle="--")
+        ax.axvspan(end_t - qub_len / 2, end_t + qub_len / 2, **plot_kwargs)
 
-        ax2.legend()
+        ax.set_ylabel("Qubit Frequency (MHz)", fontsize=14)
+        ax.set_xlabel("Time (us)", fontsize=14)
+        ax.legend(fontsize="x-large")
 
         fig.tight_layout()
 
@@ -220,41 +227,42 @@ class DistortionExp(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[DistortionResult] = None,
+        result: Optional[FreqResult] = None,
         comment: Optional[str] = None,
-        tag: str = "fastflux/distortion",
+        tag: str = "fastflux/distortion/freq",
         **kwargs,
     ) -> None:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
 
-        lengths, phases, signals2D = result
+        lengths, freqs, signals2D = result
 
         save_data(
             filepath=filepath,
             x_info={"name": "Wait Time", "unit": "s", "values": lengths * 1e-6},
-            y_info={"name": "Phase", "unit": "deg", "values": phases},
+            y_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
             tag=tag,
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> DistortionResult:
-        signals2D, lengths, phases = load_data(filepath, **kwargs)
-        assert phases is not None and lengths is not None
-        assert len(phases.shape) == 1 and len(lengths.shape) == 1
-        assert signals2D.shape == (len(phases), len(lengths))
+    def load(self, filepath: str, **kwargs) -> FreqResult:
+        signals2D, lengths, freqs = load_data(filepath, **kwargs)
+        assert freqs is not None and lengths is not None
+        assert len(freqs.shape) == 1 and len(lengths.shape) == 1
+        assert signals2D.shape == (len(freqs), len(lengths))
 
         lengths = lengths * 1e6  # s -> us
+        freqs = freqs * 1e-6  # Hz -> MHz
         signals2D = signals2D.T  # transpose back
 
-        phases = phases.astype(np.float64)
+        freqs = freqs.astype(np.float64)
         lengths = lengths.astype(np.float64)
         signals2D = signals2D.T.astype(np.complex128)
 
         self.last_cfg = None
-        self.last_result = (lengths, phases, signals2D)
+        self.last_result = (lengths, freqs, signals2D)
 
-        return lengths, phases, signals2D
+        return lengths, freqs, signals2D
