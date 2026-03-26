@@ -132,7 +132,7 @@ class DistortionExp(AbsExperiment):
         cfg: Optional[dict[str, Any]] = None,
         result: Optional[DistortionResult] = None,
         timeFly: Optional[float] = None,
-    ) -> Figure:
+    ) -> tuple[float, Figure]:
         if cfg is None:
             cfg = self.last_cfg
         assert cfg is not None, "No config found"
@@ -195,21 +195,27 @@ class DistortionExp(AbsExperiment):
         )
         ax1.set_ylabel("Phase (deg)")
 
-        ax2.plot(ideal_lengths, ideal_curve, "g-", label="Ideal Detune")
+        ax2.plot(ideal_lengths, ideal_curve, "g-", label="Ideal")
         ax2.plot(lengths, detunes, ".-")
         ax2.set_ylabel("Detune (MHz)")
         ax2.set_xlabel("Wait Time (us)")
 
         ax2.axvspan(
-            start_t - pi2_len / 2, start_t + pi2_len / 2, color="gray", alpha=0.3
+            start_t - pi2_len / 2,
+            start_t + pi2_len / 2,
+            color="gray",
+            alpha=0.3,
+            label=f"timeFly: {timeFly:.2f} us",
         )
         ax1.axvline(start_t, color="black", linestyle="--")
         ax2.axvspan(end_t - pi2_len / 2, end_t + pi2_len / 2, color="gray", alpha=0.3)
         ax1.axvline(end_t, color="black", linestyle="--")
 
+        ax2.legend()
+
         fig.tight_layout()
 
-        return fig
+        return timeFly, fig
 
     def save(
         self,
