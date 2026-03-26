@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+import numpy as np
+from numpy.typing import NDArray
 from qick.asm_v2 import QickParam
 from typing_extensions import (
     Callable,
     ClassVar,
     Literal,
     NotRequired,
+    Optional,
     Type,
     TypeAlias,
     TypedDict,
@@ -48,12 +51,19 @@ class FlatTopWaveformCfg(TypedDict, closed=True):
     raise_waveform: Union[CosineWaveformCfg, GaussWaveformCfg, DragWaveformCfg]
 
 
+class ArbWaveformCfg(TypedDict, closed=True):
+    style: Literal["arb"]
+    length: float
+    data: str
+
+
 WaveformCfg: TypeAlias = Union[
     ConstWaveformCfg,
     CosineWaveformCfg,
     GaussWaveformCfg,
     DragWaveformCfg,
     FlatTopWaveformCfg,
+    ArbWaveformCfg,
 ]
 
 
@@ -94,9 +104,7 @@ class Waveform(AbsWaveform):
     SUPPORTED_STYLES: ClassVar[dict[str, Type[AbsWaveform]]] = {}
 
     @classmethod
-    def register_waveform(
-        cls, style: str
-    ) -> Callable[[Type[AbsWaveform]], Type[AbsWaveform]]:
+    def register(cls, style: str) -> Callable[[Type[AbsWaveform]], Type[AbsWaveform]]:
         if style in cls.SUPPORTED_STYLES:
             raise ValueError(
                 f"Waveform style {style} already registered by {cls.SUPPORTED_STYLES[style].__name__}"
@@ -148,7 +156,7 @@ class Waveform(AbsWaveform):
         return self.waveform.waveform_cfg
 
 
-@Waveform.register_waveform("const")
+@Waveform.register("const")
 class ConstWaveform(AbsWaveform):
     @classmethod
     def set_param(
@@ -179,7 +187,7 @@ class ConstWaveform(AbsWaveform):
         }
 
 
-@Waveform.register_waveform("cosine")
+@Waveform.register("cosine")
 class CosineWaveform(AbsWaveform):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
         prog.add_cosine(ch, self.name, length=self.waveform_cfg["length"], **kwargs)
@@ -213,7 +221,7 @@ class CosineWaveform(AbsWaveform):
         }
 
 
-@Waveform.register_waveform("gauss")
+@Waveform.register("gauss")
 class GaussWaveform(AbsWaveform):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
         wav_cfg = cast(GaussWaveformCfg, self.waveform_cfg)
@@ -265,7 +273,7 @@ class GaussWaveform(AbsWaveform):
         }
 
 
-@Waveform.register_waveform("drag")
+@Waveform.register("drag")
 class DragWaveform(AbsWaveform):
     def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
         wav_cfg = cast(DragWaveformCfg, self.waveform_cfg)
@@ -323,7 +331,7 @@ class DragWaveform(AbsWaveform):
         }
 
 
-@Waveform.register_waveform("flat_top")
+@Waveform.register("flat_top")
 class FlatTopWaveform(AbsWaveform):
     def __init__(self, name: str, waveform_cfg: WaveformCfg) -> None:
         super().__init__(name, waveform_cfg)
@@ -375,4 +383,49 @@ class FlatTopWaveform(AbsWaveform):
             "style": "flat_top",
             "envelope": self.name,
             "length": wav_cfg["length"] - wav_cfg["raise_waveform"]["length"],
+        }
+
+
+@Waveform.register("arb")
+class ArbWaveform(AbsWaveform):
+    def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
+        idata, qdata = self.make_iqdata(ch, prog, **kwargs)
+        prog.add_envelope(ch, self.name, idata=idata, qdata=qdata)
+
+    def make_iqdata(
+        self, ch: int, prog: MyProgramV2, even_length: bool = False
+    ) -> tuple[NDArray, Optional[NDArray]]:
+        # lazy import to avoid circular import
+        from zcu_tools.meta_tool.arb_waveform import ArbWaveformDatabase
+
+        wav_cfg = cast(ArbWaveformCfg, self.waveform_cfg)
+        idata_raw, qdata_raw, time_raw = ArbWaveformDatabase.get(wav_cfg["data"])
+
+        maxv = prog.soccfg.get_maxv(ch)
+        samps_per_clk = prog.soccfg["gens"][ch]["samps_per_clk"]
+        length = wav_cfg["length"]
+
+        if even_length:
+            n_clks = 2 * prog.us2cycles(gen_ch=ch, us=length / 2)
+        else:
+            n_clks = prog.us2cycles(gen_ch=ch, us=length)
+        n_samples = int(n_clks * samps_per_clk)
+
+        target_time = np.linspace(0, length, n_samples, endpoint=False)
+        idata = np.interp(target_time, time_raw, idata_raw, left=0, right=0) * maxv
+
+        qdata = None
+        if qdata_raw is not None:
+            qdata = np.interp(target_time, time_raw, qdata_raw, left=0, right=0) * maxv
+
+        return idata, qdata
+
+    @property
+    def length(self) -> float:
+        return cast(ArbWaveformCfg, self.waveform_cfg)["length"]
+
+    def to_wav_kwargs(self) -> QickWaveformKwargs:
+        return {
+            "style": "arb",
+            "envelope": self.name,
         }
