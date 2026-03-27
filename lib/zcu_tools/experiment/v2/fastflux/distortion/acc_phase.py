@@ -15,12 +15,12 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Join,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
     PulseCfg,
     Readout,
-    Join,
     ReadoutCfg,
     Reset,
     ResetCfg,
@@ -110,7 +110,7 @@ class AccPhaseExp(AbsExperiment):
 
                 true_ts = prog.get_time_param("pi2_pulse1", "t", as_array=True)
                 true_lengths = true_ts - true_ts[0]
-                # print(np.max(np.abs(true_lengths - lengths + lengths[0])))
+                print(np.max(np.abs(true_lengths - lengths + lengths[0])))
 
                 return prog.acquire(soc, progress=False, callback=update_hook)
 

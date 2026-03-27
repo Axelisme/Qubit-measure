@@ -19,10 +19,13 @@ def round_zcu_time(
     ro_ch: Optional[int] = None,
     scaler: float = 1.0,
 ) -> T_Value:
+    one_cycle = soccfg.cycles2us(1, gen_ch=gen_ch, ro_ch=ro_ch)
     def _convert_time(t: float) -> float:
         return (
             soccfg.cycles2us(
-                soccfg.us2cycles(scaler * t, gen_ch=gen_ch, ro_ch=ro_ch),
+                soccfg.us2cycles(
+                    scaler * t - 0.5 * one_cycle, gen_ch=gen_ch, ro_ch=ro_ch
+                ),
                 gen_ch=gen_ch,
                 ro_ch=ro_ch,
             )
@@ -123,7 +126,8 @@ def sweep2array(
     if isinstance(sweep, dict):
         expts = sweep["expts"]
         round_start = apply_round(sweep["start"])
-        round_span = expts * apply_round((sweep["stop"] - sweep["start"]) / expts)
+        span = sweep["stop"] - sweep["start"]
+        round_span = (expts - 1) * apply_round(span / (expts - 1))
 
         return round_start + np.linspace(0, round_span, sweep["expts"])
     elif isinstance(sweep, list) or isinstance(sweep, np.ndarray):
