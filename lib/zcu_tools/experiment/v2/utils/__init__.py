@@ -1,5 +1,6 @@
 from .helper import make_ge_sweep, merge_result_list, set_pulse_freq
 from .round_zcu import (
+    round_sweep_dict,
     round_zcu_freq,
     round_zcu_gain,
     round_zcu_phase,
@@ -14,6 +15,7 @@ __all__ = [
     "merge_result_list",
     "set_pulse_freq",
     # round zcu
+    "round_sweep_dict",
     "sweep2array",
     "round_zcu_freq",
     "round_zcu_phase",
