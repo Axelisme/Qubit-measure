@@ -82,7 +82,7 @@ class AccPhaseExp(AbsExperiment):
 
             def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
                 modules = ctx.cfg["modules"]
-                prog = ModularProgramV2(
+                return ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
@@ -106,13 +106,7 @@ class AccPhaseExp(AbsExperiment):
                         ),
                         Readout("readout", modules["readout"]),
                     ],
-                )
-
-                true_ts = prog.get_time_param("pi2_pulse1", "t", as_array=True)
-                true_lengths = true_ts - true_ts[0]
-                print(np.max(np.abs(true_lengths - lengths + lengths[0])))
-
-                return prog.acquire(soc, progress=False, callback=update_hook)
+                ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
                 task=Task(

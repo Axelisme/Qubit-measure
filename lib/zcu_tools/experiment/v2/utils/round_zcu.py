@@ -20,7 +20,12 @@ def round_zcu_time(
     scaler: float = 1.0,
 ) -> T_Value:
     one_cycle = soccfg.cycles2us(1, gen_ch=gen_ch, ro_ch=ro_ch)
+
     def _convert_time(t: float) -> float:
+        # us2cycles use np.round to convert time to cycles
+        # but qick implementation of sweep  use np.trunc to convert step size
+        # pre substract 0.5 cycle to perform truncation instead of rounding
+        # TODO: is there better way to handle the rounding issue
         return (
             soccfg.cycles2us(
                 soccfg.us2cycles(
@@ -45,10 +50,15 @@ def round_zcu_freq(
     ro_ch: Optional[int] = None,
     scaler: float = 1.0,
 ) -> T_Value:
+    one_reg = soccfg.reg2freq(1, gen_ch=gen_ch, ro_ch=ro_ch) - soccfg.reg2freq(
+        0, gen_ch=gen_ch, ro_ch=ro_ch
+    )
+
     def _convert_freq(f: float) -> float:
         return (
             soccfg.reg2freq(
-                soccfg.freq2reg(scaler * f, gen_ch=gen_ch, ro_ch=ro_ch), gen_ch=gen_ch
+                soccfg.freq2reg(scaler * f - 0.5 * one_reg, gen_ch=gen_ch, ro_ch=ro_ch),
+                gen_ch=gen_ch,
             )
             / scaler
         )
@@ -66,12 +76,16 @@ def round_zcu_phase(
     ro_ch: Optional[int] = None,
     scaler: float = 1.0,
 ) -> T_Value:
+    one_gain = soccfg.reg2deg(1, gen_ch=gen_ch, ro_ch=ro_ch) - soccfg.reg2deg(
+        0, gen_ch=gen_ch, ro_ch=ro_ch
+    )
+
     def _convert_phase(p: float) -> float:
         num_2pi = int(scaler * p / 360.0)
         return (
             360.0 * num_2pi  # restore the wrapped-around phase to the original value
             + soccfg.reg2deg(
-                soccfg.deg2reg(scaler * p, gen_ch=gen_ch, ro_ch=ro_ch),
+                soccfg.deg2reg(scaler * p - 0.5 * one_gain, gen_ch=gen_ch, ro_ch=ro_ch),
                 gen_ch=gen_ch,
                 ro_ch=ro_ch,
             )
@@ -91,7 +105,7 @@ def round_zcu_gain(
 
     def _convert_gain(g: float) -> float:
         # qick didn't provide gain2reg function, so implement it manually
-        return int(np.round(scaler * g * maxv)) / (scaler * maxv)
+        return int(np.trunc(scaler * g * maxv)) / (scaler * maxv)
 
     if isinstance(gain, (Number, float)):
         return _convert_gain(float(gain))
