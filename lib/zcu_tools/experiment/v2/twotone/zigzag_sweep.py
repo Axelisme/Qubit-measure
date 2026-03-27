@@ -56,10 +56,9 @@ class ZigZagModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-
 class ZigZagCfg(ModularProgramCfg, TaskCfg):
     modules: ZigZagModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: dict[str, Union[SweepCfg, Sequence[float]]]
 
 
 class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):

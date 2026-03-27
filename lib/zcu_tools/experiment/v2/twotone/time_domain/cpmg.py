@@ -20,9 +20,10 @@ from typing_extensions import (
     Union,
 )
 
+from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array, round_zcu_time, round_sweep_dict
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -40,7 +41,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils.datasaver import save_data
-from zcu_tools.utils.fitting import fit_decay
+from zcu_tools.utils.fitting import fit_decay, fit_decay_fringe
 from zcu_tools.utils.process import rotate2real
 
 
@@ -64,45 +65,58 @@ class CPMG_ModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class CPMG_SweepCfg(TypedDict, closed=True):
-    times: Union[SweepCfg, NDArray, list]
-    length: SweepCfg
-
-
 class CPMG_Cfg(ModularProgramCfg, TaskCfg):
     modules: CPMG_ModuleCfg
-    sweep: CPMG_SweepCfg
+    sweep: dict[str, Union[SweepCfg, list]]
+    length_range: Union[list[tuple[float, float]], tuple[float, float]]
+    length_expts: int
 
 
 class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> CPMG_Result:
+    def run(
+        self, soc, soccfg, cfg: dict[str, Any], detune_ratio: float = 0.0
+    ) -> CPMG_Result:
         _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
         modules = _cfg["modules"]
 
         pi2_pulse = modules["pi2_pulse"]
         pi_pulse = modules["pi_pulse"]
+        length_ranges = _cfg["length_range"]
 
-        length_sweep = _cfg["sweep"]["length"]
+        if isinstance(length_ranges, tuple):
+            ranges = np.zeros((_cfg["length_expts"], 2), dtype=np.float64)
+            ranges[:, 0] = length_ranges[0]
+            ranges[:, 1] = length_ranges[1]
+        else:
+            ranges = np.array(length_ranges, dtype=np.float64)
+        length_ranges = ranges
+
         time_sweep: SweepCfg = _cfg["sweep"].pop("times")  # type: ignore
 
         # TODO: convert times and length sweeps to arrays in different time
         times = sweep2array(time_sweep, allow_array=True)
-        lengths = np.array(
+        lengths = np.array(  # (times x length)
             [
                 sweep2array(
-                    length_sweep, "time", {"soccfg": soccfg, "scaler": 1 / (2 * t)}
+                    make_sweep(
+                        start=length_ranges[i, 0],
+                        stop=length_ranges[i, 1],
+                        expts=_cfg["length_expts"],
+                    ),
+                    "time",
+                    {"soccfg": soccfg, "scaler": 1 / (2 * t)},
                 )
-                for t in times
+                for i, t in enumerate(times)
             ]
         )
-        length_idxs = np.arange(length_sweep["expts"])
-
-        cpmg_spans = sweep2param("length", _cfg["sweep"]["length"])
+        length_idxs = np.arange(_cfg["length_expts"], dtype=np.float64)
 
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
 
-        min_interval = np.min(lengths) / np.max(times)
+        min_interval = np.min(
+            (length_ranges[:, 1] - length_ranges[:, 0]) / (2 * np.max(times))
+        )
         if min_interval < 0.5 * (  # the first and last delays are half of the interval
             pi2_pulse["waveform"]["length"] + pi_pulse["waveform"]["length"]
         ):
@@ -114,35 +128,47 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             )
 
         with LivePlotter2DwithLine(
-            "Number of Pi", "Time (us)", line_axis=1, num_lines=2, title="CPMG"
+            "Number of Pi", "Time idxs", line_axis=1, num_lines=2, title="CPMG"
         ) as viewer:
 
             def measure_fn(ctx: TaskState, update_hook: Callable[[int, Any], None]):
                 cfg = ctx.cfg
                 modules = cfg["modules"]
+
+                time = ctx.env["time"]
                 pi2_pulse = modules["pi2_pulse"]
                 pi_pulse = modules["pi_pulse"]
                 dpulse_len = (
                     pi_pulse["waveform"]["length"] - pi2_pulse["waveform"]["length"]
                 )
 
-                interval = cpmg_spans / (2 * ctx.env["time"])
+                round_length_sweep = round_sweep_dict(
+                    cfg["sweep"]["length"],
+                    "time",
+                    {"soccfg": soccfg, "scaler": 1 / (2 * time)},
+                )
+                length_param = sweep2param("length", round_length_sweep)
+                detune_param = (
+                    360
+                    * detune_ratio
+                    * sweep2param(
+                        "length",  # scan with length loop
+                        make_sweep(start=0, step=1, expts=round_length_sweep["expts"]),
+                    )
+                )
+
+                interval = length_param / (2 * time)
 
                 return ModularProgramV2(
                     soccfg,
                     cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        Pulse(
-                            "pi2_pulse1",
-                            pi2_pulse,
-                            pulse_name="pi2_pulse",
-                            block_mode=False,
-                        ),
-                        Delay("first_cpmg_delay", interval - 0.5 * dpulse_len),
+                        Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
+                        Delay("first_delay", interval - 0.5 * dpulse_len),
                         Repeat(
-                            name="cpmg_pi_loop",
-                            n=ctx.env["time"] - 1,
+                            name="pi_loop",
+                            n=time - 1,
                             sub_module=[
                                 Pulse(
                                     "pi_pulse",
@@ -150,32 +176,38 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                                     pulse_name="pi_pulse",
                                     block_mode=False,
                                 ),
-                                SoftDelay("inner_cpmg_delay", 2 * interval),
+                                SoftDelay("inner_delay", 2 * interval),
                             ],
                         ),
+                        Pulse("last_pi_pulse", pi_pulse, block_mode=False),
+                        Delay("last_delay", interval + 0.5 * dpulse_len),
                         Pulse(
-                            "last_pi_pulse",
-                            pi_pulse,
-                            pulse_name="pi_pulse",
-                            block_mode=False,
+                            name="pi2_pulse2",
+                            cfg={  # type: ignore
+                                **pi2_pulse,
+                                "phase": pi2_pulse["phase"] + detune_param,
+                            },
                         ),
-                        Delay("last_cpmg_delay", interval + 0.5 * dpulse_len),
-                        Pulse("pi2_pulse2", pi2_pulse, pulse_name="pi2_pulse"),
                         Readout("readout", modules["readout"]),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
 
             def update_fn(i, ctx: TaskState, time):
                 ctx.env.update(time=int(time))
+                ctx.cfg["sweep"]["length"] = make_sweep(
+                    start=length_ranges[i, 0],
+                    stop=length_ranges[i, 1],
+                    expts=ctx.cfg["length_expts"],
+                )
 
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)).scan(
+                task=Task(measure_fn=measure_fn, result_shape=(len(length_idxs),)).scan(
                     "times", times.tolist(), before_each=update_fn
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     times,
-                    length_idxs.astype(np.float64),
+                    length_idxs,
                     cpmg_signal2real(np.asarray(ctx.root_data)),
                 ),
             )
@@ -187,7 +219,9 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
         return times, lengths, signals
 
-    def analyze(self, result: Optional[CPMG_Result] = None) -> Figure:
+    def analyze(
+        self, result: Optional[CPMG_Result] = None, fit_fringe: bool = True
+    ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -206,16 +240,21 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 np.abs(smooth_residual)
             )
 
-        prev_pOpt = None
+        prev_pOpt: Optional[tuple] = None
         t2s = np.full(len(times), np.nan, dtype=np.float64)
         t2errs = np.zeros_like(t2s)
         for i, (real_signal, lens) in enumerate(zip(real_signals2D, lengths)):
             if np.any(np.isnan(real_signal)):
                 continue
 
-            t2r, t2err, fit_signal, (pOpt, _) = fit_decay(
-                lens, real_signal, fit_params=prev_pOpt
-            )
+            if fit_fringe:
+                t2r, t2err, _, _, fit_signal, (pOpt, _) = fit_decay_fringe(
+                    lens, real_signal, fit_params=prev_pOpt
+                )
+            else:
+                t2r, t2err, fit_signal, (pOpt, _) = fit_decay(
+                    lens, real_signal, fit_params=prev_pOpt
+                )
 
             if is_good_fit(fit_signal, real_signal):
                 prev_pOpt = pOpt
@@ -270,7 +309,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             filepath=str(_filepath.with_name(_filepath.name + "_length")),
             x_info={"name": "Number of Pi", "unit": "a.u.", "values": times},
             y_info={"name": "Time Index", "unit": "a.u.", "values": length_idxs},
-            z_info={"name": "Length", "unit": "s", "values": lengths.T * 1e-6},
+            z_info={"name": "Length", "unit": "s", "values": 1e-6 * lengths.T},
             comment=comment,
             tag=tag,
             **kwargs,
