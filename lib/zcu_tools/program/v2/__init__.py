@@ -2,14 +2,15 @@ from . import modules, utils
 from .base import MyProgramV2, ProgramV2Cfg
 from .modular import ModularProgramCfg, ModularProgramV2
 from .modules import (
+    Join,
     BathReset,
     BathResetCfg,
     Delay,
     DirectReadout,
     DirectReadoutCfg,
+    DelayAuto,
     Module,
     ModuleCfg,
-    NonBlocking,
     Pulse,
     PulseCfg,
     PulseReadout,

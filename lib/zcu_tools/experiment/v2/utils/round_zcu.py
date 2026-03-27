@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from numbers import Number
 
 import numpy as np
@@ -122,8 +121,9 @@ def sweep2array(
             raise ValueError(f"Invalid round type: {round_type}")
 
     if isinstance(sweep, dict):
+        expts = sweep["expts"]
         round_start = apply_round(sweep["start"])
-        round_span = apply_round(sweep["stop"] - sweep["start"])
+        round_span = expts * apply_round((sweep["stop"] - sweep["start"]) / expts)
 
         return round_start + np.linspace(0, round_span, sweep["expts"])
     elif isinstance(sweep, list) or isinstance(sweep, np.ndarray):

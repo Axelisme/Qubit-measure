@@ -34,9 +34,6 @@ class PulseCfg(ModuleCfg, closed=True):
     ro_ch: NotRequired[int]
 
 
-
-
-
 class Pulse(Module, tag="pulse"):
     def __init__(
         self,

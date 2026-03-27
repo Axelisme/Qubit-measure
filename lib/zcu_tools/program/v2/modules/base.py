@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import warnings
 from abc import ABC, abstractmethod
 
 from qick.asm_v2 import QickParam
@@ -9,17 +8,13 @@ from typing_extensions import (
     Any,
     NotRequired,
     Optional,
-    Sequence,
     Type,
     TypedDict,
     Union,
 )
 
-from zcu_tools.config import config
 
 from ..base import MyProgramV2
-from .util import round_timestamp
-from ..utils import PrintTimeStamp
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
@@ -76,75 +71,3 @@ class Module(ABC):
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]: ...
-
-
-class Delay(Module):
-    def __init__(
-        self, name: str, delay: Union[float, QickParam], absolute: bool = False
-    ) -> None:
-        self.name = name
-        self.delay = delay
-        self.absolute = absolute
-
-    def init(self, prog: MyProgramV2) -> None:
-        pass
-
-    def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        delay_t = self.delay if self.absolute else t + self.delay
-        delay_t = round_timestamp(prog, delay_t)
-
-        prog.delay(t=delay_t, tag=self.name)
-
-        return 0.0  # reset reference time
-
-
-class SoftDelay(Module):
-    def __init__(
-        self, name: str, delay: Union[float, QickParam], absolute: bool = False
-    ) -> None:
-        self.name = name
-        self.delay = delay
-        self.absolute = absolute
-
-    def init(self, prog: MyProgramV2) -> None:
-        pass
-
-    def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        delay_t = self.delay if self.absolute else t + self.delay
-
-        return round_timestamp(prog, delay_t)
-
-
-class NonBlocking(Module):
-    def __init__(self, modules: Sequence[Module]) -> None:
-        self.modules = modules
-        self.name = "[" + ", ".join(module.name for module in modules) + "]"
-
-    def init(self, prog: MyProgramV2) -> None:
-        for module in self.modules:
-            module.init(prog)
-
-    def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        cur_t = t
-        for module in self.modules:
-            if config.DEBUG_MODE:
-                prog.append_macro(
-                    PrintTimeStamp(
-                        f"{module.__class__.__name__}({module.name})", prefix="\t"
-                    )
-                )
-            new_cur_t = module.run(prog, cur_t)
-            if new_cur_t < cur_t:
-                warnings.warn(
-                    "Find time reset in NonBlocking module. "
-                    "Maybe you should set SoftDelay instead of Delay.",
-                )
-            cur_t = new_cur_t
-
-        return t  # non-block returns initial time

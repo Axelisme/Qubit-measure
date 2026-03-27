@@ -39,11 +39,13 @@ class PrintTimeStamp(Macro):
     def __init__(
         self,
         name: str,
+        t: Union[float, QickParam] = 0.0,
         prefix: str = "",
         gen_chs: Optional[list[int]] = None,
         ro_chs: Optional[list[int]] = None,
     ) -> None:
         self.name = name
+        self.t = t
         self.prefix = prefix
         self.gen_chs = gen_chs
         self.ro_chs = ro_chs
@@ -60,6 +62,7 @@ class PrintTimeStamp(Macro):
             ro_chs = list(range(len(prog._ro_ts)))
 
         print(self.prefix + self.name)
+        print(self.prefix + f"\tglobal time: {param2str(self.t)}")
         for ch in gen_chs:
             t = prog._gen_ts[ch]
             if t != 0.0 or self.gen_chs is not None:

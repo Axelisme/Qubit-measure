@@ -17,7 +17,7 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
-    NonBlocking,
+    Join,
     Pulse,
     PulseCfg,
     Readout,
@@ -83,13 +83,9 @@ class PhaseExp(AbsExperiment):
                     ctx.cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        NonBlocking(
+                        Join(
+                            Pulse("flux_pulse", modules["flux_pulse"]),
                             [
-                                Pulse(
-                                    "flux_pulse",
-                                    modules["flux_pulse"],
-                                    block_mode=False,
-                                ),
                                 SoftDelay("wait_time", delay=length_params),
                                 Pulse("pi2_pulse1", modules["pi2_pulse"]),
                                 Pulse(
@@ -99,9 +95,9 @@ class PhaseExp(AbsExperiment):
                                         "phase": phase_params,
                                     },
                                 ),
-                            ]
+                            ],
+                            SoftDelay("readout_t", ctx.cfg["readout_t"]),
                         ),
-                        SoftDelay("readout_t", ctx.cfg["readout_t"]),
                         Readout("readout", modules["readout"]),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
@@ -123,11 +119,8 @@ class PhaseExp(AbsExperiment):
         return lengths, phases, signals
 
     def analyze(
-        self,
-        cfg: Optional[dict[str, Any]] = None,
-        result: Optional[PhaseResult] = None,
-        timeFly: Optional[float] = None,
-    ) -> tuple[float, Figure]:
+        self, cfg: Optional[dict[str, Any]] = None, result: Optional[PhaseResult] = None
+    ) -> Figure:
         if cfg is None:
             cfg = self.last_cfg
         assert cfg is not None, "No config found"
@@ -154,22 +147,14 @@ class PhaseExp(AbsExperiment):
         init_phases = np.rad2deg(np.unwrap(np.arctan2(coeffs[2], coeffs[1])))
 
         sort_idxs = np.argsort(np.abs(init_phases))
-        mean_background = np.mean(init_phases[sort_idxs[: int(len(init_phases) * 0.1)]])
-        mean_topdetune = np.mean(init_phases[sort_idxs[int(len(init_phases) * 0.9) :]])
-        if timeFly is None:
-            detune_ratios = (init_phases - mean_background) / (
-                mean_topdetune - mean_background
-            )
-            top_idx = np.argmax(detune_ratios)
-            candidate_mask = detune_ratios[:top_idx] < 0.5
-            if not np.any(candidate_mask):
-                offset = float(lengths[0])
-            else:
-                offset = lengths[np.nonzero(candidate_mask)[0][-1]]
-            timeFly = offset - float(flux_pulse["pre_delay"])
-        assert timeFly is not None
+        mean_background = np.median(
+            init_phases[sort_idxs[: int(len(init_phases) * 0.2)]]
+        )
+        mean_topdetune = np.median(
+            init_phases[sort_idxs[int(len(init_phases) * 0.8) :]]
+        )
 
-        start_t = float(flux_pulse["pre_delay"]) + timeFly
+        start_t = float(flux_pulse["pre_delay"])
         end_t = start_t + float(flux_pulse["waveform"]["length"])
 
         ideal_lengths = np.linspace(lengths[0], lengths[-1], 1000)
@@ -193,22 +178,17 @@ class PhaseExp(AbsExperiment):
         ax2.set_ylabel("Phase (deg)")
         ax2.set_xlabel("Wait Time (us)")
 
-        ax2.axvspan(
-            start_t - pi2_len / 2,
-            start_t + pi2_len / 2,
-            color="gray",
-            alpha=0.3,
-            label=f"timeFly: {timeFly:.2f} us",
-        )
+        plot_kwargs = dict(color="gray", alpha=0.3)
+        ax2.axvspan(start_t - pi2_len, start_t + pi2_len, **plot_kwargs)
         ax1.axvline(start_t, color="black", linestyle="--")
-        ax2.axvspan(end_t - pi2_len / 2, end_t + pi2_len / 2, color="gray", alpha=0.3)
+        ax2.axvspan(end_t - pi2_len, end_t + pi2_len, **plot_kwargs)
         ax1.axvline(end_t, color="black", linestyle="--")
 
         ax2.legend()
 
         fig.tight_layout()
 
-        return timeFly, fig
+        return fig
 
     def save(
         self,

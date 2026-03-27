@@ -22,7 +22,7 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
-    NonBlocking,
+    Join,
     Pulse,
     PulseCfg,
     Readout,
@@ -104,7 +104,6 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
     ) -> AcStarkResult:
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)
         modules = _cfg["modules"]
-
 
         gain_sweep = _cfg["sweep"].pop("gain")
 
@@ -377,7 +376,8 @@ class AcStarkRamseyExp(AbsExperiment):
                     ctx.cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        NonBlocking(
+                        Join(
+                            Pulse("stark_pulse", modules["stark_pulse"]),
                             [
                                 SoftDelay("wait_delay", delay=ctx.cfg["wait_delay"]),
                                 Pulse("pi2_pulse1", modules["pi2_pulse"]),
@@ -390,9 +390,8 @@ class AcStarkRamseyExp(AbsExperiment):
                                         + 360 * detune * t2r_param,
                                     },
                                 ),
-                            ]
+                            ],
                         ),
-                        Pulse("stark_pulse", modules["stark_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)

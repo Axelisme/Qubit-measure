@@ -65,3 +65,51 @@ def calc_max_length(
         length2 = length2.maxval()
 
     return max(length1, length2)
+
+
+def merge_max_length(*args: Union[float, QickParam]) -> Union[float, QickParam]:
+    merge_list = list(args)
+
+    if len(merge_list) == 0:
+        raise ValueError("at least one length must be provided")
+
+    def try_reduce(
+        length1: Union[float, QickParam], length2: Union[float, QickParam]
+    ) -> Optional[Union[float, QickParam]]:
+        if length1 > length2:
+            return length1
+        elif length1 < length2:
+            return length2
+        else:
+            return None
+
+    while True:
+        prev_num = len(merge_list)
+        i = 0
+        while i < len(merge_list):
+            j = i + 1
+            while j < len(merge_list):
+                result = try_reduce(merge_list[i], merge_list[j])
+                if result is not None:
+                    merge_list[i] = result
+                    merge_list.pop(j)
+                else:
+                    j += 1
+            i += 1
+
+        # no more reduction possible
+        if len(merge_list) == prev_num:
+            break
+
+    if len(merge_list) == 1:
+        return merge_list[0]
+
+    warnings.warn(
+        f"Detected multiple overlapping lengths: {[param2str(m) for m in merge_list]}. "
+        "Using the maximum length among them for calculation. "
+        "Note: this approach may not always be correct; it is only correct for some loop iterations and may be inaccurate for others."
+    )
+
+    merge_list = [m.maxval() if isinstance(m, QickParam) else m for m in merge_list]
+
+    return max(merge_list)

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import qick.asm_v2 as qick_asm_v2
 
-from .base import Delay, Module, ModuleCfg, NonBlocking, SoftDelay
+from .delay import Delay, SoftDelay, DelayAuto, Join
+from .base import Module, ModuleCfg
 from .loop import Repeat, SoftRepeat
 from .pulse import Pulse, PulseCfg
 from .readout import (

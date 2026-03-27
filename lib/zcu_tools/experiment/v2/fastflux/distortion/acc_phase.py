@@ -17,10 +17,10 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
-    NonBlocking,
     Pulse,
     PulseCfg,
     Readout,
+    Join,
     ReadoutCfg,
     Reset,
     ResetCfg,
@@ -64,7 +64,11 @@ class AccPhaseExp(AbsExperiment):
             "phase": _cfg["sweep"]["phase"],
         }
 
-        lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
+        lengths = sweep2array(
+            _cfg["sweep"]["length"],
+            "time",
+            {"soccfg": soccfg},
+        )
         phases = sweep2array(
             _cfg["sweep"]["phase"],
             "phase",
@@ -78,23 +82,21 @@ class AccPhaseExp(AbsExperiment):
 
             def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
                 modules = ctx.cfg["modules"]
-                return ModularProgramV2(
+                prog = ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        NonBlocking(
+                        Join(
+                            Pulse("flux_pulse", modules["flux_pulse"]),
                             [
-                                Pulse(
-                                    "flux_pulse",
-                                    modules["flux_pulse"],
-                                    block_mode=False,
-                                ),
                                 SoftDelay("wait_time", delay=length_params),
-                                Pulse("pi2_pulse1", modules["pi2_pulse"]),
-                            ]
+                                Pulse(
+                                    "pi2_pulse1", modules["pi2_pulse"], tag="pi2_pulse1"
+                                ),
+                            ],
+                            SoftDelay("readout_t", ctx.cfg["readout_t"]),
                         ),
-                        SoftDelay("readout_t", ctx.cfg["readout_t"]),
                         Pulse(
                             name="pi2_pulse2",
                             cfg={  # type: ignore[dict-item]
@@ -104,7 +106,13 @@ class AccPhaseExp(AbsExperiment):
                         ),
                         Readout("readout", modules["readout"]),
                     ],
-                ).acquire(soc, progress=False, callback=update_hook)
+                )
+
+                true_ts = prog.get_time_param("pi2_pulse1", "t", as_array=True)
+                true_lengths = true_ts - true_ts[0]
+                # print(np.max(np.abs(true_lengths - lengths + lengths[0])))
+
+                return prog.acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
                 task=Task(
@@ -126,8 +134,7 @@ class AccPhaseExp(AbsExperiment):
         self,
         cfg: Optional[dict[str, Any]] = None,
         result: Optional[AccPhaseResult] = None,
-        timeFly: Optional[float] = None,
-    ) -> tuple[float, Figure]:
+    ) -> Figure:
         if cfg is None:
             cfg = self.last_cfg
         assert cfg is not None, "No config found"
@@ -158,20 +165,8 @@ class AccPhaseExp(AbsExperiment):
         sort_idxs = np.argsort(np.abs(detunes))
         mean_background = np.mean(detunes[sort_idxs[: int(len(detunes) * 0.1)]])
         mean_topdetune = np.mean(detunes[sort_idxs[int(len(detunes) * 0.9) :]])
-        if timeFly is None:
-            detune_ratios = (detunes - mean_background) / (
-                mean_topdetune - mean_background
-            )
-            top_idx = np.argmax(detune_ratios)
-            candidate_mask = detune_ratios[:top_idx] < 0.5
-            if not np.any(candidate_mask):
-                offset = float(lengths[0])
-            else:
-                offset = lengths[np.nonzero(candidate_mask)[0][-1]]
-            timeFly = offset - float(flux_pulse["pre_delay"])
-        assert timeFly is not None
 
-        start_t = float(flux_pulse["pre_delay"]) + timeFly
+        start_t = float(flux_pulse["pre_delay"])
         end_t = start_t + float(flux_pulse["waveform"]["length"])
 
         ideal_lengths = np.linspace(lengths[0], lengths[-1], 1000)
@@ -195,22 +190,17 @@ class AccPhaseExp(AbsExperiment):
         ax2.set_ylabel("Detune (MHz)")
         ax2.set_xlabel("Wait Time (us)")
 
-        ax2.axvspan(
-            start_t - pi2_len / 2,
-            start_t + pi2_len / 2,
-            color="gray",
-            alpha=0.3,
-            label=f"timeFly: {timeFly:.2f} us",
-        )
+        plot_kwargs = dict(color="gray", alpha=0.3)
+        ax2.axvspan(start_t - pi2_len / 2, start_t + pi2_len / 2, **plot_kwargs)
+        ax2.axvspan(end_t - pi2_len / 2, end_t + pi2_len / 2, **plot_kwargs)
         ax1.axvline(start_t, color="black", linestyle="--")
-        ax2.axvspan(end_t - pi2_len / 2, end_t + pi2_len / 2, color="gray", alpha=0.3)
         ax1.axvline(end_t, color="black", linestyle="--")
 
         ax2.legend()
 
         fig.tight_layout()
 
-        return timeFly, fig
+        return fig
 
     def save(
         self,

@@ -7,9 +7,10 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
+from scipy.ndimage import gaussian_filter1d
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
-from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
@@ -25,9 +26,10 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
     sweep2param,
+    DelayAuto,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.fitting import expfunc, fit_decay
+from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.process import rotate2real
 
 # (gains, lengths, signals2D)
@@ -62,6 +64,11 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         _cfg = check_type(deepcopy(cfg), T1Cfg)
         modules = _cfg["modules"]
 
+        _cfg["sweep"] = {  # force gain be the outer loop
+            "gain": _cfg["sweep"]["gain"],
+            "length": _cfg["sweep"]["length"],
+        }
+
         # uniform in square space
         lf_ch = modules["flux_pulse"]["ch"]
         gains = sweep2array(
@@ -74,6 +81,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
         length_param = sweep2param("length", _cfg["sweep"]["length"])
         Pulse.set_param(modules["flux_pulse"], "gain", gain_param)
+        Pulse.set_param(modules["flux_pulse"], "length", length_param)
 
         with LivePlotter2D("Flux Pulse Gain (a.u.)", "Time (us)") as viewer:
 
@@ -84,17 +92,11 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     ctx.cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        Pulse(
-                            "flux_pulse",
-                            modules["flux_pulse"],
-                            block_mode=False,
-                        ),
-                        Delay("t1_delay", length_param),
                         Pulse("pi_pulse", modules["pi_pulse"]),
+                        Pulse("flux_pulse", modules["flux_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
-
 
             signals = run_task(
                 task=Task(
@@ -121,32 +123,46 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         real_signals = t1_signal2real(signals2D)
 
+        def is_good_fit(fit_signal, real_signal) -> bool:
+            real_ptp = np.ptp(real_signal)
+            fit_ptp = np.ptp(fit_signal)
+            residual = real_signal - fit_signal
+            smooth_residual = gaussian_filter1d(residual, sigma=1)
+            return fit_ptp > 0.5 * real_ptp and fit_ptp > np.mean(
+                np.abs(smooth_residual)
+            )
+
         prev_pOpt = None
         list_pOpt = []
         for real_signal in real_signals:
-            *_, (prev_pOpt, _) = fit_decay(
+            *_, fit_signal, (pOpt, _) = fit_decay(
                 lengths,
                 real_signal,
                 fit_params=prev_pOpt,
             )
+            if is_good_fit(fit_signal, real_signal):
+                prev_pOpt = pOpt
+            else:
+                prev_pOpt = None
             list_pOpt.append(prev_pOpt)
-        mean_y0 = np.mean([pOpt[0] for pOpt in list_pOpt]).item()
+        mean_y0 = np.median([pOpt[0] for pOpt in list_pOpt if pOpt is not None]).item()
 
-        t1s = np.zeros_like(gains)
+        t1s = np.full_like(gains, np.nan)
         t1errs = np.zeros_like(gains)
-        for i in range(len(gains)):
-            t1, t1err, *_ = fit_decay(
+        for i, real_signal in enumerate(real_signals):
+            t1, t1err, fit_signal, *_ = fit_decay(
                 lengths,
                 real_signals[i, :],
                 fit_params=list_pOpt[i],
                 fixedparams=(mean_y0, None, None),
             )
-            t1s[i] = t1
-            t1errs[i] = t1err
+            if is_good_fit(fit_signal, real_signal):
+                t1s[i] = t1
+                t1errs[i] = t1err
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        fig, ax = plt.subplots(figsize=config.figsize)
 
-        ax1.imshow(
+        ax.imshow(
             real_signals.T,
             extent=[gains[0], gains[-1], lengths[0], lengths[-1]],
             aspect="auto",
@@ -155,13 +171,11 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             cmap="RdBu_r",
         )
         # ax1.set_xlabel("Flux Pulse Gain (a.u.)")
-        ax1.set_ylabel("Time (us)")
+        ax.set_ylabel("Time (us)")
 
-        ax2.errorbar(gains, t1s, yerr=t1errs, fmt=".")
-        ax2.set_xlabel("Flux Pulse Gain (a.u.)")
-        ax2.set_ylabel("T1 (us)")
-        ax2.legend()
-        ax2.grid(True)
+        ax.errorbar(gains, t1s, yerr=t1errs, fmt=".", label="T1", color="black")
+        ax.set_xlabel("Flux Pulse Gain (a.u.)")
+        ax.legend()
 
         fig.tight_layout()
 

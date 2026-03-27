@@ -48,7 +48,9 @@ class Repeat(Module):
         for mod in self.sub_module:
             if config.DEBUG_MODE:
                 prog.append_macro(
-                    PrintTimeStamp(f"{mod.__class__.__name__}({mod.name})", prefix="\t")
+                    PrintTimeStamp(
+                        f"{mod.__class__.__name__}({mod.name})", cur_t, prefix="\t"
+                    )
                 )
             cur_t = mod.run(prog, cur_t)
         prog.delay(t=cur_t)

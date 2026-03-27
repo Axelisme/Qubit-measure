@@ -51,7 +51,7 @@ class ModularProgramV2(MyProgramV2):
         for module in self.modules:
             if config.DEBUG_MODE:
                 self.append_macro(
-                    PrintTimeStamp(f"{module.__class__.__name__}({module.name})")
+                    PrintTimeStamp(f"{module.__class__.__name__}({module.name})", t)
                 )
             t = module.run(self, t)
 

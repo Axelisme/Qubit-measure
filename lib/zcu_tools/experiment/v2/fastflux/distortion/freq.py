@@ -17,12 +17,12 @@ from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
-    NonBlocking,
     Pulse,
     PulseCfg,
     Readout,
     ReadoutCfg,
     Reset,
+    Join,
     ResetCfg,
     SoftDelay,
     sweep2param,
@@ -47,18 +47,12 @@ def get_resonance_freq(
     s_xs = []
     s_freqs = []
 
-    prev_freq = np.nan
     for x, amp in zip(xs, amps):
         if np.any(np.isnan(amp)):
             continue
 
         param, _ = fitlor(freqs, amp)
         curr_freq = param[3]
-
-        if abs(curr_freq - prev_freq) > 0.1 * (freqs[-1] - freqs[0]):
-            continue
-
-        prev_freq = curr_freq
 
         s_xs.append(x)
         s_freqs.append(curr_freq)
@@ -110,18 +104,14 @@ class FreqExp(AbsExperiment):
                     ctx.cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        NonBlocking(
+                        Join(
+                            Pulse("flux_pulse", modules["flux_pulse"]),
                             [
-                                Pulse(
-                                    "flux_pulse",
-                                    modules["flux_pulse"],
-                                    block_mode=False,
-                                ),
                                 SoftDelay("wait_time", delay=length_params),
                                 Pulse("qub_pulse", modules["qub_pulse"]),
-                            ]
+                            ],
+                            SoftDelay("readout_t", ctx.cfg["readout_t"]),
                         ),
-                        SoftDelay("readout_t", ctx.cfg["readout_t"]),
                         Readout("readout", modules["readout"]),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
@@ -143,11 +133,8 @@ class FreqExp(AbsExperiment):
         return lengths, freqs, signals
 
     def analyze(
-        self,
-        cfg: Optional[dict[str, Any]] = None,
-        result: Optional[FreqResult] = None,
-        timeFly: Optional[float] = None,
-    ) -> tuple[float, Figure]:
+        self, cfg: Optional[dict[str, Any]] = None, result: Optional[FreqResult] = None
+    ) -> Figure:
         if cfg is None:
             cfg = self.last_cfg
         assert cfg is not None, "No config found"
@@ -169,26 +156,14 @@ class FreqExp(AbsExperiment):
         amps = freq_signal2real(signals)
         s_lengths, s_freqs = get_resonance_freq(lengths, freqs, amps)
 
-        sort_idxs = np.argsort(np.abs(s_freqs))
+        sort_idxs = np.argsort(np.abs(s_freqs - s_freqs[0]))
         mean_background = np.mean(s_freqs[sort_idxs[: int(len(s_freqs) * 0.1)]])
         mean_topdetune = np.mean(s_freqs[sort_idxs[int(len(s_freqs) * 0.9) :]])
-        if timeFly is None:
-            detune_ratios = (s_freqs - mean_background) / (
-                mean_topdetune - mean_background
-            )
-            top_idx = np.argmax(detune_ratios)
-            candidate_mask = detune_ratios[:top_idx] < 0.5
-            if not np.any(candidate_mask):
-                offset = float(s_lengths[0])
-            else:
-                offset = s_lengths[np.nonzero(candidate_mask)[0][-1]]
-            timeFly = offset - float(flux_pulse["pre_delay"])
-        assert timeFly is not None
 
-        start_t = float(flux_pulse["pre_delay"]) + timeFly
+        start_t = float(flux_pulse["pre_delay"])
         end_t = start_t + float(flux_pulse["waveform"]["length"])
 
-        ideal_lengths = np.linspace(s_lengths[0], s_lengths[-1], 1000)
+        ideal_lengths = np.linspace(lengths[0], lengths[-1], 1000)
         ideal_curve = np.full_like(ideal_lengths, mean_background)
         ideal_curve[(ideal_lengths >= start_t) & (ideal_lengths <= end_t)] = (
             mean_topdetune
@@ -203,17 +178,15 @@ class FreqExp(AbsExperiment):
             aspect="auto",
             interpolation="none",
             cmap="RdBu_r",
+            origin="lower",
         )
 
         # Plot the resonance frequencies and fitted curve
         ax.plot(s_lengths, s_freqs, ".", c="k")
         ax.plot(ideal_lengths, ideal_curve, "g-", label="Ideal")
 
-        label = f"timeFly: {timeFly:.2f} us"
         plot_kwargs = dict(color="gray", alpha=0.3)
-        ax.axvspan(
-            start_t - qub_len / 2, start_t + qub_len / 2, label=label, **plot_kwargs
-        )
+        ax.axvspan(start_t - qub_len / 2, start_t + qub_len / 2, **plot_kwargs)
         ax.axvspan(end_t - qub_len / 2, end_t + qub_len / 2, **plot_kwargs)
 
         ax.set_ylabel("Qubit Frequency (MHz)", fontsize=14)
@@ -222,7 +195,7 @@ class FreqExp(AbsExperiment):
 
         fig.tight_layout()
 
-        return timeFly, fig
+        return fig
 
     def save(
         self,
