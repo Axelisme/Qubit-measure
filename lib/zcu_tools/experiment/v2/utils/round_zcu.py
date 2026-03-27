@@ -50,9 +50,7 @@ def round_zcu_freq(
     ro_ch: Optional[int] = None,
     scaler: float = 1.0,
 ) -> T_Value:
-    one_reg = soccfg.reg2freq(1, gen_ch=gen_ch, ro_ch=ro_ch) - soccfg.reg2freq(
-        0, gen_ch=gen_ch, ro_ch=ro_ch
-    )
+    one_reg = soccfg.reg2freq(1, gen_ch=gen_ch) - soccfg.reg2freq(0, gen_ch=gen_ch)
 
     def _convert_freq(f: float) -> float:
         return (
@@ -113,6 +111,35 @@ def round_zcu_gain(
         return np.vectorize(_convert_gain)(gain)
 
 
+def apply_round(
+    val: T_Value,
+    round_type: Literal["none", "time", "freq", "phase", "gain"],
+    round_info: dict[str, Any],
+) -> T_Value:
+    ROUND_FN_MAP: dict[str, Callable] = {
+        "none": lambda v: v,
+        "time": round_zcu_time,
+        "freq": round_zcu_freq,
+        "phase": round_zcu_phase,
+        "gain": round_zcu_gain,
+    }
+
+    if round_fn := ROUND_FN_MAP.get(round_type):
+        return round_fn(val, **round_info)
+    else:
+        raise ValueError(f"Invalid round type: {round_type}")
+
+def round_sweep_dict(sweep: SweepCfg, *args, **kwargs) -> SweepCfg:
+    expts = sweep["expts"]
+    span = sweep["stop"] - sweep["start"]
+    round_start = apply_round(sweep["start"], *args, **kwargs)
+    round_step = apply_round(span / (expts - 1), *args, **kwargs)
+    round_span = (expts - 1) * round_step
+    round_stop = round_start + round_span
+
+    return SweepCfg(start=round_start, stop=round_stop, expts=expts, step=round_step)
+
+
 def sweep2array(
     sweep: Union[SweepCfg, Sequence, NDArray],
     round_type: Literal["none", "time", "freq", "phase", "gain"] = "none",
@@ -122,31 +149,16 @@ def sweep2array(
     if round_info is None:
         round_info = {}
 
-    ROUND_FN_MAP: dict[str, Callable] = {
-        "none": lambda v: v,
-        "time": round_zcu_time,
-        "freq": round_zcu_freq,
-        "phase": round_zcu_phase,
-        "gain": round_zcu_gain,
-    }
-
-    def apply_round(val: T_Value) -> T_Value:
-
-        if round_fn := ROUND_FN_MAP.get(round_type):
-            return round_fn(val, **round_info)
-        else:
-            raise ValueError(f"Invalid round type: {round_type}")
-
     if isinstance(sweep, dict):
-        expts = sweep["expts"]
-        round_start = apply_round(sweep["start"])
-        span = sweep["stop"] - sweep["start"]
-        round_span = (expts - 1) * apply_round(span / (expts - 1))
+        round_sweep = round_sweep_dict(sweep, round_type, round_info)
 
-        return round_start + np.linspace(0, round_span, sweep["expts"])
+        return round_sweep["start"] + np.linspace(
+            0, round_sweep["stop"] - round_sweep["start"], round_sweep["expts"]
+        )
     elif isinstance(sweep, list) or isinstance(sweep, np.ndarray):
         if not allow_array:
             raise ValueError("Custom sweep is not allowed")
-        return apply_round(np.asarray(sweep, dtype=np.float64))
+        sweep_array = np.asarray(sweep, dtype=np.float64)
+        return apply_round(sweep_array, round_type, round_info)
     else:
         raise ValueError("Invalid sweep format")
