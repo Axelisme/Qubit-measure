@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: .venv
+    display_name: zcu-tools (3.9.25)
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.9.23
+    version: 3.9.25
 ---
 
 # Import Module
@@ -129,13 +129,13 @@ flux_yoko.set_mode("current", rampstep=1e-6)
 ```
 
 ```python
-md.cur_value = flux_yoko.get_current()
-md.cur_value * 1e3
+cur_value = flux_yoko.get_current()
+cur_value * 1e3
 ```
 
 ```python
-md.cur_value = flux_yoko.set_current(0.0e-3)
-md.cur_value * 1e3
+cur_value = flux_yoko.set_current(cur_value)
+cur_value * 1e3
 ```
 
 ### JPA Flux
@@ -193,10 +193,10 @@ jpa_sgs.get_info()
 # Initial Experiment Folder
 
 ```python
-# ml, md = em.new_flux(md.cur_value, unit="A")
-# ml, md = em.new_flux(md.cur_value, clone_from=(ml, md), unit="A")
-# ml, md = em.new_flux(0.0, clone_from="032023_0.122mA", unit="A")
-ml, md = em.use_flux(label="032219_2.000mA")
+# ml, md = em.new_flux(cur_value, unit="A")
+# ml, md = em.new_flux(cur_value, clone_from=(ml, md), unit="A")
+# ml, md = em.new_flux(cur_value, clone_from="032600_1.800mA", unit="A")
+ml, md = em.use_flux(label="032600_1.800mA")
 ml, md
 ```
 
@@ -250,7 +250,7 @@ md.timeFly
 
 ```python
 filename = f"lookback_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lookback_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"timeFly = {md.timeFly}us"),
@@ -315,7 +315,7 @@ md.rf_w = kappa
 
 ```python
 filename = f"{res_name}_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 res_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, str(params)),
@@ -368,8 +368,8 @@ res_gain_exp.save(
 ## Flux dependence
 
 ```python
-md.cur_value = flux_yoko.set_current(-7e-3)
-md.cur_value * 1e3
+cur_value = flux_yoko.set_current(-7e-3)
+cur_value * 1e3
 ```
 
 ```python
@@ -432,8 +432,8 @@ md.flx_half, md.flx_int, md.flx_period
 
 ```python
 flx_value = (1.0 - 0.5) * (md.flx_int - md.flx_half) / 0.5 + md.flx_half
-md.cur_value = flux_yoko.set_current(flx_value)
-md.cur_value * 1e3
+cur_value = flux_yoko.set_current(flx_value)
+cur_value * 1e3
 ```
 
 ## Set readout pulse
@@ -495,7 +495,7 @@ exp_cfg = {
 cfg = ml.make_cfg(exp_cfg, reps=100, rounds=10)
 
 
-jpa_flux_onetone_exp = ze.jpa.JPAFluxByOneToneExp()
+jpa_flux_onetone_exp = ze.jpa.OneToneFluxExp()
 _ = jpa_flux_onetone_exp.run(soc, soccfg, cfg)
 ```
 
@@ -523,7 +523,7 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, reps=10000, rounds=1)
 
-jpa_freq_exp = ze.jpa.JPAFreqExp()
+jpa_freq_exp = ze.jpa.FreqExp()
 _ = jpa_freq_exp.run(soc, soccfg, cfg)
 ```
 
@@ -535,7 +535,7 @@ md.best_jpa_freq
 
 ```python
 filename = f"JPA_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -571,7 +571,7 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, reps=10000, rounds=1)
 
-jpa_flux_exp = ze.jpa.JPAFluxExp()
+jpa_flux_exp = ze.jpa.FluxExp()
 _ = jpa_flux_exp.run(soc, soccfg, cfg)
 ```
 
@@ -583,7 +583,7 @@ md.best_jpa_flux * 1e3
 
 ```python
 filename = f"JPA_flux_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_flux_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -611,7 +611,7 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, reps=10000, rounds=1)
 
-jpa_pdr_exp = ze.jpa.JPAPowerExp()
+jpa_pdr_exp = ze.jpa.PowerExp()
 _ = jpa_pdr_exp.run(soc, soccfg, cfg)
 ```
 
@@ -623,7 +623,7 @@ md.best_jpa_power
 
 ```python
 filename = f"JPA_power_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_pdr_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -658,7 +658,7 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1)
 
-jpa_opt_exp = ze.jpa.JPAAutoOptimizeExp()
+jpa_opt_exp = ze.jpa.AutoOptimizeExp()
 _ = jpa_opt_exp.run(soc, soccfg, cfg, num_points=10000)
 ```
 
@@ -670,7 +670,7 @@ md.best_jpa_flux, md.best_jpa_freq, md.best_jpa_power, fig = jpa_opt_exp.analyze
 
 ```python
 filename = f"JPA_opt_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_opt_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -703,7 +703,7 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=5)
 
-jpa_check_exp = ze.jpa.JPACheckExp()
+jpa_check_exp = ze.jpa.CheckExp()
 _ = jpa_check_exp.run(soc, soccfg, cfg)
 ```
 
@@ -714,7 +714,7 @@ fig = jpa_check_exp.analyze()
 
 ```python
 filename = f"JPA_check_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 jpa_check_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -757,16 +757,16 @@ preditor = FluxoniumPredictor.from_file(os.path.join(result_dir, "params.json"))
 # Twotone Frequency
 
 ```python
-md.cur_value = flux_yoko.set_current(1.8e-3)
-print(f"{md.cur_value * 1e3:.2f} mA")
+cur_value = flux_yoko.set_current(1.8e-3)
+print(f"{cur_value * 1e3:.2f} mA")
 
 # ml, md = em.use_flux(label="031620_0.000mA")
-ml, md = em.new_flux(value=md.cur_value, clone_from=(ml, md), unit="A")
+# ml, md = em.new_flux(value=cur_value, clone_from=(ml, md), unit="A")
 ```
 
 ```python
-md.q_f = preditor.predict_freq(md.cur_value, transition=(0, 1))
-# q_f = preditor.predict_freq(md.cur_value, transition=(0, 1))
+md.q_f = preditor.predict_freq(cur_value, transition=(0, 1))
+# q_f = preditor.predict_freq(cur_value, transition=(0, 1))
 md.q_f
 ```
 
@@ -778,7 +778,7 @@ exp_cfg = {
         # "init_pulse": "pi_len",
         "qub_pulse": {
             "type": "pulse",
-            "waveform": ml.get_waveform("qub_flat", {"length": 2.0}),
+            "waveform": ml.get_waveform("qub_flat", {"length": 0.2}),
             "ch": md.qub_1_4_ch,
             "nqz": 2,
             "gain": 0.1,
@@ -789,7 +789,7 @@ exp_cfg = {
         "readout": "readout_dpm",
     },
     # "sweep": make_sweep(md.q_f - 200, md.q_f + 200, step=0.25),
-    "sweep": make_sweep(md.q_f - 20, md.q_f + 20, step=0.5),
+    "sweep": make_sweep(md.q_f - 20, md.q_f + 20, step=0.2),
     # "sweep": make_sweep(5650, 5750, step=0.5),
     "relax_delay": 0.5,  # us
 }
@@ -806,13 +806,17 @@ f
 ```
 
 ```python
+gc_collect()
+```
+
+```python
 md.q_f = f
 md.qf_w = kappa
 ```
 
 ```python
 filename = f"{qub_name}_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 qub_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"frequency = {f}MHz"),
@@ -820,7 +824,7 @@ qub_freq_exp.save(
 ```
 
 ```python
-flx_bias = preditor.calculate_bias(md.cur_value, md.q_f)
+flx_bias = preditor.calculate_bias(cur_value, md.q_f)
 flx_bias * 1e3
 ```
 
@@ -857,7 +861,7 @@ exp_cfg = {
     },
     "relax_delay": 30.5,  # us
     # "relax_delay": 5 * t1,  # us
-    "sweep": make_sweep(0.03, 0.5, 101),
+    "sweep": make_sweep(0.03, 0.3, 101),
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
@@ -873,7 +877,7 @@ md.pi_len, md.pi2_len, md.rabi_f
 
 ```python
 filename = f"{qub_name}_rabi_length_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 qub_lenrabi_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"pi len = {md.pi_len}us\npi/2 len = {md.pi2_len}us"),
@@ -912,7 +916,7 @@ exp_cfg = {
         # "reset": "reset_10",
         "qub_pulse": {
             "type": "pulse",
-            "waveform": ml.get_waveform("qub_flat", {"length": 1.1 * md.pi_len}),
+            "waveform": ml.get_waveform("qub_flat", {"length": 1.01 * md.pi_len}),
             "ch": md.qub_1_4_ch,
             "nqz": 2,
             "freq": md.q_f,
@@ -942,7 +946,7 @@ md.pi_gain, md.pi2_gain
 
 ```python
 filename = f"{qub_name}_rabi_amplitude_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 qub_amprabi_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"pi gain = {md.pi_gain}\npi/2 gain = {md.pi2_gain}"),
@@ -970,8 +974,8 @@ ml.register_module(
 # Reset
 
 ```python
-md.cur_value = flux_yoko.set_current(0.0e-3)
-md.cur_value * 1e3
+cur_value = flux_yoko.set_current(0.0e-3)
+cur_value * 1e3
 ```
 
 ## One Pulse
@@ -1029,7 +1033,7 @@ md.reset_f = f
 
 ```python
 filename = f"{qub_name}_sidereset_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 single_reset_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"frequency = {f}MHz"),
@@ -1075,7 +1079,7 @@ fig = single_reset_length_exp.analyze()
 
 ```python
 filename = f"{qub_name}_sidereset_length_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 single_reset_length_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -1132,7 +1136,7 @@ fig = single_reset_check_exp.analyze()
 
 ```python
 filename = f"{qub_name}_sidereset_check_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 single_reset_check_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -1149,8 +1153,8 @@ jpa_sgs.output_off()
 
 ```python
 reset1_trans = (0, 3)
-md.reset_f1 = preditor.predict_freq(md.cur_value, transition=reset1_trans)
-# md.reset_f1 = preditor.predict_freq(md.cur_value, transition=reset1_trans)
+md.reset_f1 = preditor.predict_freq(cur_value, transition=reset1_trans)
+# md.reset_f1 = preditor.predict_freq(cur_value, transition=reset1_trans)
 md.reset_f1
 ```
 
@@ -1196,7 +1200,7 @@ md.resetf1_w = kappa
 
 ```python
 filename = f"{qub_name}_dualreset_freq1_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dualreset_freq1_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"frequency = {f}MHz"),
@@ -1204,9 +1208,9 @@ dualreset_freq1_exp.save(
 ```
 
 ```python
-bias = preditor.calculate_bias(md.cur_value, md.reset_f1, transition=reset1_trans)
+bias = preditor.calculate_bias(cur_value, md.reset_f1, transition=reset1_trans)
 bias * 1e3
-# bias = preditor.calculate_bias(md.cur_value, md.reset_f1, transition=reset1_trans)
+# bias = preditor.calculate_bias(cur_value, md.reset_f1, transition=reset1_trans)
 # bias
 ```
 
@@ -1218,8 +1222,8 @@ preditor.update_bias(bias)
 
 ```python
 reset2_trans = (3, 1)
-md.reset_f2 = abs(md.r_f + preditor.predict_freq(md.cur_value, transition=reset2_trans))
-# md.reset_f2 = abs(md.r_f + preditor.predict_freq(md.cur_value, transition=reset2_trans))
+md.reset_f2 = abs(md.r_f + preditor.predict_freq(cur_value, transition=reset2_trans))
+# md.reset_f2 = abs(md.r_f + preditor.predict_freq(cur_value, transition=reset2_trans))
 md.reset_f2
 ```
 
@@ -1283,7 +1287,7 @@ reset_f2 = f2
 
 ```python
 filename = f"{qub_name}_dualreset_both_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dualreset_freq2_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"frequency = ({reset_f1:.1f}, {reset_f2:.1f})MHz"),
@@ -1360,7 +1364,7 @@ gain1, gain2, fig = dualreset_gain_exp.analyze(xname=xlabal, yname=ylabal)
 
 ```python
 filename = f"{qub_name}_dualreset_gain_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dualreset_gain_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"best gain = ({gain1:.1f}, {gain2:.1f})"),
@@ -1481,7 +1485,7 @@ _ = rabifreq_exp.run(soc, soccfg, cfg)
 
 ```python
 filename = f"{qub_name}_rabi_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 rabifreq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"pi len = {md.pi_len}us\npi/2 len = {md.pi2_len}us"),
@@ -1541,7 +1545,7 @@ md.bathreset_gain, md.bathreset_freq, fig = bathreset_freq_exp.analyze(
 
 ```python
 filename = f"{qub_name}_bathreset_freqgain_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -1596,7 +1600,7 @@ fig = bathreset_len_exp.analyze()
 
 ```python
 filename = f"{qub_name}_bathreset_len_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_len_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -1659,7 +1663,7 @@ fig = bathreset_rabicheck_exp.analyze()
 
 ```python
 filename = f"{qub_name}_bathreset_check_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 bathreset_rabicheck_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -1669,8 +1673,12 @@ bathreset_rabicheck_exp.save(
 # Flux Dependence
 
 ```python
-md.cur_value = flux_yoko.set_current(5e-3)
-md.cur_value * 1e3
+cur_value
+```
+
+```python
+cur_value = flux_yoko.set_current(2.2e-3)
+cur_value * 1e3
 ```
 
 ```python
@@ -1718,7 +1726,7 @@ qub_flux_exp.save(
 
 ```python
 %matplotlib widget
-actline = qub_flux_exp.analyze(flx_half=md.flx_half, flx_int=md.flx_int)
+actline = qub_flux_exp.analyze(flux_half=md.flx_half, flux_int=md.flx_int)
 ```
 
 ```python
@@ -1829,7 +1837,7 @@ md.readout_f = center_freq
 
 ```python
 filename = f"{qub_name}_ckp_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 ckp_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -1874,7 +1882,7 @@ md.chi, rf_w, fig = dispersive_shift_exp.analyze()
 
 ```python
 filename = f"{qub_name}_dispersive_gain{cfg['readout']['pulse_cfg']['gain']:.3f}_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 dispersive_shift_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"chi = {md.chi:.3g} MHz, kappa = {rf_w:.3g} MHz"),
@@ -1936,7 +1944,7 @@ md.ac_stark_coeff, fig = ac_stark_exp.analyze(
 
 ```python
 filename = f"{qub_name}_ac_stark_freq{cfg['modules']['stark_pulse1']['freq']:.3f}MHz_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 ac_stark_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     # comment=make_comment(cfg, f"ac_stark_coeff = {md.ac_stark_coeff:.3g} MHz"),
@@ -2030,6 +2038,7 @@ exp_cfg = {
 if repeat_on == "X90_pulse":
     exp_cfg["sweep"].update(
         gain=make_sweep(max(0.0, md.pi2_gain - 0.05), min(1.0, md.pi2_gain + 0.05), 101)
+        # gain=make_sweep(0.2, 0.7, 101)
     )
 elif repeat_on == "X180_pulse":
     exp_cfg["sweep"].update(
@@ -2051,7 +2060,7 @@ best_x, fig = zigzag_sweep_exp.analyze()
 
 ```python
 filename = f"{qub_name}_zigzag_sweep_{repeat_on}_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 zigzag_sweep_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -2117,7 +2126,7 @@ md.best_ro_freq
 
 ```python
 filename = f"{qub_name}_ro_opt_freq_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_freq_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"optimal frequency = {md.best_ro_freq:.1f}MHz"),
@@ -2167,7 +2176,7 @@ md.best_ro_gain
 
 ```python
 filename = f"{qub_name}_ro_opt_gain_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_pdr_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"optimal power = {md.best_ro_gain:.2f}"),
@@ -2211,7 +2220,7 @@ md.best_ro_length
 
 ```python
 filename = f"{qub_name}_ro_opt_length_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 opt_ro_len_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"optimal readout length = {md.best_ro_length:.2f}us"),
@@ -2307,11 +2316,15 @@ ml.update_module(
 ## T2Ramsey
 
 ```python
+gc_collect()
+```
+
+```python
 %matplotlib widget
 exp_cfg = {
     "modules": {
         # "reset": "reset_10",
-        "pi2_pulse": "pi2_amp",
+        "pi2_pulse": "pi2_len",
         "readout": "readout_dpm",
     },
     "relax_delay": 50.5,  # us
@@ -2321,9 +2334,8 @@ exp_cfg = {
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
-# activate_detune = 1.5
 activate_detune = 0.1 / cfg["sweep"]["step"]
-print(f"activate_detune: {activate_detune:.2f}")
+print(f"activate_detune: {activate_detune:.2f} MHz")
 
 t2ramsey_exp = ze.twotone.time_domain.T2RamseyExp()
 _ = t2ramsey_exp.run(soc, soccfg, cfg, detune=activate_detune)
@@ -2331,13 +2343,13 @@ _ = t2ramsey_exp.run(soc, soccfg, cfg, detune=activate_detune)
 
 ```python
 %matplotlib inline
-md.t2r, md.t2r_err, detune, _, fig = t2ramsey_exp.analyze()
+md.t2r, md.t2r_err, detune, _, fig = t2ramsey_exp.analyze(fit_fringe=True)
 print(f"real detune: {(detune - activate_detune) * 1e3:.1f}kHz")
 ```
 
 ```python
 filename = f"{qub_name}_t2ramsey_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t2ramsey_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(
@@ -2389,7 +2401,7 @@ md.t1
 
 ```python
 filename = f"{qub_name}_t1_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t1_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"t1 = {md.t1:.3f}us"),
@@ -2434,7 +2446,7 @@ md.t1_with_tone
 
 ```python
 filename = f"{qub_name}_t1_with_tone_gain{cfg['test_pulse']['gain']:.2f}_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t1_with_tone_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"t1 = {md.t1_with_tone:.3f}us"),
@@ -2480,7 +2492,7 @@ _ = t1_with_tone_sweep_exp.run(soc, soccfg, cfg)
 
 ```python
 filename = f"{qub_name}_t1_with_tone_sweep_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t1_with_tone_sweep_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -2520,7 +2532,7 @@ md.t2e, md.t2e_err, detune, _, fig = t2echo_exp.analyze(fit_method="fringe")
 
 ```python
 filename = f"{qub_name}_t2echo_{time.strftime('%m%d')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 t2echo_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(
@@ -2532,7 +2544,13 @@ t2echo_exp.save(
 ## CPMG
 
 ```python
+gc_collect()
+```
+
+```python
 %matplotlib widget
+times = list(range(20, 0, -1))
+
 exp_cfg = {
     "modules": {
         # "reset": "reset_120",
@@ -2540,26 +2558,29 @@ exp_cfg = {
         "pi2_pulse": ml.get_module("pi2_len", {"phase": 90}),  # Y/2 gate
         "readout": "readout_dpm",
     },
+    "sweep": {"times": times},
+    "length_expts": 151,
+    "length_range": [(0.1 * t, 5.0 * t) for t in times],
     # "relax_delay": 30.0,  # us
     "relax_delay": 5 * md.t1,  # us
-    "sweep": {
-        "times": list(range(5, 0, -1)),
-        "length": make_sweep(5.0, 100, 101),
-    },
 }
 cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=100)
 
+detune_ratio = 0.1
+
 cpmg_exp = ze.twotone.time_domain.CPMG_Exp()
-_ = cpmg_exp.run(soc, soccfg, cfg)
+_ = cpmg_exp.run(soc, soccfg, cfg, detune_ratio=detune_ratio)
 ```
 
 ```python
-_, _, fig = cpmg_exp.analyze()
+fig = cpmg_exp.analyze(fit_fringe=True)
 ```
 
 ```python
+filename = f"{qub_name}_cpmg_{time.strftime('%m%d')}"
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 cpmg_exp.save(
-    filepath=os.path.join(database_path, f"{qub_name}_cpmg@{em.label}"),
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
 ```
@@ -2572,7 +2593,7 @@ from datetime import datetime
 
 sample_table.add_sample(
     **{
-        "calibrated mA": md.cur_value,
+        "calibrated mA": cur_value,
         "Freq (MHz)": md.q_f,
         "T1 (us)": md.t1,
         "T1err (us)": md.t1err,
@@ -2587,7 +2608,7 @@ sample_table.add_sample(
 ```
 
 ```python
-device_cfg_path = os.path.join(em.flx_dir, "device_info.json")
+device_cfg_path = os.path.join(em.flux_dir, "device_info.json")
 
 dump_device_info(device_cfg_path)
 ```
@@ -2648,7 +2669,7 @@ print(f"Optimal fidelity after rotation = {md.fid:.1%}")
 
 ```python
 filename = f"{qub_name}_sh_ge_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_ge_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, str(result_dict)),
@@ -2721,7 +2742,7 @@ fig = sh_exp.analyze(md.g_center, md.e_center, md.ge_radius, max_point=10000)
 
 ```python
 filename = f"{qub_name}_sh_g_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_ge_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(
@@ -2769,7 +2790,7 @@ fig = sh_lenrabi_exp.analyze(
 
 ```python
 filename = f"{qub_name}_sh_rabi_length_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_lenrabi_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(
@@ -2813,7 +2834,7 @@ fig = sh_t1_exp.analyze(confusion_matrix=md.confusion_matrix, skip=1)
 
 ```python
 filename = f"{qub_name}_sh_t1_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_t1_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(
@@ -2871,7 +2892,7 @@ md.t1_with_tone = t1
 
 ```python
 filename = f"{qub_name}_sh_t1_with_tone_gain{cfg['probe_pulse']['gain']:.3f}_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_t1_with_tone_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(
@@ -2927,7 +2948,7 @@ fig = sh_t1_with_tone_sweep_exp.analyze(
 
 ```python
 filename = f"{qub_name}_sh_t1_with_tone_sweep_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_t1_with_tone_sweep_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(
@@ -2987,7 +3008,7 @@ fig = sh_mist_exp.analyze(
 ```python
 filename = f"{qub_name}_sh_mist_g_short_{time.strftime('%H%M')}"
 # filename = f"{qub_name}_sh_mist_steady_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_mist_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(
@@ -3042,7 +3063,7 @@ fig = sh_mist_exp.analyze(md.g_center, md.e_center, md.ge_radius)
 ```python
 filename = f"{qub_name}_sh_mist_steady_gain{cfg['probe_pulse']['gain']:.4f}_{time.strftime('%H%M')}"
 # filename = f"{qub_name}_sh_e_mist_short_gain{cfg['probe_pulse']['gain']:.4f}_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_mist_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(
@@ -3098,7 +3119,7 @@ _ = sh_ac_stark_exp.run(soc, soccfg, cfg, md.g_center, md.e_center, md.ge_radius
 
 ```python
 filename = f"{qub_name}_sh_ac_stark_rf{cfg['stark_pulse1']['freq']:.3f}MHz_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 sh_ac_stark_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(
@@ -3140,8 +3161,8 @@ ml.register_waveform(
 ## Single Trace
 
 ```python
-md.cur_value = flux_yoko.set_current(-7e-3)
-md.cur_value * 1e3
+cur_value = flux_yoko.set_current(-7e-3)
+cur_value * 1e3
 ```
 
 ```python
@@ -3190,7 +3211,7 @@ fig = mist_exp.analyze(
 
 ```python
 filename = f"{qub_name}_mist_e_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 mist_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg, f"ac_stark_coeff: {md.ac_stark_coeff:.3}"),
@@ -3253,7 +3274,7 @@ fig = lf_twotone_exp.analyze()
 
 ```python
 filename = f"{qub_name}_fastflux_twotone_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
 lf_twotone_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
@@ -3261,6 +3282,22 @@ lf_twotone_exp.save(
 ```
 
 ## Distortion
+
+```python
+
+```
+
+### Acc Phase
+
+```python
+gc_collect()
+```
+
+```python
+from zcu_tools.config import config
+
+config.DEBUG_MODE = False
+```
 
 ```python
 %matplotlib widget
@@ -3272,8 +3309,8 @@ exp_cfg = {
             "waveform": {"style": "const", "length": 0.3},
             "ch": md.lo_flux_ch,
             "nqz": 1,
-            "gain": 0.5,
-            "pre_delay": 0.1,
+            "gain": 0.3,
+            "pre_delay": 0.4,
             "freq": 0.0,  # not used
             "mixer_freq": 0.0,  # not used
         },
@@ -3282,27 +3319,189 @@ exp_cfg = {
         "readout": "readout_dpm",
     },
     "sweep": {
-        "length": make_sweep(0.0, 0.9, 51),
-        "phase": make_sweep(-360, 360, 151),
+        "length": make_sweep(0.05, 1.0, 351),
+        "phase": make_sweep(-360, 360, 51),
     },
-    "readout_t": 0.91,
-    "relax_delay": 0.1,  # us
+    "readout_t": 1.05,
+    "relax_delay": 10.1,  # us
 }
-cfg = ml.make_cfg(exp_cfg, reps=100, rounds=1000)
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=500)
 
-lf_distortion_exp = ze.fastflux.DistortionExp()
-_ = lf_distortion_exp.run(soc, soccfg, cfg)
+lf_dt_ap_exp = ze.fastflux.distortion.AccPhaseExp()
+_ = lf_dt_ap_exp.run(soc, soccfg, cfg)
 ```
 
 ```python
 %matplotlib inline
-fig = lf_distortion_exp.analyze(cfg=cfg)
+fig = lf_dt_ap_exp.analyze()
 ```
 
 ```python
-filename = f"{qub_name}_flux_distortion_gain{cfg['modules']['flux_pulse']['gain']:.3f}_{time.strftime('%H%M')}"
-savefig(fig, os.path.join(em.flx_dir, "image", f"{filename}.png"))
-lf_distortion_exp.save(
+filename = f"{qub_name}_flux_distortion_accphase_{time.strftime('%H%M')}"
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+lf_dt_ap_exp.save(
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    comment=make_comment(cfg),
+)
+```
+
+### Phase
+
+```python
+gc_collect()
+```
+
+```python
+%matplotlib widget
+exp_cfg = {
+    "modules": {
+        # "reset": "reset_bath",
+        "flux_pulse": {
+            "type": "pulse",
+            "waveform": {"style": "const", "length": 0.3},
+            "ch": md.lo_flux_ch,
+            "nqz": 1,
+            "gain": 0.25,
+            "pre_delay": 0.2,
+            "freq": 0.0,  # not used
+            "mixer_freq": 0.0,  # not used
+        },
+        "pi2_pulse": "pi2_len",
+        "readout": "readout_dpm",
+    },
+    "sweep": {
+        "length": make_sweep(0.0, 0.9, 151),
+        "phase": make_sweep(-360, 360, 51),
+    },
+    "readout_t": 0.95,
+    "relax_delay": 0.1,  # us
+}
+cfg = ml.make_cfg(exp_cfg, reps=1000, rounds=1000)
+
+lf_dt_p_exp = ze.fastflux.distortion.PhaseExp()
+_ = lf_dt_p_exp.run(soc, soccfg, cfg)
+```
+
+```python
+%matplotlib inline
+fig = lf_dt_p_exp.analyze()
+```
+
+```python
+filename = f"{qub_name}_flux_distortion_phase_{time.strftime('%H%M')}"
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+lf_dt_p_exp.save(
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    comment=make_comment(cfg),
+)
+```
+
+### Freq
+
+```python
+gc_collect()
+```
+
+```python
+%matplotlib widget
+exp_cfg = {
+    "modules": {
+        # "reset": "reset_bath",
+        "flux_pulse": {
+            "type": "pulse",
+            "waveform": {"style": "const", "length": 1.0},
+            "ch": md.lo_flux_ch,
+            "nqz": 1,
+            "gain": 0.3,
+            "pre_delay": 0.1,
+            "freq": 0.0,  # not used
+            "mixer_freq": 0.0,  # not used
+        },
+        "qub_pulse": {
+            "type": "pulse",
+            "waveform": {"style": "const", "length": 0.05},
+            "ch": md.qub_1_4_ch,
+            "nqz": 2,
+            "gain": 0.3,
+            # "mixer_freq": md.q_f,
+            "freq": 0.0,  # not used
+        },
+        "readout": "readout_dpm",
+    },
+    "sweep": {
+        "length": make_sweep(0.05, 1.2, 41),
+        "freq": make_sweep(md.q_f - 80, md.q_f + 20, step=1.0),
+    },
+    "readout_t": 1.25,
+    "relax_delay": 0.1,  # us
+}
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=1000)
+
+lf_dt_freq_exp = ze.fastflux.distortion.FreqExp()
+_ = lf_dt_freq_exp.run(soc, soccfg, cfg)
+```
+
+```python
+%matplotlib inline
+fig = lf_dt_freq_exp.analyze()
+```
+
+```python
+filename = f"{qub_name}_flux_distortion_freq_{time.strftime('%H%M')}"
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+lf_dt_freq_exp.save(
+    filepath=os.path.join(database_path, f"{filename}@{em.label}"),
+    comment=make_comment(cfg),
+)
+```
+
+## T1
+
+```python
+gc_collect()
+```
+
+```python
+%matplotlib widget
+exp_cfg = {
+    "modules": {
+        # "reset": "reset_bath",
+        "flux_pulse": {
+            "type": "pulse",
+            "waveform": {"style": "const", "length": 0.0},  # not used
+            "ch": md.lo_flux_ch,
+            "nqz": 1,
+            "pre_delay": 0.05,
+            "post_delay": 0.05,
+            "freq": 0.0,  # not used
+            "mixer_freq": 0.0,  # not used
+            "gain": 0.0,  # not used
+        },
+        "pi_pulse": ml.get_module("pi_amp"),
+        # "readout": "readout_rf",
+        "readout": "readout_dpm",
+    },
+    "sweep": {
+        "gain": make_sweep(-1.0, 1.0, 101),
+        "length": make_sweep(0.05, 5.0, 101),
+    },
+    "relax_delay": 10.1,  # us
+}
+cfg = ml.make_cfg(exp_cfg, reps=100, rounds=1000)
+
+lf_t1_exp = ze.fastflux.T1Exp()
+_ = lf_t1_exp.run(soc, soccfg, cfg)
+```
+
+```python
+%matplotlib inline
+fig = lf_t1_exp.analyze()
+```
+
+```python
+filename = f"{qub_name}_fastflux_t1_{time.strftime('%H%M')}"
+savefig(fig, os.path.join(em.flux_dir, "image", f"{filename}.png"))
+lf_t1_exp.save(
     filepath=os.path.join(database_path, f"{filename}@{em.label}"),
     comment=make_comment(cfg),
 )
