@@ -126,11 +126,11 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotterDict])
                     Delay("t2e_delay2", delay=0.5 * length_param),
                     Pulse(
                         name="pi2_pulse2",
-                        cfg=Pulse.set_param(
-                            modules["pi2_pulse"],
-                            "phase",
-                            modules["pi2_pulse"]["phase"] + 360 * detune * length_param,
-                        ),
+                        cfg={
+                            **modules["pi2_pulse"],
+                            "phase": modules["pi2_pulse"]["phase"]
+                            + 360 * detune * length_param,
+                        },
                     ),
                     Readout("readout", modules["readout"]),
                 ],

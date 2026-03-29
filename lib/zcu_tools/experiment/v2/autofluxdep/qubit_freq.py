@@ -88,12 +88,27 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
         # initial array, may be rounded later
         self.detunes = sweep2array(self.detune_sweep)
 
-        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
-            measure_fn=lambda ctx, update_hook: (
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: QubitFreqCfg = cast(QubitFreqCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            assert update_hook is not None
+
+            detune_sweep = cfg["sweep"]["detune"]
+            detune_param = sweep2param("detune", detune_sweep)
+
+            Pulse.set_param(
+                modules["qub_pulse"],
+                "freq",
+                modules["qub_pulse"]["freq"] + detune_param,
+            )
+
+            return (
                 prog := TwoToneProgram(
-                    ctx.env["soccfg"],
-                    ctx.cfg,
-                    sweep=[("detune", ctx.cfg["sweep"]["detune"])],
+                    ctx.env["soccfg"], cfg, sweep=[("detune", detune_sweep)]
                 )
             ).acquire(
                 ctx.env["soc"],
@@ -104,8 +119,10 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
                     self.earlystop_snr,
                     signal2real_fn=qubitfreq_signal2real,
                 ),
-            ),
-            result_shape=(self.detune_sweep["expts"],),
+            )
+
+        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
+            measure_fn=measure_fn, result_shape=(self.detune_sweep["expts"],)
         )
 
     def init(
@@ -134,21 +151,15 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
             {"dev": ctx.cfg["dev"], "sweep": {"detune": self.detune_sweep}},
             behavior="force",
         )
-        center_freq = cast(float, cfg_temp["modules"]["qub_pulse"]["freq"])
-        Pulse.set_param(
-            cfg_temp["modules"]["qub_pulse"],
-            "freq",
-            center_freq + sweep2param("detune", self.detune_sweep),
-        )
         cfg = check_type(cfg_temp, QubitFreqCfg)
+        modules = cfg["modules"]
+
+        center_freq = cast(float, modules["qub_pulse"]["freq"])
 
         self.detunes = sweep2array(
             cfg["sweep"]["detune"],
             "freq",
-            {
-                "soccfg": ctx.env["soccfg"],
-                "gen_ch": cfg["modules"]["qub_pulse"]["ch"],
-            },
+            {"soccfg": ctx.env["soccfg"], "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore

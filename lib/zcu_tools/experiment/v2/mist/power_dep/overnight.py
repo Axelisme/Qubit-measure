@@ -7,11 +7,19 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
@@ -71,30 +79,36 @@ class PowerDepOvernightExp(
             {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
         )
 
-        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-        Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: PowerDepOvernightCfg = cast(PowerDepOvernightCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            assert update_hook is not None
+
+            gain_sweep = cfg["sweep"]["gain"]
+            gain_param = sweep2param("gain", gain_sweep)
+            Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("init_pulse", modules.get("init_pulse")),
+                    Pulse("probe_pulse", modules["probe_pulse"]),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("gain", gain_sweep)],
+            ).acquire(soc, progress=False, callback=update_hook)
 
         with LivePlotter2DwithLine(
             "Pulse gain", "Iteration", line_axis=1, title="MIST Overnight"
         ) as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", modules.get("reset")),
-                                Pulse("init_pulse", modules.get("init_pulse")),
-                                Pulse("probe_pulse", modules["probe_pulse"]),
-                                Readout("readout", modules["readout"]),
-                            ],
-                            sweep=[("gain", ctx.cfg["sweep"]["gain"])],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
-                    result_shape=(len(gains),),
-                )
+                task=Task(measure_fn=measure_fn, result_shape=(len(gains),))
                 .auto_retry(max_retries=fail_retry)
                 .repeat("repeat_over_time", num_times, _cfg["interval"]),
                 init_cfg=_cfg,

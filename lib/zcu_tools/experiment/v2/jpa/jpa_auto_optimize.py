@@ -10,7 +10,15 @@ from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import (
@@ -64,16 +72,47 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         freq_sweep = _cfg["sweep"]["jpa_freq"]
         gain_sweep = _cfg["sweep"]["jpa_power"]
 
-        modules = _cfg["modules"]
-        ge_sweep = make_ge_sweep()
-        ge_param = sweep2param("ge", ge_sweep)
-        Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
-
         optimizer = JPAOptimizer(flux_sweep, freq_sweep, gain_sweep, num_points)
 
         # (num_points, [flux, freq, power])
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
+
+        def measure_fn(
+            ctx: TaskState, update_hook: Callable
+        ) -> tuple[
+            list[NDArray[np.float64]],
+            list[NDArray[np.float64]],
+            list[NDArray[np.float64]],
+        ]:
+            cfg: JPAOptCfg = cast(JPAOptCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            ge_sweep = make_ge_sweep()
+            ge_param = sweep2param("ge", ge_sweep)
+            Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
+
+            prog = ModularProgramV2(
+                soccfg,
+                ctx.cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("ge", ge_sweep)],
+            )
+
+            tracker = PCATracker()
+            avg_d = prog.acquire(
+                soc,
+                progress=False,
+                callback=lambda i, avg_d: update_hook(
+                    i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                ),
+                statistic_trackers=[tracker],
+            )
+            return avg_d, [tracker.covariance], [tracker.rough_median]
 
         def update_fn(i, ctx: TaskState, _) -> None:
             ctx.env["index"] = i
@@ -151,35 +190,6 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     params[:, 2], snrs, colors=colors, refresh=False
                 )
                 viewer.refresh()
-
-            def measure_fn(
-                ctx: TaskState, update_hook: Callable
-            ) -> tuple[
-                list[NDArray[np.float64]],
-                list[NDArray[np.float64]],
-                list[NDArray[np.float64]],
-            ]:
-                modules = ctx.cfg["modules"]
-                prog = ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("pi_pulse", modules["pi_pulse"]),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[("ge", ge_sweep)],
-                )
-                tracker = PCATracker()
-                avg_d = prog.acquire(
-                    soc,
-                    progress=False,
-                    callback=lambda i, avg_d: update_hook(
-                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
-                    ),
-                    statistic_trackers=[tracker],
-                )
-                return avg_d, [tracker.covariance], [tracker.rough_median]
 
             results = run_task(
                 task=Task(

@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Callable, NotRequired, TypedDict
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
@@ -224,39 +224,40 @@ class T1WithToneTask(
     T1PlotAndSaveMixin,
     MeasurementTask[T1Result, T_RootResult, T1PlotterDict],
 ):
-    def __init__(self, cfg) -> None:
-        cfg = check_type(deepcopy(cfg), OvernightT1WithToneCfg)
-        self.cfg = cfg
-
+    def __init__(self, cfg: dict[str, Any]) -> None:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        len_sweep = cfg["sweep"]["length"]
+        _cfg = check_type(deepcopy(cfg), OvernightT1WithToneCfg)
+        self.cfg = _cfg
 
-        self.lengths = sweep2array(len_sweep)  # initial values, may be rounded later
+        # initial values, may be rounded later
+        self.lengths = sweep2array(_cfg["sweep"]["length"])
 
-        def measure_t1_fn(ctx: TaskState, update_hook: Callable):
-            cfg = deepcopy(ctx.cfg)
+        def measure_t1_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: OvernightT1WithToneCfg = cast(OvernightT1WithToneCfg, ctx.cfg)
             modules = cfg["modules"]
 
-            Pulse.set_param(
-                modules["probe_pulse"],
-                "length",
-                sweep2param("length", cfg["sweep"]["length"]),
-            )
+            length_sweep = cfg["sweep"]["length"]
+            length_param = sweep2param("length", length_sweep)
+            Pulse.set_param(modules["probe_pulse"], "length", length_param)
+
             return ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,
-                sweep=[("length", cfg["sweep"]["length"])],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
                     Pulse("probe_pulse", modules["probe_pulse"]),
                     Readout("readout", modules["readout"]),
                 ],
+                sweep=[("length", length_sweep)],
             ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=measure_t1_fn,
-            result_shape=(len_sweep["expts"],),
+            result_shape=(len(self.lengths),),
         )
 
     def init(self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar=False) -> None:

@@ -8,7 +8,7 @@ from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typeguard import check_type
-from typing_extensions import Callable, NotRequired, Optional, TypedDict, cast
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
@@ -300,34 +300,36 @@ class MistOvernightAnalyzer:
 
 class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
     def __init__(
-        self, cfg, g_center: complex, e_center: complex, radius: float
+        self, cfg: dict[str, Any], g_center: complex, e_center: complex, radius: float
     ) -> None:
-        cfg = check_type(deepcopy(cfg), MistCfg)
-        self.cfg = cfg
-
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        gain_sweep = cfg["sweep"]["gain"]
+        _cfg = check_type(deepcopy(cfg), MistCfg)
+        self.cfg = _cfg
 
-        self.gains = sweep2array(gain_sweep)  # initial values, may be rounded later
+        # initial values, may be rounded later
+        self.gains = sweep2array(_cfg["sweep"]["gain"])
 
-        def measure_mist_fn(ctx: TaskState, update_hook: Callable):
-            cfg = deepcopy(ctx.cfg)
+        def measure_mist_fn(
+            ctx: TaskState[NDArray[np.float64], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: MistCfg = cast(MistCfg, ctx.cfg)
             modules = cfg["modules"]
-            Pulse.set_param(
-                modules["probe_pulse"],
-                "gain",
-                sweep2param("gain", cfg["sweep"]["gain"]),
-            )
+
+            gain_sweep = cfg["sweep"]["gain"]
+            gain_param = sweep2param("gain", gain_sweep)
+            Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
+
             return ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,
-                sweep=[("gain", cfg["sweep"]["gain"])],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("init_pulse", cfg=modules.get("init_pulse")),
                     Pulse("probe_pulse", cfg=modules["probe_pulse"]),
                     Readout("readout", modules["readout"]),
                 ],
+                sweep=[("gain", gain_sweep)],
             ).acquire(
                 ctx.env["soc"],
                 progress=False,
@@ -340,7 +342,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         self.task = Task[T_RootResult, list[NDArray[np.float64]], np.float64](
             measure_fn=measure_mist_fn,
             raw2signal_fn=lambda raw: raw[0][0],
-            result_shape=(gain_sweep["expts"], 2),
+            result_shape=(len(self.gains), 2),
             dtype=np.float64,
         )
 

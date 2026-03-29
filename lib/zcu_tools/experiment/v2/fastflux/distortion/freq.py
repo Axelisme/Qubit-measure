@@ -93,40 +93,42 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: FreqCfg = cast(FreqCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            length_sweep = cfg["sweep"]["length"]
+            freq_sweep = cfg["sweep"]["freq"]
+
+            length_params = sweep2param("length", length_sweep)
+            freq_params = sweep2param("freq", freq_sweep)
+            Pulse.set_param(modules["qub_pulse"], "freq", freq_params)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Join(
+                        Pulse("flux_pulse", modules["flux_pulse"]),
+                        [
+                            SoftDelay("wait_time", delay=length_params),
+                            Pulse("qub_pulse", modules["qub_pulse"]),
+                        ],
+                        SoftDelay("readout_t", cfg["readout_t"]),
+                    ),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[
+                    ("length", length_sweep),
+                    ("freq", freq_sweep),
+                ],
+            ).acquire(soc, progress=False, callback=update_hook)
+
         with LivePlotter2D("Time (us)", "Frequency (MHz)") as viewer:
-
-            def measure_fn(
-                ctx: TaskState[NDArray[np.complex128], Any],
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
-            ) -> list[NDArray[np.float64]]:
-                cfg: FreqCfg = cast(FreqCfg, ctx.cfg)
-                modules = cfg["modules"]
-
-                length_params = sweep2param("length", cfg["sweep"]["length"])
-                freq_params = sweep2param("freq", cfg["sweep"]["freq"])
-                Pulse.set_param(modules["qub_pulse"], "freq", freq_params)
-
-                return ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Join(
-                            Pulse("flux_pulse", modules["flux_pulse"]),
-                            [
-                                SoftDelay("wait_time", delay=length_params),
-                                Pulse("qub_pulse", modules["qub_pulse"]),
-                            ],
-                            SoftDelay("readout_t", cfg["readout_t"]),
-                        ),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[
-                        ("length", cfg["sweep"]["length"]),
-                        ("freq", cfg["sweep"]["freq"]),
-                    ],
-                ).acquire(soc, progress=False, callback=update_hook)
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn, result_shape=(len(lengths), len(freqs))

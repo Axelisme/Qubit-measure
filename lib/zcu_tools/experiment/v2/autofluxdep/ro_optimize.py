@@ -95,9 +95,11 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
         ]:
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
+
             ge_sweep = make_ge_sweep()
             freq_sweep = cfg["sweep"]["freq"]
             gain_sweep = cfg["sweep"]["gain"]
+
             Pulse.set_param(modules["pi_pulse"], "on/off", sweep2param("ge", ge_sweep))
             PulseReadout.set_param(
                 modules["readout"], "freq", sweep2param("freq", freq_sweep)
@@ -105,6 +107,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
             PulseReadout.set_param(
                 modules["readout"], "gain", sweep2param("gain", gain_sweep)
             )
+
             prog = ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,

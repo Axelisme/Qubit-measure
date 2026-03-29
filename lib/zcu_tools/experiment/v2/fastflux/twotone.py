@@ -7,10 +7,18 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
@@ -70,36 +78,42 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
-        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        Pulse.set_param(modules["flux_pulse"], "gain", gain_param)
-        Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: TwotoneCfg = cast(TwotoneCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            gain_sweep = cfg["sweep"]["gain"]
+            freq_sweep = cfg["sweep"]["freq"]
+
+            gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
+            freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+            Pulse.set_param(modules["flux_pulse"], "gain", gain_param)
+            Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Join(
+                        Pulse("flux_pulse", modules["flux_pulse"]),
+                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        SoftDelay("readout_t", cfg["readout_t"]),
+                    ),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[
+                    ("gain", gain_sweep),
+                    ("freq", freq_sweep),
+                ],
+            ).acquire(soc, progress=False, callback=update_hook)
 
         with LivePlotter2D("Flux Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", modules.get("reset")),
-                                Join(
-                                    Pulse("flux_pulse", modules["flux_pulse"]),
-                                    Pulse("qub_pulse", modules["qub_pulse"]),
-                                    SoftDelay("readout_t", ctx.cfg["readout_t"]),
-                                ),
-                                Readout("readout", modules["readout"]),
-                            ],
-                            sweep=[
-                                ("gain", ctx.cfg["sweep"]["gain"]),
-                                ("freq", ctx.cfg["sweep"]["freq"]),
-                            ],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
-                    result_shape=(len(gains), len(freqs)),
-                ),
+                task=Task(measure_fn=measure_fn, result_shape=(len(gains), len(freqs))),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     gains, freqs, twotone_signal2real(ctx.root_data)
