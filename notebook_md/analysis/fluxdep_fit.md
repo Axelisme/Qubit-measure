@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: zcu-tools (3.9.25)
+    display_name: .venv
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.9.25
+    version: 3.9.23
 ---
 
 ```python
@@ -31,11 +31,11 @@ from pprint import pprint
 import numpy as np
 
 %autoreload 2
-from zcu_tools.simulate.fluxonium import calculate_energy_vs_flx
+from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 import zcu_tools.notebook.analysis.fluxdep as zf
 import zcu_tools.notebook.persistance as zp
 from zcu_tools.notebook.utils import savefig
-from zcu_tools.simulate import value2flx, flx2value
+from zcu_tools.simulate import value2flux, flux2value
 import zcu_tools.experiment.v2 as ze
 ```
 
@@ -43,9 +43,9 @@ import zcu_tools.experiment.v2 as ze
 chip_name = "Q3_2D[2]"
 qub_name = "Q1"
 
-flx_half = None
-flx_int = None
-flx_period = None
+flux_half = None
+flux_int = None
+flux_period = None
 spectrums = dict[str, zp.SpectrumResult]()
 
 result_dir = f"../../result/{chip_name}/{qub_name}"
@@ -61,9 +61,9 @@ result = zp.load_result(loadpath)
 fluxdep_result = result.get("fluxdep_fit")
 assert fluxdep_result is not None, "No fluxdep_fit result found in the loaded data."
 
-flx_half = fluxdep_result["flx_half"]
-flx_period = fluxdep_result["flx_period"]
-flx_period = fluxdep_result["flx_period"]
+flux_half = fluxdep_result["flux_half"]
+flux_period = fluxdep_result["flux_period"]
+flux_period = fluxdep_result["flux_period"]
 ```
 
 # Load Spectrum
@@ -81,16 +81,16 @@ freqs *= 1e-3  # MHz -> GHz
 
 ```python
 %matplotlib widget
-actLine = zf.InteractiveLines(signals, dev_values, freqs, flx_half, flx_int)
+actLine = zf.InteractiveLines(signals, dev_values, freqs, flux_half, flux_int)
 ```
 
 ```python
-flx_half, flx_int = actLine.get_positions()
-flx_period = 2 * abs(flx_int - flx_half)
+flux_half, flux_int = actLine.get_positions()
+flux_period = 2 * abs(flux_int - flux_half)
 
-flxs = value2flx(dev_values, flx_half, flx_period)
+fluxs = value2flux(dev_values, flux_half, flux_period)
 
-flx_half, flx_int, flx_period
+flux_half, flux_int, flux_period
 ```
 
 ```python
@@ -101,7 +101,7 @@ actSel = zf.InteractiveFindPoints(signals, dev_values, freqs, threshold=6.0)
 
 ```python
 ss_dev_values, ss_freqs = actSel.get_positions()
-ss_flxs = value2flx(ss_dev_values, flx_half, flx_period)
+ss_fluxs = value2flux(ss_dev_values, flux_half, flux_period)
 ```
 
 ```python
@@ -109,18 +109,18 @@ name = os.path.basename(spect_path)
 spectrums.update(
     {
         name: {
-            "flx_half": flx_half,
-            "flx_int": flx_int,
-            "flx_period": flx_period,
+            "flux_half": flux_half,
+            "flux_int": flux_int,
+            "flux_period": flux_period,
             "spectrum": {
                 "dev_values": dev_values,
-                "fluxs": flxs,
+                "fluxs": fluxs,
                 "freqs": freqs,
                 "signals": signals,
             },
             "points": {
                 "dev_values": ss_dev_values,
-                "fluxs": ss_flxs,
+                "fluxs": ss_fluxs,
                 "freqs": ss_freqs,
             },
         }
@@ -150,7 +150,7 @@ flux_bound = zf.derive_bound(spectrums, lambda s: s["spectrum"]["fluxs"])
 freq_bound = zf.derive_bound(spectrums, lambda s: s["spectrum"]["freqs"])
 
 t_fluxs = np.linspace(flux_bound[0], flux_bound[1], 1000)
-t_dev_values = flx2value(t_fluxs, flx_half, flx_period)
+t_dev_values = flux2value(t_fluxs, flux_half, flux_period)
 ```
 
 # Manual Remove Points
@@ -221,7 +221,7 @@ savefig(fig, f"{image_dir}/search_result.png")
 ```
 
 ```python
-_, energies = calculate_energy_vs_flx(best_params, t_fluxs, cutoff=40, evals_count=15)
+_, energies = calculate_energy_vs_flux(best_params, t_fluxs, cutoff=40, evals_count=15)
 ```
 
 ```python
@@ -273,7 +273,7 @@ print("Fitted params:", *sp_params)
 ```
 
 ```python
-_, energies = calculate_energy_vs_flx(sp_params, t_fluxs, cutoff=40, evals_count=15)
+_, energies = calculate_energy_vs_flux(sp_params, t_fluxs, cutoff=40, evals_count=15)
 ```
 
 ```python
@@ -328,9 +328,9 @@ zp.dump_result(
             "EC": sp_params[1],
             "EL": sp_params[2],
         },
-        "flx_half": flx_half,
-        "flx_int": flx_int,
-        "flx_period": flx_period,
+        "flux_half": flux_half,
+        "flux_int": flux_int,
+        "flux_period": flux_period,
         "plot_transitions": plot_transitions,
     },
 )

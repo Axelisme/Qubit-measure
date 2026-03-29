@@ -7,7 +7,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: zcu-tools (3.9.25)
+    display_name: .venv
     language: python
     name: python3
 ---
@@ -67,7 +67,7 @@ soc.get_sample_rates()
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.yoko import YOKOGS200
 
-dev_info_path = os.path.join(em.flx_dir, "device_info.json")
+dev_info_path = os.path.join(em.flux_dir, "device_info.json")
 
 with open(dev_info_path, "r") as f:
     dev_info = json.load(f)
@@ -84,9 +84,9 @@ GlobalDeviceManager.setup_devices(dev_info, progress=True)
 
 ```python
 preditor = FluxoniumPredictor.from_file(os.path.join(result_dir, "params.json"))
-# preditor.flx_half = md.flx_half
-# preditor.flx_period = 2 * abs(md.flx_int - md.flx_half)
-preditor.update_bias(md.flx_bias)
+# preditor.flux_half = md.flux_half
+# preditor.flux_period = 2 * abs(md.flux_int - md.flux_half)
+preditor.update_bias(md.flux_bias)
 ```
 
 # Start Measurement
@@ -105,7 +105,7 @@ gc.collect()
 
 ```python
 %matplotlib widget
-flx_values = np.linspace(0.122e-3, -3.5e-3, 101)
+flux_values = np.linspace(0.122e-3, -3.5e-3, 101)
 
 filename = f"{qub_name}_autofluxdep"
 
@@ -122,7 +122,7 @@ readout_gain = readout_cfg["pulse_cfg"]["gain"]
 
 
 executor = (
-    zefd.FluxDepExecutor(flx_values=flx_values)
+    zefd.FluxDepExecutor(flux_values=flux_values)
     .add_measurements(
         OrderedDict(
             qubit_freq=zefd.QubitFreqTask(
@@ -290,7 +290,7 @@ executor = (
             ),
         )
     )
-    .record_animation(os.path.join(em.flx_dir, f"{filename}.mp4"))
+    .record_animation(os.path.join(em.flux_dir, f"{filename}.mp4"))
 )
 _ = executor.run(
     dev_cfg={
