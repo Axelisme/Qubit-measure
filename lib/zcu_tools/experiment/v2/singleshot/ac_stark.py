@@ -98,7 +98,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)  # prevent in-place modification
         modules = _cfg["modules"]
 
-        gain_sweep = _cfg["sweep"].pop("gain")  # remove gain from sweep
+        gain_sweep = _cfg["sweep"]["gain"]
 
         # uniform in square space
         freqs = sweep2array(
@@ -193,6 +193,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                         Pulse("stark_pulse2", modules["stark_pulse2"]),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("freq", ctx.cfg["sweep"]["freq"])],
                 ).acquire(
                     soc,
                     progress=False,

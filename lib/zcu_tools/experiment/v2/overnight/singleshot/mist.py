@@ -321,6 +321,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
             return ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,
+                sweep=[("gain", cfg["sweep"]["gain"])],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("init_pulse", cfg=modules.get("init_pulse")),

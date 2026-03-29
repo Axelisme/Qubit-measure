@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Join,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -23,6 +24,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    SoftDelay,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -48,6 +50,7 @@ class TwoToneModuleCfg(TypedDict, closed=True):
 class TwotoneCfg(ModularProgramCfg, TaskCfg):
     modules: TwoToneModuleCfg
     sweep: dict[str, SweepCfg]
+    readout_t: float
 
 
 class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
@@ -82,13 +85,16 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
                             ctx.cfg,
                             modules=[
                                 Reset("reset", modules.get("reset")),
-                                Pulse(
-                                    "flux_pulse",
-                                    modules["flux_pulse"],
-                                    block_mode=False,
+                                Join(
+                                    Pulse("flux_pulse", modules["flux_pulse"]),
+                                    Pulse("qub_pulse", modules["qub_pulse"]),
+                                    SoftDelay("readout_t", ctx.cfg["readout_t"]),
                                 ),
-                                Pulse("qub_pulse", modules["qub_pulse"]),
                                 Readout("readout", modules["readout"]),
+                            ],
+                            sweep=[
+                                ("gain", ctx.cfg["sweep"]["gain"]),
+                                ("freq", ctx.cfg["sweep"]["freq"]),
                             ],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),

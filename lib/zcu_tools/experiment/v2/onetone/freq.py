@@ -77,6 +77,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                                     Reset("reset", modules.get("reset")),
                                     PulseReadout("readout", modules["readout"]),
                                 ],
+                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),

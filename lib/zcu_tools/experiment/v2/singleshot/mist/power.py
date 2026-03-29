@@ -93,6 +93,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                         Pulse(name="probe_pulse", cfg=modules["probe_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("gain", ctx.cfg["sweep"]["gain"])],
                 ).acquire(
                     soc,
                     progress=False,

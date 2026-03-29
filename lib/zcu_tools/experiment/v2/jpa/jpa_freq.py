@@ -53,8 +53,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         jpa_freqs = sweep2array(_cfg["sweep"]["jpa_freq"], allow_array=True)
         np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
 
-        _cfg["sweep"] = {"ge": make_ge_sweep()}
-        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+        ge_sweep = make_ge_sweep()
+        ge_param = sweep2param("ge", ge_sweep)
         Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
 
         with LivePlotterScatter("JPA Frequency (MHz)", "Signal Difference") as viewer:
@@ -69,6 +69,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                         Pulse("pi_pulse", modules["pi_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("ge", ge_sweep)],
                 )
                 tracker = PCATracker()
                 avg_d = prog.acquire(

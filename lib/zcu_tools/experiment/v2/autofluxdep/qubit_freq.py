@@ -90,7 +90,11 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=lambda ctx, update_hook: (
-                prog := TwoToneProgram(ctx.env["soccfg"], ctx.cfg)
+                prog := TwoToneProgram(
+                    ctx.env["soccfg"],
+                    ctx.cfg,
+                    sweep=[("detune", ctx.cfg["sweep"]["detune"])],
+                )
             ).acquire(
                 ctx.env["soc"],
                 progress=False,

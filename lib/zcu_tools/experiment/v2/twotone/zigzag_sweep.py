@@ -80,11 +80,10 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
 
         X90_pulse = deepcopy(modules["X90_pulse"])
 
-        time_sweep: SweepCfg = _cfg["sweep"].pop("times")  # type: ignore
+        time_sweep: SweepCfg = _cfg["sweep"]["times"]  # type: ignore
         times = sweep2array(time_sweep, allow_array=True).astype(np.int64)
 
-        # extract sweep parameters
-        x_key = list(_cfg["sweep"].keys())[0]
+        x_key = next(k for k in _cfg["sweep"] if k != "times")
         if x_key not in self.SWEEP_MAP:
             raise ValueError(f"Unsupported sweep key: {x_key}")
         x_info = self.SWEEP_MAP[x_key]
@@ -131,6 +130,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                         ),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[(x_key, ctx.cfg["sweep"][x_key])],
                 ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(

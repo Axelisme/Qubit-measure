@@ -93,6 +93,7 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
                         Pulse("probe_pulse", modules["probe_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("freq", ctx.cfg["sweep"]["freq"])],
                 ).acquire(
                     soc,
                     progress=False,

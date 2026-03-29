@@ -56,10 +56,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         _cfg = check_type(deepcopy(cfg), RabiCheckCfg)
         modules = _cfg["modules"]
 
-        _cfg["sweep"] = {
-            "w/o_reset": make_ge_sweep(),
-            "gain": _cfg["sweep"]["gain"],
-        }
+        wo_reset_sweep = make_ge_sweep()
 
         gains = sweep2array(
             _cfg["sweep"]["gain"],
@@ -69,7 +66,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
 
         # Attach gain sweep to initialization pulse
         gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-        reset_param = sweep2param("w/o_reset", _cfg["sweep"]["w/o_reset"])
+        reset_param = sweep2param("w/o_reset", wo_reset_sweep)
         Pulse.set_param(modules["rabi_pulse"], "gain", gain_param)
         Reset.set_param(modules["tested_reset"], "on/off", reset_param)
 
@@ -78,6 +75,10 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
             return ModularProgramV2(
                 soccfg,
                 ctx.cfg,
+                sweep=[
+                    ("w/o_reset", wo_reset_sweep),
+                    ("gain", ctx.cfg["sweep"]["gain"]),
+                ],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("rabi_pulse", modules["rabi_pulse"]),

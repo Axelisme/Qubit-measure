@@ -168,6 +168,7 @@ class T1Task(
             return ModularProgramV2(
                 ctx.env["soccfg"],
                 ctx.cfg,
+                sweep=[("length", ctx.cfg["sweep"]["length"])],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
@@ -244,6 +245,7 @@ class T1WithToneTask(
             return ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,
+                sweep=[("length", cfg["sweep"]["length"])],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),

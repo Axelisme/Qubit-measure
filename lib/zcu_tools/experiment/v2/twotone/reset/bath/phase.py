@@ -78,6 +78,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                         and ModularProgramV2(
                             soccfg,
                             ctx.cfg,
+                            sweep=[("phase", ctx.cfg["sweep"]["phase"])],
                             modules=[
                                 Reset("reset", modules.get("reset")),
                                 Pulse("init_pulse", modules.get("init_pulse")),

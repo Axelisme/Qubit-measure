@@ -77,6 +77,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                             ModularProgramV2(
                                 soccfg,
                                 ctx.cfg,
+                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),

@@ -69,7 +69,6 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         modules = _cfg["modules"]
 
         flux_sweep = _cfg["sweep"]["flux"]
-        _cfg["sweep"] = {"gain": _cfg["sweep"]["gain"]}  # remove flux from sweep
 
         # predict sweep points
         values = sweep2array(flux_sweep, allow_array=True)
@@ -102,6 +101,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                                 Pulse("probe_pulse", modules["probe_pulse"]),
                                 Readout("readout", modules["readout"]),
                             ],
+                            sweep=[("gain", ctx.cfg["sweep"]["gain"])],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(gains),),

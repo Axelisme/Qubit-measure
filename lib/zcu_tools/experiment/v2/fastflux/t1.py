@@ -6,17 +6,24 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
 from scipy.ndimage import gaussian_filter1d
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
+from typeguard import check_type
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    Delay,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -26,7 +33,6 @@ from zcu_tools.program.v2 import (
     Reset,
     ResetCfg,
     sweep2param,
-    DelayAuto,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay
@@ -64,37 +70,43 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         _cfg = check_type(deepcopy(cfg), T1Cfg)
         modules = _cfg["modules"]
 
-        _cfg["sweep"] = {  # force gain be the outer loop
-            "gain": _cfg["sweep"]["gain"],
-            "length": _cfg["sweep"]["length"],
-        }
+        gain_sweep = _cfg["sweep"]["gain"]
+        length_sweep = _cfg["sweep"]["length"]
 
         # uniform in square space
         lf_ch = modules["flux_pulse"]["ch"]
-        gains = sweep2array(
-            _cfg["sweep"]["gain"], "gain", {"soccfg": soccfg, "gen_ch": lf_ch}
-        )
-        lengths = sweep2array(
-            _cfg["sweep"]["length"], "time", {"soccfg": soccfg, "gen_ch": lf_ch}
-        )
-
-        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-        length_param = sweep2param("length", _cfg["sweep"]["length"])
-        Pulse.set_param(modules["flux_pulse"], "gain", gain_param)
-        Pulse.set_param(modules["flux_pulse"], "length", length_param)
+        gains = sweep2array(gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": lf_ch})
+        lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
         with LivePlotter2D("Flux Pulse Gain (a.u.)", "Time (us)") as viewer:
 
-            def measure_fn(ctx, update_hook):
-                modules = ctx.cfg["modules"]
+            def measure_fn(
+                ctx: TaskState[NDArray[np.complex128], Any],
+                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            ) -> list[NDArray[np.float64]]:
+                cfg: T1Cfg = cast(T1Cfg, ctx.cfg)
+                modules = cfg["modules"]
+
+                gain_sweep = cfg["sweep"]["gain"]
+                length_sweep = cfg["sweep"]["length"]
+
+                gain_param = sweep2param("gain", gain_sweep)
+                length_param = sweep2param("length", length_sweep)
+                Pulse.set_param(modules["flux_pulse"], "gain", gain_param)
+                Pulse.set_param(modules["flux_pulse"], "length", length_param)
+
                 return ModularProgramV2(
                     soccfg,
-                    ctx.cfg,
+                    cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
                         Pulse("pi_pulse", modules["pi_pulse"]),
                         Pulse("flux_pulse", modules["flux_pulse"]),
                         Readout("readout", modules["readout"]),
+                    ],
+                    sweep=[
+                        ("gain", gain_sweep),
+                        ("length", length_sweep),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
 

@@ -88,7 +88,7 @@ def run_task(
     task: AbsTask[T_Result, T_Result],
     init_cfg: Mapping[str, Any],
     env_dict: Optional[MutableMapping[str, Any]] = None,
-    on_update: Optional[Callable[[TaskState[Result, T_Result]], Any]] = None,
+    on_update: Optional[Callable[[TaskState[Any, T_Result]], Any]] = None,
     update_interval: Optional[float] = 0.1,
 ) -> T_Result:
     """Run a task with a fresh TaskState.

@@ -61,7 +61,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         freq1_sweep = _cfg["sweep"]["freq1"]
         freq2_sweep = _cfg["sweep"]["freq2"]
-        _cfg["sweep"] = {"freq1": freq1_sweep}  # remove freq2 from sweep
 
         reset_cfg = modules["tested_reset"]
         freqs1 = sweep2array(
@@ -90,6 +89,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                             ModularProgramV2(
                                 soccfg,
                                 ctx.cfg,
+                                sweep=[("freq1", ctx.cfg["sweep"]["freq1"])],
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),
@@ -126,13 +126,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
 
-
-        # Ensure freq1 is the outer loop for better visualization
-        _cfg["sweep"] = {
-            "freq1": _cfg["sweep"]["freq1"],
-            "freq2": _cfg["sweep"]["freq2"],
-        }
-
         reset_cfg = modules["tested_reset"]
         freqs1 = sweep2array(
             _cfg["sweep"]["freq1"],
@@ -159,6 +152,10 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                             ModularProgramV2(
                                 soccfg,
                                 ctx.cfg,
+                                sweep=[
+                                    ("freq1", ctx.cfg["sweep"]["freq1"]),
+                                    ("freq2", ctx.cfg["sweep"]["freq2"]),
+                                ],
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),

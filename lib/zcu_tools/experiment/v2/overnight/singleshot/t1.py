@@ -229,7 +229,7 @@ class T1Task(
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        cfg["sweep"] = {"ge": make_ge_sweep(), "length": cfg["sweep"]["length"]}
+        ge_sweep = make_ge_sweep()
 
         # initial values, may be rounded later
         self.lengths = sweep2array(cfg["sweep"]["length"])
@@ -238,12 +238,13 @@ class T1Task(
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
 
-            ge_param = sweep2param("ge", cfg["sweep"]["ge"])
+            ge_param = sweep2param("ge", ge_sweep)
             len_param = sweep2param("length", cfg["sweep"]["length"])
             Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
             return ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,
+                sweep=[("ge", ge_sweep), ("length", cfg["sweep"]["length"])],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
@@ -321,7 +322,7 @@ class T1WithToneTask(
         self.cfg = cfg
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        cfg["sweep"] = {"ge": make_ge_sweep(), "length": cfg["sweep"]["length"]}
+        ge_sweep = make_ge_sweep()
 
         self.lengths = sweep2array(cfg["sweep"]["length"])
 
@@ -329,7 +330,7 @@ class T1WithToneTask(
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
 
-            ge_param = sweep2param("ge", cfg["sweep"]["ge"])
+            ge_param = sweep2param("ge", ge_sweep)
             len_param = sweep2param("length", cfg["sweep"]["length"])
 
             Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
@@ -337,6 +338,7 @@ class T1WithToneTask(
             return ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,
+                sweep=[("ge", ge_sweep), ("length", cfg["sweep"]["length"])],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),

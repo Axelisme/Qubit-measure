@@ -50,7 +50,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         _cfg = check_type(deepcopy(cfg), PowerCfg)
         modules = _cfg["modules"]
 
-        _cfg["sweep"] = {"ge": make_ge_sweep(), "gain": _cfg["sweep"]["gain"]}
+        ge_sweep = make_ge_sweep()
 
         gains = sweep2array(
             _cfg["sweep"]["gain"],
@@ -58,7 +58,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
-        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+        ge_param = sweep2param("ge", ge_sweep)
         gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
         Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
         Readout.set_param(modules["readout"], "gain", gain_param)
@@ -74,6 +74,10 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                         Reset("reset", modules.get("reset")),
                         Pulse("qub_pulse", modules["qub_pulse"]),
                         Readout("readout", modules["readout"]),
+                    ],
+                    sweep=[
+                        ("ge", ge_sweep),
+                        ("gain", ctx.cfg["sweep"]["gain"]),
                     ],
                 )
                 tracker = PCATracker()

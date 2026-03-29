@@ -52,8 +52,8 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         jpa_powers = sweep2array(_cfg["sweep"]["jpa_power"], allow_array=True)
         np.random.shuffle(jpa_powers[1:-1])
 
-        _cfg["sweep"] = {"ge": make_ge_sweep()}
-        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+        ge_sweep = make_ge_sweep()
+        ge_param = sweep2param("ge", ge_sweep)
         Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
 
         with LivePlotterScatter("Power (dBm)", "Signal Difference") as viewer:
@@ -68,6 +68,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                         Pulse("pi_pulse", modules["pi_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("ge", ge_sweep)],
                 )
                 tracker = PCATracker()
                 avg_d = prog.acquire(

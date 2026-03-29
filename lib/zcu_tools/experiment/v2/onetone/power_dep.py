@@ -50,7 +50,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         _cfg = check_type(deepcopy(cfg), PowerDepCfg)
         modules = _cfg["modules"]
 
-        gain_sweep = _cfg["sweep"].pop("gain")
+        gain_sweep = _cfg["sweep"]["gain"]
 
         readout_cfg = modules["readout"]
         gains = sweep2array(
@@ -90,6 +90,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                                     Reset("reset", modules.get("reset")),
                                     PulseReadout("readout", modules["readout"]),
                                 ],
+                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
                             )
                         ).acquire(
                             soc,

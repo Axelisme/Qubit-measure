@@ -63,7 +63,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     def _run_non_uniform(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
         _cfg = check_type(deepcopy(cfg), T1Cfg)
 
-        length_sweep: Union[SweepCfg, NDArray[np.float64]] = _cfg["sweep"].pop("length")  # type: ignore
+        length_sweep: Union[SweepCfg, NDArray[np.float64]] = _cfg["sweep"]["length"]  # type: ignore
 
         if isinstance(length_sweep, dict):
             lengths = (
@@ -152,6 +152,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                                     ),
                                     Readout("readout", modules["readout"]),
                                 ],
+                                sweep=[("length", ctx.cfg["sweep"]["length"])],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),
@@ -297,6 +298,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
                             Pulse(name="test_pulse", cfg=modules["test_pulse"]),
                             Readout("readout", modules["readout"]),
                         ],
+                        sweep=[("length", ctx.cfg["sweep"]["length"])],
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(lengths),),
                 ),
@@ -414,7 +416,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         _cfg = check_type(deepcopy(cfg), T1WithToneSweepCfg)
         modules = _cfg["modules"]
 
-        gain_sweep: Union[SweepCfg, NDArray[np.float64]] = _cfg["sweep"].pop("gain")  # type: ignore
+        gain_sweep: Union[SweepCfg, NDArray[np.float64]] = _cfg["sweep"]["gain"]  # type: ignore
 
         gains = sweep2array(
             gain_sweep,
@@ -451,6 +453,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                             ),
                             Readout("readout", cfg=ctx.cfg["modules"]["readout"]),
                         ],
+                        sweep=[("length", ctx.cfg["sweep"]["length"])],
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(lengths),),
                 ).scan(

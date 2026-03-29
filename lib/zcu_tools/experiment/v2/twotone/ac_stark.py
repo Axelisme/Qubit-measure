@@ -113,11 +113,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)
         modules = _cfg["modules"]
 
-        gain_sweep = _cfg["sweep"].pop("gain")
+        gain_sweep = _cfg["sweep"]["gain"]
+        freq_sweep = _cfg["sweep"]["freq"]
 
-        # uniform in square space
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            freq_sweep,
             "freq",
             {"soccfg": soccfg, "gen_ch": modules["stark_pulse2"]["ch"]},
         )
@@ -128,7 +128,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         )
         gains = round_zcu_gain(gains, soccfg, modules["stark_pulse1"]["ch"])
 
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+        freq_param = sweep2param("freq", freq_sweep)
         Pulse.set_param(modules["stark_pulse2"], "freq", freq_param)
 
         with LivePlotter2DwithLine(
@@ -158,6 +158,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                                     Pulse("stark_pulse2", modules["stark_pulse2"]),
                                     Readout("readout", modules["readout"]),
                                 ],
+                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
                             )
                         ).acquire(
                             soc,
@@ -176,7 +177,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                     result_shape=(len(freqs),),
                 ).scan(
                     "resonator gain",
-                    gains.tolist(),
+                    list(gains.tolist()),
                     before_each=lambda _, ctx, gain: Pulse.set_param(
                         ctx.cfg["modules"]["stark_pulse1"], "gain", gain
                     ),
@@ -352,9 +353,8 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
         _cfg = check_type(deepcopy(cfg), AcStarkRamseyCfg)
         modules = _cfg["modules"]
 
-        gain_sweep = _cfg["sweep"].pop("gain")
+        gain_sweep = _cfg["sweep"]["gain"]
 
-        # uniform in square space
         lengths = sweep2array(
             _cfg["sweep"]["length"],
             "time",
@@ -402,6 +402,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
                         ),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("length", ctx.cfg["sweep"]["length"])],
                 ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
@@ -410,7 +411,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
                     result_shape=(len(lengths),),
                 ).scan(
                     "resonator gain",
-                    gains.tolist(),
+                    list[float](gains.tolist()),
                     before_each=lambda _, ctx, gain: Pulse.set_param(
                         ctx.cfg["modules"]["stark_pulse"], "gain", gain
                     ),

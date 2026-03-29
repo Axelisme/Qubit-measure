@@ -74,7 +74,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
 
         X90_pulse = deepcopy(modules["X90_pulse"])
 
-        time_sweep: SweepCfg = _cfg["sweep"].pop("times")  # type: ignore
+        time_sweep: SweepCfg = _cfg["sweep"]["times"]  # type: ignore
 
         times = sweep2array(time_sweep, allow_array=True)
 

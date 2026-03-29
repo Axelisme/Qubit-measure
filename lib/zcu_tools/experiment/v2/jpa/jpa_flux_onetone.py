@@ -47,7 +47,6 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
         modules = _cfg["modules"]
 
         jpa_flux_sweep = _cfg["sweep"]["jpa_flux"]
-        _cfg["sweep"] = {"freq": _cfg["sweep"]["freq"]}  # remove jpa_flux from sweep
 
         jpa_fluxs = sweep2array(jpa_flux_sweep, allow_array=True)
         freqs = sweep2array(
@@ -78,6 +77,7 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
                                     Reset("reset", modules.get("reset")),
                                     PulseReadout("readout", modules["readout"]),
                                 ],
+                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),

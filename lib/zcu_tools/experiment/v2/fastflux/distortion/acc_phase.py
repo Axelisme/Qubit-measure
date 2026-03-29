@@ -7,7 +7,15 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
@@ -58,12 +66,6 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
         _cfg = check_type(deepcopy(cfg), AccPhaseCfg)
         modules = _cfg["modules"]
 
-        # force length be the outer loop
-        _cfg["sweep"] = {
-            "length": _cfg["sweep"]["length"],
-            "phase": _cfg["sweep"]["phase"],
-        }
-
         lengths = sweep2array(
             _cfg["sweep"]["length"],
             "time",
@@ -80,11 +82,16 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
 
         with LivePlotter2D("Time (us)", "Phase (deg)") as viewer:
 
-            def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
-                modules = ctx.cfg["modules"]
+            def measure_fn(
+                ctx: TaskState[NDArray[np.complex128], Any],
+                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            ) -> list[NDArray[np.float64]]:
+                cfg: AccPhaseCfg = cast(AccPhaseCfg, ctx.cfg)
+                modules = cfg["modules"]
+
                 return ModularProgramV2(
                     soccfg,
-                    ctx.cfg,
+                    cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
                         Join(
@@ -105,6 +112,10 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
                             },
                         ),
                         Readout("readout", modules["readout"]),
+                    ],
+                    sweep=[
+                        ("length", ctx.cfg["sweep"]["length"]),
+                        ("phase", ctx.cfg["sweep"]["phase"]),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
 

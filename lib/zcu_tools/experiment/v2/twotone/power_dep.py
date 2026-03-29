@@ -34,26 +34,22 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         _cfg = check_type(deepcopy(cfg), PowerCfg)
         modules = _cfg["modules"]
 
-        # Ensure gain is the outer loop for better visualization
-        _cfg["sweep"] = {
-            "gain": _cfg["sweep"]["gain"],
-            "freq": _cfg["sweep"]["freq"],
-        }
+        gain_sweep = _cfg["sweep"]["gain"]
+        freq_sweep = _cfg["sweep"]["freq"]
 
         gains = sweep2array(
-            _cfg["sweep"]["gain"],
+            gain_sweep,
             "gain",
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            freq_sweep,
             "freq",
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
-        # Attach both sweep parameters to the qubit pulse
-        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+        gain_param = sweep2param("gain", gain_sweep)
+        freq_param = sweep2param("freq", freq_sweep)
         Pulse.set_param(modules["qub_pulse"], "gain", gain_param)
         Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
 
@@ -61,7 +57,12 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                        soccfg, ctx.cfg
+                        soccfg,
+                        ctx.cfg,
+                        sweep=[
+                            ("gain", ctx.cfg["sweep"]["gain"]),
+                            ("freq", ctx.cfg["sweep"]["freq"]),
+                        ],
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(gains), len(freqs)),
                 ),

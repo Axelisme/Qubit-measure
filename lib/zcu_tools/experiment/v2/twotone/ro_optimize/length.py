@@ -50,14 +50,12 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         _cfg = check_type(deepcopy(cfg), LengthCfg)
 
         length_sweep = _cfg["sweep"]["length"]
+        ge_sweep = make_ge_sweep()
 
-        # replace length sweep with ge sweep, and use soft loop for length
-        _cfg["sweep"] = {"ge": make_ge_sweep()}
-
-        # set with / without pi gain for qubit pulse
+        # length uses soft loop only; FPGA sweeps |g⟩/|e⟩ for SNR
         modules = _cfg["modules"]
         Pulse.set_param(
-            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", ge_sweep)
         )
 
         readout_cfg = modules["readout"]
@@ -88,6 +86,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                         Pulse("qub_pulse", modules["qub_pulse"]),
                         PulseReadout("readout", modules["readout"]),
                     ],
+                    sweep=[("ge", ge_sweep)],
                 )
                 tracker = PCATracker()
                 avg_d = prog.acquire(

@@ -94,23 +94,25 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
         self.gains = sweep2array(gain_sweep)  # initial array, may be rounded later
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            modules = ctx.cfg["modules"]
-            Pulse.set_param(
-                modules["mist_pulse"],
-                "gain",
-                sweep2param("gain", ctx.cfg["sweep"]["gain"]),
-            )
+            cfg: MistCfg = cast(MistCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            gain_sweep = cfg["sweep"]["gain"]
+            gain_param = sweep2param("gain", gain_sweep)
+            Pulse.set_param(modules["mist_pulse"], "gain", gain_param)
             return ModularProgramV2(
                 ctx.env["soccfg"],
-                ctx.cfg,
+                cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
-                    Pulse(name="pi_pulse", cfg=modules.get("pi_pulse")),
-                    Pulse(name="mist_pulse", cfg=modules["mist_pulse"]),
-                    Readout("readout", cfg=modules["readout"]),
+                    Pulse("pi_pulse", modules.get("pi_pulse")),
+                    Pulse("mist_pulse", modules["mist_pulse"]),
+                    Readout("readout", modules["readout"]),
                 ],
+                sweep=[("gain", gain_sweep)],
             ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]]](

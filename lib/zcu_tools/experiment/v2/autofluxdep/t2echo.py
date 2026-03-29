@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
@@ -102,29 +102,39 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotterDict])
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_t2echo_fn(ctx: TaskState, update_hook: Callable):
-            modules = ctx.cfg["modules"]
-            t2e_params = sweep2param("length", ctx.cfg["sweep"]["length"])
+        def measure_t2echo_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: T2EchoCfg = cast(T2EchoCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            assert update_hook is not None
+
+            detune = cfg["activate_detune"]
+
+            length_sweep = cfg["sweep"]["length"]
+            length_param = sweep2param("length", length_sweep)
             prog = ModularProgramV2(
                 ctx.env["soccfg"],
-                ctx.cfg,
+                cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("pi2_pulse1", modules["pi2_pulse"]),
-                    Delay("t2e_delay1", delay=0.5 * t2e_params),
+                    Delay("t2e_delay1", delay=0.5 * length_param),
                     Pulse("pi_pulse", modules["pi_pulse"]),
-                    Delay("t2e_delay2", delay=0.5 * t2e_params),
+                    Delay("t2e_delay2", delay=0.5 * length_param),
                     Pulse(
                         name="pi2_pulse2",
                         cfg=Pulse.set_param(
                             modules["pi2_pulse"],
                             "phase",
-                            modules["pi2_pulse"]["phase"]
-                            + 360 * ctx.cfg["activate_detune"] * t2e_params,
+                            modules["pi2_pulse"]["phase"] + 360 * detune * length_param,
                         ),
                     ),
                     Readout("readout", modules["readout"]),
                 ],
+                sweep=[("length", length_sweep)],
             )
             return prog.acquire(
                 ctx.env["soc"],

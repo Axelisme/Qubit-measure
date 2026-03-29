@@ -91,6 +91,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
                                     ),
                                     Readout("readout", modules["readout"]),
                                 ],
+                                sweep=[("length", ctx.cfg["sweep"]["length"])],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),

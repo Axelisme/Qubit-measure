@@ -65,10 +65,9 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         gain_sweep = _cfg["sweep"]["jpa_power"]
 
         modules = _cfg["modules"]
-        _cfg["sweep"] = {"ge": make_ge_sweep()}
-        Pulse.set_param(
-            modules["pi_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
-        )
+        ge_sweep = make_ge_sweep()
+        ge_param = sweep2param("ge", ge_sweep)
+        Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
 
         optimizer = JPAOptimizer(flux_sweep, freq_sweep, gain_sweep, num_points)
 
@@ -169,6 +168,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                         Pulse("pi_pulse", modules["pi_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("ge", ge_sweep)],
                 )
                 tracker = PCATracker()
                 avg_d = prog.acquire(

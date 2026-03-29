@@ -90,6 +90,7 @@ class PowerDepOvernightExp(
                                 Pulse("probe_pulse", modules["probe_pulse"]),
                                 Readout("readout", modules["readout"]),
                             ],
+                            sweep=[("gain", ctx.cfg["sweep"]["gain"])],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(gains),),

@@ -102,11 +102,11 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         freq_sweep = _cfg["sweep"]["freq"]
         gain_sweep = _cfg["sweep"]["gain"]
         len_sweep = _cfg["sweep"]["length"]
-        _cfg["sweep"] = {"ge": make_ge_sweep()}
+        ge_sweep = make_ge_sweep()
 
         modules = _cfg["modules"]
         Pulse.set_param(
-            modules["qub_pulse"], "on/off", sweep2param("ge", _cfg["sweep"]["ge"])
+            modules["qub_pulse"], "on/off", sweep2param("ge", ge_sweep)
         )
 
         optimizer = ReadoutOptimizer(freq_sweep, gain_sweep, len_sweep, num_points)
@@ -199,6 +199,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                         Pulse("qub_pulse", modules["qub_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("ge", ge_sweep)],
                 )
                 tracker = PCATracker()
                 avg_d = prog.acquire(

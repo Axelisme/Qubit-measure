@@ -92,7 +92,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             ranges = np.array(length_ranges, dtype=np.float64)
         length_ranges = ranges
 
-        time_sweep: SweepCfg = _cfg["sweep"].pop("times")  # type: ignore
+        time_sweep: SweepCfg = _cfg["sweep"]["times"]  # type: ignore
 
         # TODO: convert times and length sweeps to arrays in different time
         times = sweep2array(time_sweep, allow_array=True)
@@ -196,6 +196,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                         ),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("length", round_length_sweep)],
                 ).acquire(soc, progress=False, callback=update_hook)
 
             def update_fn(i: int, ctx: TaskState, time: float) -> None:

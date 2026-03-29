@@ -55,12 +55,6 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         # Check that reset pulse is dual pulse type
         modules = _cfg["modules"]
 
-        # Ensure gain1 is the outer loop for better visualization
-        _cfg["sweep"] = {
-            "gain1": _cfg["sweep"]["gain1"],
-            "gain2": _cfg["sweep"]["gain2"],
-        }
-
         reset_cfg = modules["tested_reset"]
         gains1 = sweep2array(
             _cfg["sweep"]["gain1"],
@@ -93,6 +87,10 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                             ModularProgramV2(
                                 soccfg,
                                 ctx.cfg,
+                                sweep=[
+                                    ("gain1", ctx.cfg["sweep"]["gain1"]),
+                                    ("gain2", ctx.cfg["sweep"]["gain2"]),
+                                ],
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),

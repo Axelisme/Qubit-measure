@@ -56,12 +56,6 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         _cfg = check_type(deepcopy(cfg), FreqGainCfg)
         modules = _cfg["modules"]
 
-        # Check that reset pulse is dual pulse type
-        _cfg["sweep"] = {
-            "gain": _cfg["sweep"]["gain"],
-            "freq": _cfg["sweep"]["freq"],
-        }
-
         reset_cfg = modules["tested_reset"]
         gains = sweep2array(
             _cfg["sweep"]["gain"],
@@ -90,6 +84,10 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
                             ModularProgramV2(
                                 soccfg,
                                 ctx.cfg,
+                                sweep=[
+                                    ("gain", ctx.cfg["sweep"]["gain"]),
+                                    ("freq", ctx.cfg["sweep"]["freq"]),
+                                ],
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),

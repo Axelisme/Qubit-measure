@@ -50,7 +50,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
 
-        _cfg["sweep"] = {"ge": make_ge_sweep(), "freq": _cfg["sweep"]["freq"]}
+        ge_sweep = make_ge_sweep()
 
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
@@ -58,7 +58,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
-        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+        ge_param = sweep2param("ge", ge_sweep)
         freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
         Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
         Readout.set_param(modules["readout"], "freq", freq_param)
@@ -74,6 +74,10 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                         Reset("reset", modules.get("reset")),
                         Pulse("qub_pulse", modules["qub_pulse"]),
                         Readout("readout", modules["readout"]),
+                    ],
+                    sweep=[
+                        ("ge", ge_sweep),
+                        ("freq", ctx.cfg["sweep"]["freq"]),
                     ],
                 )
                 tracker = PCATracker()

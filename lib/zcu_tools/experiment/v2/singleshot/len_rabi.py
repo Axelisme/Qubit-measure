@@ -70,7 +70,11 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             viewer.get_ax().set_ylim(0.0, 1.0)
 
             def measure_fn(ctx, update_hook):
-                return TwoToneProgram(soccfg, ctx.cfg).acquire(
+                return TwoToneProgram(
+                    soccfg,
+                    ctx.cfg,
+                    sweep=[("length", ctx.cfg["sweep"]["length"])],
+                ).acquire(
                     soc,
                     progress=False,
                     callback=update_hook,

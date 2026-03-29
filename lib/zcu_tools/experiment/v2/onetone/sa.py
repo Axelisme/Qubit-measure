@@ -73,6 +73,7 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
                                     Reset("reset", modules.get("reset")),
                                     PulseReadout("readout", modules["readout"]),
                                 ],
+                                sweep=[("ro_freq", ctx.cfg["sweep"]["ro_freq"])],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),

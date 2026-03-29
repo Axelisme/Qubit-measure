@@ -54,7 +54,7 @@ T_RawResult = TypeVar("T_RawResult")
 
 def wrap_earlystop_check(
     prog: ModularProgramV2,
-    callback_fn: Callable[[int, T_RawResult], Any],
+    callback_fn: Callable[[int, T_RawResult], None],
     snr_threshold: Optional[float],
     signal2real_fn: Callable[[np.ndarray], np.ndarray],
     raw2signal_fn: Callable[[T_RawResult], np.ndarray] = default_raw2signal_fn,

@@ -46,9 +46,6 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         value_sweep = _cfg["sweep"]["flux"]
         freq_sweep = _cfg["sweep"]["freq"]
 
-        # Remove flux from sweep dict - will be handled by scan
-        _cfg["sweep"] = {"freq": freq_sweep}
-
         dev_values = sweep2array(value_sweep, allow_array=True)
         freqs = sweep2array(
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]}
@@ -64,7 +61,9 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                        soccfg, ctx.cfg
+                        soccfg,
+                        ctx.cfg,
+                        sweep=[("freq", ctx.cfg["sweep"]["freq"])],
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(freqs),),
                 )

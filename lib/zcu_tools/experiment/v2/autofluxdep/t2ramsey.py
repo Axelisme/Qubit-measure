@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
@@ -105,13 +105,19 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_ramsey_fn(ctx: TaskState, update_hook: Callable):
-            len_sweep = ctx.cfg["sweep"]["length"]
-            modules = ctx.cfg["modules"]
+        def measure_ramsey_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: T2RamseyCfg = cast(T2RamseyCfg, ctx.cfg)
+            modules = cfg["modules"]
 
-            assert len_sweep["expts"] == self.num_expts
+            assert update_hook is not None
 
-            t2r_params = sweep2param("length", len_sweep)
+            detune = cfg["activate_detune"]
+
+            len_sweep = cfg["sweep"]["length"]
+            len_param = sweep2param("length", len_sweep)
 
             prog = ModularProgramV2(
                 ctx.env["soccfg"],
@@ -119,18 +125,18 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse(name="pi2_pulse1", cfg=modules["pi2_pulse"]),
-                    Delay(name="t2r_delay", delay=t2r_params),
+                    Delay(name="t2r_delay", delay=len_param),
                     Pulse(
                         name="pi2_pulse2",
                         cfg=Pulse.set_param(
                             modules["pi2_pulse"],
                             "phase",
-                            modules["pi2_pulse"]["phase"]
-                            + 360 * ctx.cfg["activate_detune"] * t2r_params,
+                            modules["pi2_pulse"]["phase"] + 360 * detune * len_param,
                         ),
                     ),
                     Readout("readout", modules["readout"]),
                 ],
+                sweep=[("length", len_sweep)],
             )
             return prog.acquire(
                 ctx.env["soc"],

@@ -81,14 +81,18 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         modules = _cfg["modules"]
 
         length_sweep = _cfg["sweep"]["length"]
-        sweep_name = list(_cfg["sweep"].keys())[0]
+        sweep_keys = [k for k in _cfg["sweep"] if k != "length"]
+        if len(sweep_keys) != 1:
+            raise ValueError(
+                f"Expected exactly one sweep key besides 'length', got {sweep_keys!r}"
+            )
+        sweep_name = sweep_keys[0]
         x_sweep = _cfg["sweep"][sweep_name]
 
         if sweep_name not in ["gain", "freq"]:
             raise ValueError(f"Unsupported sweep key: {sweep_name}")
 
         ge_sweep = make_ge_sweep()
-        _cfg["sweep"] = {"ge": ge_sweep, "length": length_sweep}
 
         xs = sweep2array(
             x_sweep,
@@ -197,6 +201,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                         Pulse("probe_pulse", modules["probe_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("ge", ge_sweep), ("length", length_sweep)],
                 ).acquire(
                     soc,
                     progress=False,

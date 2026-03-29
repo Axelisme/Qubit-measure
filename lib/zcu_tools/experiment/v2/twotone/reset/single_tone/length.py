@@ -76,6 +76,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                             ModularProgramV2(
                                 soccfg,
                                 ctx.cfg,
+                                sweep=[("length", ctx.cfg["sweep"]["length"])],
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("init_pulse", modules.get("init_pulse")),

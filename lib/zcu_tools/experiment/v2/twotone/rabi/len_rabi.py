@@ -54,9 +54,11 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         with LivePlotter1D("Length (us)", "Signal") as viewer:
 
             def measure_fn(ctx: TaskState, update_hook):
-                return TwoToneProgram(soccfg, ctx.cfg).acquire(
-                    soc, progress=False, callback=update_hook
-                )
+                return TwoToneProgram(
+                    soccfg,
+                    ctx.cfg,
+                    sweep=[("length", ctx.cfg["sweep"]["length"])],
+                ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
                 task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)),
@@ -76,7 +78,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)
         modules = _cfg["modules"]
 
-        length_sweep = _cfg["sweep"].pop("length")
+        length_sweep = _cfg["sweep"]["length"]
 
         lengths = sweep2array(
             length_sweep,

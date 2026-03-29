@@ -52,8 +52,8 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
 
         jpa_fluxs = sweep2array(_cfg["sweep"]["jpa_flux"], allow_array=True)
 
-        _cfg["sweep"] = {"ge": make_ge_sweep()}  # remove jpa_flux from sweep
-        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+        ge_sweep = make_ge_sweep()
+        ge_param = sweep2param("ge", ge_sweep)
         Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
 
         with LivePlotter1D("JPA Flux value (a.u.)", "Signal Difference") as viewer:
@@ -68,6 +68,7 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
                         Pulse("pi_pulse", modules["pi_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("ge", ge_sweep)],
                 )
                 tracker = PCATracker()
                 avg_d = prog.acquire(

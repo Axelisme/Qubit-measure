@@ -74,7 +74,6 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 "time",
                 {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
             )
-            _cfg["sweep"] = {"length": length_sweep, "ge": make_ge_sweep()}
         else:
             if isinstance(length_sweep, dict):
                 lengths = np.geomspace(
@@ -92,7 +91,8 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 allow_array=True,
             )
             lengths = np.unique(lengths)
-            _cfg["sweep"] = {"ge": make_ge_sweep()}
+
+        ge_sweep = make_ge_sweep()
 
         fig, axs = make_plot_frame(1, 2, figsize=(12, 5))
         axs[0][0].set_ylim(0, 1)
@@ -143,11 +143,16 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 viewer.refresh()
 
             def measure_fn(ctx: TaskState, update_hook):
-                ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
+                ge_param = sweep2param("ge", ge_sweep)
 
                 def prog_maker(cfg, t1_param):
                     cfg = deepcopy(cfg)
                     modules = cfg["modules"]
+                    fpga_sweep = (
+                        [("length", cfg["sweep"]["length"]), ("ge", ge_sweep)]
+                        if uniform
+                        else [("ge", ge_sweep)]
+                    )
                     return ModularProgramV2(
                         soccfg,
                         cfg,
@@ -168,6 +173,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                             ),
                             Readout("readout", modules["readout"]),
                         ],
+                        sweep=fpga_sweep,
                     )
 
                 acquire_kwargs = dict(
@@ -179,7 +185,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                     population_radius=radius,
                 )
                 if uniform:
-                    len_param = sweep2param("length", _cfg["sweep"]["length"])
+                    len_param = sweep2param("length", ctx.cfg["sweep"]["length"])
                     return prog_maker(ctx.cfg, len_param).acquire(**acquire_kwargs)
                 else:
                     return measure_with_sweep(

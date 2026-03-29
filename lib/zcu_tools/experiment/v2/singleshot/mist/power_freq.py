@@ -62,7 +62,6 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
 
         freq_sweep = _cfg["sweep"]["freq"]
         gain_sweep = _cfg["sweep"]["gain"]
-        _cfg["sweep"] = {"freq": freq_sweep}
 
         gains = sweep2array(
             gain_sweep,
@@ -131,6 +130,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
                         Pulse("probe_pulse", modules["probe_pulse"]),
                         Readout("readout", modules["readout"]),
                     ],
+                    sweep=[("freq", ctx.cfg["sweep"]["freq"])],
                 ).acquire(
                     soc,
                     progress=False,

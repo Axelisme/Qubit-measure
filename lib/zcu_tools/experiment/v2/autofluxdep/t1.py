@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
@@ -98,18 +98,28 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotterDict]):
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_t1_fn(ctx: TaskState, update_hook: Callable):
+        def measure_t1_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: T1Cfg = cast(T1Cfg, ctx.cfg)
             modules = ctx.cfg["modules"]
-            t1_span = sweep2param("length", ctx.cfg["sweep"]["length"])
+
+            assert update_hook is not None
+
+            length_sweep = cfg["sweep"]["length"]
+
+            length_param = sweep2param("length", length_sweep)
             prog = ModularProgramV2(
                 ctx.env["soccfg"],
-                ctx.cfg,
+                cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
-                    Delay("t1_delay", delay=t1_span),
+                    Delay("t1_delay", delay=length_param),
                     Readout("readout", modules["readout"]),
                 ],
+                sweep=[("length", length_sweep)],
             )
             return prog.acquire(
                 ctx.env["soc"],

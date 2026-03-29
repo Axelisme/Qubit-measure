@@ -85,6 +85,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                                 ),
                                 Readout("readout", modules["readout"]),
                             ],
+                            sweep=[("length", ctx.cfg["sweep"]["length"])],
                         ).acquire(soc, progress=False, callback=update_hook)
                     ),
                     result_shape=(len(lengths),),

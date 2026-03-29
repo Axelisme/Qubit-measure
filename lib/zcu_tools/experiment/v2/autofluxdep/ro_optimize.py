@@ -98,7 +98,6 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
             ge_sweep = make_ge_sweep()
             freq_sweep = cfg["sweep"]["freq"]
             gain_sweep = cfg["sweep"]["gain"]
-            cfg["sweep"] = {"ge": ge_sweep, "freq": freq_sweep, "gain": gain_sweep}
             Pulse.set_param(modules["pi_pulse"], "on/off", sweep2param("ge", ge_sweep))
             PulseReadout.set_param(
                 modules["readout"], "freq", sweep2param("freq", freq_sweep)
@@ -113,6 +112,11 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
                     Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
                     PulseReadout("readout", modules["readout"]),
+                ],
+                sweep=[
+                    ("ge", ge_sweep),
+                    ("freq", freq_sweep),
+                    ("gain", gain_sweep),
                 ],
             )
             tracker = PCATracker()
@@ -170,14 +174,15 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
             behavior="force",
         )
         cfg = check_type(cfg_temp, RO_OptCfg)
+        modules = cfg["modules"]
 
         self.freqs = sweep2array(
             freq_sweep,
             "freq",
             {
                 "soccfg": ctx.env["soccfg"],
-                "gen_ch": cfg["modules"]["readout"]["pulse_cfg"]["ch"],
-                "ro_ch": cfg["modules"]["readout"]["ro_cfg"]["ro_ch"],
+                "gen_ch": modules["readout"]["pulse_cfg"]["ch"],
+                "ro_ch": modules["readout"]["ro_cfg"]["ro_ch"],
             },
         )
         self.gains = sweep2array(
@@ -185,7 +190,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
             "gain",
             {
                 "soccfg": ctx.env["soccfg"],
-                "gen_ch": cfg["modules"]["readout"]["pulse_cfg"]["ch"],
+                "gen_ch": modules["readout"]["pulse_cfg"]["ch"],
             },
         )
 

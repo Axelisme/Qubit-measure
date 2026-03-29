@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
+from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
@@ -121,22 +121,27 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
 
-        def measure_fn(ctx: TaskState, update_hook: Callable):
-            len_sweep = ctx.cfg["sweep"]["length"]
-            modules = ctx.cfg["modules"]
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: LenRabiCfg = cast(LenRabiCfg, ctx.cfg)
+            modules = cfg["modules"]
+            len_sweep = cfg["sweep"]["length"]
 
-            assert len_sweep["expts"] == self.num_expts
+            assert update_hook is not None
 
             len_params = sweep2param("length", len_sweep)
             Pulse.set_param(modules["rabi_pulse"], "length", len_params)
             prog = ModularProgramV2(
                 ctx.env["soccfg"],
-                ctx.cfg,
+                cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("rabi_pulse", modules["rabi_pulse"]),
                     Readout("readout", modules["readout"]),
                 ],
+                sweep=[("length", len_sweep)],
             )
             return prog.acquire(
                 ctx.env["soc"],

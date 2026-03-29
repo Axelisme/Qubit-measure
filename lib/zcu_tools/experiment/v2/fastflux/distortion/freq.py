@@ -7,7 +7,15 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
@@ -78,12 +86,6 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
 
-        # force length be the outer loop
-        _cfg["sweep"] = {
-            "length": _cfg["sweep"]["length"],
-            "freq": _cfg["sweep"]["freq"],
-        }
-
         lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
@@ -91,17 +93,22 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
-        length_params = sweep2param("length", _cfg["sweep"]["length"])
-        freq_params = sweep2param("freq", _cfg["sweep"]["freq"])
-        Pulse.set_param(modules["qub_pulse"], "freq", freq_params)
-
         with LivePlotter2D("Time (us)", "Frequency (MHz)") as viewer:
 
-            def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
-                modules = ctx.cfg["modules"]
+            def measure_fn(
+                ctx: TaskState[NDArray[np.complex128], Any],
+                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            ) -> list[NDArray[np.float64]]:
+                cfg: FreqCfg = cast(FreqCfg, ctx.cfg)
+                modules = cfg["modules"]
+
+                length_params = sweep2param("length", cfg["sweep"]["length"])
+                freq_params = sweep2param("freq", cfg["sweep"]["freq"])
+                Pulse.set_param(modules["qub_pulse"], "freq", freq_params)
+
                 return ModularProgramV2(
                     soccfg,
-                    ctx.cfg,
+                    cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
                         Join(
@@ -110,9 +117,13 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                                 SoftDelay("wait_time", delay=length_params),
                                 Pulse("qub_pulse", modules["qub_pulse"]),
                             ],
-                            SoftDelay("readout_t", ctx.cfg["readout_t"]),
+                            SoftDelay("readout_t", cfg["readout_t"]),
                         ),
                         Readout("readout", modules["readout"]),
+                    ],
+                    sweep=[
+                        ("length", cfg["sweep"]["length"]),
+                        ("freq", cfg["sweep"]["freq"]),
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
 

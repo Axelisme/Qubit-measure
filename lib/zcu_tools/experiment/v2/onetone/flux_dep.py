@@ -60,9 +60,6 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         freq_sweep = _cfg["sweep"]["freq"]
         flux_sweep = _cfg["sweep"]["flux"]
 
-        # remove flux from sweep dict, will be handled by soft loop
-        _cfg["sweep"] = {"freq": freq_sweep}
-
         dev_values = sweep2array(flux_sweep, allow_array=True)
         freqs = sweep2array(
             freq_sweep,
@@ -93,6 +90,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                                     Reset("reset", modules.get("reset")),
                                     PulseReadout("readout", modules["readout"]),
                                 ],
+                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
                             ).acquire(soc, progress=False, callback=update_hook)
                         )
                     ),

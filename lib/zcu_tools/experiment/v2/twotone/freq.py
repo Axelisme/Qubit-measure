@@ -52,7 +52,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                        soccfg, ctx.cfg
+                        soccfg, ctx.cfg, sweep=[("freq", ctx.cfg["sweep"]["freq"])]
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(len(freqs),),
                 ),

@@ -49,17 +49,17 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         _cfg = check_type(deepcopy(cfg), DispersiveCfg)
         modules = _cfg["modules"]
 
-        _cfg["sweep"] = {"ge": make_ge_sweep(), "freq": _cfg["sweep"]["freq"]}
+        ge_sweep = make_ge_sweep()
+        freq_sweep = _cfg["sweep"]["freq"]
 
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            freq_sweep,
             "freq",
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
-        # Set with/without π gain for qubit pulse
-        ge_param = sweep2param("ge", _cfg["sweep"]["ge"])
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
+        ge_param = sweep2param("ge", ge_sweep)
+        freq_param = sweep2param("freq", freq_sweep)
         Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
         Readout.set_param(modules["readout"], "freq", freq_param)
 
@@ -69,7 +69,12 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                        soccfg, ctx.cfg
+                        soccfg,
+                        ctx.cfg,
+                        sweep=[
+                            ("ge", ge_sweep),
+                            ("freq", ctx.cfg["sweep"]["freq"]),
+                        ],
                     ).acquire(soc, progress=False, callback=update_hook),
                     result_shape=(2, len(freqs)),
                 ),
