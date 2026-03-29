@@ -99,7 +99,6 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
 
             detune_sweep = cfg["sweep"]["detune"]
             detune_param = sweep2param("detune", detune_sweep)
-
             Pulse.set_param(
                 modules["qub_pulse"],
                 "freq",

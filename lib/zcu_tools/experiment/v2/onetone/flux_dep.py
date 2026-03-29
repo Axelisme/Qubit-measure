@@ -7,6 +7,7 @@ from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
     Any,
+    Callable,
     Mapping,
     NotRequired,
     Optional,
@@ -18,7 +19,7 @@ from typing_extensions import (
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
@@ -71,31 +72,32 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             },
         )
 
-        PulseReadout.set_param(
-            modules["readout"], "freq", sweep2param("freq", freq_sweep)
-        )
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: FluxDepCfg = cast(FluxDepCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            freq_sweep = cfg["sweep"]["freq"]
+            freq_param = sweep2param("freq", freq_sweep)
+            PulseReadout.set_param(modules["readout"], "freq", freq_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    PulseReadout("readout", modules["readout"]),
+                ],
+                sweep=[("freq", freq_sweep)],
+            ).acquire(soc, progress=False, callback=update_hook)
 
         with LivePlotter2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    PulseReadout("readout", modules["readout"]),
-                                ],
-                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        )
-                    ),
-                    result_shape=(len(freqs),),
-                ).scan(
+                task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)).scan(
                     "flux",
                     dev_values.tolist(),
                     before_each=lambda i, ctx, flux: set_flux_in_dev_cfg(

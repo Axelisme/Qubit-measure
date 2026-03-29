@@ -7,12 +7,21 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Mapping, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    Mapping,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, set_output_in_dev_cfg
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
@@ -49,43 +58,43 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
     OUTPUT_MAP = {0: "off", 1: "on"}
 
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> CheckResult:
+        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), CheckCfg)
         modules = _cfg["modules"]
 
-        _cfg["sweep"] = format_sweep1D(_cfg["sweep"], "freq")
-
+        outputs = np.array([0, 1])
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
             "freq",
             {"soccfg": soccfg, "gen_ch": modules["readout"]["pulse_cfg"]["ch"]},
         )
 
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        PulseReadout.set_param(modules["readout"], "freq", freq_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: CheckCfg = cast(CheckCfg, ctx.cfg)
+            modules = cfg["modules"]
 
-        outputs = np.array([0, 1])
+            freq_sweep = cfg["sweep"]["freq"]
+            freq_param = sweep2param("freq", freq_sweep)
+            PulseReadout.set_param(modules["readout"], "freq", freq_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    PulseReadout("readout", modules["readout"]),
+                ],
+                sweep=[("freq", freq_sweep)],
+            ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
         with LivePlotter1D(
             "Frequency (MHz)", "Magnitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    PulseReadout("readout", modules["readout"]),
-                                ],
-                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        )
-                    ),
-                    result_shape=(len(freqs),),
-                ).scan(
+                task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)).scan(
                     "JPA on/off",
                     outputs.tolist(),
                     before_each=lambda i, ctx, output: set_output_in_dev_cfg(

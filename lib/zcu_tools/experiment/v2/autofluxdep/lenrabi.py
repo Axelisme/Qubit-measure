@@ -133,6 +133,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
 
             len_params = sweep2param("length", len_sweep)
             Pulse.set_param(modules["rabi_pulse"], "length", len_params)
+
             prog = ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,

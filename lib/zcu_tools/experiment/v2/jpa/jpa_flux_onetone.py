@@ -5,12 +5,21 @@ from copy import deepcopy
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Mapping, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    Mapping,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
@@ -56,8 +65,26 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
             allow_array=True,
         )
 
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        PulseReadout.set_param(modules["readout"], "freq", freq_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: OneToneFluxCfg = cast(OneToneFluxCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            freq_sweep = cfg["sweep"]["freq"]
+            freq_param = sweep2param("freq", freq_sweep)
+            PulseReadout.set_param(modules["readout"], "freq", freq_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    PulseReadout("readout", modules["readout"]),
+                ],
+                sweep=[("freq", freq_sweep)],
+            ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
         with LivePlotter2DwithLine(
             "JPA Flux value (a.u.)",
@@ -66,23 +93,7 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
             num_lines=5,
         ) as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    PulseReadout("readout", modules["readout"]),
-                                ],
-                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        )
-                    ),
-                    result_shape=(len(freqs),),
-                ).scan(
+                task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)).scan(
                     "JPA Flux value",
                     jpa_fluxs.tolist(),
                     before_each=lambda i, ctx, flux: set_flux_in_dev_cfg(

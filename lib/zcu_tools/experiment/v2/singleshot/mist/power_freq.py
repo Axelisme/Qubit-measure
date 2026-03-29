@@ -8,10 +8,18 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
 from zcu_tools.program import SweepCfg
@@ -75,8 +83,35 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
         )
 
-        freq_param = sweep2param("freq", freq_sweep)
-        Pulse.set_param(modules["probe_pulse"], "freq", freq_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.float64], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: FreqPowerCfg = cast(FreqPowerCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            freq_sweep = cfg["sweep"]["freq"]
+            freq_param = sweep2param("freq", freq_sweep)
+            Pulse.set_param(modules["probe_pulse"], "freq", freq_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("init_pulse", modules.get("init_pulse")),
+                    Pulse("probe_pulse", modules["probe_pulse"]),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("freq", freq_sweep)],
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                g_center=g_center,
+                e_center=e_center,
+                population_radius=radius,
+            )
 
         fig, axs = make_plot_frame(3, 1, figsize=(12, 6))
 
@@ -119,26 +154,6 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
 
                 viewer.refresh()
 
-            def measure_fn(ctx, update_hook):
-                modules = ctx.cfg["modules"]
-                return ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("init_pulse", modules.get("init_pulse")),
-                        Pulse("probe_pulse", modules["probe_pulse"]),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[("freq", ctx.cfg["sweep"]["freq"])],
-                ).acquire(
-                    soc,
-                    progress=False,
-                    callback=update_hook,
-                    g_center=g_center,
-                    e_center=e_center,
-                    population_radius=radius,
-                )
 
             signals = run_task(
                 task=Task(

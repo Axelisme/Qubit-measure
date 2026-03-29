@@ -73,46 +73,47 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
             {"soccfg": soccfg, "gen_ch": modules["pi2_pulse"]["ch"]},
         )
 
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: PhaseCfg = cast(PhaseCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            length_sweep = cfg["sweep"]["length"]
+            phase_sweep = cfg["sweep"]["phase"]
+            length_param = sweep2param("length", length_sweep)
+            phase_param = sweep2param("phase", phase_sweep)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Join(
+                        Pulse("flux_pulse", modules["flux_pulse"]),
+                        [
+                            SoftDelay("wait_time", delay=length_param),
+                            Pulse("pi2_pulse1", modules["pi2_pulse"]),
+                            Pulse(
+                                name="pi2_pulse2",
+                                cfg={
+                                    **modules["pi2_pulse"],
+                                    "phase": phase_param,
+                                },
+                            ),
+                        ],
+                        SoftDelay("readout_t", cfg["readout_t"]),
+                    ),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[
+                    ("length", length_sweep),
+                    ("phase", phase_sweep),
+                ],
+            ).acquire(soc, progress=False, callback=update_hook)
+
         with LivePlotter2D("Time (us)", "Phase (deg)") as viewer:
-
-            def measure_fn(
-                ctx: TaskState[NDArray[np.complex128], Any],
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
-            ) -> list[NDArray[np.float64]]:
-                cfg: PhaseCfg = cast(PhaseCfg, ctx.cfg)
-                modules = cfg["modules"]
-
-                length_params = sweep2param("length", cfg["sweep"]["length"])
-                phase_params = sweep2param("phase", cfg["sweep"]["phase"])
-
-                return ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Join(
-                            Pulse("flux_pulse", modules["flux_pulse"]),
-                            [
-                                SoftDelay("wait_time", delay=length_params),
-                                Pulse("pi2_pulse1", modules["pi2_pulse"]),
-                                Pulse(
-                                    name="pi2_pulse2",
-                                    cfg={  # type: ignore[dict-item]
-                                        **modules["pi2_pulse"],
-                                        "phase": phase_params,
-                                    },
-                                ),
-                            ],
-                            SoftDelay("readout_t", cfg["readout_t"]),
-                        ),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[
-                        ("length", cfg["sweep"]["length"]),
-                        ("phase", cfg["sweep"]["phase"]),
-                    ],
-                ).acquire(soc, progress=False, callback=update_hook)
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn, result_shape=(len(lengths), len(phases))

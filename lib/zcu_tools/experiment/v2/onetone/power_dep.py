@@ -5,10 +5,18 @@ from copy import deepcopy
 import numpy as np
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
@@ -69,8 +77,40 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             },
         )
 
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        PulseReadout.set_param(modules["readout"], "freq", freq_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: PowerDepCfg = cast(PowerDepCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            assert update_hook is not None
+
+            freq_sweep = cfg["sweep"]["freq"]
+            freq_param = sweep2param("freq", freq_sweep)
+            PulseReadout.set_param(modules["readout"], "freq", freq_param)
+
+            return (
+                prog := ModularProgramV2(
+                    soccfg,
+                    cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        PulseReadout("readout", modules["readout"]),
+                    ],
+                    sweep=[("freq", freq_sweep)],
+                )
+            ).acquire(
+                soc,
+                progress=False,
+                callback=wrap_earlystop_check(
+                    prog,
+                    update_hook,
+                    earlystop_snr,
+                    signal2real_fn=np.abs,
+                    after_check=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
+                ),
+            )
 
         # run experiment
         with LivePlotter2DwithLine(
@@ -79,35 +119,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             ax1d = viewer.get_ax("1d")
 
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            prog := ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    PulseReadout("readout", modules["readout"]),
-                                ],
-                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
-                            )
-                        ).acquire(
-                            soc,
-                            progress=False,
-                            callback=wrap_earlystop_check(
-                                prog,
-                                update_hook,
-                                earlystop_snr,
-                                signal2real_fn=np.abs,
-                                after_check=lambda snr: ax1d.set_title(
-                                    f"snr = {snr:.1f}"
-                                ),
-                            ),
-                        )
-                    ),
-                    result_shape=(len(freqs),),
-                ).scan(
+                task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)).scan(
                     "gain",
                     gains.tolist(),
                     before_each=lambda _, ctx, gain: PulseReadout.set_param(

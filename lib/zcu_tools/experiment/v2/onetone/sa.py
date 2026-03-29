@@ -7,11 +7,19 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
@@ -55,30 +63,31 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
             {"soccfg": soccfg, "ro_ch": modules["readout"]["ro_cfg"]["ro_ch"]},
         )
 
-        # set readout frequency as sweep param
-        freq_param = sweep2param("ro_freq", _cfg["sweep"]["ro_freq"])
-        PulseReadout.set_param(_cfg["modules"]["readout"], "ro_freq", freq_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: SA_FreqCfg = cast(SA_FreqCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            freq_sweep = cfg["sweep"]["ro_freq"]
+            freq_param = sweep2param("ro_freq", freq_sweep)
+            PulseReadout.set_param(modules["readout"], "ro_freq", freq_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    PulseReadout("readout", modules["readout"]),
+                ],
+                sweep=[("ro_freq", ctx.cfg["sweep"]["ro_freq"])],
+            ).acquire(soc, progress=False, callback=update_hook)
 
         # run experiment
         with LivePlotter1D("SA Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    PulseReadout("readout", modules["readout"]),
-                                ],
-                                sweep=[("ro_freq", ctx.cfg["sweep"]["ro_freq"])],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        )
-                    ),
-                    result_shape=(len(freqs),),
-                ),
+                task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, safreq_signal2real(ctx.root_data)

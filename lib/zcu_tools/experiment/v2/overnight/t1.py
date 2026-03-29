@@ -152,34 +152,39 @@ class OvernightT1Cfg(ModularProgramCfg, TaskCfg):
 class T1Task(
     T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotterDict]
 ):
-    def __init__(self, cfg) -> None:
-        cfg = check_type(deepcopy(cfg), OvernightT1Cfg)
-        self.cfg = cfg
-
+    def __init__(self, cfg: dict[str, Any]) -> None:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        len_sweep = cfg["sweep"]["length"]
+        _cfg = check_type(deepcopy(cfg), OvernightT1Cfg)
+        self.cfg = _cfg
 
         # initial values, may be rounded later
-        self.lengths = sweep2array(len_sweep, allow_array=True)
+        self.lengths = sweep2array(_cfg["sweep"]["length"])
 
-        def measure_t1_fn(ctx: TaskState, update_hook: Callable):
-            modules = ctx.cfg["modules"]
-            t1_param = sweep2param("length", ctx.cfg["sweep"]["length"])
+        def measure_t1_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: OvernightT1Cfg = cast(OvernightT1Cfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            length_sweep = cfg["sweep"]["length"]
+            length_param = sweep2param("length", length_sweep)
+
             return ModularProgramV2(
                 ctx.env["soccfg"],
-                ctx.cfg,
-                sweep=[("length", ctx.cfg["sweep"]["length"])],
+                cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("pi_pulse", modules["pi_pulse"]),
-                    Delay("t1_delay", delay=t1_param),
+                    Delay("t1_delay", delay=length_param),
                     Readout("readout", modules["readout"]),
                 ],
+                sweep=[("length", length_sweep)],
             ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=measure_t1_fn,
-            result_shape=(len_sweep["expts"],),
+            result_shape=(len(self.lengths),),
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:

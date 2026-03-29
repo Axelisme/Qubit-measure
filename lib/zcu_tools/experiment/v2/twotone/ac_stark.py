@@ -367,7 +367,41 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
         )
         gains = round_zcu_gain(gains, soccfg, modules["stark_pulse"]["ch"])
 
-        t2r_param = sweep2param("length", _cfg["sweep"]["length"])
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: AcStarkRamseyCfg = cast(AcStarkRamseyCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            length_sweep = cfg["sweep"]["length"]
+            length_param = sweep2param("length", length_sweep)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Join(
+                        Pulse("stark_pulse", modules["stark_pulse"]),
+                        [
+                            SoftDelay("wait_delay", delay=cfg["wait_delay"]),
+                            Pulse("pi2_pulse1", modules["pi2_pulse"]),
+                            SoftDelay("t2_delay", delay=length_param),
+                            Pulse(
+                                name="pi2_pulse2",
+                                cfg={  # type: ignore[dict-item]
+                                    **modules["pi2_pulse"],
+                                    "phase": modules["pi2_pulse"]["phase"]
+                                    + 360 * detune * length_param,
+                                },
+                            ),
+                        ],
+                    ),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("length", length_sweep)],
+            ).acquire(soc, progress=False, callback=update_hook)
 
         with LivePlotter2DwithLine(
             "Stark Pulse Gain (a.u.)",
@@ -376,40 +410,8 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
             num_lines=2,
             uniform=False,
         ) as viewer:
-
-            def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
-                modules = ctx.cfg["modules"]
-                return ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Join(
-                            Pulse("stark_pulse", modules["stark_pulse"]),
-                            [
-                                SoftDelay("wait_delay", delay=ctx.cfg["wait_delay"]),
-                                Pulse("pi2_pulse1", modules["pi2_pulse"]),
-                                SoftDelay("t2_delay", delay=t2r_param),
-                                Pulse(
-                                    name="pi2_pulse2",
-                                    cfg={  # type: ignore[dict-item]
-                                        **modules["pi2_pulse"],
-                                        "phase": modules["pi2_pulse"]["phase"]
-                                        + 360 * detune * t2r_param,
-                                    },
-                                ),
-                            ],
-                        ),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[("length", ctx.cfg["sweep"]["length"])],
-                ).acquire(soc, progress=False, callback=update_hook)
-
             signals = run_task(
-                task=Task(
-                    measure_fn=measure_fn,
-                    result_shape=(len(lengths),),
-                ).scan(
+                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)).scan(
                     "resonator gain",
                     list[float](gains.tolist()),
                     before_each=lambda _, ctx, gain: Pulse.set_param(

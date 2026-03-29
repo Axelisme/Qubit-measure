@@ -78,38 +78,37 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         gains = sweep2array(gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": lf_ch})
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: T1Cfg = cast(T1Cfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            gain_sweep = cfg["sweep"]["gain"]
+            length_sweep = cfg["sweep"]["length"]
+
+            gain_param = sweep2param("gain", gain_sweep)
+            length_param = sweep2param("length", length_sweep)
+            Pulse.set_param(modules["flux_pulse"], "gain", gain_param)
+            Pulse.set_param(modules["flux_pulse"], "length", length_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Pulse("flux_pulse", modules["flux_pulse"]),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[
+                    ("gain", gain_sweep),
+                    ("length", length_sweep),
+                ],
+            ).acquire(soc, progress=False, callback=update_hook)
+
         with LivePlotter2D("Flux Pulse Gain (a.u.)", "Time (us)") as viewer:
-
-            def measure_fn(
-                ctx: TaskState[NDArray[np.complex128], Any],
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
-            ) -> list[NDArray[np.float64]]:
-                cfg: T1Cfg = cast(T1Cfg, ctx.cfg)
-                modules = cfg["modules"]
-
-                gain_sweep = cfg["sweep"]["gain"]
-                length_sweep = cfg["sweep"]["length"]
-
-                gain_param = sweep2param("gain", gain_sweep)
-                length_param = sweep2param("length", length_sweep)
-                Pulse.set_param(modules["flux_pulse"], "gain", gain_param)
-                Pulse.set_param(modules["flux_pulse"], "length", length_param)
-
-                return ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("pi_pulse", modules["pi_pulse"]),
-                        Pulse("flux_pulse", modules["flux_pulse"]),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[
-                        ("gain", gain_sweep),
-                        ("length", length_sweep),
-                    ],
-                ).acquire(soc, progress=False, callback=update_hook)
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn, result_shape=(len(gains), len(lengths))

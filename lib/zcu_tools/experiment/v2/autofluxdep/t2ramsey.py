@@ -116,8 +116,8 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
 
             detune = cfg["activate_detune"]
 
-            len_sweep = cfg["sweep"]["length"]
-            len_param = sweep2param("length", len_sweep)
+            length_sweep = cfg["sweep"]["length"]
+            length_param = sweep2param("length", length_sweep)
 
             prog = ModularProgramV2(
                 ctx.env["soccfg"],
@@ -125,18 +125,18 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse(name="pi2_pulse1", cfg=modules["pi2_pulse"]),
-                    Delay(name="t2r_delay", delay=len_param),
+                    Delay(name="t2r_delay", delay=length_param),
                     Pulse(
                         name="pi2_pulse2",
                         cfg={
                             **modules["pi2_pulse"],
                             "phase": modules["pi2_pulse"]["phase"]
-                            + 360 * detune * len_param,
+                            + 360 * detune * length_param,
                         },
                     ),
                     Readout("readout", modules["readout"]),
                 ],
-                sweep=[("length", len_sweep)],
+                sweep=[("length", length_sweep)],
             )
             return prog.acquire(
                 ctx.env["soc"],

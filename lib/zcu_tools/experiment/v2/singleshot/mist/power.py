@@ -7,11 +7,19 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
@@ -68,6 +76,36 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
         Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
 
+        def measure_fn(
+            ctx: TaskState[NDArray[np.float64], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: PowerCfg = cast(PowerCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            gain_sweep = cfg["sweep"]["gain"]
+            gain_param = sweep2param("gain", gain_sweep)
+            Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse(name="init_pulse", cfg=modules.get("init_pulse")),
+                    Pulse(name="probe_pulse", cfg=modules["probe_pulse"]),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("gain", gain_sweep)],
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                g_center=g_center,
+                e_center=e_center,
+                population_radius=radius,
+            )
+
         with LivePlotter1D(
             "Pulse gain",
             "MIST",
@@ -81,27 +119,6 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             ),
         ) as viewer:
             viewer.get_ax().set_ylim(0.0, 1.0)
-
-            def measure_fn(ctx, update_hook):
-                modules = ctx.cfg["modules"]
-                return ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse(name="init_pulse", cfg=modules.get("init_pulse")),
-                        Pulse(name="probe_pulse", cfg=modules["probe_pulse"]),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[("gain", ctx.cfg["sweep"]["gain"])],
-                ).acquire(
-                    soc,
-                    progress=False,
-                    callback=update_hook,
-                    g_center=g_center,
-                    e_center=e_center,
-                    population_radius=radius,
-                )
 
             signals = run_task(
                 task=Task(

@@ -6,11 +6,20 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    Literal,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter1D
 from zcu_tools.program import SweepCfg
@@ -59,30 +68,31 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             },
         )
 
-        # set readout frequency as sweep param
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        PulseReadout.set_param(modules["readout"], "freq", freq_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: FreqCfg = cast(FreqCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            freq_sweep = cfg["sweep"]["freq"]
+            freq_param = sweep2param("freq", freq_sweep)
+            PulseReadout.set_param(modules["readout"], "freq", freq_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    PulseReadout("readout", modules["readout"]),
+                ],
+                sweep=[("freq", freq_sweep)],
+            ).acquire(soc, progress=False, callback=update_hook)
 
         # run experiment
         with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    PulseReadout("readout", modules["readout"]),
-                                ],
-                                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        )
-                    ),
-                    result_shape=(len(freqs),),
-                ),
+                task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, freq_signal2real(ctx.root_data)

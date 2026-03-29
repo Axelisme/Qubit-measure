@@ -12,16 +12,18 @@ from tqdm.auto import tqdm
 from typeguard import check_type
 from typing_extensions import (
     Any,
+    Callable,
     NotRequired,
     Optional,
     Sequence,
     TypeAlias,
     TypedDict,
     Union,
+    cast,
 )
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
 from zcu_tools.liveplot import (
@@ -92,8 +94,6 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         if sweep_name not in ["gain", "freq"]:
             raise ValueError(f"Unsupported sweep key: {sweep_name}")
 
-        ge_sweep = make_ge_sweep()
-
         xs = sweep2array(
             x_sweep,
             sweep_name,  # type: ignore
@@ -106,10 +106,38 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
         )
 
-        ge_param = sweep2param("ge", ge_sweep)
-        length_param = sweep2param("length", length_sweep)
-        Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
-        Pulse.set_param(modules["probe_pulse"], "length", length_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.float64], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: T1WithToneSweepCfg = cast(T1WithToneSweepCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            ge_sweep = make_ge_sweep()
+            length_sweep = cfg["sweep"]["length"]
+            ge_param = sweep2param("ge", ge_sweep)
+            length_param = sweep2param("length", length_sweep)
+            Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
+            Pulse.set_param(modules["probe_pulse"], "length", length_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Pulse("probe_pulse", modules["probe_pulse"]),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("ge", ge_sweep), ("length", length_sweep)],
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                g_center=g_center,
+                e_center=e_center,
+                population_radius=radius,
+            )
 
         fig, axs = make_plot_frame(4, 2, figsize=(12, 10))
         axs[3][0].set_ylim(0.0, 1.0)
@@ -188,28 +216,6 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 )
 
                 viewer.refresh()
-
-            def measure_fn(ctx, update_hook):
-                cfg = deepcopy(ctx.cfg)
-                modules = cfg["modules"]
-                return ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("pi_pulse", modules["pi_pulse"]),
-                        Pulse("probe_pulse", modules["probe_pulse"]),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[("ge", ge_sweep), ("length", length_sweep)],
-                ).acquire(
-                    soc,
-                    progress=False,
-                    callback=update_hook,
-                    g_center=g_center,
-                    e_center=e_center,
-                    population_radius=radius,
-                )
 
             populations = run_task(
                 task=Task(

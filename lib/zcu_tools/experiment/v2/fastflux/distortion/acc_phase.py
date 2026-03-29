@@ -77,48 +77,47 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
             {"soccfg": soccfg, "gen_ch": modules["pi2_pulse"]["ch"]},
         )
 
-        length_params = sweep2param("length", _cfg["sweep"]["length"])
-        phase_params = sweep2param("phase", _cfg["sweep"]["phase"])
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: AccPhaseCfg = cast(AccPhaseCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            length_sweep = cfg["sweep"]["length"]
+            phase_sweep = cfg["sweep"]["phase"]
+            length_param = sweep2param("length", length_sweep)
+            phase_param = sweep2param("phase", phase_sweep)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Join(
+                        Pulse("flux_pulse", modules["flux_pulse"]),
+                        [
+                            SoftDelay("wait_time", delay=length_param),
+                            Pulse("pi2_pulse1", modules["pi2_pulse"], tag="pi2_pulse1"),
+                        ],
+                        SoftDelay("readout_t", cfg["readout_t"]),
+                    ),
+                    Pulse(
+                        name="pi2_pulse2",
+                        cfg={
+                            **modules["pi2_pulse"],
+                            "phase": phase_param,
+                        },
+                    ),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[
+                    ("length", length_sweep),
+                    ("phase", phase_sweep),
+                ],
+            ).acquire(soc, progress=False, callback=update_hook)
 
         with LivePlotter2D("Time (us)", "Phase (deg)") as viewer:
-
-            def measure_fn(
-                ctx: TaskState[NDArray[np.complex128], Any],
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
-            ) -> list[NDArray[np.float64]]:
-                cfg: AccPhaseCfg = cast(AccPhaseCfg, ctx.cfg)
-                modules = cfg["modules"]
-
-                return ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Join(
-                            Pulse("flux_pulse", modules["flux_pulse"]),
-                            [
-                                SoftDelay("wait_time", delay=length_params),
-                                Pulse(
-                                    "pi2_pulse1", modules["pi2_pulse"], tag="pi2_pulse1"
-                                ),
-                            ],
-                            SoftDelay("readout_t", ctx.cfg["readout_t"]),
-                        ),
-                        Pulse(
-                            name="pi2_pulse2",
-                            cfg={  # type: ignore[dict-item]
-                                **modules["pi2_pulse"],
-                                "phase": phase_params,
-                            },
-                        ),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[
-                        ("length", ctx.cfg["sweep"]["length"]),
-                        ("phase", ctx.cfg["sweep"]["phase"]),
-                    ],
-                ).acquire(soc, progress=False, callback=update_hook)
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn, result_shape=(len(lengths), len(phases))

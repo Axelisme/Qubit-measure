@@ -8,7 +8,15 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
@@ -92,7 +100,57 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
             )
             lengths = np.unique(lengths)
 
-        ge_sweep = make_ge_sweep()
+        def measure_fn(
+            ctx: TaskState[NDArray[np.float64], Any],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: T1WithToneCfg = cast(T1WithToneCfg, ctx.cfg)
+
+            def prog_maker(cfg, length_param) -> ModularProgramV2:
+                _cfg = cast(T1WithToneCfg, deepcopy(cfg))
+                modules = _cfg["modules"]
+
+                ge_sweep = make_ge_sweep()
+                ge_param = sweep2param("ge", ge_sweep)
+                Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
+                Pulse.set_param(modules["probe_pulse"], "length", length_param)
+
+                return ModularProgramV2(
+                    soccfg,
+                    _cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("init_pulse", modules.get("init_pulse")),
+                        Pulse("pi_pulse", modules["pi_pulse"]),
+                        Pulse("probe_pulse", modules["probe_pulse"]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                    sweep=(
+                        [("length", _cfg["sweep"]["length"]), ("ge", ge_sweep)]
+                        if uniform
+                        else [("ge", ge_sweep)]
+                    ),
+                )
+
+            acquire_kwargs = dict(
+                soc=soc,
+                progress=False,
+                callback=update_hook,
+                g_center=g_center,
+                e_center=e_center,
+                population_radius=radius,
+            )
+            if uniform:
+                len_param = sweep2param("length", ctx.cfg["sweep"]["length"])
+                return prog_maker(cfg, len_param).acquire(**acquire_kwargs)
+            else:
+                return measure_with_sweep(
+                    ctx,
+                    prog_maker,
+                    lengths.tolist(),
+                    sweep_shape=(2,),
+                    **acquire_kwargs,
+                )
 
         fig, axs = make_plot_frame(1, 2, figsize=(12, 5))
         axs[0][0].set_ylim(0, 1)
@@ -141,60 +199,6 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 )
 
                 viewer.refresh()
-
-            def measure_fn(ctx: TaskState, update_hook):
-                ge_param = sweep2param("ge", ge_sweep)
-
-                def prog_maker(cfg, t1_param):
-                    cfg = deepcopy(cfg)
-                    modules = cfg["modules"]
-                    fpga_sweep = (
-                        [("length", cfg["sweep"]["length"]), ("ge", ge_sweep)]
-                        if uniform
-                        else [("ge", ge_sweep)]
-                    )
-                    return ModularProgramV2(
-                        soccfg,
-                        cfg,
-                        modules=[
-                            Reset("reset", modules.get("reset")),
-                            Pulse("init_pulse", modules.get("init_pulse")),
-                            Pulse(
-                                "pi_pulse",
-                                Pulse.set_param(
-                                    modules["pi_pulse"], "on/off", ge_param
-                                ),
-                            ),
-                            Pulse(
-                                "probe_pulse",
-                                Pulse.set_param(
-                                    modules["probe_pulse"], "length", t1_param
-                                ),
-                            ),
-                            Readout("readout", modules["readout"]),
-                        ],
-                        sweep=fpga_sweep,
-                    )
-
-                acquire_kwargs = dict(
-                    soc=soc,
-                    progress=False,
-                    callback=update_hook,
-                    g_center=g_center,
-                    e_center=e_center,
-                    population_radius=radius,
-                )
-                if uniform:
-                    len_param = sweep2param("length", ctx.cfg["sweep"]["length"])
-                    return prog_maker(ctx.cfg, len_param).acquire(**acquire_kwargs)
-                else:
-                    return measure_with_sweep(
-                        ctx,
-                        prog_maker,
-                        lengths.tolist(),
-                        sweep_shape=(2,),
-                        **acquire_kwargs,
-                    )
 
             populations = run_task(
                 task=Task(
