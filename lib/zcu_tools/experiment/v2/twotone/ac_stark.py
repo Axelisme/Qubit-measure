@@ -8,7 +8,15 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
@@ -20,9 +28,9 @@ from zcu_tools.experiment.v2.utils import (
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Join,
     ModularProgramCfg,
     ModularProgramV2,
-    Join,
     Pulse,
     PulseCfg,
     Readout,
@@ -303,7 +311,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> AcStarkResult:
-        signals2D, gains, freqs = load_data(filepath, **kwargs)
+        signals2D, gains, freqs, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert freqs is not None
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
         assert signals2D.shape == (len(gains), len(freqs))
@@ -314,7 +322,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = cast(AcStarkCfg, cfg)
         self.last_result = (gains, freqs, signals2D)
 
         return gains, freqs, signals2D
@@ -337,7 +345,7 @@ class AcStarkRamseyCfg(ModularProgramCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
-class AcStarkRamseyExp(AbsExperiment):
+class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
     def run(
         self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
     ) -> AcStarkResult:
@@ -509,7 +517,7 @@ class AcStarkRamseyExp(AbsExperiment):
         )
 
     def load(self, filepath: str, **kwargs) -> AcStarkResult:
-        signals2D, gains, lens = load_data(filepath, **kwargs)
+        signals2D, gains, lens, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert gains is not None and lens is not None
         assert len(gains.shape) == 1 and len(lens.shape) == 1
         assert signals2D.shape == (len(lens), len(gains))
@@ -521,7 +529,7 @@ class AcStarkRamseyExp(AbsExperiment):
         lens = lens.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = cast(AcStarkRamseyCfg, cfg)
         self.last_result = (gains, lens, signals2D)
 
         return gains, lens, signals2D

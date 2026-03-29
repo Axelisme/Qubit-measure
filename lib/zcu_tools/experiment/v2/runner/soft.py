@@ -6,7 +6,7 @@ from typing_extensions import Any, Callable, Optional, Sequence, TypeVar, Union
 from .base import AbsTask
 from .state import Result, TaskState
 
-T_ValueType = TypeVar("T_ValueType", bound=Union[int, float, complex])
+T_Value = TypeVar("T_Value", bound=Union[int, float, complex])
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
 
@@ -15,14 +15,9 @@ class Scan(AbsTask[Sequence[T_ChildResult], T_RootResult]):
     def __init__(
         self,
         name: str,
-        values: Sequence[T_ValueType],
+        values: Sequence[T_Value],
         before_each: Callable[
-            [
-                int,
-                TaskState[Sequence[T_ChildResult], T_RootResult],
-                T_ValueType,
-            ],
-            Any,
+            [int, TaskState[Sequence[T_ChildResult], T_RootResult], T_Value], Any
         ],
         task: AbsTask[T_ChildResult, T_RootResult],
     ) -> None:

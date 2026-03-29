@@ -15,9 +15,9 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Join,
     ModularProgramCfg,
     ModularProgramV2,
-    Join,
     Pulse,
     PulseCfg,
     Readout,
@@ -53,7 +53,7 @@ class PhaseCfg(ModularProgramCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
-class PhaseExp(AbsExperiment):
+class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> PhaseResult:
         _cfg = check_type(deepcopy(cfg), PhaseCfg)
         modules = _cfg["modules"]
@@ -113,19 +113,18 @@ class PhaseExp(AbsExperiment):
             )
 
         # Cache results
-        self.last_cfg: Optional[dict] = deepcopy(cfg)
-        self.last_result: Optional[PhaseResult] = (lengths, phases, signals)
+        self.last_cfg = _cfg
+        self.last_result = (lengths, phases, signals)
 
         return lengths, phases, signals
 
     def analyze(
-        self, cfg: Optional[dict[str, Any]] = None, result: Optional[PhaseResult] = None
+        self, cfg: Optional[PhaseCfg] = None, result: Optional[PhaseResult] = None
     ) -> Figure:
         if cfg is None:
             cfg = self.last_cfg
         assert cfg is not None, "No config found"
-        _cfg = check_type(deepcopy(cfg), PhaseCfg)
-        modules = _cfg["modules"]
+        modules = cfg["modules"]
 
         flux_pulse = modules["flux_pulse"]
         pi2_len = float(modules["pi2_pulse"]["waveform"]["length"])

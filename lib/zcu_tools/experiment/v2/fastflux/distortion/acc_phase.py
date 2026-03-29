@@ -53,7 +53,7 @@ class AccPhaseCfg(ModularProgramCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
-class AccPhaseExp(AbsExperiment):
+class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> AccPhaseResult:
         _cfg = check_type(deepcopy(cfg), AccPhaseCfg)
         modules = _cfg["modules"]
@@ -119,21 +119,20 @@ class AccPhaseExp(AbsExperiment):
             )
 
         # Cache results
-        self.last_cfg: Optional[dict] = deepcopy(cfg)
-        self.last_result: Optional[AccPhaseResult] = (lengths, phases, signals)
+        self.last_cfg = _cfg
+        self.last_result = (lengths, phases, signals)
 
         return lengths, phases, signals
 
     def analyze(
         self,
-        cfg: Optional[dict[str, Any]] = None,
+        cfg: Optional[AccPhaseCfg] = None,
         result: Optional[AccPhaseResult] = None,
     ) -> Figure:
         if cfg is None:
             cfg = self.last_cfg
         assert cfg is not None, "No config found"
-        _cfg = check_type(deepcopy(cfg), AccPhaseCfg)
-        modules = _cfg["modules"]
+        modules = cfg["modules"]
 
         flux_pulse = modules["flux_pulse"]
         pi2_len = float(modules["pi2_pulse"]["waveform"]["length"])

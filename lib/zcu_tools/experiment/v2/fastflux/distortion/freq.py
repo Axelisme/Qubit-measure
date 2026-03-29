@@ -15,6 +15,7 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlotter2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Join,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -22,7 +23,6 @@ from zcu_tools.program.v2 import (
     Readout,
     ReadoutCfg,
     Reset,
-    Join,
     ResetCfg,
     SoftDelay,
     sweep2param,
@@ -73,7 +73,7 @@ class FreqCfg(ModularProgramCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
-class FreqExp(AbsExperiment):
+class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
@@ -127,13 +127,13 @@ class FreqExp(AbsExperiment):
             )
 
         # Cache results
-        self.last_cfg: Optional[dict] = deepcopy(cfg)
-        self.last_result: Optional[FreqResult] = (lengths, freqs, signals)
+        self.last_cfg = _cfg
+        self.last_result = (lengths, freqs, signals)
 
         return lengths, freqs, signals
 
     def analyze(
-        self, cfg: Optional[dict[str, Any]] = None, result: Optional[FreqResult] = None
+        self, cfg: Optional[FreqCfg] = None, result: Optional[FreqResult] = None
     ) -> Figure:
         if cfg is None:
             cfg = self.last_cfg

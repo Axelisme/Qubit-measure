@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
+from collections.abc import Hashable
 from pathlib import Path
 
 import matplotlib
@@ -16,6 +17,7 @@ from typing_extensions import (
     Mapping,
     Optional,
     Self,
+    Sequence,
     TypedDict,
     TypeVar,
 )
@@ -32,26 +34,25 @@ from zcu_tools.experiment.v2.runner import (
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import AbsLivePlotter, MultiLivePlotter, make_plot_frame
 
-T_PlotterDictType = TypeVar("T_PlotterDictType", bound=Mapping[str, AbsLivePlotter])
+T_PlotterDict = TypeVar("T_PlotterDict", bound=Mapping[str, AbsLivePlotter])
 
 
+T_Key = TypeVar("T_Key", bound=Hashable)
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
 class MeasurementTask(
     AbsTask[T_Result, T_RootResult],
-    Generic[T_Result, T_RootResult, T_PlotterDictType],
+    Generic[T_Result, T_RootResult, T_PlotterDict],
 ):
     def num_axes(self) -> dict[str, int]: ...
 
-    def make_plotter(
-        self, name: str, axs: dict[str, list[Axes]]
-    ) -> T_PlotterDictType: ...
+    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> T_PlotterDict: ...
 
     def update_plotter(
         self,
-        plotters: T_PlotterDictType,
+        plotters: T_PlotterDict,
         ctx: TaskState,
         signals: T_Result,
     ) -> None: ...
@@ -76,7 +77,7 @@ class MeasurementTask(
 class OvernightCfg(TypedDict): ...
 
 
-class OvernightBatchTask(BatchTask):
+class OvernightBatchTask(BatchTask[T_Key, T_Result, T_RootResult]):
     def __init__(self, tasks, retry_time: int = 0) -> None:
         self.retry_time = retry_time
 
@@ -107,16 +108,24 @@ class OvernightBatchTask(BatchTask):
             self.task_pbar = None
 
 
-class OvernightExecutor(AbsExperiment):
+class OvernightExecutor(AbsExperiment[Mapping[str, Result], OvernightCfg]):
     def __init__(self, num_times: int, interval: float) -> None:
         super().__init__()
 
         self.num_times = num_times
         self.interval = interval
 
-        self.measurements: dict[str, MeasurementTask] = OrderedDict()
+        self.measurements: OrderedDict[
+            str,
+            MeasurementTask[Any, Sequence[Mapping[str, Result]], Any],
+        ] = OrderedDict()
 
-    def add_measurements(self, measurements: dict[str, MeasurementTask]) -> Self:
+    def add_measurements(
+        self,
+        measurements: dict[
+            str, MeasurementTask[Any, Sequence[Mapping[str, Result]], Any]
+        ],
+    ) -> Self:
         for name, measurement in measurements.items():
             if name in self.measurements:
                 raise ValueError(f"Measurement {name} already exists")
@@ -192,6 +201,9 @@ class OvernightExecutor(AbsExperiment):
 
         return fig, plotter, plot_fn
 
+    @matplotlib.rc_context(
+        {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}
+    )
     def run(
         self, fail_retry: int = 3, env_dict: Optional[dict[str, Any]] = None
     ) -> Mapping[str, Result]:
@@ -205,22 +217,19 @@ class OvernightExecutor(AbsExperiment):
 
         cfg = OvernightCfg()
 
-        with matplotlib.rc_context(
-            {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}
-        ):
-            fig, plotter, plot_fn = self.make_plotter()
+        fig, plotter, plot_fn = self.make_plotter()
 
-            with plotter:
-                results = run_task(
-                    task=OvernightBatchTask(
-                        self.measurements, retry_time=fail_retry
-                    ).repeat("Iter", self.num_times, self.interval),
-                    init_cfg=cfg,
-                    env_dict=env_dict,
-                    on_update=plot_fn,
-                )
+        with plotter:
+            results = run_task(
+                task=OvernightBatchTask[str, Result, Sequence[Mapping[str, Result]]](
+                    self.measurements, retry_time=fail_retry
+                ).repeat("Iter", self.num_times, self.interval),
+                init_cfg=cfg,
+                env_dict=env_dict,
+                on_update=plot_fn,
+            )
 
-            plt.close(fig)
+        plt.close(fig)
 
         signals_dict = merge_result_list(results)
 

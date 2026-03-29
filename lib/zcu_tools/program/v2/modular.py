@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from qick import QickConfig
-from typing_extensions import Any, Mapping, NotRequired, Sequence, cast
+from typing_extensions import Any, Mapping, NotRequired, Optional, Sequence, cast
 
 from zcu_tools.config import config
 
@@ -26,11 +26,13 @@ class ModularProgramV2(MyProgramV2):
         soccfg: QickConfig,
         cfg: Mapping[str, Any],
         modules: Sequence[Module],
+        sweep: Optional[list[tuple[str, SweepCfg]]] = None,
         **kwargs,
     ) -> None:
         _cfg = cast(ModularProgramCfg, cfg)
 
         self.modules = modules
+        self.sweep = sweep
 
         super().__init__(soccfg, _cfg, **kwargs)
 
@@ -38,8 +40,9 @@ class ModularProgramV2(MyProgramV2):
         super()._initialize(cfg)
 
         # add v2 sweep loops
-        for name, sweep in cfg.get("sweep", {}).items():
-            self.add_loop(name, count=sweep["expts"])
+        if self.sweep is not None:
+            for name, sweep in self.sweep:
+                self.add_loop(name, count=sweep["expts"])
 
         # initialize modules
         for module in self.modules:
@@ -63,10 +66,18 @@ class BaseCustomProgramV2(ModularProgramV2):
     A base class for custom programs to inherit.
     """
 
-    def __init__(self, soccfg: QickConfig, cfg: Mapping[str, Any], **kwargs) -> None:
+    def __init__(
+        self,
+        soccfg: QickConfig,
+        cfg: Mapping[str, Any],
+        sweep: Optional[list[tuple[str, SweepCfg]]] = None,
+        **kwargs,
+    ) -> None:
         _cfg = cast(ModularProgramCfg, cfg)
 
-        super().__init__(soccfg, _cfg, modules=self.make_modules(_cfg), **kwargs)
+        super().__init__(
+            soccfg, _cfg, modules=self.make_modules(_cfg), sweep=sweep, **kwargs
+        )
 
     def make_modules(self, cfg: ModularProgramCfg) -> Sequence[Module]:
         return []

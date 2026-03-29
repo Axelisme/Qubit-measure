@@ -26,7 +26,7 @@ from .state import Result, TaskState
 
 if TYPE_CHECKING:
     from .repeat import RepeatOverTime, ReTryIfFail
-    from .soft import Scan, T_ValueType
+    from .soft import Scan, T_Value
 
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
@@ -59,9 +59,9 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult]):
     def scan(
         self,
         name: str,
-        values: Sequence[T_ValueType],
+        values: Sequence[T_Value],
         before_each: Callable[
-            [int, TaskState[Sequence[T_Result], T_RootResult], T_ValueType], Any
+            [int, TaskState[Sequence[T_Result], T_RootResult], T_Value], Any
         ],
     ) -> Scan[T_Result, T_RootResult]:
         """Scan a task over a sequence of values."""

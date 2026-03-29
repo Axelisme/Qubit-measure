@@ -263,18 +263,15 @@ class T1WithToneModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class T1WithToneProgramCfg(ModularProgramCfg):
+class T1WithToneCfg(ModularProgramCfg, TaskCfg):
     modules: T1WithToneModuleCfg
-
-
-class T1WithToneTaskConfig(T1WithToneProgramCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
-class T1WithToneExp(AbsExperiment):
+class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = check_type(deepcopy(cfg), T1WithToneTaskConfig)
+        _cfg = check_type(deepcopy(cfg), T1WithToneCfg)
         modules = _cfg["modules"]
 
         lengths = sweep2array(
@@ -398,7 +395,7 @@ class T1WithToneExp(AbsExperiment):
 
 
 # (values, times, signals)
-T1SweepResultType = tuple[
+T1WithToneSweepResult: TypeAlias = tuple[
     NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -407,17 +404,14 @@ def t1_sweep_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.flo
     return rotate2real(signals).real
 
 
-class T1WithToneSweepProgramCfg(ModularProgramCfg):
+class T1WithToneSweepCfg(ModularProgramCfg, TaskCfg):
     modules: T1WithToneModuleCfg
-
-
-class T1WithToneSweepTaskConfig(T1WithToneSweepProgramCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
-class T1WithToneSweepExp(AbsExperiment):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> T1SweepResultType:
-        _cfg = check_type(deepcopy(cfg), T1WithToneSweepTaskConfig)
+class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
+    def run(self, soc, soccfg, cfg: dict[str, Any]) -> T1WithToneSweepResult:
+        _cfg = check_type(deepcopy(cfg), T1WithToneSweepCfg)
         modules = _cfg["modules"]
 
         gain_sweep: Union[SweepCfg, NDArray[np.float64]] = _cfg["sweep"].pop("gain")  # type: ignore
@@ -480,7 +474,7 @@ class T1WithToneSweepExp(AbsExperiment):
         return gains, lengths, signals
 
     def analyze(
-        self, result: Optional[T1SweepResultType] = None
+        self, result: Optional[T1WithToneSweepResult] = None
     ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64], Figure]:
         if result is None:
             result = self.last_result
@@ -545,7 +539,7 @@ class T1WithToneSweepExp(AbsExperiment):
     def save(
         self,
         filepath: str,
-        result: Optional[T1SweepResultType] = None,
+        result: Optional[T1WithToneSweepResult] = None,
         comment: Optional[str] = None,
         tag: str = "twotone/ge/t1_with_tone_sweep",
         **kwargs,
@@ -565,7 +559,7 @@ class T1WithToneSweepExp(AbsExperiment):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> T1SweepResultType:
+    def load(self, filepath: str, **kwargs) -> T1WithToneSweepResult:
         signals, gains, Ts = load_data(filepath, **kwargs)
         assert gains is not None and Ts is not None
         assert len(gains.shape) == 1 and len(Ts.shape) == 1

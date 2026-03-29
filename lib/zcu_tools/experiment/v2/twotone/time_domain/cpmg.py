@@ -15,16 +15,17 @@ from typing_extensions import (
     Callable,
     NotRequired,
     Optional,
+    Sequence,
     TypeAlias,
     TypedDict,
     Union,
 )
 
-from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import sweep2array, round_zcu_time, round_sweep_dict
+from zcu_tools.experiment.v2.utils import round_sweep_dict, round_zcu_time, sweep2array
 from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
@@ -128,10 +129,15 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             )
 
         with LivePlotter2DwithLine(
-            "Number of Pi", "Time idxs", line_axis=1, num_lines=2, title="CPMG"
+            "Number of Pi", "Time idxs", line_axis=1, num_lines=2
         ) as viewer:
 
-            def measure_fn(ctx: TaskState, update_hook: Callable[[int, Any], None]):
+            def measure_fn(
+                ctx: TaskState[
+                    NDArray[np.complex128], Sequence[NDArray[np.complex128]]
+                ],
+                update_hook: Callable[[int, list[NDArray[np.float64]]], None],
+            ) -> list[NDArray[np.float64]]:
                 cfg = ctx.cfg
                 modules = cfg["modules"]
 
@@ -192,7 +198,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     ],
                 ).acquire(soc, progress=False, callback=update_hook)
 
-            def update_fn(i, ctx: TaskState, time):
+            def update_fn(i: int, ctx: TaskState, time: float) -> None:
                 ctx.env.update(time=int(time))
                 ctx.cfg["sweep"]["length"] = make_sweep(
                     start=length_ranges[i, 0],
