@@ -123,10 +123,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                         Repeat(
                             name="zigzag_loop",
                             n=repeat_time,
-                            sub_module=Pulse(
-                                name=f"loop_{repeat_on}",
-                                cfg=modules[repeat_on],
-                            ),
+                            sub_module=Pulse(f"loop_{repeat_on}", modules[repeat_on]),
                         ),
                         Readout("readout", modules["readout"]),
                     ],

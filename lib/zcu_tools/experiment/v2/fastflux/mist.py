@@ -4,6 +4,7 @@ from copy import deepcopy
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.image import NonUniformImage
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
@@ -50,7 +51,7 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 class MistModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
-    pi_pulse: PulseCfg
+    init_pulse: NotRequired[PulseCfg]
     flux_pulse: PulseCfg
     mist_pulse: PulseCfg
     readout: ReadoutCfg
@@ -64,7 +65,6 @@ class MistSweepDict(TypedDict, closed=True):
 class MistCfg(ModularProgramCfg, TaskCfg):
     modules: MistModuleCfg
     sweep: MistSweepDict
-    readout_t: float
 
 
 class MistExp(AbsExperiment[MistResult, MistCfg]):
@@ -106,11 +106,10 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
-                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Pulse("init_pulse", modules.get("init_pulse")),
                     Join(
                         Pulse("flux_pulse", modules["flux_pulse"]),
                         Pulse("mist_pulse", modules["mist_pulse"]),
-                        SoftDelay("readout_t", cfg["readout_t"]),
                     ),
                     Readout("readout", modules["readout"]),
                 ],
@@ -140,7 +139,9 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
 
         return flux_gains, mist_gains, signals
 
-    def analyze(self, result: Optional[MistResult] = None) -> Figure:
+    def analyze(
+        self, result: Optional[MistResult] = None, ac_coeff: Optional[float] = None
+    ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, "No result found"
@@ -151,16 +152,21 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
-        ax.imshow(
-            real_signals.T,
-            extent=[flux_gains[0], flux_gains[-1], mist_gains[0], mist_gains[-1]],
-            aspect="auto",
-            origin="lower",
-            interpolation="none",
-            cmap="RdBu_r",
+        if ac_coeff is not None:
+            mist_photons = ac_coeff * mist_gains**2
+            ylabel = "Photon Number (a.u.)"
+        else:
+            mist_photons = mist_gains**2
+            ylabel = "Mist Pulse Gain^2 (a.u.)"
+
+        im = NonUniformImage(ax, interpolation="nearest", cmap="RdBu_r")
+        im.set_data(flux_gains, mist_photons, real_signals.T)
+        im.set_extent(
+            (flux_gains[0], flux_gains[-1], mist_photons[0], mist_photons[-1])
         )
+        ax.add_artist(im)
         ax.set_xlabel("Flux Pulse Gain (a.u.)")
-        ax.set_ylabel("Mist Pulse Gain (a.u.)")
+        ax.set_ylabel(ylabel)
 
         fig.tight_layout()
 

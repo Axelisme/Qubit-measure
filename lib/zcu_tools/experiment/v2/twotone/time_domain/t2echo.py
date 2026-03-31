@@ -7,7 +7,15 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Literal,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
@@ -54,7 +62,7 @@ class T2EchoCfg(ModularProgramCfg, TaskCfg):
 class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
     def run(
         self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
-    ) -> T2EchoResult:
+    ) -> tuple[T2EchoResult, float]:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2EchoCfg)
 
@@ -62,41 +70,55 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
             _cfg["sweep"]["length"], "time", {"soccfg": soccfg, "scaler": 0.5}
         )
 
-        t2e_params = sweep2param("length", _cfg["sweep"]["length"])
+        # calculate true scanned detune based on rounding lengths
+        if detune != 0.0:
+            detune_lengths = sweep2array(
+                cfg["sweep"]["length"],
+                "phase",
+                {
+                    "soccfg": soccfg,
+                    "gen_ch": cfg["modules"]["pi2_pulse"]["ch"],
+                    "scaler": 360 * detune,
+                },
+            )
+            mask = lengths > 0
+            detune_ratio = np.mean(detune_lengths[mask] / lengths[mask]).item()
+            true_detune = detune * detune_ratio
+
+        def measure_fn(ctx, update_hook):
+            cfg: T2EchoCfg = cast(T2EchoCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            length_sweep = cfg["sweep"]["length"]
+            length_param = sweep2param("length", length_sweep)
+            detune_param = 360 * detune * length_param
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("pi2_pulse1", modules["pi2_pulse"]),
+                    Delay("t2e_delay1", delay=0.5 * length_param),
+                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Delay("t2e_delay2", delay=0.5 * length_param),
+                    Pulse(
+                        name="pi2_pulse2",
+                        cfg={
+                            **modules["pi2_pulse"],
+                            "phase": modules["pi2_pulse"]["phase"] + detune_param,
+                        },
+                    ),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("length", length_sweep)],
+            ).acquire(soc, progress=False, callback=update_hook)
 
         with LivePlotter1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Echo"}
         ) as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    Pulse("pi2_pulse1", modules["pi2_pulse"]),
-                                    Delay("t2e_delay1", delay=0.5 * t2e_params),
-                                    Pulse("pi_pulse", modules["pi_pulse"]),
-                                    Delay("t2e_delay2", delay=0.5 * t2e_params),
-                                    Pulse(
-                                        name="pi2_pulse2",
-                                        cfg={
-                                            **modules["pi2_pulse"],
-                                            "phase": modules["pi2_pulse"]["phase"]
-                                            + 360 * detune * t2e_params,
-                                        },  # type: ignore
-                                    ),
-                                    Readout("readout", modules["readout"]),
-                                ],
-                                sweep=[("length", ctx.cfg["sweep"]["length"])],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        )
-                    ),
-                    result_shape=(len(lengths),),
-                ),
+                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, t2echo_signal2real(ctx.root_data)
@@ -107,7 +129,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
         self.last_cfg = _cfg
         self.last_result = (lengths, signals)
 
-        return lengths, signals
+        return (lengths, signals), true_detune
 
     def analyze(
         self,

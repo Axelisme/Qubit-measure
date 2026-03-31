@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
@@ -53,43 +53,61 @@ class T2RamseyCfg(ModularProgramCfg, TaskCfg):
 class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
     def run(
         self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
-    ) -> T2RamseyResult:
+    ) -> tuple[T2RamseyResult, float]:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2RamseyCfg)
 
-        lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
+        length_sweep = _cfg["sweep"]["length"]
+        lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
 
-        t2r_param = sweep2param("length", _cfg["sweep"]["length"])
+        # calculate true scanned detune based on rounding lengths
+        if detune != 0.0:
+            detune_lengths = sweep2array(
+                cfg["sweep"]["length"],
+                "phase",
+                {
+                    "soccfg": soccfg,
+                    "gen_ch": cfg["modules"]["pi2_pulse"]["ch"],
+                    "scaler": 360 * detune,
+                },
+            )
+            mask = lengths > 0
+            detune_ratio = np.mean(detune_lengths[mask] / lengths[mask]).item()
+            true_detune = detune * detune_ratio
 
+        def measure_fn(ctx, update_hook):
+            cfg: T2RamseyCfg = cast(T2RamseyCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            length_sweep = cfg["sweep"]["length"]
+            length_param = sweep2param("length", length_sweep)
+            detune_param = 360 * detune * length_param
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("pi2_pulse1", modules["pi2_pulse"]),
+                    Delay("t2_delay", delay=length_param),
+                    Pulse(
+                        name="pi2_pulse2",
+                        cfg={
+                            **modules["pi2_pulse"],
+                            "phase": modules["pi2_pulse"]["phase"] + detune_param,
+                        },
+                    ),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("length", length_sweep)],
+            ).acquire(soc, progress=False, callback=update_hook)
+
+        title = f"T2 Ramsey - detune {detune:.2f} MHz"
         with LivePlotter1D(
-            "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Ramsey"}
+            "Time (us)", "Amplitude", segment_kwargs={"title": title}
         ) as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            modules=[
-                                Reset("reset", modules.get("reset")),
-                                Pulse("pi2_pulse1", modules["pi2_pulse"]),
-                                Delay("t2_delay", delay=t2r_param),
-                                Pulse(
-                                    name="pi2_pulse2",
-                                    cfg={
-                                        **modules["pi2_pulse"],
-                                        "phase": modules["pi2_pulse"]["phase"]
-                                        + 360 * detune * t2r_param,
-                                    },  # type: ignore[dict-item]
-                                ),
-                                Readout("readout", modules["readout"]),
-                            ],
-                            sweep=[("length", ctx.cfg["sweep"]["length"])],
-                        ).acquire(soc, progress=False, callback=update_hook)
-                    ),
-                    result_shape=(len(lengths),),
-                ),
+                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, t2ramsey_signal2real(ctx.root_data)
@@ -100,7 +118,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         self.last_cfg = _cfg
         self.last_result = (lengths, signals)
 
-        return lengths, signals
+        return (lengths, signals), true_detune
 
     def analyze(
         self, result: Optional[T2RamseyResult] = None, *, fit_fringe: bool = True
@@ -109,24 +127,24 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-        xs, signals = result
+        lengths, signals = result
 
         real_signals = t2ramsey_signal2real(signals)
 
         if fit_fringe:
             t2r, t2rerr, detune, detune_err, y_fit, _ = fit_decay_fringe(
-                xs, real_signals
+                lengths, real_signals
             )
         else:
-            t2r, t2rerr, y_fit, _ = fit_decay(xs, real_signals)
+            t2r, t2rerr, y_fit, _ = fit_decay(lengths, real_signals)
             detune = 0.0
             detune_err = 0.0
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.plot(xs, real_signals, label="meas", ls="-", marker="o", markersize=3)
-        ax.plot(xs, y_fit, label="fit")
+        ax.plot(lengths, real_signals, label="meas", ls="-", marker="o", markersize=3)
+        ax.plot(lengths, y_fit, label="fit")
         t2r_str = f"{t2r:.2f}us ± {t2rerr:.2f}us"
         if fit_fringe:
             detune_str = f"{detune:.2f}MHz ± {detune_err * 1e3:.2f}kHz"

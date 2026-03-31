@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
@@ -48,57 +48,46 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
-
-        length_sweep = _cfg["sweep"]["length"]
-        ge_sweep = make_ge_sweep()
-
-        # length uses soft loop only; FPGA sweeps |g⟩/|e⟩ for SNR
         modules = _cfg["modules"]
-        Pulse.set_param(
-            modules["qub_pulse"], "on/off", sweep2param("ge", ge_sweep)
-        )
 
         readout_cfg = modules["readout"]
         lengths = sweep2array(
-            length_sweep,
+            _cfg["sweep"]["length"],
             "time",
-            {
-                "soccfg": soccfg,
-                "gen_ch": readout_cfg["pulse_cfg"]["ch"],
-                "ro_ch": readout_cfg["ro_cfg"]["ro_ch"],
-            },
+            {"soccfg": soccfg, "ro_ch": readout_cfg["ro_cfg"]["ro_ch"]},
         )
-
-        # set initial readout length and adjust pulse length
-        length_params = sweep2param("length", length_sweep)
-        PulseReadout.set_param(modules["readout"], "ro_length", length_params)
         PulseReadout.set_param(modules["readout"], "length", lengths.max() + 0.11)
 
+        def measure_fn(ctx, update_hook):
+            cfg: LengthCfg = cast(LengthCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            ge_sweep = make_ge_sweep()
+            ge_param = sweep2param("ge", ge_sweep)
+            Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
+
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("qub_pulse", modules["qub_pulse"]),
+                    PulseReadout("readout", modules["readout"]),
+                ],
+                sweep=[("ge", ge_sweep)],
+            )
+            tracker = PCATracker()
+            avg_d = prog.acquire(
+                soc,
+                progress=False,
+                callback=lambda i, avg_d: update_hook(
+                    i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                ),
+                statistic_trackers=[tracker],
+            )
+            return avg_d, [tracker.covariance], [tracker.rough_median]
+
         with LivePlotter1D("Readout Length (us)", "SNR") as viewer:
-
-            def measure_fn(ctx, update_hook):
-                modules = ctx.cfg["modules"]
-                prog = ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("qub_pulse", modules["qub_pulse"]),
-                        PulseReadout("readout", modules["readout"]),
-                    ],
-                    sweep=[("ge", ge_sweep)],
-                )
-                tracker = PCATracker()
-                avg_d = prog.acquire(
-                    soc,
-                    progress=False,
-                    callback=lambda i, avg_d: update_hook(
-                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
-                    ),
-                    statistic_trackers=[tracker],
-                )
-                return avg_d, [tracker.covariance], [tracker.rough_median]
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,

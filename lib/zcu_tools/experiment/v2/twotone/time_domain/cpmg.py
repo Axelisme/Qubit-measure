@@ -23,7 +23,11 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import round_sweep_dict, round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.utils import (
+    round_sweep_dict,
+    sweep2array,
+    wrap_earlystop_check,
+)
 from zcu_tools.liveplot import LivePlotter2DwithLine
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program import SweepCfg
@@ -75,7 +79,12 @@ class CPMG_Cfg(ModularProgramCfg, TaskCfg):
 
 class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
     def run(
-        self, soc, soccfg, cfg: dict[str, Any], detune_ratio: float = 0.0
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        detune_ratio: float = 0.0,
+        earlystop_snr: Optional[float] = None,
     ) -> CPMG_Result:
         _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
         modules = _cfg["modules"]
@@ -115,9 +124,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
 
-        min_interval = np.min(
-            (length_ranges[:, 1] - length_ranges[:, 0]) / (2 * np.max(times))
-        )
+        min_interval = np.min(length_ranges[:, 0] / (2 * times))
         if min_interval < 0.5 * (  # the first and last delays are half of the interval
             pi2_pulse["waveform"]["length"] + pi_pulse["waveform"]["length"]
         ):
@@ -131,15 +138,18 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         with LivePlotter2DwithLine(
             "Number of Pi", "Time idxs", line_axis=1, num_lines=2
         ) as viewer:
+            ax1d = viewer.get_ax("1d")
 
             def measure_fn(
                 ctx: TaskState[
                     NDArray[np.complex128], Sequence[NDArray[np.complex128]]
                 ],
-                update_hook: Callable[[int, list[NDArray[np.float64]]], None],
+                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
             ) -> list[NDArray[np.float64]]:
                 cfg = ctx.cfg
                 modules = cfg["modules"]
+
+                assert update_hook is not None
 
                 time = ctx.env["time"]
                 pi2_pulse = modules["pi2_pulse"]
@@ -165,39 +175,51 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
                 interval = length_param / (2 * time)
 
-                return ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
-                        Delay("first_delay", interval - 0.5 * dpulse_len),
-                        Repeat(
-                            name="pi_loop",
-                            n=time - 1,
-                            sub_module=[
-                                Pulse(
-                                    "pi_pulse",
-                                    pi_pulse,
-                                    pulse_name="pi_pulse",
-                                    block_mode=False,
-                                ),
-                                SoftDelay("inner_delay", 2 * interval),
-                            ],
-                        ),
-                        Pulse("last_pi_pulse", pi_pulse, block_mode=False),
-                        Delay("last_delay", interval + 0.5 * dpulse_len),
-                        Pulse(
-                            name="pi2_pulse2",
-                            cfg={  # type: ignore
-                                **pi2_pulse,
-                                "phase": pi2_pulse["phase"] + detune_param,
-                            },
-                        ),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[("length", round_length_sweep)],
-                ).acquire(soc, progress=False, callback=update_hook)
+                return (
+                    prog := ModularProgramV2(
+                        soccfg,
+                        cfg,
+                        modules=[
+                            Reset("reset", modules.get("reset")),
+                            Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
+                            Delay("first_delay", interval - 0.5 * dpulse_len),
+                            Repeat(
+                                name="pi_loop",
+                                n=time - 1,
+                                sub_module=[
+                                    Pulse(
+                                        "pi_pulse",
+                                        pi_pulse,
+                                        pulse_name="pi_pulse",
+                                        block_mode=False,
+                                    ),
+                                    SoftDelay("inner_delay", 2 * interval),
+                                ],
+                            ),
+                            Pulse("last_pi_pulse", pi_pulse, block_mode=False),
+                            Delay("last_delay", interval + 0.5 * dpulse_len),
+                            Pulse(
+                                name="pi2_pulse2",
+                                cfg={  # type: ignore
+                                    **pi2_pulse,
+                                    "phase": pi2_pulse["phase"] + detune_param,
+                                },
+                            ),
+                            Readout("readout", modules["readout"]),
+                        ],
+                        sweep=[("length", round_length_sweep)],
+                    )
+                ).acquire(
+                    soc,
+                    progress=False,
+                    callback=wrap_earlystop_check(
+                        prog,
+                        update_hook,
+                        earlystop_snr,
+                        signal2real_fn=lambda x: rotate2real(x).real,
+                        after_check=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
+                    ),
+                )
 
             def update_fn(i: int, ctx: TaskState, time: float) -> None:
                 ctx.env.update(time=int(time))
@@ -238,13 +260,15 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         real_signals2D = rotate2real(signals2D).real
         norm_signals = cpmg_signal2real(signals2D)
 
-        def is_good_fit(fit_signal, real_signal) -> bool:
+        def is_good_fit(fit_signal, real_signal, t2r) -> bool:
             real_ptp = np.ptp(real_signal)
             fit_ptp = np.ptp(fit_signal)
             residual = real_signal - fit_signal
             smooth_residual = gaussian_filter1d(residual, sigma=1)
-            return fit_ptp > 0.5 * real_ptp and fit_ptp > np.mean(
-                np.abs(smooth_residual)
+            return (
+                t2r < np.max(lengths)
+                and fit_ptp > 0.5 * real_ptp
+                and fit_ptp > np.mean(np.abs(smooth_residual))
             )
 
         prev_pOpt: Optional[tuple] = None
@@ -263,7 +287,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     lens, real_signal, fit_params=prev_pOpt
                 )
 
-            if is_good_fit(fit_signal, real_signal):
+            if is_good_fit(fit_signal, real_signal, t2r):
                 prev_pOpt = pOpt
 
                 t2s[i] = t2r
@@ -274,16 +298,21 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         if np.all(np.isnan(t2s)):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
 
-        fig, ax = plt.subplots()
-        assert isinstance(ax, Axes)
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
+        assert isinstance(ax1, Axes)
+        assert isinstance(ax2, Axes)
 
         X = np.broadcast_to(times[None, :], norm_signals.T.shape)
         Y = lengths.T
-        ax.pcolormesh(X, Y, norm_signals.T, shading="nearest")
-        ax.errorbar(times, t2s, yerr=t2errs, label="Fitting T2", color="red")
-        ax.legend()
-        ax.set_ylabel("Time (us)")
-        ax.set_xlabel("Number of Pi")
+        ax1.pcolormesh(X, Y, norm_signals.T, shading="nearest")
+        ax1.set_xlabel("Number of Pi")
+        ax2.set_ylabel("Time (us)")
+        ax2.errorbar(times, t2s, yerr=t2errs, label="Fitting T2", color="red")
+        ax2.set_xscale("log")
+        ax2.set_yscale("log")
+        ax2.legend()
+        ax2.set_ylabel("Time (us)")
+        ax2.set_xlabel("Number of Pi")
 
         fig.tight_layout()
 

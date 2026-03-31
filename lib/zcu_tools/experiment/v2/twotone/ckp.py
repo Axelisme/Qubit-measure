@@ -30,6 +30,7 @@ from zcu_tools.program.v2 import (
     PulseCfg,
     Readout,
     ReadoutCfg,
+    Join,
     Reset,
     ResetCfg,
     sweep2param,
@@ -94,7 +95,6 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         _cfg = check_type(deepcopy(cfg), CKP_Cfg)
         modules = _cfg["modules"]
 
-        ge_sweep = make_ge_sweep()
         res_freq_sweep = _cfg["sweep"]["res_freq"]
         qub_freq_sweep = _cfg["sweep"]["qub_freq"]
 
@@ -109,12 +109,41 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
-        ge_param = sweep2param("ge", ge_sweep)
-        res_freq_param = sweep2param("res_freq", res_freq_sweep)
-        qub_freq_param = sweep2param("qub_freq", qub_freq_sweep)
-        Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
-        Pulse.set_param(modules["res_pulse"], "freq", res_freq_param)
-        Pulse.set_param(modules["qub_pulse"], "freq", qub_freq_param)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], NDArray[np.complex128]],
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg: CKP_Cfg = cast(CKP_Cfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            ge_sweep = make_ge_sweep()
+            res_freq_sweep = cfg["sweep"]["res_freq"]
+            qub_freq_sweep = cfg["sweep"]["qub_freq"]
+            ge_param = sweep2param("ge", ge_sweep)
+            res_freq_param = sweep2param("res_freq", res_freq_sweep)
+            qub_freq_param = sweep2param("qub_freq", qub_freq_sweep)
+            Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
+            Pulse.set_param(modules["res_pulse"], "freq", res_freq_param)
+            Pulse.set_param(modules["qub_pulse"], "freq", qub_freq_param)
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Join(
+                        Pulse("res_pulse", modules["res_pulse"]),
+                        Pulse("qub_pulse", modules["qub_pulse"]),
+                    ),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[
+                    ("ge", ge_sweep),
+                    ("res_freq", cfg["sweep"]["res_freq"]),
+                    ("qub_freq", cfg["sweep"]["qub_freq"]),
+                ],
+            ).acquire(soc, progress=False, callback=update_hook)
 
         fig, axs = make_plot_frame(1, 2, figsize=(10, 4))
 
@@ -139,38 +168,15 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             def plot_fn(
                 ctx: TaskState[NDArray[np.complex128], NDArray[np.complex128]],
             ) -> None:
-                amps = ckp_signal2real(ctx.root_data)
+                real_signal = ckp_signal2real(ctx.root_data)
 
                 viewer.get_plotter("ground").update(
-                    res_freqs, qub_freqs, amps[0], refresh=False
+                    res_freqs, qub_freqs, real_signal[0], refresh=False
                 )
                 viewer.get_plotter("excited").update(
-                    res_freqs, qub_freqs, amps[1], refresh=False
+                    res_freqs, qub_freqs, real_signal[1], refresh=False
                 )
                 viewer.refresh()
-
-            def measure_fn(
-                ctx: TaskState[NDArray[np.complex128], NDArray[np.complex128]],
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
-            ) -> list[NDArray[np.float64]]:
-                cfg: CKP_Cfg = cast(CKP_Cfg, ctx.cfg)
-                modules = cfg["modules"]
-                return ModularProgramV2(
-                    soccfg,
-                    cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("pi_pulse", modules["pi_pulse"]),
-                        Pulse("res_pulse", modules["res_pulse"], block_mode=False),
-                        Pulse("qub_pulse", modules["qub_pulse"]),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[
-                        ("ge", ge_sweep),
-                        ("res_freq", cfg["sweep"]["res_freq"]),
-                        ("qub_freq", cfg["sweep"]["qub_freq"]),
-                    ],
-                ).acquire(soc, progress=False, callback=update_hook)
 
             signals = run_task(
                 task=Task(

@@ -58,7 +58,6 @@ class TwoToneModuleCfg(TypedDict, closed=True):
 class TwotoneCfg(ModularProgramCfg, TaskCfg):
     modules: TwoToneModuleCfg
     sweep: dict[str, SweepCfg]
-    readout_t: float
 
 
 class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
@@ -101,7 +100,6 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
                     Join(
                         Pulse("flux_pulse", modules["flux_pulse"]),
                         Pulse("qub_pulse", modules["qub_pulse"]),
-                        SoftDelay("readout_t", cfg["readout_t"]),
                     ),
                     Readout("readout", modules["readout"]),
                 ],

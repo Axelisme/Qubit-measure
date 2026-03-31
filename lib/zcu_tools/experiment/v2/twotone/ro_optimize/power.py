@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
@@ -50,47 +50,48 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         _cfg = check_type(deepcopy(cfg), PowerCfg)
         modules = _cfg["modules"]
 
-        ge_sweep = make_ge_sweep()
-
         gains = sweep2array(
             _cfg["sweep"]["gain"],
             "gain",
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
-        ge_param = sweep2param("ge", ge_sweep)
-        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-        Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
-        Readout.set_param(modules["readout"], "gain", gain_param)
+        def measure_fn(ctx, update_hook):
+            cfg: PowerCfg = cast(PowerCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            ge_sweep = make_ge_sweep()
+            gain_sweep = cfg["sweep"]["gain"]
+            ge_param = sweep2param("ge", ge_sweep)
+            gain_param = sweep2param("gain", gain_sweep)
+            Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
+            Readout.set_param(modules["readout"], "gain", gain_param)
+
+            prog = ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("qub_pulse", modules["qub_pulse"]),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[
+                    ("ge", ge_sweep),
+                    ("gain", gain_sweep),
+                ],
+            )
+            tracker = PCATracker()
+            avg_d = prog.acquire(
+                soc,
+                progress=False,
+                callback=lambda i, avg_d: update_hook(
+                    i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                ),
+                statistic_trackers=[tracker],
+            )
+            return avg_d, [tracker.covariance], [tracker.rough_median]
 
         with LivePlotter1D("Readout Power", "SNR") as viewer:
-
-            def measure_fn(ctx, update_hook):
-                modules = ctx.cfg["modules"]
-                prog = ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("qub_pulse", modules["qub_pulse"]),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[
-                        ("ge", ge_sweep),
-                        ("gain", ctx.cfg["sweep"]["gain"]),
-                    ],
-                )
-                tracker = PCATracker()
-                avg_d = prog.acquire(
-                    soc,
-                    progress=False,
-                    callback=lambda i, avg_d: update_hook(
-                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
-                    ),
-                    statistic_trackers=[tracker],
-                )
-                return avg_d, [tracker.covariance], [tracker.rough_median]
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
