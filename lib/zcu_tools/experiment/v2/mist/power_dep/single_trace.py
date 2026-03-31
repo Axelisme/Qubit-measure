@@ -78,8 +78,6 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             cfg: PowerDepCfg = cast(PowerDepCfg, ctx.cfg)
             modules = cfg["modules"]
 
-            assert update_hook is not None
-
             gain_sweep = cfg["sweep"]["gain"]
             gain_param = sweep2param("gain", gain_sweep)
             Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
@@ -153,7 +151,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         filepath: str,
         result: Optional[PowerDepResult] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/mist/gain",
+        tag: str = "mist/gain",
         **kwargs,
     ) -> None:
         if result is None:

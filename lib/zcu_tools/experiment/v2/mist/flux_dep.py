@@ -200,7 +200,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         filepath: str,
         result: Optional[FluxDepResult] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/flux_dep/mist",
+        tag: str = "mist/flux_dep",
         **kwargs,
     ) -> None:
         if result is None:

@@ -173,7 +173,7 @@ class PowerDepOvernightExp(
         filepath: str,
         result: Optional[PowerDepOvernightResult] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/mist/gain_overnight",
+        tag: str = "mist/gain_overnight",
         **kwargs,
     ) -> None:
         if result is None:
