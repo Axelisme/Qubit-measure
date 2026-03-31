@@ -15,7 +15,7 @@ from zcu_tools.utils.func_tools import min_interval
 def estimate_snr(real_signals: NDArray[np.float64]) -> float:
     smooth_signals = gaussian_filter(real_signals, sigma=1)
     noise = np.mean(np.abs(real_signals - smooth_signals))
-    return float((np.max(smooth_signals) - np.min(smooth_signals)) / noise)
+    return (np.ptp(smooth_signals) / noise).item()
 
 
 def snr_as_signal(

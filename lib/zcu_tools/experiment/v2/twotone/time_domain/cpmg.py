@@ -158,18 +158,14 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     pi_pulse["waveform"]["length"] - pi2_pulse["waveform"]["length"]
                 )
 
-                round_length_sweep = round_sweep_dict(
-                    cfg["sweep"]["length"],
-                    "time",
-                    {"soccfg": soccfg, "scaler": 1 / (2 * time)},
-                )
-                length_param = sweep2param("length", round_length_sweep)
+                length_sweep = cfg["sweep"]["length"]
+                length_param = sweep2param("length", length_sweep)
                 detune_param = (
                     360
                     * detune_ratio
                     * sweep2param(
-                        "length",  # scan with length loop
-                        make_sweep(start=0, step=1, expts=round_length_sweep["expts"]),
+                        "length",
+                        make_sweep(start=0, step=1, expts=length_sweep["expts"]),
                     )
                 )
 
@@ -187,12 +183,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                                 name="pi_loop",
                                 n=time - 1,
                                 sub_module=[
-                                    Pulse(
-                                        "pi_pulse",
-                                        pi_pulse,
-                                        pulse_name="pi_pulse",
-                                        block_mode=False,
-                                    ),
+                                    Pulse("pi_pulse", pi_pulse, block_mode=False),
                                     SoftDelay("inner_delay", 2 * interval),
                                 ],
                             ),
@@ -207,7 +198,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                             ),
                             Readout("readout", modules["readout"]),
                         ],
-                        sweep=[("length", round_length_sweep)],
+                        sweep=[("length", length_sweep)],
                     )
                 ).acquire(
                     soc,
@@ -222,7 +213,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 )
 
             def update_fn(i: int, ctx: TaskState, time: float) -> None:
-                ctx.env.update(time=int(time))
+                ctx.env.update(time=int(time), length_idx=i)
                 ctx.cfg["sweep"]["length"] = make_sweep(
                     start=length_ranges[i, 0],
                     stop=length_ranges[i, 1],
@@ -236,7 +227,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     times,
-                    length_idxs,
+                    lengths[ctx.env["length_idx"]],
                     cpmg_signal2real(np.asarray(ctx.root_data)),
                 ),
             )
@@ -249,7 +240,11 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         return times, lengths, signals
 
     def analyze(
-        self, result: Optional[CPMG_Result] = None, fit_fringe: bool = True
+        self,
+        result: Optional[CPMG_Result] = None,
+        fit_fringe: bool = True,
+        t2r: Optional[float] = None,
+        t1: Optional[float] = None,
     ) -> Figure:
         if result is None:
             result = self.last_result
@@ -260,45 +255,35 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         real_signals2D = rotate2real(signals2D).real
         norm_signals = cpmg_signal2real(signals2D)
 
-        def is_good_fit(fit_signal, real_signal, t2r) -> bool:
-            real_ptp = np.ptp(real_signal)
+        def is_good_fit(lens, fit_signal, real_signal, t2r, t2err) -> bool:
             fit_ptp = np.ptp(fit_signal)
             residual = real_signal - fit_signal
             smooth_residual = gaussian_filter1d(residual, sigma=1)
+            mean_residual = np.mean(np.abs(smooth_residual))
             return (
-                t2r < np.max(lengths)
-                and fit_ptp > 0.5 * real_ptp
-                and fit_ptp > np.mean(np.abs(smooth_residual))
+                t2r < np.max(lens) and t2err < 0.5 * t2r and fit_ptp > 4 * mean_residual
             )
 
-        prev_pOpt: Optional[tuple] = None
         t2s = np.full(len(times), np.nan, dtype=np.float64)
         t2errs = np.zeros_like(t2s)
         for i, (real_signal, lens) in enumerate(zip(real_signals2D, lengths)):
             if np.any(np.isnan(real_signal)):
                 continue
 
+            plens = lens - lens[0]
             if fit_fringe:
-                t2r, t2err, _, _, fit_signal, (pOpt, _) = fit_decay_fringe(
-                    lens, real_signal, fit_params=prev_pOpt
-                )
+                t2, t2err, _, _, fit_signal, _ = fit_decay_fringe(plens, real_signal)
             else:
-                t2r, t2err, fit_signal, (pOpt, _) = fit_decay(
-                    lens, real_signal, fit_params=prev_pOpt
-                )
+                t2, t2err, fit_signal, _ = fit_decay(plens, real_signal)
 
-            if is_good_fit(fit_signal, real_signal, t2r):
-                prev_pOpt = pOpt
-
-                t2s[i] = t2r
+            if is_good_fit(plens, fit_signal, real_signal, t2, t2err):
+                t2s[i] = t2
                 t2errs[i] = t2err
-            else:
-                prev_pOpt = None
 
         if np.all(np.isnan(t2s)):
             raise ValueError("No valid Fitting T2 found. Please check the data.")
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3))
         assert isinstance(ax1, Axes)
         assert isinstance(ax2, Axes)
 
@@ -306,12 +291,17 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         Y = lengths.T
         ax1.pcolormesh(X, Y, norm_signals.T, shading="nearest")
         ax1.set_xlabel("Number of Pi")
-        ax2.set_ylabel("Time (us)")
-        ax2.errorbar(times, t2s, yerr=t2errs, label="Fitting T2", color="red")
+        ax1.set_ylabel("Time (us)")
+
+        ax2.errorbar(times, t2s, yerr=t2errs, label=r"$T_{CPMG}$", color="red", fmt=".")
+        if t1 is not None:
+            ax2.axhline(2 * t1, color="blue", linestyle="--", label=r"$2T_1$")
+        if t2r is not None:
+            ax2.axhline(t2r, color="green", linestyle="--", label=r"$T_{2r}$")
+        ax2.set_xlim(0.3, None)
         ax2.set_xscale("log")
         ax2.set_yscale("log")
         ax2.legend()
-        ax2.set_ylabel("Time (us)")
         ax2.set_xlabel("Number of Pi")
 
         fig.tight_layout()
