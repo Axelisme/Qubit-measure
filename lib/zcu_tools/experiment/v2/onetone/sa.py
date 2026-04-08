@@ -21,7 +21,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -85,7 +85,7 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
             ).acquire(soc, progress=False, callback=update_hook)
 
         # run experiment
-        with LivePlotter1D("SA Frequency (MHz)", "Amplitude") as viewer:
+        with LivePlot1D("SA Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
                 task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)),
                 init_cfg=_cfg,

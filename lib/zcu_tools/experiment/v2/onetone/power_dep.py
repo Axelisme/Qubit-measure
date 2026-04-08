@@ -18,7 +18,7 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -113,7 +113,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             )
 
         # run experiment
-        with LivePlotter2DwithLine(
+        with LivePlot2DwithLine(
             "Power (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
             ax1d = viewer.get_ax("1d")

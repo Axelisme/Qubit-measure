@@ -11,7 +11,7 @@ from typing_extensions import Any, Callable, Optional, TypedDict, cast
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
-from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
@@ -66,12 +66,12 @@ class QubitFreqResult(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class FreqPlotterDict(TypedDict, closed=True):
-    fit_freq: LivePlotter1D
-    detune: LivePlotter2DwithLine
+class FreqPlotDict(TypedDict, closed=True):
+    fit_freq: LivePlot1D
+    detune: LivePlot2DwithLine
 
 
-class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDict]):
+class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]):
     def __init__(
         self,
         detune_sweep: SweepCfg,
@@ -244,16 +244,16 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotterDi
     def num_axes(self) -> dict[str, int]:
         return dict(fit_freq=1, detune=2)
 
-    def make_plotter(self, name, axs) -> FreqPlotterDict:
+    def make_plotter(self, name, axs) -> FreqPlotDict:
         self.freq_line = axs["detune"][1].axvline(np.nan, color="red", linestyle="--")
-        return FreqPlotterDict(
-            fit_freq=LivePlotter1D(
+        return FreqPlotDict(
+            fit_freq=LivePlot1D(
                 "Flux device value",
                 "Frequency (MHz)",
                 existed_axes=[axs["fit_freq"]],
                 segment_kwargs=dict(title=name + "(fit_freq)"),
             ),
-            detune=LivePlotter2DwithLine(
+            detune=LivePlot2DwithLine(
                 "Flux device value",
                 "Detune (MHz)",
                 line_axis=1,

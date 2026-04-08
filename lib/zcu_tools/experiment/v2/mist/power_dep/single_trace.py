@@ -21,7 +21,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -94,7 +94,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                 sweep=[("gain", gain_sweep)],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter1D("Pulse gain", "MIST") as viewer:
+        with LivePlot1D("Pulse gain", "MIST") as viewer:
             signals = run_task(
                 task=Task(measure_fn=measure_fn, result_shape=(len(gains),)),
                 init_cfg=_cfg,

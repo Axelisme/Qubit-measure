@@ -32,27 +32,26 @@ from zcu_tools.experiment.v2.runner import (
     run_with_retries,
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
-from zcu_tools.liveplot import AbsLivePlotter, MultiLivePlotter, make_plot_frame
+from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
 
-T_PlotterDict = TypeVar("T_PlotterDict", bound=Mapping[str, AbsLivePlotter])
+T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
 
 
-T_Key = TypeVar("T_Key", bound=Hashable)
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
 class MeasurementTask(
     AbsTask[T_Result, T_RootResult],
-    Generic[T_Result, T_RootResult, T_PlotterDict],
+    Generic[T_Result, T_RootResult, T_PlotDict],
 ):
     def num_axes(self) -> dict[str, int]: ...
 
-    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> T_PlotterDict: ...
+    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> T_PlotDict: ...
 
     def update_plotter(
         self,
-        plotters: T_PlotterDict,
+        plotters: T_PlotDict,
         ctx: TaskState,
         signals: T_Result,
     ) -> None: ...
@@ -77,7 +76,7 @@ class MeasurementTask(
 class OvernightCfg(TypedDict): ...
 
 
-class OvernightBatchTask(BatchTask[T_Key, T_Result, T_RootResult]):
+class OvernightBatchTask(BatchTask[str, T_Result, T_RootResult]):
     def __init__(self, tasks, retry_time: int = 0) -> None:
         self.retry_time = retry_time
 
@@ -167,7 +166,7 @@ class OvernightExecutor(AbsExperiment[Mapping[str, Result], OvernightCfg]):
 
     def make_plotter(
         self,
-    ) -> tuple[Figure, MultiLivePlotter[tuple[str, str]], Callable[[TaskState], None]]:
+    ) -> tuple[Figure, MultiLivePlot[tuple[str, str]], Callable[[TaskState], None]]:
         fig, axs_map = self.make_ax_layout()
 
         plotters_map = {
@@ -180,7 +179,7 @@ class OvernightExecutor(AbsExperiment[Mapping[str, Result], OvernightCfg]):
         def flatten_dict(d: Mapping[str, Mapping[str, T]]) -> dict[tuple[str, str], T]:
             return {(n1, n2): v for n1, d2 in d.items() for n2, v in d2.items()}
 
-        plotter = MultiLivePlotter(fig, flatten_dict(plotters_map))
+        plotter = MultiLivePlot(fig, flatten_dict(plotters_map))
 
         def plot_fn(ctx: TaskState) -> None:
             if len(ctx.path) < 2:
@@ -221,7 +220,7 @@ class OvernightExecutor(AbsExperiment[Mapping[str, Result], OvernightCfg]):
 
         with plotter:
             results = run_task(
-                task=OvernightBatchTask[str, Result, Sequence[Mapping[str, Result]]](
+                task=OvernightBatchTask[Result, Sequence[dict[str, Result]]](
                     self.measurements, retry_time=fail_retry
                 ).repeat("Iter", self.num_times, self.interval),
                 init_cfg=cfg,

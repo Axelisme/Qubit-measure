@@ -21,7 +21,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -93,7 +93,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                 sweep=[("freq", freq_sweep)],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter2DwithLine(
+        with LivePlot2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
             signals = run_task(

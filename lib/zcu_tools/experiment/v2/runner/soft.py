@@ -11,17 +11,17 @@ T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
 
 
-class Scan(AbsTask[Sequence[T_ChildResult], T_RootResult]):
+class Scan(AbsTask[list[T_ChildResult], T_RootResult]):
     def __init__(
         self,
         name: str,
         values: Sequence[T_Value],
         before_each: Callable[
-            [int, TaskState[Sequence[T_ChildResult], T_RootResult], T_Value], Any
+            [int, TaskState[list[T_ChildResult], T_RootResult], T_Value], Any
         ],
         task: AbsTask[T_ChildResult, T_RootResult],
     ) -> None:
-        self.sweep_values = values
+        self.sweep_values = list(values)
         self.sweep_name = name
         self.update_cfg_fn = before_each
         self.sub_task = task
@@ -39,7 +39,7 @@ class Scan(AbsTask[Sequence[T_ChildResult], T_RootResult]):
 
     def init(
         self,
-        state: TaskState[Sequence[T_ChildResult], T_RootResult],
+        state: TaskState[list[T_ChildResult], T_RootResult],
         dynamic_pbar: bool = False,
     ) -> None:
         self.dynamic_pbar = dynamic_pbar
@@ -53,7 +53,7 @@ class Scan(AbsTask[Sequence[T_ChildResult], T_RootResult]):
 
         self.sub_task.init(state.child(0), dynamic_pbar=dynamic_pbar)
 
-    def run(self, state: TaskState[Sequence[T_ChildResult], T_RootResult]) -> None:
+    def run(self, state: TaskState[list[T_ChildResult], T_RootResult]) -> None:
         if self.dynamic_pbar:
             self.sweep_pbar = self.make_pbar(leave=False)
         else:

@@ -20,7 +20,7 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Join,
@@ -117,7 +117,7 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter2D("Time (us)", "Phase (deg)") as viewer:
+        with LivePlot2D("Time (us)", "Phase (deg)") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn, result_shape=(len(lengths), len(phases))

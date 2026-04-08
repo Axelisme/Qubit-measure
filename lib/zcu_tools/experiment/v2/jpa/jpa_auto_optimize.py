@@ -29,7 +29,7 @@ from zcu_tools.experiment.utils import (
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal
-from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot
+from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -147,19 +147,19 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
 
         instant_plot(fig)  # show the figure immediately
 
-        with MultiLivePlotter(
+        with MultiLivePlot(
             fig,
             plotters=dict(
-                iter_scatter=LivePlotterScatter(
+                iter_scatter=LivePlotScatter(
                     "Iteration", "SNR (a.u.)", existed_axes=[[ax_iter]]
                 ),
-                flux_scatter=LivePlotterScatter(
+                flux_scatter=LivePlotScatter(
                     "JPA Flux (mA)", "SNR (a.u.)", existed_axes=[[ax_flux]]
                 ),
-                freq_scatter=LivePlotterScatter(
+                freq_scatter=LivePlotScatter(
                     "JPA Frequency (MHz)", "SNR (a.u.)", existed_axes=[[ax_freq]]
                 ),
-                power_scatter=LivePlotterScatter(
+                power_scatter=LivePlotScatter(
                     "JPA Power (dBm)", "SNR (a.u.)", existed_axes=[[ax_power]]
                 ),
             ),

@@ -21,7 +21,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -104,7 +104,7 @@ class PowerDepOvernightExp(
                 sweep=[("gain", gain_sweep)],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter2DwithLine(
+        with LivePlot2DwithLine(
             "Pulse gain", "Iteration", line_axis=1, title="MIST Overnight"
         ) as viewer:
             signals = run_task(

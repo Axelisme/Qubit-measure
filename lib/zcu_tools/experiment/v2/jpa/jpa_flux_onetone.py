@@ -21,7 +21,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -86,7 +86,7 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
                 sweep=[("freq", freq_sweep)],
             ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
-        with LivePlotter2DwithLine(
+        with LivePlot2DwithLine(
             "JPA Flux value (a.u.)",
             "Readout frequency (MHz)",
             line_axis=1,

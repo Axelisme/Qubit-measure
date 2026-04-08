@@ -14,7 +14,7 @@ from zcu_tools.experiment.v2.utils import (
     sweep2array,
     wrap_earlystop_check,
 )
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment, make_sweep
 from zcu_tools.program import SweepCfg
@@ -103,11 +103,11 @@ class LenRabiResult(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class LenRabiPlotterDict(TypedDict, closed=True):
-    rabi_curve: LivePlotter2DwithLine
+class LenRabiPlotDict(TypedDict, closed=True):
+    rabi_curve: LivePlot2DwithLine
 
 
-class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDict]):
+class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotDict]):
     def __init__(
         self,
         num_expts: int,
@@ -254,10 +254,10 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotterDic
     def num_axes(self) -> dict[str, int]:
         return dict(rabi_curve=2)
 
-    def make_plotter(self, name, axs) -> LenRabiPlotterDict:
+    def make_plotter(self, name, axs) -> LenRabiPlotDict:
         self.pi_line = axs["rabi_curve"][1].axvline(np.nan, color="red", linestyle="--")
-        return LenRabiPlotterDict(
-            rabi_curve=LivePlotter2DwithLine(
+        return LenRabiPlotDict(
+            rabi_curve=LivePlot2DwithLine(
                 "Flux device value",
                 "Signal",
                 line_axis=1,

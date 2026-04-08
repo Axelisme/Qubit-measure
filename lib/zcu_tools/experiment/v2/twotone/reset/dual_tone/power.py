@@ -13,7 +13,7 @@ from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -78,7 +78,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             ref_j = 0 if gains2[0] < gains2[-1] else -1
             return np.abs(signals - signals[ref_i, ref_j])
 
-        with LivePlotter2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
+        with LivePlot2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: (

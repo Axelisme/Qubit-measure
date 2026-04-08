@@ -22,7 +22,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -106,7 +106,7 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
                 sweep=[("freq", freq_sweep), ("gain", gain_sweep)],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter2D("Pulse frequency (MHz)", "Pulse gain (a.u.)") as viewer:
+        with LivePlot2D("Pulse frequency (MHz)", "Pulse gain (a.u.)") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,

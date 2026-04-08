@@ -7,11 +7,20 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
 from typeguard import check_type
-from typing_extensions import Any, Mapping, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    Callable,
+    Mapping,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.v2.runner import BatchTask, Task, TaskCfg, run_task
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.experiment.v2.runner import BatchTask, Task, TaskCfg, TaskState, run_task
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
     ModularProgramV2,
@@ -97,7 +106,7 @@ def allxy_signal2real(
     signals_dict: Mapping[tuple[str, str], NDArray[np.complex128]],
 ) -> NDArray[np.float64]:
     all_signals = np.array(list(signals_dict.values()))
-    return rotate2real(all_signals).real  # type: ignore
+    return rotate2real(all_signals).real
 
 
 # ------------------------------------------------------------------------------
@@ -122,66 +131,53 @@ class AllXY_Cfg(ModularProgramCfg, TaskCfg):
 class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> AllXY_Result:
         _cfg = check_type(deepcopy(cfg), AllXY_Cfg)
-        modules = _cfg["modules"]
 
-        assert _cfg.get("sweep", dict()) == {}, (
-            "AllXY experiment does not support sweep configurations. "
-            "Please remove 'sweep' key from the configuration."
-        )
+        def make_task(gate1: str, gate2: str) -> Task:
 
-        # Create gate-to-pulse mapping from configuration
-        gate2pulse_map = {
-            "I": modules.get("I_pulse"),
-            "X180": modules["X180_pulse"],
-            "Y180": modules["Y180_pulse"],
-            "X90": modules["X90_pulse"],
-            "Y90": modules["Y90_pulse"],
-        }
+            def measure_fn(
+                ctx: TaskState,
+                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            ) -> list[NDArray[np.float64]]:
+                cfg = cast(AllXY_Cfg, ctx.cfg)
+                modules = cfg["modules"]
 
-        # Validate that all required gates are defined
-        for gate_name, pulse_cfg in gate2pulse_map.items():
-            if gate_name != "I" and pulse_cfg is None:
-                raise ValueError(f"Gate '{gate_name}' pulse configuration is missing")
+                gate2pulse_map = {
+                    "I": modules.get("I_pulse"),
+                    "X180": modules["X180_pulse"],
+                    "Y180": modules["Y180_pulse"],
+                    "X90": modules["X90_pulse"],
+                    "Y90": modules["Y90_pulse"],
+                }
 
-        liveplotter = LivePlotter1D(
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("first_pulse", gate2pulse_map[gate1]),
+                        Pulse("second_pulse", gate2pulse_map[gate2]),
+                        Readout("readout", modules["readout"]),
+                    ],
+                ).acquire(soc, progress=False, callback=update_hook)
+
+            return Task(measure_fn=measure_fn)
+
+        with LivePlot1D(
             xlabel="Gate",
             ylabel="Signal",
             segment_kwargs=dict(
                 show_grid=True,
                 line_kwargs=[dict(marker=".", linestyle=None, markersize=5)],
             ),
-        )
-
-        # Configure x-axis labels if plotter is available
-        if not liveplotter.disable:
-            ax = liveplotter.get_ax()
+        ) as viewer:
+            # Configure x-axis labels
+            ax = viewer.get_ax()
             ax.set_xticks(np.arange(len(ALLXY_SEQUENCE)))
             ax.set_xticklabels(
                 [f"({gate1}, {gate2})" for gate1, gate2 in ALLXY_SEQUENCE],
                 rotation=45,
                 ha="right",
             )
-
-        with liveplotter as viewer:
-
-            def make_task(gate1: str, gate2: str) -> Task:
-                return Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    Pulse("first_pulse", gate2pulse_map[gate1]),
-                                    Pulse("second_pulse", gate2pulse_map[gate2]),
-                                    Readout("readout", modules["readout"]),
-                                ],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        )
-                    )
-                )
 
             signals_dict = run_task(
                 task=BatchTask(
@@ -196,7 +192,6 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                     allxy_signal2real(ctx.root_data),
                 ),
             )
-        signals_dict = dict(signals_dict)
 
         # Cache results
         self.last_cfg = _cfg

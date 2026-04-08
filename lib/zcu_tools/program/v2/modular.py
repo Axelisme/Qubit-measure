@@ -13,7 +13,6 @@ from .utils import PrintTimeStamp
 
 class ModularProgramCfg(ProgramV2Cfg):
     modules: Mapping[str, Any]
-    sweep: NotRequired[Mapping[str, SweepCfg]]
 
 
 class ModularProgramV2(MyProgramV2):
@@ -32,7 +31,7 @@ class ModularProgramV2(MyProgramV2):
         _cfg = cast(ModularProgramCfg, cfg)
 
         self.modules = modules
-        self.sweep = sweep
+        self.sweep_dict = sweep
 
         super().__init__(soccfg, _cfg, **kwargs)
 
@@ -40,8 +39,8 @@ class ModularProgramV2(MyProgramV2):
         super()._initialize(cfg)
 
         # add v2 sweep loops
-        if self.sweep is not None:
-            for name, sweep in self.sweep:
+        if self.sweep_dict is not None:
+            for name, sweep in self.sweep_dict:
                 self.add_loop(name, count=sweep["expts"])
 
         # initialize modules

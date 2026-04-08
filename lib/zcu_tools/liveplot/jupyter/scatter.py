@@ -3,20 +3,20 @@ from __future__ import annotations
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from typing_extensions import Optional, Sequence, Union
+from typing_extensions import Any, Optional, Sequence, Union, cast
 
-from ..base import AbsLivePlotter
+from ..base import AbsLivePlot
 from ..segments import ScatterSegment
-from .base import JupyterPlotMixin
+from .base import JupyterMixin
 
 
-class LivePlotterScatter(JupyterPlotMixin, AbsLivePlotter):
+class LivePlotScatter(JupyterMixin, AbsLivePlot):
     def __init__(
         self,
         xlabel: str,
         ylabel: str,
         *,
-        segment_kwargs: Optional[dict] = None,
+        segment_kwargs: Optional[dict[str, Any]] = None,
         existed_axes: Optional[list[list[Axes]]] = None,
         auto_close: bool = True,
         disable: bool = False,
@@ -60,4 +60,4 @@ class LivePlotterScatter(JupyterPlotMixin, AbsLivePlotter):
         return self.axs[0][0]
 
     def get_segment(self) -> ScatterSegment:
-        return self.segments[0][0]  # type: ignore
+        return cast(ScatterSegment, self.segments[0][0])

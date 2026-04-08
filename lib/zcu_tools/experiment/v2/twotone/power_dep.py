@@ -10,7 +10,7 @@ from typing_extensions import Any, Optional, TypeAlias
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -53,7 +53,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         Pulse.set_param(modules["qub_pulse"], "gain", gain_param)
         Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
 
-        with LivePlotter2D("Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
+        with LivePlot2D("Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(

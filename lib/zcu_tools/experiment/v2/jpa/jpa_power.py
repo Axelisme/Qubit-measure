@@ -22,7 +22,7 @@ from zcu_tools.experiment.utils import format_sweep1D, set_power_in_dev_cfg
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
-from zcu_tools.liveplot import LivePlotterScatter
+from zcu_tools.liveplot import LivePlotScatter
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -109,7 +109,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             )
             return avg_d, [tracker.covariance], [tracker.rough_median]
 
-        with LivePlotterScatter("Power (dBm)", "Signal Difference") as viewer:
+        with LivePlotScatter("Power (dBm)", "Signal Difference") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,

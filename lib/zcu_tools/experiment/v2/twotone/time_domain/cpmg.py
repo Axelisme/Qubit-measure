@@ -15,7 +15,6 @@ from typing_extensions import (
     Callable,
     NotRequired,
     Optional,
-    Sequence,
     TypeAlias,
     TypedDict,
     Union,
@@ -23,12 +22,8 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import (
-    round_sweep_dict,
-    sweep2array,
-    wrap_earlystop_check,
-)
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
+from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -135,15 +130,13 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 f"pi_pulse_length: {pi_pulse['waveform']['length']:.2g}",
             )
 
-        with LivePlotter2DwithLine(
+        with LivePlot2DwithLine(
             "Number of Pi", "Time idxs", line_axis=1, num_lines=2
         ) as viewer:
             ax1d = viewer.get_ax("1d")
 
             def measure_fn(
-                ctx: TaskState[
-                    NDArray[np.complex128], Sequence[NDArray[np.complex128]]
-                ],
+                ctx: TaskState[NDArray[np.complex128], Any],
                 update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
             ) -> list[NDArray[np.float64]]:
                 cfg = ctx.cfg

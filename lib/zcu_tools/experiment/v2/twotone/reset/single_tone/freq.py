@@ -13,7 +13,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -68,7 +68,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
         PulseReset.set_param(reset_cfg, "freq", freq_param)
 
-        with LivePlotter1D("Frequency (MHz)", "Amplitude") as viewer:
+        with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: (

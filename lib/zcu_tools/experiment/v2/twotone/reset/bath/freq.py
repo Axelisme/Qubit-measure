@@ -13,7 +13,7 @@ from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, Ty
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -73,9 +73,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         Reset.set_param(modules["tested_reset"], "res_gain", gain_param)
         Reset.set_param(modules["tested_reset"], "res_freq", freq_param)
 
-        with LivePlotter2D(
-            "Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)"
-        ) as viewer:
+        with LivePlot2D("Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: (

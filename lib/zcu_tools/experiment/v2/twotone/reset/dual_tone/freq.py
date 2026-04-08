@@ -13,7 +13,7 @@ from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, Ty
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D, LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot2D, LivePlot2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -78,7 +78,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freq1_param = sweep2param("freq1", freq1_sweep)
         TwoPulseReset.set_param(modules["tested_reset"], "freq1", freq1_param)
 
-        with LivePlotter2DwithLine(
+        with LivePlot2DwithLine(
             "Frequency1 (MHz)", "Frequency2 (MHz)", line_axis=0
         ) as viewer:
             signals = run_task(
@@ -143,7 +143,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         TwoPulseReset.set_param(modules["tested_reset"], "freq1", freq1_param)
         TwoPulseReset.set_param(modules["tested_reset"], "freq2", freq2_param)
 
-        with LivePlotter2D("Frequency1 (MHz)", "Frequency2 (MHz)") as viewer:
+        with LivePlot2D("Frequency1 (MHz)", "Frequency2 (MHz)") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: (

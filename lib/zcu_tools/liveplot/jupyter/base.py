@@ -16,7 +16,7 @@ from ..segments import AbsSegment
 
 # Generic type variable used to correctly type the context-manager methods so that
 # subclasses don't need to override ``__enter__`` just to narrow the return type.
-T_JupyterPlotMixin = TypeVar("T_JupyterPlotMixin", bound="JupyterPlotMixin")
+T_JupyterMixin = TypeVar("T_JupyterMixin", bound="JupyterMixin")
 
 
 def instant_plot(fig: Figure) -> None:
@@ -87,7 +87,7 @@ def grab_frame_with_instant_plot(writer: FFMpegWriter, **savefig_kwargs) -> None
     )
 
 
-class JupyterPlotMixin:
+class JupyterMixin:
     """live plotters in Jupyter notebooks."""
 
     def __init__(
@@ -165,7 +165,7 @@ class JupyterPlotMixin:
         with self.update_lock:
             self._refresh_while_lock()
 
-    def __enter__(self: T_JupyterPlotMixin) -> T_JupyterPlotMixin:
+    def __enter__(self: T_JupyterMixin) -> T_JupyterMixin:
         if self.disable:
             return self
 

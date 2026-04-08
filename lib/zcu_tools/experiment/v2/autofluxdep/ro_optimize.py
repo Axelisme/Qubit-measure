@@ -13,7 +13,7 @@ from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program import SweepCfg
@@ -68,11 +68,11 @@ class RO_OptResult(TypedDict, closed=True):
     best_gain: NDArray[np.float64]
 
 
-class RO_OptPlotterDict(TypedDict, closed=True):
-    snr: LivePlotter2D
+class RO_OptPlotDict(TypedDict, closed=True):
+    snr: LivePlot2D
 
 
-class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict]):
+class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
     def __init__(
         self,
         freq_expts: int,
@@ -243,12 +243,12 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotterDict])
     def num_axes(self) -> dict[str, int]:
         return dict(snr=1)
 
-    def make_plotter(self, name, axs) -> RO_OptPlotterDict:
+    def make_plotter(self, name, axs) -> RO_OptPlotDict:
         self.best_point = axs["snr"][0].scatter(
             [np.nan], [np.nan], color="red", label="Best Point", zorder=3
         )
-        return RO_OptPlotterDict(
-            snr=LivePlotter2D(
+        return RO_OptPlotDict(
+            snr=LivePlot2D(
                 "Frequency (MHz)",
                 "Gain (a.u.)",
                 existed_axes=[axs["snr"]],

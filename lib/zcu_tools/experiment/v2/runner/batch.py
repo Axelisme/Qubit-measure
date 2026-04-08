@@ -12,7 +12,7 @@ T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
 
 
-class BatchTask(AbsTask[Mapping[T_Key, T_ChildResult], T_RootResult]):
+class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult]):
     def __init__(
         self,
         tasks: Mapping[T_Key, AbsTask[T_ChildResult, T_RootResult]],
@@ -61,5 +61,5 @@ class BatchTask(AbsTask[Mapping[T_Key, T_ChildResult], T_RootResult]):
             self.task_pbar.close()
             self.task_pbar = None
 
-    def get_default_result(self) -> Mapping[T_Key, T_ChildResult]:
+    def get_default_result(self) -> dict[T_Key, T_ChildResult]:
         return {name: task.get_default_result() for name, task in self.tasks.items()}

@@ -15,7 +15,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Pulse,
@@ -63,7 +63,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
         Readout.set_param(modules["readout"], "freq", freq_param)
 
-        with LivePlotter1D(
+        with LivePlot1D(
             "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
             signals = run_task(

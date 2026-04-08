@@ -3,29 +3,29 @@ from __future__ import annotations
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from typing_extensions import Optional
+from typing_extensions import Any, Optional, cast
 
-from ..base import AbsLivePlotter
+from ..base import AbsLivePlot
 from ..segments import Plot1DSegment
-from .base import JupyterPlotMixin
+from .base import JupyterMixin
 
 
-class LivePlotter1D(JupyterPlotMixin, AbsLivePlotter):
+class LivePlot1D(JupyterMixin, AbsLivePlot):
     def __init__(
         self,
         xlabel: str,
         ylabel: str,
         *,
-        segment_kwargs: Optional[dict] = None,
+        segment_kwargs: Optional[dict[str, Any]] = None,
         existed_axes: Optional[list[list[Axes]]] = None,
         auto_close: bool = True,
         disable: bool = False,
     ) -> None:
         if segment_kwargs is None:
             segment_kwargs = {}
-        segment = Plot1DSegment(xlabel, ylabel, **segment_kwargs)
+
         super().__init__(
-            [[segment]],
+            [[Plot1DSegment(xlabel, ylabel, **segment_kwargs)]],
             existed_axes=existed_axes,
             auto_close=auto_close,
             disable=disable,
@@ -53,4 +53,4 @@ class LivePlotter1D(JupyterPlotMixin, AbsLivePlotter):
         return self.axs[0][0]
 
     def get_segment(self) -> Plot1DSegment:
-        return self.segments[0][0]  # type: ignore
+        return cast(Plot1DSegment, self.segments[0][0])

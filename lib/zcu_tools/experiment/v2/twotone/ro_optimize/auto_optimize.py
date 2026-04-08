@@ -21,7 +21,7 @@ from zcu_tools.experiment.v2.runner import (
 )
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
-from zcu_tools.liveplot import LivePlotterScatter, MultiLivePlotter, instant_plot
+from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -147,19 +147,19 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
 
         instant_plot(fig)  # show the figure immediately
 
-        with MultiLivePlotter(
+        with MultiLivePlot(
             fig,
             plotters=dict(
-                iter_scatter=LivePlotterScatter(
+                iter_scatter=LivePlotScatter(
                     "Iteration", "SNR (a.u.)", existed_axes=[[ax_iter]]
                 ),
-                freq_scatter=LivePlotterScatter(
+                freq_scatter=LivePlotScatter(
                     "Frequency (MHz)", "SNR (a.u.)", existed_axes=[[ax_freq]]
                 ),
-                gain_scatter=LivePlotterScatter(
+                gain_scatter=LivePlotScatter(
                     "Readout Gain (a.u.)", "SNR (a.u.)", existed_axes=[[ax_gain]]
                 ),
-                len_scatter=LivePlotterScatter(
+                len_scatter=LivePlotScatter(
                     "Readout Length (us)", "SNR (a.u.)", existed_axes=[[ax_len]]
                 ),
             ),

@@ -21,7 +21,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -106,7 +106,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 population_radius=radius,
             )
 
-        with LivePlotter1D(
+        with LivePlot1D(
             "Pulse gain",
             "MIST",
             segment_kwargs=dict(

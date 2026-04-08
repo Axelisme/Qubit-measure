@@ -36,14 +36,14 @@ from zcu_tools.experiment.v2.runner import (
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import (
-    AbsLivePlotter,
-    MultiLivePlotter,
+    AbsLivePlot,
+    MultiLivePlot,
     grab_frame_with_instant_plot,
     make_plot_frame,
 )
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
-T_PlotterDict = TypeVar("T_PlotterDict", bound=Mapping[str, AbsLivePlotter])
+T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
 
 
 T_Result = TypeVar("T_Result", bound=Result)
@@ -51,17 +51,17 @@ T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
 class MeasurementTask(
-    AbsTask[T_Result, T_RootResult], Generic[T_Result, T_RootResult, T_PlotterDict]
+    AbsTask[T_Result, T_RootResult], Generic[T_Result, T_RootResult, T_PlotDict]
 ):
     @abstractmethod
     def num_axes(self) -> dict[str, int]: ...
 
     @abstractmethod
-    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> T_PlotterDict: ...
+    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> T_PlotDict: ...
 
     @abstractmethod
     def update_plotter(
-        self, plotters: T_PlotterDict, ctx: TaskState, signals: T_Result
+        self, plotters: T_PlotDict, ctx: TaskState, signals: T_Result
     ) -> None: ...
 
     @abstractmethod
@@ -99,7 +99,7 @@ class FluxDepInfoDict(UserDict):
         self.last_info[key] = deepcopy(item)
 
 
-class FluxDepBatchTask(BatchTask):
+class FluxDepBatchTask(BatchTask[str, T_Result, T_RootResult]):
     def __init__(self, tasks, retry_time: int = 0) -> None:
         self.retry_time = retry_time
 
@@ -190,7 +190,7 @@ class FluxDepExecutor:
         self,
     ) -> tuple[
         Figure,
-        MultiLivePlotter[tuple[str, str]],
+        MultiLivePlot[tuple[str, str]],
         Callable[[TaskState], None],
         Optional[FFMpegWriter],
     ]:
@@ -217,7 +217,7 @@ class FluxDepExecutor:
         def flatten_dict(d: Mapping[str, Mapping[str, T]]) -> dict[tuple[str, str], T]:
             return {(n1, n2): v for n1, d2 in d.items() for n2, v in d2.items()}
 
-        plotter = MultiLivePlotter(fig, flatten_dict(plotters_map))
+        plotter = MultiLivePlot(fig, flatten_dict(plotters_map))
 
         def plot_fn(ctx: TaskState) -> None:
             if len(ctx.path) < 2:
@@ -242,6 +242,9 @@ class FluxDepExecutor:
 
         return fig, plotter, plot_fn, writer
 
+    @matplotlib.rc_context(
+        {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}
+    )
     def run(
         self,
         dev_cfg: dict[str, DeviceInfo],
@@ -280,32 +283,29 @@ class FluxDepExecutor:
         set_flux_in_dev_cfg(cfg["dev"], self.flux_values[0], label="flux_dev")
         GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
 
-        with matplotlib.rc_context(
-            {"font.size": 6, "xtick.major.size": 6, "ytick.major.size": 6}
-        ):
-            fig, plotter, plot_fn, writer = self.make_plotter()
+        fig, plotter, plot_fn, writer = self.make_plotter()
 
-            with plotter:
-                try:
-                    results = run_task(
-                        task=FluxDepBatchTask(
-                            self.measurements,
-                            retry_time=retry_time,
-                        ).scan(
-                            "flux",
-                            self.flux_values.tolist(),
-                            before_each=update_fn,
-                        ),
-                        init_cfg=cfg,
-                        env_dict=env_dict,
-                        on_update=plot_fn,
-                    )
+        with plotter:
+            try:
+                results = run_task(
+                    task=FluxDepBatchTask(
+                        self.measurements,
+                        retry_time=retry_time,
+                    ).scan(
+                        "flux",
+                        self.flux_values.tolist(),
+                        before_each=update_fn,
+                    ),
+                    init_cfg=cfg,
+                    env_dict=env_dict,
+                    on_update=plot_fn,
+                )
 
-                finally:
-                    if self.record_path is not None:
-                        assert writer is not None
-                        writer.finish()
-            plt.close(fig)
+            finally:
+                if self.record_path is not None:
+                    assert writer is not None
+                    writer.finish()
+        plt.close(fig)
 
         signals_dict = merge_result_list(results)
 

@@ -3,21 +3,58 @@ from __future__ import annotations
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from typing_extensions import Literal, Optional, Union
+from typing_extensions import (
+    Any,
+    Generic,
+    Literal,
+    Optional,
+    TypeVar,
+    Union,
+    cast,
+    overload,
+)
 
-from ..base import AbsLivePlotter
+from ..base import AbsLivePlot
 from ..segments import Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment
-from .base import JupyterPlotMixin
+from .base import JupyterMixin
+
+Seg2D_T = TypeVar("Seg2D_T", Plot2DSegment, PlotNonUniform2DSegment)
 
 
-class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
+class LivePlot2D(JupyterMixin, AbsLivePlot, Generic[Seg2D_T]):
+    @overload
+    def __init__(
+        self: LivePlot2D[Plot2DSegment],
+        xlabel: str,
+        ylabel: str,
+        *,
+        uniform: Literal[True] = ...,
+        segment_kwargs: Optional[dict[str, Any]] = ...,
+        existed_axes: Optional[list[list[Axes]]] = ...,
+        auto_close: bool = ...,
+        disable: bool = ...,
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self: LivePlot2D[PlotNonUniform2DSegment],
+        xlabel: str,
+        ylabel: str,
+        *,
+        uniform: Literal[False],
+        segment_kwargs: Optional[dict[str, Any]] = ...,
+        existed_axes: Optional[list[list[Axes]]] = ...,
+        auto_close: bool = ...,
+        disable: bool = ...,
+    ) -> None: ...
+
     def __init__(
         self,
         xlabel: str,
         ylabel: str,
         *,
         uniform: bool = True,
-        segment_kwargs: Optional[dict] = None,
+        segment_kwargs: Optional[dict[str, Any]] = None,
         existed_axes: Optional[list[list[Axes]]] = None,
         auto_close: bool = True,
         disable: bool = False,
@@ -59,11 +96,39 @@ class LivePlotter2D(JupyterPlotMixin, AbsLivePlotter):
     def get_ax(self) -> Axes:
         return self.axs[0][0]
 
-    def get_segment(self) -> Union[Plot2DSegment, PlotNonUniform2DSegment]:
-        return self.segments[0][0]  # type: ignore
+    def get_segment(self) -> Seg2D_T:
+        return cast(Seg2D_T, self.segments[0][0])
 
 
-class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
+class LivePlot2DwithLine(JupyterMixin, AbsLivePlot, Generic[Seg2D_T]):
+    @overload
+    def __init__(
+        self: LivePlot2DwithLine[Plot2DSegment],
+        xlabel: str,
+        ylabel: str,
+        line_axis: Literal[0, 1],
+        num_lines: int = ...,
+        title: Optional[str] = ...,
+        uniform: Literal[True] = ...,
+        segment2d_kwargs: Optional[dict[str, Any]] = ...,
+        segment1d_line_kwargs: Optional[list[dict[str, Any]]] = ...,
+        **kwargs,
+    ) -> None: ...
+
+    @overload
+    def __init__(
+        self: LivePlot2DwithLine[PlotNonUniform2DSegment],
+        xlabel: str,
+        ylabel: str,
+        line_axis: Literal[0, 1],
+        num_lines: int = ...,
+        title: Optional[str] = ...,
+        uniform: Literal[False] = ...,
+        segment2d_kwargs: Optional[dict[str, Any]] = ...,
+        segment1d_line_kwargs: Optional[list[dict[str, Any]]] = ...,
+        **kwargs,
+    ) -> None: ...
+
     def __init__(
         self,
         xlabel: str,
@@ -72,8 +137,8 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         num_lines: int = 1,
         title: Optional[str] = None,
         uniform: bool = True,
-        segment2d_kwargs: Optional[dict] = None,
-        segment1d_line_kwargs: Optional[list[dict]] = None,
+        segment2d_kwargs: Optional[dict[str, Any]] = None,
+        segment1d_line_kwargs: Optional[list[dict[str, Any]]] = None,
         **kwargs,
     ) -> None:
         if segment2d_kwargs is None:
@@ -118,8 +183,6 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
 
         ax2d, ax1d = self.get_ax("2d"), self.get_ax("1d")
         segment2d, segment1d = self.get_segment("2d"), self.get_segment("1d")
-        assert isinstance(segment2d, (Plot2DSegment, PlotNonUniform2DSegment))
-        assert isinstance(segment1d, Plot1DSegment)
 
         # use the last non-nan line as current line
         if np.all(np.isnan(signals)):
@@ -149,8 +212,14 @@ class LivePlotter2DwithLine(JupyterPlotMixin, AbsLivePlotter):
         ax_map = ["2d", "1d"]
         return self.axs[0][ax_map.index(name)]
 
-    def get_segment(
-        self, name: Literal["2d", "1d"]
-    ) -> Union[Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment]:
+    @overload
+    def get_segment(self, name: Literal["2d"]) -> Seg2D_T: ...
+
+    @overload
+    def get_segment(self, name: Literal["1d"]) -> Plot1DSegment: ...
+
+    def get_segment(self, name: Literal["2d", "1d"]) -> Union[Plot1DSegment, Seg2D_T]:
         segment_map = ["2d", "1d"]
-        return self.segments[0][segment_map.index(name)]  # type: ignore
+        return cast(
+            Union[Plot1DSegment, Seg2D_T], self.segments[0][segment_map.index(name)]
+        )

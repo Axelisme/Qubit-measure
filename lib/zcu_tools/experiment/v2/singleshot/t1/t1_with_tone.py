@@ -22,7 +22,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
-from zcu_tools.liveplot import LivePlotter1D, MultiLivePlotter, make_plot_frame
+from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -156,10 +156,10 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         axs[0][0].set_ylim(0, 1)
         axs[0][1].set_ylim(0, 1)
 
-        with MultiLivePlotter(
+        with MultiLivePlot(
             fig,
             dict(
-                init_g=LivePlotter1D(
+                init_g=LivePlot1D(
                     "Time (us)",
                     "Amplitude",
                     existed_axes=[[axs[0][0]]],
@@ -172,7 +172,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                         ],
                     ),
                 ),
-                init_e=LivePlotter1D(
+                init_e=LivePlot1D(
                     "Time (us)",
                     "Amplitude",
                     existed_axes=[[axs[0][1]]],

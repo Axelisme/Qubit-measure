@@ -25,7 +25,7 @@ from zcu_tools.experiment.v2.utils import (
     sweep2array,
     wrap_earlystop_check,
 )
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Join,
@@ -131,7 +131,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         freq_param = sweep2param("freq", freq_sweep)
         Pulse.set_param(modules["stark_pulse2"], "freq", freq_param)
 
-        with LivePlotter2DwithLine(
+        with LivePlot2DwithLine(
             "Stark Pulse Gain (a.u.)",
             "Frequency (MHz)",
             line_axis=1,
@@ -403,7 +403,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
                 sweep=[("length", length_sweep)],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter2DwithLine(
+        with LivePlot2DwithLine(
             "Stark Pulse Gain (a.u.)",
             "Time (us)",
             line_axis=1,

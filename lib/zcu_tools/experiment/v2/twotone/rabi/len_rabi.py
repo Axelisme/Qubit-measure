@@ -13,7 +13,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -51,7 +51,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         length_param = sweep2param("length", _cfg["sweep"]["length"])
         Pulse.set_param(modules["qub_pulse"], "length", length_param)
 
-        with LivePlotter1D("Length (us)", "Signal") as viewer:
+        with LivePlot1D("Length (us)", "Signal") as viewer:
 
             def measure_fn(ctx: TaskState, update_hook):
                 return TwoToneProgram(
@@ -87,7 +87,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         )
         lengths = np.unique(lengths)  # remove duplicates
 
-        with LivePlotter1D("Length (us)", "Signal") as viewer:
+        with LivePlot1D("Length (us)", "Signal") as viewer:
 
             def measure_fn(ctx: TaskState, update_hook):
                 return TwoToneProgram(soccfg, ctx.cfg).acquire(

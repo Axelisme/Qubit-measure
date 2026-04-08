@@ -13,7 +13,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     BathReset,
@@ -70,7 +70,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         phase_param = sweep2param("phase", _cfg["sweep"]["phase"])
         BathReset.set_param(modules["tested_reset"], "pi2_phase", phase_param)
 
-        with LivePlotter1D("Phase (deg)", "Signal (a.u.)") as viewer:
+        with LivePlot1D("Phase (deg)", "Signal (a.u.)") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: (

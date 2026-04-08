@@ -13,7 +13,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
@@ -103,7 +103,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
             ).acquire(soc, progress=False, callback=update_hook)
 
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
-        with LivePlotter1D(
+        with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": title}
         ) as viewer:
             signals = run_task(

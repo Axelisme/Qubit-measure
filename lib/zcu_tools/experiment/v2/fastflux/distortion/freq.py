@@ -20,7 +20,7 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Join,
@@ -128,7 +128,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter2D("Time (us)", "Frequency (MHz)") as viewer:
+        with LivePlot2D("Time (us)", "Frequency (MHz)") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn, result_shape=(len(lengths), len(freqs))

@@ -6,7 +6,7 @@ from matplotlib.figure import Figure
 from typing_extensions import Generic, Hashable, TypeVar
 
 
-class AbsLivePlotter(ABC):
+class AbsLivePlot(ABC):
     """
     Base class for instant visualization.
 
@@ -29,14 +29,14 @@ class AbsLivePlotter(ABC):
         """Refresh the plot to reflect the latest data."""
         pass
 
-    def __enter__(self) -> AbsLivePlotter:
+    def __enter__(self) -> AbsLivePlot:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         pass
 
 
-class NonePlotter(AbsLivePlotter):
+class DummyPlot(AbsLivePlot):
     """
     A plotter that does nothing.
     """
@@ -54,10 +54,10 @@ class NonePlotter(AbsLivePlotter):
         pass
 
 
-PlotterKey_T = TypeVar("PlotterKey_T", bound=Hashable)
+PlotKey_T = TypeVar("PlotKey_T", bound=Hashable)
 
 
-class MultiLivePlotter(AbsLivePlotter, Generic[PlotterKey_T]):
+class MultiLivePlot(AbsLivePlot, Generic[PlotKey_T]):
     """
     A wrapper for multiple live plotters.
 
@@ -69,7 +69,7 @@ class MultiLivePlotter(AbsLivePlotter, Generic[PlotterKey_T]):
     def __init__(
         self,
         fig: Figure,
-        plotters: dict[PlotterKey_T, AbsLivePlotter],
+        plotters: dict[PlotKey_T, AbsLivePlot],
     ) -> None:
         self.fig = fig
         self.plotters = plotters
@@ -78,9 +78,7 @@ class MultiLivePlotter(AbsLivePlotter, Generic[PlotterKey_T]):
         for plotter in self.plotters.values():
             plotter.clear()
 
-    def update(
-        self, plot_args: dict[PlotterKey_T, tuple], refresh: bool = True
-    ) -> None:
+    def update(self, plot_args: dict[PlotKey_T, tuple], refresh: bool = True) -> None:
         for key, args in plot_args.items():
             self.plotters[key].update(*args, refresh=False)
         if refresh:
@@ -89,7 +87,7 @@ class MultiLivePlotter(AbsLivePlotter, Generic[PlotterKey_T]):
     def refresh(self) -> None:
         self.fig.canvas.draw()
 
-    def __enter__(self) -> MultiLivePlotter[PlotterKey_T]:
+    def __enter__(self) -> MultiLivePlot[PlotKey_T]:
         for plotter in self.plotters.values():
             plotter.__enter__()
 
@@ -101,5 +99,5 @@ class MultiLivePlotter(AbsLivePlotter, Generic[PlotterKey_T]):
         for plotter in self.plotters.values():
             plotter.__exit__(exc_type, exc_value, traceback)
 
-    def get_plotter(self, key: PlotterKey_T) -> AbsLivePlotter:
+    def get_plotter(self, key: PlotKey_T) -> AbsLivePlot:
         return self.plotters[key]

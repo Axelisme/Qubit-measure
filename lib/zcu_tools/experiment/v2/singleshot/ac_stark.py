@@ -18,9 +18,9 @@ from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import (
-    LivePlotter1D,
-    LivePlotter2D,
-    MultiLivePlotter,
+    LivePlot1D,
+    LivePlot2D,
+    MultiLivePlot,
     make_plot_frame,
 )
 from zcu_tools.program import SweepCfg
@@ -120,8 +120,8 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
 
         fig, axs = make_plot_frame(2, 2, figsize=(8, 6))
 
-        def make_plotter2d(ax: Axes) -> LivePlotter2D:
-            return LivePlotter2D(
+        def make_plotter2d(ax: Axes) -> LivePlot2D:
+            return LivePlot2D(
                 "Stark Pulse Gain (a.u.)",
                 "Probe Frequency (MHz)",
                 uniform=False,
@@ -129,9 +129,9 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                 existed_axes=[[ax]],
             )
 
-        def make_plotter1d(ax: Axes) -> LivePlotter1D:
+        def make_plotter1d(ax: Axes) -> LivePlot1D:
             ax.set_ylim(0.0, 1.0)
-            return LivePlotter1D(
+            return LivePlot1D(
                 "Probe Frequency (MHz)",
                 "Population",
                 existed_axes=[[ax]],
@@ -145,7 +145,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                 ),
             )
 
-        with MultiLivePlotter(
+        with MultiLivePlot(
             fig,
             dict(
                 g_2d=make_plotter2d(axs[0][0]),

@@ -21,7 +21,7 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
+from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -115,22 +115,22 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
 
         fig, axs = make_plot_frame(3, 1, figsize=(12, 6))
 
-        with MultiLivePlotter(
+        with MultiLivePlot(
             fig,
             dict(
-                plot_2d_g=LivePlotter2D(
+                plot_2d_g=LivePlot2D(
                     "gain (a.u.)",
                     "freq (MHz)",
                     uniform=False,
                     existed_axes=[[axs[0][0]]],
                 ),
-                plot_2d_e=LivePlotter2D(
+                plot_2d_e=LivePlot2D(
                     "gain (a.u.)",
                     "freq (MHz)",
                     uniform=False,
                     existed_axes=[[axs[1][0]]],
                 ),
-                plot_2d_o=LivePlotter2D(
+                plot_2d_o=LivePlot2D(
                     "gain (a.u.)",
                     "freq (MHz)",
                     uniform=False,

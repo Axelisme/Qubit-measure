@@ -13,7 +13,7 @@ from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import ModularProgramCfg, OneToneProgram
 from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -50,7 +50,7 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         )
         assert isinstance(Ts, np.ndarray)
 
-        with LivePlotter1D("Time (us)", "Amplitude") as viewer:
+        with LivePlot1D("Time (us)", "Amplitude") as viewer:
 
             def measure_fn(ctx, update_hook):
                 return OneToneProgram(soccfg, ctx.cfg).acquire_decimated(

@@ -12,7 +12,7 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, c
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
-from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
+from zcu_tools.liveplot import LivePlot1D, LivePlot2D
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -40,20 +40,20 @@ class T1Result(TypedDict, closed=True):
     populations: NDArray[np.float64]
 
 
-class T1PlotterDict(TypedDict, closed=True):
-    populations_go: LivePlotter2D
-    populations_eo: LivePlotter2D
-    current_g: LivePlotter1D
-    current_e: LivePlotter1D
+class T1PlotDict(TypedDict, closed=True):
+    populations_go: LivePlot2D
+    populations_eo: LivePlot2D
+    current_g: LivePlot1D
+    current_e: LivePlot1D
 
 
-class T1_PlotAndSaveMixin:
+class T1PlotAndSaveMixin:
     def num_axes(self) -> dict[str, int]:
         return dict(populations_go=1, populations_eo=1, current_g=1, current_e=1)
 
     def make_plotter(self, name, axs):
         def make_2d_plotter(ax, title):
-            return LivePlotter2D(
+            return LivePlot2D(
                 "Iteration",
                 "Time (us)",
                 uniform=False,
@@ -64,7 +64,7 @@ class T1_PlotAndSaveMixin:
             )
 
         def make_1d_plotter(ax, title):
-            return LivePlotter1D(
+            return LivePlot1D(
                 "Time (us)",
                 "Population",
                 existed_axes=[ax],
@@ -79,7 +79,7 @@ class T1_PlotAndSaveMixin:
                 ),
             )
 
-        return T1PlotterDict(
+        return T1PlotDict(
             populations_go=make_2d_plotter(axs["populations_go"], f"{name} Ground"),
             populations_eo=make_2d_plotter(axs["populations_eo"], f"{name} Other"),
             current_g=make_1d_plotter(axs["current_g"], f"{name} Init Ground"),
@@ -205,23 +205,18 @@ class T1_PlotAndSaveMixin:
         ax.grid(True)
 
 
-class OvernightSingleshotT1ModuleCfg(TypedDict, closed=True):
+class T1ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class OvernightSingleshotT1ProgramCfg(ModularProgramCfg):
-    modules: OvernightSingleshotT1ModuleCfg
-
-
-class T1Cfg(OvernightSingleshotT1ProgramCfg, TaskCfg):
+class T1Cfg(ModularProgramCfg, TaskCfg):
+    modules: T1ModuleCfg
     sweep: dict[str, SweepCfg]
 
 
-class T1Task(
-    T1_PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotterDict]
-):
+class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
     def __init__(
         self, cfg: dict[str, Any], g_center: complex, e_center: complex, radius: float
     ) -> None:
@@ -301,23 +296,20 @@ class T1Task(
         self.task.cleanup()
 
 
-class OvernightSingleshotT1WithToneModuleCfg(TypedDict, closed=True):
+class T1WithToneModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class OvernightSingleshotT1WithToneProgramCfg(ModularProgramCfg):
-    modules: OvernightSingleshotT1WithToneModuleCfg
-
-
-class T1WithToneCfg(OvernightSingleshotT1WithToneProgramCfg, TaskCfg):
+class T1WithToneCfg(ModularProgramCfg, TaskCfg):
+    modules: T1WithToneModuleCfg
     sweep: dict[str, SweepCfg]
 
 
 class T1WithToneTask(
-    T1_PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotterDict]
+    T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotDict]
 ):
     def __init__(
         self, cfg: dict[str, Any], g_center: complex, e_center: complex, radius: float

@@ -16,7 +16,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time, sweep2array
-from zcu_tools.liveplot import LivePlotter1D, LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
@@ -104,7 +104,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
             return acc_signals / rounds
 
-        with LivePlotter1D(
+        with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
@@ -130,7 +130,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
 
-        with LivePlotter1D(
+        with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
@@ -284,7 +284,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         length_param = sweep2param("length", _cfg["sweep"]["length"])
         Pulse.set_param(modules["test_pulse"], "length", length_param)
 
-        with LivePlotter1D(
+        with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
             signals = run_task(
@@ -433,7 +433,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         length_param = sweep2param("length", _cfg["sweep"]["length"])
         Pulse.set_param(modules["test_pulse"], "length", length_param)
 
-        with LivePlotter2DwithLine(
+        with LivePlot2DwithLine(
             "gain", "Time (us)", line_axis=1, num_lines=5
         ) as viewer:
             signals = run_task(

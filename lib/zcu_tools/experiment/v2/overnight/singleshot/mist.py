@@ -13,7 +13,7 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, c
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter1D, LivePlotter2D
+from zcu_tools.liveplot import LivePlot1D, LivePlot2D
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -39,11 +39,11 @@ class MistResult(TypedDict, closed=True):
     populations: NDArray[np.float64]  # (N, 2)
 
 
-class MistPlotterDict(TypedDict, closed=True):
-    populations_g: LivePlotter2D
-    populations_e: LivePlotter2D
-    populations_o: LivePlotter2D
-    current: LivePlotter1D
+class MistPlotDict(TypedDict, closed=True):
+    populations_g: LivePlot2D
+    populations_e: LivePlot2D
+    populations_o: LivePlot2D
+    current: LivePlot1D
 
 
 class MistModuleCfg(TypedDict, closed=True):
@@ -298,7 +298,7 @@ class MistOvernightAnalyzer:
         return self.result
 
 
-class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
+class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     def __init__(
         self, cfg: dict[str, Any], g_center: complex, e_center: complex, radius: float
     ) -> None:
@@ -382,9 +382,9 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
     def num_axes(self) -> dict[str, int]:
         return dict(populations_g=1, populations_e=1, populations_o=1, current=1)
 
-    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> MistPlotterDict:
-        return MistPlotterDict(
-            populations_g=LivePlotter2D(
+    def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> MistPlotDict:
+        return MistPlotDict(
+            populations_g=LivePlot2D(
                 "Iteration",
                 "Time (us)",
                 uniform=False,
@@ -393,7 +393,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
                     title=f"{name} Ground",
                 ),
             ),
-            populations_e=LivePlotter2D(
+            populations_e=LivePlot2D(
                 "Iteration",
                 "Time (us)",
                 uniform=False,
@@ -402,7 +402,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
                     title=f"{name} Excited",
                 ),
             ),
-            populations_o=LivePlotter2D(
+            populations_o=LivePlot2D(
                 "Iteration",
                 "Time (us)",
                 uniform=False,
@@ -411,7 +411,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
                     title=f"{name} Other",
                 ),
             ),
-            current=LivePlotter1D(
+            current=LivePlot1D(
                 "Time (us)",
                 "Population",
                 existed_axes=[axs["current"]],

@@ -23,7 +23,7 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, set_output_in_dev_cfg
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -90,7 +90,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
                 sweep=[("freq", freq_sweep)],
             ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
 
-        with LivePlotter1D(
+        with LivePlot1D(
             "Frequency (MHz)", "Magnitude", segment_kwargs=dict(num_lines=2)
         ) as viewer:
             signals = run_task(

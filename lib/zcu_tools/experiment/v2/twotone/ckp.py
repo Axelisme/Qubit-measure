@@ -21,16 +21,16 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
-from zcu_tools.liveplot import LivePlotter2D, MultiLivePlotter, make_plot_frame
+from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Join,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
     PulseCfg,
     Readout,
     ReadoutCfg,
-    Join,
     Reset,
     ResetCfg,
     sweep2param,
@@ -147,16 +147,16 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
 
         fig, axs = make_plot_frame(1, 2, figsize=(10, 4))
 
-        with MultiLivePlotter(
+        with MultiLivePlot(
             fig,
             dict(
-                ground=LivePlotter2D(
+                ground=LivePlot2D(
                     "Resonator Drive Frequency (MHz)",
                     "Qubit Probe Frequency (MHz)",
                     segment_kwargs=dict(title="Ground State"),
                     existed_axes=[[axs[0][0]]],
                 ),
-                excited=LivePlotter2D(
+                excited=LivePlot2D(
                     "Resonator Drive Frequency (MHz)",
                     "Qubit Probe Frequency (MHz)",
                     segment_kwargs=dict(title="Excited State"),

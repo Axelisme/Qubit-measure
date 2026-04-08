@@ -4,8 +4,8 @@ from copy import deepcopy
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.image import NonUniformImage
 from matplotlib.figure import Figure
+from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
@@ -21,7 +21,7 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2D
+from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Join,
@@ -119,9 +119,7 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
                 ],
             ).acquire(soc, progress=False, callback=update_hook)
 
-        with LivePlotter2D(
-            "Flux Pulse Gain (a.u.)", "Mist Pulse Gain (a.u.)"
-        ) as viewer:
+        with LivePlot2D("Flux Pulse Gain (a.u.)", "Mist Pulse Gain (a.u.)") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,

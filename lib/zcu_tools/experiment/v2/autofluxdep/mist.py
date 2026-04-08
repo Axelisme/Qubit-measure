@@ -11,7 +11,7 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, c
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
@@ -75,11 +75,11 @@ class MistResult(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class MistPlotterDict(TypedDict, closed=True):
-    mist: LivePlotter2DwithLine
+class MistPlotDict(TypedDict, closed=True):
+    mist: LivePlot2DwithLine
 
 
-class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
+class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     def __init__(
         self,
         gain_sweep: SweepCfg,
@@ -175,9 +175,9 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotterDict]):
     def num_axes(self) -> dict[str, int]:
         return dict(mist=2)
 
-    def make_plotter(self, name, axs) -> MistPlotterDict:
-        return MistPlotterDict(
-            mist=LivePlotter2DwithLine(
+    def make_plotter(self, name, axs) -> MistPlotDict:
+        return MistPlotDict(
+            mist=LivePlot2DwithLine(
                 "Flux device value",
                 "Readout Gain (a.u.)",
                 line_axis=1,

@@ -27,9 +27,9 @@ from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
 from zcu_tools.liveplot import (
-    LivePlotter1D,
-    LivePlotter2D,
-    MultiLivePlotter,
+    LivePlot1D,
+    LivePlot2D,
+    MultiLivePlot,
     make_plot_frame,
 )
 from zcu_tools.program import SweepCfg
@@ -143,8 +143,8 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         axs[3][0].set_ylim(0.0, 1.0)
         axs[3][1].set_ylim(0.0, 1.0)
 
-        def make_plotter2d(ax: Axes, show_ylabel=True) -> LivePlotter2D:
-            return LivePlotter2D(
+        def make_plotter2d(ax: Axes, show_ylabel=True) -> LivePlot2D:
+            return LivePlot2D(
                 sweep_name,
                 "Time (us)" if show_ylabel else "",
                 uniform=False,
@@ -152,8 +152,8 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 segment_kwargs=dict(vmin=0.0, vmax=1.0),
             )
 
-        def make_plotter1d(ax: Axes, show_ylabel=True) -> LivePlotter1D:
-            return LivePlotter1D(
+        def make_plotter1d(ax: Axes, show_ylabel=True) -> LivePlot1D:
+            return LivePlot1D(
                 "Time (us)",
                 "Population" if show_ylabel else "",
                 existed_axes=[[ax]],
@@ -167,7 +167,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 ),
             )
 
-        with MultiLivePlotter(
+        with MultiLivePlot(
             fig,
             dict(
                 gg_2d=make_plotter2d(axs[0][0]),

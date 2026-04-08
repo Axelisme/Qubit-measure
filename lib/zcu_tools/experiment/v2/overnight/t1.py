@@ -12,7 +12,7 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, c
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -58,17 +58,17 @@ class T1Result(TypedDict, closed=True):
     signals: NDArray[np.complex128]
 
 
-class T1PlotterDict(TypedDict, closed=True):
-    t1: LivePlotter2DwithLine
+class T1PlotDict(TypedDict, closed=True):
+    t1: LivePlot2DwithLine
 
 
 class T1PlotAndSaveMixin:
     def num_axes(self) -> dict[str, int]:
         return dict(t1=2)
 
-    def make_plotter(self, name, axs) -> T1PlotterDict:
-        return T1PlotterDict(
-            t1=LivePlotter2DwithLine(
+    def make_plotter(self, name, axs) -> T1PlotDict:
+        return T1PlotDict(
+            t1=LivePlot2DwithLine(
                 "Iteration",
                 "Time (us)",
                 line_axis=1,
@@ -138,23 +138,21 @@ class T1PlotAndSaveMixin:
         fig.tight_layout()
 
 
-class OvernightT1ModuleCfg(TypedDict, closed=True):
+class T1ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class OvernightT1Cfg(ModularProgramCfg, TaskCfg):
-    modules: OvernightT1ModuleCfg
+class T1Cfg(ModularProgramCfg, TaskCfg):
+    modules: T1ModuleCfg
     sweep: dict[str, SweepCfg]
 
 
-class T1Task(
-    T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotterDict]
-):
+class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
     def __init__(self, cfg: dict[str, Any]) -> None:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = check_type(deepcopy(cfg), OvernightT1Cfg)
+        _cfg = check_type(deepcopy(cfg), T1Cfg)
         self.cfg = _cfg
 
         # initial values, may be rounded later
@@ -164,7 +162,7 @@ class T1Task(
             ctx: TaskState[NDArray[np.complex128], Any],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: OvernightT1Cfg = cast(OvernightT1Cfg, ctx.cfg)
+            cfg: T1Cfg = cast(T1Cfg, ctx.cfg)
             modules = cfg["modules"]
 
             length_sweep = cfg["sweep"]["length"]
@@ -213,25 +211,25 @@ class T1Task(
         self.task.cleanup()
 
 
-class OvernightT1WithToneModuleCfg(TypedDict, closed=True):
+class T1WithToneModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class OvernightT1WithToneCfg(ModularProgramCfg, TaskCfg):
-    modules: OvernightT1WithToneModuleCfg
+class T1WithToneCfg(ModularProgramCfg, TaskCfg):
+    modules: T1WithToneModuleCfg
     sweep: dict[str, SweepCfg]
 
 
 class T1WithToneTask(
     T1PlotAndSaveMixin,
-    MeasurementTask[T1Result, T_RootResult, T1PlotterDict],
+    MeasurementTask[T1Result, T_RootResult, T1PlotDict],
 ):
     def __init__(self, cfg: dict[str, Any]) -> None:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = check_type(deepcopy(cfg), OvernightT1WithToneCfg)
+        _cfg = check_type(deepcopy(cfg), T1WithToneCfg)
         self.cfg = _cfg
 
         # initial values, may be rounded later
@@ -241,7 +239,7 @@ class T1WithToneTask(
             ctx: TaskState[NDArray[np.complex128], Any],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: OvernightT1WithToneCfg = cast(OvernightT1WithToneCfg, ctx.cfg)
+            cfg: T1WithToneCfg = cast(T1WithToneCfg, ctx.cfg)
             modules = cfg["modules"]
 
             length_sweep = cfg["sweep"]["length"]

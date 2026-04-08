@@ -11,7 +11,7 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, c
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
-from zcu_tools.liveplot import LivePlotter1D
+from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment, make_sweep
 from zcu_tools.program import SweepCfg
@@ -84,12 +84,12 @@ class T2RamseyResult(TypedDict, closed=True):
     success: NDArray[np.bool_]
 
 
-class T2RamseyPlotterDict(TypedDict, closed=True):
-    t2r: LivePlotter1D
-    t2r_curve: LivePlotter1D
+class T2RamseyPlotDict(TypedDict, closed=True):
+    t2r: LivePlot1D
+    t2r_curve: LivePlot1D
 
 
-class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotterDict]):
+class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDict]):
     def __init__(
         self,
         num_expts: int,
@@ -240,9 +240,9 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
     def num_axes(self) -> dict[str, int]:
         return dict(t2r=1, t2r_curve=1)
 
-    def make_plotter(self, name, axs) -> T2RamseyPlotterDict:
-        return T2RamseyPlotterDict(
-            t2r=LivePlotter1D(
+    def make_plotter(self, name, axs) -> T2RamseyPlotDict:
+        return T2RamseyPlotDict(
+            t2r=LivePlot1D(
                 "Flux device value",
                 "T2Ramsey (us)",
                 existed_axes=[axs["t2r"]],
@@ -250,7 +250,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotter
                     title=name + "(t2r)", line_kwargs=[dict(linestyle="None")]
                 ),
             ),
-            t2r_curve=LivePlotter1D(
+            t2r_curve=LivePlot1D(
                 "Signal",
                 "Time (us)",
                 existed_axes=[axs["t2r_curve"]],

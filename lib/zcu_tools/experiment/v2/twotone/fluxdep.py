@@ -12,7 +12,7 @@ from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlotter2DwithLine
+from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
     InteractiveFindPoints,
     InteractiveLines,
@@ -55,7 +55,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         freq_param = sweep2param("freq", freq_sweep)
         Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
 
-        with LivePlotter2DwithLine(
+        with LivePlot2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2
         ) as viewer:
             signals = run_task(

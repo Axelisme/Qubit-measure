@@ -61,7 +61,7 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult]):
         name: str,
         values: Sequence[T_Value],
         before_each: Callable[
-            [int, TaskState[Sequence[T_Result], T_RootResult], T_Value], Any
+            [int, TaskState[list[T_Result], T_RootResult], T_Value], Any
         ],
     ) -> Scan[T_Result, T_RootResult]:
         """Scan a task over a sequence of values."""
