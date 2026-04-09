@@ -90,7 +90,7 @@ class NoneReset(AbsReset, tag="none"):
 
     def init(self, prog: MyProgramV2) -> None: ...
 
-    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+    def total_length(self, _prog: MyProgramV2) -> Union[float, QickParam]:
         return 0.0
 
     def run(
@@ -100,7 +100,7 @@ class NoneReset(AbsReset, tag="none"):
 
     @staticmethod
     def set_param(
-        cfg: NoneResetCfg, param_name: str, param_value: Union[float, QickParam]
+        _cfg: NoneResetCfg, _param_name: str, _param_value: Union[float, QickParam]
     ) -> NoneResetCfg:
         raise ValueError("NoneReset does not support set_param")
 
@@ -151,7 +151,7 @@ class PulseReset(AbsReset, tag="pulse"):
 
 
 class TwoPulseReset(AbsReset, tag="two_pulse"):
-    def __init__(self, name: str, cfg: dict[str, Any]) -> None:
+    def __init__(self, name: str, cfg: TwoPulseResetCfg) -> None:
         self.name = name
         pulse1_cfg = cfg["pulse1_cfg"]
         pulse2_cfg = cfg["pulse2_cfg"]
@@ -211,7 +211,7 @@ class TwoPulseReset(AbsReset, tag="two_pulse"):
 
 
 class BathReset(AbsReset, tag="bath"):
-    def __init__(self, name: str, cfg: dict[str, Any]) -> None:
+    def __init__(self, name: str, cfg: BathResetCfg) -> None:
         self.name = name
         qubit_tone_cfg = cfg["qubit_tone_cfg"]
         cavity_tone_cfg = cfg["cavity_tone_cfg"]
