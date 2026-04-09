@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from collections import OrderedDict
+import hashlib
+import json
 import warnings
 
+from qick.asm_v2 import QickParam
 from typing_extensions import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,49 +16,87 @@ if TYPE_CHECKING:
 class PulseRegistry:
     """A registry to manage and share pulse configurations within a program."""
 
+    HASH_KEYS = [
+        "waveform",
+        "ch",
+        "nqz",
+        "freq",
+        "phase",
+        "gain",
+        "mixer_freq",
+        "mux_freqs",
+        "mux_gains",
+        "mux_phases",
+        "mask",
+        "outsel",
+        "ro_ch",
+    ]
+
     def __init__(self) -> None:
-        self._pulses: dict[str, "PulseCfg"] = {}
+        self._pulses: dict[str, tuple[str, PulseCfg]] = {}
 
-    def register(self, name: str, cfg: "PulseCfg") -> None:
-        """Registers a pulse configuration."""
-        if name in self._pulses:
-            warnings.warn(
-                f"Pulse '{name}' is being re-registered. Overwriting previous configuration."
-            )
-        self._pulses[name] = cfg
+    def calc_name(self, cfg: PulseCfg) -> str:
+        def sort_dict(d: dict) -> dict:
+            sorted_dict = OrderedDict()
+            for key in sorted(d.keys()):
+                value = d[key]
+                if isinstance(value, QickParam):
+                    value = OrderedDict(
+                        [
+                            ("type", "QickParam"),
+                            ("start", value.start),
+                            ("spans", sort_dict(value.spans)),
+                        ]
+                    )
+                if isinstance(value, dict):
+                    value = sort_dict(value)
 
-    def has(self, name: str) -> bool:
-        """Checks if a pulse is registered."""
-        return name in self._pulses
+                sorted_dict[key] = value
+            return sorted_dict
 
-    def check_valid_mixer_freq(
-        self, new_pulse_name: str, new_pulse_cfg: "PulseCfg"
-    ) -> None:
+        filter_cfg = {k: cfg.get(k) for k in PulseRegistry.HASH_KEYS if k in cfg}
+        cfg_json = json.dumps(sort_dict(filter_cfg), separators=(",", ":"))
+        hash_name = hashlib.sha256(cfg_json.encode("utf-8")).hexdigest()
+
+        return f"pulse_{hash_name[:16]}"
+
+    def register(self, name: str, cfg: PulseCfg) -> bool:
+        """Registers a pulse configuration. returns True if the pulse is newly registered, False if it already exists."""
+        pulse_name = self.calc_name(cfg)
+        if pulse_name in self._pulses:
+            return False
+
+        self._pulses[pulse_name] = (name, deepcopy(cfg))
+
+        return True
+
+    def check_valid_mixer_freq(self, name: str, pulse_cfg: PulseCfg) -> None:
         """
         Checks if a new pulse's mixer frequency is consistent with other pulses
         on the same channel.
         """
-        if "mixer_freq" not in new_pulse_cfg:
-            return
+        ch = pulse_cfg["ch"]
+        has_mixer_freq = "mixer_freq" in pulse_cfg
+        mixer_freq = pulse_cfg.get("mixer_freq")
 
-        ch = new_pulse_cfg["ch"]
-        mixer_freq = new_pulse_cfg["mixer_freq"]
-
-        for name, cfg in self._pulses.items():
-            if cfg["ch"] != ch:
+        for p_name, p_cfg in self._pulses.values():
+            if p_cfg["ch"] != ch:
                 continue
 
-            # All pulses on a channel being checked must have a mixer_freq if the new one does.
-            if "mixer_freq" not in cfg:
+            registered_has_mixer_freq = "mixer_freq" in p_cfg
+            registered_mixer_freq = p_cfg.get("mixer_freq")
+
+            if has_mixer_freq != registered_has_mixer_freq:
                 raise ValueError(
-                    f"Pulse '{name}' on channel {ch} is missing 'mixer_freq', "
-                    f"which is required for comparison with '{new_pulse_name}'."
+                    f"Pulse '{p_name}' on channel {ch} has "
+                    f"{'no ' if not registered_has_mixer_freq else ''}'mixer_freq', "
+                    f"which is required for comparison with '{name}'."
                 )
 
-            if cfg["mixer_freq"] != mixer_freq:
+            if has_mixer_freq and registered_mixer_freq != mixer_freq:
                 warnings.warn(
                     f"Mixer frequency mismatch on channel {ch}: "
-                    f"Pulse '{name}' ({cfg['mixer_freq']} MHz) and "
-                    f"Pulse '{new_pulse_name}' ({mixer_freq} MHz). "
+                    f"Pulse '{p_name}' ({registered_mixer_freq} MHz) and "
+                    f"Pulse '{name}' ({mixer_freq} MHz). "
                     "This may lead to unexpected behavior."
                 )

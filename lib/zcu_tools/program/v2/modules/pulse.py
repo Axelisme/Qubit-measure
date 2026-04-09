@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import warnings
 from copy import deepcopy
 
 from qick.asm_v2 import QickParam
@@ -39,14 +37,12 @@ class Pulse(Module, tag="pulse"):
         self,
         name: str,
         cfg: Optional[PulseCfg],
-        pulse_name: Optional[str] = None,
         tag: Optional[str] = None,
         block_mode: bool = True,
     ) -> None:
         self.name = name
         self.cfg = deepcopy(cfg)
 
-        self.pulse_name = name if pulse_name is None else pulse_name
         self.tag = tag
         self.block_mode = block_mode
 
@@ -55,12 +51,16 @@ class Pulse(Module, tag="pulse"):
             return
 
         self.waveform = Waveform(f"{self.name}_waveform", self.cfg["waveform"])
+        self.pulse_id = prog.pulse_registry.calc_name(self.cfg)
+
+        prog.pulse_registry.check_valid_mixer_freq(self.name, self.cfg)
 
         # if this is the first time to init the pulse, init it
-        if not prog.pulse_registry.has(self.pulse_name):
-            self.init_pulse(prog, self.pulse_name)
+        # if not, re-use the pulse
+        if prog.pulse_registry.register(self.name, self.cfg):
+            self.init_pulse(prog, self.pulse_id)
 
-    def init_pulse(self, prog: MyProgramV2, name: str) -> None:
+    def init_pulse(self, prog: MyProgramV2, pulse_id: str) -> None:
         cfg = self.cfg
         assert cfg is not None
 
@@ -90,17 +90,11 @@ class Pulse(Module, tag="pulse"):
         # add the pulse
         prog.add_pulse(
             cfg["ch"],
-            name,
+            pulse_id,
             ro_ch=cfg.get("ro_ch"),
             **wav_kwargs,
             **self.waveform.to_wav_kwargs(),
         )
-
-        # register the pulse
-        prog.pulse_registry.register(name, cfg)
-
-        if "mixer_freq" in cfg:
-            prog.pulse_registry.check_valid_mixer_freq(name, cfg)
 
     def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
         if self.cfg is None:
@@ -124,12 +118,11 @@ class Pulse(Module, tag="pulse"):
         if cfg is None:
             return t
 
-        prog.pulse(cfg["ch"], self.pulse_name, t=t + cfg["pre_delay"], tag=self.tag)
+        prog.pulse(cfg["ch"], self.pulse_id, t=t + cfg["pre_delay"], tag=self.tag)
 
         if self.block_mode:  # default
             return t + self.total_length(prog)
-        else:
-            # no block, return the start time as the end time
+        else:  # no block, return the start time as the end time
             return t
 
     @staticmethod

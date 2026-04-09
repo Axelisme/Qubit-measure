@@ -178,39 +178,30 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
             Y180_pulse["phase"] += 90.0
             MY90_pulse = deepcopy(X90_pulse)
             MY90_pulse["phase"] -= 90.0
-            gate_info_map: dict[str, tuple[Optional[PulseCfg], int, str]] = {
-                "I": (I_pulse, 0, "0"),
-                "X90": (X90_pulse, 0, "90"),
-                "X180": (X180_pulse, 0, "180"),
-                "-X90": (MX90_pulse, 0, "90"),
-                "Y90": (Y90_pulse, 0, "90"),
-                "Y180": (Y180_pulse, 0, "180"),
-                "-Y90": (MY90_pulse, 0, "90"),
-                "Z90": (None, -90, "_"),
-                "Z180": (None, -180, "_"),
-                "-Z90": (None, 90, "_"),
+            gate_info_map: dict[str, tuple[Optional[PulseCfg], int]] = {
+                "I": (I_pulse, 0),
+                "X90": (X90_pulse, 0),
+                "X180": (X180_pulse, 0),
+                "-X90": (MX90_pulse, 0),
+                "Y90": (Y90_pulse, 0),
+                "Y180": (Y180_pulse, 0),
+                "-Y90": (MY90_pulse, 0),
+                "Z90": (None, -90),
+                "Z180": (None, -180),
+                "-Z90": (None, 90),
             }
 
             global_phase: int = 0
             gate_modules = []
             for i, clifford_idx in enumerate[int](ctx.env["clifford_seq"]):
                 for gate_name in CLIFFORD_GROUP[clifford_idx]:
-                    gate_pulse, acc_phase, base_name = gate_info_map[gate_name]
-
-                    pulse_name = f"base{base_name}"
+                    gate_pulse, acc_phase = gate_info_map[gate_name]
 
                     gate_pulse = deepcopy(gate_pulse)
                     if gate_pulse is not None:
                         gate_pulse["phase"] += global_phase
-                        pulse_name += f"_{gate_pulse['phase']:.1f}"  # add phase info
 
-                    gate_modules.append(
-                        Pulse(
-                            f"C{i}_{gate_name}",
-                            gate_pulse,
-                            pulse_name=pulse_name,  # re-use pulse if possible
-                        )
-                    )
+                    gate_modules.append(Pulse(f"C{i}_{gate_name}", gate_pulse))
 
                     # virtual Z gates accumulate in global_phase
                     global_phase = (global_phase + acc_phase) % 360
