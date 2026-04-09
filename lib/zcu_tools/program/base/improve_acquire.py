@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
@@ -88,7 +89,13 @@ class StatisticMixin(TypedAcquireMixin):
 
             ro_chs: dict = self.ro_chs  # type: ignore
 
+            if len(trackers) != len(self.acc_buf):
+                raise ValueError(
+                    f"Number of statistic trackers ({len(trackers)}) must match number of readout channels ({len(self.acc_buf)})"
+                )
+
             assert isinstance(ro_chs, dict)
+            assert len(self.acc_buf) == len(ro_chs)
             for d_rep, tracker, ro in zip(self.acc_buf, trackers, ro_chs.values()):
                 assert self.avg_level is not None
                 d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
@@ -107,9 +114,6 @@ class StatisticMixin(TypedAcquireMixin):
         statistic_trackers: Optional[List[AbsStatisticTracker]] = None,
         **kwargs,
     ):
-        ro_chs = self.ro_chs  # type: ignore
-
-        assert isinstance(ro_chs, dict)
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(statistic_trackers=statistic_trackers)
         return super().acquire(*args, extra_args=extra_args, **kwargs)
@@ -141,8 +145,12 @@ class EarlyStopMixin(TypedAcquireMixin):
     def finish_round(self) -> bool:
         not_finish = super().finish_round()
         if not_finish and self.early_stop:
-            assert self.rounds_pbar is not None
-            self.rounds_pbar.close()
+            if self.rounds_pbar is not None:
+                self.rounds_pbar.close()
+            else:
+                warnings.warn(
+                    "Early stop signal received but rounds_pbar is not set, cannot close the progress bar"
+                )
         return not_finish and not self.early_stop
 
 
@@ -227,25 +235,34 @@ class SingleShotMixin(TypedAcquireMixin):
 
     def _process_accumulated(self, acc_buf) -> List[NDArray[np.float64]]:
         assert self.acquire_params is not None
-        if self.acquire_params["threshold"] is not None:
+
+        threshold = self.acquire_params.get("threshold")
+        angle = self.acquire_params.get("angle")
+
+        ge_radius: Optional[float] = self.acquire_params.get("population_radius")
+        g_center: Optional[complex] = self.acquire_params.get("g_center")
+        e_center: Optional[complex] = self.acquire_params.get("e_center")
+
+        remove_offset: bool = self.acquire_params["remove_offset"]
+
+        if threshold is not None:
             d_reps = [np.zeros_like(d) for d in acc_buf]
-            self.shots = self._apply_threshold(
-                acc_buf,
-                self.acquire_params["threshold"],
-                self.acquire_params["angle"],
-                self.acquire_params["remove_offset"],
-            )
+            if ge_radius is not None:
+                warnings.warn(
+                    "Both threshold and population_radius are set, threshold will be applied and population_radius will be ignored"
+                )
+            self.shots = self._apply_threshold(acc_buf, threshold, angle, remove_offset)
             for i, ch_shot in enumerate(self.shots):
                 d_reps[i][..., 0] = ch_shot
             return self._average_buf(d_reps, length_norm=False)
-        elif self.acquire_params["population_radius"] is not None:
+        elif ge_radius is not None:
             d_reps = [np.zeros_like(d) for d in acc_buf]
+            if g_center is None or e_center is None:
+                raise ValueError(
+                    "g_center and e_center must be provided when population_radius is set"
+                )
             self.shots = self._apply_classification(
-                acc_buf,
-                self.acquire_params["g_center"],
-                self.acquire_params["e_center"],
-                self.acquire_params["population_radius"],
-                self.acquire_params["remove_offset"],
+                acc_buf, g_center, e_center, ge_radius, remove_offset
             )
             for i, ch_shot in enumerate(self.shots):
                 d_reps[i] = ch_shot
