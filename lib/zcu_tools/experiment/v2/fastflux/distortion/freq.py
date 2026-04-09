@@ -82,15 +82,25 @@ class FreqCfg(ModularProgramCfg, TaskCfg):
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
 
-        lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
+        length_sweep = _cfg["sweep"]["length"]
+        freq_sweep = _cfg["sweep"]["freq"]
+
+        qub_pulse = modules["qub_pulse"]
+
+        lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
-            "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": qub_pulse["ch"]}
         )
 
         def measure_fn(
@@ -126,7 +136,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     ("length", length_sweep),
                     ("freq", freq_sweep),
                 ],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot2D("Time (us)", "Frequency (MHz)") as viewer:
             signals = run_task(

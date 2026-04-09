@@ -49,7 +49,14 @@ class PowerCfg(ModularProgramCfg, TaskCfg):
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PowerResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> PowerResult:
         _cfg = check_type(deepcopy(cfg), PowerCfg)
 
         # Check that reset pulse is dual pulse type
@@ -99,7 +106,12 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                                     ),
                                     Readout("readout", modules["readout"]),
                                 ],
-                            ).acquire(soc, progress=False, callback=update_hook)
+                            ).acquire(
+                                soc,
+                                progress=False,
+                                callback=update_hook,
+                                **(acquire_kwargs or {}),
+                            )
                         )
                     ),
                     result_shape=(len(gains1), len(gains2)),

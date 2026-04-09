@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -52,21 +53,38 @@ class LengthCfg(ModularProgramCfg, TaskCfg):
 
 class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
     def run(
-        self, soc, soccfg, cfg: dict[str, Any], detune: float = 0.0
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        detune: float = 0.0,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
         modules = _cfg["modules"]
 
-        # TODO: align qubit pulse length with cavity pulse length
-        lengths = sweep2array(
-            _cfg["sweep"]["length"],
+        length_sweep = _cfg["sweep"]["length"]
+
+        tested_reset = modules["tested_reset"]
+
+        qub_lengths = sweep2array(
+            length_sweep,
             "time",
-            {
-                "soccfg": soccfg,
-                "gen_ch": modules["tested_reset"]["qubit_tone_cfg"]["ch"],
-            },
+            {"soccfg": soccfg, "gen_ch": tested_reset["qubit_tone_cfg"]["ch"]},
         )
+        res_lengths = sweep2array(
+            length_sweep,
+            "time",
+            {"soccfg": soccfg, "gen_ch": tested_reset["cavity_tone_cfg"]["ch"]},
+        )
+        if not np.allclose(qub_lengths, res_lengths, atol=1e-2):
+            warnings.warn(
+                "Qubit tone length and cavity tone length may not align! This may cause unexpected results. Please check your sweep configuration."
+            )
+
+        lengths = qub_lengths  # use qubit tone length as x-axis
 
         length_param = sweep2param("length", _cfg["sweep"]["length"])
         phase_param = 360 * detune * length_param
@@ -89,7 +107,12 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                                     Reset("tested_reset", modules["tested_reset"]),
                                     Readout("readout", modules["readout"]),
                                 ],
-                            ).acquire(soc, progress=False, callback=update_hook)
+                            ).acquire(
+                                soc,
+                                progress=False,
+                                callback=update_hook,
+                                **(acquire_kwargs or {}),
+                            )
                         )
                     ),
                     result_shape=(len(lengths),),

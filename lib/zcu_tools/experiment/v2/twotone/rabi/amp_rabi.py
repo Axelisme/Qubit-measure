@@ -33,7 +33,14 @@ class AmpRabiCfg(TwoToneCfg, TaskCfg):
 
 
 class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> AmpRabiResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> AmpRabiResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), AmpRabiCfg)
         modules = _cfg["modules"]
@@ -54,7 +61,12 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
                         soccfg,
                         ctx.cfg,
                         sweep=[("gain", ctx.cfg["sweep"]["gain"])],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    ).acquire(
+                        soc,
+                        progress=False,
+                        callback=update_hook,
+                        **(acquire_kwargs or {}),
+                    ),
                     result_shape=(len(gains),),
                 ),
                 init_cfg=_cfg,

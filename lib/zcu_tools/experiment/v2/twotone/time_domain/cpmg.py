@@ -78,8 +78,10 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         soc,
         soccfg,
         cfg: dict[str, Any],
+        *,
         detune_ratio: float = 0.0,
         earlystop_snr: Optional[float] = None,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> CPMG_Result:
         _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
         modules = _cfg["modules"]
@@ -203,6 +205,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                         signal2real_fn=lambda x: rotate2real(x).real,
                         after_check=lambda snr: ax1d.set_title(f"snr = {snr:.1f}"),
                     ),
+                    **(acquire_kwargs or {}),
                 )
 
             def update_fn(i: int, ctx: TaskState, time: float) -> None:

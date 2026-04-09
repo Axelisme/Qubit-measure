@@ -44,7 +44,14 @@ class DispersiveCfg(TwoToneCfg, TaskCfg):
 
 
 class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> DispersiveResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> DispersiveResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), DispersiveCfg)
         modules = _cfg["modules"]
@@ -75,7 +82,12 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
                             ("ge", ge_sweep),
                             ("freq", ctx.cfg["sweep"]["freq"]),
                         ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    ).acquire(
+                        soc,
+                        progress=False,
+                        callback=update_hook,
+                        **(acquire_kwargs or {}),
+                    ),
                     result_shape=(2, len(freqs)),
                 ),
                 init_cfg=_cfg,

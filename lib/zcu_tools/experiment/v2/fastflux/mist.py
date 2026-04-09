@@ -33,7 +33,6 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
-    SoftDelay,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -68,7 +67,14 @@ class MistCfg(ModularProgramCfg, TaskCfg):
 
 
 class MistExp(AbsExperiment[MistResult, MistCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> MistResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> MistResult:
         _cfg = check_type(deepcopy(cfg), MistCfg)
         modules = _cfg["modules"]
 
@@ -117,7 +123,9 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
                     ("flux_gain", flux_gain_sweep),
                     ("mist_gain", mist_gain_sweep),
                 ],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Mist Pulse Gain (a.u.)") as viewer:
             signals = run_task(

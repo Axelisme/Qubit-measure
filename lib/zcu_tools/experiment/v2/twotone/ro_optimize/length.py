@@ -45,7 +45,14 @@ class LengthCfg(ModularProgramCfg, TaskCfg):
 
 
 class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> LengthResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
         modules = _cfg["modules"]
@@ -84,6 +91,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                     i, (avg_d, [tracker.covariance], [tracker.rough_median])
                 ),
                 statistic_trackers=[tracker],
+                **(acquire_kwargs or {}),
             )
             return avg_d, [tracker.covariance], [tracker.rough_median]
 

@@ -62,15 +62,25 @@ class PhaseCfg(ModularProgramCfg, TaskCfg):
 
 
 class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PhaseResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> PhaseResult:
         _cfg = check_type(deepcopy(cfg), PhaseCfg)
         modules = _cfg["modules"]
 
-        lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
+        length_sweep = _cfg["sweep"]["length"]
+        phase_sweep = _cfg["sweep"]["phase"]
+
+        pi2_pulse = modules["pi2_pulse"]
+
+        lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         phases = sweep2array(
-            _cfg["sweep"]["phase"],
-            "phase",
-            {"soccfg": soccfg, "gen_ch": modules["pi2_pulse"]["ch"]},
+            phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse["ch"]}
         )
 
         def measure_fn(

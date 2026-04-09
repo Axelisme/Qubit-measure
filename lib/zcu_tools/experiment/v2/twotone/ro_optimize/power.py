@@ -45,7 +45,14 @@ class PowerCfg(ModularProgramCfg, TaskCfg):
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PowerResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> PowerResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), PowerCfg)
         modules = _cfg["modules"]
@@ -88,6 +95,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     i, (avg_d, [tracker.covariance], [tracker.rough_median])
                 ),
                 statistic_trackers=[tracker],
+                **(acquire_kwargs or {}),
             )
             return avg_d, [tracker.covariance], [tracker.rough_median]
 

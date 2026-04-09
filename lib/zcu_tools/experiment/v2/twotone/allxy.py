@@ -129,7 +129,14 @@ class AllXY_Cfg(ModularProgramCfg, TaskCfg):
 
 
 class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> AllXY_Result:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> AllXY_Result:
         _cfg = check_type(deepcopy(cfg), AllXY_Cfg)
 
         def make_task(gate1: str, gate2: str) -> Task:
@@ -158,7 +165,12 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                         Pulse("second_pulse", gate2pulse_map[gate2]),
                         Readout("readout", modules["readout"]),
                     ],
-                ).acquire(soc, progress=False, callback=update_hook)
+                ).acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    **(acquire_kwargs or {}),
+                )
 
             return Task(measure_fn=measure_fn)
 

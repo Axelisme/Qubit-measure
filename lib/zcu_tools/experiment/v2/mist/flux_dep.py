@@ -73,7 +73,14 @@ class FluxDepCfg(ModularProgramCfg, TaskCfg):
 
 
 class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FluxDepResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> FluxDepResult:
         _cfg = check_type(deepcopy(cfg), FluxDepCfg)
         modules = _cfg["modules"]
 
@@ -108,7 +115,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[("gain", gain_sweep)],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot2DwithLine(
             "Flux device value",

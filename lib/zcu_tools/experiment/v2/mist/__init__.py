@@ -1,5 +1,5 @@
 from .flux_dep import FluxDepExp
-from .power_dep import DriveFreqExp, PowerDepExp, PowerDepOvernightExp
+from .power_dep import DriveFreqExp, PowerDepExp
 
 __all__ = [
     # flux dep
@@ -7,5 +7,5 @@ __all__ = [
     # power dep
     "DriveFreqExp",
     "PowerDepExp",
-    "PowerDepOvernightExp",
 ]
+

@@ -1,17 +1,26 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    Callable,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
@@ -52,51 +61,81 @@ class LengthCfg(ModularProgramCfg, TaskCfg):
 
 
 class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> LengthResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
         modules = _cfg["modules"]
 
-        pulse1_cfg = modules["tested_reset"]["pulse1_cfg"]
-        pulse2_cfg = modules["tested_reset"]["pulse2_cfg"]
+        length_sweep = _cfg["sweep"]["length"]
 
-        lengths = sweep2array(
-            _cfg["sweep"]["length"],
-            "time",
-            {"soccfg": soccfg, "gen_ch": pulse1_cfg["ch"]},
-        )
-
+        reset_cfg = modules["tested_reset"]
+        pulse1_cfg = reset_cfg["pulse1_cfg"]
+        pulse2_cfg = reset_cfg["pulse2_cfg"]
         length_diff = (
             pulse2_cfg["waveform"]["length"] - pulse1_cfg["waveform"]["length"]
         )
-        length1_param = sweep2param("length", _cfg["sweep"]["length"])
 
-        Pulse.set_param(pulse1_cfg, "length", length1_param)
-        Pulse.set_param(pulse2_cfg, "length", length1_param + length_diff)
+        pulse1_lengths = sweep2array(
+            length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse1_cfg["ch"])
+        )
+        pulse2_lengths = sweep2array(
+            length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse2_cfg["ch"])
+        )
+        if not np.allclose(pulse1_lengths, pulse2_lengths, atol=1e-2):
+            warnings.warn(
+                "Sweep lengths for pulse1 and pulse2 are different. This may lead to unexpected results."
+            )
+        if np.any(pulse2_lengths + length_diff < 0):
+            raise ValueError(
+                "Find negative length in pulse2 while sweeping pulse1 length. Please check the sweep configuration."
+            )
+        lengths = pulse1_lengths  # Use pulse1 lengths as the x-axis values
+
+        def measure_fn(
+            ctx: TaskState, update_hook: Optional[Callable]
+        ) -> list[NDArray[np.float64]]:
+            cfg = cast(LengthCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            tested_reset_cfg = modules["tested_reset"]
+            pulse1_cfg = tested_reset_cfg["pulse1_cfg"]
+            pulse2_cfg = tested_reset_cfg["pulse2_cfg"]
+
+            length_diff = (
+                pulse2_cfg["waveform"]["length"] - pulse1_cfg["waveform"]["length"]
+            )
+            length1_param = sweep2param("length", length_sweep)
+
+            Pulse.set_param(pulse1_cfg, "length", length1_param)
+            Pulse.set_param(pulse2_cfg, "length", length1_param + length_diff)
+
+            return ModularProgramV2(
+                soccfg,
+                ctx.cfg,
+                sweep=[("length", ctx.cfg["sweep"]["length"])],
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("init_pulse", modules.get("init_pulse")),
+                    TwoPulseReset("tested_reset", tested_reset_cfg),
+                    Readout("readout", modules["readout"]),
+                ],
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D("Length (us)", "Amplitude") as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                sweep=[("length", ctx.cfg["sweep"]["length"])],
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    Pulse("init_pulse", modules.get("init_pulse")),
-                                    TwoPulseReset(
-                                        "tested_reset", modules["tested_reset"]
-                                    ),
-                                    Readout("readout", modules["readout"]),
-                                ],
-                            ).acquire(soc, progress=False, callback=update_hook)
-                        )
-                    ),
-                    result_shape=(len(lengths),),
-                ),
+                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, reset_length_signal2real(ctx.root_data)

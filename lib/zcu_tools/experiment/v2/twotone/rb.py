@@ -140,7 +140,14 @@ class RB_Cfg(ModularProgramCfg, TaskCfg):
 
 
 class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> RB_Result:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> RB_Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "depth")
         _cfg = check_type(deepcopy(cfg), RB_Cfg)
 
@@ -216,7 +223,12 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                     *gate_modules,
                     Readout("readout", modules["readout"]),
                 ],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D("Depth", "Signal") as viewer:
 

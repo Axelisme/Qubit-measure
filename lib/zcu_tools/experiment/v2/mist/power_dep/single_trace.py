@@ -60,7 +60,14 @@ class PowerDepCfg(ModularProgramCfg, TaskCfg):
 
 
 class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PowerDepResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> PowerDepResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), PowerDepCfg)
         modules = _cfg["modules"]
@@ -92,7 +99,9 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[("gain", gain_sweep)],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot1D("Pulse gain", "MIST") as viewer:
             signals = run_task(

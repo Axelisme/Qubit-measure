@@ -55,7 +55,14 @@ class FreqCfg(ModularProgramCfg, TaskCfg):
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run_soft(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
+    def run_soft(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
 
@@ -98,7 +105,12 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                                     ),
                                     Readout("readout", modules["readout"]),
                                 ],
-                            ).acquire(soc, progress=False, callback=update_hook)
+                            ).acquire(
+                                soc,
+                                progress=False,
+                                callback=update_hook,
+                                **(acquire_kwargs or {}),
+                            )
                         )
                     ),
                     result_shape=(len(freqs1),),
@@ -122,7 +134,14 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         return freqs1, freqs2, signals
 
-    def run_hard(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
+    def run_hard(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
 
@@ -164,7 +183,12 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                                     ),
                                     Readout("readout", modules["readout"]),
                                 ],
-                            ).acquire(soc, progress=False, callback=update_hook)
+                            ).acquire(
+                                soc,
+                                progress=False,
+                                callback=update_hook,
+                                **(acquire_kwargs or {}),
+                            )
                         )
                     ),
                     result_shape=(len(freqs1), len(freqs2)),
@@ -189,11 +213,16 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         cfg: dict[str, Any],
         *,
         method: Literal["soft", "hard"] = "soft",
+        acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqResult:
         if method == "soft":
-            return self.run_soft(soc, soccfg, cfg)
+            return self.run_soft(
+                soc, soccfg, cfg, acquire_kwargs=acquire_kwargs
+            )
         else:
-            return self.run_hard(soc, soccfg, cfg)
+            return self.run_hard(
+                soc, soccfg, cfg, acquire_kwargs=acquire_kwargs
+            )
 
     def analyze(
         self,

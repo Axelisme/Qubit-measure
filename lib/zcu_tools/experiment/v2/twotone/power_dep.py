@@ -30,7 +30,14 @@ class PowerCfg(TwoToneCfg, TaskCfg):
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PowerResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> PowerResult:
         _cfg = check_type(deepcopy(cfg), PowerCfg)
         modules = _cfg["modules"]
 
@@ -63,7 +70,12 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                             ("gain", ctx.cfg["sweep"]["gain"]),
                             ("freq", ctx.cfg["sweep"]["freq"]),
                         ],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    ).acquire(
+                        soc,
+                        progress=False,
+                        callback=update_hook,
+                        **(acquire_kwargs or {}),
+                    ),
                     result_shape=(len(gains), len(freqs)),
                 ),
                 init_cfg=_cfg,

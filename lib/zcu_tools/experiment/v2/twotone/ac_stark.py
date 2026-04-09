@@ -108,7 +108,13 @@ class AcStarkCfg(ModularProgramCfg, TaskCfg):
 
 class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
     def run(
-        self, soc, soccfg, cfg: dict[str, Any], *, earlystop_snr: Optional[float] = None
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        earlystop_snr: Optional[float] = None,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> AcStarkResult:
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)
         modules = _cfg["modules"]
@@ -172,6 +178,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                                     f"snr = {snr:.1f}"
                                 ),
                             ),
+                            **(acquire_kwargs or {}),
                         )
                     ),
                     result_shape=(len(freqs),),
@@ -348,7 +355,13 @@ class AcStarkRamseyCfg(ModularProgramCfg, TaskCfg):
 
 class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
     def run(
-        self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        detune: float = 0.0,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> AcStarkResult:
         _cfg = check_type(deepcopy(cfg), AcStarkRamseyCfg)
         modules = _cfg["modules"]
@@ -401,7 +414,12 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[("length", length_sweep)],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot2DwithLine(
             "Stark Pulse Gain (a.u.)",

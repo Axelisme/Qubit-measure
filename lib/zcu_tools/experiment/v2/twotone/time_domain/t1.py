@@ -60,7 +60,13 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     to measure the qubit's energy relaxation.
     """
 
-    def _run_non_uniform(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
+    def _run_non_uniform(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> T1Result:
         _cfg = check_type(deepcopy(cfg), T1Cfg)
 
         length_sweep: Union[SweepCfg, NDArray[np.float64]] = _cfg["sweep"]["length"]  # type: ignore
@@ -96,7 +102,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                             Delay("t1_delay", delay=t1_delay),
                             Readout("readout", modules["readout"]),
                         ],
-                    ).acquire(soc, progress=False)
+                    ).acquire(soc, progress=False, **(acquire_kwargs or {}))
 
                     acc_signals[i] += raw_i[0][0].dot([1, 1j])
 
@@ -125,7 +131,13 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         return lengths, signals
 
-    def _run_uniform(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
+    def _run_uniform(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> T1Result:
         _cfg = check_type(deepcopy(cfg), T1Cfg)
 
         lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
@@ -153,7 +165,12 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                                     Readout("readout", modules["readout"]),
                                 ],
                                 sweep=[("length", ctx.cfg["sweep"]["length"])],
-                            ).acquire(soc, progress=False, callback=update_hook)
+                            ).acquire(
+                                soc,
+                                progress=False,
+                                callback=update_hook,
+                                **(acquire_kwargs or {}),
+                            )
                         )
                     ),
                     result_shape=(len(lengths),),
@@ -170,12 +187,22 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
         return lengths, signals
 
-    def run(self, soc, soccfg, cfg: dict[str, Any], uniform: bool = True) -> T1Result:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        uniform: bool = True,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> T1Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         if uniform:
-            return self._run_uniform(soc, soccfg, cfg)
+            return self._run_uniform(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
         else:
-            return self._run_non_uniform(soc, soccfg, cfg)
+            return self._run_non_uniform(
+                soc, soccfg, cfg, acquire_kwargs=acquire_kwargs
+            )
 
     def analyze(
         self, result: Optional[T1Result] = None, *, dual_exp: bool = False
@@ -270,7 +297,14 @@ class T1WithToneCfg(ModularProgramCfg, TaskCfg):
 
 
 class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> T1Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T1WithToneCfg)
         modules = _cfg["modules"]
@@ -299,7 +333,12 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
                             Readout("readout", modules["readout"]),
                         ],
                         sweep=[("length", ctx.cfg["sweep"]["length"])],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    ).acquire(
+                        soc,
+                        progress=False,
+                        callback=update_hook,
+                        **(acquire_kwargs or {}),
+                    ),
                     result_shape=(len(lengths),),
                 ),
                 init_cfg=_cfg,
@@ -412,7 +451,14 @@ class T1WithToneSweepCfg(ModularProgramCfg, TaskCfg):
 
 
 class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> T1WithToneSweepResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> T1WithToneSweepResult:
         _cfg = check_type(deepcopy(cfg), T1WithToneSweepCfg)
         modules = _cfg["modules"]
 
@@ -454,7 +500,12 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                             Readout("readout", cfg=ctx.cfg["modules"]["readout"]),
                         ],
                         sweep=[("length", ctx.cfg["sweep"]["length"])],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    ).acquire(
+                        soc,
+                        progress=False,
+                        callback=update_hook,
+                        **(acquire_kwargs or {}),
+                    ),
                     result_shape=(len(lengths),),
                 ).scan(
                     "gain",

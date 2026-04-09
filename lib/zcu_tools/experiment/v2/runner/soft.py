@@ -23,7 +23,7 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult]):
     ) -> None:
         self.sweep_values = list(values)
         self.sweep_name = name
-        self.update_cfg_fn = before_each
+        self.before_each_fn = before_each
         self.sub_task = task
 
         self.sweep_pbar: Optional[tqdm] = None
@@ -49,7 +49,7 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult]):
 
         # Pre-update cfg for the first value
         if len(self.sweep_values) > 0:
-            self.update_cfg_fn(0, state, self.sweep_values[0])
+            self.before_each_fn(0, state, self.sweep_values[0])
 
         self.sub_task.init(state.child(0), dynamic_pbar=dynamic_pbar)
 
@@ -61,7 +61,7 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult]):
             self.sweep_pbar.reset()
 
         for i, v in enumerate(self.sweep_values):
-            self.update_cfg_fn(i, state, v)
+            self.before_each_fn(i, state, v)
 
             self.sub_task.run(state.child(i))
 

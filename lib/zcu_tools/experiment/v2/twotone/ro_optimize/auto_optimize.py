@@ -96,7 +96,15 @@ class AutoOptCfg(ModularProgramCfg, TaskCfg):
 
 
 class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any], num_points: int) -> AutoOptResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        num_points: int,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> AutoOptResult:
         _cfg = check_type(deepcopy(cfg), AutoOptCfg)
 
         freq_sweep = _cfg["sweep"]["freq"]
@@ -105,9 +113,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         ge_sweep = make_ge_sweep()
 
         modules = _cfg["modules"]
-        Pulse.set_param(
-            modules["qub_pulse"], "on/off", sweep2param("ge", ge_sweep)
-        )
+        Pulse.set_param(modules["qub_pulse"], "on/off", sweep2param("ge", ge_sweep))
 
         optimizer = ReadoutOptimizer(freq_sweep, gain_sweep, len_sweep, num_points)
 
@@ -209,6 +215,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                         i, (avg_d, [tracker.covariance], [tracker.rough_median])
                     ),
                     statistic_trackers=[tracker],
+                    **(acquire_kwargs or {}),
                 )
                 return avg_d, [tracker.covariance], [tracker.rough_median]
 

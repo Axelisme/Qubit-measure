@@ -52,7 +52,14 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
 
 
 class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqGainResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> FreqGainResult:
         _cfg = check_type(deepcopy(cfg), FreqGainCfg)
         modules = _cfg["modules"]
 
@@ -92,7 +99,12 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
                                     Reset("tested_reset", modules["tested_reset"]),
                                     Readout("readout", modules["readout"]),
                                 ],
-                            ).acquire(soc, progress=False, callback=update_hook)
+                            ).acquire(
+                                soc,
+                                progress=False,
+                                callback=update_hook,
+                                **(acquire_kwargs or {}),
+                            )
                         )
                     ),
                     result_shape=(len(gains), len(freqs)),

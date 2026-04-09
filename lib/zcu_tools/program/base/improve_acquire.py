@@ -236,8 +236,8 @@ class SingleShotMixin(TypedAcquireMixin):
     def _process_accumulated(self, acc_buf) -> List[NDArray[np.float64]]:
         assert self.acquire_params is not None
 
-        threshold = self.acquire_params.get("threshold")
-        angle = self.acquire_params.get("angle")
+        threshold: Optional[float] = self.acquire_params.get("threshold")
+        angle: Optional[float] = self.acquire_params.get("angle")
 
         ge_radius: Optional[float] = self.acquire_params.get("population_radius")
         g_center: Optional[complex] = self.acquire_params.get("g_center")

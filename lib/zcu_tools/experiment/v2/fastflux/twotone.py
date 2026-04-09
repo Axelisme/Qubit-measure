@@ -32,7 +32,6 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
-    SoftDelay,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -61,7 +60,14 @@ class TwotoneCfg(ModularProgramCfg, TaskCfg):
 
 
 class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> TwoToneResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> TwoToneResult:
         _cfg = check_type(deepcopy(cfg), TwotoneCfg)
         modules = _cfg["modules"]
 
@@ -107,7 +113,9 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
                     ("gain", gain_sweep),
                     ("freq", freq_sweep),
                 ],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
             signals = run_task(

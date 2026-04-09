@@ -61,7 +61,13 @@ class T2EchoCfg(ModularProgramCfg, TaskCfg):
 
 class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
     def run(
-        self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        detune: float = 0.0,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> tuple[T2EchoResult, float]:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2EchoCfg)
@@ -112,7 +118,12 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[("length", length_sweep)],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Echo"}

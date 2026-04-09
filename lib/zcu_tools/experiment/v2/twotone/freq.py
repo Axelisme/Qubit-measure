@@ -32,7 +32,14 @@ class FreqCfg(TwoToneCfg, TaskCfg):
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
@@ -53,7 +60,12 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
                         soccfg, ctx.cfg, sweep=[("freq", ctx.cfg["sweep"]["freq"])]
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    ).acquire(
+                        soc,
+                        progress=False,
+                        callback=update_hook,
+                        **(acquire_kwargs or {}),
+                    ),
                     result_shape=(len(freqs),),
                 ),
                 init_cfg=_cfg,

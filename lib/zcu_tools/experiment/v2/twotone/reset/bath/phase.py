@@ -53,7 +53,14 @@ class PhaseCfg(ModularProgramCfg, TaskCfg):
 
 
 class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> PhaseResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> PhaseResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "phase")
         _cfg = check_type(deepcopy(cfg), PhaseCfg)
         modules = _cfg["modules"]
@@ -85,7 +92,12 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                                 BathReset("tested_reset", modules["tested_reset"]),
                                 Readout("readout", modules["readout"]),
                             ],
-                        ).acquire(soc, progress=False, callback=update_hook)
+                        ).acquire(
+                            soc,
+                            progress=False,
+                            callback=update_hook,
+                            **(acquire_kwargs or {}),
+                        )
                     ),
                     result_shape=(len(phases),),
                 ),

@@ -66,7 +66,14 @@ class T1Cfg(ModularProgramCfg, TaskCfg):
 
 
 class T1Exp(AbsExperiment[T1Result, T1Cfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> T1Result:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> T1Result:
         _cfg = check_type(deepcopy(cfg), T1Cfg)
         modules = _cfg["modules"]
 
@@ -106,7 +113,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     ("gain", gain_sweep),
                     ("length", length_sweep),
                 ],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Time (us)") as viewer:
             signals = run_task(

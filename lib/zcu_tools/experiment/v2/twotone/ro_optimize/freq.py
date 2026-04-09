@@ -45,7 +45,14 @@ class FreqCfg(ModularProgramCfg, TaskCfg):
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
@@ -88,6 +95,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                         i, (avg_d, [tracker.covariance], [tracker.rough_median])
                     ),
                     statistic_trackers=[tracker],
+                    **(acquire_kwargs or {}),
                 )
                 return avg_d, [tracker.covariance], [tracker.rough_median]
 

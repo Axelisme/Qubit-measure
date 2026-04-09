@@ -33,7 +33,13 @@ class LenRabiCfg(TwoToneCfg, TaskCfg):
 
 
 class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
-    def _run_for_flat(self, soc, soccfg, cfg: dict[str, Any]) -> LenRabiResult:
+    def _run_for_flat(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> LenRabiResult:
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)
         modules = _cfg["modules"]
 
@@ -58,7 +64,12 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                     soccfg,
                     ctx.cfg,
                     sweep=[("length", ctx.cfg["sweep"]["length"])],
-                ).acquire(soc, progress=False, callback=update_hook)
+                ).acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    **(acquire_kwargs or {}),
+                )
 
             signals = run_task(
                 task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)),
@@ -74,7 +85,13 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         return lengths, signals
 
-    def _run_for_arb(self, soc, soccfg, cfg: dict[str, Any]) -> LenRabiResult:
+    def _run_for_arb(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> LenRabiResult:
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)
         modules = _cfg["modules"]
 
@@ -91,7 +108,10 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
             def measure_fn(ctx: TaskState, update_hook):
                 return TwoToneProgram(soccfg, ctx.cfg).acquire(
-                    soc, progress=False, callback=update_hook
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    **(acquire_kwargs or {}),
                 )
 
             def update_fn(i, ctx: TaskState, length):
@@ -119,7 +139,14 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         return lengths, signals
 
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> LenRabiResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> LenRabiResult:
         modules = cfg["modules"]
         qub_waveform = modules["qub_pulse"]["waveform"]
 
@@ -127,10 +154,12 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         if qub_waveform["style"] in ["const", "flat_top"]:
             # use hard sweep for flat top pulse
-            return self._run_for_flat(soc, soccfg, cfg)
+            return self._run_for_flat(
+                soc, soccfg, cfg, acquire_kwargs=acquire_kwargs
+            )
         else:
             # use soft sweep for arb pulse
-            return self._run_for_arb(soc, soccfg, cfg)
+            return self._run_for_arb(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
 
     def analyze(
         self, result: Optional[LenRabiResult] = None, *, decay: bool = True

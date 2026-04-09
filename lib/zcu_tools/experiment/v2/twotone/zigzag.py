@@ -67,6 +67,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         cfg: dict[str, Any],
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
+        acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> ZigZagResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "times")
         _cfg = check_type(deepcopy(cfg), ZigZagCfg)
@@ -105,7 +106,12 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
                         ),
                         Readout("readout", modules["readout"]),
                     ],
-                ).acquire(soc, progress=False, callback=update_hook)
+                ).acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    **(acquire_kwargs or {}),
+                )
 
             signals = run_task(
                 task=Task(measure_fn=measure_fn).scan(

@@ -38,7 +38,13 @@ class FreqFluxCfg(TwoToneCfg, TaskCfg):
 
 class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
     def run(
-        self, soc, soccfg, cfg: dict[str, Any], fail_retry: int = 0
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        fail_retry: int = 0,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqFluxResult:
         _cfg = check_type(deepcopy(cfg), FreqFluxCfg)
         modules = _cfg["modules"]
@@ -64,7 +70,12 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
                         soccfg,
                         ctx.cfg,
                         sweep=[("freq", ctx.cfg["sweep"]["freq"])],
-                    ).acquire(soc, progress=False, callback=update_hook),
+                    ).acquire(
+                        soc,
+                        progress=False,
+                        callback=update_hook,
+                        **(acquire_kwargs or {}),
+                    ),
                     result_shape=(len(freqs),),
                 )
                 .auto_retry(max_retries=fail_retry)

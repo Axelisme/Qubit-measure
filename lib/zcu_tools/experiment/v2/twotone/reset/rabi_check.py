@@ -51,7 +51,14 @@ class RabiCheckCfg(ModularProgramCfg, TaskCfg):
 
 
 class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> RabiCheckResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> RabiCheckResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), RabiCheckCfg)
         modules = _cfg["modules"]
@@ -86,7 +93,12 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                     Pulse("post_pulse", modules.get("post_pulse")),
                     Readout("readout", modules["readout"]),
                 ],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D(
             "Pulse gain", "Amplitude", segment_kwargs=dict(num_lines=2)

@@ -91,7 +91,14 @@ class CKP_Cfg(ModularProgramCfg, TaskCfg):
 
 
 class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> CKP_Result:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> CKP_Result:
         _cfg = check_type(deepcopy(cfg), CKP_Cfg)
         modules = _cfg["modules"]
 
@@ -143,7 +150,12 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                     ("res_freq", cfg["sweep"]["res_freq"]),
                     ("qub_freq", cfg["sweep"]["qub_freq"]),
                 ],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
         fig, axs = make_plot_frame(1, 2, figsize=(10, 4))
 

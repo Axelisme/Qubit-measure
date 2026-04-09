@@ -74,6 +74,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         cfg: dict[str, Any],
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
+        acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> ZigZagSweepResult:
         _cfg = check_type(deepcopy(cfg), ZigZagCfg)
         modules = _cfg["modules"]
@@ -128,7 +129,12 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                         Readout("readout", modules["readout"]),
                     ],
                     sweep=[(x_key, ctx.cfg["sweep"][x_key])],
-                ).acquire(soc, progress=False, callback=update_hook)
+                ).acquire(
+                    soc,
+                    progress=False,
+                    callback=update_hook,
+                    **(acquire_kwargs or {}),
+                )
 
             signals = run_task(
                 task=Task(

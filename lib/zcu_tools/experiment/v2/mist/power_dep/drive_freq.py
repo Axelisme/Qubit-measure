@@ -64,7 +64,14 @@ class DriveFreqCfg(ModularProgramCfg, TaskCfg):
 
 
 class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> DriveFreqResult:
+    def run(
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
+    ) -> DriveFreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), DriveFreqCfg)
         modules = _cfg["modules"]
@@ -104,7 +111,9 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[("freq", freq_sweep), ("gain", gain_sweep)],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot2D("Pulse frequency (MHz)", "Pulse gain (a.u.)") as viewer:
             signals = run_task(

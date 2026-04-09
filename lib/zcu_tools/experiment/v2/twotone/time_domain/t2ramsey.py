@@ -52,7 +52,13 @@ class T2RamseyCfg(ModularProgramCfg, TaskCfg):
 
 class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
     def run(
-        self, soc, soccfg, cfg: dict[str, Any], *, detune: float = 0.0
+        self,
+        soc,
+        soccfg,
+        cfg: dict[str, Any],
+        *,
+        detune: float = 0.0,
+        acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> tuple[T2RamseyResult, float]:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2RamseyCfg)
@@ -100,7 +106,12 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[("length", length_sweep)],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
         title = f"T2 Ramsey - detune {detune:.2f} MHz"
         with LivePlot1D(

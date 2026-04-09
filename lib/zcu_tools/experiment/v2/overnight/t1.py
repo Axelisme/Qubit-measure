@@ -106,7 +106,7 @@ class T1PlotAndSaveMixin:
         )
 
     def analyze(
-        self, name: str, iters: NDArray[np.int64], result: T1Result, fig: Figure
+        self, _name: str, iters: NDArray[np.int64], result: T1Result, fig: Figure
     ) -> None:
         Ts = result["lengths"][0]  # (Ts, )
         signals = result["signals"]  # (iters, Ts)
@@ -150,7 +150,9 @@ class T1Cfg(ModularProgramCfg, TaskCfg):
 
 
 class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
-    def __init__(self, cfg: dict[str, Any]) -> None:
+    def __init__(
+        self, cfg: dict[str, Any], *, acquire_kwargs: Optional[dict[str, Any]] = None
+    ) -> None:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T1Cfg)
         self.cfg = _cfg
@@ -178,7 +180,12 @@ class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotD
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[("length", length_sweep)],
-            ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
+            ).acquire(
+                ctx.env["soc"],
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=measure_t1_fn,
@@ -224,10 +231,11 @@ class T1WithToneCfg(ModularProgramCfg, TaskCfg):
 
 
 class T1WithToneTask(
-    T1PlotAndSaveMixin,
-    MeasurementTask[T1Result, T_RootResult, T1PlotDict],
+    T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotDict]
 ):
-    def __init__(self, cfg: dict[str, Any]) -> None:
+    def __init__(
+        self, cfg: dict[str, Any], *, acquire_kwargs: Optional[dict[str, Any]] = None
+    ) -> None:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T1WithToneCfg)
         self.cfg = _cfg
@@ -256,11 +264,15 @@ class T1WithToneTask(
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[("length", length_sweep)],
-            ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
+            ).acquire(
+                ctx.env["soc"],
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]]](
-            measure_fn=measure_t1_fn,
-            result_shape=(len(self.lengths),),
+            measure_fn=measure_t1_fn, result_shape=(len(self.lengths),)
         )
 
     def init(self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar=False) -> None:
