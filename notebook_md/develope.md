@@ -14,333 +14,299 @@ jupyter:
 
 ```python
 %load_ext autoreload
+from pathlib import Path
+import math
+
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Dict, List, cast
-from joblib import Parallel, delayed
-from tqdm.auto import tqdm
 import qutip as qt
 from scqubits.core.fluxonium import Fluxonium
-from scqubits.core.oscillator import Oscillator
 from scqubits.core.hilbert_space import HilbertSpace
+
+%autoreload 2
+import zcu_tools.notebook.persistance as zp
+from zcu_tools.meta_tool import ExperimentManager
+from zcu_tools.simulate import value2flux
+from zcu_tools.notebook.analysis.t1_curve import charge_spectral_density
 ```
 
 ```python
-from zcu_tools.utils.datasaver import load_data
+chip_name = "Q12_2D[6]"
+qub_name = "Q1"
 
-filepath = r"../Database/SA/R_freq_1.hdf5"
-signals, fpts, _, cfg = load_data(filepath, return_cfg=True)
+result_dir = Path("..", "result", chip_name, qub_name)
+param_path = result_dir / "params.json"
 
-fpts *= 1e-9
-amps = np.abs(signals)
-
-drive_freq = 1e-3 * cfg["readout"]["pulse_cfg"]["freq"]
-
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-ax1.plot(fpts, amps)
-ax1.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
-ax1.set_title(f"Drive frequency: {drive_freq:.2f} GHz")
-ax1.set_ylim(0.0, None)
-ax2.plot(fpts, amps)
-ax2.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
-ax2.set_ylim(0.0, 0.03)
-plt.show(fig)
+image_dir = result_dir / "image" / "simulation"
+image_dir.mkdir(exist_ok=True, parents=True)
 ```
 
 ```python
-from zcu_tools.utils.datasaver import load_data
+result_dict = zp.load_result(f"{result_dir}/params.json")
+fluxdepfit_dict = result_dict.get("fluxdep_fit")
+assert fluxdepfit_dict is not None, "fluxdep_fit not found in result_dict"
 
-filepath = r"../Database/SA/R_freq_2.hdf5"
-signals, fpts, _, cfg = load_data(filepath, return_cfg=True)
+params = (
+    fluxdepfit_dict["params"]["EJ"],
+    fluxdepfit_dict["params"]["EC"],
+    fluxdepfit_dict["params"]["EL"],
+)
+flux_half = fluxdepfit_dict["flux_half"]
+flux_int = fluxdepfit_dict["flux_int"]
+flux_period = fluxdepfit_dict["flux_period"]
 
-fpts *= 1e-9
-amps = np.abs(signals)
+print("params = ", params, " GHz")
+print("flux_half = ", flux_half)
+print("flux_int = ", flux_int)
+print("flux_period = ", flux_period)
 
-drive_freq = 1e-3 * cfg["readout"]["pulse_cfg"]["freq"]
+sample_f = 9.58464
+fwhm = 5.247  # MHz
 
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-ax1.plot(fpts, amps)
-ax1.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
-ax1.set_title(f"Drive frequency: {drive_freq:.2f} GHz")
-ax1.set_ylim(0.0, None)
-ax2.plot(fpts, amps)
-ax2.axvline(drive_freq, color="r", linestyle="--", linewidth=1, alpha=0.3)
-ax2.set_ylim(0.0, 0.01)
-plt.show(fig)
+g = 0.1  # GHz
+if dispersive_dict := result_dict.get("dispersive"):
+    bare_rf = dispersive_dict["bare_rf"]
+    g = dispersive_dict["g"]
+elif "r_f" in fluxdepfit_dict["plot_transitions"]:
+    bare_rf = fluxdepfit_dict["plot_transitions"]["r_f"]
+else:
+    bare_rf = 5.0  # GHz
+print(f"bare rf = {bare_rf}", "GHz")
+print(f"g = {g}", "GHz")
 ```
 
-# Mist Simulation
-
 ```python
-params = (5.0, 1.0, 1.0)
+em = ExperimentManager(result_dir / "exps")
+ml, md = em.use_flux(label="1.800mA", readonly=True)
 
-flx = 0.5
-qub_dim = 40
-qub_cutoff = 50
-max_photon = 500
-kappa = 5.2  # MHz
+flux = value2flux(1.8e-3, flux_half, flux_period)
 
-r_f = 5.0  # GHz
-
-g = 50e-3  # GHz
+image_flx_dir = image_dir / f"{em.label}_flux{flux:.2f}"
+image_flx_dir
 ```
 
-# Single Coupling
+```python
+qub_cutoff = 40
+qub_dim = 15
+
+fluxonium = Fluxonium(*params, flux=flux, cutoff=qub_cutoff, truncated_dim=qub_dim)
+hilbertspace = HilbertSpace([fluxonium])
+hilbertspace.generate_lookup()
+
+evals = hilbertspace.eigenvals()
+f01 = evals[1] - evals[0]
+print(f"f01 = {f01:.2f} GHz")
+H_q = 2 * np.pi * hilbertspace.hamiltonian()
+F_n = (
+    2
+    * np.pi
+    * hilbertspace.op_in_dressed_eigenbasis(fluxonium.n_operator, truncated_dim=qub_dim)
+)
+F_phi = (
+    2
+    * np.pi
+    * hilbertspace.op_in_dressed_eigenbasis(
+        fluxonium.phi_operator, truncated_dim=qub_dim
+    )
+)
+
+Q_cap = 4e5
+Temp = 63e-3  # K
+A_phi = 1e-3 * 2 * np.pi
+omega_ir = 2 * np.pi * 1e-3
+EC = params[1]
+kappa = 2 * np.pi * fwhm * 1e-3
+
+
+def charge_noise_sp(w: np.ndarray) -> np.ndarray:
+    # 4e4 is the Qality facotor of dielectric loss, under 63mK
+    mask = w > 0
+    result = np.zeros_like(w)
+    result[mask] = charge_spectral_density(w[mask], Temp, EC) / Q_cap
+    return result
+
+
+def flux_noise_sp(w: np.ndarray) -> np.ndarray:
+    mask = w > 0
+    result = np.zeros_like(w)
+    result[mask] = A_phi**2 / np.maximum(np.abs(w[mask]), omega_ir)
+    return result
+
+
+H_q
+```
+
+## Single
 
 ```python
-from zcu_tools.simulate.fluxonium.branch.floquet import FloquetBranchAnalysis
+qf = f01
 
-amps = np.arange(0.0, 2 * g * np.sqrt(max_photon), 1e-3 * kappa)
-photons = (amps / (2 * g)) ** 2
+amp = np.sqrt(0) * kappa / (2 * np.pi)
+print(f"amp: {1e3 * amp:.2f} MHz")
 
 
-def calc_energies(branchs: List[int]) -> Dict[int, np.ndarray]:
-    avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
+def round_freq(
+    t1: float, t2: float, tol: float = 1
+) -> tuple[float, float, float, float]:
+    """
+    find the largest common divisor of two periods
+    let t1 ~= a*dt, t2 ~= b*dt, return a*dt, b*dt, dt, lcm(t1, t2)
+    """
+    a, b = (t1, t2) if t1 > t2 else (t2, t1)
+    while b > tol:
+        a, b = b, a % b
+    dt = a
+    n1 = round(t1 / dt)
+    n2 = round(t2 / dt)
+    return n1 * dt, n2 * dt, dt, math.lcm(n1, n2) * dt
 
-    fb_analysis = FloquetBranchAnalysis(
-        params, r_f, g, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
+
+r_qf_t = 1 / qf
+r_rf_t = 1 / bare_rf
+r_dt = 0.1 / bare_rf
+r_T = 1 / bare_rf
+# r_qf_t, r_rf_t, r_dt, r_T = round_freq(1 / qf, 1 / bare_rf, 0.8e-3)
+
+r_qf = 1 / r_qf_t
+r_rf = 1 / r_rf_t
+times = np.arange(0.0, 50.0, r_dt)
+print(
+    f"qf_err: {1e3 * (qf - r_qf): .2f} MHz",
+    f"\nrf_err: {1e3 * (bare_rf - r_rf): .2f} MHz",
+    f"\ndt = {r_dt:.5f} ns, T = {r_T:.5f} ns",
+    f"\nnumber of points = {len(times)}",
+)
+
+
+n_eps = 2 * np.pi * amp
+w_rd = 2 * np.pi * r_rf
+w_qd = 2 * np.pi * r_qf
+
+avg_n = (n_eps / kappa) ** 2
+print(f"avg_n = {avg_n:.2f}")
+
+n_drive = -2 * n_eps / kappa * g
+q_drive = 2 * np.pi * 0.005  # GHz
+
+H = qt.QobjEvo(  # type: ignore
+    # [H_q, [F_n, "n_drive * sin(w_rd * t) + q_drive * cos(w_qd * t)"]],
+    [H_q, [F_n, "n_drive * sin(w_rd * t)"]],
+    # [H_q, [F_n, "q_drive * cos(w_qd * t)"]],
+    args={"n_drive": n_drive, "w_rd": w_rd, "q_drive": q_drive, "w_qd": w_qd},
+)
+```
+
+```python
+psi0 = qt.basis(qub_dim, 0)
+psi1 = qt.basis(qub_dim, 1)
+psi9 = qt.basis(qub_dim, 9)
+
+
+result = qt.fmmesolve(
+    H,
+    psi1,
+    times,
+    # c_ops=[F_n, F_phi],
+    c_ops=[F_phi],
+    e_ops=[psi0.proj(), psi1.proj(), psi9.proj()],
+    # spectra_cb=[charge_noise_sp, flux_noise_sp],
+    spectra_cb=[flux_noise_sp],
+    T=r_T,  # type: ignore
+    options=dict(progress_bar="tqdm"),
+)
+```
+
+```python
+fig, ax1 = plt.subplots()
+ax1.plot(times, result.expect[0], label="g")
+ax1.plot(times, result.expect[1], label="e")
+ax1.plot(times, result.expect[2], label="4")
+ax1.plot(times, 1 - (np.sum([*result.expect], axis=0)), label="o")
+ax1.set_xlabel("Time (ns)")
+ax1.set_ylabel("Probability")
+ax1.set_ylim(-0.01, 1.01)
+ax1.legend()
+plt.show()
+
+```
+
+# Over photon
+
+```python
+H = [H_q, [F_n, "n_drive * sin(w_rd * t)"]]
+
+
+def simulate_population(
+    times: np.ndarray, photon: float, track_state: list[int]
+) -> np.ndarray:
+    n_eps = 2 * np.pi * np.sqrt(photon) * kappa / (2 * np.pi)
+
+    w_rd = 2 * np.pi * bare_rf
+    n_drive = -2 * n_eps / kappa * g
+
+    psi_0 = qt.basis(qub_dim, 1)
+    e_ops = [qt.basis(qub_dim, i).proj() for i in track_state]
+
+    result = qt.fmmesolve(
+        H,
+        psi_0,
+        times,
+        c_ops=[F_phi],
+        e_ops=e_ops,
+        spectra_cb=[flux_noise_sp],
+        T=1 / bare_rf,  # type: ignore
+        args={"n_drive": n_drive, "w_rd": w_rd},
+        options=dict(progress_bar=""),
     )
 
-    fbasis_n = Parallel(n_jobs=-1)(
-        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
-        for photon in tqdm(photons, desc="Computing Floquet basis")
-    )
-    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
-
-    branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs)
-    branch_energies = fb_analysis.calc_branch_energies(fbasis_n, branch_infos)
-
-    return {k: np.asarray(v) for k, v in branch_energies.items()}
-
-
-branchs = list(range(25))
-branch_energies = calc_energies(branchs)
-
-
-resonator = Oscillator(r_f, truncated_dim=30)
-fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
-hilbertspace = HilbertSpace([fluxonium, resonator])
-hilbertspace.add_interaction(
-    g=g,
-    op1=(fluxonium.n_operator(), fluxonium),
-    op2=(resonator.annihilation_operator() + resonator.creation_operator(), resonator),
-    add_hc=False,
-)
-E_n0 = hilbertspace.eigenvals(evals_count=qub_dim * 15)
-
-hilbertspace.generate_lookup(ordering="LX")
-
-
-def calc_E_n0_ij(i: int, j: int) -> np.ndarray:
-    i_dressed = hilbertspace.dressed_index((i, 0))
-    j_dressed = hilbertspace.dressed_index((j, 0))
-
-    return E_n0[j_dressed] - E_n0[i_dressed]
+    return np.stack([result.expect[i] for i in range(len(e_ops))])
 
 ```
 
 ```python
-%matplotlib widget
-from zcu_tools.notebook.analysis.mist.branch import round_to_nearest
+from joblib import Parallel, delayed
+from tqdm.auto import tqdm
 
-fig, ax = plt.subplots()
+times = np.arange(0.0, 50.0, 0.1 / bare_rf)
+photons = np.linspace(0, 400, 400)
+track_states = [0, 1, 9]
 
-transitions = {}
-E_01 = branch_energies[1] - branch_energies[0]
-E_01 += calc_E_n0_ij(0, 1) - E_01[0]
-for i in (0, 1):
-    for j in range(i + 1, np.max(branchs)):
-        E_ij = branch_energies[j] - branch_energies[i]
-        E_ij += calc_E_n0_ij(i, j) - E_ij[0]
-
-        E_ij_mod = round_to_nearest(E_01, E_ij, r_f)
-
-        transitions[f"{i} → {j}"] = E_ij_mod
-
-
-ax.set_ylim(0.0, 1e3 * E_01[0] + 250)
-# ax.set_ylim(0.0, 1e3 * r_f + 250)
-# ax.axhline(1e3 * r_f, color="black", linestyle="--")
-
-
-def calc_default_xy(photons: np.ndarray, E_ij: np.ndarray) -> tuple[float, float]:
-    y = np.median(E_ij).item()
-    x = photons[np.argmin(np.abs(E_ij - y))]
-    return x, y
-
-
-ylim = ax.get_ylim()
-for name, E_ij in transitions.items():
-    E_ij = 1e3 * E_ij
-
-    mask = np.bitwise_and(E_ij > ylim[0], E_ij < ylim[1])
-    if np.any(mask):
-        (line,) = ax.plot(photons, E_ij)
-        ax.annotate(
-            name,
-            xy=calc_default_xy(photons[mask], E_ij[mask]),
-            xytext=(5, 0),
-            textcoords="offset points",
-            va="center",
-            fontsize=7,
-            color=line.get_color(),
-            bbox=dict(
-                boxstyle="round,pad=0.3",
-                fc="white",
-                alpha=0.9,
-                ec="none",
-            ),
-        )
-
-
-plt.show(fig)
-# savefig(fig, f"{image_dir}/ac_stark_populations.png", dpi=300)
-# plt.close(fig)
+_result = Parallel(n_jobs=4)(
+    delayed(simulate_population)(times, photon, track_states)
+    for photon in tqdm(photons, desc="Simulation")
+)
+result = np.array(_result)  # (photons, track_states, times)
 ```
 
 ```python
-idx = np.argmin(np.abs(photons - 1))
-chi = (
-    branch_energies[1][idx]
-    - branch_energies[1][0]
-    - branch_energies[0][idx]
-    + branch_energies[0][0]
+import matplotlib.pyplot as plt
+
+mean_result = np.mean(result[..., -int(0.1 * len(times)) :], axis=-1)
+# mean_result = result[..., -1]  # (photons, times)
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+ax1.imshow(
+    result[:, 1, :].T,
+    aspect="auto",
+    cmap="RdBu_r",
+    origin="lower",
+    interpolation="none",
+    extent=[photons[0], photons[-1], times[0], times[-1]],
 )
-print(f"chi = {1e3 * chi: .2f} MHz")
-```
+ax1.set_ylabel("Time (ns)")
 
-# Dual Coupling
+for i, state in enumerate(track_states):
+    # if np.max(mean_result[:, i]) < 0.05:
+    #     continue
+    ax2.plot(photons, mean_result[:, i], label=f"state {state}")
+other_pop = 1 - np.sum(mean_result, axis=1)
+ax2.plot(photons, other_pop, label="other")
+ax2.set_xlabel("Average Photon number")
+ax2.set_ylabel("Population")
+ax2.legend()
+plt.show()
+fig.savefig(f"{image_dir}/population_over_photons2.png", dpi=300)
 
-```python
-g1 = 0.4 * g  # GHz
-g2 = -0.4 * g  # GHz
-```
-
-```python
-from zcu_tools.simulate.fluxonium.branch.floquet import (
-    FloquetDualCouplingBranchAnalysis,
-)
-
-amps = np.arange(0.0, (abs(g1) + abs(g2)) * np.sqrt(max_photon), 1e-3 * kappa)
-photons = (amps / (abs(g1) + abs(g2))) ** 2
-
-
-def calc_energies(branchs: List[int]) -> Dict[int, np.ndarray]:
-    avg_times = np.linspace(0.0, 2 * np.pi / r_f, 100)
-
-    fb_analysis = FloquetDualCouplingBranchAnalysis(
-        params, r_f, g1, g2, flx=flx, qub_dim=qub_dim, qub_cutoff=qub_cutoff
-    )
-
-    fbasis_n = Parallel(n_jobs=-1)(
-        delayed(fb_analysis.make_floquet_basis)(photon, precompute=avg_times)
-        for photon in tqdm(photons, desc="Computing Floquet basis")
-    )
-    fbasis_n = cast(List[qt.FloquetBasis], fbasis_n)
-
-    branch_infos = fb_analysis.calc_branch_infos(fbasis_n, branchs)
-    branch_energies = fb_analysis.calc_branch_energies(fbasis_n, branch_infos)
-
-    return {k: np.asarray(v) for k, v in branch_energies.items()}
-
-
-branchs = list(range(25))
-branch_energies = calc_energies(branchs)
-
-
-resonator = Oscillator(r_f, truncated_dim=10)
-fluxonium = Fluxonium(*params, flux=flx, cutoff=qub_cutoff, truncated_dim=qub_dim)
-hilbertspace = HilbertSpace([fluxonium, resonator])
-hilbertspace.add_interaction(
-    g=g1,
-    op1=(fluxonium.n_operator(), fluxonium),
-    op2=(resonator.annihilation_operator() + resonator.creation_operator(), resonator),
-    add_hc=False,
-)
-hilbertspace.add_interaction(
-    g=g2,
-    op1=(1j * fluxonium.phi_operator(), fluxonium),
-    op2=(resonator.annihilation_operator() - resonator.creation_operator(), resonator),
-    add_hc=False,
-)
-E_n0 = hilbertspace.eigenvals(evals_count=qub_dim * 10)
-
-hilbertspace.generate_lookup(ordering="LX")
-
-
-def calc_E_n0_ij(i: int, j: int) -> np.ndarray:
-    i_dressed = hilbertspace.dressed_index((i, 0))
-    j_dressed = hilbertspace.dressed_index((j, 0))
-
-    return E_n0[j_dressed] - E_n0[i_dressed]
-
-```
-
-```python
-%matplotlib widget
-from zcu_tools.notebook.analysis.mist.branch import round_to_nearest
-
-fig, ax = plt.subplots()
-
-transitions = {}
-E_01 = branch_energies[1] - branch_energies[0]
-E_01 += calc_E_n0_ij(0, 1) - E_01[0]
-for i in (0, 1):
-    for j in range(i + 1, np.max(branchs)):
-        E_ij = branch_energies[j] - branch_energies[i]
-        E_ij += calc_E_n0_ij(i, j) - E_ij[0]
-
-        E_ij_mod = round_to_nearest(E_01, E_ij, r_f)
-
-        transitions[f"{i} → {j}"] = E_ij_mod
-
-
-ax.set_ylim(1e3 * E_01[0] - 250, 1e3 * E_01[0] + 250)
-
-
-def calc_default_xy(photons: np.ndarray, E_ij: np.ndarray) -> tuple[float, float]:
-    y = np.median(E_ij).item()
-    x = photons[np.argmin(np.abs(E_ij - y))]
-    return x, y
-
-
-ylim = ax.get_ylim()
-for name, E_ij in transitions.items():
-    E_ij = 1e3 * E_ij
-
-    mask = np.bitwise_and(E_ij > ylim[0], E_ij < ylim[1])
-    if np.any(mask):
-        (line,) = ax.plot(photons, E_ij)
-        ax.annotate(
-            name,
-            xy=calc_default_xy(photons[mask], E_ij[mask]),
-            xytext=(5, 0),
-            textcoords="offset points",
-            va="center",
-            fontsize=7,
-            color=line.get_color(),
-            bbox=dict(
-                boxstyle="round,pad=0.3",
-                fc="white",
-                alpha=0.9,
-                ec="none",
-            ),
-        )
-
-
-plt.show(fig)
-# savefig(fig, f"{image_dir}/ac_stark_populations.png", dpi=300)
-```
-
-```python
-idx = np.argmin(np.abs(photons - 1))
-chi = (
-    branch_energies[1][idx]
-    - branch_energies[1][0]
-    - branch_energies[0][idx]
-    + branch_energies[0][0]
-)
-print(f"chi = {1e3 * chi: .2f} MHz")
 ```
 
 ```python

@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: zcu-tools (3.9.25)
+    display_name: .venv
     language: python
     name: python3
   language_info:
@@ -21,7 +21,7 @@ jupyter:
     name: python
     nbconvert_exporter: python
     pygments_lexer: ipython3
-    version: 3.9.25
+    version: 3.9.23
 ---
 
 ```python
@@ -37,8 +37,8 @@ from scipy.ndimage import gaussian_filter1d
 %autoreload 2
 import zcu_tools.notebook.persistance as zp
 import zcu_tools.notebook.analysis.dispersive as zd
-from zcu_tools.simulate import value2flx
-from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flx
+from zcu_tools.simulate import value2flux
+from zcu_tools.simulate.fluxonium import calculate_dispersive_vs_flux
 from zcu_tools.notebook.analysis.plot import plot_dispersive_shift
 from zcu_tools.utils.fitting.resonance import (
     fit_edelay,
@@ -71,14 +71,14 @@ params = (
     fluxdepfit_dict["params"]["EC"],
     fluxdepfit_dict["params"]["EL"],
 )
-flx_half = fluxdepfit_dict["flx_half"]
-flx_int = fluxdepfit_dict["flx_int"]
-flx_period = fluxdepfit_dict["flx_period"]
+flux_half = fluxdepfit_dict["flux_half"]
+flux_int = fluxdepfit_dict["flux_int"]
+flux_period = fluxdepfit_dict["flux_period"]
 
 print("params = ", params, " GHz")
-print("flx_half = ", flx_half)
-print("flx_int = ", flx_int)
-print("flx_period = ", flx_period)
+print("flux_half = ", flux_half)
+print("flux_int = ", flux_int)
+print("flux_period = ", flux_period)
 
 if dispersive_dict := result_dict.get("dispersive"):
     bare_rf = dispersive_dict["bare_rf"]
@@ -98,7 +98,7 @@ onetone_path = r"../../Database\Q3_2D[2]\Q1\2026\03\Data_0316\R1_flux_6.hdf5"
 
 sp_dev_values, sp_freqs, sp_signals = FluxDepExp().load(onetone_path)
 sp_freqs *= 1e-3  # MHz to GHz
-sp_fluxs = value2flx(sp_dev_values, flx_half, flx_period)
+sp_fluxs = value2flux(sp_dev_values, flux_half, flux_period)
 ```
 
 ```python
@@ -195,7 +195,7 @@ t_fluxs = np.linspace(sp_fluxs.min(), sp_fluxs.max(), 501)
 ```
 
 ```python
-plot_rfs = calculate_dispersive_vs_flx(params, t_fluxs, bare_rf, best_g, return_dim=3)
+plot_rfs = calculate_dispersive_vs_flux(params, t_fluxs, bare_rf, best_g, return_dim=3)
 ```
 
 ```python
