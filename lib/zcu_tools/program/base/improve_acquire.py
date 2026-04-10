@@ -1,12 +1,29 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import warnings
+from abc import ABC, abstractmethod
 
 import numpy as np
-from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
-from typing_extensions import Callable, List, Optional, TypeAlias, Union, cast
+from typing_extensions import (
+    TYPE_CHECKING,
+    Callable,
+    Generic,
+    List,
+    Optional,
+    TypeAlias,
+    TypeVar,
+    Union,
+    cast,
+)
+
+if TYPE_CHECKING:
+    try:
+        from numpy.typing import NDArray  # type: ignore
+    except ImportError:  # for python < 3.9
+        T_val = TypeVar("T_val", bound=np.number)
+
+        class NDArray(np.ndarray, Generic[T_val]): ...
 
 CallbackType: TypeAlias = Callable[[int, List[NDArray[np.float64]]], None]
 
@@ -17,7 +34,7 @@ class TypedAcquireMixin(AcquireMixin):
     """
 
     def get_raw(self) -> Optional[List[NDArray[np.int64]]]:
-        return super().get_raw()
+        return super().get_raw()  # type: ignore
 
     def get_time_axis(
         self, ro_index: int, length_only: bool = False
