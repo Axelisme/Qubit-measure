@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 import numpy as np
 from qick.qick_asm import AcquireMixin
 from typing_extensions import (
-    TYPE_CHECKING,
     Callable,
     Generic,
     List,
@@ -17,13 +16,12 @@ from typing_extensions import (
     cast,
 )
 
-if TYPE_CHECKING:
-    try:
-        from numpy.typing import NDArray  # type: ignore
-    except ImportError:  # for python < 3.9
-        T_val = TypeVar("T_val", bound=np.number)
+try:
+    from numpy.typing import NDArray  # type: ignore
+except ImportError:  # for python < 3.9
+    T_val = TypeVar("T_val", bound=np.number)
 
-        class NDArray(np.ndarray, Generic[T_val]): ...
+    class NDArray(np.ndarray, Generic[T_val]): ...
 
 CallbackType: TypeAlias = Callable[[int, List[NDArray[np.float64]]], None]
 
