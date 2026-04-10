@@ -30,7 +30,7 @@ def instant_plot(fig: Figure) -> None:
 
     figsize = fig.get_size_inches()
 
-    pixel_per_inch = 70
+    pixel_per_inch = fig.dpi
 
     canvas.toolbar_visible = False  # type: ignore
     canvas.header_visible = False  # type: ignore
