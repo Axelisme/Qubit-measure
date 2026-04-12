@@ -27,9 +27,11 @@ def sweep2param(name: str, sweep: SweepCfg) -> QickParam:
 
 def param2str(param: Union[float, QickParam]) -> str:
     """Convert a parameter to a string."""
-    if isinstance(param, QickParam) and param.is_sweep():
-        return f"sweep({param.minval():.3f}, {param.maxval():.3f})"
-
+    if isinstance(param, QickParam):
+        if param.is_sweep():
+            return f"sweep({param.minval():.3f}, {param.maxval():.3f})"
+        else:
+            return f"{param.start:.3f}"
     return f"{float(param):.3f}"
 
 

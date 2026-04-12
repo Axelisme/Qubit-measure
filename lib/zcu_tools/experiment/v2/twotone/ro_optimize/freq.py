@@ -8,11 +8,11 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, Callable, cast
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -44,6 +44,9 @@ class FreqCfg(ModularProgramCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
+RawResult: TypeAlias = tuple[list[NDArray[np.float64]], list[NDArray[np.float64]], list[NDArray[np.float64]]]
+
+
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     def run(
         self,
@@ -57,48 +60,51 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         _cfg = check_type(deepcopy(cfg), FreqCfg)
         modules = _cfg["modules"]
 
-        ge_sweep = make_ge_sweep()
-
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
             "freq",
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
-        ge_param = sweep2param("ge", ge_sweep)
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
-        Readout.set_param(modules["readout"], "freq", freq_param)
+        def measure_fn(ctx:TaskState, update_hook: Optional[Callable[[int, RawResult], None]]) -> RawResult:
+            cfg = cast(FreqCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            assert update_hook is not None, "update_hook is required for measure_fn"
+
+            ge_sweep = make_ge_sweep()
+            freq_sweep = cfg["sweep"]["freq"]
+            ge_param = sweep2param("ge", ge_sweep)
+            freq_param = sweep2param("freq", freq_sweep)
+            Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
+            Readout.set_param(modules["readout"], "freq", freq_param)
+
+            prog = ModularProgramV2(
+                soccfg,
+                ctx.cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("qub_pulse", modules["qub_pulse"]),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[
+                    ("ge", ge_sweep),
+                    ("freq", ctx.cfg["sweep"]["freq"]),
+                ],
+            )
+            tracker = PCATracker()
+            avg_d = prog.acquire(
+                soc,
+                progress=False,
+                callback=lambda i, avg_d: update_hook(
+                    i, (avg_d, [tracker.covariance], [tracker.rough_median])
+                ),
+                statistic_trackers=[tracker],
+                **(acquire_kwargs or {}),
+            )
+            return avg_d, [tracker.covariance], [tracker.rough_median]
 
         with LivePlot1D("Frequency (MHz)", "SNR") as viewer:
-
-            def measure_fn(ctx, update_hook):
-                modules = ctx.cfg["modules"]
-                prog = ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("qub_pulse", modules["qub_pulse"]),
-                        Readout("readout", modules["readout"]),
-                    ],
-                    sweep=[
-                        ("ge", ge_sweep),
-                        ("freq", ctx.cfg["sweep"]["freq"]),
-                    ],
-                )
-                tracker = PCATracker()
-                avg_d = prog.acquire(
-                    soc,
-                    progress=False,
-                    callback=lambda i, avg_d: update_hook(
-                        i, (avg_d, [tracker.covariance], [tracker.rough_median])
-                    ),
-                    statistic_trackers=[tracker],
-                    **(acquire_kwargs or {}),
-                )
-                return avg_d, [tracker.covariance], [tracker.rough_median]
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
