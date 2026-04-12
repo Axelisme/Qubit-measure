@@ -14,10 +14,11 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
-from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
+from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -26,7 +27,6 @@ from zcu_tools.program.v2 import (
     PulseReadoutCfg,
     Reset,
     ResetCfg,
-    sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
@@ -70,19 +70,15 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             cfg: LengthCfg = cast(LengthCfg, ctx.cfg)
             modules = cfg["modules"]
 
-            ge_sweep = make_ge_sweep()
-            ge_param = sweep2param("ge", ge_sweep)
-            Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
-
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
-                    Pulse("qub_pulse", modules["qub_pulse"]),
+                    Branch("ge", [], Pulse("qub_pulse", modules["qub_pulse"])),
                     PulseReadout("readout", modules["readout"]),
                 ],
-                sweep=[("ge", ge_sweep)],
+                sweep=[("ge", 2)],
             )
             tracker = PCATracker()
             avg_d = prog.acquire(

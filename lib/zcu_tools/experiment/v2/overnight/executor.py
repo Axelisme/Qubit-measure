@@ -220,7 +220,7 @@ class OvernightExecutor(AbsExperiment[Mapping[str, Result], OvernightCfg]):
 
         with plotter:
             results = run_task(
-                task=OvernightBatchTask[Result, Sequence[dict[str, Result]]](
+                task=OvernightBatchTask[Result, list[dict[str, Result]]](
                     self.measurements, retry_time=fail_retry
                 ).repeat("Iter", self.num_times, self.interval),
                 init_cfg=cfg,

@@ -14,10 +14,11 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
-from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
+from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -67,11 +68,8 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             cfg: PowerCfg = cast(PowerCfg, ctx.cfg)
             modules = cfg["modules"]
 
-            ge_sweep = make_ge_sweep()
             gain_sweep = cfg["sweep"]["gain"]
-            ge_param = sweep2param("ge", ge_sweep)
             gain_param = sweep2param("gain", gain_sweep)
-            Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
             Readout.set_param(modules["readout"], "gain", gain_param)
 
             prog = ModularProgramV2(
@@ -79,11 +77,11 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
-                    Pulse("qub_pulse", modules["qub_pulse"]),
+                    Branch("ge", [], Pulse("qub_pulse", modules["qub_pulse"])),
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[
-                    ("ge", ge_sweep),
+                    ("ge", 2),
                     ("gain", gain_sweep),
                 ],
             )

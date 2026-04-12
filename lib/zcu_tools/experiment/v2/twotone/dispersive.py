@@ -9,19 +9,24 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Optional, TypeAlias
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
-from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
+    ModularProgramCfg,
+    ModularProgramV2,
     Pulse,
+    PulseCfg,
     Readout,
-    TwoToneCfg,
-    TwoToneProgram,
+    ReadoutCfg,
+    Reset,
+    ResetCfg,
     sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -39,7 +44,15 @@ def dispersive_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
     return np.abs(signals)
 
 
-class DispersiveCfg(TwoToneCfg, TaskCfg):
+class DispersiveModuleCfg(TypedDict, closed=True):
+    reset: NotRequired[ResetCfg]
+    init_pulse: NotRequired[PulseCfg]
+    qub_pulse: PulseCfg
+    readout: ReadoutCfg
+
+
+class DispersiveCfg(ModularProgramCfg, TaskCfg):
+    modules: DispersiveModuleCfg
     sweep: dict[str, SweepCfg]
 
 
@@ -56,7 +69,6 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         _cfg = check_type(deepcopy(cfg), DispersiveCfg)
         modules = _cfg["modules"]
 
-        ge_sweep = make_ge_sweep()
         freq_sweep = _cfg["sweep"]["freq"]
 
         freqs = sweep2array(
@@ -65,9 +77,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
         )
 
-        ge_param = sweep2param("ge", ge_sweep)
         freq_param = sweep2param("freq", freq_sweep)
-        Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
         Readout.set_param(modules["readout"], "freq", freq_param)
 
         with LivePlot1D(
@@ -75,11 +85,21 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         ) as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
+                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
                         soccfg,
                         ctx.cfg,
+                        modules=[
+                            Reset("reset", ctx.cfg["modules"].get("reset")),
+                            Pulse("init_pulse", ctx.cfg["modules"].get("init_pulse")),
+                            Branch(
+                                "ge",
+                                [],
+                                Pulse("qub_pulse", ctx.cfg["modules"]["qub_pulse"]),
+                            ),
+                            Readout("readout", ctx.cfg["modules"]["readout"]),
+                        ],
                         sweep=[
-                            ("ge", ge_sweep),
+                            ("ge", 2),
                             ("freq", ctx.cfg["sweep"]["freq"]),
                         ],
                     ).acquire(

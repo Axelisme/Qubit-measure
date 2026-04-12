@@ -21,10 +21,11 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, set_freq_in_dev_cfg
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
-from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
+from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlotScatter
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -33,7 +34,6 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
-    sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
@@ -84,19 +84,15 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
             assert update_hook is not None
 
-            ge_sweep = make_ge_sweep()
-            ge_param = sweep2param("ge", ge_sweep)
-            Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
-
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
-                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Branch("ge", [], Pulse("pi_pulse", modules["pi_pulse"])),
                     Readout("readout", modules["readout"]),
                 ],
-                sweep=[("ge", ge_sweep)],
+                sweep=[("ge", 2)],
             )
             tracker = PCATracker()
             avg_d = prog.acquire(

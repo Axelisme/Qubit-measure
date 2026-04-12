@@ -14,10 +14,11 @@ from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
 from zcu_tools.experiment.v2.tracker import PCATracker
-from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
+from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -72,11 +73,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
             assert update_hook is not None, "update_hook is required for measure_fn"
 
-            ge_sweep = make_ge_sweep()
             freq_sweep = cfg["sweep"]["freq"]
-            ge_param = sweep2param("ge", ge_sweep)
             freq_param = sweep2param("freq", freq_sweep)
-            Pulse.set_param(modules["qub_pulse"], "on/off", ge_param)
             Readout.set_param(modules["readout"], "freq", freq_param)
 
             prog = ModularProgramV2(
@@ -84,11 +82,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 ctx.cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
-                    Pulse("qub_pulse", modules["qub_pulse"]),
+                    Branch("ge", [], Pulse("qub_pulse", modules["qub_pulse"])),
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[
-                    ("ge", ge_sweep),
+                    ("ge", 2),
                     ("freq", ctx.cfg["sweep"]["freq"]),
                 ],
             )

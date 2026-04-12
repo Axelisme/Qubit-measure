@@ -7,16 +7,26 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from qick.asm_v2 import QickParam
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import (
+    Any,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    Union,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     Delay,
     ModularProgramCfg,
     ModularProgramV2,
@@ -84,8 +94,6 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             lengths = sweep2array(lengths, "time", {"soccfg": soccfg}, allow_array=True)
             lengths = np.unique(lengths)
 
-        ge_sweep = make_ge_sweep()
-
         fig, axs = make_plot_frame(1, 2, figsize=(12, 5))
         axs[0][0].set_ylim(0, 1)
         axs[0][1].set_ylim(0, 1)
@@ -135,28 +143,27 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 viewer.refresh()
 
             def measure_fn(ctx: TaskState, update_hook):
-                ge_param = sweep2param("ge", ge_sweep)
-
                 def prog_maker(cfg, t1_delay):
-                    cfg = deepcopy(cfg)
+                    cfg = cast(T1Cfg, deepcopy(cfg))
                     modules = cfg["modules"]
-                    fpga_sweep = (
-                        [("length", cfg["sweep"]["length"]), ("ge", ge_sweep)]
+                    fpga_sweep: list[tuple[str, Union[int, SweepCfg]]] = (
+                        [("length", cfg["sweep"]["length"]), ("ge", 2)]
                         if uniform
-                        else [("ge", ge_sweep)]
+                        else [("ge", 2)]
                     )
                     return ModularProgramV2(
                         soccfg,
                         cfg,
                         modules=[
                             Reset("reset", modules.get("reset")),
-                            Pulse(
-                                "pi_pulse",
-                                Pulse.set_param(
-                                    modules["pi_pulse"], "on/off", ge_param
-                                ),
+                            Branch(
+                                "ge",
+                                [],
+                                [
+                                    Pulse("pi_pulse", modules["pi_pulse"]),
+                                    Delay("t1_delay", delay=t1_delay),
+                                ],
                             ),
-                            Delay("t1_delay", delay=t1_delay),
                             Readout("readout", modules["readout"]),
                         ],
                         sweep=fpga_sweep,
@@ -172,7 +179,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 )
                 if uniform:
                     len_param = sweep2param("length", ctx.cfg["sweep"]["length"])
-                    return prog_maker(ctx.cfg, len_param).acquire(**acquire_kwargs)
+                    return prog_maker(cast(T1Cfg, ctx.cfg), len_param).acquire(
+                        **acquire_kwargs
+                    )
                 else:
                     return measure_with_sweep(
                         ctx,

@@ -129,13 +129,7 @@ class Pulse(Module, tag="pulse"):
     def set_param(
         cfg: PulseCfg, param_name: str, param_value: Union[float, QickParam]
     ) -> PulseCfg:
-        if param_name == "on/off":
-            cfg["gain"] = param_value * cfg["gain"]
-
-            # if the pulse is const or flat_top, also shrink the waveform length
-            if cfg["waveform"]["style"] in ["const", "flat_top"]:
-                Waveform.set_param(cfg["waveform"], param_name, param_value)
-        elif param_name == "length":
+        if param_name == "length":
             Waveform.set_param(cfg["waveform"], param_name, param_value)
         elif param_name in ["gain", "freq", "phase"]:
             cfg[param_name] = param_value

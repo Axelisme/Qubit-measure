@@ -4,7 +4,6 @@ import numpy as np
 from typing_extensions import Sequence, TypeVar
 
 from zcu_tools.experiment.v2.runner import Result
-from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import PulseCfg
 
 
@@ -26,7 +25,3 @@ def merge_result_list(results: Sequence[T_Result]) -> T_Result:
             for name in results[0]
         }
     return np.asarray(results)  # type: ignore
-
-
-def make_ge_sweep() -> SweepCfg:
-    return {"start": 0.0, "stop": 1.0, "expts": 2, "step": 0.5}

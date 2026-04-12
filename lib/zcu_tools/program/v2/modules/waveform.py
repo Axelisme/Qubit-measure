@@ -167,9 +167,7 @@ class ConstWaveform(AbsWaveform):
     ) -> ConstWaveformCfg:
         wav_cfg = cast(ConstWaveformCfg, waveform_cfg)
 
-        if param_name == "on/off":
-            wav_cfg["length"] = param_value * (wav_cfg["length"] - 0.01) + 0.01
-        elif param_name == "length":
+        if param_name == "length":
             wav_cfg["length"] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")
@@ -361,12 +359,7 @@ class FlatTopWaveform(AbsWaveform):
     ) -> FlatTopWaveformCfg:
         wav_cfg = cast(FlatTopWaveformCfg, waveform_cfg)
 
-        if param_name == "on/off":
-            min_length = 0.01 + wav_cfg["raise_waveform"]["length"]
-            wav_cfg["length"] = min_length + param_value * (
-                wav_cfg["length"] - min_length
-            )
-        elif param_name == "length":
+        if param_name == "length":
             wav_cfg["length"] = param_value
         else:
             raise ValueError(f"Unknown parameter: {param_name}")

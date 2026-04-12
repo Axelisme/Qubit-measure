@@ -180,10 +180,7 @@ class TwoPulseReset(AbsReset, tag="two_pulse"):
     def set_param(
         cfg: TwoPulseResetCfg, param_name: str, param_value: Union[float, QickParam]
     ) -> TwoPulseResetCfg:
-        if param_name == "on/off":
-            Pulse.set_param(cfg["pulse1_cfg"], "on/off", param_value)
-            Pulse.set_param(cfg["pulse2_cfg"], "on/off", param_value)
-        elif param_name in ["gain1", "freq1"]:
+        if param_name in ["gain1", "freq1"]:
             Pulse.set_param(cfg["pulse1_cfg"], param_name.replace("1", ""), param_value)
         elif param_name in ["gain2", "freq2"]:
             Pulse.set_param(cfg["pulse2_cfg"], param_name.replace("2", ""), param_value)
@@ -232,7 +229,7 @@ class BathReset(AbsReset, tag="bath"):
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         res_t = self.res_pulse.run(prog, t)
-        qub_t = self.qub_pulse.run(prog, t)
+        _qub_t = self.qub_pulse.run(prog, t)
 
         end_t = res_t # pi2 pulse are right after res pulse
 
@@ -244,11 +241,7 @@ class BathReset(AbsReset, tag="bath"):
     def set_param(
         cfg: BathResetCfg, param_name: str, param_value: Union[float, QickParam]
     ) -> BathResetCfg:
-        if param_name == "on/off":
-            Pulse.set_param(cfg["qubit_tone_cfg"], "on/off", param_value)
-            Pulse.set_param(cfg["cavity_tone_cfg"], "on/off", param_value)
-            Pulse.set_param(cfg["pi2_cfg"], "on/off", param_value)
-        elif param_name in ["qub_gain", "qub_freq"]:
+        if param_name in ["qub_gain", "qub_freq"]:
             Pulse.set_param(
                 cfg["qubit_tone_cfg"], param_name.replace("qub_", ""), param_value
             )

@@ -21,10 +21,11 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -110,9 +111,6 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 _cfg = cast(T1WithToneCfg, deepcopy(cfg))
                 modules = _cfg["modules"]
 
-                ge_sweep = make_ge_sweep()
-                ge_param = sweep2param("ge", ge_sweep)
-                Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
                 Pulse.set_param(modules["probe_pulse"], "length", length_param)
 
                 return ModularProgramV2(
@@ -121,14 +119,20 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                     modules=[
                         Reset("reset", modules.get("reset")),
                         Pulse("init_pulse", modules.get("init_pulse")),
-                        Pulse("pi_pulse", modules["pi_pulse"]),
-                        Pulse("probe_pulse", modules["probe_pulse"]),
+                        Branch(
+                            "ge",
+                            Pulse("probe_pulse_g", modules["probe_pulse"]),
+                            [
+                                Pulse("pi_pulse", modules["pi_pulse"]),
+                                Pulse("probe_pulse", modules["probe_pulse"]),
+                            ],
+                        ),
                         Readout("readout", modules["readout"]),
                     ],
                     sweep=(
-                        [("length", _cfg["sweep"]["length"]), ("ge", ge_sweep)]
+                        [("length", _cfg["sweep"]["length"]), ("ge", 2)]
                         if uniform
-                        else [("ge", ge_sweep)]
+                        else [("ge", 2)]
                     ),
                 )
 

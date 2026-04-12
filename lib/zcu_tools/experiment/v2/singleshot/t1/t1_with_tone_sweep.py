@@ -25,7 +25,7 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
-from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import (
     LivePlot1D,
     LivePlot2D,
@@ -34,6 +34,7 @@ from zcu_tools.liveplot import (
 )
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -113,11 +114,8 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             cfg: T1WithToneSweepCfg = cast(T1WithToneSweepCfg, ctx.cfg)
             modules = cfg["modules"]
 
-            ge_sweep = make_ge_sweep()
             length_sweep = cfg["sweep"]["length"]
-            ge_param = sweep2param("ge", ge_sweep)
             length_param = sweep2param("length", length_sweep)
-            Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
             Pulse.set_param(modules["probe_pulse"], "length", length_param)
 
             return ModularProgramV2(
@@ -125,11 +123,17 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
-                    Pulse("pi_pulse", modules["pi_pulse"]),
-                    Pulse("probe_pulse", modules["probe_pulse"]),
+                    Branch(
+                        "ge",
+                        Pulse("probe_pulse_g", modules["probe_pulse"]),
+                        [
+                            Pulse("pi_pulse", modules["pi_pulse"]),
+                            Pulse("probe_pulse", modules["probe_pulse"]),
+                        ],
+                    ),
                     Readout("readout", modules["readout"]),
                 ],
-                sweep=[("ge", ge_sweep), ("length", length_sweep)],
+                sweep=[("ge", 2), ("length", length_sweep)],
             ).acquire(
                 soc,
                 progress=False,

@@ -12,12 +12,13 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.tracker import PCATracker
-from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
+from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -96,14 +97,11 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
 
-            ge_sweep = make_ge_sweep()
             freq_sweep = cfg["sweep"]["freq"]
             gain_sweep = cfg["sweep"]["gain"]
 
-            ge_param = sweep2param("ge", ge_sweep)
             freq_param = sweep2param("freq", freq_sweep)
             gain_param = sweep2param("gain", gain_sweep)
-            Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
             PulseReadout.set_param(modules["readout"], "freq", freq_param)
             PulseReadout.set_param(modules["readout"], "gain", gain_param)
 
@@ -112,11 +110,11 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
-                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Branch("ge", [], Pulse("pi_pulse", modules["pi_pulse"])),
                     PulseReadout("readout", modules["readout"]),
                 ],
                 sweep=[
-                    ("ge", ge_sweep),
+                    ("ge", 2),
                     ("freq", freq_sweep),
                     ("gain", gain_sweep),
                 ],

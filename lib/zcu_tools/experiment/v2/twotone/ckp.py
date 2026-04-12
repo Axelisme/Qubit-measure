@@ -20,10 +20,11 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     Join,
     ModularProgramCfg,
     ModularProgramV2,
@@ -123,13 +124,10 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             cfg: CKP_Cfg = cast(CKP_Cfg, ctx.cfg)
             modules = cfg["modules"]
 
-            ge_sweep = make_ge_sweep()
             res_freq_sweep = cfg["sweep"]["res_freq"]
             qub_freq_sweep = cfg["sweep"]["qub_freq"]
-            ge_param = sweep2param("ge", ge_sweep)
             res_freq_param = sweep2param("res_freq", res_freq_sweep)
             qub_freq_param = sweep2param("qub_freq", qub_freq_sweep)
-            Pulse.set_param(modules["pi_pulse"], "on/off", ge_param)
             Pulse.set_param(modules["res_pulse"], "freq", res_freq_param)
             Pulse.set_param(modules["qub_pulse"], "freq", qub_freq_param)
 
@@ -138,7 +136,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                 cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
-                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Branch("ge", [], Pulse("pi_pulse", modules["pi_pulse"])),
                     Join(
                         Pulse("res_pulse", modules["res_pulse"]),
                         Pulse("qub_pulse", modules["qub_pulse"]),
@@ -146,7 +144,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[
-                    ("ge", ge_sweep),
+                    ("ge", 2),
                     ("res_freq", cfg["sweep"]["res_freq"]),
                     ("qub_freq", cfg["sweep"]["qub_freq"]),
                 ],

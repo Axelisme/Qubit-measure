@@ -20,10 +20,11 @@ from zcu_tools.experiment.v2.runner import (
     run_task,
 )
 from zcu_tools.experiment.v2.tracker import PCATracker
-from zcu_tools.experiment.v2.utils import make_ge_sweep, snr_as_signal, sweep2array
+from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -32,7 +33,6 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
-    sweep2param,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
@@ -110,10 +110,6 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         freq_sweep = _cfg["sweep"]["freq"]
         gain_sweep = _cfg["sweep"]["gain"]
         len_sweep = _cfg["sweep"]["length"]
-        ge_sweep = make_ge_sweep()
-
-        modules = _cfg["modules"]
-        Pulse.set_param(modules["qub_pulse"], "on/off", sweep2param("ge", ge_sweep))
 
         optimizer = ReadoutOptimizer(freq_sweep, gain_sweep, len_sweep, num_points)
 
@@ -202,10 +198,10 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                     ctx.cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Branch("ge", [], Pulse("qub_pulse", modules["qub_pulse"])),
                         Readout("readout", modules["readout"]),
                     ],
-                    sweep=[("ge", ge_sweep)],
+                    sweep=[("ge", 2)],
                 )
                 tracker = PCATracker()
                 avg_d = prog.acquire(
