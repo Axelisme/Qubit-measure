@@ -163,14 +163,16 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
     def analyze(
         self,
         result: Optional[ZigZagSweepResult] = None,
+        find_range: tuple[Optional[float], Optional[float]] = (None, None),
     ) -> tuple[float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
 
+
         times, values, signals = result
 
-        real_signals = zigzag_signal2real(signals)
+        real_signals = zigzag_signal2real(signals) # (times , values)
         valid_cutoff = np.min(np.sum(~np.isnan(real_signals), axis=0))
 
         if valid_cutoff < 2:
@@ -179,9 +181,14 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         times = times[:valid_cutoff]
         real_signals = real_signals[:valid_cutoff]
 
-        cum_diff = np.sum(np.abs(np.diff(real_signals, axis=0)), axis=0)
-        cum_diff = gaussian_filter1d(cum_diff, sigma=1)
-        min_value = values[np.argmin(cum_diff)]
+        val_diff = np.sum(np.abs(np.diff(real_signals, axis=0)), axis=0)
+        loss = gaussian_filter1d(val_diff, sigma=1)
+
+        if find_range[0] is not None:
+            loss[values < find_range[0]] = np.nan
+        if find_range[1] is not None:
+            loss[values > find_range[1]] = np.nan
+        min_value = values[np.nanargmin(loss)]
 
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
         ax1.imshow(
@@ -192,17 +199,17 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
             interpolation="none",
         )
         ax1.set_ylabel("Number of gate")
-        ax2.plot(values, cum_diff, marker=".")
+        ax2.plot(values, loss, marker=".")
         ax2.axvline(
             x=min_value,
             color="red",
             linestyle="--",
-            label=f"x = {min_value:.3f}",
+            label=f"x = {min_value:.3f}"
         )
         ax2.grid(True)
         ax2.legend()
         ax2.set_xlabel("Sweep value (a.u.)")
-        ax2.set_ylabel("Cumulative difference (a.u.)")
+        ax2.set_ylabel("Loss (a.u.)")
 
         return min_value, fig
 

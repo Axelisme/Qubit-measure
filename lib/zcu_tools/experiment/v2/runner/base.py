@@ -70,12 +70,12 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult]):
         return Scan(name, values, before_each, task=self)
 
     def repeat(
-        self, name: str, times: int, interval: float
+        self, name: str, times: int, interval: float = 0.0
     ) -> RepeatOverTime[T_Result, T_RootResult]:
         """Repeat a task over a fixed number of times at a fixed interval."""
         from .repeat import RepeatOverTime
 
-        return RepeatOverTime(name, times, interval, task=self)
+        return RepeatOverTime(name, times, task=self, interval=interval)
 
     def auto_retry(self, max_retries: int) -> ReTryIfFail[T_Result, T_RootResult]:
         """Automatically retry a task if it fails."""

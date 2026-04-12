@@ -98,14 +98,14 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs = freqs[val_mask]
         signals = signals[val_mask]
 
-        y = rotate2real(signals).real
+        real_signals = qubfreq_signal2real(signals)
 
-        freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(freqs, y, model_type)
+        freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(freqs, real_signals, model_type)
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)
 
-        ax.plot(freqs, y, label="signal", marker="o", markersize=3)
+        ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
         if plot_fit:
             ax.plot(freqs, y_fit, label=f"fit, kappa={kappa:.1g} MHz")
             label = f"f_q = {freq:.5g} ± {freq_err:.1g} MHz"

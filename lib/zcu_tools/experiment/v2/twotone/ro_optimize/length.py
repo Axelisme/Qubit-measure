@@ -57,6 +57,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         _cfg = check_type(deepcopy(cfg), LengthCfg)
         modules = _cfg["modules"]
 
+
         readout_cfg = modules["readout"]
         lengths = sweep2array(
             _cfg["sweep"]["length"],
@@ -95,6 +96,9 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             )
             return avg_d, [tracker.covariance], [tracker.rough_median]
 
+        def average_signals(signals: list[list[NDArray[np.float64]]]) -> NDArray[np.float64]:
+            return np.mean([s[0] for s in signals], axis=0)
+
         with LivePlot1D("Readout Length (us)", "SNR") as viewer:
             signals = run_task(
                 task=Task(
@@ -114,7 +118,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             signals = np.asarray(signals)
 
         # record the last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = check_type(deepcopy(cfg), LengthCfg)
         self.last_result = (lengths, signals)
 
         return lengths, signals

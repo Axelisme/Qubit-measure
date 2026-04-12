@@ -197,7 +197,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
             warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
             _cfg["rounds"] = 1
 
-        if "reps" in _cfg:
+        if _cfg.setdefault("reps", 1) != 1:
             warnings.warn("reps will be overwritten by singleshot measurement shots")
         _cfg["reps"] = _cfg["shots"]
 

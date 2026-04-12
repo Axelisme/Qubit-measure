@@ -89,10 +89,11 @@ def fit_edelay(freqs: NDArray[np.float64], signals: NDArray[np.complex128]) -> f
     def loss_func(edelay: float) -> float:
         rot_signals = remove_edelay(freqs, signals, edelay)
         xc, yc, r0 = fit_circle_params(rot_signals.real, rot_signals.imag)
-        return np.sum(
-            (r0 - np.sqrt((rot_signals.real - xc) ** 2 + (rot_signals.imag - yc) ** 2))
-            ** 2
-        ).item()
+        norm_signals = rot_signals - (xc + 1j * yc)
+
+        circle_loss = np.sum((r0 - np.abs(norm_signals)) ** 2).item()
+        phase_loss = np.maximum(2*np.pi, np.ptp(np.unwrap(np.angle(norm_signals)))).item()
+        return circle_loss + phase_loss
 
     fit_range = 5.0 / np.ptp(freqs)
     edelays = np.linspace(-fit_range, fit_range, 1000)

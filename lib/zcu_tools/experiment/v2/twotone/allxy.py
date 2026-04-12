@@ -139,6 +139,10 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
     ) -> AllXY_Result:
         _cfg = check_type(deepcopy(cfg), AllXY_Cfg)
 
+        rounds = _cfg["rounds"]
+        _cfg["rounds"] = 1  # We'll handle the rounds in the task loop
+
+        prog_cache: dict[tuple[str, str], ModularProgramV2] = {}
         def make_task(gate1: str, gate2: str) -> Task:
 
             def measure_fn(
@@ -156,16 +160,20 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                     "Y90": modules["Y90_pulse"],
                 }
 
-                return ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("first_pulse", gate2pulse_map[gate1]),
-                        Pulse("second_pulse", gate2pulse_map[gate2]),
-                        Readout("readout", modules["readout"]),
-                    ],
-                ).acquire(
+                if (gate1, gate2) not in prog_cache:
+                    prog_cache[(gate1, gate2)] =  ModularProgramV2(
+                        soccfg,
+                        cfg,
+                        modules=[
+                            Reset("reset", modules.get("reset")),
+                            Pulse("first_pulse", gate2pulse_map[gate1]),
+                            Pulse("second_pulse", gate2pulse_map[gate2]),
+                            Readout("readout", modules["readout"]),
+                        ],
+                    )
+
+
+                return prog_cache[(gate1, gate2)].acquire(
                     soc,
                     progress=False,
                     callback=update_hook,
@@ -173,6 +181,16 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                 )
 
             return Task(measure_fn=measure_fn)
+
+        def average_round(signals: list[dict[tuple[str, str], NDArray[np.complex128]]]) -> dict[tuple[str, str], NDArray[np.complex128]]:
+            avg_signals: dict[tuple[str, str], NDArray[np.complex128]] = {}
+            for gate_pair in ALLXY_SEQUENCE:
+                gate_signals = [sig[gate_pair] for sig in signals]
+                if np.all(np.isnan(gate_signals)):
+                    avg_signals[gate_pair] = np.full_like(gate_signals[0], np.nan)
+                else:
+                    avg_signals[gate_pair] = np.nanmean(gate_signals, axis=0)
+            return avg_signals
 
         with LivePlot1D(
             xlabel="Gate",
@@ -197,16 +215,21 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                         (gate1, gate2): make_task(gate1, gate2)
                         for gate1, gate2 in ALLXY_SEQUENCE
                     }
+                ).scan(
+                    "round",
+                    list(range(rounds)),
+                    before_each=lambda *_: None,
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
-                    allxy_signal2real(ctx.root_data),
+                    allxy_signal2real(average_round(ctx.root_data)),
                 ),
             )
+            signals_dict = average_round(signals_dict)
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = check_type(deepcopy(cfg), AllXY_Cfg)
         self.last_result = signals_dict
 
         return signals_dict

@@ -156,9 +156,7 @@ class TwoPulseReset(AbsReset, tag="two_pulse"):
         pulse1_cfg = cfg["pulse1_cfg"]
         pulse2_cfg = cfg["pulse2_cfg"]
 
-        self.reset_pulse1 = Pulse(
-            name=f"{name}_pulse1", cfg=pulse1_cfg, block_mode=False
-        )
+        self.reset_pulse1 = Pulse(name=f"{name}_pulse1", cfg=pulse1_cfg)
         self.reset_pulse2 = Pulse(name=f"{name}_pulse2", cfg=pulse2_cfg)
 
     def init(self, prog: MyProgramV2) -> None:
@@ -173,9 +171,10 @@ class TwoPulseReset(AbsReset, tag="two_pulse"):
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        self.reset_pulse1.run(prog, t)
-        self.reset_pulse2.run(prog, t)
-        return t + self.total_length(prog)
+        pulse1_t = self.reset_pulse1.run(prog, t)
+        pulse2_t = self.reset_pulse2.run(prog, t)
+
+        return calc_max_length(pulse1_t, pulse2_t)
 
     @staticmethod
     def set_param(
@@ -217,31 +216,29 @@ class BathReset(AbsReset, tag="bath"):
         cavity_tone_cfg = cfg["cavity_tone_cfg"]
         pi2_cfg = cfg["pi2_cfg"]
 
-        self.qub_pulse = Pulse(
-            name=f"{name}_qub_pulse", cfg=qubit_tone_cfg, block_mode=False
-        )
         self.res_pulse = Pulse(name=f"{name}_res_pulse", cfg=cavity_tone_cfg)
+        self.qub_pulse = Pulse(name=f"{name}_qub_pulse", cfg=qubit_tone_cfg)
         self.pi2_pulse = Pulse(name=f"{name}_pi2_pulse", cfg=pi2_cfg)
 
     def init(self, prog: MyProgramV2) -> None:
-        self.qub_pulse.init(prog)
         self.res_pulse.init(prog)
+        self.qub_pulse.init(prog)
         self.pi2_pulse.init(prog)
 
     def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
-        return calc_max_length(
-            self.qub_pulse.total_length(prog),
-            self.res_pulse.total_length(prog) + self.pi2_pulse.total_length(prog),
-        )
+        return self.res_pulse.total_length(prog) + self.pi2_pulse.total_length(prog)
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        self.qub_pulse.run(prog, t)  # non-blocking
-        cur_t = self.res_pulse.run(prog, t)
-        cur_t = self.pi2_pulse.run(prog, cur_t)
+        res_t = self.res_pulse.run(prog, t)
+        qub_t = self.qub_pulse.run(prog, t)
 
-        return t + self.total_length(prog)
+        end_t = res_t # pi2 pulse are right after res pulse
+
+        end_t = self.pi2_pulse.run(prog, end_t)
+
+        return end_t
 
     @staticmethod
     def set_param(
@@ -261,8 +258,9 @@ class BathReset(AbsReset, tag="bath"):
                 param_name.replace("res_", ""),
                 param_value,
             )
-        elif param_name == "length":
+        elif param_name == "qub_length":
             Pulse.set_param(cfg["qubit_tone_cfg"], "length", param_value)
+        elif param_name == "res_length":
             Pulse.set_param(cfg["cavity_tone_cfg"], "length", param_value)
         elif param_name == "pi2_phase":
             Pulse.set_param(cfg["pi2_cfg"], "phase", param_value)

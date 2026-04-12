@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
-import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, Callable, cast
+from qick.asm_v2 import QickSweep1D
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
@@ -24,19 +24,18 @@ from zcu_tools.program.v2 import (
     Readout,
     ReadoutCfg,
     Reset,
+    BathReset,
     ResetCfg,
-    sweep2param,
 )
 from zcu_tools.program.v2.modules import BathResetCfg
 from zcu_tools.utils.datasaver import load_data, save_data
-from zcu_tools.utils.process import rotate2real
 
 # (lens, signals)
 LengthResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return rotate2real(signals).real
+    return np.abs(signals[..., 2] - signals[..., 0])**2 + np.abs(signals[..., 3] - signals[..., 1])**2  # (lengths, )
 
 
 class LengthModuleCfg(TypedDict, closed=True):
@@ -58,70 +57,86 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         soccfg,
         cfg: dict[str, Any],
         *,
-        detune: float = 0.0,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
         modules = _cfg["modules"]
 
+        rounds = _cfg["rounds"]
+        _cfg["rounds"] = 1 # implemented round loop by scan
+
         length_sweep = _cfg["sweep"]["length"]
-
         tested_reset = modules["tested_reset"]
-
         qub_lengths = sweep2array(
             length_sweep,
             "time",
             {"soccfg": soccfg, "gen_ch": tested_reset["qubit_tone_cfg"]["ch"]},
+            allow_array=True,
         )
-        res_lengths = sweep2array(
-            length_sweep,
-            "time",
-            {"soccfg": soccfg, "gen_ch": tested_reset["cavity_tone_cfg"]["ch"]},
-        )
-        if not np.allclose(qub_lengths, res_lengths, atol=1e-2):
-            warnings.warn(
-                "Qubit tone length and cavity tone length may not align! This may cause unexpected results. Please check your sweep configuration."
-            )
-
         lengths = qub_lengths  # use qubit tone length as x-axis
 
-        length_param = sweep2param("length", _cfg["sweep"]["length"])
-        phase_param = 360 * detune * length_param
-        Reset.set_param(modules["tested_reset"], "length", length_param)
-        Reset.set_param(modules["tested_reset"], "pi2_phase", phase_param)
+        orig_res_length = tested_reset["cavity_tone_cfg"]["waveform"]["length"]
+        orig_qub_length = tested_reset["qubit_tone_cfg"]["waveform"]["length"]
+        length_diff = orig_res_length - orig_qub_length
+
+
+        prog_cache: dict[float, ModularProgramV2] = {}
+        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]) -> list[NDArray[np.float64]]:
+            cfg = cast(LengthCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            tested_reset = modules["tested_reset"]
+
+            phase_param = QickSweep1D("phase", 0.0, 270.0)
+            BathReset.set_param(tested_reset, "pi2_phase", phase_param)
+
+            length = float(tested_reset["qubit_tone_cfg"]["waveform"]["length"])
+            if length not in prog_cache:
+                prog_cache[length] = ModularProgramV2(
+                    soccfg,
+                    cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        Pulse("init_pulse", modules.get("init_pulse")),
+                        BathReset("tested_reset", tested_reset),
+                        Readout("readout", modules["readout"]),
+                    ],
+                    sweep=[
+                        ("phase", 4), # (0, 90, 180, 270)
+                    ]
+                )
+
+            return prog_cache[length].acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
+
+        def update_length(i: int, ctx: TaskState, length: float) -> None:
+            modules = cast(LengthCfg, ctx.cfg)["modules"]
+            BathReset.set_param(modules["tested_reset"], "qub_length", length)
+            BathReset.set_param(modules["tested_reset"], "res_length", length + length_diff)
+
+        def average_signals(signals: list[list[NDArray[np.complex128]]]) -> NDArray[np.complex128]:
+            _signals = np.array(signals)  # shape: (rounds, lengths, 4)
+            mean_signals = np.full_like(_signals[0], fill_value=np.nan)
+            mask = np.any(np.isfinite(_signals), axis=0)
+            mean_signals[mask] = np.nanmean(_signals[:, mask], axis=0)
+            return mean_signals # (lengths, 4)
 
         with LivePlot1D("Length (us)", "Signal (a.u.)") as viewer:
             signals = run_task(
-                task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                sweep=[("length", ctx.cfg["sweep"]["length"])],
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    Pulse("init_pulse", modules.get("init_pulse")),
-                                    Reset("tested_reset", modules["tested_reset"]),
-                                    Readout("readout", modules["readout"]),
-                                ],
-                            ).acquire(
-                                soc,
-                                progress=False,
-                                callback=update_hook,
-                                **(acquire_kwargs or {}),
-                            )
-                        )
-                    ),
-                    result_shape=(len(lengths),),
-                ),
+                task=Task(measure_fn=measure_fn, result_shape=(4, ))
+                .scan("length", lengths.tolist(), before_each=update_length)
+                .repeat("rounds", rounds),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    lengths, bathreset_signal2real(ctx.root_data)
+                    lengths, bathreset_signal2real(average_signals(ctx.root_data))
                 ),
             )
+            signals = average_signals(signals)
 
         # Cache results
         self.last_cfg = _cfg
@@ -165,24 +180,25 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         save_data(
             filepath=filepath,
             x_info={"name": "Length", "unit": "s", "values": lens * 1e-6},
-            z_info={"name": "Signal", "unit": "a.u.", "values": signals},
+            y_info={"name": "Pi2 Phase", "unit": "deg", "values": [0, 90, 180, 270]},
+            z_info={"name": "Signal", "unit": "a.u.", "values": signals.T},
             comment=comment,
             tag=tag,
             **kwargs,
         )
 
     def load(self, filepath: str, **kwargs) -> LengthResult:
-        signals, lens, _ = load_data(filepath, **kwargs)
+        signals, lens, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert lens is not None
-        assert len(lens.shape) == 1 and len(signals.shape) == 1
-        assert lens.shape == signals.shape
+        assert len(lens.shape) == 1 and len(signals.shape) == 2
+        assert signals.shape == (len(lens), 2)
 
         lens = lens * 1e6  # s -> us
 
         lens = lens.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = cast(LengthCfg, cfg)
         self.last_result = (lens, signals)
 
         return lens, signals

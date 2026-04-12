@@ -127,8 +127,19 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         pOpt, _ = fitcos(phases, real_signals, fixedparams=[None, None, 1 / 360, None])
         y_fit = cosfunc(phases, *pOpt)
 
-        max_phase = phases[np.argmax(y_fit)]
-        min_phase = phases[np.argmin(y_fit)]
+        init_phase = float(pOpt[3])
+
+        max_phase = -init_phase
+        min_phase = 180 - init_phase
+
+        while abs(max_phase) > abs(max_phase - 360):
+            max_phase -= 360
+        while abs(max_phase) > abs(max_phase + 360):
+            max_phase += 360
+        while abs(min_phase) > abs(min_phase - 360):
+            min_phase -= 360
+        while abs(min_phase) > abs(min_phase + 360):
+            min_phase += 360
 
         fig, ax = plt.subplots()
         assert isinstance(fig, Figure)

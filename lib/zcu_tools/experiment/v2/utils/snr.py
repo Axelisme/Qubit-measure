@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import wraps
 
 import numpy as np
+from scipy.special import erf
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typing_extensions import Any, Callable, Optional, Sequence, TypeVar
@@ -26,21 +27,19 @@ def snr_as_signal(
     ],
     ge_axis: int = 0,
 ) -> NDArray[np.float64]:
-    avg_d, cov_d, med_d = raw
+    _avg_d, _cov_d, _med_d = raw
 
-    avg_d = avg_d[0][0]
-    cov_d = cov_d[0][0]
-    med_d = med_d[0][0]
+    avg_d:NDArray[np.float64] = _avg_d[0][0]
+    cov_d:NDArray[np.float64] = _cov_d[0][0]
+    med_d:NDArray[np.float64] = _med_d[0][0]
     assert avg_d.shape[ge_axis] == 2
     assert cov_d.shape[ge_axis] == 2
     assert med_d.shape[ge_axis] == 2
 
-    from scipy.special import erf
-
     # (ge, *sweep)
-    peak_contrast = np.abs(
+    peak_contrast:NDArray[np.float64] = np.abs(
         (np.take(med_d, 1, axis=ge_axis) - np.take(med_d, 0, axis=ge_axis)).dot([1, 1j])
-    ).real
+    )
 
     noise = np.mean(np.sqrt(np.diagonal(cov_d, axis1=-2, axis2=-1)), axis=ge_axis)
     noise_max = np.clip(np.max(noise, axis=-1), 1e-12, None)

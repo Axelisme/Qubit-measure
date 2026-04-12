@@ -21,7 +21,7 @@ def fit_qubit_freq(
 ]:
     """[freq, freq_err, kappa, kappa_err, fit_singals, (pOpt, pCov)]"""
     if type == "lor":
-        pOpt, pCov = fitlor(freqs, real_signals)
+        pOpt, pCov = fitlor(freqs, real_signals, fixedparams=[None, 0, None, None, None])
         fit_singals = lorfunc(freqs, *pOpt)
 
         freq = pOpt[3]

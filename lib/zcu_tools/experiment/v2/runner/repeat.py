@@ -63,13 +63,13 @@ class ReTryIfFail(AbsTask[T_Result, T_RootResult]):
         return self.task.get_default_result()
 
 
-class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult]):
+class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult]):
     def __init__(
         self,
         name: str,
         num_times: int,
-        interval: float,
         task: AbsTask[T_ChildResult, T_RootResult],
+        interval: float = 0.0,
     ) -> None:
         self.name = name
         self.num_times = num_times
@@ -90,12 +90,13 @@ class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult]):
                 leave=leave,
                 miniters=0.2,
                 bar_format="{desc}: {bar} {n:.1f}/{total:.1f} s",
+                disable=self.interval == 0.0,
             ),
         )
 
     def init(
         self,
-        state: TaskState[Sequence[T_ChildResult], T_RootResult],
+        state: TaskState[list[T_ChildResult], T_RootResult],
         dynamic_pbar: bool = False,
     ) -> None:
         self.dynamic_pbar = dynamic_pbar
@@ -107,7 +108,7 @@ class RepeatOverTime(AbsTask[Sequence[T_ChildResult], T_RootResult]):
 
         self.task.init(state.child(0), dynamic_pbar=dynamic_pbar)
 
-    def run(self, state: TaskState[Sequence[T_ChildResult], T_RootResult]) -> None:
+    def run(self, state: TaskState[list[T_ChildResult], T_RootResult]) -> None:
         if self.dynamic_pbar:
             self.iter_pbar, self.time_pbar = self.make_pbar(leave=False)
         else:
