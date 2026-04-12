@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import qick.asm_v2 as qasm
 from qick.asm_v2 import QickParam
-from typing_extensions import Union
+from typing_extensions import TypeAlias, Union
+
 from zcu_tools.config import config
 
 from ..base import MyProgramV2
-from .base import Module
 from ..utils import PrintTimeStamp
+from .base import Module
+
+SubModule: TypeAlias = Union[Module, list[Module]]
 
 
 class Repeat(Module):
@@ -16,9 +19,7 @@ class Repeat(Module):
     It will call delay before and inside each loop, this may cause unexpected behavior
     """
 
-    def __init__(
-        self, name: str, n: int, sub_module: Union[Module, list[Module]]
-    ) -> None:
+    def __init__(self, name: str, n: int, sub_module: SubModule) -> None:
         self.name = name
         self.n = n
 
@@ -62,9 +63,7 @@ class Repeat(Module):
 class SoftRepeat(Module):
     """Repeat a module or a list of modules n times"""
 
-    def __init__(
-        self, name: str, n: int, sub_module: Union[Module, list[Module]]
-    ) -> None:
+    def __init__(self, name: str, n: int, sub_module: SubModule) -> None:
         self.name = name
         self.n = n
 
@@ -86,3 +85,79 @@ class SoftRepeat(Module):
             for mod in self.sub_module:
                 t = mod.run(prog, t)
         return t
+
+
+class Branch(Module):
+    """Select and execute one branch per outer-loop iteration based on the loop counter.
+
+    Branch does NOT create its own loop. It relies on an external sweep loop
+    (created via add_loop) whose counter register matches ``name``. On each
+    iteration of that outer loop the counter selects the corresponding branch,
+    so branch *i* runs exactly once (at iteration *i*).
+
+    Each branch is wrapped with delay / delay_auto to flush timing, so branches
+    may have different durations. The module always returns 0.0.
+    """
+
+    def __init__(self, name: str, *branches: SubModule) -> None:
+        self.name = name
+
+        if len(branches) < 2:
+            raise ValueError("Branch requires at least 2 branches")
+
+        self.branches: list[list[Module]] = [
+            [b] if isinstance(b, Module) else list(b) for b in branches
+        ]
+
+    def init(self, prog: MyProgramV2) -> None:
+        for branch in self.branches:
+            for mod in branch:
+                mod.init(prog)
+
+    def run(
+        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+    ) -> Union[float, QickParam]:
+        prog.delay(t=t)
+        prog.delay_auto(t=0)
+
+        end_label = f"_branch_{self.name}_end"
+        n = len(self.branches)
+
+        for i, branch in enumerate(self.branches):
+            is_last = i == n - 1
+
+            if not is_last:
+                skip_label = f"_branch_{self.name}_skip_{i}"
+                prog.append_macro(
+                    qasm.CondJump(
+                        arg1=self.name, arg2=i, op="-", test="NZ", label=skip_label
+                    )
+                )
+
+            cur_t: Union[float, QickParam] = 0.0
+            for mod in branch:
+                if config.DEBUG_MODE:
+                    prog.append_macro(
+                        PrintTimeStamp(
+                            f"{mod.__class__.__name__}({mod.name})",
+                            cur_t,
+                            prefix="\t",
+                        )
+                    )
+                cur_t = mod.run(prog, cur_t)
+
+            # TODO: support branch with swept duration
+            if isinstance(cur_t, QickParam):
+                raise NotImplementedError("Branch with swept duration is not supported")
+
+            prog.delay(t=cur_t)
+
+            if not is_last:
+                prog.append_macro(qasm.Jump(label=end_label))
+                prog.append_macro(qasm.Label(label=skip_label))
+
+        prog.append_macro(qasm.Label(label=end_label))
+
+        prog.delay_auto(t=0)
+
+        return 0.0

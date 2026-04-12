@@ -7,15 +7,24 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
-from zcu_tools.experiment.v2.utils import make_ge_sweep, sweep2array
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    Branch,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -63,33 +72,37 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         _cfg = check_type(deepcopy(cfg), RabiCheckCfg)
         modules = _cfg["modules"]
 
-        wo_reset_sweep = make_ge_sweep()
-
         gains = sweep2array(
             _cfg["sweep"]["gain"],
             "gain",
             {"soccfg": soccfg, "gen_ch": modules["rabi_pulse"]["ch"]},
         )
 
-        # Attach gain sweep to initialization pulse
-        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-        reset_param = sweep2param("w/o_reset", wo_reset_sweep)
-        Pulse.set_param(modules["rabi_pulse"], "gain", gain_param)
-        Reset.set_param(modules["tested_reset"], "on/off", reset_param)
+        def measure_fn(
+            ctx: TaskState, update_hook: Optional[Callable]
+        ) -> list[NDArray[np.float64]]:
+            cfg = cast(RabiCheckCfg, ctx.cfg)
+            modules = cfg["modules"]
 
-        def measure_fn(ctx, update_hook):
-            modules = ctx.cfg["modules"]
+            # Attach gain sweep to initialization pulse
+            gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
+            Pulse.set_param(modules["rabi_pulse"], "gain", gain_param)
+
             return ModularProgramV2(
                 soccfg,
-                ctx.cfg,
+                cfg,
                 sweep=[
-                    ("w/o_reset", wo_reset_sweep),
-                    ("gain", ctx.cfg["sweep"]["gain"]),
+                    ("w/o_reset", 2),
+                    ("gain", cfg["sweep"]["gain"]),
                 ],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("rabi_pulse", modules["rabi_pulse"]),
-                    Reset("tested_reset", modules["tested_reset"]),
+                    Branch(
+                        "w/o_reset",
+                        [],
+                        Reset("tested_reset", modules["tested_reset"]),
+                    ),
                     Pulse("post_pulse", modules.get("post_pulse")),
                     Readout("readout", modules["readout"]),
                 ],
