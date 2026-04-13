@@ -12,7 +12,7 @@ from joblib import Parallel, delayed
 from numpy.typing import NDArray
 from scqubits.core.fluxonium import Fluxonium
 from tqdm.auto import tqdm
-from typing_extensions import Any, cast
+from typing_extensions import cast
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
 # parameters

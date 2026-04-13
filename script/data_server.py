@@ -1,16 +1,17 @@
 import argparse
 from pathlib import Path
+from typing import Literal
 
 from flask import Flask, request, send_file
 from zcu_tools.utils.datasaver import safe_labber_filepath
 
-KEYWORD = "Database"
-ROOT_DIR = Path(__file__).resolve().parents[1] / KEYWORD
+DATABASE_DIR_NAME = "Database"
+ROOT_DIR = Path(__file__).resolve().parents[1] / DATABASE_DIR_NAME
 DEFAULT_IP = "0.0.0.0"
 DEFAULT_PORT = 4999
 
 
-def is_allowed_file(filename: str):
+def is_allowed_file(filename: str) -> bool:
     allowed_ls = ["hdf5", "h5"]
     return "." in filename and filename.split(".")[-1].lower() in allowed_ls
 
@@ -19,13 +20,13 @@ def get_relpath(path_str: str) -> Path:
     # normalize separators to POSIX style, handling both Windows and Unix inputs
     normalized = path_str.replace("\\", "/")
     segments = [seg for seg in normalized.split("/") if seg]
-    if KEYWORD in segments:
-        idx = segments.index(KEYWORD)
+    if DATABASE_DIR_NAME in segments:
+        idx = segments.index(DATABASE_DIR_NAME)
         segments = segments[idx + 1 :]
     return Path(*segments)
 
 
-def save_file(file):
+def save_file(file) -> tuple[str, Literal[200]]:
     # determine destination relative path and full filepath
     rel = get_relpath(file.filename)
     dest = ROOT_DIR / rel
