@@ -79,7 +79,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
             prog = ModularProgramV2(
                 soccfg,
-                ctx.cfg,
+                cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Branch("ge", [], Pulse("qub_pulse", modules["qub_pulse"])),
@@ -87,7 +87,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 ],
                 sweep=[
                     ("ge", 2),
-                    ("freq", ctx.cfg["sweep"]["freq"]),
+                    ("freq", freq_sweep),
                 ],
             )
             tracker = PCATracker()
