@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import jupytext  # pyright: ignore
+import jupytext
 from typing_extensions import Optional
 
 # ------------------------------
