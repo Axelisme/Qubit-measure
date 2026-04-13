@@ -132,7 +132,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotDict])
             assert update_hook is not None
 
             len_params = sweep2param("length", len_sweep)
-            Pulse.set_param(modules["rabi_pulse"], "length", len_params)
+            modules["rabi_pulse"].set_param("length", len_params)
 
             prog = ModularProgramV2(
                 ctx.env["soccfg"],
@@ -189,7 +189,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotDict])
         real_signals = lenrabi_signal2real(ctx.value["raw_signals"])
 
         self.lengths = sweep2array(
-            len_sweep, "time", {"soccfg": ctx.env["soccfg"], "gen_ch": rabi_pulse["ch"]}
+            len_sweep, "time", {"soccfg": ctx.env["soccfg"], "gen_ch": rabi_pulse.ch}
         )
 
         pi_len, pi2_len, rabi_freq, mean_err, fit_signals = auto_fit_lenrabi(
@@ -208,7 +208,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotDict])
         if success:
             info: FluxDepInfoDict = ctx.env["info"]
 
-            cur_pi_product = pi_len * rabi_pulse["gain"]
+            cur_pi_product = pi_len * rabi_pulse.gain
             prev_pi_product = info.last.get("smooth_pi_product", cur_pi_product)
             num_step = max(
                 1, info["flux_idx"] - info.last.get("lenrabi_success_idx", 0)

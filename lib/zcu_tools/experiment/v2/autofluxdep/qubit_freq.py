@@ -99,10 +99,9 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
 
             detune_sweep = cfg["sweep"]["detune"]
             detune_param = sweep2param("detune", detune_sweep)
-            Pulse.set_param(
-                modules["qub_pulse"],
+            modules["qub_pulse"].set_param(
                 "freq",
-                modules["qub_pulse"]["freq"] + detune_param,
+                modules["qub_pulse"].freq + detune_param,
             )
 
             return (
@@ -153,12 +152,12 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         cfg = check_type(cfg_temp, QubitFreqCfg)
         modules = cfg["modules"]
 
-        center_freq = cast(float, modules["qub_pulse"]["freq"])
+        center_freq = cast(float, modules["qub_pulse"].freq)
 
         self.detunes = sweep2array(
             cfg["sweep"]["detune"],
             "freq",
-            {"soccfg": ctx.env["soccfg"], "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": ctx.env["soccfg"], "gen_ch": modules["qub_pulse"].ch},
         )
 
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
@@ -196,7 +195,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             success = False
 
         if success:
-            cur_factor = kappa / float(cfg["modules"]["qub_pulse"]["gain"])
+            cur_factor = kappa / float(cfg["modules"]["qub_pulse"].gain)
             prev_factor = info.last.get("qfw_factor", cur_factor)
             num_step = max(
                 1, info["flux_idx"] - info.last.get("qubfreq_success_idx", 0)

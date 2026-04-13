@@ -64,7 +64,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
         def measure_fn(ctx:TaskState, update_hook: Optional[Callable[[int, RawResult], None]]) -> RawResult:
@@ -75,7 +75,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
             freq_sweep = cfg["sweep"]["freq"]
             freq_param = sweep2param("freq", freq_sweep)
-            Readout.set_param(modules["readout"], "freq", freq_param)
+            modules["readout"].set_param("freq", freq_param)
 
             prog = ModularProgramV2(
                 soccfg,

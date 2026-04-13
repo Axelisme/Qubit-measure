@@ -123,13 +123,13 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
         min_interval = np.min(length_ranges[:, 0] / (2 * times))
         if min_interval < 0.5 * (  # the first and last delays are half of the interval
-            pi2_pulse["waveform"]["length"] + pi_pulse["waveform"]["length"]
+            pi2_pulse.waveform.length + pi_pulse.waveform.length
         ):
             raise ValueError(
                 "The interval is too short to measure the CPMG signal",
                 f"min_interval: {min_interval:.2g}, ",
-                f"pi2_pulse_length: {pi2_pulse['waveform']['length']:.2g}, ",
-                f"pi_pulse_length: {pi_pulse['waveform']['length']:.2g}",
+                f"pi2_pulse_length: {pi2_pulse.waveform.length:.2g}, ",
+                f"pi_pulse_length: {pi_pulse.waveform.length:.2g}",
             )
 
         with LivePlot2DwithLine(
@@ -150,7 +150,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 pi2_pulse = modules["pi2_pulse"]
                 pi_pulse = modules["pi_pulse"]
                 dpulse_len = (
-                    pi_pulse["waveform"]["length"] - pi2_pulse["waveform"]["length"]
+                    pi_pulse.waveform.length - pi2_pulse.waveform.length
                 )
 
                 length_sweep = cfg["sweep"]["length"]
@@ -186,10 +186,9 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                             Delay("last_delay", interval + 0.5 * dpulse_len),
                             Pulse(
                                 name="pi2_pulse2",
-                                cfg={  # type: ignore
-                                    **pi2_pulse,
-                                    "phase": pi2_pulse["phase"] + detune_param,
-                                },
+                                cfg=pi2_pulse.with_updates(
+                                    phase=pi2_pulse.phase + detune_param
+                                ),
                             ),
                             Readout("readout", modules["readout"]),
                         ],

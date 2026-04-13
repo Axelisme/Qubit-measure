@@ -66,18 +66,18 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         gains1 = sweep2array(
             _cfg["sweep"]["gain1"],
             "gain",
-            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse1_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": reset_cfg.pulse1_cfg.ch},
         )
         gains2 = sweep2array(
             _cfg["sweep"]["gain2"],
             "gain",
-            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse2_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
         )
 
         gain1_param = sweep2param("gain1", _cfg["sweep"]["gain1"])
         gain2_param = sweep2param("gain2", _cfg["sweep"]["gain2"])
-        TwoPulseReset.set_param(modules["tested_reset"], "gain1", gain1_param)
-        TwoPulseReset.set_param(modules["tested_reset"], "gain2", gain2_param)
+        modules["tested_reset"].set_param("gain1", gain1_param)
+        modules["tested_reset"].set_param("gain2", gain2_param)
 
         def dual_reset_gain_signal2real(signals: NDArray) -> np.ndarray:
             # Choose reference point based on sweep direction (use minimum power point)

@@ -69,12 +69,12 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         gains = sweep2array(
             _cfg["sweep"]["gain"],
             "gain",
-            {"soccfg": soccfg, "gen_ch": reset_cfg["cavity_tone_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
             "freq",
-            {"soccfg": soccfg, "gen_ch": reset_cfg["cavity_tone_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
 
 
@@ -88,11 +88,11 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
             freq_sweep = cfg["sweep"]["freq"]
             gain_param = sweep2param("gain", gain_sweep)
             freq_param = sweep2param("freq", freq_sweep)
-            BathReset.set_param(tested_reset, "res_gain", gain_param)
-            BathReset.set_param(tested_reset, "res_freq", freq_param)
+            tested_reset.set_param("res_gain", gain_param)
+            tested_reset.set_param("res_freq", freq_param)
 
-            phase_param = QickSweep1D("phase", 0.0, 270.0) + tested_reset["pi2_cfg"]["phase"]
-            BathReset.set_param(tested_reset, "pi2_phase", phase_param)
+            phase_param = QickSweep1D("phase", 0.0, 270.0) + tested_reset.pi2_cfg.phase
+            tested_reset.set_param("pi2_phase", phase_param)
 
             return ModularProgramV2(
                 soccfg,

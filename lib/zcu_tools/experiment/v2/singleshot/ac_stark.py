@@ -104,7 +104,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["stark_pulse2"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["stark_pulse2"].ch},
         )
         gains = np.sqrt(
             np.linspace(
@@ -112,11 +112,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             )
         )
         gains = sweep2array(
-            gains, "gain", {"soccfg": soccfg, "gen_ch": modules["stark_pulse1"]["ch"]}
+            gains, "gain", {"soccfg": soccfg, "gen_ch": modules["stark_pulse1"].ch}
         )
 
         freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        Pulse.set_param(modules["stark_pulse2"], "freq", freq_param)
+        modules["stark_pulse2"].set_param("freq", freq_param)
 
         fig, axs = make_plot_frame(2, 2, figsize=(8, 6))
 
@@ -156,7 +156,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         ) as viewer:
 
             def update_fn(i, ctx, gain) -> None:
-                Pulse.set_param(ctx.cfg["modules"]["stark_pulse1"], "gain", gain)
+                ctx.cfg["modules"]["stark_pulse1"].set_param("gain", gain)
                 ctx.env_dict["idx"] = i
 
             def plot_fn(ctx) -> None:

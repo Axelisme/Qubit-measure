@@ -62,6 +62,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
     ) -> tuple[T2RamseyResult, float]:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2RamseyCfg)
+        modules = _cfg["modules"]
 
         length_sweep = _cfg["sweep"]["length"]
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
@@ -73,7 +74,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                 "phase",
                 {
                     "soccfg": soccfg,
-                    "gen_ch": cfg["modules"]["pi2_pulse"]["ch"],
+                    "gen_ch": modules["pi2_pulse"].ch,
                     "scaler": 360 * detune,
                 },
             )
@@ -98,10 +99,9 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                     Delay("t2_delay", delay=length_param),
                     Pulse(
                         name="pi2_pulse2",
-                        cfg={
-                            **modules["pi2_pulse"],
-                            "phase": modules["pi2_pulse"]["phase"] + detune_param,
-                        },
+                        cfg=modules["pi2_pulse"].with_updates(
+                            phase=modules["pi2_pulse"].phase + detune_param
+                        ),
                     ),
                     Readout("readout", modules["readout"]),
                 ],

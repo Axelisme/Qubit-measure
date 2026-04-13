@@ -81,7 +81,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         length_sweep = _cfg["sweep"]["length"]
 
         # uniform in square space
-        lf_ch = modules["flux_pulse"]["ch"]
+        lf_ch = modules["flux_pulse"].ch
         gains = sweep2array(gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": lf_ch})
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
@@ -97,8 +97,8 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
             gain_param = sweep2param("gain", gain_sweep)
             length_param = sweep2param("length", length_sweep)
-            Pulse.set_param(modules["flux_pulse"], "gain", gain_param)
-            Pulse.set_param(modules["flux_pulse"], "length", length_param)
+            modules["flux_pulse"].set_param("gain", gain_param)
+            modules["flux_pulse"].set_param("length", length_param)
 
             return ModularProgramV2(
                 soccfg,

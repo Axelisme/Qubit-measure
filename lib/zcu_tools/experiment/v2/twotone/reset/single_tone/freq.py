@@ -69,11 +69,11 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
             "freq",
-            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": reset_cfg.pulse_cfg.ch},
         )
 
         freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        PulseReset.set_param(reset_cfg, "freq", freq_param)
+        reset_cfg.set_param("freq", freq_param)
 
         with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(

@@ -73,17 +73,17 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs1 = sweep2array(
             freq1_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse1_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": reset_cfg.pulse1_cfg.ch},
         )
         freqs2 = sweep2array(
             freq2_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse2_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
             allow_array=True,
         )
 
         freq1_param = sweep2param("freq1", freq1_sweep)
-        TwoPulseReset.set_param(modules["tested_reset"], "freq1", freq1_param)
+        modules["tested_reset"].set_param("freq1", freq1_param)
 
         with LivePlot2DwithLine(
             "Frequency1 (MHz)", "Frequency2 (MHz)", line_axis=0
@@ -117,9 +117,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 ).scan(
                     "freq2",
                     freqs2.tolist(),
-                    before_each=lambda _, ctx, freq2: Reset.set_param(
-                        ctx.cfg["modules"]["tested_reset"], "freq2", freq2
-                    ),
+                    before_each=lambda _, ctx, freq2: ctx.cfg["modules"][
+                        "tested_reset"
+                    ].set_param("freq2", freq2),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
@@ -149,18 +149,18 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs1 = sweep2array(
             _cfg["sweep"]["freq1"],
             "freq",
-            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse1_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": reset_cfg.pulse1_cfg.ch},
         )
         freqs2 = sweep2array(
             _cfg["sweep"]["freq2"],
             "freq",
-            {"soccfg": soccfg, "gen_ch": reset_cfg["pulse2_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
         )
 
         freq1_param = sweep2param("freq1", _cfg["sweep"]["freq1"])
         freq2_param = sweep2param("freq2", _cfg["sweep"]["freq2"])
-        TwoPulseReset.set_param(modules["tested_reset"], "freq1", freq1_param)
-        TwoPulseReset.set_param(modules["tested_reset"], "freq2", freq2_param)
+        modules["tested_reset"].set_param("freq1", freq1_param)
+        modules["tested_reset"].set_param("freq2", freq2_param)
 
         with LivePlot2D("Frequency1 (MHz)", "Frequency2 (MHz)") as viewer:
             signals = run_task(

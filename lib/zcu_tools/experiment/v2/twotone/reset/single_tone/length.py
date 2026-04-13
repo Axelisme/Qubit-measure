@@ -9,17 +9,17 @@ from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
     Any,
+    Callable,
     NotRequired,
     Optional,
     TypeAlias,
     TypedDict,
-    Callable,
     cast,
 )
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
@@ -74,10 +74,10 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
 
         length_sweep = _cfg["sweep"]["length"]
 
-        pulse_cfg = modules["tested_reset"]["pulse_cfg"]
+        pulse_cfg = modules["tested_reset"].pulse_cfg
 
         lengths = sweep2array(
-            length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse_cfg["ch"])
+            length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse_cfg.ch)
         )
 
         def measure_fn(
@@ -89,12 +89,12 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             length_sweep = cfg["sweep"]["length"]
             length_param = sweep2param("length", length_sweep)
 
-            PulseReset.set_param(modules["tested_reset"], "length", length_param)
+            modules["tested_reset"].set_param("length", length_param)
 
             return ModularProgramV2(
                 soccfg,
-                ctx.cfg,
-                sweep=[("length", ctx.cfg["sweep"]["length"])],
+                cfg,
+                sweep=[("length", length_sweep)],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("init_pulse", modules.get("init_pulse")),

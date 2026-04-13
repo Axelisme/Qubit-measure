@@ -83,7 +83,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
                 "phase",
                 {
                     "soccfg": soccfg,
-                    "gen_ch": cfg["modules"]["pi2_pulse"]["ch"],
+                    "gen_ch": cfg["modules"]["pi2_pulse"].ch,
                     "scaler": 360 * detune,
                 },
             )
@@ -110,10 +110,9 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
                     Delay("t2e_delay2", delay=0.5 * length_param),
                     Pulse(
                         name="pi2_pulse2",
-                        cfg={
-                            **modules["pi2_pulse"],
-                            "phase": modules["pi2_pulse"]["phase"] + detune_param,
-                        },
+                        cfg=modules["pi2_pulse"].with_updates(
+                            phase=modules["pi2_pulse"].phase + detune_param
+                        ),
                     ),
                     Readout("readout", modules["readout"]),
                 ],

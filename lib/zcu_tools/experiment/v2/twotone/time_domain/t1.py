@@ -312,11 +312,11 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         lengths = sweep2array(
             _cfg["sweep"]["length"],
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["test_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["test_pulse"].ch},
         )
 
         length_param = sweep2param("length", _cfg["sweep"]["length"])
-        Pulse.set_param(modules["test_pulse"], "length", length_param)
+        modules["test_pulse"].set_param("length", length_param)
 
         with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
@@ -467,17 +467,17 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["test_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["test_pulse"].ch},
             allow_array=True,
         )
         lengths = sweep2array(
             _cfg["sweep"]["length"],
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["test_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["test_pulse"].ch},
         )
 
         length_param = sweep2param("length", _cfg["sweep"]["length"])
-        Pulse.set_param(modules["test_pulse"], "length", length_param)
+        modules["test_pulse"].set_param("length", length_param)
 
         with LivePlot2DwithLine(
             "gain", "Time (us)", line_axis=1, num_lines=5
@@ -510,9 +510,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 ).scan(
                     "gain",
                     gains.tolist(),
-                    before_each=lambda _, ctx, gain: Pulse.set_param(
-                        ctx.cfg["modules"]["test_pulse"], "gain", gain
-                    ),
+                    before_each=lambda _, ctx, gain: ctx.cfg["modules"]["test_pulse"].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

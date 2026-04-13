@@ -48,11 +48,11 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         gains = sweep2array(
             _cfg["sweep"]["gain"],
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
         gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-        Pulse.set_param(modules["qub_pulse"], "gain", gain_param)
+        modules["qub_pulse"].set_param("gain", gain_param)
 
         with LivePlot1D("Pulse gain", "Amplitude") as viewer:
             signals = run_task(

@@ -1,4 +1,4 @@
-from .helper import merge_result_list, set_pulse_freq
+from .helper import merge_result_list
 from .round_zcu import (
     round_sweep_dict,
     round_zcu_freq,
@@ -12,7 +12,6 @@ from .snr import estimate_snr, snr_as_signal, wrap_earlystop_check
 __all__ = [
     # helper
     "merge_result_list",
-    "set_pulse_freq",
     # round zcu
     "round_sweep_dict",
     "sweep2array",

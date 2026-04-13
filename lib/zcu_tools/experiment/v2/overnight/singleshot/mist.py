@@ -318,7 +318,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
 
             gain_sweep = cfg["sweep"]["gain"]
             gain_param = sweep2param("gain", gain_sweep)
-            Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
+            modules["probe_pulse"].set_param("gain", gain_param)
 
             return ModularProgramV2(
                 ctx.env["soccfg"],
@@ -354,7 +354,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             "gain",
             {
                 "soccfg": ctx.env["soccfg"],
-                "gen_ch": self.cfg["modules"]["probe_pulse"]["ch"],
+                "gen_ch": self.cfg["modules"]["probe_pulse"].ch,
             },
         )
         self.task.init(ctx.child("populations"), dynamic_pbar=dynamic_pbar)  # type: ignore

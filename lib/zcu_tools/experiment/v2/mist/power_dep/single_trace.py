@@ -75,7 +75,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         gains = sweep2array(
             _cfg["sweep"]["gain"],
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
         )
 
         def measure_fn(
@@ -87,7 +87,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
             gain_sweep = cfg["sweep"]["gain"]
             gain_param = sweep2param("gain", gain_sweep)
-            Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
+            modules["probe_pulse"].set_param("gain", gain_param)
 
             return ModularProgramV2(
                 soccfg,

@@ -81,7 +81,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
             lengths = sweep2array(
                 length_sweep,
                 "time",
-                {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+                {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
             )
         else:
             if isinstance(length_sweep, dict):
@@ -96,7 +96,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
             lengths = sweep2array(
                 lengths,
                 "time",
-                {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+                {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
                 allow_array=True,
             )
             lengths = np.unique(lengths)
@@ -111,7 +111,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 _cfg = cast(T1WithToneCfg, deepcopy(cfg))
                 modules = _cfg["modules"]
 
-                Pulse.set_param(modules["probe_pulse"], "length", length_param)
+                modules["probe_pulse"].set_param("length", length_param)
 
                 return ModularProgramV2(
                     soccfg,

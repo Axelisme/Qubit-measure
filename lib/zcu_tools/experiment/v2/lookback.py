@@ -46,7 +46,7 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
         prog = OneToneProgram(soccfg, _cfg)
         Ts = (
             prog.get_time_axis(ro_index=0)
-            + _cfg["modules"]["readout"]["ro_cfg"]["trig_offset"]
+            + _cfg["modules"]["readout"].ro_cfg.trig_offset
         )
         assert isinstance(Ts, np.ndarray)
 

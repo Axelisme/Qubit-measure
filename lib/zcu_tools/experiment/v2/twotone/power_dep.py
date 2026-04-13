@@ -47,13 +47,13 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
             allow_array=True,
         )
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
 
@@ -63,7 +63,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
             freq_sweep = cfg["sweep"]["freq"]
             freq_param = sweep2param("freq", freq_sweep)
-            Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
+            modules["qub_pulse"].set_param("freq", freq_param)
 
             return TwoToneProgram(
                         soccfg,
@@ -84,7 +84,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     measure_fn=measure_fn,
                     result_shape=(len(freqs), ),
                 ).scan(
-                    "gain", gains.tolist(), before_each=lambda i, ctx, gain: Pulse.set_param(ctx.cfg["modules"]["qub_pulse"], "gain", gain)
+                    "gain", gains.tolist(), before_each=lambda i, ctx, gain: ctx.cfg["modules"]["qub_pulse"].set_param("gain", gain)
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

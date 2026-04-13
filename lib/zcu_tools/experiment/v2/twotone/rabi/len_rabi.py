@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, Optional, TypeAlias, cast, Callable
+from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
@@ -43,7 +43,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)
         modules = _cfg["modules"]
 
-        assert modules["qub_pulse"]["waveform"]["style"] in ["const", "flat_top"], (
+        assert modules["qub_pulse"].waveform.style in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
 
@@ -51,7 +51,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         lengths = sweep2array(
             _cfg["sweep"]["length"],
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
         def measure_fn(ctx: TaskState, update_hook: Optional[Callable]) -> list[NDArray[np.float64]]:
@@ -60,12 +60,10 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
             length_sweep = cfg["sweep"]["length"]
             length_param = sweep2param("length", length_sweep)
-            Pulse.set_param(modules["qub_pulse"], "length", length_param)
+            modules["qub_pulse"].set_param("length", length_param)
 
             return TwoToneProgram(
-                soccfg,
-                ctx.cfg,
-                sweep=[("length", ctx.cfg["sweep"]["length"])],
+                soccfg, cfg, sweep=[("length", length_sweep)]
             ).acquire(
                 soc,
                 progress=False,
@@ -106,7 +104,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         lengths = sweep2array(
             length_sweep,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
         lengths = np.unique(lengths)  # remove duplicates
 
@@ -115,7 +113,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             cfg = cast(LenRabiCfg, ctx.cfg)
             modules = cfg["modules"]
 
-            length = float(modules["qub_pulse"]["waveform"]["length"])
+            length = float(modules["qub_pulse"].waveform.length)
 
             if length not in prog_cache:
                 prog_cache[length] = TwoToneProgram(soccfg, cfg)
@@ -139,9 +137,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 task=Task(measure_fn=measure_fn).scan(
                     "length",
                     lengths.tolist(),
-                    before_each=lambda _, ctx, length: Pulse.set_param(
-                        ctx.cfg["modules"]["qub_pulse"], "length", length
-                    ),
+                    before_each=lambda _, ctx, length: ctx.cfg["modules"]["qub_pulse"].set_param("length", length),
                 ).scan(
                     "round", # implement round loop here
                     list(range(rounds)),
@@ -169,11 +165,11 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LenRabiResult:
         modules = cfg["modules"]
-        qub_waveform = modules["qub_pulse"]["waveform"]
+        qub_waveform = modules["qub_pulse"].waveform
 
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
 
-        if qub_waveform["style"] in ["const", "flat_top"]:
+        if qub_waveform.style in ["const", "flat_top"]:
             # use hard sweep for flat top pulse
             return self._run_for_flat(
                 soc, soccfg, cfg, acquire_kwargs=acquire_kwargs

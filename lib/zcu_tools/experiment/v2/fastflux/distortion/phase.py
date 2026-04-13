@@ -80,7 +80,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
 
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         phases = sweep2array(
-            phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse["ch"]}
+            phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse.ch}
         )
 
         def measure_fn(
@@ -107,10 +107,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                             Pulse("pi2_pulse1", modules["pi2_pulse"]),
                             Pulse(
                                 name="pi2_pulse2",
-                                cfg={
-                                    **modules["pi2_pulse"],
-                                    "phase": phase_param,
-                                },
+                                cfg=modules["pi2_pulse"].with_updates(phase=phase_param),
                             ),
                         ],
                         SoftDelay("readout_t", cfg["readout_t"]),
@@ -149,7 +146,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         modules = cfg["modules"]
 
         flux_pulse = modules["flux_pulse"]
-        pi2_len = float(modules["pi2_pulse"]["waveform"]["length"])
+        pi2_len = float(modules["pi2_pulse"].waveform.length)
 
         if result is None:
             result = self.last_result
@@ -175,8 +172,8 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
             init_phases[sort_idxs[int(len(init_phases) * 0.8) :]]
         )
 
-        start_t = float(flux_pulse["pre_delay"])
-        end_t = start_t + float(flux_pulse["waveform"]["length"])
+        start_t = float(flux_pulse.pre_delay)
+        end_t = start_t + float(flux_pulse.waveform.length)
 
         ideal_lengths = np.linspace(lengths[0], lengths[-1], 1000)
         ideal_curve = np.full_like(ideal_lengths, mean_background)

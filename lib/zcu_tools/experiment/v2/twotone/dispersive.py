@@ -74,11 +74,11 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
         freq_param = sweep2param("freq", freq_sweep)
-        Readout.set_param(modules["readout"], "freq", freq_param)
+        modules["readout"].set_param("freq", freq_param)
 
         with LivePlot1D(
             "Frequency (MHz)", "Amplitude", segment_kwargs=dict(num_lines=2)

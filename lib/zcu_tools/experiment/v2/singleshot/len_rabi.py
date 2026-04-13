@@ -42,18 +42,18 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)  # avoid in-place modification
         modules = _cfg["modules"]
 
-        assert modules["qub_pulse"]["waveform"]["style"] in ["const", "flat_top"], (
+        assert modules["qub_pulse"].waveform.style in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
 
         lengths = sweep2array(
             _cfg["sweep"]["length"],
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
         length_param = sweep2param("length", _cfg["sweep"]["length"])
-        Pulse.set_param(modules["qub_pulse"], "length", length_param)
+        modules["qub_pulse"].set_param("length", length_param)
 
         with LivePlot1D(
             "Length (us)",

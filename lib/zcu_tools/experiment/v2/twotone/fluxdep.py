@@ -54,12 +54,12 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
 
         dev_values = sweep2array(value_sweep, allow_array=True)
         freqs = sweep2array(
-            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]}
+            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch}
         )
 
         # Frequency is swept by FPGA (hard sweep)
         freq_param = sweep2param("freq", freq_sweep)
-        Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
+        modules["qub_pulse"].set_param("freq", freq_param)
 
         with LivePlot2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2

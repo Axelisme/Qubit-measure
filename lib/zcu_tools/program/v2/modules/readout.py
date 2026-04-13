@@ -1,54 +1,121 @@
 from __future__ import annotations
 
 import warnings
+from abc import abstractmethod
 from copy import deepcopy
 
 from qick.asm_v2 import QickParam
 from typing_extensions import (
     TYPE_CHECKING,
     Any,
-    NotRequired,
-    Type,
+    Callable,
+    ClassVar,
+    Literal,
+    Optional,
+    Self,
     TypeAlias,
-    TypeVar,
     Union,
-    cast,
 )
 
 from ..base import MyProgramV2
 from .base import Module, ModuleCfg
-from .pulse import Pulse, PulseCfg, Waveform
+from .pulse import Pulse, PulseCfg
 from .util import calc_max_length, round_timestamp
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
 
 
-class DirectReadoutCfg(ModuleCfg, closed=True):
+@ModuleCfg.register_handler("readout/direct")
+class DirectReadoutCfg(ModuleCfg):
+    type: Literal["readout/direct"] = "readout/direct"
     ro_ch: int
     ro_length: Union[float, QickParam]
     ro_freq: Union[float, QickParam]
-    trig_offset: Union[float, QickParam]
+    trig_offset: Union[float, QickParam] = 0.0
+    gen_ch: Optional[int] = None
 
-    gen_ch: NotRequired[int]
+    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+        if name == "ro_freq":
+            self.ro_freq = value
+        elif name == "ro_length":
+            self.ro_length = value
+        else:
+            raise ValueError(f"Unknown parameter: {name}")
 
 
-class PulseReadoutCfg(ModuleCfg, closed=True):
+@ModuleCfg.register_handler("readout/pulse")
+class PulseReadoutCfg(ModuleCfg):
+    type: Literal["readout/pulse"] = "readout/pulse"
     pulse_cfg: PulseCfg
     ro_cfg: DirectReadoutCfg
+
+    @classmethod
+    def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
+        raw_cfg = deepcopy(raw_cfg)
+
+        pulse_cfg = raw_cfg.get("pulse_cfg")
+        if isinstance(pulse_cfg, str):
+            raw_cfg["pulse_cfg"] = ml.get_module(pulse_cfg)
+        ro_cfg = raw_cfg.get("ro_cfg")
+        if isinstance(ro_cfg, str):
+            raw_cfg["ro_cfg"] = ml.get_module(ro_cfg)
+
+        # auto derive ro_ch from pulse_cfg.ch
+        if isinstance(pulse_cfg := raw_cfg.get("pulse_cfg"), dict):
+            ch = pulse_cfg.get("ch")
+            if isinstance(ro_cfg := raw_cfg.get("ro_cfg"), dict):
+                ro_cfg.setdefault("ro_ch", ch)
+
+        return cls.model_validate(raw_cfg)
+
+    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+        if name == "gain":
+            self.pulse_cfg.set_param("gain", value)
+        elif name == "freq":
+            self.pulse_cfg.set_param("freq", value)
+            self.ro_cfg.set_param("ro_freq", value)
+        elif name == "ro_freq":
+            self.ro_cfg.set_param("ro_freq", value)
+        elif name == "length":
+            self.pulse_cfg.set_param("length", value)
+        elif name == "ro_length":
+            self.ro_cfg.set_param("ro_length", value)
+        else:
+            raise ValueError(f"Unknown parameter: {name}")
 
 
 ReadoutCfg: TypeAlias = Union[PulseReadoutCfg, DirectReadoutCfg]
 
-T_ReadoutCfg = TypeVar("T_ReadoutCfg", bound=ReadoutCfg)
+
+class AbsReadout(Module):
+    @abstractmethod
+    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]: ...
 
 
-class AbsReadout(Module, tag="readout"): ...
+class Readout(AbsReadout):
+    _supported_readout: ClassVar[dict[str, type["AbsReadout"]]] = {}
 
-
-class Readout(Module):
     def __init__(self, name: str, cfg: ReadoutCfg) -> None:
-        self.readout = cast(Readout, Module.parse(cfg["type"])(name, cfg))
+        cfg_type = cfg.type
+        if cfg_type not in self._supported_readout:
+            raise ValueError(f"Unknown readout type: {cfg_type}")
+        self.readout = self._supported_readout[cfg_type](name, cfg)
+
+    @classmethod
+    def register_readout(
+        cls, id_name: str
+    ) -> Callable[[type["AbsReadout"]], type["AbsReadout"]]:
+        if id_name in cls._supported_readout:
+            raise ValueError(
+                f"Readout {id_name} already registered by {cls._supported_readout[id_name].__name__}"
+            )
+
+        def decorator(sub_cls: type["AbsReadout"]) -> type["AbsReadout"]:
+            cls._supported_readout[id_name] = sub_cls
+            return sub_cls
+
+        return decorator
 
     @property
     def name(self) -> str:
@@ -65,118 +132,52 @@ class Readout(Module):
     ) -> Union[float, QickParam]:
         return self.readout.run(prog, t)
 
-    @staticmethod
-    def set_param(
-        cfg: T_ReadoutCfg, param_name: str, param_value: Union[float, QickParam]
-    ) -> T_ReadoutCfg:
-        return cast(Type[Readout], Module.parse(cfg["type"])).set_param(
-            cfg, param_name, param_value
-        )
-
-    @staticmethod
-    def auto_fill(cfg: Union[str, dict[str, Any]], ml: ModuleLibrary) -> ReadoutCfg:
-        if isinstance(cfg, str):
-            cfg = ml.get_module(cfg)
-
-        return cast(Type[Readout], Module.parse(cfg["type"])).auto_fill(cfg, ml)
-
-
-class DirectReadout(AbsReadout, tag="direct"):
+@Readout.register_readout("readout/direct")
+class DirectReadout(AbsReadout):
     def __init__(self, name: str, cfg: DirectReadoutCfg) -> None:
         self.name = name
-        self.cfg = cfg
+        self.cfg = deepcopy(cfg)
 
     def init(self, prog: MyProgramV2) -> None:
-        prog.declare_readout(ch=self.cfg["ro_ch"], length=self.cfg["ro_length"])
-
+        prog.declare_readout(ch=self.cfg.ro_ch, length=self.cfg.ro_length)
         prog.add_readoutconfig(
-            ch=self.cfg["ro_ch"],
+            ch=self.cfg.ro_ch,
             name=self.name,
-            freq=self.cfg["ro_freq"],
-            gen_ch=self.cfg.get("gen_ch"),
+            freq=self.cfg.ro_freq,
+            gen_ch=self.cfg.gen_ch,
         )
 
     def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
         return round_timestamp(
             prog,
-            round_timestamp(prog, self.cfg["trig_offset"])
-            + round_timestamp(prog, self.cfg["ro_length"], ro_ch=self.cfg["ro_ch"]),
+            round_timestamp(prog, self.cfg.trig_offset)
+            + round_timestamp(prog, self.cfg.ro_length, ro_ch=self.cfg.ro_ch),
         )
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        ro_ch = self.cfg["ro_ch"]
-        trig_offset = self.cfg["trig_offset"]
-
+        ro_ch = self.cfg.ro_ch
+        trig_offset = self.cfg.trig_offset
         prog.send_readoutconfig(ro_ch, self.name, t=t)  # type: ignore
         prog.trigger([ro_ch], t=t + trig_offset)
+        return t
 
-        return t  # always non-blocking
-
-    @classmethod
-    def set_param(
-        cls,
-        cfg: DirectReadoutCfg,
-        param_name: str,
-        param_value: Union[float, QickParam],
-    ) -> DirectReadoutCfg:
-        if param_name == "ro_freq":
-            cfg["ro_freq"] = param_value
-        elif param_name == "ro_length":
-            cfg["ro_length"] = param_value
-        else:
-            raise ValueError(f"Unknown parameter: {param_name}")
-
-        return cfg
-
-    @staticmethod
-    def auto_fill(
-        cfg: Union[str, dict[str, Any]], ml: ModuleLibrary
-    ) -> DirectReadoutCfg:
-        if isinstance(cfg, str):
-            cfg = ml.get_module(cfg)
-
-        cfg["type"] = "readout/direct"
-        cfg.setdefault("trig_offset", 0.0)
-
-        return cast(DirectReadoutCfg, cfg)
-
-
-class PulseReadout(AbsReadout, tag="pulse"):
+@Readout.register_readout("readout/pulse")
+class PulseReadout(AbsReadout):
     def __init__(self, name: str, cfg: PulseReadoutCfg) -> None:
         self.name = name
-        self.pulse_cfg = deepcopy(cfg["pulse_cfg"])
-        self.ro_cfg = deepcopy(cfg["ro_cfg"])
-
-        ro_ch = self.pulse_cfg.setdefault("ro_ch", self.ro_cfg["ro_ch"])
-        if ro_ch != self.ro_cfg["ro_ch"]:
+        self.cfg = deepcopy(cfg)
+        ro_ch = self.cfg.pulse_cfg.ro_ch
+        if ro_ch is None:
+            ro_ch = self.cfg.ro_cfg.ro_ch
+            self.cfg.pulse_cfg.ro_ch = ro_ch
+        if ro_ch != self.cfg.ro_cfg.ro_ch:
             warnings.warn(
                 f"{name} pulse_cfg.ro_ch is {ro_ch}, this may not be what you want"
             )
-
-        self.pulse = Pulse(name=f"{name}_pulse", cfg=self.pulse_cfg)
-        self.ro_window = DirectReadout(name=f"{name}_adc", cfg=self.ro_cfg)
-
-    @classmethod
-    def set_param(
-        cls, cfg: PulseReadoutCfg, param_name: str, param_value: Union[float, QickParam]
-    ) -> PulseReadoutCfg:
-        if param_name == "gain":
-            Pulse.set_param(cfg["pulse_cfg"], "gain", param_value)
-        elif param_name == "freq":
-            Pulse.set_param(cfg["pulse_cfg"], "freq", param_value)
-            DirectReadout.set_param(cfg["ro_cfg"], "ro_freq", param_value)
-        elif param_name == "ro_freq":
-            DirectReadout.set_param(cfg["ro_cfg"], "ro_freq", param_value)
-        elif param_name == "length":
-            Waveform.set_param(cfg["pulse_cfg"]["waveform"], "length", param_value)
-        elif param_name == "ro_length":
-            DirectReadout.set_param(cfg["ro_cfg"], "ro_length", param_value)
-        else:
-            raise ValueError(f"Unknown parameter: {param_name}")
-
-        return cfg
+        self.pulse = Pulse(name=f"{name}_pulse", cfg=self.cfg.pulse_cfg)
+        self.ro_window = DirectReadout(name=f"{name}_adc", cfg=self.cfg.ro_cfg)
 
     def init(self, prog: MyProgramV2) -> None:
         self.pulse.init(prog)
@@ -190,23 +191,6 @@ class PulseReadout(AbsReadout, tag="pulse"):
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        self.ro_window.run(prog, t)  # non-blocking
+        self.ro_window.run(prog, t)
         self.pulse.run(prog, t)
-
         return t + self.total_length(prog)
-
-    @staticmethod
-    def auto_fill(
-        cfg: Union[str, dict[str, Any]], ml: ModuleLibrary
-    ) -> PulseReadoutCfg:
-        if isinstance(cfg, str):
-            cfg = ml.get_module(cfg)
-
-        cfg["type"] = "readout/pulse"
-        cfg["pulse_cfg"] = Pulse.auto_fill(cfg["pulse_cfg"], ml)
-        cfg["ro_cfg"] = DirectReadout.auto_fill(cfg["ro_cfg"], ml)
-        if (freq := cfg["pulse_cfg"].get("freq")) is not None:
-            cfg["ro_cfg"].setdefault("ro_freq", freq)
-        cfg["ro_cfg"].setdefault("gen_ch", cfg["pulse_cfg"]["ch"])
-
-        return cast(PulseReadoutCfg, cfg)

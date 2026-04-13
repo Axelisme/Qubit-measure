@@ -98,13 +98,13 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         xs = sweep2array(
             x_sweep,
             sweep_name,  # type: ignore
-            round_info={"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+            round_info={"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
             allow_array=True,
         )
         lengths = sweep2array(
             length_sweep,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
         )
 
         def measure_fn(
@@ -116,7 +116,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
 
             length_sweep = cfg["sweep"]["length"]
             length_param = sweep2param("length", length_sweep)
-            Pulse.set_param(modules["probe_pulse"], "length", length_param)
+            modules["probe_pulse"].set_param("length", length_param)
 
             return ModularProgramV2(
                 soccfg,
@@ -186,7 +186,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         ) as viewer:
 
             def update_fn(i, ctx, value) -> None:
-                Pulse.set_param(ctx.cfg["modules"]["probe_pulse"], sweep_name, value)
+                ctx.cfg["modules"]["probe_pulse"].set_param(sweep_name, value)
                 ctx.env_dict["idx"] = i
 
             def plot_fn(ctx) -> None:

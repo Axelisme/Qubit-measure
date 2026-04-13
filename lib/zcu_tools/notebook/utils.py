@@ -15,6 +15,7 @@ from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100A
 from zcu_tools.device.yoko import YOKOGS200
 from zcu_tools.program import SweepCfg
+from zcu_tools.utils import format_dict
 
 if TYPE_CHECKING:
     try:
@@ -134,8 +135,8 @@ def make_comment(cfg: Mapping[str, Any], comment: Optional[str] = None) -> str:
     Returns:
         str: A formatted comment string.
     """
-    # pretty convert cfg to string
-    cfg = dict(deepcopy(cfg))
+
+    cfg = format_dict(cfg)
     if comment is not None:
         cfg["comment"] = comment
 

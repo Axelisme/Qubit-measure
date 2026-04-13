@@ -70,12 +70,12 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
             "phase",
             {
                 "soccfg": soccfg,
-                "gen_ch": modules["tested_reset"]["pi2_cfg"]["ch"],
+                "gen_ch": modules["tested_reset"].pi2_cfg.ch,
             },
         )
 
         phase_param = sweep2param("phase", _cfg["sweep"]["phase"])
-        BathReset.set_param(modules["tested_reset"], "pi2_phase", phase_param)
+        modules["tested_reset"].set_param("pi2_phase", phase_param)
 
         with LivePlot1D("Phase (deg)", "Signal (a.u.)") as viewer:
             signals = run_task(

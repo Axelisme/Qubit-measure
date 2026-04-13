@@ -17,6 +17,7 @@ from typing_extensions import (
     TypeAlias,
     TypedDict,
     Union,
+    cast,
 )
 
 from zcu_tools.experiment import AbsExperiment
@@ -55,10 +56,13 @@ class ZigZagModuleCfg(TypedDict, closed=True):
     X180_pulse: NotRequired[PulseCfg]
     readout: ReadoutCfg
 
+class ZigZagSweepCfg(TypedDict, extra_items=SweepCfg):
+    times: Union[SweepCfg, Sequence[int]]
+
 
 class ZigZagCfg(ModularProgramCfg, TaskCfg):
     modules: ZigZagModuleCfg
-    sweep: dict[str, Union[SweepCfg, Sequence[float]]]
+    sweep: ZigZagSweepCfg
 
 
 class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
@@ -88,17 +92,19 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         if x_key not in self.SWEEP_MAP:
             raise ValueError(f"Unsupported sweep key: {x_key}")
         x_info = self.SWEEP_MAP[x_key]
+        if repeat_on == "X180_pulse":
+            repeat_pulse = modules.get("X180_pulse")
+            if repeat_pulse is None:
+                raise ValueError("Repeat on pulse X180_pulse not found")
+        else:
+            repeat_pulse = modules["X90_pulse"]
+
         values = sweep2array(
             _cfg["sweep"][x_key],
             x_key,  # type: ignore
-            {"soccfg": soccfg, "gen_ch": modules[repeat_on]["ch"]},  # type: ignore
+            {"soccfg": soccfg, "gen_ch": repeat_pulse.ch},
         )
-
-        if repeat_on not in modules:
-            raise ValueError(f"Repeat on pulse {repeat_on} not found")
-
-        Pulse.set_param(
-            modules[repeat_on],  # type: ignore
+        repeat_pulse.set_param(
             x_info["param_key"],
             sweep2param(x_info["param_key"], _cfg["sweep"][x_key]),  # type: ignore
         )
@@ -108,7 +114,11 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         ) as viewer:
 
             def measure_fn(ctx: TaskState, update_hook):
+                cfg = cast(ZigZagCfg, ctx.cfg)
                 modules = ctx.cfg["modules"]
+
+                x_sweep: SweepCfg = cfg["sweep"][x_key]
+
                 zigzag_time = ctx.env["zigzag_time"]
                 if repeat_on == "X90_pulse":
                     repeat_time = 2 * zigzag_time
@@ -117,10 +127,10 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
 
                 return ModularProgramV2(
                     soccfg,
-                    ctx.cfg,
+                    cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        Pulse(name="X90_pulse", cfg=X90_pulse),
+                        Pulse("X90_pulse", X90_pulse),
                         Repeat(
                             name="zigzag_loop",
                             n=repeat_time,
@@ -128,7 +138,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                         ),
                         Readout("readout", modules["readout"]),
                     ],
-                    sweep=[(x_key, ctx.cfg["sweep"][x_key])],
+                    sweep=[(x_key, x_sweep)],
                 ).acquire(
                     soc,
                     progress=False,

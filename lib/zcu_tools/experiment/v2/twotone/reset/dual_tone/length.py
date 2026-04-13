@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import warnings
+from copy import deepcopy
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,17 +10,17 @@ from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
     Any,
+    Callable,
     NotRequired,
     Optional,
     TypeAlias,
     TypedDict,
-    Callable,
     cast,
 )
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
@@ -76,17 +76,15 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         length_sweep = _cfg["sweep"]["length"]
 
         reset_cfg = modules["tested_reset"]
-        pulse1_cfg = reset_cfg["pulse1_cfg"]
-        pulse2_cfg = reset_cfg["pulse2_cfg"]
-        length_diff = (
-            pulse2_cfg["waveform"]["length"] - pulse1_cfg["waveform"]["length"]
-        )
+        pulse1_cfg = reset_cfg.pulse1_cfg
+        pulse2_cfg = reset_cfg.pulse2_cfg
+        length_diff = pulse2_cfg.waveform.length - pulse1_cfg.waveform.length
 
         pulse1_lengths = sweep2array(
-            length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse1_cfg["ch"])
+            length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse1_cfg.ch)
         )
         pulse2_lengths = sweep2array(
-            length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse2_cfg["ch"])
+            length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse2_cfg.ch)
         )
         if not np.allclose(pulse1_lengths, pulse2_lengths, atol=1e-2):
             warnings.warn(
@@ -105,21 +103,19 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             modules = cfg["modules"]
 
             tested_reset_cfg = modules["tested_reset"]
-            pulse1_cfg = tested_reset_cfg["pulse1_cfg"]
-            pulse2_cfg = tested_reset_cfg["pulse2_cfg"]
+            pulse1_cfg = tested_reset_cfg.pulse1_cfg
+            pulse2_cfg = tested_reset_cfg.pulse2_cfg
 
-            length_diff = (
-                pulse2_cfg["waveform"]["length"] - pulse1_cfg["waveform"]["length"]
-            )
+            length_diff = pulse2_cfg.waveform.length - pulse1_cfg.waveform.length
             length1_param = sweep2param("length", length_sweep)
 
-            Pulse.set_param(pulse1_cfg, "length", length1_param)
-            Pulse.set_param(pulse2_cfg, "length", length1_param + length_diff)
+            pulse1_cfg.set_param("length", length1_param)
+            pulse2_cfg.set_param("length", length1_param + length_diff)
 
             return ModularProgramV2(
                 soccfg,
-                ctx.cfg,
-                sweep=[("length", ctx.cfg["sweep"]["length"])],
+                cfg,
+                sweep=[("length", length_sweep)],
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Pulse("init_pulse", modules.get("init_pulse")),

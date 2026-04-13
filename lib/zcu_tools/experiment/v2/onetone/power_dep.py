@@ -64,7 +64,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": readout_cfg["pulse_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": readout_cfg.pulse_cfg.ch},
             allow_array=True,
         )
         freqs = sweep2array(
@@ -72,8 +72,8 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             "freq",
             {
                 "soccfg": soccfg,
-                "gen_ch": readout_cfg["pulse_cfg"]["ch"],
-                "ro_ch": readout_cfg["ro_cfg"]["ro_ch"],
+                "gen_ch": readout_cfg.pulse_cfg.ch,
+                "ro_ch": readout_cfg.ro_cfg.ro_ch,
             },
         )
 
@@ -88,7 +88,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
             freq_sweep = cfg["sweep"]["freq"]
             freq_param = sweep2param("freq", freq_sweep)
-            PulseReadout.set_param(modules["readout"], "freq", freq_param)
+            modules["readout"].set_param("freq", freq_param)
 
             return (
                 prog := ModularProgramV2(
@@ -122,9 +122,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                 task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)).scan(
                     "gain",
                     gains.tolist(),
-                    before_each=lambda _, ctx, gain: PulseReadout.set_param(
-                        ctx.cfg["modules"]["readout"], "gain", gain
-                    ),
+                    before_each=lambda _, ctx, gain: ctx.cfg["modules"]["readout"].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

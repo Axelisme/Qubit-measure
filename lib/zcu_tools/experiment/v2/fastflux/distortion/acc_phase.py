@@ -80,7 +80,7 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
 
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         phases = sweep2array(
-            phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse["ch"]}
+            phase_sweep, "phase", {"soccfg": soccfg, "gen_ch": pi2_pulse.ch}
         )
 
         def measure_fn(
@@ -110,10 +110,7 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
                     ),
                     Pulse(
                         name="pi2_pulse2",
-                        cfg={
-                            **modules["pi2_pulse"],
-                            "phase": phase_param,
-                        },
+                        cfg=modules["pi2_pulse"].with_updates(phase=phase_param),
                     ),
                     Readout("readout", modules["readout"]),
                 ],
@@ -153,7 +150,7 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
         modules = cfg["modules"]
 
         flux_pulse = modules["flux_pulse"]
-        pi2_len = float(modules["pi2_pulse"]["waveform"]["length"])
+        pi2_len = float(modules["pi2_pulse"].waveform.length)
 
         if result is None:
             result = self.last_result
@@ -177,8 +174,8 @@ class AccPhaseExp(AbsExperiment[AccPhaseResult, AccPhaseCfg]):
         mean_background = np.mean(detunes[sort_idxs[: int(len(detunes) * 0.1)]])
         mean_topdetune = np.mean(detunes[sort_idxs[int(len(detunes) * 0.9) :]])
 
-        start_t = float(flux_pulse["pre_delay"])
-        end_t = start_t + float(flux_pulse["waveform"]["length"])
+        start_t = float(flux_pulse.pre_delay)
+        end_t = start_t + float(flux_pulse.waveform.length)
 
         ideal_lengths = np.linspace(lengths[0], lengths[-1], 1000)
         ideal_curve = np.full_like(ideal_lengths, mean_background)

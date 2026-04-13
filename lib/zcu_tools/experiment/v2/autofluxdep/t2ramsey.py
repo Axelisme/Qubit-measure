@@ -128,11 +128,10 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
                     Delay(name="t2r_delay", delay=length_param),
                     Pulse(
                         name="pi2_pulse2",
-                        cfg={
-                            **modules["pi2_pulse"],
-                            "phase": modules["pi2_pulse"]["phase"]
-                            + 360 * detune * length_param,
-                        },
+                        cfg=modules["pi2_pulse"].with_updates(
+                            phase=modules["pi2_pulse"].phase
+                            + 360 * detune * length_param
+                        ),
                     ),
                     Readout("readout", modules["readout"]),
                 ],

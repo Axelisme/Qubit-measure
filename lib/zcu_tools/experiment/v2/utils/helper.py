@@ -4,15 +4,6 @@ import numpy as np
 from typing_extensions import Sequence, TypeVar
 
 from zcu_tools.experiment.v2.runner import Result
-from zcu_tools.program.v2 import PulseCfg
-
-
-def set_pulse_freq(pulse_cfg: PulseCfg, freq: float) -> PulseCfg:
-    pulse_cfg["freq"] = freq
-    if "mixer_freq" in pulse_cfg:
-        pulse_cfg["mixer_freq"] = freq
-    return pulse_cfg
-
 
 T_Result = TypeVar("T_Result", bound=Result)
 

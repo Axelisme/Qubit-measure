@@ -61,7 +61,7 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["readout"]["pulse_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["readout"].pulse_cfg.ch},
             allow_array=True,
         )
 
@@ -74,7 +74,7 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
 
             freq_sweep = cfg["sweep"]["freq"]
             freq_param = sweep2param("freq", freq_sweep)
-            PulseReadout.set_param(modules["readout"], "freq", freq_param)
+            modules["readout"].set_param("freq", freq_param)
 
             return ModularProgramV2(
                 soccfg,

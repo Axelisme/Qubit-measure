@@ -334,7 +334,7 @@ class T1WithToneTask(
 
             length_sweep = cfg["sweep"]["length"]
             length_param = sweep2param("length", length_sweep)
-            Pulse.set_param(modules["probe_pulse"], "length", length_param)
+            modules["probe_pulse"].set_param("length", length_param)
 
             return ModularProgramV2(
                 ctx.env["soccfg"],

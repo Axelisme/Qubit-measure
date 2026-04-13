@@ -100,7 +100,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         freqs = sweep2array(
-            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": qub_pulse["ch"]}
+            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": qub_pulse.ch}
         )
 
         def measure_fn(
@@ -115,7 +115,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
             length_params = sweep2param("length", length_sweep)
             freq_params = sweep2param("freq", freq_sweep)
-            Pulse.set_param(modules["qub_pulse"], "freq", freq_params)
+            modules["qub_pulse"].set_param("freq", freq_params)
 
             return ModularProgramV2(
                 soccfg,
@@ -167,7 +167,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         modules = _cfg["modules"]
 
         flux_pulse = modules["flux_pulse"]
-        qub_len = float(modules["qub_pulse"]["waveform"]["length"])
+        qub_len = float(modules["qub_pulse"].waveform.length)
 
         if result is None:
             result = self.last_result
@@ -185,8 +185,8 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         mean_background = np.mean(s_freqs[sort_idxs[: int(len(s_freqs) * 0.1)]])
         mean_topdetune = np.mean(s_freqs[sort_idxs[int(len(s_freqs) * 0.9) :]])
 
-        start_t = float(flux_pulse["pre_delay"])
-        end_t = start_t + float(flux_pulse["waveform"]["length"])
+        start_t = float(flux_pulse.pre_delay)
+        end_t = start_t + float(flux_pulse.waveform.length)
 
         ideal_lengths = np.linspace(lengths[0], lengths[-1], 1000)
         ideal_curve = np.full_like(ideal_lengths, mean_background)

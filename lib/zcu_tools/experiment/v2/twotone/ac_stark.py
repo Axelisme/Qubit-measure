@@ -125,17 +125,17 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["stark_pulse2"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["stark_pulse2"].ch},
         )
         gains = np.sqrt(
             np.linspace(
                 gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
             )
         )
-        gains = round_zcu_gain(gains, soccfg, modules["stark_pulse1"]["ch"])
+        gains = round_zcu_gain(gains, soccfg, modules["stark_pulse1"].ch)
 
         freq_param = sweep2param("freq", freq_sweep)
-        Pulse.set_param(modules["stark_pulse2"], "freq", freq_param)
+        modules["stark_pulse2"].set_param("freq", freq_param)
 
         with LivePlot2DwithLine(
             "Stark Pulse Gain (a.u.)",
@@ -185,9 +185,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                 ).scan(
                     "resonator gain",
                     list(gains.tolist()),
-                    before_each=lambda _, ctx, gain: Pulse.set_param(
-                        ctx.cfg["modules"]["stark_pulse1"], "gain", gain
-                    ),
+                    before_each=lambda _, ctx, gain: ctx.cfg["modules"]["stark_pulse1"].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
@@ -371,14 +369,14 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
         lengths = sweep2array(
             _cfg["sweep"]["length"],
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["stark_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["stark_pulse"].ch},
         )
         gains = np.sqrt(
             np.linspace(
                 gain_sweep["start"] ** 2, gain_sweep["stop"] ** 2, gain_sweep["expts"]
             )
         )
-        gains = round_zcu_gain(gains, soccfg, modules["stark_pulse"]["ch"])
+        gains = round_zcu_gain(gains, soccfg, modules["stark_pulse"].ch)
 
         def measure_fn(
             ctx: TaskState[NDArray[np.complex128], Any],
@@ -403,11 +401,10 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
                             SoftDelay("t2_delay", delay=length_param),
                             Pulse(
                                 name="pi2_pulse2",
-                                cfg={  # type: ignore[dict-item]
-                                    **modules["pi2_pulse"],
-                                    "phase": modules["pi2_pulse"]["phase"]
-                                    + 360 * detune * length_param,
-                                },
+                                cfg=modules["pi2_pulse"].with_updates(
+                                    phase=modules["pi2_pulse"].phase
+                                    + 360 * detune * length_param
+                                ),
                             ),
                         ],
                     ),
@@ -432,9 +429,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
                 task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)).scan(
                     "resonator gain",
                     list[float](gains.tolist()),
-                    before_each=lambda _, ctx, gain: Pulse.set_param(
-                        ctx.cfg["modules"]["stark_pulse"], "gain", gain
-                    ),
+                    before_each=lambda _, ctx, gain: ctx.cfg["modules"]["stark_pulse"].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

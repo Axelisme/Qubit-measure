@@ -75,7 +75,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         gains = sweep2array(
             _cfg["sweep"]["gain"],
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["rabi_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["rabi_pulse"].ch},
         )
 
         def measure_fn(
@@ -86,7 +86,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
 
             # Attach gain sweep to initialization pulse
             gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-            Pulse.set_param(modules["rabi_pulse"], "gain", gain_param)
+            modules["rabi_pulse"].set_param("gain", gain_param)
 
             return ModularProgramV2(
                 soccfg,

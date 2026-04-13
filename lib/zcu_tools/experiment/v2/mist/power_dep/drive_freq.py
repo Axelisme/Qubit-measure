@@ -81,10 +81,10 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
 
         probe_pulse = modules["probe_pulse"]
         freqs = sweep2array(
-            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": probe_pulse["ch"]}
+            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": probe_pulse.ch}
         )
         gains = sweep2array(
-            gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": probe_pulse["ch"]}
+            gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": probe_pulse.ch}
         )
 
         def measure_fn(
@@ -98,8 +98,8 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
             gain_sweep = cfg["sweep"]["gain"]
             freq_param = sweep2param("freq", freq_sweep)
             gain_param = sweep2param("gain", gain_sweep)
-            Pulse.set_param(modules["probe_pulse"], "freq", freq_param)
-            Pulse.set_param(modules["probe_pulse"], "gain", gain_param)
+            modules["probe_pulse"].set_param("freq", freq_param)
+            modules["probe_pulse"].set_param("gain", gain_param)
 
             return ModularProgramV2(
                 soccfg,

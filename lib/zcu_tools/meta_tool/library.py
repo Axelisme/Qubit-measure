@@ -8,8 +8,8 @@ from typing_extensions import Any, Optional, Union, cast
 from yaml.nodes import MappingNode
 
 from zcu_tools.device import GlobalDeviceManager
-from zcu_tools.program.v2 import Module, ModuleCfg, WaveformCfg
-from zcu_tools.utils import deepupdate, numpy2number
+from zcu_tools.program.v2 import ModuleCfg, WaveformCfg
+from zcu_tools.utils import deepupdate, format_dict
 
 from .syncfile import SyncFile, auto_sync
 
@@ -79,12 +79,29 @@ class ModuleLibrary(SyncFile):
         with open(path, "r") as f:
             cfg = yaml.safe_load(f)
 
-        self.waveforms = cfg["waveforms"]
-        self.modules = cfg["modules"]
+        for key in ["waveforms", "modules"]:
+            if key not in cfg:
+                raise ValueError(
+                    f"{key} not found in loading module library config file"
+                )
+            if not isinstance(cfg[key], dict):
+                raise ValueError(
+                    f"{key} in loading module library config file is not a dict, "
+                    f"got {type(cfg[key])}"
+                )
+
+        self.waveforms = {
+            name: WaveformCfg.model_validate(wav_cfg)
+            for name, wav_cfg in cfg["waveforms"].items()
+        }
+        self.modules = {
+            name: ModuleCfg.model_validate(mod_cfg)
+            for name, mod_cfg in cfg["modules"].items()
+        }
 
     def _dump(self, path: str) -> None:
         dump_cfg = dict(waveforms=self.waveforms, modules=self.modules)
-        dump_cfg = numpy2number(deepcopy(dump_cfg))
+        dump_cfg = format_dict(dump_cfg)
 
         with open(path, "w") as f:
             yaml.dump(dump_cfg, f, Dumper=ModuleDumper, sort_keys=False)
@@ -98,49 +115,41 @@ class ModuleLibrary(SyncFile):
         deepupdate(dev_cfg, exp_cfg.get("dev", {}), behavior="force")
         exp_cfg["dev"] = dev_cfg
 
-        modules: dict[str, Union[str, dict]] = exp_cfg.get("modules", {})
+        modules: dict[str, Union[str, dict, ModuleCfg]] = exp_cfg.get("modules", {})
         for name, sub_cfg in modules.items():
-            if isinstance(sub_cfg, str):
-                sub_cfg = self.get_module(sub_cfg)
-            if "type" not in sub_cfg:
-                raise ValueError(f"Top-level module {name} is missing 'type' field")
-
-            module_cls = Module.parse(sub_cfg["type"])
-            modules[name] = module_cls.auto_fill(sub_cfg, self)  # type: ignore
+            modules[name] = ModuleCfg.from_raw(sub_cfg, self)
 
         exp_cfg.setdefault("relax_delay", 0.0)
         exp_cfg.setdefault("rounds", 1)
         exp_cfg.setdefault("reps", 1)
 
-        return numpy2number(exp_cfg)
+        return exp_cfg
 
     @auto_sync("write")
-    def register_waveform(self, **wav_kwargs) -> None:
+    def register_waveform(
+        self, **wav_kwargs: Union[dict[str, Any], WaveformCfg]
+    ) -> None:
         self._check_can_write()
         wav_kwargs = deepcopy(wav_kwargs)
 
         # filter out non-waveform attributes
-        changed = False
         for name, wav_cfg in wav_kwargs.items():
-            if self.waveforms.get(name) != wav_cfg:
-                changed = True
+            if isinstance(wav_cfg, dict):
+                wav_cfg = WaveformCfg.from_dict(wav_cfg, self)
             self.waveforms[name] = wav_cfg  # directly overwrite
-        if changed:
-            self._dirty = True
+        self._dirty = True
 
     @auto_sync("write")
-    def register_module(self, **mod_kwargs) -> None:
+    def register_module(self, **mod_kwargs: Union[dict[str, Any], ModuleCfg]) -> None:
         self._check_can_write()
         mod_kwargs = deepcopy(mod_kwargs)
 
-        changed = False
-        for name, cfg in mod_kwargs.items():
-            if self.modules.get(name) != cfg:
-                changed = True
-            self.modules[name] = cfg
+        for name, mod_cfg in mod_kwargs.items():
+            if isinstance(mod_cfg, dict):
+                mod_cfg = ModuleCfg.from_dict(mod_cfg, self)
+            self.modules[name] = mod_cfg  # directly overwrite
 
-        if changed:
-            self._dirty = True
+        self._dirty = True
 
     @auto_sync("read")
     def get_waveform(
@@ -150,30 +159,28 @@ class ModuleLibrary(SyncFile):
             raise ValueError(
                 f"Waveform {name} not found, available waveforms: {list(self.waveforms.keys())}"
             )
-        waveform = deepcopy(self.waveforms[name])
+        waveform = self.waveforms[name]
         if override_cfg is not None:
-            deepupdate(cast(dict, waveform), override_cfg, behavior="force")
-        return waveform  # type: ignore[return-value]
+            waveform = waveform.with_updates(**override_cfg)
+        return deepcopy(waveform)
 
     @auto_sync("read")
     def get_module(
         self, name: str, override_cfg: Optional[dict[str, Any]] = None
-    ) -> dict[str, Any]:
+    ) -> ModuleCfg:
         if name not in self.modules:
             raise ValueError(
                 f"Module {name} not found, available modules: {list(self.modules.keys())}"
             )
-        module = deepcopy(self.modules[name])
+        module = self.modules[name]
         if override_cfg is not None:
-            deepupdate(cast(dict, module), override_cfg, behavior="force")
-        return cast(dict, module)
+            module = module.with_updates(**override_cfg)
+        return deepcopy(module)
 
     @auto_sync("write")
     def update_module(self, name: str, override_cfg: dict[str, Any]) -> None:
         self._check_can_write()
-        deepupdate(
-            cast(dict, self.modules[name]), deepcopy(override_cfg), behavior="force"
-        )
+        self.modules[name] = self.modules[name].with_updates(**override_cfg)
         self._dirty = True
 
     def __str__(self) -> str:

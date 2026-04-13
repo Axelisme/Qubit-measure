@@ -131,9 +131,9 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
 
             params[i, :] = cur_params
             modules = ctx.cfg["modules"]
-            Readout.set_param(modules["readout"], "freq", cur_params[0])
-            Readout.set_param(modules["readout"], "gain", cur_params[1])
-            Readout.set_param(modules["readout"], "length", cur_params[2])
+            modules["readout"].set_param("freq", cur_params[0])
+            modules["readout"].set_param("gain", cur_params[1])
+            modules["readout"].set_param("length", cur_params[2])
 
         # initialize figure and axes
         figsize = (8, 5)

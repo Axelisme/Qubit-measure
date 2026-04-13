@@ -47,25 +47,22 @@ def deepupdate(
             conflict_handler(d, u, k)
 
 
-def numpy2number(obj: Any) -> Any:
-    """
-    將所有 numpy 資料型別轉換為對應的 Python 資料型別。
+def format_dict(obj: Mapping[str, Any]) -> dict[str, Any]:
+    def _format_value(v: Any) -> Any:
+        if hasattr(v, "model_dump") and callable(v.model_dump):
+            v = v.model_dump()  # work for pydantic model
+        if hasattr(v, "tolist") and callable(v.tolist):
+            v = v.tolist()  # work for numpy array
+        if hasattr(v, "item") and callable(v.item):
+            v = v.item()  # work for numpy scalar
 
-    Args:
-        obj (Any): 任意物件，可能包含 numpy 型別。
+        if isinstance(v, dict):
+            v = {k: _format_value(v) for k, v in v.items()}
+        if isinstance(v, list):
+            v = [_format_value(v) for v in v]
+        return v
 
-    Returns:
-        Any: 將 numpy 型別轉換為 Python 型別後的物件。
-    """
-    if hasattr(obj, "tolist") and callable(obj.tolist):
-        obj = obj.tolist()
-    if isinstance(obj, dict):
-        return {k: numpy2number(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [numpy2number(v) for v in obj]
-    if hasattr(obj, "item") and callable(obj.item):
-        return obj.item()
-    return obj
+    return {k: _format_value(v) for k, v in obj.items()}
 
 
 __all__ = [
@@ -77,6 +74,6 @@ __all__ = [
     # utils
     "deepupdate",
     # datasaver
-    "numpy2number",
     "datasaver",
+    "format_dict",
 ]

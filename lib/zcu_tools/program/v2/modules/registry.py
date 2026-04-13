@@ -57,7 +57,8 @@ class PulseRegistry:
                 sorted_dict[key] = value
             return sorted_dict
 
-        filter_cfg = {k: cfg.get(k) for k in PulseRegistry.HASH_KEYS if k in cfg}
+        cfg_dict = cfg.to_dict()
+        filter_cfg = {k: cfg_dict.get(k) for k in PulseRegistry.HASH_KEYS if k in cfg_dict}
         cfg_json = json.dumps(sort_dict(filter_cfg), separators=(",", ":"))
         hash_name = hashlib.sha256(cfg_json.encode("utf-8")).hexdigest()
 
@@ -69,18 +70,18 @@ class PulseRegistry:
         if pulse_name in self._pulses:
             logger.debug(
                 "PulseRegistry: reuse '%s' (module=%s, ch=%s, phase=%s, gain=%s)",
-                pulse_name, name, cfg["ch"], cfg["phase"], cfg["gain"],
+                pulse_name, name, cfg.ch, cfg.phase, cfg.gain,
             )
             return False
 
         self._pulses[pulse_name] = (name, deepcopy(cfg))
-        waveform = cfg["waveform"]
-        waveform_style = waveform["style"] if isinstance(waveform, dict) else "?"
+        waveform = cfg.waveform
+        waveform_style = waveform.style
         logger.debug(
             "PulseRegistry: new '%s' (module=%s, ch=%s, freq=%s, phase=%s, gain=%s, "
             "waveform_style=%s) [total=%d]",
-            pulse_name, name, cfg["ch"], cfg["freq"],
-            cfg["phase"], cfg["gain"],
+            pulse_name, name, cfg.ch, cfg.freq,
+            cfg.phase, cfg.gain,
             waveform_style,
             len(self._pulses),
         )
@@ -92,16 +93,16 @@ class PulseRegistry:
         Checks if a new pulse's mixer frequency is consistent with other pulses
         on the same channel.
         """
-        ch = pulse_cfg["ch"]
-        has_mixer_freq = "mixer_freq" in pulse_cfg
-        mixer_freq = pulse_cfg.get("mixer_freq")
+        ch = pulse_cfg.ch
+        has_mixer_freq = pulse_cfg.mixer_freq is not None
+        mixer_freq = pulse_cfg.mixer_freq
 
         for p_name, p_cfg in self._pulses.values():
-            if p_cfg["ch"] != ch:
+            if p_cfg.ch != ch:
                 continue
 
-            registered_has_mixer_freq = "mixer_freq" in p_cfg
-            registered_mixer_freq = p_cfg.get("mixer_freq")
+            registered_has_mixer_freq = p_cfg.mixer_freq is not None
+            registered_mixer_freq = p_cfg.mixer_freq
 
             if has_mixer_freq != registered_has_mixer_freq:
                 raise ValueError(

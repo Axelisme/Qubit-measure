@@ -182,14 +182,10 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                 I_pulse = modules.get("I_pulse")
                 X90_pulse = modules["X90_pulse"]
                 X180_pulse = modules["X180_pulse"]
-                MX90_pulse = deepcopy(X90_pulse)
-                MX90_pulse["phase"] += 180.0
-                Y90_pulse = deepcopy(X90_pulse)
-                Y90_pulse["phase"] += 90.0
-                Y180_pulse = deepcopy(X180_pulse)
-                Y180_pulse["phase"] += 90.0
-                MY90_pulse = deepcopy(X90_pulse)
-                MY90_pulse["phase"] -= 90.0
+                MX90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 180.0)
+                Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
+                Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
+                MY90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase - 90.0)
                 gate_info_map: dict[str, tuple[Optional[PulseCfg], int]] = {
                     "I": (I_pulse, 0),
                     "X90": (X90_pulse, 0),
@@ -210,8 +206,9 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                         gate_pulse, acc_phase = gate_info_map[gate_name]
 
                         if gate_pulse is not None:
-                            gate_pulse = deepcopy(gate_pulse)
-                            gate_pulse["phase"] += global_phase
+                            gate_pulse = gate_pulse.with_updates(
+                                phase=gate_pulse.phase + global_phase
+                            )
                             gate_modules.append(Pulse(f"C{i}_{gate_name}", gate_pulse))
                             gate_modules.append(DelayAuto("pulse_delay", t=0.005))
 

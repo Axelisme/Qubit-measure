@@ -74,13 +74,13 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
             allow_array=True,
         )
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
         )
 
         def measure_fn(
@@ -92,7 +92,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
 
             freq_sweep = cfg["sweep"]["freq"]
             freq_param = sweep2param("freq", freq_sweep)
-            Pulse.set_param(modules["probe_pulse"], "freq", freq_param)
+            modules["probe_pulse"].set_param("freq", freq_param)
 
             return ModularProgramV2(
                 soccfg,
@@ -164,9 +164,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
                 ).scan(
                     "gain",
                     gains.tolist(),
-                    before_each=lambda i, ctx, gain: Pulse.set_param(
-                        ctx.cfg["modules"]["probe_pulse"], "gain", gain
-                    ),
+                    before_each=lambda i, ctx, gain: ctx.cfg["modules"]["probe_pulse"].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=plot_fn,

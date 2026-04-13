@@ -6,17 +6,26 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, Callable, cast
 from qick.asm_v2 import QickSweep1D
+from typeguard import check_type
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import format_sweep1D
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    BathReset,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -24,7 +33,6 @@ from zcu_tools.program.v2 import (
     Readout,
     ReadoutCfg,
     Reset,
-    BathReset,
     ResetCfg,
 )
 from zcu_tools.program.v2.modules import BathResetCfg
@@ -71,13 +79,13 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         qub_lengths = sweep2array(
             length_sweep,
             "time",
-            {"soccfg": soccfg, "gen_ch": tested_reset["qubit_tone_cfg"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": tested_reset.qubit_tone_cfg.ch},
             allow_array=True,
         )
         lengths = qub_lengths  # use qubit tone length as x-axis
 
-        orig_res_length = tested_reset["cavity_tone_cfg"]["waveform"]["length"]
-        orig_qub_length = tested_reset["qubit_tone_cfg"]["waveform"]["length"]
+        orig_res_length = tested_reset.cavity_tone_cfg.waveform.length
+        orig_qub_length = tested_reset.qubit_tone_cfg.waveform.length
         length_diff = orig_res_length - orig_qub_length
 
 
@@ -89,9 +97,9 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             tested_reset = modules["tested_reset"]
 
             phase_param = QickSweep1D("phase", 0.0, 270.0)
-            BathReset.set_param(tested_reset, "pi2_phase", phase_param)
+            tested_reset.set_param("pi2_phase", phase_param)
 
-            length = float(tested_reset["qubit_tone_cfg"]["waveform"]["length"])
+            length = float(tested_reset.qubit_tone_cfg.waveform.length)
             if length not in prog_cache:
                 prog_cache[length] = ModularProgramV2(
                     soccfg,
@@ -116,8 +124,8 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
 
         def update_length(i: int, ctx: TaskState, length: float) -> None:
             modules = cast(LengthCfg, ctx.cfg)["modules"]
-            BathReset.set_param(modules["tested_reset"], "qub_length", length)
-            BathReset.set_param(modules["tested_reset"], "res_length", length + length_diff)
+            modules["tested_reset"].set_param("qub_length", length)
+            modules["tested_reset"].set_param("res_length", length + length_diff)
 
         def average_signals(signals: list[list[NDArray[np.complex128]]]) -> NDArray[np.complex128]:
             _signals = np.array(signals)  # shape: (rounds, lengths, 4)

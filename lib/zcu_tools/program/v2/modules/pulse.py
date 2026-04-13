@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import logging
 from copy import deepcopy
 
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Any, NotRequired, Optional, Union, cast
+from typing_extensions import TYPE_CHECKING, Any, Literal, Optional, Self, Union
 
 from ..base import MyProgramV2
 from .base import Module, ModuleCfg
@@ -14,29 +13,47 @@ from .waveform import Waveform, WaveformCfg
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
 
-logger = logging.getLogger(__name__)
 
-
-class PulseCfg(ModuleCfg, closed=True):
+@ModuleCfg.register_handler("pulse")
+class PulseCfg(ModuleCfg):
+    type: Literal["pulse"] = "pulse"
     waveform: WaveformCfg
     ch: int
     nqz: int
     freq: Union[float, QickParam]
-    phase: Union[float, QickParam]
+    phase: Union[float, QickParam] = 0.0
     gain: Union[float, QickParam]
-    pre_delay: Union[float, QickParam]
-    post_delay: Union[float, QickParam]
+    pre_delay: Union[float, QickParam] = 0.0
+    post_delay: Union[float, QickParam] = 0.0
 
-    mixer_freq: NotRequired[float]
-    mux_freqs: NotRequired[list[float]]
-    mux_gains: NotRequired[list[float]]
-    mux_phases: NotRequired[list[float]]
-    mask: NotRequired[list[int]]
-    outsel: NotRequired[int]
-    ro_ch: NotRequired[int]
+    mixer_freq: Optional[float] = None
+    mux_freqs: Optional[list[float]] = None
+    mux_gains: Optional[list[float]] = None
+    mux_phases: Optional[list[float]] = None
+    mask: Optional[list[int]] = None
+    outsel: Optional[int] = None
+    ro_ch: Optional[int] = None
+
+    @classmethod
+    def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
+        raw_cfg = deepcopy(raw_cfg)
+
+        waveform_cfg = raw_cfg.get("waveform")
+        if isinstance(waveform_cfg, str):
+            raw_cfg["waveform"] = ml.get_waveform(waveform_cfg)
+
+        return cls.model_validate(raw_cfg)
+
+    def set_param(self, name: str, value: Union[float, QickParam]) -> None:
+        if name == "length":
+            self.waveform.set_param(name, value)
+        elif name in {"gain", "freq", "phase"}:
+            setattr(self, name, value)
+        else:
+            raise ValueError(f"Unknown parameter: {name}")
 
 
-class Pulse(Module, tag="pulse"):
+class Pulse(Module):
     def __init__(
         self,
         name: str,
@@ -45,23 +62,18 @@ class Pulse(Module, tag="pulse"):
         block_mode: bool = True,
     ) -> None:
         self.name = name
-        self.cfg = deepcopy(cfg)
-
+        self.cfg = deepcopy(cfg) if cfg is not None else None
         self.tag = tag
         self.block_mode = block_mode
 
     def init(self, prog: MyProgramV2) -> None:
         if self.cfg is None:
-            logger.debug("Pulse.init: '%s' has no cfg, skipped", self.name)
             return
 
-        self.waveform = Waveform(f"{self.name}_waveform", self.cfg["waveform"])
+        self.waveform = Waveform(f"{self.name}_waveform", self.cfg.waveform)
         self.pulse_id = prog.pulse_registry.calc_name(self.cfg)
 
         prog.pulse_registry.check_valid_mixer_freq(self.name, self.cfg)
-
-        # if this is the first time to init the pulse, init it
-        # if not, re-use the pulse
         if prog.pulse_registry.register(self.name, self.cfg):
             self.init_pulse(prog, self.pulse_id)
 
@@ -69,35 +81,29 @@ class Pulse(Module, tag="pulse"):
         cfg = self.cfg
         assert cfg is not None
 
-        ro_ch = cfg.get("ro_ch") if "mixer_freq" in cfg else None
+        ro_ch = cfg.ro_ch if cfg.mixer_freq is not None else None
         prog.declare_gen(
-            cfg["ch"],
-            nqz=cfg["nqz"],
-            mixer_freq=cfg.get("mixer_freq"),
-            mux_freqs=cfg.get("mux_freqs"),
-            mux_gains=cfg.get("mux_gains"),
-            mux_phases=cfg.get("mux_phases"),
+            cfg.ch,
+            nqz=cfg.nqz,
+            mixer_freq=cfg.mixer_freq,
+            mux_freqs=cfg.mux_freqs,
+            mux_gains=cfg.mux_gains,
+            mux_phases=cfg.mux_phases,
             ro_ch=ro_ch,
         )
 
-        self.waveform.create(prog, cfg["ch"])
+        self.waveform.create(prog, cfg.ch)
+        pulse_kwargs = dict[str, Any](freq=cfg.freq, phase=cfg.phase, gain=cfg.gain)
+        if cfg.mask is not None:
+            pulse_kwargs["mask"] = cfg.mask
+        if cfg.outsel is not None:
+            pulse_kwargs["outsel"] = cfg.outsel
 
-        # derive pulse style
-        wav_kwargs = dict[str, Any](
-            freq=cfg["freq"], phase=cfg["phase"], gain=cfg["gain"]
-        )
-
-        if "mask" in cfg:
-            wav_kwargs["mask"] = cfg["mask"]
-        if "outsel" in cfg:
-            wav_kwargs["outsel"] = cfg["outsel"]
-
-        # add the pulse
         prog.add_pulse(
-            cfg["ch"],
+            cfg.ch,
             pulse_id,
-            ro_ch=cfg.get("ro_ch"),
-            **wav_kwargs,
+            ro_ch=cfg.ro_ch,
+            **pulse_kwargs,
             **self.waveform.to_wav_kwargs(),
         )
 
@@ -107,53 +113,20 @@ class Pulse(Module, tag="pulse"):
         return round_timestamp(
             prog,
             (
-                round_timestamp(prog, self.cfg["pre_delay"])
-                + round_timestamp(prog, self.waveform.length, gen_ch=self.cfg["ch"])
-                + round_timestamp(prog, self.cfg["post_delay"])
+                round_timestamp(prog, self.cfg.pre_delay)
+                + round_timestamp(prog, self.waveform.length, gen_ch=self.cfg.ch)
+                + round_timestamp(prog, self.cfg.post_delay)
             ),
         )
-
-    # -----------------------
 
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         cfg = self.cfg
-
         if cfg is None:
             return t
 
-        prog.pulse(cfg["ch"], self.pulse_id, t=t + cfg["pre_delay"], tag=self.tag)
-
-        if self.block_mode:  # default
+        prog.pulse(cfg.ch, self.pulse_id, t=t + cfg.pre_delay, tag=self.tag)
+        if self.block_mode:
             return t + self.total_length(prog)
-        else:  # no block, return the start time as the end time
-            return t
-
-    @staticmethod
-    def set_param(
-        cfg: PulseCfg, param_name: str, param_value: Union[float, QickParam]
-    ) -> PulseCfg:
-        if param_name == "length":
-            Waveform.set_param(cfg["waveform"], param_name, param_value)
-        elif param_name in ["gain", "freq", "phase"]:
-            cfg[param_name] = param_value
-        else:
-            raise ValueError(f"Unknown parameter: {param_name}")
-
-        return cfg
-
-    @staticmethod
-    def auto_fill(cfg: Union[str, dict[str, Any]], ml: ModuleLibrary) -> PulseCfg:
-        if isinstance(cfg, str):
-            cfg = ml.get_module(cfg)
-
-        cfg["type"] = "pulse"
-        cfg.setdefault("phase", 0.0)
-        cfg.setdefault("pre_delay", 0.0)
-        cfg.setdefault("post_delay", 0.0)
-
-        if isinstance(cfg["waveform"], str):
-            cfg["waveform"] = ml.get_waveform(cfg["waveform"])
-
-        return cast(PulseCfg, cfg)
+        return t

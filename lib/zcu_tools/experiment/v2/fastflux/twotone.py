@@ -75,12 +75,12 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         gains = sweep2array(
             _cfg["sweep"]["gain"],
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["flux_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["flux_pulse"].ch},
         )
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
         def measure_fn(
@@ -95,8 +95,8 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
 
             gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
             freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-            Pulse.set_param(modules["flux_pulse"], "gain", gain_param)
-            Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
+            modules["flux_pulse"].set_param("gain", gain_param)
+            modules["qub_pulse"].set_param("freq", freq_param)
 
             return ModularProgramV2(
                 soccfg,

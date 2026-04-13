@@ -102,8 +102,8 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
 
             freq_param = sweep2param("freq", freq_sweep)
             gain_param = sweep2param("gain", gain_sweep)
-            PulseReadout.set_param(modules["readout"], "freq", freq_param)
-            PulseReadout.set_param(modules["readout"], "gain", gain_param)
+            modules["readout"].set_param("freq", freq_param)
+            modules["readout"].set_param("gain", gain_param)
 
             prog = ModularProgramV2(
                 ctx.env["soccfg"],
@@ -181,8 +181,8 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             "freq",
             {
                 "soccfg": ctx.env["soccfg"],
-                "gen_ch": modules["readout"]["pulse_cfg"]["ch"],
-                "ro_ch": modules["readout"]["ro_cfg"]["ro_ch"],
+                "gen_ch": modules["readout"].pulse_cfg.ch,
+                "ro_ch": modules["readout"].ro_cfg.ro_ch,
             },
         )
         self.gains = sweep2array(
@@ -190,7 +190,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             "gain",
             {
                 "soccfg": ctx.env["soccfg"],
-                "gen_ch": modules["readout"]["pulse_cfg"]["ch"],
+                "gen_ch": modules["readout"].pulse_cfg.ch,
             },
         )
 
@@ -210,8 +210,8 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         info["best_ro_gain"] = best_gain
 
         readout_cfg = deepcopy(cfg["modules"]["readout"])
-        PulseReadout.set_param(readout_cfg, "freq", best_freq)
-        PulseReadout.set_param(readout_cfg, "gain", best_gain)
+        readout_cfg.set_param("freq", best_freq)
+        readout_cfg.set_param("gain", best_gain)
 
         info["opt_readout"] = readout_cfg
 

@@ -62,9 +62,9 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         lengths = sweep2array(
             _cfg["sweep"]["length"],
             "time",
-            {"soccfg": soccfg, "ro_ch": readout_cfg["ro_cfg"]["ro_ch"]},
+            {"soccfg": soccfg, "ro_ch": readout_cfg.ro_cfg.ro_ch},
         )
-        PulseReadout.set_param(modules["readout"], "length", lengths.max() + 0.11)
+        modules["readout"].set_param("length", lengths.max() + 0.11)
 
         def measure_fn(ctx, update_hook):
             cfg: LengthCfg = cast(LengthCfg, ctx.cfg)
@@ -104,9 +104,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                 ).scan(
                     "length",
                     lengths.tolist(),
-                    before_each=lambda _, ctx, length: PulseReadout.set_param(
-                        ctx.cfg["modules"]["readout"], "ro_length", length
-                    ),
+                    before_each=lambda _, ctx, length: ctx.cfg["modules"]["readout"].set_param("ro_length", length),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(lengths, np.abs(ctx.root_data)),

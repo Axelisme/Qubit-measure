@@ -84,12 +84,12 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
         flux_gains = sweep2array(
             flux_gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["flux_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["flux_pulse"].ch},
         )
         mist_gains = sweep2array(
             mist_gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["mist_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["mist_pulse"].ch},
         )
 
         def measure_fn(
@@ -104,8 +104,8 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
 
             flux_gain_param = sweep2param("flux_gain", flux_gain_sweep)
             mist_gain_param = sweep2param("mist_gain", mist_gain_sweep)
-            Pulse.set_param(modules["flux_pulse"], "gain", flux_gain_param)
-            Pulse.set_param(modules["mist_pulse"], "gain", mist_gain_param)
+            modules["flux_pulse"].set_param("gain", flux_gain_param)
+            modules["mist_pulse"].set_param("gain", mist_gain_param)
 
             return ModularProgramV2(
                 soccfg,

@@ -61,7 +61,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         gains = sweep2array(
             _cfg["sweep"]["gain"],
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
         def measure_fn(ctx, update_hook):
@@ -70,7 +70,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
             gain_sweep = cfg["sweep"]["gain"]
             gain_param = sweep2param("gain", gain_sweep)
-            Readout.set_param(modules["readout"], "gain", gain_param)
+            modules["readout"].set_param("gain", gain_param)
 
             prog = ModularProgramV2(
                 soccfg,

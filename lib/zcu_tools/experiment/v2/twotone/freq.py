@@ -48,12 +48,12 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs = sweep2array(
             _cfg["sweep"]["freq"],
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
         # bind sweep parameter as *QickParam* so it is executed by FPGA
         freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        Pulse.set_param(modules["qub_pulse"], "freq", freq_param)
+        modules["qub_pulse"].set_param("freq", freq_param)
 
         with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(

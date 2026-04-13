@@ -109,12 +109,12 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         res_freqs = sweep2array(
             res_freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["res_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["res_pulse"].ch},
         )
         qub_freqs = sweep2array(
             qub_freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"]["ch"]},
+            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
         def measure_fn(
@@ -128,8 +128,8 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             qub_freq_sweep = cfg["sweep"]["qub_freq"]
             res_freq_param = sweep2param("res_freq", res_freq_sweep)
             qub_freq_param = sweep2param("qub_freq", qub_freq_sweep)
-            Pulse.set_param(modules["res_pulse"], "freq", res_freq_param)
-            Pulse.set_param(modules["qub_pulse"], "freq", qub_freq_param)
+            modules["res_pulse"].set_param("freq", res_freq_param)
+            modules["qub_pulse"].set_param("freq", qub_freq_param)
 
             return ModularProgramV2(
                 soccfg,
