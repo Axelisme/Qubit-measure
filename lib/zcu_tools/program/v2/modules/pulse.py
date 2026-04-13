@@ -8,7 +8,7 @@ from typing_extensions import TYPE_CHECKING, Any, Literal, Optional, Self, Union
 from ..base import MyProgramV2
 from .base import Module, ModuleCfg
 from .util import round_timestamp
-from .waveform import Waveform, WaveformCfg
+from .waveform import UnionWaveformCfg, Waveform
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 @ModuleCfg.register_handler("pulse")
 class PulseCfg(ModuleCfg):
     type: Literal["pulse"] = "pulse"
-    waveform: WaveformCfg
+    waveform: UnionWaveformCfg
     ch: int
     nqz: int
     freq: Union[float, QickParam]

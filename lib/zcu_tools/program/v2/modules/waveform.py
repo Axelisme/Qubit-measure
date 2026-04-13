@@ -4,9 +4,11 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from numpy.typing import NDArray
+from pydantic import Field, TypeAdapter
 from qick.asm_v2 import QickParam
 from typing_extensions import (
     TYPE_CHECKING,
+    Annotated,
     Any,
     Callable,
     ClassVar,
@@ -27,13 +29,15 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
 
 
-class BaseWaveformCfg(ConfigBase):
+class WaveformCfg(ConfigBase):
     @classmethod
     def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
-        return cls.model_validate(raw_cfg)
+        return TypeAdapter(
+            Annotated[UnionWaveformCfg, Field(discriminator="style")]
+        ).validate_python(raw_cfg)
 
 
-class ConstWaveformCfg(BaseWaveformCfg):
+class ConstWaveformCfg(WaveformCfg):
     style: Literal["const"] = "const"
     length: Union[float, QickParam]
 
@@ -44,7 +48,7 @@ class ConstWaveformCfg(BaseWaveformCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-class CosineWaveformCfg(BaseWaveformCfg):
+class CosineWaveformCfg(WaveformCfg):
     style: Literal["cosine"] = "cosine"
     length: float
 
@@ -56,7 +60,7 @@ class CosineWaveformCfg(BaseWaveformCfg):
         self.length = value
 
 
-class GaussWaveformCfg(BaseWaveformCfg):
+class GaussWaveformCfg(WaveformCfg):
     style: Literal["gauss"] = "gauss"
     length: float
     sigma: float
@@ -77,7 +81,7 @@ class GaussWaveformCfg(BaseWaveformCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-class DragWaveformCfg(BaseWaveformCfg):
+class DragWaveformCfg(WaveformCfg):
     style: Literal["drag"] = "drag"
     length: float
     sigma: float
@@ -104,7 +108,7 @@ class DragWaveformCfg(BaseWaveformCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-class ArbWaveformCfg(BaseWaveformCfg):
+class ArbWaveformCfg(WaveformCfg):
     style: Literal["arb"] = "arb"
     length: float
     data: str
@@ -118,7 +122,7 @@ RaiseWaveformCfg: TypeAlias = Union[
 ]
 
 
-class FlatTopWaveformCfg(BaseWaveformCfg):
+class FlatTopWaveformCfg(WaveformCfg):
     style: Literal["flat_top"] = "flat_top"
     length: Union[float, QickParam]
     raise_waveform: RaiseWaveformCfg
@@ -130,7 +134,7 @@ class FlatTopWaveformCfg(BaseWaveformCfg):
             raise ValueError(f"Unknown parameter: {param_name}")
 
 
-WaveformCfg: TypeAlias = Union[
+UnionWaveformCfg: TypeAlias = Union[
     ConstWaveformCfg,
     CosineWaveformCfg,
     GaussWaveformCfg,
@@ -148,7 +152,7 @@ class QickWaveformKwargs(TypedDict):
 
 
 class AbsWaveform(ABC):
-    def __init__(self, name: str, waveform_cfg: WaveformCfg) -> None:
+    def __init__(self, name: str, waveform_cfg: UnionWaveformCfg) -> None:
         self.name = name
         self.waveform_cfg = waveform_cfg
 
@@ -181,7 +185,7 @@ class Waveform(AbsWaveform):
 
         return decorator
 
-    def __init__(self, name: str, waveform_cfg: WaveformCfg) -> None:
+    def __init__(self, name: str, waveform_cfg: UnionWaveformCfg) -> None:
         waveform_style = waveform_cfg.style
         if waveform_style not in self._supported_waveforms:
             raise ValueError(f"Unknown waveform style: {waveform_style}")

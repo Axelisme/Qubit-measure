@@ -7,14 +7,14 @@ from typing_extensions import Any, Mapping, Optional, Sequence, Union, cast
 
 from ..base import SweepCfg
 from .base import MyProgramV2, ProgramV2Cfg
-from .modules import Module
+from .modules import Module, ModuleCfg
 from .utils import PrintTimeStamp
 
 logger = logging.getLogger(__name__)
 
 
 class ModularProgramCfg(ProgramV2Cfg):
-    modules: Mapping[str, Any]
+    modules: Mapping[str, ModuleCfg]
 
 
 class ModularProgramV2(MyProgramV2):

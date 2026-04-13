@@ -36,7 +36,7 @@ qub_name = "Q1_fs6881"
 result_dir = f"../result/{chip_name}/{qub_name}"
 
 database_path = create_datafolder(
-    str(Path.cwd().parent), prefix=str(Path(chip_name, qub_name))
+    str(Path.cwd().parent), name=str(Path(chip_name, qub_name))
 )
 em = ExperimentManager(f"{result_dir}/exps")
 ml, md = em.use_flux(label="0303_1.800mA", readonly=True)

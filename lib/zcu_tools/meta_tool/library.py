@@ -4,7 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import yaml
-from typing_extensions import Any, Optional, Union, cast
+from typing_extensions import Any, Optional, TypeVar, Union, cast
 from yaml.nodes import MappingNode
 
 from zcu_tools.device import GlobalDeviceManager
@@ -52,6 +52,8 @@ class ModuleDumper(yaml.SafeDumper):
 # 註冊自定義的 dict 處理函數
 ModuleDumper.add_representer(dict, ModuleDumper.represent_dict)
 
+T_ModuleCfg = TypeVar("T_ModuleCfg", bound=ModuleCfg)
+T_WaveformCfg = TypeVar("T_WaveformCfg", bound=WaveformCfg)
 
 class ModuleLibrary(SyncFile):
     def __init__(
@@ -91,11 +93,11 @@ class ModuleLibrary(SyncFile):
                 )
 
         self.waveforms = {
-            name: WaveformCfg.model_validate(wav_cfg)
+            name: WaveformCfg.from_dict(wav_cfg, self)
             for name, wav_cfg in cfg["waveforms"].items()
         }
         self.modules = {
-            name: ModuleCfg.model_validate(mod_cfg)
+            name: ModuleCfg.from_dict(mod_cfg, self)
             for name, mod_cfg in cfg["modules"].items()
         }
 
@@ -153,28 +155,44 @@ class ModuleLibrary(SyncFile):
 
     @auto_sync("read")
     def get_waveform(
-        self, name: str, override_cfg: Optional[dict[str, Any]] = None
-    ) -> WaveformCfg:
+        self,
+        name: str,
+        override_cfg: Optional[dict[str, Any]] = None,
+        type: type[T_WaveformCfg] = WaveformCfg,
+    ) -> T_WaveformCfg:
         if name not in self.waveforms:
             raise ValueError(
                 f"Waveform {name} not found, available waveforms: {list(self.waveforms.keys())}"
             )
         waveform = self.waveforms[name]
+
+        if not isinstance(waveform, type):
+            raise ValueError(f"Waveform {name} is not required type {type.__name__}")
+
         if override_cfg is not None:
             waveform = waveform.with_updates(**override_cfg)
+
         return deepcopy(waveform)
 
     @auto_sync("read")
     def get_module(
-        self, name: str, override_cfg: Optional[dict[str, Any]] = None
-    ) -> ModuleCfg:
+        self,
+        name: str,
+        override_cfg: Optional[dict[str, Any]] = None,
+        type: type[T_ModuleCfg] = ModuleCfg,
+    ) -> T_ModuleCfg:
         if name not in self.modules:
             raise ValueError(
                 f"Module {name} not found, available modules: {list(self.modules.keys())}"
             )
         module = self.modules[name]
+
+        if not isinstance(module, type):
+            raise ValueError(f"Module {name} is not required type {type.__name__}")
+
         if override_cfg is not None:
             module = module.with_updates(**override_cfg)
+
         return deepcopy(module)
 
     @auto_sync("write")

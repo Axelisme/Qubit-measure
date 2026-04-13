@@ -25,11 +25,11 @@ from typing_extensions import cast
 
 %autoreload 2
 import zcu_tools.experiment.v2.autofluxdep as zefd
+import zcu_tools.program.v2 as zp
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.meta_tool import ExperimentManager
 from zcu_tools.utils.datasaver import create_datafolder
 from zcu_tools.notebook.utils import make_sweep, reconnect_devices, dump_device_info
-from zcu_tools.program.v2 import PulseCfg
 ```
 
 ```python
@@ -112,13 +112,13 @@ filename = f"{qub_name}_autofluxdep"
 # snapshot of execution code
 measure_code: str = In[-1]  # noqa: F821 # type: ignore
 
-pi_pulse = cast(PulseCfg, ml.get_module("pi_amp"))
-pi_len = pi_pulse["waveform"]["length"]
-pi_product = pi_len * pi_pulse["gain"]
+pi_pulse = ml.get_module("pi_amp", type=zp.PulseCfg)
+pi_len = float(pi_pulse.waveform.length)
+pi_product = pi_len * float(pi_pulse.gain)
 
-readout_cfg = ml.get_module("readout_dpm")
-readout_freq = readout_cfg["pulse_cfg"]["freq"]
-readout_gain = readout_cfg["pulse_cfg"]["gain"]
+readout_cfg = ml.get_module("readout_dpm", type=zp.PulseReadoutCfg)
+readout_freq = float(readout_cfg.pulse_cfg.freq)
+readout_gain = float(readout_cfg.pulse_cfg.gain)
 
 
 executor = (
@@ -168,13 +168,12 @@ executor = (
                     and ml.make_cfg(
                         {
                             "modules": {
-                                "rabi_pulse": {
-                                    **pi_pulse,
-                                    "nqz": 2,
-                                    "freq": cur_qf,
-                                    "gain": min(1.0, prev_pi_pd / (1.5 * pi_len)),
-                                    # "mixer_freq": cur_qf,
-                                },
+                                "rabi_pulse": pi_pulse.with_updates(
+                                    nqz=2,
+                                    freq=cur_qf,
+                                    gain=min(1.0, prev_pi_pd / (1.5 * pi_len)),
+                                    # mixer_freq=cur_qf,
+                                ),
                                 "readout": opt_readout,
                             },
                             "relax_delay": 3 * prev_t1,

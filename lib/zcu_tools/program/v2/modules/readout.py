@@ -61,11 +61,13 @@ class PulseReadoutCfg(ModuleCfg):
         if isinstance(ro_cfg, str):
             raw_cfg["ro_cfg"] = ml.get_module(ro_cfg)
 
-        # auto derive ro_ch from pulse_cfg.ch
+        # auto derive ro_ch/ro_freq from pulse_cfg.ch/freq
         if isinstance(pulse_cfg := raw_cfg.get("pulse_cfg"), dict):
             ch = pulse_cfg.get("ch")
+            freq = pulse_cfg.get("freq")
             if isinstance(ro_cfg := raw_cfg.get("ro_cfg"), dict):
                 ro_cfg.setdefault("ro_ch", ch)
+                ro_cfg.setdefault("ro_freq", freq)
 
         return cls.model_validate(raw_cfg)
 
