@@ -25,6 +25,7 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    DelayAuto,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -33,7 +34,6 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
-    DelayAuto,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay
@@ -213,7 +213,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                             gate_pulse = deepcopy(gate_pulse)
                             gate_pulse["phase"] += global_phase
                             gate_modules.append(Pulse(f"C{i}_{gate_name}", gate_pulse))
-                            gate_modules.append(DelayAuto("pulse_delay", t=0.01))
+                            gate_modules.append(DelayAuto("pulse_delay", t=0.005))
 
                         # virtual Z gates accumulate in global_phase
                         global_phase = (global_phase + acc_phase) % 360

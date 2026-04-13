@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 
 from tqdm.auto import tqdm
@@ -9,6 +10,8 @@ from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .base import AbsTask
 from .state import Result, TaskState
+
+logger = logging.getLogger(__name__)
 
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 T_ChildResult = TypeVar("T_ChildResult", bound=Result)
@@ -29,10 +32,13 @@ def run_with_retries(
             if attempt == retry_time:
                 if raise_error:
                     raise
-                print(e)
+                logger.error("run_with_retries: final attempt failed: %s", e)
             else:
-                print(f"Failed to run task, retrying... ({attempt + 1}/{retry_time})")
-                task.cleanup()  # cleanup and re-init
+                logger.warning(
+                    "run_with_retries: attempt %d/%d failed, retrying: %s",
+                    attempt + 1, retry_time, e,
+                )
+                task.cleanup()
                 task.init(state, dynamic_pbar=dynamic_pbar)
                 continue
         break

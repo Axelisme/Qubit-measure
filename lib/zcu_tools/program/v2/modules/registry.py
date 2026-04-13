@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from collections import OrderedDict
 import hashlib
@@ -11,6 +12,8 @@ from typing_extensions import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .pulse import PulseCfg
+
+logger = logging.getLogger(__name__)
 
 
 class PulseRegistry:
@@ -64,9 +67,23 @@ class PulseRegistry:
         """Registers a pulse configuration. returns True if the pulse is newly registered, False if it already exists."""
         pulse_name = self.calc_name(cfg)
         if pulse_name in self._pulses:
+            logger.debug(
+                "PulseRegistry: reuse '%s' (module=%s, ch=%s, phase=%s, gain=%s)",
+                pulse_name, name, cfg["ch"], cfg["phase"], cfg["gain"],
+            )
             return False
 
         self._pulses[pulse_name] = (name, deepcopy(cfg))
+        waveform = cfg["waveform"]
+        waveform_style = waveform["style"] if isinstance(waveform, dict) else "?"
+        logger.debug(
+            "PulseRegistry: new '%s' (module=%s, ch=%s, freq=%s, phase=%s, gain=%s, "
+            "waveform_style=%s) [total=%d]",
+            pulse_name, name, cfg["ch"], cfg["freq"],
+            cfg["phase"], cfg["gain"],
+            waveform_style,
+            len(self._pulses),
+        )
 
         return True
 

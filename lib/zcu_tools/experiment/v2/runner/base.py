@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from copy import deepcopy
 
@@ -27,6 +28,8 @@ from .state import Result, TaskState
 if TYPE_CHECKING:
     from .repeat import RepeatOverTime, ReTryIfFail
     from .soft import Scan, T_Value
+
+logger = logging.getLogger(__name__)
 
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
@@ -112,14 +115,21 @@ def run_task(
         on_update=on_update,
     )
 
+    logger.debug(
+        "run_task: task=%s, cfg_keys=%s, env_keys=%s",
+        type(task).__name__, list(cfg.keys()), list(env_dict.keys()),
+    )
+
     try:
         task.init(state, dynamic_pbar=False)
+        logger.debug("run_task: init done, starting run")
         task.run(state)
+        logger.debug("run_task: run done, cleanup")
         task.cleanup()
     except KeyboardInterrupt:
-        print("Received KeyboardInterrupt, early stopping the program")
+        logger.warning("run_task: KeyboardInterrupt, early stopping")
     except Exception:
-        print("Error during measurement:")
+        logger.exception("run_task: error during measurement")
         print_traceback()
 
     return state.root_data

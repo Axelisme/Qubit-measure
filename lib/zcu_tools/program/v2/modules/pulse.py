@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import logging
 from copy import deepcopy
 
 from qick.asm_v2 import QickParam
@@ -11,6 +13,8 @@ from .waveform import Waveform, WaveformCfg
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
+
+logger = logging.getLogger(__name__)
 
 
 class PulseCfg(ModuleCfg, closed=True):
@@ -48,6 +52,7 @@ class Pulse(Module, tag="pulse"):
 
     def init(self, prog: MyProgramV2) -> None:
         if self.cfg is None:
+            logger.debug("Pulse.init: '%s' has no cfg, skipped", self.name)
             return
 
         self.waveform = Waveform(f"{self.name}_waveform", self.cfg["waveform"])

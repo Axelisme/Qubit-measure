@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import logging
+
 import qick.asm_v2 as qasm
 from qick.asm_v2 import QickParam
 from typing_extensions import TypeAlias, Union
 
-from zcu_tools.config import config
-
 from ..base import MyProgramV2
 from ..utils import PrintTimeStamp
 from .base import Module
+
+logger = logging.getLogger(__name__)
 
 SubModule: TypeAlias = Union[Module, list[Module]]
 
@@ -43,11 +45,13 @@ class Repeat(Module):
         # this n must > 0, to prevent infinite loop in qick
         assert self.n > 0
 
+        logger.debug("Repeat.run: name='%s', n=%d, t=%s", self.name, self.n, t)
+
         prog.delay(t=t)
         prog.append_macro(qasm.OpenLoop(name=self.name, n=self.n))
         cur_t = 0.0
         for mod in self.sub_module:
-            if config.DEBUG_MODE:
+            if logger.isEnabledFor(logging.DEBUG):
                 prog.append_macro(
                     PrintTimeStamp(
                         f"{mod.__class__.__name__}({mod.name})", cur_t, prefix="\t"
@@ -117,6 +121,11 @@ class Branch(Module):
     def run(
         self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
+        logger.debug(
+            "Branch.run: name='%s', n_branches=%d, t=%s",
+            self.name, len(self.branches), t,
+        )
+
         prog.delay(t=t)
         prog.delay_auto(t=0)
 
@@ -136,7 +145,7 @@ class Branch(Module):
 
             cur_t: Union[float, QickParam] = 0.0
             for mod in branch:
-                if config.DEBUG_MODE:
+                if logger.isEnabledFor(logging.DEBUG):
                     prog.append_macro(
                         PrintTimeStamp(
                             f"{mod.__class__.__name__}({mod.name})",

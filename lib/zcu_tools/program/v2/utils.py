@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import logging
+
 from qick.asm_v2 import AsmInst, Macro, QickParam, QickSweep1D
 from typing_extensions import Optional, Union
 
 from zcu_tools.program import SweepCfg
+
+logger = logging.getLogger(__name__)
 
 
 def sweep2param(name: str, sweep: SweepCfg) -> QickParam:
@@ -63,13 +67,14 @@ class PrintTimeStamp(Macro):
         if ro_chs is None:
             ro_chs = list(range(len(prog._ro_ts)))
 
-        print(self.prefix + self.name)
-        print(self.prefix + f"\tglobal time: {param2str(self.t)}")
+        lines = [self.prefix + self.name]
+        lines.append(self.prefix + f"\tglobal time: {param2str(self.t)}")
         for ch in gen_chs:
             t = prog._gen_ts[ch]
             if t != 0.0 or self.gen_chs is not None:
-                print(self.prefix + f"\tgen[{ch}] " + param2str(t))
+                lines.append(self.prefix + f"\tgen[{ch}] " + param2str(t))
         for ch in ro_chs:
             t = prog._ro_ts[ch]
             if t != 0.0 or self.ro_chs is not None:
-                print(self.prefix + f"\t ro[{ch}] " + param2str(t))
+                lines.append(self.prefix + f"\t ro[{ch}] " + param2str(t))
+        logger.debug("\n".join(lines))

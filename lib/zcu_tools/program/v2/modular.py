@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from qick import QickConfig
-from typing_extensions import Any, Mapping, Optional, Sequence, cast, Union
+import logging
 
-from zcu_tools.config import config
+from qick import QickConfig
+from typing_extensions import Any, Mapping, Optional, Sequence, Union, cast
 
 from ..base import SweepCfg
 from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module
 from .utils import PrintTimeStamp
+
+logger = logging.getLogger(__name__)
 
 
 class ModularProgramCfg(ProgramV2Cfg):
@@ -33,6 +35,13 @@ class ModularProgramV2(MyProgramV2):
         self.modules = modules
         self.sweep_dict = sweep
 
+        logger.debug(
+            "ModularProgramV2.__init__: %d modules, reps=%s, relax_delay=%s",
+            len(modules),
+            _cfg["reps"],
+            _cfg["relax_delay"],
+        )
+
         super().__init__(soccfg, _cfg, **kwargs)
 
     def _initialize(self, cfg: ModularProgramCfg) -> None:
@@ -50,11 +59,17 @@ class ModularProgramV2(MyProgramV2):
         for module in self.modules:
             module.init(self)
 
+        logger.debug(
+            "ModularProgramV2._initialize: registered %d unique pulses, %d waveforms",
+            len(self.pulse_registry._pulses),
+            len(self.waves),
+        )
+
     def _body(self, cfg: ModularProgramCfg) -> None:
 
         t = 0.0
         for module in self.modules:
-            if config.DEBUG_MODE:
+            if logger.isEnabledFor(logging.DEBUG):
                 self.append_macro(
                     PrintTimeStamp(f"{module.__class__.__name__}(name={module.name})", t)
                 )

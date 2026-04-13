@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from numpy.typing import NDArray
 from tqdm.auto import tqdm
@@ -9,6 +11,8 @@ from zcu_tools.device import GlobalDeviceManager
 
 from .base import AbsTask
 from .state import Result, TaskState
+
+logger = logging.getLogger(__name__)
 
 
 def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.complex128]:
@@ -79,6 +83,11 @@ class Task(
         if dev_cfg := state.cfg.get("dev"):
             GlobalDeviceManager.setup_devices(dev_cfg, progress=False)
 
+        logger.debug(
+            "Task.run: path=%s, rounds=%s, cfg_keys=%s",
+            state.path, state.cfg["rounds"], list(state.cfg.keys()),
+        )
+
         def update_hook(ir: int, raw: T_Raw) -> None:
             assert self.avg_pbar is not None
             self.avg_pbar.update(ir - self.avg_pbar.n)
@@ -88,6 +97,8 @@ class Task(
         signal = self.raw2signal_fn(self.measure_fn(state, update_hook))
 
         self.avg_pbar.update(state.cfg["rounds"] - self.avg_pbar.n)  # type: ignore[arg-type]
+
+        logger.debug("Task.run: done, signal shape=%s", getattr(signal, "shape", "?"))
 
         state.set_value(signal)
 

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from tqdm.auto import tqdm
 from typing_extensions import Any, Callable, Optional, Sequence, TypeVar, Union
 
 from .base import AbsTask
 from .state import Result, TaskState
+
+logger = logging.getLogger(__name__)
 
 T_Value = TypeVar("T_Value", bound=Union[int, float, complex])
 T_RootResult = TypeVar("T_RootResult", bound=Result)
@@ -60,8 +64,14 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult]):
             assert self.sweep_pbar is not None
             self.sweep_pbar.reset()
 
+        logger.debug(
+            "Scan.run: name='%s', n_values=%d, path=%s",
+            self.sweep_name, len(self.sweep_values), state.path,
+        )
+
         for i, v in enumerate(self.sweep_values):
             self.before_each_fn(i, state, v)
+            logger.debug("Scan '%s' step %d/%d, value=%s", self.sweep_name, i + 1, len(self.sweep_values), v)
 
             self.sub_task.run(state.child(i))
 

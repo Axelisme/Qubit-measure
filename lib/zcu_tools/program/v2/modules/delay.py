@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import logging
 
 from qick.asm_v2 import QickParam
 from typing_extensions import TYPE_CHECKING, Optional, Sequence, Union
-
-from zcu_tools.config import config
 
 from .base import Module
 from ..base import MyProgramV2
@@ -13,6 +12,8 @@ from ..utils import PrintTimeStamp
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
+
+logger = logging.getLogger(__name__)
 
 
 class Delay(Module):
@@ -116,11 +117,16 @@ class Join(Module):
                 )
             )
 
+        logger.debug(
+            "Join.run: %d parallel branches, t=%s",
+            len(self.join_modules), t,
+        )
+
         end_t_list = []
         for list in self.join_modules:
             cur_t = t
             for m in list:
-                if config.DEBUG_MODE:
+                if logger.isEnabledFor(logging.DEBUG):
                     insert_debug(m, cur_t)
                 cur_t = m.run(prog, cur_t)
 

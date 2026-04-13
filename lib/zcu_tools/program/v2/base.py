@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
 from typing_extensions import Any, Mapping, TypedDict, cast
@@ -7,6 +9,8 @@ from typing_extensions import Any, Mapping, TypedDict, cast
 from zcu_tools.program.base import MyProgram
 
 from .modules.registry import PulseRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class ProgramV2Cfg(TypedDict):
@@ -31,10 +35,30 @@ class MyProgramV2(MyProgram, AveragerProgramV2):  # type: ignore
             **kwargs,
         )
 
+    def compile(self) -> None:
+        super().compile()
+
+        pmem_len = len(self.binprog["pmem"]) if self.binprog["pmem"] else 0
+        wmem_len = len(self.binprog["wmem"]) if self.binprog["wmem"] else 0
+        dmem_len = len(self.binprog["dmem"]) if self.binprog["dmem"] else 0
+        pmem_cap = self.tproccfg["pmem_size"]
+        wmem_cap = self.tproccfg["wmem_size"]
+        dmem_cap = self.tproccfg["dmem_size"]
+
+        logger.debug(
+            f"{self.__class__.__name__}.compile: "
+            f"pmem={pmem_len}/{pmem_cap} ({(100 * pmem_len / pmem_cap if pmem_cap else 0):.1f}%), "
+            f"wmem={wmem_len}/{wmem_cap} ({(100 * wmem_len / wmem_cap if wmem_cap else 0):.1f}%), "
+            f"dmem={dmem_len}/{dmem_cap} ({(100 * dmem_len / dmem_cap if dmem_cap else 0):.1f}%)",
+        )
+
     def acquire(self, *args, **kwargs):
-        # v2 program need to pass rounds to acquire
+        logger.debug(
+            "MyProgramV2.acquire: reps=%s, rounds=%s",
+            self.cfg["reps"],
+            self.cfg["rounds"],
+        )
         return super().acquire(*args, rounds=self.cfg["rounds"], **kwargs)
 
     def acquire_decimated(self, *args, **kwargs):
-        # v2 program need to pass rounds to acquire_decimated
         return super().acquire_decimated(*args, rounds=self.cfg["rounds"], **kwargs)

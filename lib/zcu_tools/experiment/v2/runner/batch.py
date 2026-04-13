@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from tqdm.auto import tqdm
 from typing_extensions import Hashable, Mapping, Optional, TypeVar
 
 from .base import AbsTask
 from .state import Result
+
+logger = logging.getLogger(__name__)
 
 T_Key = TypeVar("T_Key", bound=Hashable)
 
@@ -42,8 +46,11 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult]):
             assert self.task_pbar is not None
             self.task_pbar.reset()
 
+        logger.debug("BatchTask.run: %d tasks", len(self.tasks))
+
         for name, task in self.tasks.items():
             self.task_pbar.set_description(desc=f"Task [{str(name)}]")
+            logger.debug("BatchTask.run: starting task '%s'", name)
 
             task.run(state.child(name))
 
