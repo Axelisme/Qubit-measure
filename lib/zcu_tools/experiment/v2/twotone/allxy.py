@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import curve_fit
@@ -236,7 +237,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
 
     def analyze(
         self, result: Optional[AllXY_Result] = None, fit_ge: bool = False
-    ) -> None:
+    ) -> Figure:
         if result is None:
             result = self.last_result
         assert result is not None, (
@@ -317,7 +318,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
         # 3. Plotting
         # ------------------------------------------------------------------
 
-        _, ax = plt.subplots(figsize=config.figsize)
+        fig, ax = plt.subplots(figsize=config.figsize)
         ax.plot(real_signals, marker="o", linestyle="None", label="Measured Signals")
         ax.plot(
             predict_signals,
@@ -341,7 +342,8 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
         ax.set_title(f"power dep: {power_err:.1%}, detune dep: {detune_err:.1%}")
 
         plt.tight_layout()
-        plt.show()
+
+        return fig
 
     def save(
         self,
@@ -358,11 +360,10 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
         )
 
         signals_dict = result
-        sequence = list(signals_dict.keys())
-        signals = np.concatenate(list(signals_dict.values()))
+        signals = np.asarray(list(signals_dict.values()))
 
         # Create gate indices and labels
-        gate_indices = np.arange(len(sequence))
+        gate_indices = np.arange(len(signals_dict.keys()))
 
         save_data(
             filepath=filepath,
