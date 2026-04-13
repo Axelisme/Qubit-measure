@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Tools for Qubit Measurement on ZCU216"
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["numpy", "tqdm", "matplotlib", "typing-extensions", "typeguard"]
+dependencies = ["numpy", "tqdm", "matplotlib", "typing-extensions", "typeguard", "jupytext"]
 
 [project.optional-dependencies]
 server = ["numpy==1.23.5"]
@@ -24,7 +24,6 @@ fit = [
     "numba",
     "requests",
     "flask",
-    "jupytext",
     "scikit-optimize",
 ]
 client = [
