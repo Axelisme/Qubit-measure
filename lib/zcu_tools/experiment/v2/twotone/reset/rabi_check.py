@@ -50,7 +50,7 @@ class RabiCheckModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     rabi_pulse: PulseCfg
     tested_reset: ResetCfg
-    post_pulse: NotRequired[PulseCfg]
+    pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
@@ -92,7 +92,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                 soccfg,
                 cfg,
                 sweep=[
-                    ("w/o_reset", 2),
+                    ("w/o_reset", 3),
                     ("gain", cfg["sweep"]["gain"]),
                 ],
                 modules=[
@@ -101,9 +101,13 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                     Branch(
                         "w/o_reset",
                         [],
-                        Reset("tested_reset", modules["tested_reset"]),
+                        Reset("tested_reset_1", modules["tested_reset"]),
+                        [
+                            Reset("tested_reset_2", modules["tested_reset"]),
+                            Pulse("pi_pulse", modules["pi_pulse"]),
+                        ]
                     ),
-                    Pulse("post_pulse", modules.get("post_pulse")),
+
                     Readout("readout", modules["readout"]),
                 ],
             ).acquire(
@@ -114,12 +118,12 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
             )
 
         with LivePlot1D(
-            "Pulse gain", "Amplitude", segment_kwargs=dict(num_lines=2)
+            "Pulse gain", "Amplitude", segment_kwargs=dict(num_lines=3)
         ) as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
-                    result_shape=(2, len(gains)),
+                    result_shape=(3, len(gains)),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
@@ -142,12 +146,13 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         gains, signals = result
         real_signals = reset_rabi_signal2real(signals)
 
-        wo_signals, w_signals = real_signals
+        wo_signals, w_signals, wp_signals = real_signals
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
-        ax.plot(gains, w_signals, label="With Reset", marker=".")
         ax.plot(gains, wo_signals, label="Without Reset", marker=".")
+        ax.plot(gains, w_signals, label="With Reset", marker=".")
+        ax.plot(gains, wp_signals, label="  + Pi Pulse", marker=".")
         ax.legend()
         ax.grid(True)
 
@@ -170,7 +175,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         save_data(
             filepath=filepath,
             x_info={"name": "Amplitude", "unit": "a.u.", "values": gains},
-            y_info={"name": "Reset", "unit": "None", "values": np.array([0, 1])},
+            y_info={"name": "Reset", "unit": "None", "values": np.array([0, 1, 2])},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,
