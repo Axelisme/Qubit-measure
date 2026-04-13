@@ -33,6 +33,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    DelayAuto,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay
@@ -116,8 +117,11 @@ RECOVERY_INDEX = (9, 14, 21, 19, 0, 6)
 # ==============================================================================
 
 
-def rb_signal2real(signals2D: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.nanmean(rotate2real(signals2D).real, axis=0)
+def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    mask = np.any(np.isfinite(signals), axis=0) # (depths, )
+    mean_signals = np.full((signals.shape[1],), np.nan, dtype=np.complex128) # (depths,)
+    mean_signals[mask] = np.nanmean(signals[..., mask], axis=0)
+    return rotate2real(mean_signals).real
 
 
 class RB_ModuleCfg(TypedDict, closed=True):
@@ -151,6 +155,9 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "depth")
         _cfg = check_type(deepcopy(cfg), RB_Cfg)
 
+        rounds = _cfg["rounds"]
+        _cfg["rounds"] = 1 # implement by task scan
+
         depths = sweep2array(_cfg["sweep"]["depth"], allow_array=True).astype(np.int64)
 
         max_depth = int(np.max(depths))
@@ -160,6 +167,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
             [child.entropy for child in ss.spawn(_cfg["n_seeds"])], dtype=np.int64
         )
 
+        prog_cahce: dict[tuple[int, int], ModularProgramV2] = {}
         def measure_fn(
             ctx: TaskState,
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
@@ -167,59 +175,73 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
             cfg = cast(RB_Cfg, ctx.cfg)
             modules = cfg["modules"]
 
-            I_pulse = modules.get("I_pulse")
-            X90_pulse = modules["X90_pulse"]
-            X180_pulse = modules["X180_pulse"]
-            MX90_pulse = deepcopy(X90_pulse)
-            MX90_pulse["phase"] += 180.0
-            Y90_pulse = deepcopy(X90_pulse)
-            Y90_pulse["phase"] += 90.0
-            Y180_pulse = deepcopy(X180_pulse)
-            Y180_pulse["phase"] += 90.0
-            MY90_pulse = deepcopy(X90_pulse)
-            MY90_pulse["phase"] -= 90.0
-            gate_info_map: dict[str, tuple[Optional[PulseCfg], int]] = {
-                "I": (I_pulse, 0),
-                "X90": (X90_pulse, 0),
-                "X180": (X180_pulse, 0),
-                "-X90": (MX90_pulse, 0),
-                "Y90": (Y90_pulse, 0),
-                "Y180": (Y180_pulse, 0),
-                "-Y90": (MY90_pulse, 0),
-                "Z90": (None, -90),
-                "Z180": (None, -180),
-                "-Z90": (None, 90),
-            }
+            seed:int = ctx.env["seed"]
+            depth:int = ctx.env["depth"]
 
-            global_phase: int = 0
-            gate_modules = []
-            for i, clifford_idx in enumerate[int](ctx.env["clifford_seq"]):
-                for gate_name in CLIFFORD_GROUP[clifford_idx]:
-                    gate_pulse, acc_phase = gate_info_map[gate_name]
+            if (seed, depth) not in prog_cahce:
+                I_pulse = modules.get("I_pulse")
+                X90_pulse = modules["X90_pulse"]
+                X180_pulse = modules["X180_pulse"]
+                MX90_pulse = deepcopy(X90_pulse)
+                MX90_pulse["phase"] += 180.0
+                Y90_pulse = deepcopy(X90_pulse)
+                Y90_pulse["phase"] += 90.0
+                Y180_pulse = deepcopy(X180_pulse)
+                Y180_pulse["phase"] += 90.0
+                MY90_pulse = deepcopy(X90_pulse)
+                MY90_pulse["phase"] -= 90.0
+                gate_info_map: dict[str, tuple[Optional[PulseCfg], int]] = {
+                    "I": (I_pulse, 0),
+                    "X90": (X90_pulse, 0),
+                    "X180": (X180_pulse, 0),
+                    "-X90": (MX90_pulse, 0),
+                    "Y90": (Y90_pulse, 0),
+                    "Y180": (Y180_pulse, 0),
+                    "-Y90": (MY90_pulse, 0),
+                    "Z90": (None, -90),
+                    "Z180": (None, -180),
+                    "-Z90": (None, 90),
+                }
 
-                    gate_pulse = deepcopy(gate_pulse)
-                    if gate_pulse is not None:
-                        gate_pulse["phase"] += global_phase
+                global_phase: int = 0
+                gate_modules = []
+                for i, clifford_idx in enumerate[int](ctx.env["clifford_seq"]):
+                    for gate_name in CLIFFORD_GROUP[clifford_idx]:
+                        gate_pulse, acc_phase = gate_info_map[gate_name]
 
-                    gate_modules.append(Pulse(f"C{i}_{gate_name}", gate_pulse))
+                        if gate_pulse is not None:
+                            gate_pulse = deepcopy(gate_pulse)
+                            gate_pulse["phase"] += global_phase
+                            gate_modules.append(Pulse(f"C{i}_{gate_name}", gate_pulse))
+                            gate_modules.append(DelayAuto("pulse_delay", t=0.01))
 
-                    # virtual Z gates accumulate in global_phase
-                    global_phase = (global_phase + acc_phase) % 360
+                        # virtual Z gates accumulate in global_phase
+                        global_phase = (global_phase + acc_phase) % 360
 
-            return ModularProgramV2(
-                soccfg,
-                cfg,
-                modules=[
-                    Reset("reset", modules.get("reset")),
-                    *gate_modules,
-                    Readout("readout", modules["readout"]),
-                ],
-            ).acquire(
+                prog_cahce[(seed, depth)] = ModularProgramV2(
+                    soccfg,
+                    cfg,
+                    modules=[
+                        Reset("reset", modules.get("reset")),
+                        *gate_modules,
+                        Readout("readout", modules["readout"]),
+                    ],
+                )
+
+            return prog_cahce[(seed, depth)].acquire(
                 soc,
                 progress=False,
                 callback=update_hook,
                 **(acquire_kwargs or {}),
             )
+
+        def average_signals(signals: list[list[list[NDArray[np.complex128]]]]) -> NDArray[np.complex128]:
+            _signals = np.asarray(signals)  # shape: (n_seeds, rounds, n_depths)
+            mean_signals = np.full((_signals.shape[0], _signals.shape[2]), np.nan, np.complex128) # (n_seeds, n_depths)
+            for i in range(_signals.shape[0]):
+                mask = np.any(np.isfinite(_signals[i]), axis=0) # (n_depths, )
+                mean_signals[i, mask] = np.nanmean(_signals[i, :, mask], axis=1)
+            return mean_signals
 
         with LivePlot1D("Depth", "Signal") as viewer:
 
@@ -230,6 +252,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                 clifford_seq = total_clifford_seq[:depth]
                 clifford_seq.append(RECOVERY_INDEX[acc_states[depth]])
 
+                ctx.env["depth"] = depth
                 ctx.env["clifford_seq"] = clifford_seq
 
             def update_seq_seed(si: int, ctx: TaskState, entropy: int) -> None:
@@ -245,22 +268,24 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                         state = GATE_EFFECT_MAP[gate][state]
                     cum_states.append(state)
 
+                ctx.env["seed"] = entropy
                 ctx.env["total_clifford_seq"] = clifford_idxs.tolist()
                 ctx.env["acc_states"] = cum_states
 
             signals = run_task(
                 task=Task(measure_fn=measure_fn)
                 .scan("depth", depths.tolist(), before_each=update_seq_depth)
+                .scan("rounds", list(range(rounds)), before_each=lambda *_: None)
                 .scan("seed", entropys.tolist(), before_each=update_seq_seed),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     depths.astype(np.float64),
-                    rb_signal2real(np.asarray(ctx.root_data)),
+                    rb_signal2real(average_signals(ctx.root_data))
                 ),
             )
-            signals2D = np.asarray(signals)  # shape: (n_seeds, n_depths)
+            signals2D = average_signals(signals)  # shape: (n_seeds, n_depths)
 
-        self.last_cfg = _cfg
+        self.last_cfg = cast(RB_Cfg, deepcopy(cfg))
         self.last_result = (entropys, depths, signals2D)
 
         return entropys, depths, signals2D
