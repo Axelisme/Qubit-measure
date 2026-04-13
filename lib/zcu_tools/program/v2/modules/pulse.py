@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
 
 
-@ModuleCfg.register_handler("pulse")
+@ModuleCfg.bind_handler
 class PulseCfg(ModuleCfg):
     type: Literal["pulse"] = "pulse"
     waveform: UnionWaveformCfg

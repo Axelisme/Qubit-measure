@@ -9,7 +9,6 @@ from qick.asm_v2 import QickParam
 from typing_extensions import (
     TYPE_CHECKING,
     Any,
-    Callable,
     ClassVar,
     Optional,
     Self,
@@ -58,30 +57,38 @@ T_ModuleCfg = TypeVar("T_ModuleCfg", bound="ModuleCfg")
 
 
 class ModuleCfg(ConfigBase):
+    # not initiailize here to avoid overwriting when reloading module
     _delegated_cls: ClassVar[dict[str, type["ModuleCfg"]]]
 
     type: str
     desc: Optional[str] = None
 
     @classmethod
-    def register_handler(
-        cls, name_id: str
-    ) -> Callable[[type[T_ModuleCfg]], type[T_ModuleCfg]]:
+    def module_type(cls) -> str:
+        type_field = cls.model_fields.get("type")
+        if type_field is None:
+            raise ValueError(f"{cls.__name__} must define a 'type' field")
+        if not isinstance(type_field.default, str):
+            raise ValueError(
+                f"{cls.__name__}.type default must be a string literal for registration"
+            )
+        return type_field.default
+
+    @classmethod
+    def bind_handler(cls, sub_cls: type[T_ModuleCfg]) -> type[T_ModuleCfg]:
+        """Bind a module config class to handle it type"""
         if not hasattr(cls, "_delegated_cls"):
-            cls._delegated_cls = {}
+            cls._delegated_cls = {}  # initialize here
 
-        def decorator(sub_cls: type[T_ModuleCfg]) -> type[T_ModuleCfg]:
-            registered_cls = cls._delegated_cls.get(name_id)
-            if registered_cls is not None and registered_cls is not sub_cls:
-                raise ValueError(
-                    f"{cls.__name__} already registered name_id {name_id} to {registered_cls.__name__}"
-                )
+        name_id = sub_cls.module_type()
+        registered_cls = cls._delegated_cls.get(name_id)
+        if registered_cls is not None and registered_cls is not sub_cls:
+            raise ValueError(
+                f"{cls.__name__} already registered name_id {name_id} to {registered_cls.__name__}"
+            )
 
-            cls._delegated_cls[name_id] = sub_cls
-
-            return sub_cls
-
-        return decorator
+        cls._delegated_cls[name_id] = sub_cls
+        return sub_cls
 
     @classmethod
     def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> "ModuleCfg":

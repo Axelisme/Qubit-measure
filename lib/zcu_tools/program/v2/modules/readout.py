@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
 
 
-@ModuleCfg.register_handler("readout/direct")
+@ModuleCfg.bind_handler
 class DirectReadoutCfg(ModuleCfg):
     type: Literal["readout/direct"] = "readout/direct"
     ro_ch: int
@@ -44,7 +44,7 @@ class DirectReadoutCfg(ModuleCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-@ModuleCfg.register_handler("readout/pulse")
+@ModuleCfg.bind_handler
 class PulseReadoutCfg(ModuleCfg):
     type: Literal["readout/pulse"] = "readout/pulse"
     pulse_cfg: PulseCfg
@@ -105,7 +105,7 @@ class Readout(AbsReadout):
         self.readout = self._supported_readout[cfg_type](name, cfg)
 
     @classmethod
-    def register_readout(
+    def bind_readout(
         cls, id_name: str
     ) -> Callable[[type["AbsReadout"]], type["AbsReadout"]]:
         if id_name in cls._supported_readout:
@@ -134,7 +134,7 @@ class Readout(AbsReadout):
     ) -> Union[float, QickParam]:
         return self.readout.run(prog, t)
 
-@Readout.register_readout("readout/direct")
+@Readout.bind_readout(DirectReadoutCfg.module_type())
 class DirectReadout(AbsReadout):
     def __init__(self, name: str, cfg: DirectReadoutCfg) -> None:
         self.name = name
@@ -165,7 +165,7 @@ class DirectReadout(AbsReadout):
         prog.trigger([ro_ch], t=t + trig_offset)
         return t
 
-@Readout.register_readout("readout/pulse")
+@Readout.bind_readout(PulseReadoutCfg.module_type())
 class PulseReadout(AbsReadout):
     def __init__(self, name: str, cfg: PulseReadoutCfg) -> None:
         self.name = name

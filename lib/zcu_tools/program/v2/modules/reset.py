@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
 
 
-@ModuleCfg.register_handler("reset/none")
+@ModuleCfg.bind_handler
 class NoneResetCfg(ModuleCfg):
     type: Literal["reset/none"] = "reset/none"
 
@@ -37,7 +37,7 @@ class NoneResetCfg(ModuleCfg):
         raise ValueError("NoneReset does not support set_param")
 
 
-@ModuleCfg.register_handler("reset/pulse")
+@ModuleCfg.bind_handler
 class PulseResetCfg(ModuleCfg):
     type: Literal["reset/pulse"] = "reset/pulse"
     pulse_cfg: PulseCfg
@@ -56,7 +56,7 @@ class PulseResetCfg(ModuleCfg):
         self.pulse_cfg.set_param(name, value)
 
 
-@ModuleCfg.register_handler("reset/two_pulse")
+@ModuleCfg.bind_handler
 class TwoPulseResetCfg(ModuleCfg):
     type: Literal["reset/two_pulse"] = "reset/two_pulse"
     pulse1_cfg: PulseCfg
@@ -87,7 +87,7 @@ class TwoPulseResetCfg(ModuleCfg):
             raise ValueError(f"Unknown parameter: {name}")
 
 
-@ModuleCfg.register_handler("reset/bath")
+@ModuleCfg.bind_handler
 class BathResetCfg(ModuleCfg):
     type: Literal["reset/bath"] = "reset/bath"
     cavity_tone_cfg: PulseCfg
@@ -145,9 +145,7 @@ class Reset(AbsReset):
         self.reset = self._supported_reset[cfg_type](name, cfg)
 
     @classmethod
-    def register_reset(
-        cls, id_name: str
-    ) -> Callable[[type["AbsReset"]], type["AbsReset"]]:
+    def bind_reset(cls, id_name: str) -> Callable[[type["AbsReset"]], type["AbsReset"]]:
         if id_name in cls._supported_reset:
             raise ValueError(
                 f"Reset {id_name} already registered by {cls._supported_reset[id_name].__name__}"
@@ -175,7 +173,7 @@ class Reset(AbsReset):
         return self.reset.run(prog, t)
 
 
-@Reset.register_reset("reset/none")
+@Reset.bind_reset(NoneResetCfg.module_type())
 class NoneReset(AbsReset):
     def __init__(self, name: str, cfg: NoneResetCfg) -> None:
         self.name = name
@@ -192,7 +190,7 @@ class NoneReset(AbsReset):
         return t
 
 
-@Reset.register_reset("reset/pulse")
+@Reset.bind_reset(PulseResetCfg.module_type())
 class PulseReset(AbsReset):
     def __init__(self, name: str, cfg: PulseResetCfg) -> None:
         self.name = name
@@ -211,7 +209,7 @@ class PulseReset(AbsReset):
         return self.reset_pulse.run(prog, t)
 
 
-@Reset.register_reset("reset/two_pulse")
+@Reset.bind_reset(TwoPulseResetCfg.module_type())
 class TwoPulseReset(AbsReset):
     def __init__(self, name: str, cfg: TwoPulseResetCfg) -> None:
         self.name = name
@@ -236,7 +234,7 @@ class TwoPulseReset(AbsReset):
         return calc_max_length(pulse1_t, pulse2_t)
 
 
-@Reset.register_reset("reset/bath")
+@Reset.bind_reset(BathResetCfg.module_type())
 class BathReset(AbsReset):
     def __init__(self, name: str, cfg: BathResetCfg) -> None:
         self.name = name
