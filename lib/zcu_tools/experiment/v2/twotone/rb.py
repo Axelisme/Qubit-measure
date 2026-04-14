@@ -114,7 +114,7 @@ CLIFFORD_GROUP: list[CliffordDecomp] = [
 # from the SO(3) rotation matrices of Rx, Ry, Rz at ±π/2 and π.
 PX, MX, PY, MY, PZ, MZ = 0, 1, 2, 3, 4, 5
 GATE_EFFECT_MAP = {
-    "I":    (PX, MX, PY, MY, PZ, MZ),
+    "Id":    (PX, MX, PY, MY, PZ, MZ),
     "X90":  (PX, MX, PZ, MZ, MY, PY),
     "-X90": (PX, MX, MZ, PZ, PY, MY),
     "X180": (PX, MX, MY, PY, MZ, PZ),

@@ -108,13 +108,11 @@ class Readout(AbsReadout):
     def bind_readout(
         cls, id_name: str
     ) -> Callable[[type["AbsReadout"]], type["AbsReadout"]]:
-        if id_name in cls._supported_readout:
-            raise ValueError(
-                f"Readout {id_name} already registered by {cls._supported_readout[id_name].__name__}"
-            )
-
         def decorator(sub_cls: type["AbsReadout"]) -> type["AbsReadout"]:
-            cls._supported_readout[id_name] = sub_cls
+            if (registered_cls := cls._supported_readout.setdefault(id_name, sub_cls)) != sub_cls:
+                raise ValueError(
+                    f"Readout {id_name} already registered by {registered_cls.__name__}"
+                )
             return sub_cls
 
         return decorator
@@ -142,11 +140,15 @@ class DirectReadout(AbsReadout):
 
     def init(self, prog: ModularProgramV2) -> None:
         prog.declare_readout(ch=self.cfg.ro_ch, length=self.cfg.ro_length)
+
+        readout_kwargs = dict()
+        if self.cfg.gen_ch is not None:
+            readout_kwargs["gen_ch"] = self.cfg.gen_ch
         prog.add_readoutconfig(
             ch=self.cfg.ro_ch,
             name=self.name,
             freq=self.cfg.ro_freq,
-            gen_ch=self.cfg.gen_ch,
+            **readout_kwargs,
         )
 
     def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:

@@ -146,13 +146,11 @@ class Reset(AbsReset):
 
     @classmethod
     def bind_reset(cls, id_name: str) -> Callable[[type["AbsReset"]], type["AbsReset"]]:
-        if id_name in cls._supported_reset:
-            raise ValueError(
-                f"Reset {id_name} already registered by {cls._supported_reset[id_name].__name__}"
-            )
-
         def decorator(sub_cls: type["AbsReset"]) -> type["AbsReset"]:
-            cls._supported_reset[id_name] = sub_cls
+            if (registered_cls := cls._supported_reset.setdefault(id_name, sub_cls)) != sub_cls:
+                raise ValueError(
+                    f"Reset {id_name} already registered by {registered_cls.__name__}"
+                )
             return sub_cls
 
         return decorator

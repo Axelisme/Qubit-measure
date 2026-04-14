@@ -39,9 +39,9 @@ class MyProgramV2(ImproveAcquireMixin, AveragerProgramV2):  # type: ignore
     def compile(self) -> None:
         super().compile()
 
-        pmem_len = len(self.binprog["pmem"]) if self.binprog["pmem"] else 0
-        wmem_len = len(self.binprog["wmem"]) if self.binprog["wmem"] else 0
-        dmem_len = len(self.binprog["dmem"]) if self.binprog["dmem"] else 0
+        pmem_len = len(self.binprog["pmem"]) if self.binprog["pmem"] is not None else 0
+        wmem_len = len(self.binprog["wmem"]) if self.binprog["wmem"] is not None else 0
+        dmem_len = len(self.binprog["dmem"]) if self.binprog["dmem"] is not None else 0
         pmem_cap = self.tproccfg["pmem_size"]
         wmem_cap = self.tproccfg["wmem_size"]
         dmem_cap = self.tproccfg["dmem_size"]
