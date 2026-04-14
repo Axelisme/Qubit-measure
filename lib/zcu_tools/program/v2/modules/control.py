@@ -141,10 +141,8 @@ class ScanWith(Module):
         cur_t: Union[float, QickParam] = 0.0
         for mod in self.sub_module:
             if logger.isEnabledFor(logging.DEBUG):
-                prog.append_macro(
-                    PrintTimeStamp(
-                        f"{mod.__class__.__name__}({mod.name})", cur_t, prefix="\t"
-                    )
+                prog.debug_macro(
+                    f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
                 )
             cur_t = mod.run(prog, cur_t)
         prog.delay(t=cur_t)
@@ -205,12 +203,8 @@ class Branch(Module):
             cur_t: Union[float, QickParam] = 0.0
             for mod in branch:
                 if logger.isEnabledFor(logging.DEBUG):
-                    prog.append_macro(
-                        PrintTimeStamp(
-                            f"{mod.__class__.__name__}({mod.name})",
-                            cur_t,
-                            prefix="\t",
-                        )
+                    prog.debug_macro(
+                        f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
                     )
                 cur_t = mod.run(prog, cur_t)
 
