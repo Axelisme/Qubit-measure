@@ -17,13 +17,13 @@ from typing_extensions import (
     Union,
 )
 
-from ..base import MyProgramV2
 from .base import Module, ModuleCfg
 from .pulse import Pulse, PulseCfg
 from .util import calc_max_length, round_timestamp
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.program.v2.modular import ModularProgramV2
 
 
 @ModuleCfg.bind_handler
@@ -92,7 +92,7 @@ ReadoutCfg: TypeAlias = Union[PulseReadoutCfg, DirectReadoutCfg]
 
 class AbsReadout(Module):
     @abstractmethod
-    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]: ...
+    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]: ...
 
 
 class Readout(AbsReadout):
@@ -123,14 +123,14 @@ class Readout(AbsReadout):
     def name(self) -> str:
         return self.readout.name
 
-    def init(self, prog: MyProgramV2) -> None:
+    def init(self, prog: ModularProgramV2) -> None:
         self.readout.init(prog)
 
-    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
         return self.readout.total_length(prog)
 
     def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         return self.readout.run(prog, t)
 
@@ -140,7 +140,7 @@ class DirectReadout(AbsReadout):
         self.name = name
         self.cfg = deepcopy(cfg)
 
-    def init(self, prog: MyProgramV2) -> None:
+    def init(self, prog: ModularProgramV2) -> None:
         prog.declare_readout(ch=self.cfg.ro_ch, length=self.cfg.ro_length)
         prog.add_readoutconfig(
             ch=self.cfg.ro_ch,
@@ -149,7 +149,7 @@ class DirectReadout(AbsReadout):
             gen_ch=self.cfg.gen_ch,
         )
 
-    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
         return round_timestamp(
             prog,
             round_timestamp(prog, self.cfg.trig_offset)
@@ -157,7 +157,7 @@ class DirectReadout(AbsReadout):
         )
 
     def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         ro_ch = self.cfg.ro_ch
         trig_offset = self.cfg.trig_offset
@@ -181,17 +181,17 @@ class PulseReadout(AbsReadout):
         self.pulse = Pulse(name=f"{name}_pulse", cfg=self.cfg.pulse_cfg)
         self.ro_window = DirectReadout(name=f"{name}_adc", cfg=self.cfg.ro_cfg)
 
-    def init(self, prog: MyProgramV2) -> None:
+    def init(self, prog: ModularProgramV2) -> None:
         self.pulse.init(prog)
         self.ro_window.init(prog)
 
-    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
         return calc_max_length(
             self.ro_window.total_length(prog), self.pulse.total_length(prog)
         )
 
     def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         self.ro_window.run(prog, t)
         self.pulse.run(prog, t)

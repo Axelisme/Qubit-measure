@@ -1,8 +1,8 @@
-from .base import MyProgram, SweepCfg
+from .base import ImproveAcquireMixin, SweepCfg
 
 __all__ = [
-    # base
-    "MyProgram",
+    # improve acquire
+    "ImproveAcquireMixin",
     # sweep
     "SweepCfg",
 ]

@@ -22,11 +22,11 @@ from typing_extensions import (
     Union,
 )
 
-from ..base import MyProgramV2
 from .base import ConfigBase
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.program.v2.modular import ModularProgramV2
 
 
 class WaveformCfg(ConfigBase):
@@ -161,7 +161,7 @@ class AbsWaveform(ABC):
         return self.waveform_cfg.length
 
     @abstractmethod
-    def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None: ...
+    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None: ...
 
     @abstractmethod
     def to_wav_kwargs(self) -> QickWaveformKwargs: ...
@@ -199,7 +199,7 @@ class Waveform(AbsWaveform):
     def length(self) -> Union[float, QickParam]:
         return self.waveform.length
 
-    def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         self.waveform.create(prog, ch, **kwargs)
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
@@ -212,7 +212,7 @@ class ConstWaveform(AbsWaveform):
         self.name = name
         self.waveform_cfg = waveform_cfg
 
-    def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None: ...
+    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None: ...
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
         return {"style": "const", "length": self.length}
@@ -228,7 +228,7 @@ class CosineWaveform(AbsWaveform):
     def length(self) -> float:
         return self.waveform_cfg.length
 
-    def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         prog.add_cosine(ch, self.name, length=self.length, **kwargs)
 
     def to_wav_kwargs(self) -> QickWaveformKwargs:
@@ -245,7 +245,7 @@ class GaussWaveform(AbsWaveform):
     def length(self) -> float:
         return self.waveform_cfg.length
 
-    def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         wav_cfg = self.waveform_cfg
         prog.add_gauss(
             ch,
@@ -269,7 +269,7 @@ class DragWaveform(AbsWaveform):
     def length(self) -> float:
         return self.waveform_cfg.length
 
-    def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         wav_cfg = self.waveform_cfg
         prog.add_DRAG(
             ch,
@@ -295,12 +295,12 @@ class ArbWaveform(AbsWaveform):
     def length(self) -> float:
         return self.waveform_cfg.length
 
-    def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         idata, qdata = self.make_iqdata(ch, prog, **kwargs)
         prog.add_envelope(ch, self.name, idata=idata, qdata=qdata)
 
     def make_iqdata(
-        self, ch: int, prog: MyProgramV2, even_length: bool = False
+        self, ch: int, prog: ModularProgramV2, even_length: bool = False
     ) -> tuple[NDArray, Optional[NDArray]]:
         # lazy import to avoid circular import
         from zcu_tools.meta_tool.arb_waveform import ArbWaveformDatabase
@@ -338,7 +338,7 @@ class FlatTopWaveform(AbsWaveform):
 
         self.raise_waveform = Waveform(name, waveform_cfg.raise_waveform)
 
-    def create(self, prog: MyProgramV2, ch: int, **kwargs) -> None:
+    def create(self, prog: ModularProgramV2, ch: int, **kwargs) -> None:
         kwargs.setdefault("even_length", True)
         self.raise_waveform.create(prog, ch, **kwargs)
 

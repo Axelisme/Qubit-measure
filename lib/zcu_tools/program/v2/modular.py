@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+import numpy as np
+from numpy.typing import NDArray
 from qick import QickConfig
 from typing_extensions import Any, Mapping, Optional, Sequence, Union, cast
 
@@ -34,6 +36,7 @@ class ModularProgramV2(MyProgramV2):
 
         self.modules = modules
         self.sweep_dict = sweep
+        self._dmem_buffer = []
 
         logger.debug(
             "ModularProgramV2.__init__: %d modules, reps=%s, relax_delay=%s",
@@ -77,6 +80,16 @@ class ModularProgramV2(MyProgramV2):
 
         self.delay(t=t)
 
+    def set_dmem(self, values: Sequence[int]) -> int:
+        offset = len(self._dmem_buffer)
+        self._dmem_buffer.extend(values)
+        return offset
+
+    def compile_datamem(self) -> Optional[NDArray[np.int32]]:
+        if len(self._dmem_buffer) == 0:
+            return None
+
+        return np.array(self._dmem_buffer, dtype=np.int32)
 
 class BaseCustomProgramV2(ModularProgramV2):
     """

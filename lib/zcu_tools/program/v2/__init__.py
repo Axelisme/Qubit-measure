@@ -23,6 +23,7 @@ from .modules import (
     Repeat,
     Reset,
     ResetCfg,
+    ScanWith,
     SoftDelay,
     SoftRepeat,
     TwoPulseReset,

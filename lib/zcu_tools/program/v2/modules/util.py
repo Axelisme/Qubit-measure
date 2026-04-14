@@ -3,7 +3,7 @@ from __future__ import annotations
 import warnings
 
 import numpy as np
-from qick.asm_v2 import QickProgramV2, QickParam
+from qick.asm_v2 import QickParam, QickProgramV2
 from typing_extensions import Optional, Union
 
 from ..utils import param2str

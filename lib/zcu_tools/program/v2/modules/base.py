@@ -17,10 +17,9 @@ from typing_extensions import (
     overload,
 )
 
-from ..base import MyProgramV2
-
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.program.v2.modular import ModularProgramV2
 
 
 class ConfigBase(BaseModel):
@@ -141,9 +140,9 @@ class Module(ABC):
         self.name = "UnnamedModule"
 
     @abstractmethod
-    def init(self, prog: MyProgramV2) -> None: ...
+    def init(self, prog: ModularProgramV2) -> None: ...
 
     @abstractmethod
     def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]: ...

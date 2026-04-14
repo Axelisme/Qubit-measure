@@ -5,13 +5,13 @@ from copy import deepcopy
 from qick.asm_v2 import QickParam
 from typing_extensions import TYPE_CHECKING, Any, Literal, Optional, Self, Union
 
-from ..base import MyProgramV2
 from .base import Module, ModuleCfg
 from .util import round_timestamp
 from .waveform import UnionWaveformCfg, Waveform
 
 if TYPE_CHECKING:
     from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.program.v2.modular import ModularProgramV2
 
 
 @ModuleCfg.bind_handler
@@ -66,7 +66,7 @@ class Pulse(Module):
         self.tag = tag
         self.block_mode = block_mode
 
-    def init(self, prog: MyProgramV2) -> None:
+    def init(self, prog: ModularProgramV2) -> None:
         if self.cfg is None:
             return
 
@@ -77,7 +77,7 @@ class Pulse(Module):
         if prog.pulse_registry.register(self.name, self.cfg):
             self.init_pulse(prog, self.pulse_id)
 
-    def init_pulse(self, prog: MyProgramV2, pulse_id: str) -> None:
+    def init_pulse(self, prog: ModularProgramV2, pulse_id: str) -> None:
         cfg = self.cfg
         assert cfg is not None
 
@@ -107,7 +107,7 @@ class Pulse(Module):
             **self.waveform.to_wav_kwargs(),
         )
 
-    def total_length(self, prog: MyProgramV2) -> Union[float, QickParam]:
+    def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]:
         if self.cfg is None:
             return 0.0
         return round_timestamp(
@@ -120,7 +120,7 @@ class Pulse(Module):
         )
 
     def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         cfg = self.cfg
         if cfg is None:

@@ -5,13 +5,12 @@ import logging
 from qick.asm_v2 import QickParam
 from typing_extensions import TYPE_CHECKING, Optional, Sequence, Union
 
-from .base import Module
-from ..base import MyProgramV2
-from .util import round_timestamp, merge_max_length
 from ..utils import PrintTimeStamp
+from .base import Module
+from .util import merge_max_length, round_timestamp
 
 if TYPE_CHECKING:
-    from zcu_tools.meta_tool import ModuleLibrary
+    from zcu_tools.program.v2.modular import ModularProgramV2
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +23,11 @@ class Delay(Module):
         self.delay = delay
         self.absolute = absolute
 
-    def init(self, prog: MyProgramV2) -> None:
+    def init(self, prog: ModularProgramV2) -> None:
         pass
 
     def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         delay_t = self.delay if self.absolute else t + self.delay
         delay_t = round_timestamp(prog, delay_t)
@@ -46,11 +45,11 @@ class SoftDelay(Module):
         self.delay = delay
         self.absolute = absolute
 
-    def init(self, prog: MyProgramV2) -> None:
+    def init(self, prog: ModularProgramV2) -> None:
         pass
 
     def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         delay_t = self.delay if self.absolute else t + self.delay
 
@@ -72,11 +71,11 @@ class DelayAuto(Module):
         self.ros = ros
         self.tag = tag
 
-    def init(self, prog: MyProgramV2) -> None:
+    def init(self, prog: ModularProgramV2) -> None:
         pass
 
     def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         prog.delay_auto(
             t=self.t,  # type: ignore[arg-type]
@@ -102,13 +101,13 @@ class Join(Module):
 
         self.join_modules = join_modules
 
-    def init(self, prog: MyProgramV2) -> None:
+    def init(self, prog: ModularProgramV2) -> None:
         for list in self.join_modules:
             for m in list:
                 m.init(prog)
 
     def run(
-        self, prog: MyProgramV2, t: Union[float, QickParam] = 0.0
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         def insert_debug(module: Module, t: Union[float, QickParam]) -> None:
             prog.append_macro(
