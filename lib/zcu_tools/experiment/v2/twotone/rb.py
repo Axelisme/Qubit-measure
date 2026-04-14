@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from enum import IntEnum
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +11,7 @@ from typeguard import check_type
 from typing_extensions import (
     Any,
     Callable,
+    Literal,
     NotRequired,
     Optional,
     TypeAlias,
@@ -25,7 +27,7 @@ from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    DelayAuto,
+    Branch,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -34,6 +36,7 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
+    ScanWith,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay
@@ -57,13 +60,28 @@ RB_Result: TypeAlias = tuple[
 # and cost zero physical pulses.
 # ==============================================================================
 
-CliffordDecomp: TypeAlias = tuple[str, ...]
+
+class BasicGate(IntEnum):
+    Id = 0
+    X90 = 1
+    X180 = 2
+    MX90 = 3
+    Y90 = 4
+    Y180 = 5
+    MY90 = 6
+
+
+GateName: TypeAlias = Literal[
+    "Id", "X90", "X180", "-X90", "Y90", "Y180", "-Y90", "Z90", "Z180", "-Z90"
+]
+
 
 NUM_CLIFFORDS = 24
 
 # fmt: off
+CliffordDecomp: TypeAlias = tuple[GateName, ...]
 CLIFFORD_GROUP: list[CliffordDecomp] = [
-    ("I",),                         # C0  — I
+    ("Id",),                        # C0  — Id
     ("Z90",),                       # C1  — Rz(π/2)
     ("Z180",),                      # C2  — Rz(π)
     ("-Z90",),                      # C3  — Rz(-π/2)
@@ -112,9 +130,42 @@ GATE_EFFECT_MAP = {
 RECOVERY_INDEX = (9, 14, 21, 19, 0, 6)
 # fmt: on
 
-# ==============================================================================
-# Sequence generation
-# ==============================================================================
+
+def reduce_gate_seq(seq: list[CliffordDecomp]) -> list[BasicGate]:
+    phase_axis: int = 0
+
+    def convert_gate(gate: GateName) -> Optional[BasicGate]:
+        nonlocal phase_axis
+
+        # fmt: off
+        axis_map = {"Z90": 3, "Z180": 2, "-Z90": 1}
+        gate_map = {
+            "Id":   (BasicGate.Id,   BasicGate.Id,   BasicGate.Id,   BasicGate.Id),
+            "X90":  (BasicGate.X90,  BasicGate.Y90,  BasicGate.MX90, BasicGate.MY90),
+            "X180": (BasicGate.X180, BasicGate.Y180, BasicGate.X180, BasicGate.Y180),
+            "-X90": (BasicGate.MX90, BasicGate.MY90, BasicGate.X90,  BasicGate.Y90),
+            "Y90":  (BasicGate.Y90,  BasicGate.MX90, BasicGate.MY90, BasicGate.X90),
+            "Y180": (BasicGate.Y180, BasicGate.X180, BasicGate.Y180, BasicGate.X180),
+            "-Y90": (BasicGate.MY90, BasicGate.X90,  BasicGate.Y90,  BasicGate.MX90),
+        }
+        # fmt: on
+
+        if gate in gate_map:
+            return gate_map[gate][phase_axis]
+
+        # virtual Z gate
+        phase_axis = (phase_axis + axis_map[gate]) % 4
+
+        return None
+
+    reduced_seq: list[BasicGate] = []
+    for cf_group in seq:
+        for gate in cf_group:
+            basic_gate = convert_gate(gate)
+            if basic_gate is not None:
+                reduced_seq.append(basic_gate)
+
+    return reduced_seq
 
 
 def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -179,48 +230,35 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
             depth:int = ctx.env["depth"]
 
             if (seed, depth) not in prog_cahce:
-                I_pulse = modules.get("I_pulse")
+                gate_seq = reduce_gate_seq(ctx.env["clifford_seq"])
+
+                Id_pulse = modules.get("I_pulse")
                 X90_pulse = modules["X90_pulse"]
                 X180_pulse = modules["X180_pulse"]
                 MX90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 180.0)
                 Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
                 Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
                 MY90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase - 90.0)
-                gate_info_map: dict[str, tuple[Optional[PulseCfg], int]] = {
-                    "I": (I_pulse, 0),
-                    "X90": (X90_pulse, 0),
-                    "X180": (X180_pulse, 0),
-                    "-X90": (MX90_pulse, 0),
-                    "Y90": (Y90_pulse, 0),
-                    "Y180": (Y180_pulse, 0),
-                    "-Y90": (MY90_pulse, 0),
-                    "Z90": (None, -90),
-                    "Z180": (None, -180),
-                    "-Z90": (None, 90),
-                }
-
-                global_phase: int = 0
-                gate_modules = []
-                for i, clifford_idx in enumerate[int](ctx.env["clifford_seq"]):
-                    for gate_name in CLIFFORD_GROUP[clifford_idx]:
-                        gate_pulse, acc_phase = gate_info_map[gate_name]
-
-                        if gate_pulse is not None:
-                            gate_pulse = gate_pulse.with_updates(
-                                phase=gate_pulse.phase + global_phase
-                            )
-                            gate_modules.append(Pulse(f"C{i}_{gate_name}", gate_pulse))
-                            gate_modules.append(DelayAuto("pulse_delay", t=0.005))
-
-                        # virtual Z gates accumulate in global_phase
-                        global_phase = (global_phase + acc_phase) % 360
 
                 prog_cahce[(seed, depth)] = ModularProgramV2(
                     soccfg,
                     cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        *gate_modules,
+                        ScanWith(
+                            "gate_idx",
+                            gate_seq,
+                            Branch(
+                                "gate_idx",
+                                Pulse("gate_Id", Id_pulse),
+                                Pulse("gate_X90", X90_pulse),
+                                Pulse("gate_X180", X180_pulse),
+                                Pulse("gate_MX90", MX90_pulse),
+                                Pulse("gate_Y90", Y90_pulse),
+                                Pulse("gate_Y180", Y180_pulse),
+                                Pulse("gate_MY90", MY90_pulse),
+                            ),
+                        ),
                         Readout("readout", modules["readout"]),
                     ],
                 )
@@ -250,7 +288,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                 clifford_seq.append(RECOVERY_INDEX[acc_states[depth]])
 
                 ctx.env["depth"] = depth
-                ctx.env["clifford_seq"] = clifford_seq
+                ctx.env["clifford_seq"] = [CLIFFORD_GROUP[ci] for ci in clifford_seq]
 
             def update_seq_seed(si: int, ctx: TaskState, entropy: int) -> None:
                 child = np.random.SeedSequence(entropy)

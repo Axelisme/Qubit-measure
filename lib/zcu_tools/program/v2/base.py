@@ -3,12 +3,13 @@ from __future__ import annotations
 import logging
 
 from qick import QickConfig
-from qick.asm_v2 import AveragerProgramV2
-from typing_extensions import Any, Mapping, TypedDict, cast
+from qick.asm_v2 import AveragerProgramV2, QickParam
+from typing_extensions import Any, Mapping, TypedDict, Union, cast
 
 from zcu_tools.program.base import ImproveAcquireMixin
 
 from .modules.registry import PulseRegistry
+from .utils import PrintTimeStamp
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,11 @@ class MyProgramV2(ImproveAcquireMixin, AveragerProgramV2):  # type: ignore
             f"wmem={wmem_len}/{wmem_cap} ({(100 * wmem_len / wmem_cap if wmem_cap else 0):.1f}%), "
             f"dmem={dmem_len}/{dmem_cap} ({(100 * dmem_len / dmem_cap if dmem_cap else 0):.1f}%)",
         )
+
+    def debug_macro(
+        self, name: str, t: Union[float, QickParam], prefix: str = ""
+    ) -> None:
+        self.append_macro(PrintTimeStamp(name, t, prefix=prefix))
 
     def acquire(self, *args, **kwargs):
         logger.debug(

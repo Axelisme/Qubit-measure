@@ -73,9 +73,7 @@ class ModularProgramV2(MyProgramV2):
         t = 0.0
         for module in self.modules:
             if logger.isEnabledFor(logging.DEBUG):
-                self.append_macro(
-                    PrintTimeStamp(f"{module.__class__.__name__}(name={module.name})", t)
-                )
+                self.debug_macro(f"{type(module).__name__}({module.name})", t)
             t = module.run(self, t)
 
         self.delay(t=t)
@@ -90,6 +88,7 @@ class ModularProgramV2(MyProgramV2):
             return None
 
         return np.array(self._dmem_buffer, dtype=np.int32)
+
 
 class BaseCustomProgramV2(ModularProgramV2):
     """

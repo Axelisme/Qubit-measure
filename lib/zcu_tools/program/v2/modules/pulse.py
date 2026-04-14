@@ -19,7 +19,7 @@ class PulseCfg(ModuleCfg):
     type: Literal["pulse"] = "pulse"
     waveform: UnionWaveformCfg
     ch: int
-    nqz: int
+    nqz: Literal[1, 2]
     freq: Union[float, QickParam]
     phase: Union[float, QickParam] = 0.0
     gain: Union[float, QickParam]

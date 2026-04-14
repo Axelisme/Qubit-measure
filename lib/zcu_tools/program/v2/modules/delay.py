@@ -109,13 +109,6 @@ class Join(Module):
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        def insert_debug(module: Module, t: Union[float, QickParam]) -> None:
-            prog.append_macro(
-                PrintTimeStamp(
-                    f"{module.__class__.__name__}({module.name})", t, prefix="\t"
-                )
-            )
-
         logger.debug(
             "Join.run: %d parallel branches, t=%s",
             len(self.join_modules), t,
@@ -126,7 +119,9 @@ class Join(Module):
             cur_t = t
             for m in list:
                 if logger.isEnabledFor(logging.DEBUG):
-                    insert_debug(m, cur_t)
+                    prog.debug_macro(
+                        f"{type(m).__name__}({m.name})", cur_t, prefix="\t"
+                    )
                 cur_t = m.run(prog, cur_t)
 
             end_t_list.append(cur_t)

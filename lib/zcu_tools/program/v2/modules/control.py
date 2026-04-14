@@ -51,18 +51,16 @@ class Repeat(Module):
         logger.debug("Repeat.run: name='%s', n=%d, t=%s", self.name, self.n, t)
 
         prog.delay(t=t)
-        prog.append_macro(qasm.OpenLoop(name=self.name, n=self.n))
+        prog.open_loop(name=self.name, n=self.n)
         cur_t = 0.0
         for mod in self.sub_module:
             if logger.isEnabledFor(logging.DEBUG):
-                prog.append_macro(
-                    PrintTimeStamp(
-                        f"{mod.__class__.__name__}({mod.name})", cur_t, prefix="\t"
-                    )
+                prog.debug_macro(
+                    f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
                 )
             cur_t = mod.run(prog, cur_t)
         prog.delay(t=cur_t)
-        prog.append_macro(qasm.CloseLoop())
+        prog.close_loop()
 
         return 0.0  # prog.delay will modify ref time
 
@@ -137,7 +135,7 @@ class ScanWith(Module):
         prog.delay(t=t)
         prog.write_reg(self.addr_reg, self.offset)
 
-        prog.append_macro(qasm.OpenLoop(name=f"{self.name}_loop", n=n))
+        prog.open_loop(name=f"{self.name}_loop", n=n)
         prog.read_dmem(dst=self.name, addr=self.addr_reg)
 
         cur_t: Union[float, QickParam] = 0.0
@@ -152,7 +150,7 @@ class ScanWith(Module):
         prog.delay(t=cur_t)
 
         prog.inc_reg(self.addr_reg, 1)
-        prog.append_macro(qasm.CloseLoop())
+        prog.close_loop()
 
         return 0.0
 
@@ -202,11 +200,7 @@ class Branch(Module):
 
             if not is_last:
                 skip_label = f"_branch_{self.name}_skip_{i}"
-                prog.append_macro(
-                    qasm.CondJump(
-                        arg1=self.name, arg2=i, op="-", test="NZ", label=skip_label
-                    )
-                )
+                prog.cond_jump(skip_label, self.name, "NZ", "-", i)
 
             cur_t: Union[float, QickParam] = 0.0
             for mod in branch:
@@ -227,10 +221,10 @@ class Branch(Module):
             prog.delay(t=cur_t)
 
             if not is_last:
-                prog.append_macro(qasm.Jump(label=end_label))
-                prog.append_macro(qasm.Label(label=skip_label))
+                prog.jump(end_label)
+                prog.label(skip_label)
 
-        prog.append_macro(qasm.Label(label=end_label))
+        prog.label(end_label)
 
         prog.delay_auto(t=0)
 

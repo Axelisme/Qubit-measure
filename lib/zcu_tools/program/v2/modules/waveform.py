@@ -30,6 +30,8 @@ if TYPE_CHECKING:
 
 
 class WaveformCfg(ConfigBase):
+    style: str
+
     @classmethod
     def from_dict(cls, raw_cfg: dict[str, Any], ml: "ModuleLibrary") -> Self:
         return TypeAdapter(
