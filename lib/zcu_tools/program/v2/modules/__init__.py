@@ -3,7 +3,7 @@ from __future__ import annotations
 import qick.asm_v2 as qick_asm_v2
 
 from .base import Module, ModuleCfg
-from .control import Branch, Repeat, ScanWith, SoftRepeat
+from .control import Branch, ForEach, Repeat, RepeatByRegister, SoftRepeat
 from .delay import Delay, DelayAuto, Join, SoftDelay
 from .pulse import Pulse, PulseCfg
 from .readout import (

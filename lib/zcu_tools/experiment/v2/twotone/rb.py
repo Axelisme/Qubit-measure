@@ -28,6 +28,7 @@ from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
+    ForEach,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -36,7 +37,6 @@ from zcu_tools.program.v2 import (
     ReadoutCfg,
     Reset,
     ResetCfg,
-    ScanWith,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay
@@ -245,11 +245,12 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                     cfg,
                     modules=[
                         Reset("reset", modules.get("reset")),
-                        ScanWith(
-                            "gate_idx",
-                            gate_seq,
-                            Branch(
-                                "gate_idx",
+                        ForEach(
+                            "gate_depth",
+                            values=gate_seq,
+                            val_reg="gate_idx",
+                            sub_module=Branch(
+                                "basic_gate",
                                 Pulse("gate_Id", Id_pulse),
                                 Pulse("gate_X90", X90_pulse),
                                 Pulse("gate_X180", X180_pulse),
@@ -257,6 +258,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                                 Pulse("gate_Y90", Y90_pulse),
                                 Pulse("gate_Y180", Y180_pulse),
                                 Pulse("gate_MY90", MY90_pulse),
+                                compare_by="gate_idx",
                             ),
                         ),
                         Readout("readout", modules["readout"]),

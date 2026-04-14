@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import logging
 
-import numpy as np
-import qick.asm_v2 as qasm
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Sequence, TypeAlias, Union
+from typing_extensions import TYPE_CHECKING, Optional, Sequence, TypeAlias, Union
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
 
-from ..utils import PrintTimeStamp
+
 from .base import Module
 
 logger = logging.getLogger(__name__)
@@ -48,10 +46,11 @@ class Repeat(Module):
         # this n must > 0, to prevent infinite loop in qick
         assert self.n > 0
 
-        logger.debug("Repeat.run: name='%s', n=%d, t=%s", self.name, self.n, t)
+        logger.debug(f"Repeat.run: name='{self.name}', n={self.n}, t={t}")
 
         prog.delay(t=t)
         prog.open_loop(name=self.name, n=self.n)
+
         cur_t = 0.0
         for mod in self.sub_module:
             if logger.isEnabledFor(logging.DEBUG):
@@ -60,6 +59,8 @@ class Repeat(Module):
                 )
             cur_t = mod.run(prog, cur_t)
         prog.delay(t=cur_t)
+        prog.delay_auto(t=0)
+
         prog.close_loop()
 
         return 0.0  # prog.delay will modify ref time
@@ -92,33 +93,89 @@ class SoftRepeat(Module):
         return t
 
 
-class ScanWith(Module):
-    """Run ``sub_module`` once per entry in ``values``, loading each into register ``name``.
+class RepeatByRegister(Module):
+    """Repeat a module or a list of modules n times, where n is the value of a register"""
 
-    An internal loop counter register holds the iteration index; register ``name`` is
-    filled from data memory so it can drive :class:`Branch` and similar modules.
-
-    Values are staged into program dmem init data during :meth:`init`.
-    """
-
-    def __init__(self, name: str, values: Sequence[int], sub_module: SubModule) -> None:
+    def __init__(self, name: str, n_reg: str, sub_module: SubModule) -> None:
         self.name = name
-        self.values = list(values)
-
-        if len(values) == 0:
-            raise ValueError("ScanWith requires a non-empty values sequence")
+        self.n_reg = n_reg
 
         if isinstance(sub_module, Module):
             sub_module = [sub_module]
         self.sub_module = sub_module
 
+        self.counter_reg = f"{self.name}_counter"
+
+    def init(self, prog: ModularProgramV2) -> None:
+        for mod in self.sub_module:
+            mod.init(prog)
+
+        prog.add_reg(self.counter_reg)
+
+    def run(
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
+    ) -> Union[float, QickParam]:
+        logger.debug(f"RepeatWith.run: name='{self.name}', n_reg='{self.n_reg}', t={t}")
+        prog.delay(t=t)
+
+        start_label = f"{self.name}_start"
+        end_label = f"{self.name}_end"
+
+        # Guard against negative loop bounds to avoid non-terminating loops.
+        prog.cond_jump(end_label, self.n_reg, "S")
+        prog.write_reg(self.counter_reg, 0)
+
+        prog.label(start_label)
+        prog.cond_jump(end_label, self.n_reg, "Z", "-", self.counter_reg)
+
+        cur_t = 0.0
+        for mod in self.sub_module:
+            if logger.isEnabledFor(logging.DEBUG):
+                prog.debug_macro(
+                    f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
+                )
+            cur_t = mod.run(prog, cur_t)
+        prog.delay(t=cur_t)
+        prog.delay_auto(t=0)
+
+        prog.inc_reg(self.counter_reg, 1)
+        prog.jump(start_label)
+
+        prog.label(end_label)
+
+        return 0.0  # prog.delay will modify ref time
+
+
+class ForEach(Module):
+    """Run ``sub_module`` once per entry in ``values``, loading each into register ``val_reg``.
+
+    An internal loop counter register holds the iteration index; register ``val_reg`` is
+    filled from data memory so it can drive :class:`Branch` and similar modules.
+
+    Values are staged into program dmem init data during :meth:`init`.
+    """
+
+    def __init__(
+        self, name: str, values: Sequence[int], val_reg: str, sub_module: SubModule
+    ) -> None:
+        self.name = name
+        self.values = list(values)
+
+        if len(values) == 0:
+            raise ValueError("ForEach requires a non-empty values sequence")
+
+        if isinstance(sub_module, Module):
+            sub_module = [sub_module]
+        self.sub_module = sub_module
+
+        self.val_reg = val_reg
         self.addr_reg = f"{name}_addr"
         self.offset = 0
 
     def init(self, prog: ModularProgramV2) -> None:
         self.offset = prog.set_dmem(self.values)
 
-        prog.add_reg(self.name)
+        prog.add_reg(self.val_reg)
         prog.add_reg(self.addr_reg)
 
         for mod in self.sub_module:
@@ -129,14 +186,20 @@ class ScanWith(Module):
     ) -> Union[float, QickParam]:
         n = len(self.values)
         logger.debug(
-            f"ScanWith.run: name='{self.name}', n={n}, offset={self.offset}, t={t}"
+            "ForEach.run: ",
+            f"name='{self.name}',",
+            f"val_reg='{self.val_reg}',",
+            f"addr_reg='{self.addr_reg}',",
+            f"n={n},",
+            f"offset={self.offset},",
+            f"t={t}",
         )
 
         prog.delay(t=t)
         prog.write_reg(self.addr_reg, self.offset)
 
         prog.open_loop(name=f"{self.name}_loop", n=n)
-        prog.read_dmem(dst=self.name, addr=self.addr_reg)
+        prog.read_dmem(dst=self.val_reg, addr=self.addr_reg)
 
         cur_t: Union[float, QickParam] = 0.0
         for mod in self.sub_module:
@@ -165,8 +228,11 @@ class Branch(Module):
     may have different durations. The module always returns 0.0.
     """
 
-    def __init__(self, name: str, *branches: SubModule) -> None:
+    def __init__(
+        self, name: str, *branches: SubModule, compare_by: Optional[str] = None
+    ) -> None:
         self.name = name
+        self.compare_reg = compare_by if compare_by is not None else name
 
         if len(branches) < 2:
             raise ValueError("Branch requires at least 2 branches")
@@ -184,21 +250,25 @@ class Branch(Module):
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         logger.debug(
-            f"Branch.run: name='{self.name}', n_branches={len(self.branches)}, t={t}"
+            "Branch.run: ",
+            f"name='{self.name}',",
+            f"compare_reg='{self.compare_reg}',",
+            f"n_branches={len(self.branches)},",
+            f"t={t}",
         )
 
         prog.delay(t=t)
         prog.delay_auto(t=0)
 
-        end_label = f"_branch_{self.name}_end"
+        end_label = f"{self.name}_branch_end"
         n = len(self.branches)
 
         for i, branch in enumerate(self.branches):
             is_last = i == n - 1
 
             if not is_last:
-                skip_label = f"_branch_{self.name}_skip_{i}"
-                prog.cond_jump(skip_label, self.name, "NZ", "-", i)
+                skip_label = f"{self.name}_branch_skip_{i}"
+                prog.cond_jump(skip_label, self.compare_reg, "NZ", "-", i)
 
             cur_t: Union[float, QickParam] = 0.0
             for mod in branch:
