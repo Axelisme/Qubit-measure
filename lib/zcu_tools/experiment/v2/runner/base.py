@@ -48,6 +48,7 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult]):
         """Initialize the task with the current state.
 
         If dynamic_pbar is True, the progress bar will only show up in the run() method.
+        NOTE: This method may be called multiple times during the task execution.
         """
 
     @abstractmethod

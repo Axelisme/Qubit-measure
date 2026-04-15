@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import warnings
 from abc import ABC, abstractmethod
 
@@ -16,10 +17,12 @@ from typing_extensions import (
     cast,
 )
 
-try:
+# NOTE: `numpy.typing.NDArray` may be unavailable on Python <=3.8 environments.
+# Usually it is on the xilinx FPGA environment.
+if sys.version_info >= (3, 9):
     from numpy.typing import NDArray  # type: ignore
-except ImportError:  # for python < 3.9
-    T_val = TypeVar("T_val", bound=np.number)
+else:
+    T_val = TypeVar("T_val")
 
     class NDArray(np.ndarray, Generic[T_val]): ...
 
@@ -73,196 +76,35 @@ class TypedAcquireMixin(AcquireMixin):
         return super().acquire_decimated(*args, **kwargs)  # type: ignore
 
 
-class AbsStatisticTracker(ABC):
-    @abstractmethod
-    def update(self, points: NDArray[np.float64]) -> None: ...
-
-
-class StatisticMixin(TypedAcquireMixin):
-    """
-    Add statistic information for acquired method to the AcquireMixin class
-    """
-
-    def finish_round(self) -> bool:
-        not_finish = super().finish_round()
-
-        assert self.acc_buf is not None
-        assert self.acquire_params is not None
-
-        trackers = self.acquire_params.get("statistic_trackers")
-        if trackers is not None:
-            trackers = cast(List[AbsStatisticTracker], trackers)
-            if self.acquire_params["type"] != "accumulated":
-                raise NotImplementedError(
-                    "Statistic is not implemented for type other than accumulated"
-                )
-
-            if self.acquire_params["threshold"] is not None:
-                raise NotImplementedError(
-                    "Statistic is not implemented for thresholded data"
-                )
-
-            ro_chs: dict = self.ro_chs  # type: ignore
-
-            if len(trackers) != len(self.acc_buf):
-                raise ValueError(
-                    f"Number of statistic trackers ({len(trackers)}) must match number of readout channels ({len(self.acc_buf)})"
-                )
-
-            assert isinstance(ro_chs, dict)
-            assert len(self.acc_buf) == len(ro_chs)
-            for d_rep, tracker, ro in zip(self.acc_buf, trackers, ro_chs.values()):
-                assert self.avg_level is not None
-                d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
-
-                if not ro["edge_counting"]:
-                    d_rep = d_rep / ro["length"]
-                d_rep = cast(NDArray[np.float64], d_rep)
-
-                tracker.update(d_rep)  # (..., m, 2)
-
-        return not_finish
-
-    def acquire(
-        self,
-        *args,
-        statistic_trackers: Optional[List[AbsStatisticTracker]] = None,
-        **kwargs,
-    ):
-        extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(statistic_trackers=statistic_trackers)
-        return super().acquire(*args, extra_args=extra_args, **kwargs)
-
-
 class EarlyStopMixin(TypedAcquireMixin):
-    """
-    Add early stopping functionality to the AcquireMixin class
-    """
-
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.early_stop = False
+        self._early_stop = False
 
     def set_early_stop(self, silent: bool = False) -> None:
         # tell program to return as soon as this round is finished
         if not silent:
             print("Program received early stop signal")
-        self.early_stop = True
+        self._early_stop = True
 
     def acquire(self, *args, **kwargs):
-        self.early_stop = False
+        self._early_stop = False
         return super().acquire(*args, **kwargs)  # type: ignore
 
     def acquire_decimated(self, *args, **kwargs):
-        self.early_stop = False
+        self._early_stop = False
         return super().acquire_decimated(*args, **kwargs)  # type: ignore
 
     def finish_round(self) -> bool:
         not_finish = super().finish_round()
-        if not_finish and self.early_stop:
+        if not_finish and self._early_stop:
             if self.rounds_pbar is not None:
                 self.rounds_pbar.close()
             else:
                 warnings.warn(
                     "Early stop signal received but rounds_pbar is not set, cannot close the progress bar"
                 )
-        return not_finish and not self.early_stop
-
-
-class CallbackMixin(StatisticMixin):
-    """
-    Add callback functionality to the AcquireMixin class
-    """
-
-    def _reset_inc_summarize(self) -> None:
-        self._inc_sum_count: int = 0
-        self._inc_sum_state: Optional[List[NDArray[np.float64]]] = None
-
-    def _inc_summarize_accumulated(
-        self, rounds_buf: List[NDArray[np.float64]]
-    ) -> List[NDArray[np.float64]]:
-        self._inc_sum_count += 1
-        if len(rounds_buf) != self._inc_sum_count:
-            warnings.warn(
-                f"Detected non-matching number of rounds ({len(rounds_buf)}) and _inc_sum_count ({self._inc_sum_count})"
-                "The callback data may be corrupted, fallback to normal summarize"
-            )
-            return self._summarize_accumulated(rounds_buf)
-
-        n_ro_chs = len(self.ro_chs)  # type: ignore
-
-        assert self.rounds_buf is not None
-        if self._inc_sum_state is None:  # first round
-            self._inc_sum_state = cast(
-                List[NDArray[np.float64]],
-                [
-                    np.zeros_like(self.rounds_buf[0][i], dtype=np.float64)
-                    for i in range(n_ro_chs)
-                ],
-            )
-
-        # update the state with the new data
-        for i in range(n_ro_chs):
-            self._inc_sum_state[i] += rounds_buf[-1][i]
-
-        mean_data = cast(
-            List[NDArray[np.float64]],
-            [d / self._inc_sum_count for d in self._inc_sum_state],
-        )
-
-        return mean_data
-
-    def _inc_summarize_decimated(
-        self, rounds_buf: List[NDArray[np.float64]]
-    ) -> List[NDArray[np.float64]]:
-        # NOTE: currently, summarize decimated is identical to summarize accumulated
-        return self._inc_summarize_accumulated(rounds_buf)
-
-    def acquire(self, *args, callback: Optional[CallbackType] = None, **kwargs):
-        extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(callback=callback)
-
-        self._reset_inc_summarize()
-
-        return super().acquire(*args, extra_args=extra_args, **kwargs)
-
-    def acquire_decimated(
-        self, *args, callback: Optional[CallbackType] = None, **kwargs
-    ):
-        extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(callback=callback)
-
-        self._reset_inc_summarize()
-
-        return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
-
-    def finish_round(self) -> bool:
-        not_finish = super().finish_round()
-
-        # trigger the callback function after each round
-        assert self.acquire_params is not None
-        callback: Optional[CallbackType] = self.acquire_params["callback"]
-        if callback is not None:
-            assert callable(callback), "callback must be a callable function"
-            assert self.rounds_buf is not None
-
-            # NOTE: increment the summary to reduce cpu usage
-
-            round_n = len(self.rounds_buf)
-            if self.acquire_params["type"] == "accumulated":
-                # avg_d = self._summarize_accumulated(self.rounds_buf)
-                avg_d = self._inc_summarize_accumulated(self.rounds_buf)
-                callback(round_n, avg_d)
-            elif self.acquire_params["type"] == "decimated":
-                # dec_d = self._summarize_decimated(self.rounds_buf)
-                dec_d = self._inc_summarize_decimated(self.rounds_buf)
-                callback(round_n, dec_d)
-            else:
-                raise NotImplementedError(
-                    "Callback is not implemented for type other than accumulated or decimated"
-                )
-
-        return not_finish
+        return not_finish and not self._early_stop
 
 
 class SingleShotMixin(TypedAcquireMixin):
@@ -362,6 +204,166 @@ class SingleShotMixin(TypedAcquireMixin):
             e_shot = np.heaviside(population_radius - e_dist, 0)
             shots.append(np.stack([g_shot, e_shot], axis=-1))
         return shots
+
+
+class AbsStatisticTracker(ABC):
+    @abstractmethod
+    def update(self, points: NDArray[np.float64]) -> None:
+        """points shape: (*sweep, reps, 2)"""
+
+
+class StatisticMixin(TypedAcquireMixin):
+    """
+    Add statistic information for acquired method to the AcquireMixin class
+    """
+
+    def finish_round(self) -> bool:
+        not_finish = super().finish_round()
+
+        assert self.acc_buf is not None
+        assert self.acquire_params is not None
+
+        trackers = self.acquire_params.get("statistic_trackers")
+        if trackers is not None:
+            trackers = cast(List[AbsStatisticTracker], trackers)
+            if self.acquire_params["type"] != "accumulated":
+                raise NotImplementedError(
+                    "Statistic is not implemented for type other than accumulated"
+                )
+
+            if self.acquire_params["threshold"] is not None:
+                raise NotImplementedError(
+                    "Statistic is not implemented for thresholded data"
+                )
+
+            ro_chs: dict = self.ro_chs  # type: ignore
+
+            if len(trackers) != len(self.acc_buf):
+                raise ValueError(
+                    f"Number of statistic trackers ({len(trackers)}) must match number of readout channels ({len(self.acc_buf)})"
+                )
+
+            assert isinstance(ro_chs, dict)
+            assert len(self.acc_buf) == len(ro_chs)
+            for d_rep, tracker, ro in zip(self.acc_buf, trackers, ro_chs.values()):
+                assert self.avg_level is not None
+                d_rep = np.moveaxis(d_rep, [-2, self.avg_level], [0, -2])
+
+                if not ro["edge_counting"]:
+                    d_rep = d_rep / ro["length"]
+                d_rep = cast(NDArray[np.float64], d_rep)
+
+                tracker.update(d_rep)  # (..., m, 2)
+
+        return not_finish
+
+    def acquire(
+        self,
+        *args,
+        statistic_trackers: Optional[List[AbsStatisticTracker]] = None,
+        **kwargs,
+    ):
+        extra_args = kwargs.pop("extra_args", dict())
+        extra_args.update(statistic_trackers=statistic_trackers)
+        return super().acquire(*args, extra_args=extra_args, **kwargs)
+
+
+class CallbackMixin(StatisticMixin):
+    """
+    Add callback functionality to the AcquireMixin class
+    """
+
+    def _reset_inc_summarize(self) -> None:
+        self._inc_sum_count: int = 0
+        self._inc_sum_state: Optional[List[NDArray[np.float64]]] = None
+
+    def _inc_summarize_accumulated(
+        self, rounds_buf: List[NDArray[np.float64]]
+    ) -> List[NDArray[np.float64]]:
+        self._inc_sum_count += 1
+        if len(rounds_buf) != self._inc_sum_count:
+            warnings.warn(
+                f"Detected non-matching number of rounds ({len(rounds_buf)}) and _inc_sum_count ({self._inc_sum_count})"
+                "The callback data may be corrupted, fallback to normal summarize"
+            )
+            return self._summarize_accumulated(rounds_buf)
+
+        n_ro_chs = len(self.ro_chs)  # type: ignore
+
+        assert self.rounds_buf is not None
+        if self._inc_sum_state is None:  # first round
+            self._inc_sum_state = cast(
+                List[NDArray[np.float64]],
+                [
+                    np.zeros_like(self.rounds_buf[0][i], dtype=np.float64)
+                    for i in range(n_ro_chs)
+                ],
+            )
+
+        # update the state with the new data
+        for i in range(n_ro_chs):
+            self._inc_sum_state[i] += rounds_buf[-1][i]
+
+        mean_data = cast(
+            List[NDArray[np.float64]],
+            [d / self._inc_sum_count for d in self._inc_sum_state],
+        )
+
+        return mean_data
+
+    def _inc_summarize_decimated(
+        self, rounds_buf: List[NDArray[np.float64]]
+    ) -> List[NDArray[np.float64]]:
+        # NOTE: currently, summarize decimated is identical to summarize accumulated
+        return self._inc_summarize_accumulated(rounds_buf)
+
+    def acquire(self, *args, callback: Optional[CallbackType] = None, **kwargs):
+        extra_args = kwargs.pop("extra_args", dict())
+        extra_args.update(callback=callback)
+
+        self._reset_inc_summarize()
+
+        return super().acquire(*args, extra_args=extra_args, **kwargs)
+
+    def acquire_decimated(
+        self, *args, callback: Optional[CallbackType] = None, **kwargs
+    ):
+        extra_args = kwargs.pop("extra_args", dict())
+        extra_args.update(callback=callback)
+
+        self._reset_inc_summarize()
+
+        return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
+
+    def finish_round(self) -> bool:
+        not_finish = super().finish_round()
+
+        acquire_params = self.acquire_params
+        assert acquire_params is not None
+
+        # trigger the callback function after each round
+        callback: Optional[CallbackType] = acquire_params["callback"]
+        if callback is not None:
+            assert callable(callback), "callback must be a callable function"
+            assert self.rounds_buf is not None
+
+            # NOTE: increment the summary to reduce cpu usage
+            round_n = len(self.rounds_buf)
+            acquire_type = acquire_params["type"]
+            if acquire_type == "accumulated":
+                # avg_d = self._summarize_accumulated(self.rounds_buf)
+                avg_d = self._inc_summarize_accumulated(self.rounds_buf)
+                callback(round_n, avg_d)
+            elif acquire_type == "decimated":
+                # dec_d = self._summarize_decimated(self.rounds_buf)
+                dec_d = self._inc_summarize_decimated(self.rounds_buf)
+                callback(round_n, dec_d)
+            else:
+                raise NotImplementedError(
+                    "Callback is not implemented for type other than accumulated or decimated"
+                )
+
+        return not_finish
 
 
 class ImproveAcquireMixin(

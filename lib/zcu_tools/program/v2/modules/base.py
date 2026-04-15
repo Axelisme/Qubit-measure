@@ -135,6 +135,7 @@ class ModuleCfg(ConfigBase):
             f"{self.__class__.__name__} does not support set_param"
         )
 
+
 class Module(ABC):
     def __init__(self, *args, **kwargs) -> None:
         self.name = "UnnamedModule"
