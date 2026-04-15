@@ -174,9 +174,55 @@ class CallbackMixin(StatisticMixin):
     Add callback functionality to the AcquireMixin class
     """
 
+    def _reset_inc_summarize(self) -> None:
+        self._inc_sum_count: int = 0
+        self._inc_sum_state: Optional[List[NDArray[np.float64]]] = None
+
+    def _inc_summarize_accumulated(
+        self, rounds_buf: List[NDArray[np.float64]]
+    ) -> List[NDArray[np.float64]]:
+        self._inc_sum_count += 1
+        if len(rounds_buf) != self._inc_sum_count:
+            warnings.warn(
+                f"Detected non-matching number of rounds ({len(rounds_buf)}) and _inc_sum_count ({self._inc_sum_count})"
+                "The callback data may be corrupted, fallback to normal summarize"
+            )
+            return self._summarize_accumulated(rounds_buf)
+
+        n_ro_chs = len(self.ro_chs)  # type: ignore
+
+        assert self.rounds_buf is not None
+        if self._inc_sum_state is None:  # first round
+            self._inc_sum_state = cast(
+                List[NDArray[np.float64]],
+                [
+                    np.zeros_like(self.rounds_buf[0][i], dtype=np.float64)
+                    for i in range(n_ro_chs)
+                ],
+            )
+
+        # update the state with the new data
+        for i in range(n_ro_chs):
+            self._inc_sum_state[i] += rounds_buf[-1][i]
+
+        mean_data = cast(
+            List[NDArray[np.float64]],
+            [d / self._inc_sum_count for d in self._inc_sum_state],
+        )
+
+        return mean_data
+
+    def _inc_summarize_decimated(
+        self, rounds_buf: List[NDArray[np.float64]]
+    ) -> List[NDArray[np.float64]]:
+        # NOTE: currently, summarize decimated is identical to summarize accumulated
+        return self._inc_summarize_accumulated(rounds_buf)
+
     def acquire(self, *args, callback: Optional[CallbackType] = None, **kwargs):
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(callback=callback)
+
+        self._reset_inc_summarize()
 
         return super().acquire(*args, extra_args=extra_args, **kwargs)
 
@@ -185,6 +231,8 @@ class CallbackMixin(StatisticMixin):
     ):
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(callback=callback)
+
+        self._reset_inc_summarize()
 
         return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
 
@@ -198,12 +246,16 @@ class CallbackMixin(StatisticMixin):
             assert callable(callback), "callback must be a callable function"
             assert self.rounds_buf is not None
 
+            # NOTE: increment the summary to reduce cpu usage
+
             round_n = len(self.rounds_buf)
             if self.acquire_params["type"] == "accumulated":
-                avg_d = self._summarize_accumulated(self.rounds_buf)
+                # avg_d = self._summarize_accumulated(self.rounds_buf)
+                avg_d = self._inc_summarize_accumulated(self.rounds_buf)
                 callback(round_n, avg_d)
             elif self.acquire_params["type"] == "decimated":
-                dec_d = self._summarize_decimated(self.rounds_buf)
+                # dec_d = self._summarize_decimated(self.rounds_buf)
+                dec_d = self._inc_summarize_decimated(self.rounds_buf)
                 callback(round_n, dec_d)
             else:
                 raise NotImplementedError(
