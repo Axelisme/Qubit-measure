@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Optional, Sequence, TypeAlias, Union
+from typing_extensions import TYPE_CHECKING, Optional, Self, Sequence, TypeAlias, Union
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
@@ -22,19 +22,23 @@ class Repeat(Module):
     It will call delay before and inside each loop, this may cause unexpected behavior
     """
 
-    def __init__(self, name: str, n: int, sub_module: SubModule) -> None:
+    def __init__(self, name: str, n: int) -> None:
         self.name = name
         self.n = n
-
-        if isinstance(sub_module, Module):
-            sub_module = [sub_module]
-        self.sub_module = sub_module
+        self.sub_modules = []
+        self.idx_reg = f"{name}_idx"
 
         if n < 0:
             raise ValueError(f"Repeat n must be greater than or equal to 0, got {n}")
 
+    def add_content(self, mod: SubModule) -> Self:
+        if isinstance(mod, Module):
+            mod = [mod]
+        self.sub_modules.extend(mod)
+        return self
+
     def init(self, prog: ModularProgramV2) -> None:
-        for mod in self.sub_module:
+        for mod in self.sub_modules:
             mod.init(prog)
 
     def run(
@@ -49,10 +53,10 @@ class Repeat(Module):
         logger.debug(f"Repeat.run: name='{self.name}', n={self.n}, t={t}")
 
         prog.delay(t=t)
-        prog.open_loop(name=self.name, n=self.n)
+        prog.open_loop(name=self.idx_reg, n=self.n)
 
         cur_t = 0.0
-        for mod in self.sub_module:
+        for mod in self.sub_modules:
             if logger.isEnabledFor(logging.DEBUG):
                 prog.debug_macro(
                     f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
@@ -69,26 +73,29 @@ class Repeat(Module):
 class SoftRepeat(Module):
     """Repeat a module or a list of modules n times"""
 
-    def __init__(self, name: str, n: int, sub_module: SubModule) -> None:
+    def __init__(self, name: str, n: int) -> None:
         self.name = name
         self.n = n
-
-        if isinstance(sub_module, Module):
-            sub_module = [sub_module]
-        self.sub_module = sub_module
+        self.sub_modules = []
 
         if n < 0:
             raise ValueError(f"Repeat n must be greater than or equal to 0, got {n}")
 
+    def add_content(self, mod: SubModule) -> Self:
+        if isinstance(mod, Module):
+            mod = [mod]
+        self.sub_modules.extend(mod)
+        return self
+
     def init(self, prog: ModularProgramV2) -> None:
-        for mod in self.sub_module:
+        for mod in self.sub_modules:
             mod.init(prog)
 
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         for _ in range(self.n):
-            for mod in self.sub_module:
+            for mod in self.sub_modules:
                 t = mod.run(prog, t)
         return t
 
@@ -96,18 +103,20 @@ class SoftRepeat(Module):
 class RepeatByRegister(Module):
     """Repeat a module or a list of modules n times, where n is the value of a register"""
 
-    def __init__(self, name: str, n_reg: str, sub_module: SubModule) -> None:
+    def __init__(self, name: str, n_reg: str) -> None:
         self.name = name
         self.n_reg = n_reg
-
-        if isinstance(sub_module, Module):
-            sub_module = [sub_module]
-        self.sub_module = sub_module
-
+        self.sub_modules = []
         self.counter_reg = f"{self.name}_counter"
 
+    def add_content(self, mod: SubModule) -> Self:
+        if isinstance(mod, Module):
+            mod = [mod]
+        self.sub_modules.extend(mod)
+        return self
+
     def init(self, prog: ModularProgramV2) -> None:
-        for mod in self.sub_module:
+        for mod in self.sub_modules:
             mod.init(prog)
 
         prog.add_reg(self.counter_reg)
@@ -117,6 +126,7 @@ class RepeatByRegister(Module):
     ) -> Union[float, QickParam]:
         logger.debug(f"RepeatWith.run: name='{self.name}', n_reg='{self.n_reg}', t={t}")
         prog.delay(t=t)
+        prog.delay_auto(t=0)
 
         start_label = f"{self.name}_start"
         end_label = f"{self.name}_end"
@@ -129,7 +139,7 @@ class RepeatByRegister(Module):
         prog.cond_jump(end_label, self.n_reg, "Z", "-", self.counter_reg)
 
         cur_t = 0.0
-        for mod in self.sub_module:
+        for mod in self.sub_modules:
             if logger.isEnabledFor(logging.DEBUG):
                 prog.debug_macro(
                     f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
@@ -146,74 +156,74 @@ class RepeatByRegister(Module):
         return 0.0  # prog.delay will modify ref time
 
 
-class ForEach(Module):
-    """Run ``sub_module`` once per entry in ``values``, loading each into register ``val_reg``.
-
-    An internal loop counter register holds the iteration index; register ``val_reg`` is
-    filled from data memory so it can drive :class:`Branch` and similar modules.
-
-    Values are staged into program dmem init data during :meth:`init`.
-    """
-
+class LoadValue(Module):
     def __init__(
-        self, name: str, values: Sequence[int], val_reg: str, sub_module: SubModule
+        self,
+        name: str,
+        values: Sequence[int],
+        idx_reg: str,
+        val_reg: str,
+        use_existed: bool = False,
     ) -> None:
         self.name = name
         self.values = list(values)
+        if len(self.values) == 0:
+            raise ValueError("LoadValue requires a non-empty values sequence")
+        self.use_existed = use_existed
 
-        if len(values) == 0:
-            raise ValueError("ForEach requires a non-empty values sequence")
-
-        if isinstance(sub_module, Module):
-            sub_module = [sub_module]
-        self.sub_module = sub_module
-
+        self.idx_reg = idx_reg
         self.val_reg = val_reg
         self.addr_reg = f"{name}_addr"
         self.offset = 0
 
     def init(self, prog: ModularProgramV2) -> None:
-        self.offset = prog.set_dmem(self.values)
+        self.offset = prog.add_dmem(self.values)
 
-        prog.add_reg(self.val_reg)
+        if not self.use_existed:
+            prog.add_reg(self.val_reg)
         prog.add_reg(self.addr_reg)
-
-        for mod in self.sub_module:
-            mod.init(prog)
 
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        n = len(self.values)
-        logger.debug(
-            "ForEach.run: ",
-            f"name='{self.name}',",
-            f"val_reg='{self.val_reg}',",
-            f"addr_reg='{self.addr_reg}',",
-            f"n={n},",
-            f"offset={self.offset},",
-            f"t={t}",
-        )
+        # addr = bind_sweep_index + dmem_offset
+        prog.write_reg(self.addr_reg, self.idx_reg)
+        if self.offset != 0:
+            prog.inc_reg(self.addr_reg, self.offset)
 
-        prog.delay(t=t)
-        prog.write_reg(self.addr_reg, self.offset)
-
-        prog.open_loop(name=f"{self.name}_loop", n=n)
         prog.read_dmem(dst=self.val_reg, addr=self.addr_reg)
 
-        cur_t: Union[float, QickParam] = 0.0
-        for mod in self.sub_module:
-            if logger.isEnabledFor(logging.DEBUG):
-                prog.debug_macro(
-                    f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
-                )
-            cur_t = mod.run(prog, cur_t)
-        prog.delay(t=cur_t)
+        return t
 
-        prog.inc_reg(self.addr_reg, 1)
-        prog.close_loop()
 
-        return 0.0
+class ScanWith(Module):
+    def __init__(
+        self, name: str, values: Sequence[int], val_reg: str, use_existed: bool = False
+    ) -> None:
+        self.name = name
+        self.repeat_mod = Repeat(name=f"{name}_repeat", n=len(values))
+
+        self.repeat_mod.add_content(
+            LoadValue(
+                name=f"{name}_load",
+                idx_reg=self.repeat_mod.idx_reg,
+                val_reg=val_reg,
+                values=values,
+                use_existed=use_existed,
+            )
+        )
+
+    def add_content(self, mod: SubModule) -> Self:
+        self.repeat_mod.add_content(mod)
+        return self
+
+    def init(self, prog: ModularProgramV2) -> None:
+        self.repeat_mod.init(prog)
+
+    def run(
+        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
+    ) -> Union[float, QickParam]:
+        return self.repeat_mod.run(prog, t)
 
 
 class Branch(Module):
@@ -250,11 +260,11 @@ class Branch(Module):
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         logger.debug(
-            "Branch.run: ",
-            f"name='{self.name}',",
-            f"compare_reg='{self.compare_reg}',",
-            f"n_branches={len(self.branches)},",
-            f"t={t}",
+            "Branch.run: name='%s', compare_reg='%s', n_branches=%d, t=%s",
+            self.name,
+            self.compare_reg,
+            len(self.branches),
+            t,
         )
 
         prog.delay(t=t)

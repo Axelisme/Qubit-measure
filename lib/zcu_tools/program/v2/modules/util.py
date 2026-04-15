@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import warnings
 
 import numpy as np
@@ -34,8 +35,8 @@ def round_timestamp(
 
     round_fn = np.ceil if take_ceil else np.floor
 
-    # TODO: non-hacky way to round QickParam timestamps?
-    cycles_t = t * fclk
+    # Round on a detached value to avoid mutating caller-owned QickParam.
+    cycles_t = copy.deepcopy(t) * fclk
     if isinstance(cycles_t, QickParam):
         cycles_t.start = int(round_fn(cycles_t.start))
         cycles_t.spans = {k: int(round_fn(v)) for k, v in cycles_t.spans.items()}

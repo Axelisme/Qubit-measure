@@ -78,7 +78,7 @@ class ModularProgramV2(MyProgramV2):
 
         self.delay(t=t)
 
-    def set_dmem(self, values: Sequence[int]) -> int:
+    def add_dmem(self, values: Sequence[int]) -> int:
         offset = len(self._dmem_buffer)
         self._dmem_buffer.extend(values)
         return offset

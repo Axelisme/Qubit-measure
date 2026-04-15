@@ -7,28 +7,28 @@ from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import (
     Any,
+    Callable,
     Literal,
     NotRequired,
     Optional,
     TypeAlias,
     TypedDict,
-    Union,
+    cast,
 )
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
+    LoadValue,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
     PulseCfg,
     Readout,
     ReadoutCfg,
-    Repeat,
+    RepeatByRegister,
     Reset,
     ResetCfg,
 )
@@ -36,7 +36,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (times, signals)
-ZigZagResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
+ZigZagResult: TypeAlias = tuple[NDArray[np.int64], NDArray[np.complex128]]
 
 
 def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -50,13 +50,9 @@ class ZigZagModuleCfg(TypedDict, closed=True):
     readout: ReadoutCfg
 
 
-class ZigZagSweepCfg(TypedDict, closed=True):
-    times: Union[SweepCfg, NDArray]
-
-
 class ZigZagCfg(ModularProgramCfg, TaskCfg):
     modules: ZigZagModuleCfg
-    sweep: ZigZagSweepCfg
+    n_times: int
 
 
 class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
@@ -69,62 +65,56 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> ZigZagResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "times")
         _cfg = check_type(deepcopy(cfg), ZigZagCfg)
-        modules = _cfg["modules"]
 
-        X90_pulse = deepcopy(modules["X90_pulse"])
+        times = np.arange(_cfg["n_times"])
+        loop_n = list(2 * times if repeat_on == "X90_pulse" else times)
 
-        time_sweep = _cfg["sweep"]["times"]
-        times = sweep2array(time_sweep, allow_array=True)
+        def measure_fn(
+            ctx: TaskState, update_hook: Optional[Callable]
+        ) -> list[NDArray[np.float64]]:
+            cfg = cast(ZigZagCfg, ctx.cfg)
+            modules = cfg["modules"]
+
+            X90_pulse = deepcopy(modules["X90_pulse"])
+            repeat_pulse = modules.get(repeat_on)
+            if repeat_pulse is None:
+                raise ValueError(f"Repeat on pulse {repeat_on} not found")
+
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("X90_pulse", X90_pulse),
+                    LoadValue(
+                        "load_repeat_count",
+                        values=loop_n,
+                        idx_reg="times",
+                        val_reg="repeat_count",
+                    ),
+                    RepeatByRegister("zigzag_loop", n_reg="repeat_count").add_content(
+                        Pulse(f"loop_{repeat_on}", repeat_pulse)
+                    ),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("times", len(times))],
+            ).acquire(
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot1D(
             "Times", "Signal", segment_kwargs=dict(show_grid=True)
         ) as viewer:
-
-            def measure_fn(ctx: TaskState, update_hook):
-                modules = ctx.cfg["modules"]
-                zigzag_time = ctx.env["zigzag_time"]
-                if repeat_on == "X90_pulse":
-                    repeat_time = 2 * zigzag_time
-                else:
-                    repeat_time = zigzag_time
-
-                return ModularProgramV2(
-                    soccfg,
-                    ctx.cfg,
-                    modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse(name="X90_pulse", cfg=X90_pulse),
-                        Repeat(
-                            name="zigzag_loop",
-                            n=repeat_time,
-                            sub_module=Pulse(
-                                name=f"loop_{repeat_on}",
-                                cfg=modules[repeat_on],
-                            ),
-                        ),
-                        Readout("readout", modules["readout"]),
-                    ],
-                ).acquire(
-                    soc,
-                    progress=False,
-                    callback=update_hook,
-                    **(acquire_kwargs or {}),
-                )
-
             signals = run_task(
-                task=Task(measure_fn=measure_fn).scan(
-                    "times",
-                    times.tolist(),
-                    before_each=lambda _, ctx, time: ctx.env.update(zigzag_time=time),
-                ),
+                task=Task(measure_fn=measure_fn, result_shape=(len(times),)),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    times, zigzag_signal2real(np.asarray(ctx.root_data))
+                    times.astype(np.float64),
+                    zigzag_signal2real(ctx.root_data),
                 ),
             )
-            signals = np.asarray(signals)
+            signals = np.asarray(signals, dtype=np.complex128)
 
         # record last cfg and result
         self.last_cfg = _cfg
@@ -151,6 +141,9 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         assert result is not None, "no result found"
 
         times, signals = result
+
+        times = times.astype(np.float64)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Times", "unit": "a.u.", "values": times},
@@ -166,7 +159,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         assert len(times.shape) == 1 and len(signals.shape) == 1
         assert times.shape == signals.shape
 
-        times = times.astype(np.float64)
+        times = times.astype(np.int64)
         signals = signals.astype(np.complex128)
 
         self.last_cfg = None

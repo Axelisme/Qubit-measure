@@ -15,9 +15,11 @@ from typing_extensions import (
     Callable,
     NotRequired,
     Optional,
+    Sequence,
     TypeAlias,
     TypedDict,
     Union,
+    cast,
 )
 
 from zcu_tools.experiment import AbsExperiment
@@ -49,12 +51,12 @@ def cpmg_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     real_signals = rotate2real(signals).real
     max_vals = np.max(real_signals, axis=1, keepdims=True)
     min_vals = np.min(real_signals, axis=1, keepdims=True)
-    return (real_signals - min_vals) / (max_vals - min_vals)
+    return (real_signals - min_vals) / np.clip(max_vals - min_vals, 1e-12, None)
 
 
 # (times, lengths(time x length), signals)
 CPMG_Result: TypeAlias = tuple[
-    NDArray[np.float64], NDArray[np.float64], NDArray[np.complex128]
+    NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
 
@@ -64,10 +66,14 @@ class CPMG_ModuleCfg(TypedDict, closed=True):
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
+class CPMG_SweepCfg(TypedDict, closed=True):
+    times: Union[SweepCfg, Sequence[int]]
+    length: SweepCfg
+
 
 class CPMG_Cfg(ModularProgramCfg, TaskCfg):
     modules: CPMG_ModuleCfg
-    sweep: dict[str, Union[SweepCfg, list]]
+    sweep: CPMG_SweepCfg
     length_range: Union[list[tuple[float, float]], tuple[float, float]]
     length_expts: int
 
@@ -88,20 +94,22 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
 
         pi2_pulse = modules["pi2_pulse"]
         pi_pulse = modules["pi_pulse"]
-        length_ranges = _cfg["length_range"]
 
+        time_sweep = _cfg["sweep"]["times"]
+        times = sweep2array(time_sweep, allow_array=True)
+        if not np.allclose(times, np.round(times)):
+            raise ValueError("Times must be integers")
+        times = times.astype(np.int64)
+
+        length_ranges = _cfg["length_range"]
         if isinstance(length_ranges, tuple):
-            ranges = np.zeros((_cfg["length_expts"], 2), dtype=np.float64)
+            ranges = np.zeros((len(times), 2), dtype=np.float64)
             ranges[:, 0] = length_ranges[0]
             ranges[:, 1] = length_ranges[1]
         else:
             ranges = np.array(length_ranges, dtype=np.float64)
         length_ranges = ranges
 
-        time_sweep: SweepCfg = _cfg["sweep"]["times"]  # type: ignore
-
-        # TODO: convert times and length sweeps to arrays in different time
-        times = sweep2array(time_sweep, allow_array=True)
         lengths = np.array(  # (times x length)
             [
                 sweep2array(
@@ -116,7 +124,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 for i, t in enumerate(times)
             ]
         )
-        length_idxs = np.arange(_cfg["length_expts"], dtype=np.float64)
+        length_idxs = np.arange(_cfg["length_expts"], dtype=np.int64)
 
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
@@ -141,7 +149,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 ctx: TaskState[NDArray[np.complex128], Any],
                 update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
             ) -> list[NDArray[np.float64]]:
-                cfg = ctx.cfg
+                cfg = cast(CPMG_Cfg, ctx.cfg)
                 modules = cfg["modules"]
 
                 assert update_hook is not None
@@ -149,9 +157,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 time = ctx.env["time"]
                 pi2_pulse = modules["pi2_pulse"]
                 pi_pulse = modules["pi_pulse"]
-                dpulse_len = (
-                    pi_pulse.waveform.length - pi2_pulse.waveform.length
-                )
+                dpulse_len = pi_pulse.waveform.length - pi2_pulse.waveform.length
 
                 length_sweep = cfg["sweep"]["length"]
                 length_param = sweep2param("length", length_sweep)
@@ -174,13 +180,11 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                             Reset("reset", modules.get("reset")),
                             Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
                             Delay("first_delay", interval - 0.5 * dpulse_len),
-                            Repeat(
-                                name="pi_loop",
-                                n=time - 1,
-                                sub_module=[
+                            Repeat("pi_loop", time - 1).add_content(
+                                [
                                     Pulse("pi_pulse", pi_pulse, block_mode=False),
                                     SoftDelay("inner_delay", 2 * interval),
-                                ],
+                                ]
                             ),
                             Pulse("last_pi_pulse", pi_pulse, block_mode=False),
                             Delay("last_delay", interval + 0.5 * dpulse_len),
@@ -221,7 +225,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
-                    times,
+                    times.astype(np.float64),
                     lengths[ctx.env["length_idx"]],
                     cpmg_signal2real(np.asarray(ctx.root_data)),
                 ),
@@ -323,12 +327,13 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             _filepath, times=times, lengths=lengths, signals2D=signals2D
         )
 
+        float_times = times.astype(np.float64)
         length_idxs = np.arange(lengths.shape[1])
 
         # lengths
         save_data(
             filepath=str(_filepath.with_name(_filepath.name + "_length")),
-            x_info={"name": "Number of Pi", "unit": "a.u.", "values": times},
+            x_info={"name": "Number of Pi", "unit": "a.u.", "values": float_times},
             y_info={"name": "Time Index", "unit": "a.u.", "values": length_idxs},
             z_info={"name": "Length", "unit": "s", "values": 1e-6 * lengths.T},
             comment=comment,
@@ -339,7 +344,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         # signals
         save_data(
             filepath=str(_filepath.with_name(_filepath.name + "_signals")),
-            x_info={"name": "Number of pi", "unit": "a.u.", "values": times},
+            x_info={"name": "Number of pi", "unit": "a.u.", "values": float_times},
             y_info={"name": "Time Index", "unit": "a.u.", "values": length_idxs},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals2D.T},
             comment=comment,
@@ -353,10 +358,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         lengths = data["lengths"]
         signals2D = data["signals2D"]
 
-        lengths = lengths * 1e6  # s -> us
-        signals2D = signals2D.T  # transpose back
-
-        times = times.astype(np.float64)
+        times = times.astype(np.int64)
         lengths = lengths.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
