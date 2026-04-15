@@ -50,7 +50,7 @@ class Repeat(Module):
         # this n must > 0, to prevent infinite loop in qick
         assert self.n > 0
 
-        logger.debug(f"Repeat.run: name='{self.name}', n={self.n}, t={t}")
+        logger.debug("Repeat.run: name='%s', n=%d, t=%s", self.name, self.n, t)
 
         prog.delay(t=t)
         prog.open_loop(name=self.idx_reg, n=self.n)
@@ -124,7 +124,9 @@ class RepeatByRegister(Module):
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        logger.debug(f"RepeatWith.run: name='{self.name}', n_reg='{self.n_reg}', t={t}")
+        logger.debug(
+            "RepeatWith.run: name='%s', n_reg='%s', t=%s", self.name, self.n_reg, t
+        )
         prog.delay(t=t)
         prog.delay_auto(t=0)
 
