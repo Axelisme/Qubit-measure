@@ -22,7 +22,7 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import LivePlot2DwithLine
+from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     LoadValue,
@@ -145,8 +145,8 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                 soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
             )
 
-        with LivePlot2DwithLine(
-            "Times", x_info["name"], line_axis=1, num_lines=3
+        with LivePlot2D(
+            "Times", x_info["name"]
         ) as viewer:
             signals = run_task(
                 task=Task(
