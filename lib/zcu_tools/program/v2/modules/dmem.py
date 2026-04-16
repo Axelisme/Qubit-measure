@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 import math
 
-from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Self, Sequence, TypeAlias, Union
+from qick.asm_v2 import AsmInst, CondJump, Label, Macro, QickParam, ReadDmem
+from typing_extensions import TYPE_CHECKING, Optional, Self, Sequence, TypeAlias, Union
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
@@ -16,6 +16,130 @@ from .control import Repeat
 logger = logging.getLogger(__name__)
 
 SubModule: TypeAlias = Union[Module, list[Module]]
+
+
+class LoadValueMacro(Macro):
+    def __init__(
+        self,
+        idx_reg: str,
+        val_reg: str,
+        addr_reg: str,
+        word_idx_reg: str,
+        slot_reg: str,
+        shift_reg: str,
+        word_reg: str,
+        sign_reg: str,
+        offset: int,
+        shift_offset: int,
+        word_shift: int,
+        slot_mask: int,
+        value_mask: int,
+        signed_mode: bool,
+        sign_bit_mask: int,
+        sign_bias: int,
+        sign_clear_label: Optional[str],
+    ) -> None:
+        super().__init__(
+            idx_reg=idx_reg,
+            val_reg=val_reg,
+            addr_reg=addr_reg,
+            word_idx_reg=word_idx_reg,
+            slot_reg=slot_reg,
+            shift_reg=shift_reg,
+            word_reg=word_reg,
+            sign_reg=sign_reg,
+            offset=offset,
+            shift_offset=shift_offset,
+            word_shift=word_shift,
+            slot_mask=slot_mask,
+            value_mask=value_mask,
+            signed_mode=signed_mode,
+            sign_bit_mask=sign_bit_mask,
+            sign_bias=sign_bias,
+            sign_clear_label=sign_clear_label,
+        )
+        self._validated = False
+
+    def preprocess(self, prog: ModularProgramV2) -> None:
+        # Keep register address resolution in expand() so macros that declare
+        # registers later in the compile pipeline still work.
+        if self.signed_mode:
+            if self.sign_clear_label is None:
+                raise ValueError("sign_clear_label is required in signed mode")
+            if not self.sign_reg:
+                raise ValueError("sign_reg is required in signed mode")
+        self._validated = True
+
+    def _write_op(self, prog: ModularProgramV2, dst: str, op: str) -> AsmInst:
+        return AsmInst(
+            inst={
+                "CMD": "REG_WR",
+                "DST": prog._get_reg(dst),
+                "SRC": "op",
+                "OP": op,
+            },
+            addr_inc=1,
+        )
+
+    def expand(self, prog: ModularProgramV2) -> list[Macro]:
+        if not self._validated:
+            self.preprocess(prog)
+
+        idx_hw = prog._get_reg(self.idx_reg)
+        shift_hw = prog._get_reg(self.shift_reg)
+        word_hw = prog._get_reg(self.word_reg)
+        val_hw = prog._get_reg(self.val_reg)
+        word_idx_hw = prog._get_reg(self.word_idx_reg)
+        slot_hw = prog._get_reg(self.slot_reg)
+        addr_hw = prog._get_reg(self.addr_reg)
+
+        insts: list[Macro] = []
+        # word_idx = idx >> log2(values_per_word)
+        insts.append(
+            self._write_op(prog, self.word_idx_reg, f"{idx_hw} ASR #{self.word_shift}")
+        )
+        # slot = idx & (values_per_word - 1)
+        insts.append(
+            self._write_op(prog, self.slot_reg, f"{idx_hw} AND #{self.slot_mask}")
+        )
+
+        # addr = word_idx + dmem_offset
+        insts.append(self._write_op(prog, self.addr_reg, word_idx_hw))
+        if self.offset != 0:
+            insts.append(
+                self._write_op(prog, self.addr_reg, f"{addr_hw} + #{self.offset}")
+            )
+        insts.append(ReadDmem(dst=self.word_reg, addr=self.addr_reg))
+
+        # shift = shift_table[slot]
+        insts.append(self._write_op(prog, self.addr_reg, slot_hw))
+        if self.shift_offset != 0:
+            insts.append(
+                self._write_op(prog, self.addr_reg, f"{addr_hw} + #{self.shift_offset}")
+            )
+        insts.append(ReadDmem(dst=self.shift_reg, addr=self.addr_reg))
+
+        # extracted = (word >> shift) & value_mask
+        insts.append(self._write_op(prog, self.val_reg, f"{word_hw} ASR {shift_hw}"))
+        insts.append(
+            self._write_op(prog, self.val_reg, f"{val_hw} AND #{self.value_mask}")
+        )
+
+        if self.signed_mode:
+            insts.append(
+                self._write_op(
+                    prog, self.sign_reg, f"{val_hw} AND #{self.sign_bit_mask}"
+                )
+            )
+            insts.append(
+                CondJump(label=self.sign_clear_label, arg1=self.sign_reg, test="Z")
+            )
+            insts.append(
+                self._write_op(prog, self.val_reg, f"{val_hw} - #{self.sign_bias}")
+            )
+            insts.append(Label(label=self.sign_clear_label))
+
+        return insts
 
 
 class LoadValue(Module):
@@ -57,6 +181,7 @@ class LoadValue(Module):
         self._sign_bias = 0
         self._word_shift = 0
         self._shift_table: list[int] = []
+        self._macro_seq = 0
 
         self._plan_compression()
 
@@ -105,38 +230,32 @@ class LoadValue(Module):
             prog.read_dmem(dst=self.val_reg, addr=self.addr_reg)
             return t
 
-        idx_hw = prog._get_reg(self.idx_reg)
-        shift_hw = prog._get_reg(self.shift_reg)
-        word_hw = prog._get_reg(self.word_reg)
-        val_hw = prog._get_reg(self.val_reg)
-
-        # word_idx = idx >> log2(values_per_word)
-        self._write_op(prog, self.word_idx_reg, f"{idx_hw} ASR #{self._word_shift}")
-        # slot = idx & (values_per_word - 1)
-        self._write_op(prog, self.slot_reg, f"{idx_hw} AND #{self._slot_mask}")
-
-        # addr = bind_sweep_index + dmem_offset
-        prog.write_reg(self.addr_reg, self.word_idx_reg)
-        if self.offset != 0:
-            prog.inc_reg(self.addr_reg, self.offset)
-        prog.read_dmem(dst=self.word_reg, addr=self.addr_reg)
-
-        # shift = shift_table[slot]
-        prog.write_reg(self.addr_reg, self.slot_reg)
-        if self.shift_offset != 0:
-            prog.inc_reg(self.addr_reg, self.shift_offset)
-        prog.read_dmem(dst=self.shift_reg, addr=self.addr_reg)
-
-        # extracted = (word >> shift) & value_mask
-        self._write_op(prog, self.val_reg, f"{word_hw} ASR {shift_hw}")
-        self._write_op(prog, self.val_reg, f"{val_hw} AND #{self._value_mask}")
-
+        self._macro_seq += 1
+        sign_clear_label: Optional[str] = None
         if self._signed_mode:
-            sign_clear_label = f"{self.name}_sign_clear"
-            self._write_op(prog, self.sign_reg, f"{val_hw} AND #{self._sign_bit_mask}")
-            prog.cond_jump(sign_clear_label, self.sign_reg, "Z")
-            self._write_op(prog, self.val_reg, f"{val_hw} - #{self._sign_bias}")
-            prog.label(sign_clear_label)
+            sign_clear_label = f"{self.name}_sign_clear_{self._macro_seq}"
+
+        prog.append_macro(
+            LoadValueMacro(
+                idx_reg=self.idx_reg,
+                val_reg=self.val_reg,
+                addr_reg=self.addr_reg,
+                word_idx_reg=self.word_idx_reg,
+                slot_reg=self.slot_reg,
+                shift_reg=self.shift_reg,
+                word_reg=self.word_reg,
+                sign_reg=self.sign_reg,
+                offset=self.offset,
+                shift_offset=self.shift_offset,
+                word_shift=self._word_shift,
+                slot_mask=self._slot_mask,
+                value_mask=self._value_mask,
+                signed_mode=self._signed_mode,
+                sign_bit_mask=self._sign_bit_mask,
+                sign_bias=self._sign_bias,
+                sign_clear_label=sign_clear_label,
+            )
+        )
 
         return t
 
@@ -206,17 +325,6 @@ class LoadValue(Module):
         if self._signed_mode:
             self._sign_bit_mask = 1 << (bits - 1)
             self._sign_bias = 1 << bits
-
-    def _write_op(self, prog: ModularProgramV2, dst: str, op: str) -> None:
-        prog.asm_inst(
-            {
-                "CMD": "REG_WR",
-                "DST": prog._get_reg(dst),
-                "SRC": "op",
-                "OP": op,
-            }
-        )
-
 
 class ScanWith(Module):
     def __init__(
