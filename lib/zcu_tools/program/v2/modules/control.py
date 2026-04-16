@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from qick.asm_v2 import QickParam
-from typing_extensions import TYPE_CHECKING, Optional, Self, Sequence, TypeAlias, Union
+from typing_extensions import TYPE_CHECKING, Optional, Self, TypeAlias, Union
 
 if TYPE_CHECKING:
     from zcu_tools.program.v2.modular import ModularProgramV2
@@ -107,7 +107,7 @@ class RepeatByRegister(Module):
         self.name = name
         self.n_reg = n_reg
         self.sub_modules = []
-        self.counter_reg = f"{self.name}_counter"
+        self.counter_reg = f"{name}_counter"
 
     def add_content(self, mod: SubModule) -> Self:
         if isinstance(mod, Module):
@@ -156,76 +156,6 @@ class RepeatByRegister(Module):
         prog.label(end_label)
 
         return 0.0  # prog.delay will modify ref time
-
-
-class LoadValue(Module):
-    def __init__(
-        self,
-        name: str,
-        values: Sequence[int],
-        idx_reg: str,
-        val_reg: str,
-        use_existed: bool = False,
-    ) -> None:
-        self.name = name
-        self.values = list(values)
-        if len(self.values) == 0:
-            raise ValueError("LoadValue requires a non-empty values sequence")
-        self.use_existed = use_existed
-
-        self.idx_reg = idx_reg
-        self.val_reg = val_reg
-        self.addr_reg = f"{name}_addr"
-        self.offset = 0
-
-    def init(self, prog: ModularProgramV2) -> None:
-        self.offset = prog.add_dmem(self.values)
-
-        if not self.use_existed:
-            prog.add_reg(self.val_reg)
-        prog.add_reg(self.addr_reg)
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        # addr = bind_sweep_index + dmem_offset
-        prog.write_reg(self.addr_reg, self.idx_reg)
-        if self.offset != 0:
-            prog.inc_reg(self.addr_reg, self.offset)
-
-        prog.read_dmem(dst=self.val_reg, addr=self.addr_reg)
-
-        return t
-
-
-class ScanWith(Module):
-    def __init__(
-        self, name: str, values: Sequence[int], val_reg: str, use_existed: bool = False
-    ) -> None:
-        self.name = name
-        self.repeat_mod = Repeat(name=f"{name}_repeat", n=len(values))
-
-        self.repeat_mod.add_content(
-            LoadValue(
-                name=f"{name}_load",
-                idx_reg=self.repeat_mod.idx_reg,
-                val_reg=val_reg,
-                values=values,
-                use_existed=use_existed,
-            )
-        )
-
-    def add_content(self, mod: SubModule) -> Self:
-        self.repeat_mod.add_content(mod)
-        return self
-
-    def init(self, prog: ModularProgramV2) -> None:
-        self.repeat_mod.init(prog)
-
-    def run(
-        self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
-    ) -> Union[float, QickParam]:
-        return self.repeat_mod.run(prog, t)
 
 
 class Branch(Module):

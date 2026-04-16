@@ -36,6 +36,7 @@ class ModularProgramV2(MyProgramV2):
         self.modules = modules
         self.sweep_dict = sweep
         self._dmem_buffer = []
+        self._temp_regs: list[str] = []
 
         logger.debug(
             "ModularProgramV2.__init__: %d modules, reps=%s, relax_delay=%s",
@@ -80,6 +81,24 @@ class ModularProgramV2(MyProgramV2):
         offset = len(self._dmem_buffer)
         self._dmem_buffer.extend(values)
         return offset
+
+    def acquire_temp_reg(self, num: int = 1) -> list[str]:
+        """Acquire shared scratch registers for temporary calculations.
+
+        The returned registers are shared across modules. Callers must not
+        rely on temp register values persisting across module boundaries.
+        """
+        if num < 0:
+            raise ValueError(f"num must be greater than or equal to 0, got {num}")
+        elif num == 0:
+            return []
+
+        while len(self._temp_regs) < num:
+            reg_name = f"temp_reg_{len(self._temp_regs)}"
+            self.add_reg(reg_name, allow_reuse=True)
+            self._temp_regs.append(reg_name)
+
+        return self._temp_regs[:num]
 
     def compile_datamem(self) -> Optional[NDArray[np.int32]]:
         if len(self._dmem_buffer) == 0:
