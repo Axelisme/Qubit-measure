@@ -76,14 +76,12 @@ class PulseRegistry:
 
         self._pulses[pulse_name] = (name, deepcopy(cfg))
         waveform = cfg.waveform
-        waveform_style = waveform.style
         logger.debug(
             "PulseRegistry: new '%s' (module=%s, ch=%s, freq=%s, phase=%s, gain=%s, "
-            "waveform_style=%s) [total=%d]",
+            "style=%s, len=%s)",
             pulse_name, name, cfg.ch, cfg.freq,
             cfg.phase, cfg.gain,
-            waveform_style,
-            len(self._pulses),
+            waveform.style, waveform.length,
         )
 
         return True

@@ -62,7 +62,7 @@ class MyProgramV2(ImproveAcquireMixin, AveragerProgramV2):  # type: ignore
         logger.debug(
             "MyProgramV2.acquire: reps=%s, rounds=%s",
             self.cfg["reps"],
-            self.cfg["rounds"],
+            self.cfg["rounds"]
         )
         return super().acquire(*args, rounds=self.cfg["rounds"], **kwargs)
 

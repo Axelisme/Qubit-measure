@@ -10,7 +10,6 @@ from typing_extensions import Any, Mapping, Optional, Sequence, Union, cast
 from ..base import SweepCfg
 from .base import MyProgramV2, ProgramV2Cfg
 from .modules import Module, ModuleCfg
-from .utils import PrintTimeStamp
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +62,8 @@ class ModularProgramV2(MyProgramV2):
             module.init(self)
 
         logger.debug(
-            "ModularProgramV2._initialize: registered %d unique pulses, %d waveforms",
-            len(self.pulse_registry._pulses),
-            len(self.waves),
+            "ModularProgramV2._initialize: registered %d unique pulses",
+            len(self.pulse_registry._pulses)
         )
 
     def _body(self, cfg: ModularProgramCfg) -> None:

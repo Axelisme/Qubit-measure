@@ -125,7 +125,7 @@ class RepeatByRegister(Module):
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         logger.debug(
-            "RepeatWith.run: name='%s', n_reg='%s', t=%s", self.name, self.n_reg, t
+            "RepeatByRegister.run: name='%s', n_reg='%s', t=%s", self.name, self.n_reg, t
         )
         prog.delay(t=t)
         prog.delay_auto(t=0)
