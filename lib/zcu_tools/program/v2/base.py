@@ -4,7 +4,7 @@ import logging
 
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2, QickParam
-from typing_extensions import Any, Mapping, TypedDict, Union, cast
+from typing_extensions import Any, Mapping, NotRequired, TypedDict, Union, cast
 
 from zcu_tools.program.base import ImproveAcquireMixin
 
@@ -31,7 +31,7 @@ class MyProgramV2(ImproveAcquireMixin, AveragerProgramV2):  # type: ignore
             cfg=dict(_cfg),
             reps=_cfg["reps"],
             initial_delay=0.0,
-            final_wait=_cfg.get("final_wait", 0.0),
+            final_wait=0.0,
             final_delay=_cfg["relax_delay"],
             **kwargs,
         )
