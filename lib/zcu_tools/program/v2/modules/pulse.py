@@ -130,3 +130,6 @@ class Pulse(Module):
         if self.block_mode:
             return t + self.total_length(prog)
         return t
+
+    def allow_rerun(self) -> bool:
+        return True

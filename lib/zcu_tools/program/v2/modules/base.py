@@ -147,3 +147,9 @@ class Module(ABC):
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]: ...
+
+    def allow_rerun(self) -> bool:
+        """Whether this module allows being run multiple times (e.g. in a loop).
+        If False, running it more than once will raise an error.
+        """
+        return False

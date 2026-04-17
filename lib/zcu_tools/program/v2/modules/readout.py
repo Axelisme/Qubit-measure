@@ -94,6 +94,9 @@ class AbsReadout(Module):
     @abstractmethod
     def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]: ...
 
+    def allow_rerun(self) -> bool:
+        return True
+
 
 class Readout(AbsReadout):
     _supported_readout: ClassVar[dict[str, type["AbsReadout"]]] = {}
@@ -109,7 +112,9 @@ class Readout(AbsReadout):
         cls, id_name: str
     ) -> Callable[[type["AbsReadout"]], type["AbsReadout"]]:
         def decorator(sub_cls: type["AbsReadout"]) -> type["AbsReadout"]:
-            if (registered_cls := cls._supported_readout.setdefault(id_name, sub_cls)) != sub_cls:
+            if (
+                registered_cls := cls._supported_readout.setdefault(id_name, sub_cls)
+            ) != sub_cls:
                 raise ValueError(
                     f"Readout {id_name} already registered by {registered_cls.__name__}"
                 )
@@ -131,6 +136,7 @@ class Readout(AbsReadout):
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
         return self.readout.run(prog, t)
+
 
 @Readout.bind_readout(DirectReadoutCfg.module_type())
 class DirectReadout(AbsReadout):
@@ -166,6 +172,7 @@ class DirectReadout(AbsReadout):
         prog.send_readoutconfig(ro_ch, self.name, t=t)  # type: ignore
         prog.trigger([ro_ch], t=t + trig_offset)
         return t
+
 
 @Readout.bind_readout(PulseReadoutCfg.module_type())
 class PulseReadout(AbsReadout):

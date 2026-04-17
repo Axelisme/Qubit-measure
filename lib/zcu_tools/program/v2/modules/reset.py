@@ -132,6 +132,9 @@ class AbsReset(Module):
     @abstractmethod
     def total_length(self, prog: ModularProgramV2) -> Union[float, QickParam]: ...
 
+    def allow_rerun(self) -> bool:
+        return True
+
 
 class Reset(AbsReset):
     _supported_reset: ClassVar[dict[str, type["AbsReset"]]] = {}
@@ -147,7 +150,9 @@ class Reset(AbsReset):
     @classmethod
     def bind_reset(cls, id_name: str) -> Callable[[type["AbsReset"]], type["AbsReset"]]:
         def decorator(sub_cls: type["AbsReset"]) -> type["AbsReset"]:
-            if (registered_cls := cls._supported_reset.setdefault(id_name, sub_cls)) != sub_cls:
+            if (
+                registered_cls := cls._supported_reset.setdefault(id_name, sub_cls)
+            ) != sub_cls:
                 raise ValueError(
                     f"Reset {id_name} already registered by {registered_cls.__name__}"
                 )

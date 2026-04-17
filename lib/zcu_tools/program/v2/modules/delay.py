@@ -5,7 +5,6 @@ import logging
 from qick.asm_v2 import QickParam
 from typing_extensions import TYPE_CHECKING, Optional, Sequence, Union
 
-from ..utils import PrintTimeStamp
 from .base import Module
 from .util import merge_max_length, round_timestamp
 
@@ -36,6 +35,9 @@ class Delay(Module):
 
         return 0.0  # reset reference time
 
+    def allow_rerun(self) -> bool:
+        return True
+
 
 class SoftDelay(Module):
     def __init__(
@@ -54,6 +56,9 @@ class SoftDelay(Module):
         delay_t = self.delay if self.absolute else t + self.delay
 
         return round_timestamp(prog, delay_t)
+
+    def allow_rerun(self) -> bool:
+        return True
 
 
 class DelayAuto(Module):
@@ -85,6 +90,9 @@ class DelayAuto(Module):
         )
         return 0.0
 
+    def allow_rerun(self) -> bool:
+        return True
+
 
 class Join(Module):
     def __init__(self, *args: Union[Module, Sequence[Module]]) -> None:
@@ -111,7 +119,8 @@ class Join(Module):
     ) -> Union[float, QickParam]:
         logger.debug(
             "Join.run: %d parallel branches, t=%s",
-            len(self.join_modules), t,
+            len(self.join_modules),
+            t,
         )
 
         end_t_list = []
@@ -129,3 +138,6 @@ class Join(Module):
         end_t = merge_max_length(*end_t_list)
 
         return end_t
+
+    def allow_rerun(self) -> bool:
+        return all(m.allow_rerun() for mlist in self.join_modules for m in mlist)

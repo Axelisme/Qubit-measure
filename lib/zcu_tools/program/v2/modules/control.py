@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from qick.asm_v2 import AsmInst, Label, Macro, QickParam, WriteLabel
+from qick.asm_v2 import QickParam
 from typing_extensions import TYPE_CHECKING, Optional, Self, TypeAlias, Union
 
 if TYPE_CHECKING:
@@ -16,127 +16,13 @@ logger = logging.getLogger(__name__)
 SubModule: TypeAlias = Union[Module, list[Module]]
 
 
-class OpenLoopByRegMacro(Macro):
-    """Register-based equivalent of QICK's OpenLoop.
-
-    Generates: guard against non-positive n, initialize counter to 0,
-    loop-start label, and exit-condition check.
-    The loop body (sub-module macros) is appended to macro_list by Repeat.run()
-    between this macro and CloseLoopByRegMacro.
-    """
-
-    def __init__(self, name: str, n_reg: str, counter_reg: str) -> None:
-        self.name = name
-        self.n_reg = n_reg
-        self.counter_reg = counter_reg
-
-    def expand(self, prog) -> list:  # type: ignore
-        start_label = f"{self.name}_start"
-        end_label = f"{self.name}_end"
-        large_pmem = prog.tproccfg["pmem_size"] > 2**11
-
-        n_reg = prog._get_reg(self.n_reg)
-        counter_reg = prog._get_reg(self.counter_reg)
-
-        insts = []
-
-        # Guard: skip loop if n_reg is signed/negative
-        insts.append(AsmInst(inst={"CMD": "TEST", "OP": n_reg, "UF": "1"}, addr_inc=1))
-        if large_pmem:
-            insts.append(WriteLabel(label=end_label))
-            insts.append(
-                AsmInst(inst={"CMD": "JUMP", "IF": "S", "ADDR": "s15"}, addr_inc=1)
-            )
-        else:
-            insts.append(
-                AsmInst(inst={"CMD": "JUMP", "IF": "S", "LABEL": end_label}, addr_inc=1)
-            )
-
-        # Initialize counter to 0
-        insts.append(
-            AsmInst(
-                inst={"CMD": "REG_WR", "DST": counter_reg, "SRC": "imm", "LIT": "#0"},
-                addr_inc=1,
-            )
-        )
-
-        # Loop start label
-        insts.append(Label(label=start_label))
-
-        # Exit when counter reaches n_reg (n_reg - counter == 0)
-        insts.append(
-            AsmInst(
-                inst={"CMD": "TEST", "OP": f"{n_reg} - {counter_reg}", "UF": "1"},
-                addr_inc=1,
-            )
-        )
-        if large_pmem:
-            insts.append(WriteLabel(label=end_label))
-            insts.append(
-                AsmInst(inst={"CMD": "JUMP", "IF": "Z", "ADDR": "s15"}, addr_inc=1)
-            )
-        else:
-            insts.append(
-                AsmInst(inst={"CMD": "JUMP", "IF": "Z", "LABEL": end_label}, addr_inc=1)
-            )
-
-        return insts
-
-
-class CloseLoopByRegMacro(Macro):
-    """Register-based equivalent of QICK's CloseLoop.
-
-    Generates: increment counter, unconditional jump back to loop start, end label.
-    """
-
-    def __init__(self, name: str, counter_reg: str) -> None:
-        self.name = name
-        self.counter_reg = counter_reg
-
-    def expand(self, prog) -> list:  # type: ignore
-        start_label = f"{self.name}_start"
-        end_label = f"{self.name}_end"
-        large_pmem = prog.tproccfg["pmem_size"] > 2**11
-
-        counter_reg = prog._get_reg(self.counter_reg)
-
-        insts = []
-
-        # Increment counter
-        insts.append(
-            AsmInst(
-                inst={
-                    "CMD": "REG_WR",
-                    "DST": counter_reg,
-                    "SRC": "op",
-                    "OP": f"{counter_reg} + #1",
-                },
-                addr_inc=1,
-            )
-        )
-
-        # Jump back to loop start
-        if large_pmem:
-            insts.append(WriteLabel(label=start_label))
-            insts.append(AsmInst(inst={"CMD": "JUMP", "ADDR": "s15"}, addr_inc=1))
-        else:
-            insts.append(
-                AsmInst(inst={"CMD": "JUMP", "LABEL": start_label}, addr_inc=1)
-            )
-
-        # End label
-        insts.append(Label(label=end_label))
-
-        return insts
-
-
 class Repeat(Module):
     """
     Repeat sub-modules n times.
 
     If n is an int, uses QICK's open_loop/close_loop (compile-time constant).
-    If n is a str, treats it as a register name: bookends sub-module runs with
-    OpenLoopByRegMacro / CloseLoopByRegMacro for a runtime loop count.
+    If n is a str, treats it as a register name: emits a register-driven loop
+    using cond_jump / jump / label, so the loop count can vary at runtime.
     """
 
     def __init__(self, name: str, n: Union[int, str]) -> None:
@@ -144,13 +30,8 @@ class Repeat(Module):
         self.n = n
         self.sub_modules = []
 
-        self.idx_reg = ""
-        if isinstance(n, int):
-            if n < 0:
-                raise ValueError(
-                    f"Repeat n must be greater than or equal to 0, got {n}"
-                )
-            self.idx_reg = f"{name}_idx"
+        if isinstance(n, int) and n < 0:
+            raise ValueError(f"Repeat n must be greater than or equal to 0, got {n}")
 
     def add_content(self, mod: SubModule) -> Self:
         if isinstance(mod, Module):
@@ -161,48 +42,22 @@ class Repeat(Module):
     def init(self, prog: ModularProgramV2) -> None:
         for mod in self.sub_modules:
             mod.init(prog)
-        if isinstance(self.n, str):
-            self.counter_reg = f"{self.name}_counter"
-            prog.add_reg(self.counter_reg)
 
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        if isinstance(self.n, str):
-            logger.debug(
-                "Repeat.run (by register): name='%s', n_reg='%s', t=%s",
-                self.name,
-                self.n,
-                t,
-            )
-            prog.delay(t=t)
-            prog.delay_auto(t=0)
-            prog.append_macro(OpenLoopByRegMacro(self.name, self.n, self.counter_reg))
-
-            cur_t = 0.0
-            for mod in self.sub_modules:
-                if logger.isEnabledFor(logging.DEBUG):
-                    prog.debug_macro(
-                        f"{type(mod).__name__}({mod.name})", cur_t, prefix="\t"
-                    )
-                cur_t = mod.run(prog, cur_t)
-            prog.delay(t=cur_t)
-
-            prog.append_macro(CloseLoopByRegMacro(self.name, self.counter_reg))
-            prog.delay_auto(t=0)
-
-            return 0.0
-
-        if self.n == 0:
-            return t
-
-        # this n must > 0, to prevent infinite loop in qick
-        assert self.n > 0
-
-        logger.debug("Repeat.run: name='%s', n=%d, t=%s", self.name, self.n, t)
+        logger.debug("Repeat.run: name='%s', n='%s', t=%s", self.name, self.n, t)
 
         prog.delay(t=t)
-        prog.open_loop(name=self.idx_reg, n=self.n)
+        prog.delay_auto(t=0)
+
+        if isinstance(self.n, int) and self.n <= 0:
+            return 0.0
+
+        if isinstance(self.n, str):
+            prog.open_loop_reg(self.n, self.name)
+        else:
+            prog.open_loop(self.n, self.name)
 
         cur_t = 0.0
         for mod in self.sub_modules:
@@ -212,9 +67,11 @@ class Repeat(Module):
                 )
             cur_t = mod.run(prog, cur_t)
         prog.delay(t=cur_t)
-        prog.delay_auto(t=0)
 
-        prog.close_loop()
+        if isinstance(self.n, str):
+            prog.close_loop_reg(self.name)
+        else:
+            prog.close_loop()
 
         return 0.0  # prog.delay will modify ref time
 
@@ -233,8 +90,18 @@ class SoftRepeat(Module):
     def add_content(self, mod: SubModule) -> Self:
         if isinstance(mod, Module):
             mod = [mod]
+
+        for m in mod:
+            if not m.allow_rerun():
+                raise ValueError(
+                    f"Module {m.name} does not allow rerun, cannot be used in SoftRepeat"
+                )
+
         self.sub_modules.extend(mod)
         return self
+
+    def allow_rerun(self) -> bool:
+        return all(mod.allow_rerun() for mod in self.sub_modules)
 
     def init(self, prog: ModularProgramV2) -> None:
         for mod in self.sub_modules:
