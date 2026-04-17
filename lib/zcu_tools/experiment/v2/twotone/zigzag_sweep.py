@@ -91,7 +91,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         if len(_cfg["sweep"]) != 1:
             raise ValueError("Expected exactly one sweep key")
 
-        x_key = next(k for k in _cfg["sweep"] if k != "times")
+        x_key = next(k for k in _cfg["sweep"])
         x_sweep = _cfg["sweep"][x_key]
         if x_key not in ZigZagSweepExp.SWEEP_MAP:
             raise ValueError(f"Unsupported sweep key: {x_key}")
@@ -122,7 +122,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
             x_param = sweep2param(x_info["param_key"], x_sweep)
             repeat_pulse.set_param(x_info["param_key"], x_param)
 
-            loop_n = list(2 * times if repeat_on == "X90_pulse" else times)
+            loop_n = 2 * times if repeat_on == "X90_pulse" else times
 
             return ModularProgramV2(
                 soccfg,
@@ -132,7 +132,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                     Pulse("X90_pulse", X90_pulse),
                     LoadValue(
                         "load_repeat_count",
-                        values=loop_n,
+                        values=list(loop_n),
                         idx_reg="times",
                         val_reg="repeat_count",
                     ),
@@ -196,10 +196,13 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         min_value = values[np.nanargmin(loss)]
 
         fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+
+        dx = (values[1] - values[0]) * 0.5
+        dy = (times[1] - times[0]) * 0.5
         ax1.imshow(
             zigzag_signal2real(signals),
             aspect="auto",
-            extent=[values[0], values[-1], times[0], times[-1]],
+            extent=[values[0] - dx, values[-1] + dx, times[0] - dy, times[-1] + dy],
             origin="lower",
             interpolation="none",
         )

@@ -29,7 +29,7 @@ class LoadValue(Module):
         auto_compress: bool = True,
     ) -> None:
         self.name = name
-        self.values = list(values)
+        self.values = [int(v) for v in values]
         if len(self.values) == 0:
             raise ValueError("LoadValue requires a non-empty values sequence")
         self.use_existed = use_existed
