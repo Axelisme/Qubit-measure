@@ -19,7 +19,6 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D
-from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     LoadValue,
     ModularProgramCfg,
@@ -28,7 +27,7 @@ from zcu_tools.program.v2 import (
     PulseCfg,
     Readout,
     ReadoutCfg,
-    RepeatByRegister,
+    Repeat,
     Reset,
     ResetCfg,
 )
@@ -93,7 +92,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
                         idx_reg="times",
                         val_reg="repeat_count",
                     ),
-                    RepeatByRegister("zigzag_loop", n_reg="repeat_count").add_content(
+                    Repeat("zigzag_loop", n="repeat_count").add_content(
                         Pulse(f"loop_{repeat_on}", repeat_pulse)
                     ),
                     Readout("readout", modules["readout"]),
@@ -122,10 +121,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
 
         return times, signals
 
-    def analyze(
-        self,
-        result: Optional[ZigZagResult] = None,
-    ) -> tuple[float, float]:
+    def analyze(self, _result: Optional[ZigZagResult] = None) -> tuple[float, float]:
         raise NotImplementedError("Not implemented")
 
     def save(

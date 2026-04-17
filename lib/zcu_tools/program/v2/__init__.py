@@ -22,7 +22,6 @@ from .modules import (
     Readout,
     ReadoutCfg,
     Repeat,
-    RepeatByRegister,
     Reset,
     ResetCfg,
     ScanWith,

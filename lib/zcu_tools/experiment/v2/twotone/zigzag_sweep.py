@@ -32,7 +32,7 @@ from zcu_tools.program.v2 import (
     PulseCfg,
     Readout,
     ReadoutCfg,
-    RepeatByRegister,
+    Repeat,
     Reset,
     ResetCfg,
     sweep2param,
@@ -55,6 +55,7 @@ class ZigZagModuleCfg(TypedDict, closed=True):
     X90_pulse: PulseCfg
     X180_pulse: NotRequired[PulseCfg]
     readout: ReadoutCfg
+
 
 class ZigZagSweepCfg(TypedDict):
     gain: NotRequired[SweepCfg]
@@ -135,7 +136,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                         idx_reg="times",
                         val_reg="repeat_count",
                     ),
-                    RepeatByRegister("zigzag_loop", n_reg="repeat_count").add_content(
+                    Repeat("zigzag_loop", n="repeat_count").add_content(
                         Pulse(f"loop_{repeat_on}", repeat_pulse)
                     ),
                     Readout("readout", modules["readout"]),
@@ -145,9 +146,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                 soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
             )
 
-        with LivePlot2D(
-            "Times", x_info["name"]
-        ) as viewer:
+        with LivePlot2D("Times", x_info["name"]) as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn, result_shape=(len(times), len(values))
@@ -176,10 +175,9 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
-
         times, values, signals = result
 
-        real_signals = zigzag_signal2real(signals) # (times , values)
+        real_signals = zigzag_signal2real(signals)  # (times , values)
         valid_cutoff = np.min(np.sum(~np.isnan(real_signals), axis=0))
 
         if valid_cutoff < 2:
@@ -208,10 +206,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         ax1.set_ylabel("Number of gate")
         ax2.plot(values, loss, marker=".")
         ax2.axvline(
-            x=min_value,
-            color="red",
-            linestyle="--",
-            label=f"x = {min_value:.3f}"
+            x=min_value, color="red", linestyle="--", label=f"x = {min_value:.3f}"
         )
         ax2.grid(True)
         ax2.legend()
