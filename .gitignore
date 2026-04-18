@@ -23,8 +23,7 @@ notebook_md/plot/*
 
 qick/
 labber_api/
-abcd_rf_fit/
-qiskit-metal
+qiskit-metal/
 
 *.bak
 *.yaml
