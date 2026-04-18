@@ -11,7 +11,6 @@ from typeguard import check_type
 from typing_extensions import (
     Any,
     Callable,
-    Mapping,
     NotRequired,
     Optional,
     TypeAlias,
@@ -20,9 +19,12 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.v2.runner import BatchTask, Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
+    Branch,
+    LoadValue,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -35,8 +37,8 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
-# (sequence, signals)
-AllXY_Result: TypeAlias = dict[tuple[str, str], NDArray[np.complex128]]
+# (signals in ALLXY_SEQUENCE order)
+AllXY_Result: TypeAlias = NDArray[np.complex128]
 
 # Standard AllXY sequence of 21 gate pairs
 ALLXY_SEQUENCE = [
@@ -62,6 +64,10 @@ ALLXY_SEQUENCE = [
     ("X90", "X90"),
     ("Y90", "Y90"),
 ]
+
+GATE_LIST = ["I", "X90", "Y90", "X180", "Y180"]
+ALLXY_GATE1_IDX = [GATE_LIST.index(g1) for g1, _ in ALLXY_SEQUENCE]
+ALLXY_GATE2_IDX = [GATE_LIST.index(g2) for _, g2 in ALLXY_SEQUENCE]
 
 # ------------------------------------------------------------------------------
 # Helper functions
@@ -103,11 +109,8 @@ def predict_state_with_error(
         raise ValueError(f"Invalid gate pair: {gates}")
 
 
-def allxy_signal2real(
-    signals_dict: Mapping[tuple[str, str], NDArray[np.complex128]],
-) -> NDArray[np.float64]:
-    all_signals = np.array(list(signals_dict.values()))
-    return rotate2real(all_signals).real
+def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
+    return rotate2real(signals).real
 
 
 # ------------------------------------------------------------------------------
@@ -119,9 +122,7 @@ class AllXY_ModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     I_pulse: NotRequired[PulseCfg]
     X180_pulse: PulseCfg
-    Y180_pulse: PulseCfg
     X90_pulse: PulseCfg
-    Y90_pulse: PulseCfg
     readout: ReadoutCfg
 
 
@@ -139,59 +140,62 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> AllXY_Result:
         _cfg = check_type(deepcopy(cfg), AllXY_Cfg)
+        setup_devices(_cfg, progress=True)
 
-        rounds = _cfg["rounds"]
-        _cfg["rounds"] = 1  # We'll handle the rounds in the task loop
+        def measure_fn(
+            ctx: TaskState,
+            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+        ) -> list[NDArray[np.float64]]:
+            cfg = cast(AllXY_Cfg, ctx.cfg)
+            modules = cfg["modules"]
 
-        prog_cache: dict[tuple[str, str], ModularProgramV2] = {}
-        def make_task(gate1: str, gate2: str) -> Task:
+            I_pulse = modules.get("I_pulse")
+            X180_pulse = modules["X180_pulse"]
+            X90_pulse = modules["X90_pulse"]
+            Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90)
+            Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90)
 
-            def measure_fn(
-                ctx: TaskState,
-                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
-            ) -> list[NDArray[np.float64]]:
-                cfg = cast(AllXY_Cfg, ctx.cfg)
-                modules = cfg["modules"]
+            pulse_map = {
+                "I": I_pulse,
+                "X180": X180_pulse,
+                "Y180": Y180_pulse,
+                "X90": X90_pulse,
+                "Y90": Y90_pulse,
+            }
 
-                gate2pulse_map = {
-                    "I": modules.get("I_pulse"),
-                    "X180": modules["X180_pulse"],
-                    "Y180": modules["Y180_pulse"],
-                    "X90": modules["X90_pulse"],
-                    "Y90": modules["Y90_pulse"],
-                }
-
-                if (gate1, gate2) not in prog_cache:
-                    prog_cache[(gate1, gate2)] =  ModularProgramV2(
-                        soccfg,
-                        cfg,
-                        modules=[
-                            Reset("reset", modules.get("reset")),
-                            Pulse("first_pulse", gate2pulse_map[gate1]),
-                            Pulse("second_pulse", gate2pulse_map[gate2]),
-                            Readout("readout", modules["readout"]),
-                        ],
-                    )
-
-
-                return prog_cache[(gate1, gate2)].acquire(
-                    soc,
-                    progress=False,
-                    callback=update_hook,
-                    **(acquire_kwargs or {}),
+            def make_branch(name: str, compare_by: str) -> Branch:
+                return Branch(
+                    name,
+                    *(Pulse(f"{name}_{gate}", pulse_map[gate]) for gate in GATE_LIST),
+                    compare_by=compare_by,
                 )
 
-            return Task(measure_fn=measure_fn, pbar_n=1)
-
-        def average_round(signals: list[dict[tuple[str, str], NDArray[np.complex128]]]) -> dict[tuple[str, str], NDArray[np.complex128]]:
-            avg_signals: dict[tuple[str, str], NDArray[np.complex128]] = {}
-            for gate_pair in ALLXY_SEQUENCE:
-                gate_signals = [sig[gate_pair] for sig in signals]
-                if np.all(np.isnan(gate_signals)):
-                    avg_signals[gate_pair] = np.full_like(gate_signals[0], np.nan)
-                else:
-                    avg_signals[gate_pair] = np.nanmean(gate_signals, axis=0)
-            return avg_signals
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    LoadValue(
+                        "load_gate1_idx",
+                        values=ALLXY_GATE1_IDX,
+                        idx_reg="allxy_idx",
+                        val_reg="gate_idx",
+                    ),
+                    make_branch("gate1", compare_by="gate_idx"),
+                    LoadValue(
+                        "load_gate2_idx",
+                        values=ALLXY_GATE2_IDX,
+                        idx_reg="allxy_idx",
+                        val_reg="gate_idx",
+                        use_existed=True,
+                    ),
+                    make_branch("gate2", compare_by="gate_idx"),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("allxy_idx", len(ALLXY_SEQUENCE))],
+            ).acquire(
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+            )
 
         with LivePlot1D(
             xlabel="Gate",
@@ -210,30 +214,24 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                 ha="right",
             )
 
-            signals_dict = run_task(
-                task=BatchTask(
-                    tasks={
-                        (gate1, gate2): make_task(gate1, gate2)
-                        for gate1, gate2 in ALLXY_SEQUENCE
-                    }
-                ).scan(
-                    "round",
-                    list(range(rounds)),
-                    before_each=lambda *_: None,
+            signals = run_task(
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(ALLXY_SEQUENCE),),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
-                    allxy_signal2real(average_round(ctx.root_data)),
+                    allxy_signal2real(ctx.root_data),
                 ),
             )
-            signals_dict = average_round(signals_dict)
 
         # Cache results
-        self.last_cfg = check_type(deepcopy(cfg), AllXY_Cfg)
-        self.last_result = signals_dict
+        self.last_cfg = cast(AllXY_Cfg, deepcopy(cfg))
+        self.last_result = signals
 
-        return signals_dict
+        return signals
 
     def analyze(
         self, result: Optional[AllXY_Result] = None, fit_ge: bool = False
@@ -244,12 +242,12 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
             "No measurement data available. Run experiment first."
         )
 
-        signals_dict = result
+        signals = result
 
         # Rotate IQ data so that the contrast lies on the real axis and take only
         # the real part for further analysis.
-        sequence = list(signals_dict.keys())
-        real_signals = allxy_signal2real(signals_dict)
+        sequence = ALLXY_SEQUENCE
+        real_signals = allxy_signal2real(signals)
 
         # ------------------------------------------------------------------
         # fitting the signal with error
@@ -359,15 +357,12 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
             "No measurement data available. Run experiment first."
         )
 
-        signals_dict = result
-        signals = np.asarray(list(signals_dict.values()))
-
-        # Create gate indices and labels
-        gate_indices = np.arange(len(signals_dict.keys()))
+        gate_idxs = np.arange(len(ALLXY_SEQUENCE))
+        signals = result
 
         save_data(
             filepath=filepath,
-            x_info={"name": "Gate Pair Index", "unit": "", "values": gate_indices},
+            x_info={"name": "Gate Pair Index", "unit": "", "values": gate_idxs},
             z_info={"name": "Signal", "unit": "a.u.", "values": signals},
             comment=comment,
             tag=tag,
@@ -375,20 +370,14 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> AllXY_Result:
-        signals, gate_indices, _ = load_data(filepath, **kwargs)
-        assert gate_indices is not None
-        assert len(gate_indices.shape) == 1 and len(signals.shape) == 1
-        assert len(gate_indices) == len(ALLXY_SEQUENCE)
-        assert signals.shape == gate_indices.shape
+        signals, gate_idxs, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        assert len(gate_idxs.shape) == 1 and len(signals.shape) == 1
+        assert len(gate_idxs) == len(ALLXY_SEQUENCE)
+        assert signals.shape == gate_idxs.shape
 
         signals = signals.astype(np.complex128)
 
-        # Reconstruct signals_dict from flat signals array
-        signals_dict: AllXY_Result = {}
-        for i, seq in enumerate(ALLXY_SEQUENCE):
-            signals_dict[seq] = signals[i : i + 1]
+        self.last_cfg = cast(AllXY_Cfg, deepcopy(cfg))
+        self.last_result = signals
 
-        self.last_cfg = None
-        self.last_result = signals_dict
-
-        return signals_dict
+        return signals

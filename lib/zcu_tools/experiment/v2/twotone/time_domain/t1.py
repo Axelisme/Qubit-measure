@@ -9,17 +9,28 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, Union
+from typing_extensions import (
+    Any,
+    Callable,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    Union,
+    cast,
+)
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
-from zcu_tools.experiment.v2.utils import round_zcu_time, sweep2array
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
+    DelayAuto,
+    LoadValue,
     ModularProgramCfg,
     ModularProgramV2,
     Pulse,
@@ -83,41 +94,42 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             )
         else:
             lengths = np.asarray(length_sweep)
-        lengths = round_zcu_time(lengths, soccfg)
-        lengths = np.unique(lengths)
+        length_cycles = np.asarray(
+            [int(soccfg.us2cycles(t)) for t in lengths], dtype=np.int64
+        )
+        length_cycles = np.unique(length_cycles)
+        lengths = np.asarray(
+            [soccfg.cycles2us(int(cycle)) for cycle in length_cycles], dtype=np.float64
+        )
 
-        def measure_fn(ctx, update_hook):
-            rounds = ctx.cfg.pop("rounds", 1)
-            ctx.cfg["rounds"] = 1
-            modules = ctx.cfg["modules"]
+        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
+            cfg = cast(T1Cfg, ctx.cfg)
+            modules = cfg["modules"]
 
-            acc_signals = np.zeros_like(lengths, dtype=np.complex128)
-            for ir in range(rounds):
-                for i, t1_delay in enumerate(lengths):
-                    raw_i = ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset("reset", modules.get("reset")),
-                            Pulse("pi_pulse", modules["pi_pulse"]),
-                            Delay("t1_delay", delay=t1_delay),
-                            Readout("readout", modules["readout"]),
-                        ],
-                    ).acquire(soc, progress=False, **(acquire_kwargs or {}))
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                modules=[
+                    Reset("reset", modules.get("reset")),
+                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    LoadValue(
+                        "load_t1_delay",
+                        values=list(length_cycles),
+                        idx_reg="length_idx",
+                        val_reg="t1_delay_cycle",
+                    ),
+                    DelayAuto("t1_delay", t="t1_delay_cycle"),
+                    Readout("readout", modules["readout"]),
+                ],
+                sweep=[("length_idx", len(length_cycles))],
+            ).acquire(
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+            )
 
-                    acc_signals[i] += raw_i[0][0].dot([1, 1j])
-
-                update_hook(ir, acc_signals / (ir + 1))
-
-            return acc_signals / rounds
-
-        with LivePlot1D(
-            "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
-        ) as viewer:
+        with LivePlot1D("Time (us)", "Amplitude") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
-                    raw2signal_fn=lambda raw: raw,
                     result_shape=(len(lengths),),
                     pbar_n=_cfg["rounds"],
                 ),
@@ -152,6 +164,8 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 task=Task(
                     measure_fn=lambda ctx, update_hook: (
                         (modules := ctx.cfg["modules"])
+                        and (length_sweep := ctx.cfg["sweep"]["length"])
+                        and (length_param := sweep2param("length", length_sweep))
                         and (
                             ModularProgramV2(
                                 soccfg,
@@ -159,15 +173,10 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                                 modules=[
                                     Reset("reset", modules.get("reset")),
                                     Pulse("pi_pulse", modules["pi_pulse"]),
-                                    Delay(
-                                        name="t1_delay",
-                                        delay=sweep2param(
-                                            "length", ctx.cfg["sweep"]["length"]
-                                        ),
-                                    ),
+                                    Delay("t1_delay", length_param),
                                     Readout("readout", modules["readout"]),
                                 ],
-                                sweep=[("length", ctx.cfg["sweep"]["length"])],
+                                sweep=[("length", length_sweep)],
                             ).acquire(
                                 soc,
                                 progress=False,

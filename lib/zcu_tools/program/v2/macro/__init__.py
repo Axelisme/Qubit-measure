@@ -6,6 +6,7 @@ from qick.asm_v2 import AsmV2, QickParam
 from .loop import CloseLoopReg, OpenLoopReg
 from .write_reg import WriteRegOp
 from .debug import PrintTimeStamp
+from .delay import DelayRegAuto
 
 
 class ImproveAsmV2(AsmV2):
@@ -26,6 +27,12 @@ class ImproveAsmV2(AsmV2):
     def close_loop_reg(self, name: str) -> None:
         """Close the register-driven loop opened with ``open_loop_reg(name)``."""
         self.append_macro(CloseLoopReg(name=name))
+
+    def delay_reg_auto(
+        self, time_reg: str, gens: bool = True, ros: bool = True
+    ) -> None:
+        """Auto-align to timeline, then increment by runtime cycles from a register."""
+        self.append_macro(DelayRegAuto(time_reg=time_reg, gens=gens, ros=ros))
 
     def debug_macro(
         self, name: str, t: Union[float, QickParam], prefix: str = ""

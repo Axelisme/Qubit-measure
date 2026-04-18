@@ -16,36 +16,29 @@ logger = logging.getLogger(__name__)
 
 class Delay(Module):
     def __init__(
-        self, name: str, delay: Union[float, QickParam], absolute: bool = False
+        self, name: str, delay: Union[float, QickParam], tag: Optional[str] = None
     ) -> None:
         self.name = name
         self.delay = delay
-        self.absolute = absolute
+        self.tag = tag
 
-    def init(self, prog: ModularProgramV2) -> None:
-        pass
+    def init(self, prog: ModularProgramV2) -> None: ...
 
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        delay_t = self.delay if self.absolute else t + self.delay
-        delay_t = round_timestamp(prog, delay_t)
-
-        prog.delay(t=delay_t, tag=self.name)
+        prog.delay(t=round_timestamp(prog, self.delay), tag=self.tag)
 
         return 0.0  # reset reference time
 
     def allow_rerun(self) -> bool:
-        return True
+        return self.tag is None
 
 
 class SoftDelay(Module):
-    def __init__(
-        self, name: str, delay: Union[float, QickParam], absolute: bool = False
-    ) -> None:
+    def __init__(self, name: str, delay: Union[float, QickParam]) -> None:
         self.name = name
         self.delay = delay
-        self.absolute = absolute
 
     def init(self, prog: ModularProgramV2) -> None:
         pass
@@ -53,9 +46,8 @@ class SoftDelay(Module):
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        delay_t = self.delay if self.absolute else t + self.delay
 
-        return round_timestamp(prog, delay_t)
+        return round_timestamp(prog, self.delay)
 
     def allow_rerun(self) -> bool:
         return True
@@ -65,7 +57,7 @@ class DelayAuto(Module):
     def __init__(
         self,
         name: str,
-        t: float = 0.0,
+        t: Union[float, QickParam, str] = 0.0,
         gens: bool = True,
         ros: bool = True,
         tag: Optional[str] = None,
@@ -76,22 +68,22 @@ class DelayAuto(Module):
         self.ros = ros
         self.tag = tag
 
-    def init(self, prog: ModularProgramV2) -> None:
-        pass
+        if tag is not None and isinstance(t, str):
+            raise ValueError("DelayAuto with tag cannot have t as a register name")
+
+    def init(self, prog: ModularProgramV2) -> None: ...
 
     def run(
         self, prog: ModularProgramV2, t: Union[float, QickParam] = 0.0
     ) -> Union[float, QickParam]:
-        prog.delay_auto(
-            t=self.t,  # type: ignore[arg-type]
-            gens=self.gens,
-            ros=self.ros,
-            tag=self.tag,
-        )
+        if isinstance(self.t, str):
+            prog.delay_reg_auto(time_reg=self.t, gens=self.gens, ros=self.ros)
+        else:
+            prog.delay_auto(t=self.t, gens=self.gens, ros=self.ros, tag=self.tag)  # type: ignore
         return 0.0
 
     def allow_rerun(self) -> bool:
-        return True
+        return self.tag is None
 
 
 class Join(Module):
