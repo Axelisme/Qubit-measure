@@ -17,6 +17,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -65,6 +66,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> ZigZagResult:
         _cfg = check_type(deepcopy(cfg), ZigZagCfg)
+        setup_devices(_cfg, progress=True)
 
         times = np.arange(_cfg["n_times"])
         loop_n = list(2 * times if repeat_on == "X90_pulse" else times)
@@ -106,7 +108,11 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
             "Times", "Signal", segment_kwargs=dict(show_grid=True)
         ) as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(times),)),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(times),),
+                    pbar_n=_cfg["rounds"],
+                ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     times.astype(np.float64),

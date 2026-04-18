@@ -10,7 +10,7 @@ from typeguard import check_type
 from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -40,6 +40,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
     ) -> LenRabiResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)  # avoid in-place modification
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         assert modules["qub_pulse"].waveform.style in ["const", "flat_top"], (
@@ -89,6 +90,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(lengths), 2),
                     dtype=np.float64,
+                    pbar_n=1,
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

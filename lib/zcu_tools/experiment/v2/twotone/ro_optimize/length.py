@@ -11,7 +11,7 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
@@ -55,8 +55,8 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
     ) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
-
 
         readout_cfg = modules["readout"]
         lengths = sweep2array(
@@ -92,7 +92,9 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             )
             return avg_d, [tracker.covariance], [tracker.rough_median]
 
-        def average_signals(signals: list[list[NDArray[np.float64]]]) -> NDArray[np.float64]:
+        def average_signals(
+            signals: list[list[NDArray[np.float64]]],
+        ) -> NDArray[np.float64]:
             return np.mean([s[0] for s in signals], axis=0)
 
         with LivePlot1D("Readout Length (us)", "SNR") as viewer:
@@ -101,10 +103,13 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     dtype=np.float64,
+                    pbar_n=_cfg["rounds"],
                 ).scan(
                     "length",
                     lengths.tolist(),
-                    before_each=lambda _, ctx, length: ctx.cfg["modules"]["readout"].set_param("ro_length", length),
+                    before_each=lambda _, ctx, length: ctx.cfg["modules"][
+                        "readout"
+                    ].set_param("ro_length", length),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(lengths, np.abs(ctx.root_data)),

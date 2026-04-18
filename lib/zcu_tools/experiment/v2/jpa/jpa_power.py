@@ -18,7 +18,11 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, set_power_in_dev_cfg
+from zcu_tools.experiment.utils import (
+    format_sweep1D,
+    set_power_in_dev_cfg,
+    setup_devices,
+)
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
@@ -80,6 +84,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             list[NDArray[np.float64]],
         ]:
             cfg: PowerCfg = cast(PowerCfg, ctx.cfg)
+            setup_devices(cfg, progress=False)
             modules = cfg["modules"]
 
             assert update_hook is not None
@@ -112,6 +117,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     dtype=np.float64,
+                    pbar_n=_cfg["rounds"],
                 ).scan(
                     "power (dBm)",
                     jpa_powers.tolist(),

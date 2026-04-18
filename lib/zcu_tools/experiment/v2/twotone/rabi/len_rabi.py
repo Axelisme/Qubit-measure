@@ -10,7 +10,7 @@ from typeguard import check_type
 from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -41,6 +41,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LenRabiResult:
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         assert modules["qub_pulse"].waveform.style in ["const", "flat_top"], (
@@ -54,7 +55,9 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
-        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]) -> list[NDArray[np.float64]]:
+        def measure_fn(
+            ctx: TaskState, update_hook: Optional[Callable]
+        ) -> list[NDArray[np.float64]]:
             cfg = cast(LenRabiCfg, ctx.cfg)
             modules = cfg["modules"]
 
@@ -73,7 +76,11 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         with LivePlot1D("Length (us)", "Signal") as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(lengths),),
+                    pbar_n=_cfg["rounds"],
+                ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, rabi_signal2real(ctx.root_data)
@@ -94,6 +101,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LenRabiResult:
         _cfg = check_type(deepcopy(cfg), LenRabiCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         rounds = _cfg["rounds"]
@@ -108,7 +116,8 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         )
         lengths = np.unique(lengths)  # remove duplicates
 
-        prog_cache:dict[float, TwoToneProgram] = {}
+        prog_cache: dict[float, TwoToneProgram] = {}
+
         def measure_fn(ctx: TaskState, update_hook):
             cfg = cast(LenRabiCfg, ctx.cfg)
             modules = cfg["modules"]
@@ -119,13 +128,12 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 prog_cache[length] = TwoToneProgram(soccfg, cfg)
 
             return prog_cache[length].acquire(
-                soc,
-                progress=False,
-                callback=update_hook,
-                **(acquire_kwargs or {})
+                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
             )
 
-        def average_round(signals: list[list[NDArray[np.complex128]]]) -> NDArray[np.complex128]:
+        def average_round(
+            signals: list[list[NDArray[np.complex128]]],
+        ) -> NDArray[np.complex128]:
             _signals = np.asarray(signals)  # shape: (rounds, len(lengths))
             mask = np.any(~np.isnan(_signals), axis=0)
             mean_signals = np.full(_signals.shape[1], np.nan, dtype=np.complex128)
@@ -134,14 +142,18 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         with LivePlot1D("Length (us)", "Signal") as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn).scan(
+                task=Task(measure_fn=measure_fn, pbar_n=1)
+                .scan(
                     "length",
                     lengths.tolist(),
-                    before_each=lambda _, ctx, length: ctx.cfg["modules"]["qub_pulse"].set_param("length", length),
-                ).scan(
-                    "round", # implement round loop here
+                    before_each=lambda _, ctx, length: ctx.cfg["modules"][
+                        "qub_pulse"
+                    ].set_param("length", length),
+                )
+                .scan(
+                    "round",  # implement round loop here
                     list(range(rounds)),
-                    before_each=lambda *_: None
+                    before_each=lambda *_: None,
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
@@ -171,9 +183,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         if qub_waveform.style in ["const", "flat_top"]:
             # use hard sweep for flat top pulse
-            return self._run_for_flat(
-                soc, soccfg, cfg, acquire_kwargs=acquire_kwargs
-            )
+            return self._run_for_flat(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
         else:
             # use soft sweep for arb pulse
             return self._run_for_arb(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)

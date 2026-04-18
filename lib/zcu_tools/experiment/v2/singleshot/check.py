@@ -11,6 +11,7 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.program.v2 import (
     ModularProgramCfg,
@@ -54,6 +55,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         cfg["reps"] = cfg["shots"]
 
         _cfg = check_type(deepcopy(cfg), CheckCfg)  # avoid in-place modification
+        setup_devices(_cfg, progress=True)
 
         def measure_fn(ctx: TaskState, _) -> NDArray[np.float64]:
             modules = ctx.cfg["modules"]
@@ -86,6 +88,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
                 measure_fn=measure_fn,
                 raw2signal_fn=raw2signal_fn,
                 result_shape=(_cfg["shots"],),
+                pbar_n=1,
             ),
             init_cfg=_cfg,
         )

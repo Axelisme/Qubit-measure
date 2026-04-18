@@ -7,8 +7,6 @@ from numpy.typing import NDArray
 from tqdm.auto import tqdm
 from typing_extensions import Any, Callable, Generic, Optional, Sequence, Type, TypeVar
 
-from zcu_tools.device import GlobalDeviceManager
-
 from .base import AbsTask
 from .state import Result, TaskState
 
@@ -40,19 +38,25 @@ class Task(
         raw2signal_fn: Callable[[T_Raw], NDArray[T_DType]] = default_raw2signal_fn,
         result_shape: tuple[int, ...] = (),
         dtype: Type[T_DType] = np.complex128,
+        pbar_n: Optional[int] = None,
     ) -> None:
         self.measure_fn = measure_fn
         self.raw2signal_fn = raw2signal_fn
         self.result_shape = result_shape
         self.dtype = dtype
+        self.pbar_n = pbar_n
 
         self.avg_pbar: Optional[tqdm] = None
         self.dynamic_pbar: bool = False
 
-    def make_pbar(
-        self, state: TaskState[NDArray[T_DType], T_RootResult], leave: bool
-    ) -> tqdm:
-        total = state.cfg.get("rounds")
+    def set_pbar_n(self, pbar_n: Optional[int]) -> None:
+        self.pbar_n = pbar_n
+        if self.avg_pbar is not None:
+            self.avg_pbar.total = pbar_n
+            self.avg_pbar.refresh()
+
+    def make_pbar(self, leave: bool) -> tqdm:
+        total = self.pbar_n
         return tqdm(
             total=total,
             smoothing=0,
@@ -66,26 +70,24 @@ class Task(
         state: TaskState[NDArray[T_DType], T_RootResult],
         dynamic_pbar: bool = False,
     ) -> None:
+        del state  # kept for AbsTask.init contract
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
-            self.avg_pbar = self.make_pbar(state, leave=True)
+            self.avg_pbar = self.make_pbar(leave=True)
 
     def run(self, state: TaskState[NDArray[T_DType], T_RootResult]) -> None:
-        assert "rounds" in state.cfg
-
         if self.dynamic_pbar:
-            self.avg_pbar = self.make_pbar(state, leave=False)
+            self.avg_pbar = self.make_pbar(leave=False)
         else:
             assert self.avg_pbar is not None
             self.avg_pbar.reset()
 
-        if dev_cfg := state.cfg.get("dev"):
-            GlobalDeviceManager.setup_devices(dev_cfg, progress=False)
-
         logger.debug(
-            "Task.run: path=%s, rounds=%s, cfg_keys=%s",
-            state.path, state.cfg["rounds"], list(state.cfg.keys()),
+            "Task.run: path=%s, pbar_n=%s, cfg_keys=%s",
+            state.path,
+            self.pbar_n,
+            list(state.cfg.keys()),
         )
 
         def update_hook(ir: int, raw: T_Raw) -> None:
@@ -96,7 +98,8 @@ class Task(
 
         signal = self.raw2signal_fn(self.measure_fn(state, update_hook))
 
-        self.avg_pbar.update(state.cfg["rounds"] - self.avg_pbar.n)  # type: ignore[arg-type]
+        if self.pbar_n is not None:
+            self.avg_pbar.update(self.pbar_n - self.avg_pbar.n)
 
         logger.debug("Task.run: done, signal shape=%s", getattr(signal, "shape", "?"))
 

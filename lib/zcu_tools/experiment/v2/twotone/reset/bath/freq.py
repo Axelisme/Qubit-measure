@@ -9,10 +9,19 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, Callable, cast
+from typing_extensions import (
+    Any,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    Callable,
+    cast,
+)
 from qick.asm_v2 import QickSweep1D
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -28,7 +37,7 @@ from zcu_tools.program.v2 import (
     BathReset,
     ResetCfg,
     sweep2param,
-    BathResetCfg
+    BathResetCfg,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
@@ -50,7 +59,9 @@ class FreqGainCfg(ModularProgramCfg, TaskCfg):
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(signals[2] - signals[0])**2 + np.abs(signals[3] - signals[1])**2  # (gain, freq)
+    return (
+        np.abs(signals[2] - signals[0]) ** 2 + np.abs(signals[3] - signals[1]) ** 2
+    )  # (gain, freq)
 
 
 class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
@@ -63,6 +74,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqGainResult:
         _cfg = check_type(deepcopy(cfg), FreqGainCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         reset_cfg = modules["tested_reset"]
@@ -77,8 +89,9 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
             {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
 
-
-        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]) -> list[NDArray[np.float64]]:
+        def measure_fn(
+            ctx: TaskState, update_hook: Optional[Callable]
+        ) -> list[NDArray[np.float64]]:
             cfg = cast(FreqGainCfg, ctx.cfg)
             modules = cfg["modules"]
 
@@ -104,7 +117,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[
-                    ("phase", 4), # 0, 90, 180, 270 degrees
+                    ("phase", 4),  # 0, 90, 180, 270 degrees
                     ("gain", gain_sweep),
                     ("freq", freq_sweep),
                 ],
@@ -117,7 +130,11 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
 
         with LivePlot2D("Cavity Frequency (MHz)", "Cavity drive Gain (a.u.)") as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(4, len(gains), len(freqs))),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(4, len(gains), len(freqs)),
+                    pbar_n=_cfg["rounds"],
+                ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, gains, bathreset_signal2real(ctx.root_data).T
@@ -131,9 +148,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         return gains, freqs, signals
 
     def analyze(
-        self,
-        result: Optional[FreqGainResult] = None,
-        smooth: float = 1.0
+        self, result: Optional[FreqGainResult] = None, smooth: float = 1.0
     ) -> tuple[float, float, Figure]:
         if result is None:
             result = self.last_result
@@ -142,7 +157,9 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         gains, freqs, signals = result
 
         # Find peak in amplitude
-        smooth_signals: NDArray[np.complex128] = gaussian_filter(signals, sigma=smooth, axes=(1, 2)) # type: ignore
+        smooth_signals: NDArray[np.complex128] = gaussian_filter(
+            signals, sigma=smooth, axes=(1, 2)
+        )  # type: ignore
         real_signals = bathreset_signal2real(smooth_signals)
 
         gain_opt = gains[np.argmax(np.max(real_signals, axis=1))]
@@ -232,7 +249,9 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
     def load(self, filepath: list[str], **kwargs) -> FreqGainResult:
         deg0_filepath, deg90_filepath, deg180_filepath, deg270_filepath = filepath
 
-        deg0_signals, gains, freqs, cfg = load_data(deg0_filepath, return_cfg=True, **kwargs)
+        deg0_signals, gains, freqs, cfg = load_data(
+            deg0_filepath, return_cfg=True, **kwargs
+        )
         assert gains is not None and freqs is not None
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
         assert deg0_signals.shape == (len(freqs), len(gains))
@@ -263,7 +282,9 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
 
         gains = gains.astype(np.float64)
         freqs = freqs.astype(np.float64)
-        signals = np.stack([deg0_signals, deg90_signals, deg180_signals, deg270_signals], axis=0).astype(np.complex128)
+        signals = np.stack(
+            [deg0_signals, deg90_signals, deg180_signals, deg270_signals], axis=0
+        ).astype(np.complex128)
 
         self.last_cfg = cast(FreqGainCfg, cfg)
         self.last_result = (gains, freqs, signals)

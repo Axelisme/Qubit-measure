@@ -18,7 +18,7 @@ from typing_extensions import (
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -70,6 +70,7 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
             cfg: OneToneFluxCfg = cast(OneToneFluxCfg, ctx.cfg)
+            setup_devices(cfg, progress=False)
             modules = cfg["modules"]
 
             freq_sweep = cfg["sweep"]["freq"]
@@ -93,7 +94,11 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
             num_lines=5,
         ) as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)).scan(
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(freqs),),
+                    pbar_n=_cfg["rounds"],
+                ).scan(
                     "JPA Flux value",
                     jpa_fluxs.tolist(),
                     before_each=lambda i, ctx, flux: set_flux_in_dev_cfg(

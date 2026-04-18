@@ -19,6 +19,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -75,6 +76,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1Result:
         _cfg = check_type(deepcopy(cfg), T1Cfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gain_sweep = _cfg["sweep"]["gain"]
@@ -120,7 +122,9 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Time (us)") as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=measure_fn, result_shape=(len(gains), len(lengths))
+                    measure_fn=measure_fn,
+                    result_shape=(len(gains), len(lengths)),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

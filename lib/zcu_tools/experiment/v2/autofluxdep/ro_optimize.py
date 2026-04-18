@@ -10,6 +10,7 @@ from typeguard import check_type
 from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
 
 from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
@@ -97,6 +98,8 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
 
+            setup_devices(cfg, progress=False)
+
             freq_sweep = cfg["sweep"]["freq"]
             gain_sweep = cfg["sweep"]["gain"]
 
@@ -164,7 +167,6 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         freq_sweep = make_sweep(*cfg_temp["freq_range"], self.freq_expts)
         gain_sweep = make_sweep(*cfg_temp["gain_range"], self.gain_expts)
 
-
         cfg_temp = dict(cfg_temp)
         del cfg_temp["freq_range"]
         del cfg_temp["gain_range"]
@@ -194,6 +196,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             },
         )
 
+        self.task.set_pbar_n(cfg["rounds"])
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.value["raw_signals"]

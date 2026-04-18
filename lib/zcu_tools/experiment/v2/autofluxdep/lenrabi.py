@@ -9,6 +9,7 @@ from typeguard import check_type
 from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import (
     sweep2array,
@@ -129,6 +130,8 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotDict])
             modules = cfg["modules"]
             len_sweep = cfg["sweep"]["length"]
 
+            setup_devices(cfg, progress=False)
+
             assert update_hook is not None
 
             len_params = sweep2param("length", len_sweep)
@@ -184,6 +187,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotDict])
         cfg = check_type(cfg_temp, LenRabiCfg)
 
         rabi_pulse = cfg["modules"]["rabi_pulse"]
+        self.task.set_pbar_n(cfg["rounds"])
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))
 
         real_signals = lenrabi_signal2real(ctx.value["raw_signals"])

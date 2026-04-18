@@ -18,7 +18,7 @@ from typing_extensions import (
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -43,9 +43,11 @@ FluxDepResult: TypeAlias = tuple[
 def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
+
 class FluxDepModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     readout: PulseReadoutCfg
+
 
 class FluxDepCfg(ModularProgramCfg, TaskCfg):
     modules: FluxDepModuleCfg
@@ -77,6 +79,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
             cfg: FluxDepCfg = cast(FluxDepCfg, ctx.cfg)
+            setup_devices(cfg, progress=False)
             modules = cfg["modules"]
 
             freq_sweep = cfg["sweep"]["freq"]
@@ -97,7 +100,11 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=10
         ) as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)).scan(
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(freqs),),
+                    pbar_n=_cfg["rounds"],
+                ).scan(
                     "flux",
                     dev_values.tolist(),
                     before_each=lambda i, ctx, flux: set_flux_in_dev_cfg(

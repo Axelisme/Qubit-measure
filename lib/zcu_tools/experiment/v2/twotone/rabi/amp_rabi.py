@@ -10,7 +10,7 @@ from typeguard import check_type
 from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -43,6 +43,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
     ) -> AmpRabiResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), AmpRabiCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gains = sweep2array(
@@ -57,6 +58,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         with LivePlot1D("Pulse gain", "Amplitude") as viewer:
             signals = run_task(
                 task=Task(
+                    pbar_n=_cfg["rounds"],
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
                         soccfg,
                         ctx.cfg,

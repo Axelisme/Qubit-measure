@@ -13,7 +13,7 @@ from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, 
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import round_zcu_time, sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
@@ -68,6 +68,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1Result:
         _cfg = check_type(deepcopy(cfg), T1Cfg)
+        setup_devices(_cfg, progress=True)
 
         length_sweep: Union[SweepCfg, NDArray[np.float64]] = _cfg["sweep"]["length"]  # type: ignore
 
@@ -118,6 +119,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw,
                     result_shape=(len(lengths),),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
@@ -139,6 +141,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1Result:
         _cfg = check_type(deepcopy(cfg), T1Cfg)
+        setup_devices(_cfg, progress=True)
 
         lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
 
@@ -174,6 +177,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                         )
                     ),
                     result_shape=(len(lengths),),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
@@ -307,6 +311,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
     ) -> T1Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T1WithToneCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         lengths = sweep2array(
@@ -340,6 +345,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
                         **(acquire_kwargs or {}),
                     ),
                     result_shape=(len(lengths),),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
@@ -460,6 +466,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1WithToneSweepResult:
         _cfg = check_type(deepcopy(cfg), T1WithToneSweepCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gain_sweep: Union[SweepCfg, NDArray[np.float64]] = _cfg["sweep"]["gain"]  # type: ignore
@@ -507,10 +514,13 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                         **(acquire_kwargs or {}),
                     ),
                     result_shape=(len(lengths),),
+                    pbar_n=_cfg["rounds"],
                 ).scan(
                     "gain",
                     gains.tolist(),
-                    before_each=lambda _, ctx, gain: ctx.cfg["modules"]["test_pulse"].set_param("gain", gain),
+                    before_each=lambda _, ctx, gain: ctx.cfg["modules"][
+                        "test_pulse"
+                    ].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

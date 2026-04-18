@@ -25,6 +25,7 @@ from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
+    setup_devices,
 )
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
@@ -86,6 +87,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             list[NDArray[np.float64]],
         ]:
             cfg: JPAOptCfg = cast(JPAOptCfg, ctx.cfg)
+            setup_devices(cfg, progress=False)
             modules = cfg["modules"]
 
             prog = ModularProgramV2(
@@ -192,6 +194,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     dtype=np.float64,
+                    pbar_n=_cfg["rounds"],
                 ).scan(
                     "Iteration",
                     list(range(num_points)),

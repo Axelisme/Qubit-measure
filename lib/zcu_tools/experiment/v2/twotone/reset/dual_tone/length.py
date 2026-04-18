@@ -19,7 +19,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -71,6 +71,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
     ) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         length_sweep = _cfg["sweep"]["length"]
@@ -131,7 +132,11 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
 
         with LivePlot1D("Length (us)", "Amplitude") as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(lengths),),
+                    pbar_n=_cfg["rounds"],
+                ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, reset_length_signal2real(ctx.root_data)

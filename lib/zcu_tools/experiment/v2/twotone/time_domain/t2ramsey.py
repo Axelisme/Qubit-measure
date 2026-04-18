@@ -10,7 +10,7 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -62,6 +62,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
     ) -> tuple[T2RamseyResult, float]:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2RamseyCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         length_sweep = _cfg["sweep"]["length"]
@@ -118,7 +119,11 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
             "Time (us)", "Amplitude", segment_kwargs={"title": title}
         ) as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(lengths),),
+                    pbar_n=_cfg["rounds"],
+                ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, t2ramsey_signal2real(ctx.root_data)

@@ -19,7 +19,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -74,6 +74,7 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
     ) -> DriveFreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), DriveFreqCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         freq_sweep = _cfg["sweep"]["freq"]
@@ -120,6 +121,7 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(freqs), len(gains)),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

@@ -19,6 +19,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
@@ -66,6 +67,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         radius: float,
     ) -> FreqPowerResult:
         _cfg = check_type(deepcopy(cfg), FreqPowerCfg)  # prevent in-place modification
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         freq_sweep = _cfg["sweep"]["freq"]
@@ -154,17 +156,19 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
 
                 viewer.refresh()
 
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(freqs), 2),
                     dtype=np.float64,
+                    pbar_n=1,
                 ).scan(
                     "gain",
                     gains.tolist(),
-                    before_each=lambda i, ctx, gain: ctx.cfg["modules"]["probe_pulse"].set_param("gain", gain),
+                    before_each=lambda i, ctx, gain: ctx.cfg["modules"][
+                        "probe_pulse"
+                    ].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=plot_fn,

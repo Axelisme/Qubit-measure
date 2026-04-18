@@ -19,6 +19,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
@@ -101,6 +102,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> CKP_Result:
         _cfg = check_type(deepcopy(cfg), CKP_Cfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         res_freq_sweep = _cfg["sweep"]["res_freq"]
@@ -192,6 +194,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(2, len(res_freqs), len(qub_freqs)),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=plot_fn,

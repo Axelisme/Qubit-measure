@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 from typeguard import check_type
 from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
@@ -225,6 +225,8 @@ class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotD
         _cfg = check_type(deepcopy(cfg), T1Cfg)
         self.cfg = _cfg
 
+        setup_devices(_cfg, progress=True)
+
         # initial values, may be rounded later
         self.lengths = sweep2array(cfg["sweep"]["length"])
 
@@ -268,6 +270,7 @@ class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotD
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(2, len(self.lengths), 2),
             dtype=np.float64,
+            pbar_n=_cfg["rounds"],
         )
 
     def init(
@@ -366,6 +369,7 @@ class T1WithToneTask(
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(2, len(self.lengths), 2),
             dtype=np.float64,
+            pbar_n=_cfg["rounds"],
         )
 
     def init(

@@ -16,6 +16,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -56,6 +57,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         self, soc, soccfg, cfg: dict[str, Any], *, earlystop_snr: Optional[float] = None
     ) -> PowerDepResult:
         _cfg = check_type(deepcopy(cfg), PowerDepCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gain_sweep = _cfg["sweep"]["gain"]
@@ -119,10 +121,16 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             ax1d = viewer.get_ax("1d")
 
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)).scan(
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(freqs),),
+                    pbar_n=_cfg["rounds"],
+                ).scan(
                     "gain",
                     gains.tolist(),
-                    before_each=lambda _, ctx, gain: ctx.cfg["modules"]["readout"].set_param("gain", gain),
+                    before_each=lambda _, ctx, gain: ctx.cfg["modules"][
+                        "readout"
+                    ].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from typeguard import check_type
 from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -157,6 +157,8 @@ class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotD
         _cfg = check_type(deepcopy(cfg), T1Cfg)
         self.cfg = _cfg
 
+        setup_devices(_cfg, progress=True)
+
         # initial values, may be rounded later
         self.lengths = sweep2array(_cfg["sweep"]["length"])
 
@@ -190,6 +192,7 @@ class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotD
         self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=measure_t1_fn,
             result_shape=(len(self.lengths),),
+            pbar_n=_cfg["rounds"],
         )
 
     def init(self, ctx, dynamic_pbar=False) -> None:
@@ -272,7 +275,9 @@ class T1WithToneTask(
             )
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]]](
-            measure_fn=measure_t1_fn, result_shape=(len(self.lengths),)
+            measure_fn=measure_t1_fn,
+            result_shape=(len(self.lengths),),
+            pbar_n=_cfg["rounds"],
         )
 
     def init(self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar=False) -> None:

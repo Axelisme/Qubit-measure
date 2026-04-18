@@ -11,7 +11,7 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
@@ -56,6 +56,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
     ) -> PowerResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), PowerCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gains = sweep2array(
@@ -104,6 +105,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     result_shape=(len(gains),),
                     dtype=np.float64,
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(gains, np.abs(ctx.root_data)),

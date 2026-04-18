@@ -8,10 +8,18 @@ from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from scipy.ndimage import gaussian_filter1d
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, Callable, cast
+from typing_extensions import (
+    Any,
+    NotRequired,
+    Optional,
+    TypeAlias,
+    TypedDict,
+    Callable,
+    cast,
+)
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
 from zcu_tools.experiment.v2.tracker import PCATracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
@@ -45,7 +53,9 @@ class FreqCfg(ModularProgramCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
-RawResult: TypeAlias = tuple[list[NDArray[np.float64]], list[NDArray[np.float64]], list[NDArray[np.float64]]]
+RawResult: TypeAlias = tuple[
+    list[NDArray[np.float64]], list[NDArray[np.float64]], list[NDArray[np.float64]]
+]
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
@@ -59,6 +69,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     ) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), FreqCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         freqs = sweep2array(
@@ -67,7 +78,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
-        def measure_fn(ctx:TaskState, update_hook: Optional[Callable[[int, RawResult], None]]) -> RawResult:
+        def measure_fn(
+            ctx: TaskState, update_hook: Optional[Callable[[int, RawResult], None]]
+        ) -> RawResult:
             cfg = cast(FreqCfg, ctx.cfg)
             modules = cfg["modules"]
 
@@ -109,6 +122,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     result_shape=(len(freqs),),
                     dtype=np.float64,
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(freqs, np.abs(ctx.root_data)),

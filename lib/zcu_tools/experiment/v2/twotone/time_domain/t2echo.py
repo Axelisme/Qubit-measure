@@ -18,7 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -71,6 +71,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
     ) -> tuple[T2EchoResult, float]:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T2EchoCfg)
+        setup_devices(_cfg, progress=True)
 
         lengths = sweep2array(
             _cfg["sweep"]["length"], "time", {"soccfg": soccfg, "scaler": 0.5}
@@ -128,7 +129,11 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
             "Time (us)", "Amplitude", segment_kwargs={"title": "T2 Echo"}
         ) as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(lengths),),
+                    pbar_n=_cfg["rounds"],
+                ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, t2echo_signal2real(ctx.root_data)

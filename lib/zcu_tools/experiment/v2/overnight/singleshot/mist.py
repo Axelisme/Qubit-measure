@@ -10,7 +10,7 @@ from scipy.ndimage import gaussian_filter
 from typeguard import check_type
 from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
@@ -306,6 +306,8 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         _cfg = check_type(deepcopy(cfg), MistCfg)
         self.cfg = _cfg
 
+        setup_devices(_cfg, progress=True)
+
         # initial values, may be rounded later
         self.gains = sweep2array(_cfg["sweep"]["gain"])
 
@@ -344,6 +346,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(len(self.gains), 2),
             dtype=np.float64,
+            pbar_n=_cfg["rounds"],
         )
 
     def init(

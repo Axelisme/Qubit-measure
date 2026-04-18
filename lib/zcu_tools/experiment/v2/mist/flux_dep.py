@@ -19,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -97,6 +97,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
             cfg: FluxDepCfg = cast(FluxDepCfg, ctx.cfg)
+            setup_devices(cfg, progress=False)
             modules = cfg["modules"]
 
             assert update_hook is not None
@@ -127,7 +128,11 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             title="MIST over FLux",
         ) as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(gains),)).scan(
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(gains),),
+                    pbar_n=_cfg["rounds"],
+                ).scan(
                     "flux",
                     values.tolist(),
                     before_each=lambda _, ctx, value: set_flux_in_dev_cfg(

@@ -8,6 +8,7 @@ from typeguard import check_type
 from typing_extensions import Any, Optional, TypeAlias, Callable, cast
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -39,6 +40,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> PowerResult:
         _cfg = check_type(deepcopy(cfg), PowerCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gain_sweep = _cfg["sweep"]["gain"]
@@ -56,8 +58,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
         )
 
-
-        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]) -> list[NDArray[np.float64]]:
+        def measure_fn(
+            ctx: TaskState, update_hook: Optional[Callable]
+        ) -> list[NDArray[np.float64]]:
             cfg = cast(PowerCfg, ctx.cfg)
             modules = cfg["modules"]
 
@@ -65,26 +68,27 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             freq_param = sweep2param("freq", freq_sweep)
             modules["qub_pulse"].set_param("freq", freq_param)
 
-            return TwoToneProgram(
-                        soccfg,
-                        cfg,
-                        sweep=[
-                            ("freq", freq_sweep)
-                        ]
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        callback=update_hook,
-                        **(acquire_kwargs or {}),
-                    )
+            return TwoToneProgram(soccfg, cfg, sweep=[("freq", freq_sweep)]).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
-        with LivePlot2DwithLine("Pulse Gain (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=2) as viewer:
+        with LivePlot2DwithLine(
+            "Pulse Gain (a.u.)", "Frequency (MHz)", line_axis=1, num_lines=2
+        ) as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
-                    result_shape=(len(freqs), ),
+                    result_shape=(len(freqs),),
+                    pbar_n=_cfg["rounds"],
                 ).scan(
-                    "gain", gains.tolist(), before_each=lambda i, ctx, gain: ctx.cfg["modules"]["qub_pulse"].set_param("gain", gain)
+                    "gain",
+                    gains.tolist(),
+                    before_each=lambda i, ctx, gain: ctx.cfg["modules"][
+                        "qub_pulse"
+                    ].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

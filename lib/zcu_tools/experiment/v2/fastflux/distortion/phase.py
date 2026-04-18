@@ -18,6 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -71,6 +72,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> PhaseResult:
         _cfg = check_type(deepcopy(cfg), PhaseCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         length_sweep = _cfg["sweep"]["length"]
@@ -107,7 +109,9 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                             Pulse("pi2_pulse1", modules["pi2_pulse"]),
                             Pulse(
                                 name="pi2_pulse2",
-                                cfg=modules["pi2_pulse"].with_updates(phase=phase_param),
+                                cfg=modules["pi2_pulse"].with_updates(
+                                    phase=phase_param
+                                ),
                             ),
                         ],
                         SoftDelay("readout_t", cfg["readout_t"]),
@@ -123,7 +127,9 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         with LivePlot2D("Time (us)", "Phase (deg)") as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=measure_fn, result_shape=(len(lengths), len(phases))
+                    measure_fn=measure_fn,
+                    result_shape=(len(lengths), len(phases)),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

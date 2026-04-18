@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
-from collections.abc import Hashable
+from abc import abstractmethod
 from pathlib import Path
 
 import matplotlib
@@ -22,7 +22,6 @@ from typing_extensions import (
     TypeVar,
 )
 
-from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
@@ -45,10 +44,13 @@ class MeasurementTask(
     AbsTask[T_Result, T_RootResult],
     Generic[T_Result, T_RootResult, T_PlotDict],
 ):
+    @abstractmethod
     def num_axes(self) -> dict[str, int]: ...
 
+    @abstractmethod
     def make_plotter(self, name: str, axs: dict[str, list[Axes]]) -> T_PlotDict: ...
 
+    @abstractmethod
     def update_plotter(
         self,
         plotters: T_PlotDict,
@@ -56,6 +58,7 @@ class MeasurementTask(
         signals: T_Result,
     ) -> None: ...
 
+    @abstractmethod
     def save(
         self,
         filepath: str,
@@ -65,9 +68,11 @@ class MeasurementTask(
         prefix_tag: str,
     ) -> None: ...
 
+    @abstractmethod
     def load(self, filepath: str, **kwargs) -> T_Result: ...
 
     @classmethod
+    @abstractmethod
     def analyze(
         cls, name: str, iters: NDArray[np.int64], result: T_Result, **kwargs
     ) -> None: ...
@@ -76,13 +81,13 @@ class MeasurementTask(
 class OvernightCfg(TypedDict): ...
 
 
-class OvernightBatchTask(BatchTask[str, T_Result, T_RootResult]):
+class OvernightBatchTask(BatchTask[str, Result, list[dict[str, Result]]]):
     def __init__(self, tasks, retry_time: int = 0) -> None:
         self.retry_time = retry_time
 
         super().__init__(tasks)
 
-    def run(self, ctx: TaskState[T_Result, T_RootResult]) -> None:
+    def run(self, ctx: TaskState[Result, T_RootResult]) -> None:
         if self.dynamic_pbar:
             self.task_pbar = self.make_pbar(leave=False)
         else:
@@ -107,7 +112,7 @@ class OvernightBatchTask(BatchTask[str, T_Result, T_RootResult]):
             self.task_pbar = None
 
 
-class OvernightExecutor(AbsExperiment[Mapping[str, Result], OvernightCfg]):
+class OvernightExecutor:
     def __init__(self, num_times: int, interval: float) -> None:
         super().__init__()
 
@@ -220,7 +225,7 @@ class OvernightExecutor(AbsExperiment[Mapping[str, Result], OvernightCfg]):
 
         with plotter:
             results = run_task(
-                task=OvernightBatchTask[Result, list[dict[str, Result]]](
+                task=OvernightBatchTask(
                     self.measurements, retry_time=fail_retry
                 ).repeat("Iter", self.num_times, self.interval),
                 init_cfg=cfg,
@@ -276,6 +281,3 @@ class OvernightExecutor(AbsExperiment[Mapping[str, Result], OvernightCfg]):
                 comment,
                 prefix_tag + f"/{ms_name}",
             )
-
-    def load(self, filepath: str, **kwargs):
-        raise NotImplementedError("Load method is not implemented yet.")

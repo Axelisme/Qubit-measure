@@ -181,7 +181,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                     **(acquire_kwargs or {}),
                 )
 
-            return Task(measure_fn=measure_fn)
+            return Task(measure_fn=measure_fn, pbar_n=1)
 
         def average_round(signals: list[dict[tuple[str, str], NDArray[np.complex128]]]) -> dict[tuple[str, str], NDArray[np.complex128]]:
             avg_signals: dict[tuple[str, str], NDArray[np.complex128]] = {}

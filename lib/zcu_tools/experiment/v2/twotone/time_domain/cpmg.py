@@ -23,6 +23,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -66,6 +67,7 @@ class CPMG_ModuleCfg(TypedDict, closed=True):
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
+
 class CPMG_SweepCfg(TypedDict, closed=True):
     times: Union[SweepCfg, Sequence[int]]
     length: SweepCfg
@@ -90,6 +92,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> CPMG_Result:
         _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         pi2_pulse = modules["pi2_pulse"]
@@ -220,9 +223,11 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 )
 
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(length_idxs),)).scan(
-                    "times", times.tolist(), before_each=update_fn
-                ),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(length_idxs),),
+                    pbar_n=_cfg["rounds"],
+                ).scan("times", times.tolist(), before_each=update_fn),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     times.astype(np.float64),

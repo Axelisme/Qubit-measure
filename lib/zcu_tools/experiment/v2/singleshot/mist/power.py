@@ -18,7 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -65,6 +65,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
     ) -> PowerResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), PowerCfg)  # prevent in-place modification
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gains = sweep2array(
@@ -126,6 +127,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(gains), 2),
                     dtype=np.float64,
+                    pbar_n=1,
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

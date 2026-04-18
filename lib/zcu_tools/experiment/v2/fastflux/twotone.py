@@ -18,6 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -69,6 +70,7 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> TwoToneResult:
         _cfg = check_type(deepcopy(cfg), TwotoneCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         # uniform in square space
@@ -119,7 +121,11 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
 
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Frequency (MHz)") as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(gains), len(freqs))),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(gains), len(freqs)),
+                    pbar_n=_cfg["rounds"],
+                ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     gains, freqs, twotone_signal2real(ctx.root_data)

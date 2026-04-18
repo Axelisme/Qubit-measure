@@ -10,7 +10,7 @@ from typeguard import check_type
 from typing_extensions import Any, Literal, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -42,6 +42,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
     ) -> FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), FreqCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         # predicted sweep points before FPGA coercion
@@ -67,6 +68,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                         **(acquire_kwargs or {}),
                     ),
                     result_shape=(len(freqs),),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
@@ -100,7 +102,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         real_signals = qubfreq_signal2real(signals)
 
-        freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(freqs, real_signals, model_type)
+        freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(
+            freqs, real_signals, model_type
+        )
 
         fig, ax = plt.subplots(figsize=config.figsize)
         assert isinstance(fig, Figure)

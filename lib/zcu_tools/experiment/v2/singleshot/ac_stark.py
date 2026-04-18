@@ -14,6 +14,7 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.experiment.v2.utils import sweep2array
@@ -96,6 +97,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         radius: float,
     ) -> AcStarkResult:
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)  # prevent in-place modification
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gain_sweep = _cfg["sweep"]["gain"]
@@ -209,6 +211,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(freqs), 2),
                     dtype=np.float64,
+                    pbar_n=1,
                 ).scan(
                     "resonator gain",
                     gains.tolist(),

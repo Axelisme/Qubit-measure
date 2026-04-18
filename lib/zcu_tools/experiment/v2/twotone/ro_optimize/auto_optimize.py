@@ -13,6 +13,7 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import (
     Task,
     TaskCfg,
@@ -106,6 +107,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> AutoOptResult:
         _cfg = check_type(deepcopy(cfg), AutoOptCfg)
+        setup_devices(_cfg, progress=True)
 
         freq_sweep = _cfg["sweep"]["freq"]
         gain_sweep = _cfg["sweep"]["gain"]
@@ -220,6 +222,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     dtype=np.float64,
+                    pbar_n=_cfg["rounds"],
                 ).scan(
                     "Iteration",
                     list(range(num_points)),

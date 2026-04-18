@@ -12,7 +12,7 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -67,6 +67,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
     ) -> DispersiveResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
         _cfg = check_type(deepcopy(cfg), DispersiveCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         freq_sweep = _cfg["sweep"]["freq"]
@@ -85,6 +86,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         ) as viewer:
             signals = run_task(
                 task=Task(
+                    pbar_n=_cfg["rounds"],
                     measure_fn=lambda ctx, update_hook: ModularProgramV2(
                         soccfg,
                         ctx.cfg,

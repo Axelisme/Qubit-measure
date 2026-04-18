@@ -19,6 +19,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import (
     round_zcu_gain,
@@ -117,6 +118,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> AcStarkResult:
         _cfg = check_type(deepcopy(cfg), AcStarkCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gain_sweep = _cfg["sweep"]["gain"]
@@ -182,10 +184,13 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                         )
                     ),
                     result_shape=(len(freqs),),
+                    pbar_n=_cfg["rounds"],
                 ).scan(
                     "resonator gain",
                     list(gains.tolist()),
-                    before_each=lambda _, ctx, gain: ctx.cfg["modules"]["stark_pulse1"].set_param("gain", gain),
+                    before_each=lambda _, ctx, gain: ctx.cfg["modules"][
+                        "stark_pulse1"
+                    ].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
@@ -362,6 +367,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> AcStarkResult:
         _cfg = check_type(deepcopy(cfg), AcStarkRamseyCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gain_sweep = _cfg["sweep"]["gain"]
@@ -426,10 +432,16 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
             uniform=False,
         ) as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(lengths),)).scan(
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(lengths),),
+                    pbar_n=_cfg["rounds"],
+                ).scan(
                     "resonator gain",
                     list[float](gains.tolist()),
-                    before_each=lambda _, ctx, gain: ctx.cfg["modules"]["stark_pulse"].set_param("gain", gain),
+                    before_each=lambda _, ctx, gain: ctx.cfg["modules"][
+                        "stark_pulse"
+                    ].set_param("gain", gain),
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

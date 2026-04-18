@@ -18,6 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -91,6 +92,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         length_sweep = _cfg["sweep"]["length"]
@@ -143,7 +145,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         with LivePlot2D("Time (us)", "Frequency (MHz)") as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=measure_fn, result_shape=(len(lengths), len(freqs))
+                    measure_fn=measure_fn,
+                    result_shape=(len(lengths), len(freqs)),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

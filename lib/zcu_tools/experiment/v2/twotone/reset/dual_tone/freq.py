@@ -11,6 +11,7 @@ from typeguard import check_type
 from typing_extensions import Any, Literal, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, LivePlot2DwithLine
@@ -64,6 +65,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         freq1_sweep = _cfg["sweep"]["freq1"]
@@ -114,6 +116,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                         )
                     ),
                     result_shape=(len(freqs1),),
+                    pbar_n=_cfg["rounds"],
                 ).scan(
                     "freq2",
                     freqs2.tolist(),
@@ -143,6 +146,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqResult:
         _cfg = check_type(deepcopy(cfg), FreqCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         reset_cfg = modules["tested_reset"]
@@ -192,6 +196,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                         )
                     ),
                     result_shape=(len(freqs1), len(freqs2)),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
@@ -216,13 +221,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqResult:
         if method == "soft":
-            return self.run_soft(
-                soc, soccfg, cfg, acquire_kwargs=acquire_kwargs
-            )
+            return self.run_soft(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
         else:
-            return self.run_hard(
-                soc, soccfg, cfg, acquire_kwargs=acquire_kwargs
-            )
+            return self.run_hard(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
 
     def analyze(
         self,

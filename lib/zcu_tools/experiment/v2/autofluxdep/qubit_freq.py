@@ -9,13 +9,14 @@ from typeguard import check_type
 from typing_extensions import Any, Callable, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
-from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import load_data, save_data
@@ -95,6 +96,8 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             cfg: QubitFreqCfg = cast(QubitFreqCfg, ctx.cfg)
             modules = cfg["modules"]
 
+            setup_devices(cfg, progress=False)
+
             assert update_hook is not None
 
             detune_sweep = cfg["sweep"]["detune"]
@@ -160,6 +163,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             {"soccfg": ctx.env["soccfg"], "gen_ch": modules["qub_pulse"].ch},
         )
 
+        self.task.set_pbar_n(cfg["rounds"])
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.value["raw_signals"]

@@ -9,7 +9,7 @@ from typing_extensions import Any, Mapping, Optional, TypeAlias, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -61,22 +61,27 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         freq_param = sweep2param("freq", freq_sweep)
         modules["qub_pulse"].set_param("freq", freq_param)
 
+        def measure_fn(ctx, update_hook):
+            setup_devices(ctx.cfg, progress=False)
+            return TwoToneProgram(
+                soccfg,
+                ctx.cfg,
+                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
+            ).acquire(
+                soc,
+                progress=False,
+                callback=update_hook,
+                **(acquire_kwargs or {}),
+            )
+
         with LivePlot2DwithLine(
             "Flux device value", "Frequency (MHz)", line_axis=1, num_lines=2
         ) as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                        soccfg,
-                        ctx.cfg,
-                        sweep=[("freq", ctx.cfg["sweep"]["freq"])],
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        callback=update_hook,
-                        **(acquire_kwargs or {}),
-                    ),
+                    measure_fn=measure_fn,
                     result_shape=(len(freqs),),
+                    pbar_n=_cfg["rounds"],
                 )
                 .auto_retry(max_retries=fail_retry)
                 .scan(

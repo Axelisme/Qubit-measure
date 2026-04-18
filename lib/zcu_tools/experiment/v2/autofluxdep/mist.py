@@ -9,6 +9,7 @@ from typeguard import check_type
 from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -100,6 +101,8 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             cfg: MistCfg = cast(MistCfg, ctx.cfg)
             modules = cfg["modules"]
 
+            setup_devices(cfg, progress=False)
+
             gain_sweep = cfg["sweep"]["gain"]
             gain_param = sweep2param("gain", gain_sweep)
             modules["mist_pulse"].set_param("gain", gain_param)
@@ -150,6 +153,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             },
         )
 
+        self.task.set_pbar_n(cfg["rounds"])
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.value["raw_signals"]

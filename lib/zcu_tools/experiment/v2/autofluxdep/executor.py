@@ -24,8 +24,8 @@ from typing_extensions import (
     TypeVar,
 )
 
-from zcu_tools.device import DeviceInfo, GlobalDeviceManager
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg
+from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
@@ -281,7 +281,7 @@ class FluxDepExecutor:
             set_flux_in_dev_cfg(ctx.cfg["dev"], flux, label="flux_dev")
 
         set_flux_in_dev_cfg(cfg["dev"], self.flux_values[0], label="flux_dev")
-        GlobalDeviceManager.setup_devices(cfg["dev"], progress=True)
+        setup_devices(cfg, progress=True)
 
         fig, plotter, plot_fn, writer = self.make_plotter()
 
@@ -314,11 +314,6 @@ class FluxDepExecutor:
 
         return signals_dict
 
-    def analyze(
-        self, *args, result: Optional[Mapping[str, Result]] = None, **kwargs
-    ) -> None:
-        raise NotImplementedError("Not implemented")
-
     def save(
         self,
         filepath: str,
@@ -339,6 +334,3 @@ class FluxDepExecutor:
                 comment,
                 prefix_tag + f"/{ms_name}",
             )
-
-    def load(self, filepath: str, **kwargs) -> Mapping[str, Result]:
-        raise NotImplementedError("Not implemented")

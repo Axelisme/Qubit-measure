@@ -19,6 +19,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.utils.single_shot import GE_FitResult, singleshot_ge_analysis
 from zcu_tools.experiment.v2.runner import (
     Task,
@@ -191,6 +192,7 @@ class GE_Cfg(ModularProgramCfg, TaskCfg):
 class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> GE_Result:
         _cfg = check_type(deepcopy(cfg), GE_Cfg)  # avoid in-place modification
+        setup_devices(_cfg, progress=True)
 
         # Validate and setup configuration
         if _cfg.setdefault("rounds", 1) != 1:
@@ -238,6 +240,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
                 measure_fn=measure_fn,
                 raw2signal_fn=raw2signal_fn,
                 result_shape=(_cfg["shots"],),
+                pbar_n=1,
             ).scan(
                 "w/o probe pulse",
                 [False, True],

@@ -12,6 +12,7 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import ModularProgramCfg, OneToneProgram
@@ -38,6 +39,7 @@ def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> LookbackResult:
         _cfg = check_type(deepcopy(cfg), LookbackCfg)
+        setup_devices(_cfg, progress=True)
 
         if _cfg.setdefault("reps", 1) != 1:
             warnings.warn("reps is not 1 in config, this will be ignored.")
@@ -62,6 +64,7 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0].dot([1, 1j]),
                     result_shape=(len(Ts),),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

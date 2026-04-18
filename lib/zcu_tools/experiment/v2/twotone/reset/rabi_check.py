@@ -18,7 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -70,6 +70,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
     ) -> RabiCheckResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), RabiCheckCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gains = sweep2array(
@@ -105,9 +106,8 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                         [
                             Reset("tested_reset_2", modules["tested_reset"]),
                             Pulse("pi_pulse", modules["pi_pulse"]),
-                        ]
+                        ],
                     ),
-
                     Readout("readout", modules["readout"]),
                 ],
             ).acquire(
@@ -124,6 +124,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(3, len(gains)),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

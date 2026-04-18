@@ -18,7 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -70,6 +70,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     ) -> PowerDepResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
         _cfg = check_type(deepcopy(cfg), PowerDepCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         gains = sweep2array(
@@ -105,7 +106,11 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
         with LivePlot1D("Pulse gain", "MIST") as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(gains),)),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(gains),),
+                    pbar_n=_cfg["rounds"],
+                ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     gains, mist_signal2real(ctx.root_data)

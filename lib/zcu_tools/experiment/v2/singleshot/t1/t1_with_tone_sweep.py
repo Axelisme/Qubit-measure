@@ -23,6 +23,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.experiment.v2.utils import sweep2array
@@ -81,6 +82,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         radius: float,
     ) -> T1WithToneSweepResult:
         _cfg = check_type(deepcopy(cfg), T1WithToneSweepCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         length_sweep = _cfg["sweep"]["length"]
@@ -227,6 +229,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(2, len(lengths), 2),
                     dtype=np.float64,
+                    pbar_n=_cfg["rounds"],
                 ).scan(
                     sweep_name,
                     xs.tolist(),

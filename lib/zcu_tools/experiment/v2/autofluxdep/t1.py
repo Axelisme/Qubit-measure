@@ -9,6 +9,7 @@ from typeguard import check_type
 from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot1D
@@ -105,6 +106,8 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
             cfg: T1Cfg = cast(T1Cfg, ctx.cfg)
             modules = ctx.cfg["modules"]
 
+            setup_devices(cfg, progress=False)
+
             assert update_hook is not None
 
             length_sweep = cfg["sweep"]["length"]
@@ -164,6 +167,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         )
         cfg = check_type(cfg_temp, T1Cfg)
 
+        self.task.set_pbar_n(cfg["rounds"])
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.value["raw_signals"]

@@ -19,6 +19,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -76,6 +77,7 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> MistResult:
         _cfg = check_type(deepcopy(cfg), MistCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         flux_gain_sweep = _cfg["sweep"]["flux_gain"]
@@ -132,6 +134,7 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(flux_gains), len(mist_gains)),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

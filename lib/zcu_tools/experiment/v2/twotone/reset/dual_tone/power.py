@@ -11,6 +11,7 @@ from typeguard import check_type
 from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -58,6 +59,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> PowerResult:
         _cfg = check_type(deepcopy(cfg), PowerCfg)
+        setup_devices(_cfg, progress=True)
 
         # Check that reset pulse is dual pulse type
         modules = _cfg["modules"]
@@ -88,6 +90,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         with LivePlot2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
             signals = run_task(
                 task=Task(
+                    pbar_n=_cfg["rounds"],
                     measure_fn=lambda ctx, update_hook: (
                         (modules := ctx.cfg["modules"])
                         and (

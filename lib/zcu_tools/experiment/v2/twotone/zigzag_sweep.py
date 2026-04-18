@@ -20,6 +20,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -84,6 +85,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> ZigZagSweepResult:
         _cfg = check_type(deepcopy(cfg), ZigZagCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         times = np.arange(_cfg["n_times"])
@@ -149,7 +151,9 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         with LivePlot2D("Times", x_info["name"]) as viewer:
             signals = run_task(
                 task=Task(
-                    measure_fn=measure_fn, result_shape=(len(times), len(values))
+                    measure_fn=measure_fn,
+                    result_shape=(len(times), len(values)),
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(

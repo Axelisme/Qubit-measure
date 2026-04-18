@@ -18,7 +18,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -37,9 +37,11 @@ from zcu_tools.utils.datasaver import load_data, save_data
 # (freqs, signals)
 SA_FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
+
 class SA_FreqModuleCfg(TypedDict, closed=True):
     reset: NotRequired[ResetCfg]
     readout: PulseReadoutCfg
+
 
 class SA_FreqCfg(ModularProgramCfg, TaskCfg):
     modules: SA_FreqModuleCfg
@@ -54,6 +56,7 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
     def run(self, soc, soccfg, cfg: dict[str, Any]) -> SA_FreqResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "ro_freq")
         _cfg = check_type(deepcopy(cfg), SA_FreqCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         # Predicted frequency points (before mapping to ADC domain)
@@ -87,7 +90,11 @@ class SA_FreqExp(AbsExperiment[SA_FreqResult, SA_FreqCfg]):
         # run experiment
         with LivePlot1D("SA Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(len(freqs),)),
+                task=Task(
+                    measure_fn=measure_fn,
+                    result_shape=(len(freqs),),
+                    pbar_n=_cfg["rounds"],
+                ),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, safreq_signal2real(ctx.root_data)

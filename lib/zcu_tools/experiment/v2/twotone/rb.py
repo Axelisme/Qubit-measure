@@ -21,7 +21,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -169,8 +169,10 @@ def reduce_gate_seq(seq: list[CliffordDecomp]) -> list[BasicGate]:
 
 
 def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    mask = np.any(np.isfinite(signals), axis=0) # (depths, )
-    mean_signals = np.full((signals.shape[1],), np.nan, dtype=np.complex128) # (depths,)
+    mask = np.any(np.isfinite(signals), axis=0)  # (depths, )
+    mean_signals = np.full(
+        (signals.shape[1],), np.nan, dtype=np.complex128
+    )  # (depths,)
     mean_signals[mask] = np.nanmean(signals[..., mask], axis=0)
     return rotate2real(mean_signals).real
 
@@ -205,9 +207,10 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
     ) -> RB_Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "depth")
         _cfg = check_type(deepcopy(cfg), RB_Cfg)
+        setup_devices(_cfg, progress=True)
 
         rounds = _cfg["rounds"]
-        _cfg["rounds"] = 1 # implement by task scan
+        _cfg["rounds"] = 1  # implement by task scan
 
         depths = sweep2array(_cfg["sweep"]["depth"], allow_array=True).astype(np.int64)
 
@@ -219,6 +222,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
         )
 
         prog_cahce: dict[tuple[int, int], ModularProgramV2] = {}
+
         def measure_fn(
             ctx: TaskState,
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
@@ -226,8 +230,8 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
             cfg = cast(RB_Cfg, ctx.cfg)
             modules = cfg["modules"]
 
-            seed:int = ctx.env["seed"]
-            depth:int = ctx.env["depth"]
+            seed: int = ctx.env["seed"]
+            depth: int = ctx.env["depth"]
 
             if (seed, depth) not in prog_cahce:
                 gate_seq = reduce_gate_seq(ctx.env["clifford_seq"])
@@ -269,11 +273,15 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                 **(acquire_kwargs or {}),
             )
 
-        def average_signals(signals: list[list[list[NDArray[np.complex128]]]]) -> NDArray[np.complex128]:
+        def average_signals(
+            signals: list[list[list[NDArray[np.complex128]]]],
+        ) -> NDArray[np.complex128]:
             _signals = np.asarray(signals)  # shape: (n_seeds, rounds, n_depths)
-            mean_signals = np.full((_signals.shape[0], _signals.shape[2]), np.nan, np.complex128) # (n_seeds, n_depths)
+            mean_signals = np.full(
+                (_signals.shape[0], _signals.shape[2]), np.nan, np.complex128
+            )  # (n_seeds, n_depths)
             for i in range(_signals.shape[0]):
-                mask = np.any(np.isfinite(_signals[i]), axis=0) # (n_depths, )
+                mask = np.any(np.isfinite(_signals[i]), axis=0)  # (n_depths, )
                 mean_signals[i, mask] = np.nanmean(_signals[i, :, mask], axis=1)
             return mean_signals
 
@@ -307,14 +315,14 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                 ctx.env["acc_states"] = cum_states
 
             signals = run_task(
-                task=Task(measure_fn=measure_fn)
+                task=Task(measure_fn=measure_fn, pbar_n=1)
                 .scan("depth", depths.tolist(), before_each=update_seq_depth)
                 .scan("rounds", list(range(rounds)), before_each=lambda *_: None)
                 .scan("seed", entropys.tolist(), before_each=update_seq_seed),
                 init_cfg=_cfg,
                 on_update=lambda ctx: viewer.update(
                     depths.astype(np.float64),
-                    rb_signal2real(average_signals(ctx.root_data))
+                    rb_signal2real(average_signals(ctx.root_data)),
                 ),
             )
             signals2D = average_signals(signals)  # shape: (n_seeds, n_depths)

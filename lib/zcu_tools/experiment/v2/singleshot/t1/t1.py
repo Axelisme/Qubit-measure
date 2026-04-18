@@ -20,7 +20,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
@@ -78,6 +78,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
     ) -> T1Result:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), T1Cfg)
+        setup_devices(_cfg, progress=True)
 
         length_sweep = _cfg["sweep"]["length"]
 
@@ -197,6 +198,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(lengths), 2, 2),
                     dtype=np.float64,
+                    pbar_n=_cfg["rounds"],
                 ),
                 init_cfg=_cfg,
                 on_update=plot_fn,

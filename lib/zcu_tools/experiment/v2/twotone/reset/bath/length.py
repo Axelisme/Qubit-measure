@@ -19,7 +19,7 @@ from typing_extensions import (
 )
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D
+from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -43,7 +43,10 @@ LengthResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
-    return np.abs(signals[..., 2] - signals[..., 0])**2 + np.abs(signals[..., 3] - signals[..., 1])**2  # (lengths, )
+    return (
+        np.abs(signals[..., 2] - signals[..., 0]) ** 2
+        + np.abs(signals[..., 3] - signals[..., 1]) ** 2
+    )  # (lengths, )
 
 
 class LengthModuleCfg(TypedDict, closed=True):
@@ -69,10 +72,11 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
     ) -> LengthResult:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         _cfg = check_type(deepcopy(cfg), LengthCfg)
+        setup_devices(_cfg, progress=True)
         modules = _cfg["modules"]
 
         rounds = _cfg["rounds"]
-        _cfg["rounds"] = 1 # implemented round loop by scan
+        _cfg["rounds"] = 1  # implemented round loop by scan
 
         length_sweep = _cfg["sweep"]["length"]
         tested_reset = modules["tested_reset"]
@@ -88,9 +92,11 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         orig_qub_length = tested_reset.qubit_tone_cfg.waveform.length
         length_diff = orig_res_length - orig_qub_length
 
-
         prog_cache: dict[float, ModularProgramV2] = {}
-        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]) -> list[NDArray[np.float64]]:
+
+        def measure_fn(
+            ctx: TaskState, update_hook: Optional[Callable]
+        ) -> list[NDArray[np.float64]]:
             cfg = cast(LengthCfg, ctx.cfg)
             modules = cfg["modules"]
 
@@ -111,8 +117,8 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                         Readout("readout", modules["readout"]),
                     ],
                     sweep=[
-                        ("phase", 4), # (0, 90, 180, 270)
-                    ]
+                        ("phase", 4),  # (0, 90, 180, 270)
+                    ],
                 )
 
             return prog_cache[length].acquire(
@@ -127,16 +133,18 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             modules["tested_reset"].set_param("qub_length", length)
             modules["tested_reset"].set_param("res_length", length + length_diff)
 
-        def average_signals(signals: list[list[NDArray[np.complex128]]]) -> NDArray[np.complex128]:
+        def average_signals(
+            signals: list[list[NDArray[np.complex128]]],
+        ) -> NDArray[np.complex128]:
             _signals = np.array(signals)  # shape: (rounds, lengths, 4)
             mean_signals = np.full_like(_signals[0], fill_value=np.nan)
             mask = np.any(np.isfinite(_signals), axis=0)
             mean_signals[mask] = np.nanmean(_signals[:, mask], axis=0)
-            return mean_signals # (lengths, 4)
+            return mean_signals  # (lengths, 4)
 
         with LivePlot1D("Length (us)", "Signal (a.u.)") as viewer:
             signals = run_task(
-                task=Task(measure_fn=measure_fn, result_shape=(4, ))
+                task=Task(measure_fn=measure_fn, result_shape=(4,), pbar_n=1)
                 .scan("length", lengths.tolist(), before_each=update_length)
                 .repeat("rounds", rounds),
                 init_cfg=_cfg,

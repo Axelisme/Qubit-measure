@@ -9,6 +9,7 @@ from typeguard import check_type
 from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
 
 from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot1D
@@ -109,6 +110,8 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
             cfg: T2EchoCfg = cast(T2EchoCfg, ctx.cfg)
             modules = cfg["modules"]
 
+            setup_devices(cfg, progress=False)
+
             assert update_hook is not None
 
             detune = cfg["activate_detune"]
@@ -183,6 +186,7 @@ class T2EchoTask(MeasurementTask[T2EchoResult, T_RootResult, T2EchoPlotDict]):
         cfg_temp["activate_detune"] = self.detune_ratio / len_sweep["step"]  # type: ignore
         cfg = check_type(cfg_temp, T2EchoCfg)
 
+        self.task.set_pbar_n(cfg["rounds"])
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
 
         raw_signals = ctx.value["raw_signals"]
