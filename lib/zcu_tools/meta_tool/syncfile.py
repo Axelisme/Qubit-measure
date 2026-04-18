@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import warnings
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
 
 from typing_extensions import (
     Callable,
+    Iterator,
     Literal,
     Optional,
     ParamSpec,
@@ -14,6 +16,14 @@ from typing_extensions import (
     Union,
     cast,
 )
+
+try:
+    import fcntl as _fcntl
+except ImportError:  # Windows: advisory flock not available
+    _fcntl = None  # type: ignore[assignment]
+
+_FLOCK_UNAVAILABLE_WARNED = False
+
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -87,15 +97,56 @@ class SyncFile(ABC):
         self.update_modify_time()
         self._dirty = False
 
+    @contextmanager
+    def _file_lock(self) -> Iterator[None]:
+        """Acquire an exclusive advisory lock on ``self._path``.
+
+        On platforms without fcntl (Windows) this is a no-op and warns once.
+        The file is touched so flock has a target even when the backing file
+        has not yet been written.
+        """
+        assert self._path is not None
+
+        if _fcntl is None:
+            global _FLOCK_UNAVAILABLE_WARNED
+            if not _FLOCK_UNAVAILABLE_WARNED:
+                warnings.warn(
+                    "fcntl unavailable on this platform; SyncFile has no "
+                    "cross-process locking. Concurrent writers may corrupt data."
+                )
+                _FLOCK_UNAVAILABLE_WARNED = True
+            yield
+            return
+
+        if not self._path.exists():
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.touch()
+
+        fh = open(self._path, "a+")
+        try:
+            _fcntl.flock(fh.fileno(), _fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                _fcntl.flock(fh.fileno(), _fcntl.LOCK_UN)
+        finally:
+            fh.close()
+
     def sync(self) -> None:
         if self._path is None:
             return
 
-        if self._path.exists():
-            mtime = self._path.stat().st_mtime_ns
-            if self._dirty and not self._readonly:
+        with self._file_lock():
+            if self._path.exists():
+                mtime = self._path.stat().st_mtime_ns
+                if self._dirty and not self._readonly:
+                    if mtime > self._modify_time:
+                        warnings.warn(
+                            f"SyncFile conflict: {self._path} was modified by "
+                            "another process; local changes kept, overwriting."
+                        )
+                    self.dump()
+                elif mtime >= self._modify_time:
+                    self.load()
+            elif not self._readonly:
                 self.dump()
-            elif mtime >= self._modify_time:
-                self.load()
-        elif not self._readonly:
-            self.dump()

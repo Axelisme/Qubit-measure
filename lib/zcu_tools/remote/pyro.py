@@ -109,6 +109,6 @@ def make_soc_proxy(
                     (Exception,), exception_handler
                 )  # register your handler
         except Exception as e:
-            raise RuntimeError("Failed to set up Pyro exception handler: ", e)
+            raise RuntimeError(f"Failed to set up Pyro exception handler: {e}") from e
 
     return soc, soccfg

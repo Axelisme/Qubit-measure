@@ -126,11 +126,13 @@ def run_task(
         logger.debug("run_task: init done, starting run")
         task.run(state)
         logger.debug("run_task: run done, cleanup")
-        task.cleanup()
     except KeyboardInterrupt:
         logger.warning("run_task: KeyboardInterrupt, early stopping")
     except Exception:
         logger.exception("run_task: error during measurement")
         print_traceback()
+        raise
+    finally:
+        task.cleanup()
 
     return state.root_data
