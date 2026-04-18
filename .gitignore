@@ -9,6 +9,7 @@ wheels/
 .cursor
 .claude
 .vscode
+.github
 
 Database/
 Database
