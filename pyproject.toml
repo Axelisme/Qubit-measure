@@ -63,6 +63,9 @@ typeCheckingMode = "basic"
 reportExplicitAny = "none"
 reportMissingTypeStubs = "none"
 
+[tool.pytest.ini_options]
+filterwarnings = ["ignore::DeprecationWarning:matplotlib.*"]
+
 [tool.jupytext]
 notebook_metadata_filter = "-all"
 cell_metadata_filter = "-all"
