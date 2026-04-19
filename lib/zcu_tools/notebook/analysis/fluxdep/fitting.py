@@ -9,17 +9,47 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import numpy as np
 from h5py import File
-from joblib import Parallel, delayed
 from matplotlib.figure import Figure
-from numba import njit
+from numba import set_num_threads
 from numpy.typing import NDArray
 from scipy.optimize import least_squares
 from tqdm.auto import tqdm, trange
+from typing_extensions import overload
 
 from zcu_tools.notebook.persistance import TransitionDict
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux
 
-from .models import count_max_evals, energy2linearform
+from .models import compile_transitions, count_max_evals, energy2linearform
+
+
+@overload
+def search_in_database(
+    fluxs: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    datapath: str,
+    transitions: TransitionDict,
+    EJb: tuple[float, float],
+    ECb: tuple[float, float],
+    ELb: tuple[float, float],
+    n_jobs: int = 1,
+    fuzzy: bool = True,
+    plot: bool = True,
+) -> tuple[tuple[float, float, float], Figure]: ...
+
+
+@overload
+def search_in_database(
+    fluxs: NDArray[np.float64],
+    freqs: NDArray[np.float64],
+    datapath: str,
+    transitions: TransitionDict,
+    EJb: tuple[float, float],
+    ECb: tuple[float, float],
+    ELb: tuple[float, float],
+    n_jobs: int = 1,
+    fuzzy: bool = True,
+    plot: bool = False,
+) -> tuple[tuple[float, float, float], None]: ...
 
 
 def search_in_database(
@@ -30,9 +60,27 @@ def search_in_database(
     EJb: tuple[float, float],
     ECb: tuple[float, float],
     ELb: tuple[float, float],
-    n_jobs: int = -1,
+    n_jobs: int = 1,
     fuzzy: bool = True,
-) -> tuple[tuple[float, float, float], Figure]:
+    plot: bool = True,
+) -> tuple[tuple[float, float, float], Figure | None]:
+    """Search a precomputed fluxonium database for (EJ, EC, EL) best matching
+    the observed (fluxs, freqs).
+
+    For each database entry `f_params[i]`, we find a scalar scale `a` (via
+    breakpoint search on the transition model |a*B + C|) that minimises the
+    mean distance to the observed frequencies; the candidate parameters are
+    `f_params[i] * a`. The best scale across all entries defines the final
+    fit. Scales allow a single simulated grid to cover a continuous (EJ,EC,EL)
+    neighbourhood — they are not arbitrary fit degrees of freedom.
+
+    The entire outer loop runs inside a parallel njit kernel (``prange``)
+    with ``n_jobs`` numba threads (``-1`` = all cores, ``1`` = serial), so no
+    Python code sits on the hot path. The kernel is called in batches purely
+    to give tqdm progress feedback.
+    """
+    from .njit import _apply_interp, _interp_weights, _search_kernel
+
     # Load data from database
     with File(datapath, "r") as file:
         f_fluxs = file["fluxs"][:]  # (f_fluxs, ) # type: ignore[index]
@@ -42,291 +90,145 @@ def search_in_database(
     assert isinstance(f_params, np.ndarray)
     assert isinstance(f_energies, np.ndarray)
 
-    # Interpolate points
+    # Interpolate points. f_fluxs is strictly increasing and shared across all
+    # entries, so precompute (idx, w) once then apply with a parallel njit
+    # kernel — avoids 4396*M Python-level np.interp calls.
     fluxs = np.mod(fluxs, 1.0)
-    sf_energies = np.empty((f_params.shape[0], len(fluxs), f_energies.shape[2]))
-    for n in range(f_params.shape[0]):
-        for m in range(f_energies.shape[2]):
-            sf_energies[n, :, m] = np.interp(fluxs, f_fluxs, f_energies[n, :, m])
+    f_energies_c = np.ascontiguousarray(f_energies, dtype=np.float64)
+    f_fluxs_c = np.ascontiguousarray(f_fluxs, dtype=np.float64)
+    fluxs_c = np.ascontiguousarray(fluxs, dtype=np.float64)
+    idxs, ws = _interp_weights(fluxs_c, f_fluxs_c)
+    sf_energies = _apply_interp(f_energies_c, idxs, ws)
 
     # Initialize variables
+    N = f_params.shape[0]
     best_idx = 0
-    best_factor = 1.0
+    best_scale = 1.0
     best_dist = np.inf
     best_params = np.full(3, np.nan)
-    results = np.full((f_params.shape[0], 2), np.nan)  # (N, 2)
+    results = np.full((N, 2), np.nan)  # (N, 2)
 
-    idx_bar = trange(f_params.shape[0], desc="Searching...")
+    idx_bar = trange(N, desc="Searching...")
 
-    def find_close_points(freqs, energies, factor, allows) -> np.ndarray:
+    # Pre-compile transitions once so the hot loop calls only nogil njit code.
+    tr_pairs, tr_coeffs, tr_offsets = compile_transitions(
+        transitions, f_energies.shape[2]
+    )
+
+    def find_close_points(freqs, energies, scale, allows) -> np.ndarray:
         Bs, Cs = energy2linearform(energies, allows)
-        fs = np.abs(factor * Bs + Cs)
+        fs = np.abs(scale * Bs + Cs)
         dists = np.abs(fs - freqs[:, None])
         min_idx = np.argmin(dists, axis=1)
         return fs[range(len(freqs)), min_idx]
 
-    # ------------------------------------------------------------
-    # define the search functions
-    # ------------------------------------------------------------
+    # Ensure contiguous float64 for njit signature.
+    sf_energies_c = np.ascontiguousarray(sf_energies, dtype=np.float64)
+    f_params_c = np.ascontiguousarray(f_params, dtype=np.float64)
+    freqs_c = np.ascontiguousarray(freqs, dtype=np.float64)
 
-    @njit(
-        "float64(float64[:], float64, float64[:,:], float64[:,:])",
-        nogil=True,
-    )
-    def eval_dist(
-        A: NDArray[np.float64], a: float, B: NDArray[np.float64], C: NDArray[np.float64]
-    ) -> float:
-        """
-        計算: mean_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
-        """
-        N = A.shape[0]
-        K = B.shape[1]
+    import os
 
-        dist = 0.0
-        for i in range(N):
-            # min_diff = float("inf") # this will cause error in python 3.8 numba
-            min_diff = np.inf
-            for j in range(K):
-                diff = np.abs(A[i] - np.abs(a * B[i, j] + C[i, j]))
-                if diff < min_diff:
-                    min_diff = diff
-            dist += min_diff
+    n_workers = n_jobs if n_jobs > 0 else (os.cpu_count() or 1)
+    set_num_threads(n_workers)
 
-        return dist / N
+    def _run_kernel(start: int, end: int, fuzzy_flag: bool) -> NDArray[np.float64]:
+        return _search_kernel(
+            sf_energies_c[start:end],
+            f_params_c[start:end],
+            tr_pairs,
+            tr_coeffs,
+            tr_offsets,
+            freqs_c,
+            EJb[0],
+            EJb[1],
+            ECb[0],
+            ECb[1],
+            ELb[0],
+            ELb[1],
+            fuzzy_flag,
+        )
 
-    @njit(
-        "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:], float64, float64)",
-        nogil=True,
-    )
-    def candidate_breakpoint_search(
-        A: NDArray[np.float64],
-        B: NDArray[np.float64],
-        C: NDArray[np.float64],
-        a_min: float,
-        a_max: float,
-    ) -> tuple[float, float]:
-        """
-        使用候選斷點法尋找最佳的 a 值, 使得目標函數最小化
-        目標函數: F(a) = mean_i(min_j(|A[i] - |a * B[i, j] + C[i, j]||))
-        假設: A 中所有值都是正的
-
-        Parameters:
-        A: 目標向量, numpy 陣列, 形狀 (N,), 所有元素均為正數
-        B: 候選向量矩陣, numpy 陣列, 形狀 (N, K)
-        C: 偏移矩陣, numpy 陣列, 形狀 (N, K)
-        a_min: 最小的 a 值
-        a_max: 最大的 a 值
-
-        Returns:
-        best_distance: 最小的目標函數值, 如果沒有找到則返回 inf
-        best_a: 使得目標函數最小的 a 值, 如果沒有找到則返回 1.0
-        """
-        N = A.shape[0]
-        K = B.shape[1]
-
-        # 評估篩選後的 a 值
-        # best_distance = float("inf")
-        best_distance = np.inf
-        best_a = (a_min + a_max) / 2.0
-
-        for i in range(N):
-            for j in range(K):
-                if B[i, j] == 0:
-                    continue
-
-                a1 = (A[i] - C[i, j]) / B[i, j]
-                a2 = (-A[i] - C[i, j]) / B[i, j]
-
-                for a in (a1, a2):
-                    if a_min <= a <= a_max:
-                        dist = eval_dist(A, a, B, C)
-
-                        if dist < best_distance:
-                            best_distance = dist
-                            best_a = a
-
-        return best_distance, best_a
-
-    @njit(
-        "Tuple((float64, float64))(float64[:], float64[:,:], float64[:,:], float64, float64)",
-        nogil=True,
-    )
-    def smart_fuzzy_search(
-        A: NDArray[np.float64],
-        B: NDArray[np.float64],
-        C: NDArray[np.float64],
-        a_min: float,
-        a_max: float,
-    ) -> tuple[float, float]:
-        """
-        結合密度估計和有限評估的方法尋找最佳的 a 值
-        先通過密度估計找到可能的高密度區域，然後在這些區域中進行有限的評估
-
-        Parameters:
-        A: 目標向量, numpy 陣列, 形狀 (N,)
-        B: 候選向量矩陣, numpy 陣列, 形狀 (N, K)
-        C: 偏移矩陣, numpy 陣列, 形狀 (N, K)
-        a_min: 最小的 a 值
-        a_max: 最大的 a 值
-
-        Returns:
-        best_distance: 最小的目標函數值
-        best_a: 使得目標函數最小的 a 值
-        """
-        N = A.shape[0]
-        K = B.shape[1]
-
-        DOWNSAMPLE_THRESHOLD = 1000
-        MAX_BIN_USED = 3
-        SAMPLE_RATE_IN_BIN = 0.05
-
-        # 收集所有可能的 a 值
-        cand_as = []
-
-        for i in range(N):
-            for j in range(K):
-                if B[i, j] == 0:
-                    continue
-
-                a1 = (A[i] - C[i, j]) / B[i, j]
-                a2 = (-A[i] - C[i, j]) / B[i, j]
-
-                if a_min <= a1 <= a_max:
-                    cand_as.append(a1)
-                if a_min <= a2 <= a_max:
-                    cand_as.append(a2)
-
-        # 如果候選值太多，降採樣
-        if len(cand_as) >= DOWNSAMPLE_THRESHOLD:
-            cand_as.sort()
-
-            # 找到高密度區域
-            # 1. 先用直方圖方法分析密度
-            num_bins = min(100, max(10, len(cand_as) // 10))
-            bin_width = (a_max - a_min) / num_bins
-
-            bin_counts = np.zeros(num_bins, dtype=np.int32)
-            for i in range(len(cand_as)):
-                bin_idx = min(int((cand_as[i] - a_min) / bin_width), num_bins - 1)
-                bin_counts[bin_idx] += 1
-
-            # 找到前5多的bin，選取每個bin降採樣100分之1的數量，與中位數，加入test_as
-            sample_as = []
-            for bin_idx in np.argsort(-bin_counts)[:MAX_BIN_USED]:
-                # 如果bin數量為0，跳過
-                if bin_counts[bin_idx] == 0:
-                    break
-
-                # 計算該bin的起始和結束範圍
-                bin_start = a_min + bin_idx * bin_width
-                bin_end = bin_start + bin_width
-
-                # 收集該bin內的所有a值
-                bin_as = []
-                for a in cand_as:
-                    if bin_start <= a < bin_end:
-                        bin_as.append(a)
-
-                # 如果bin內有值
-                if len(bin_as) > 0:
-                    # 添加bin的中位數
-                    sample_as.append(np.median(np.array(bin_as)))
-
-                    # 降採樣該bin內的值 (取100分之1)
-                    step = max(1, int(len(bin_as) * SAMPLE_RATE_IN_BIN))
-                    sample_as.extend(bin_as[:step:])
-            cand_as = sample_as
-
-        # 5. 評估所有選出的點，找到最佳的
-        # best_dist = float("inf")
-        best_dist = np.inf
-        best_a = (a_min + a_max) / 2.0
-
-        for a in cand_as:
-            dist = eval_dist(A, a, B, C)
-            if dist < best_dist:
-                best_dist = dist
-                best_a = a
-
-        return best_dist, best_a
-
-    # ------------------------------------------------------------
-    # search function define done
-    # ------------------------------------------------------------
-
-    def process_energy(i: int, fuzzy: bool) -> tuple[int, float, float]:
-        nonlocal f_params, sf_energies, freqs, transitions
-        assert isinstance(f_params, np.ndarray)
-
-        param = f_params[i]
-        a_min = max(EJb[0] / param[0], ECb[0] / param[1], ELb[0] / param[2])
-        a_max = min(EJb[1] / param[0], ECb[1] / param[1], ELb[1] / param[2])
-        if a_min > a_max:
-            return i, np.inf, 1.0
-
-        Bs, Cs = energy2linearform(sf_energies[i], transitions)
-        if fuzzy:
-            return i, *smart_fuzzy_search(freqs, Bs, Cs, a_min, a_max)
-        return i, *candidate_breakpoint_search(freqs, Bs, Cs, a_min, a_max)
+    # ~20 batches amortise prange dispatch (sweet spot 256–1024 on this
+    # workload) while still giving the pbar enough ticks to feel live. Floor
+    # at 64 so small-N cases still hit multiple threads per batch.
+    batch_size = max(64, (N + 19) // 20)
 
     try:
-        for i, dist, factor in Parallel(  # type: ignore[reportGeneralTypeIssues]
-            return_as="generator_unordered", n_jobs=n_jobs, require="sharedmem"
-        )(delayed(process_energy)(i, fuzzy) for i in idx_bar):
-            results[i] = dist, factor
+        for start in range(0, N, batch_size):
+            end = min(start + batch_size, N)
+            results[start:end] = _run_kernel(start, end, fuzzy)
+            idx_bar.update(end - start)
 
-            if not np.isnan(dist) and dist < best_dist:
-                # Update best result
-                best_idx = i
-                best_factor = factor
-                best_params = f_params[i] * factor
-                best_dist = dist
-        else:
-            idx_bar.set_description_str("Done! ")
-        if fuzzy:
-            # recalculate factor
-            best_idx, best_dist, best_factor = process_energy(best_idx, fuzzy=False)
-            best_params = f_params[best_idx] * best_factor
+        finite_mask = np.isfinite(results[:, 0])
+        if finite_mask.any():
+            best_idx = int(np.argmin(np.where(finite_mask, results[:, 0], np.inf)))
+            best_dist = float(results[best_idx, 0])
+            best_scale = float(results[best_idx, 1])
+            best_params = f_params[best_idx] * best_scale
+
+        idx_bar.set_description_str("Done! ")
+        if fuzzy and np.isfinite(best_dist):
+            # recalculate scale with exact method and keep results consistent
+            single = _run_kernel(best_idx, best_idx + 1, False)
+            best_dist = float(single[0, 0])
+            best_scale = float(single[0, 1])
+            best_params = f_params[best_idx] * best_scale
+            results[best_idx] = best_dist, best_scale
 
     except KeyboardInterrupt:
         pass
     finally:
         idx_bar.close()
 
-    fig = plt.figure(figsize=(10, 7))
-    gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
+    if not np.isfinite(best_dist):
+        raise RuntimeError(
+            "No valid candidate found in database (all parameter bounds infeasible)."
+        )
 
-    fig.suptitle(
-        f"Best Distance: {best_dist:.2g}, EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}"
-    )
+    fig: Figure | None = None
+    if plot:
+        fig = plt.figure(figsize=(10, 7))
+        gs = fig.add_gridspec(3, 2, width_ratios=[1.5, 1])
 
-    p_freqs = find_close_points(freqs, sf_energies[best_idx], best_factor, transitions)
+        fig.suptitle(
+            f"Best Distance: {best_dist:.2g}, EJ={best_params[0]:.2f}, EC={best_params[1]:.2f}, EL={best_params[2]:.2f}"
+        )
 
-    # Frequency comparison plot
-    ax_freq = fig.add_subplot(gs[:, 0])
-    ax_freq.scatter(fluxs, freqs, label="Target", color="blue", marker="o")
-    ax_freq.scatter(fluxs, p_freqs, label="Predicted", color="red", marker="x")
-    ax_freq.set_ylabel("Frequency (GHz)")
-    ax_freq.set_xlabel("Flux")
-    ax_freq.legend()
-    ax_freq.grid(True)
+        p_freqs = find_close_points(
+            freqs, sf_energies[best_idx], best_scale, transitions
+        )
 
-    # Create scatter plots for EJ, EC,
-    dists, factors = results[:, 0], results[:, 1]
-    for i, (name, bound) in enumerate([("EJ", EJb), ("EC", ECb), ("EL", ELb)]):
-        ax_param = fig.add_subplot(gs[i, 1])
-        ax_param.set_xlim(*bound)
-        ax_param.set_xlabel(name)
-        ax_param.set_ylabel("Distance")
-        ax_param.grid()
+        # Frequency comparison plot
+        ax_freq = fig.add_subplot(gs[:, 0])
+        ax_freq.scatter(fluxs, freqs, label="Target", color="blue", marker="o")
+        ax_freq.scatter(fluxs, p_freqs, label="Predicted", color="red", marker="x")
+        ax_freq.set_ylabel("Frequency (GHz)")
+        ax_freq.set_xlabel("Flux")
+        ax_freq.legend()
+        ax_freq.grid(True)
 
-        ax_param.scatter(f_params[:, i] * factors, dists, s=2)
-        ax_param.scatter([best_params[i]], [best_dist], color="red", s=50, marker="*")
-        ax_param.set_ylim(0.0, np.max(dists[np.isfinite(dists)]) * 1.1)
+        # Per-parameter distance scatter (4k points each — rasterize).
+        dists, scales = results[:, 0], results[:, 1]
+        finite_dists = dists[np.isfinite(dists)]
+        y_top = float(np.max(finite_dists) * 1.1) if finite_dists.size else None
+        for i, (name, bound) in enumerate([("EJ", EJb), ("EC", ECb), ("EL", ELb)]):
+            ax_param = fig.add_subplot(gs[i, 1])
+            ax_param.set_xlim(*bound)
+            ax_param.set_xlabel(name)
+            ax_param.set_ylabel("Distance")
+            ax_param.grid()
 
-    plt.show()
+            ax_param.scatter(f_params[:, i] * scales, dists, s=2, rasterized=True)
+            ax_param.scatter(
+                [best_params[i]], [best_dist], color="red", s=50, marker="*"
+            )
+            if y_top is not None:
+                ax_param.set_ylim(0.0, y_top)
 
-    return tuple(best_params), fig
+        plt.show()
+
+    return (float(best_params[0]), float(best_params[1]), float(best_params[2])), fig
 
 
 def fit_spectrum(
@@ -339,7 +241,7 @@ def fit_spectrum(
 ) -> tuple[float, float, float]:
     max_lvl = count_max_evals(transitions)
 
-    pbar = tqdm(desc="Distance: nan", total=maxfun)
+    pbar = tqdm(desc="Distance: nan", total=maxfun, leave=False)
 
     def update_pbar(params, dist) -> None:
         nonlocal pbar
@@ -366,24 +268,25 @@ def fit_spectrum(
 
     import scqubits.settings as scq_settings
 
-    scq_settings.PROGRESSBAR_DISABLED, old = True, scq_settings.PROGRESSBAR_DISABLED
+    old = scq_settings.PROGRESSBAR_DISABLED
+    scq_settings.PROGRESSBAR_DISABLED = True
 
     EJb, ECb, ELb = param_b
-    res = least_squares(
-        residuals,
-        init_params,
-        bounds=((EJb[0], ECb[0], ELb[0]), (EJb[1], ECb[1], ELb[1])),
-        max_nfev=maxfun,
-        loss="soft_l1",
-    )
-
-    pbar.close()
-
-    scq_settings.PROGRESSBAR_DISABLED = old
+    try:
+        res = least_squares(
+            residuals,
+            init_params,
+            bounds=((EJb[0], ECb[0], ELb[0]), (EJb[1], ECb[1], ELb[1])),
+            max_nfev=maxfun,
+            loss="soft_l1",
+        )
+    finally:
+        scq_settings.PROGRESSBAR_DISABLED = old
+        pbar.close()
 
     if isinstance(res, np.ndarray):  # old version
         best_params = res
     else:
         best_params = res.x
 
-    return tuple(best_params)
+    return (float(best_params[0]), float(best_params[1]), float(best_params[2]))
