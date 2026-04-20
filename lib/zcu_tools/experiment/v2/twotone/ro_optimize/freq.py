@@ -21,7 +21,7 @@ from typing_extensions import (
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
-from zcu_tools.experiment.v2.tracker import KMeansTracker
+from zcu_tools.experiment.v2.tracker import MomentTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
@@ -53,7 +53,7 @@ class FreqCfg(ModularProgramCfg, TaskCfg):
     sweep: dict[str, SweepCfg]
 
 
-RawResult: TypeAlias = list[KMeansTracker]
+RawResult: TypeAlias = list[MomentTracker]
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
@@ -101,7 +101,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     ("freq", freq_sweep),
                 ],
             )
-            tracker = KMeansTracker()
+            tracker = MomentTracker()
             prog.acquire(
                 soc,
                 progress=False,

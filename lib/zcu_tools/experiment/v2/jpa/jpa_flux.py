@@ -25,7 +25,7 @@ from zcu_tools.experiment.utils import (
     setup_devices,
 )
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.tracker import KMeansTracker
+from zcu_tools.experiment.v2.tracker import MomentTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
@@ -65,8 +65,8 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.float64], Any],
-            update_hook: Optional[Callable[[int, list[KMeansTracker]], None]],
-        ) -> list[KMeansTracker]:
+            update_hook: Optional[Callable[[int, list[MomentTracker]], None]],
+        ) -> list[MomentTracker]:
             cfg: FluxCfg = cast(FluxCfg, ctx.cfg)
             setup_devices(cfg, progress=False)
             modules = cfg["modules"]
@@ -83,7 +83,7 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
                 ],
                 sweep=[("ge", 2)],
             )
-            tracker = KMeansTracker()
+            tracker = MomentTracker()
             prog.acquire(
                 soc,
                 progress=False,

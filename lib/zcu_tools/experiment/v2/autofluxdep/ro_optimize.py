@@ -12,7 +12,7 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
-from zcu_tools.experiment.v2.tracker import KMeansTracker
+from zcu_tools.experiment.v2.tracker import MomentTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.meta_tool import ModuleLibrary
@@ -88,7 +88,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         self.gain_expts = gain_expts
         self.cfg_maker = cfg_maker
 
-        def measure_ro_fn(ctx: TaskState, update_hook: Callable) -> list[KMeansTracker]:
+        def measure_ro_fn(ctx: TaskState, update_hook: Callable) -> list[MomentTracker]:
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
 
@@ -116,7 +116,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
                     ("gain", gain_sweep),
                 ],
             )
-            tracker = KMeansTracker()
+            tracker = MomentTracker()
             prog.acquire(
                 ctx.env["soc"],
                 progress=False,
@@ -129,7 +129,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         self.gains = np.linspace(0, 1, gain_expts)  # initial array
         self.task = Task[
             T_RootResult,
-            list[KMeansTracker],
+            list[MomentTracker],
             np.float64,
         ](
             measure_fn=measure_ro_fn,
@@ -262,7 +262,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         np.savez_compressed(filepath, flux_values=flux_values, **result)
 
     @classmethod
-    def load(cls, filepath: str, **kwargs) -> dict:
+    def load(cls, filepath: str) -> dict:
         data = np.load(filepath)
 
         flux_values = data["flux_values"]

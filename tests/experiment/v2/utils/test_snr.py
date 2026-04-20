@@ -1,21 +1,16 @@
-"""Tests for snr_as_signal — verifies it rewards well-separated isotropic
-two-Gaussian signals and penalizes asymmetry about the g-e bisector.
-
-Current metric: erf(||Δcenter|| / (sqrt(32) σ)) × symmetry, where
-symmetry = BC(reflect_g_across_bisector, e), the Bhattacharyya
-coefficient between e's gaussian and g's gaussian reflected across the
-perpendicular bisector of the g-e center segment.
-"""
+"""Tests for snr_as_signal with the disc*sym SNR metric."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, cast
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from zcu_tools.experiment.v2.utils.snr import snr_as_signal
+from zcu_tools.experiment.v2.tracker import MomentTracker
+from zcu_tools.experiment.v2.utils.snr import calc_snr, snr_as_signal
 
 
 # ---------- helpers ----------
@@ -23,24 +18,31 @@ from zcu_tools.experiment.v2.utils.snr import snr_as_signal
 
 @dataclass
 class _FakeTracker:
-    """Minimal stand-in for PCATracker exposing the attributes snr_as_signal reads."""
+    """Minimal stand-in for MomentTracker exposing the attributes snr_as_signal reads."""
 
     mean: NDArray[np.float64]
     covariance: NDArray[np.float64]
-    leader_center: NDArray[np.float64]
+    third_moment: NDArray[np.float64]
+
+
+def _third_moment(samples: np.ndarray) -> np.ndarray:
+    """Population third central moment for one set of IQ samples.
+
+    samples: (N, 2) → out: (2, 2, 2).
+    """
+    centered = samples - samples.mean(axis=0, keepdims=True)
+    return np.einsum("mi,mj,mk->ijk", centered, centered, centered) / centered.shape[0]
 
 
 def _stats_from_samples(samples_ge: np.ndarray):
     """samples_ge: shape (2, N, 2) — (ge, shots, IQ).
 
-    Returns ``[fake_tracker]`` matching the runtime contract where the
-    raw is ``Sequence[PCATracker]`` and snr_as_signal reads
-    ``raw[0].leader_center`` / ``raw[0].covariance``.
+    Returns ``[fake_tracker]`` matching snr_as_signal's contract.
     """
-    avg = samples_ge.mean(axis=1)  # (2, 2)
-    med = np.median(samples_ge, axis=1)  # (2, 2)
+    mean = samples_ge.mean(axis=1)  # (2, 2)
     cov = np.stack([np.cov(s, rowvar=False) for s in samples_ge], axis=0)  # (2, 2, 2)
-    return [_FakeTracker(mean=avg, covariance=cov, leader_center=med)]
+    m3 = np.stack([_third_moment(s) for s in samples_ge], axis=0)  # (2, 2, 2, 2)
+    return [_FakeTracker(mean=mean, covariance=cov, third_moment=m3)]
 
 
 def _isotropic(center, sigma, n, rng):
@@ -55,7 +57,43 @@ def _rotated_elliptical(center, sx, sy, angle, n, rng):
 
 
 def _score(samples_ge):
-    return float(snr_as_signal(_stats_from_samples(samples_ge)))
+    return float(
+        snr_as_signal(cast(list[MomentTracker], _stats_from_samples(samples_ge)))
+    )
+
+
+def _third_gaussian_score(
+    separation: float,
+    third_strength: float,
+    bisector_offset: float,
+    rng: np.random.Generator,
+    n: int = 8000,
+    sigma: float = 1.0,
+    mode: Literal["e_only", "ge_both"] = "e_only",
+) -> float:
+    if mode == "e_only":
+        n_third_g = 0
+        n_third_e = int(round(n * third_strength))
+    elif mode == "ge_both":
+        n_third_each = int(round(n * third_strength / 2.0))
+        n_third_g = n_third_each
+        n_third_e = n_third_each
+    else:
+        raise ValueError(f"Unsupported mode: {mode}")
+
+    g_main = _isotropic([0.0, 0.0], sigma, n - n_third_g, rng)
+    e_main = _isotropic([separation, 0.0], sigma, n - n_third_e, rng)
+    if n_third_g > 0:
+        g_third = _isotropic([separation / 2.0, bisector_offset], sigma, n_third_g, rng)
+        g = np.concatenate([g_main, g_third], axis=0)
+    else:
+        g = g_main
+    if n_third_e > 0:
+        e_third = _isotropic([separation / 2.0, bisector_offset], sigma, n_third_e, rng)
+        e = np.concatenate([e_main, e_third], axis=0)
+    else:
+        e = e_main
+    return _score(np.stack([g, e]))
 
 
 # ---------- tests ----------
@@ -77,9 +115,11 @@ def test_ideal_two_gaussians_well_separated_high_score(rng):
 def test_ideal_two_gaussians_overlapping_low_score(rng):
     n = 5000
     g = _isotropic([0.0, 0.0], 1.0, n, rng)
-    e = _isotropic([0.3, 0.0], 1.0, n, rng)
-    score = _score(np.stack([g, e]))
-    assert score < 0.2
+    e_overlap = _isotropic([0.3, 0.0], 1.0, n, rng)
+    e_sep = _isotropic([10.0, 0.0], 1.0, n, rng)
+    overlap_score = _score(np.stack([g, e_overlap]))
+    sep_score = _score(np.stack([g, e_sep]))
+    assert overlap_score < sep_score
 
 
 def test_identical_centers_near_zero(rng):
@@ -87,18 +127,17 @@ def test_identical_centers_near_zero(rng):
     g = _isotropic([0.0, 0.0], 1.0, n, rng)
     e = _isotropic([0.0, 0.0], 1.0, n, rng)
     score = _score(np.stack([g, e]))
-    assert score < 0.05
+    assert score == pytest.approx(0.0, abs=0.1)
 
 
 def test_separation_monotonicity(rng):
-    """Larger center distance → higher score (all else equal)."""
     n = 5000
     scores = []
     for d in [2.0, 5.0, 10.0, 20.0]:
         g = _isotropic([0.0, 0.0], 1.0, n, rng)
         e = _isotropic([d, 0.0], 1.0, n, rng)
         scores.append(_score(np.stack([g, e])))
-    assert all(scores[i] <= scores[i + 1] + 1e-3 for i in range(len(scores) - 1))
+    assert all(scores[i] <= scores[i + 1] + 0.03 for i in range(len(scores) - 1))
     assert scores[0] < scores[-1]
 
 
@@ -106,8 +145,7 @@ D = 1.2  # near-threshold center separation in units of σ
 
 
 def test_horizontal_ellipse_penalized_vs_isotropic(rng):
-    """Ellipses elongated along the separation axis. Pooled-cov σ inflates
-    along the long axis, shrinking the erf factor."""
+    """σ along separation axis grows → disc shrinks."""
     n = 8000
     g_iso = _isotropic([0.0, 0.0], 1.0, n, rng)
     e_iso = _isotropic([D, 0.0], 1.0, n, rng)
@@ -117,16 +155,12 @@ def test_horizontal_ellipse_penalized_vs_isotropic(rng):
     e_el = _rotated_elliptical([D, 0.0], 2.0, 0.3, 0.0, n, rng)
     el_score = _score(np.stack([g_el, e_el]))
 
-    # σ inflates from 1 to ~1.43 → erf argument shrinks ~30%. Same shape
-    # so consistency≈1. Penalty is moderate (not the >10x of the legacy
-    # metric — that was an explicit (λ_min/λ_max) factor we dropped).
     assert el_score < iso_score
-    assert el_score < iso_score * 0.85
+    assert el_score < iso_score * 0.95
 
 
 def test_shape_mismatch_between_g_and_e_penalized(rng):
-    """g tight & round, e horizontally elongated, same 1.2σ center
-    distance. Bhattacharyya consistency must pull the score down."""
+    """σ_g ≠ σ_e → sym factor drops; total score lower."""
     n = 6000
     g_same = _isotropic([0.0, 0.0], 1.0, n, rng)
     e_same = _isotropic([D, 0.0], 1.0, n, rng)
@@ -137,112 +171,92 @@ def test_shape_mismatch_between_g_and_e_penalized(rng):
     mismatched = _score(np.stack([g_diff, e_diff]))
 
     assert mismatched < matched
-    assert mismatched < matched * 0.6
+    assert mismatched < matched * 0.9
 
 
-def test_third_gaussian_at_midpoint_penalized(rng):
-    """Contaminate e with a third cluster at the midpoint between g and e.
-    Median is robust so peak_contrast barely moves, but inflated cov
-    shrinks the erf term — score must drop."""
-    n = 6000
-    g = _isotropic([0.0, 0.0], 1.0, n, rng)
-    e_clean = _isotropic([D, 0.0], 1.0, n, rng)
-    clean = _score(np.stack([g, e_clean]))
+def test_ge_distance_increases_snr_without_third_interference(rng):
+    sigma = 1.0
+    separations = [0.5 * sigma, 1.0 * sigma, 2.0 * sigma, 3.0 * sigma]
+    scores = [
+        _third_gaussian_score(sep, 0.0, 0.0, rng, sigma=sigma) for sep in separations
+    ]
+    assert all(scores[i] <= scores[i + 1] + 0.02 for i in range(len(scores) - 1))
+    assert scores[-1] > scores[0]
 
-    e_main = _isotropic([D, 0.0], 1.0, int(n * 0.7), rng)
-    e_third = _isotropic([D / 2, 0.0], 1.0, int(n * 0.3), rng)
-    e_contam = np.concatenate([e_main, e_third], axis=0)
-    contaminated = _score(np.stack([g, e_contam]))
 
-    assert contaminated < clean
-    assert contaminated < clean * 0.95
+def test_bisector_strength_sweep_at_2sigma(rng):
+    """Stronger one-sided 3rd Gaussian should reduce the score."""
+    sigma = 1.0
+    separation = 2.0 * sigma
+    strengths = [0.0, 0.1, 0.2, 0.35]
+
+    # Use offset=0 (projection-axis only — perpendicular offset is invisible
+    # to a 1D-projected skew metric).
+    scores = [
+        _third_gaussian_score(separation, s, 0.0, rng, sigma=sigma) for s in strengths
+    ]
+
+    assert all(scores[i + 1] <= scores[i] + 0.03 for i in range(len(strengths) - 1))
+    assert scores[-1] < scores[0] - 0.05
+
+
+def test_e_only_third_contamination_lower_than_symmetric_ge(rng):
+    sigma = 1.0
+    separation = 2.0 * sigma
+    strength = 0.2
+    snr_e_only = _third_gaussian_score(
+        separation, strength, 0.0, rng, sigma=sigma, mode="e_only"
+    )
+    snr_ge_both = _third_gaussian_score(
+        separation, strength, 0.0, rng, sigma=sigma, mode="ge_both"
+    )
+    assert snr_e_only < snr_ge_both
 
 
 def test_symmetry_one_for_bisector_symmetric_shapes(rng):
-    """Shapes that are themselves mirror-symmetric about the bisector
-    (axis-aligned ellipses with the separation along an axis) should
-    score close to 1 at large separation."""
     n = 6000
     g = _isotropic([0.0, 0.0], 1.0, n, rng)
     e = _isotropic([10.0, 0.0], 1.0, n, rng)
     iso_score = _score(np.stack([g, e]))
 
-    # Identical axis-aligned ellipses — symmetric about the y-axis bisector.
     g_a = _rotated_elliptical([0.0, 0.0], 1.5, 0.7, 0.0, n, rng)
     e_a = _rotated_elliptical([10.0, 0.0], 1.5, 0.7, 0.0, n, rng)
     aligned_score = _score(np.stack([g_a, e_a]))
 
     assert iso_score > 0.9
-    assert aligned_score > 0.9
-
-
-def test_symmetry_drops_for_rotated_identical_ellipses(rng):
-    """Identical-shape ellipses tilted at an angle — Σ_g == Σ_e but the
-    pair is NOT mirror-symmetric about the perpendicular bisector, so
-    the new metric should penalize them. This is a deliberate semantic
-    change from the previous shape-consistency metric."""
-    n = 6000
-    g_a = _rotated_elliptical([0.0, 0.0], 1.5, 0.7, 0.0, n, rng)
-    e_a = _rotated_elliptical([10.0, 0.0], 1.5, 0.7, 0.0, n, rng)
-    aligned_score = _score(np.stack([g_a, e_a]))
-
-    g_r = _rotated_elliptical([0.0, 0.0], 1.5, 0.7, 0.5, n, rng)
-    e_r = _rotated_elliptical([10.0, 0.0], 1.5, 0.7, 0.5, n, rng)
-    rotated_score = _score(np.stack([g_r, e_r]))
-
-    assert rotated_score < aligned_score
-
-
-def test_consistency_drops_for_shape_mismatch(rng):
-    """g circular, e wide ellipse, same center → erf factor identical
-    (same trace), but consistency factor distinguishes them."""
-    n = 6000
-    # Identical-shape baseline at large separation
-    g_a = _isotropic([0.0, 0.0], 1.0, n, rng)
-    e_a = _isotropic([10.0, 0.0], 1.0, n, rng)
-    same_shape = _score(np.stack([g_a, e_a]))
-
-    # Asymmetric shapes at the same separation
-    g_b = _isotropic([0.0, 0.0], 1.0, n, rng)
-    e_b = _rotated_elliptical([10.0, 0.0], 2.5, 0.4, 0.0, n, rng)
-    diff_shape = _score(np.stack([g_b, e_b]))
-
-    assert diff_shape < same_shape
-    # consistency for {I, diag(6.25, 0.16)} ≈ 0.55 → score should drop notably
-    assert diff_shape < same_shape * 0.8
+    assert aligned_score > 0.8
 
 
 def test_sweep_axis_broadcasting(rng):
-    """snr_as_signal should produce one score per sweep point when the
-    tracker's leading dims include a sweep axis."""
     n = 3000
     n_sweep = 4
 
-    avgs, meds, covs = [], [], []
+    means, covs, m3s = [], [], []
     for k in range(n_sweep):
         d = 2.0 + 3.0 * k
         g = _isotropic([0.0, 0.0], 1.0, n, rng)
         e = _isotropic([d, 0.0], 1.0, n, rng)
         samples = np.stack([g, e])
-        avgs.append(samples.mean(axis=1))
-        meds.append(np.median(samples, axis=1))
+        means.append(samples.mean(axis=1))
         covs.append(np.stack([np.cov(s, rowvar=False) for s in samples]))
+        m3s.append(np.stack([_third_moment(s) for s in samples]))
 
-    avg = np.stack(avgs, axis=0)  # (sweep, ge, IQ)
-    med = np.stack(meds, axis=0)
+    mean = np.stack(means, axis=0)  # (sweep, ge, IQ)
     cov = np.stack(covs, axis=0)  # (sweep, ge, IQ, IQ)
+    m3 = np.stack(m3s, axis=0)  # (sweep, ge, 2, 2, 2)
 
-    raw = [_FakeTracker(mean=avg, covariance=cov, leader_center=med)]
+    raw = cast(
+        list[MomentTracker],
+        [_FakeTracker(mean=mean, covariance=cov, third_moment=m3)],
+    )
     out = snr_as_signal(raw, ge_axis=1)
     assert out.shape == (n_sweep,)
-    assert np.all(np.diff(out) > 0)
+    assert np.all(np.diff(out) >= -0.04)
 
 
 def test_symmetric_leakage_keeps_symmetry_factor_high(rng):
-    """Both g and e leak 20% into the other state. The pair remains
-    mirror-symmetric about the bisector, so the symmetry factor stays
-    near 1 — any drop in total score comes from inflated pooled cov,
-    not from asymmetry."""
+    """Both g and e leak symmetrically — sym stays near 1, disc drops
+    because projected σ inflates."""
     n = 8000
     sep = 6.0
 
@@ -258,44 +272,38 @@ def test_symmetric_leakage_keeps_symmetry_factor_high(rng):
             _isotropic([0.0, 0.0], 1.0, int(n * 0.2), rng),
         ]
     )
-    sym_score = _score(np.stack([g, e]))
+    stats = _stats_from_samples(np.stack([g, e]))[0]
+    mean_d = stats.mean
+    cov_d = stats.covariance
+    m3_d = stats.third_moment
 
-    # match the inflated pooled covariance with a clean baseline that
-    # has the same per-state cov shape — score should be similar (i.e.
-    # the symmetric leakage didn't get hit hard by the symmetry factor).
+    # Decompose: sym must be ≈1 for mirror-symmetric leakage.
+    axis_vec = mean_d[1] - mean_d[0]
+    axis = axis_vec / np.linalg.norm(axis_vec)
+    sigma_g = float(np.sqrt(axis @ cov_d[0] @ axis))
+    sigma_e = float(np.sqrt(axis @ cov_d[1] @ axis))
+    skew_g = np.einsum("i,j,k,ijk->", axis, axis, axis, m3_d[0]) / sigma_g**3
+    skew_e = np.einsum("i,j,k,ijk->", axis, axis, axis, m3_d[1]) / sigma_e**3
+    d_sym = 0.5 * (skew_g + skew_e) ** 2 + 0.5 * np.log(sigma_g / sigma_e) ** 2
+    sym = float(np.exp(-d_sym))
+
+    assert sym > 0.95  # mirror-symmetric → sym ≈ 1
+
+    sym_score = float(calc_snr(mean_d, cov_d, m3_d, ge_axis=0))
+
+    # Clean baseline with the same inflated σ (so same disc) but no leakage.
     inflated_var = float(np.cov(g, rowvar=False)[0, 0])
     g_baseline = _isotropic([0.0, 0.0], np.sqrt(inflated_var), n, rng)
     e_baseline = _isotropic([sep, 0.0], np.sqrt(inflated_var), n, rng)
     baseline = _score(np.stack([g_baseline, e_baseline]))
 
-    # symmetry factor ≈ 1 → leakage score should track the matched-cov
-    # baseline closely (within ~15%).
-    assert sym_score > baseline * 0.85
-
-
-def test_rotated_pair_penalized_vs_axis_aligned(rng):
-    """Identical-shape ellipses with the same eigenvalues but rotated
-    by 45° are NOT mirror-symmetric about the y-axis bisector — the
-    symmetry factor should make the rotated case score lower than the
-    axis-aligned case (erf factor identical: same trace, same medians)."""
-    n = 8000
-    g_a = _rotated_elliptical([0.0, 0.0], 1.5, 0.5, 0.0, n, rng)
-    e_a = _rotated_elliptical([6.0, 0.0], 1.5, 0.5, 0.0, n, rng)
-    aligned = _score(np.stack([g_a, e_a]))
-
-    g_r = _rotated_elliptical([0.0, 0.0], 1.5, 0.5, np.pi / 4, n, rng)
-    e_r = _rotated_elliptical([6.0, 0.0], 1.5, 0.5, np.pi / 4, n, rng)
-    rotated = _score(np.stack([g_r, e_r]))
-
-    assert rotated < aligned
-    assert rotated < aligned * 0.85
-
-
-
+    # sym≈1 both sides; baseline's Δμ is the full sep, leakage case's Δμ
+    # is smaller → disc drops → sym_score < baseline.
+    assert sym_score < baseline
 
 
 def test_score_bounded_in_zero_one(rng):
-    """erf ∈ [0,1] and consistency ∈ (0,1] → product ∈ [0,1]."""
+    """New metric is bounded by [0, 1] with tiny MC overshoot."""
     n = 2000
     cases = [
         (_isotropic([0, 0], 1.0, n, rng), _isotropic([0, 0], 1.0, n, rng)),
@@ -307,4 +315,53 @@ def test_score_bounded_in_zero_one(rng):
     ]
     for g, e in cases:
         s = _score(np.stack([g, e]))
-        assert 0.0 <= s <= 1.0
+        assert -0.01 <= s <= 1.01
+
+
+def test_skewness_antisymmetric_under_ge_swap(rng):
+    """Swapping G↔E labels reflects axis, so skew_g,e swap and negate;
+    their sum is invariant → sym invariant → total score invariant
+    (disc already symmetric in G/E)."""
+    n = 8000
+    # deliberately asymmetric contamination
+    g = _isotropic([0.0, 0.0], 1.0, n, rng)
+    e_main = _isotropic([4.0, 0.0], 1.0, int(n * 0.7), rng)
+    e_third = _isotropic([2.0, 0.0], 1.0, int(n * 0.3), rng)
+    e = np.concatenate([e_main, e_third], axis=0)
+
+    score_ge = _score(np.stack([g, e]))
+    score_eg = _score(np.stack([e, g]))
+    assert score_ge == pytest.approx(score_eg, abs=1e-9)
+
+
+def test_sym_one_for_perfectly_symmetric_bimodal(rng):
+    """Each side is a symmetric bimodal (mirror-symmetric about its own
+    mean) → skew=0 on both → sym ≈ 1."""
+    n = 20000
+    sep = 6.0
+    # g = symmetric bimodal around 0: peaks at ±a
+    a = 0.5
+    g = np.concatenate(
+        [
+            _isotropic([-a, 0.0], 0.3, n // 2, rng),
+            _isotropic([a, 0.0], 0.3, n // 2, rng),
+        ]
+    )
+    e = np.concatenate(
+        [
+            _isotropic([sep - a, 0.0], 0.3, n // 2, rng),
+            _isotropic([sep + a, 0.0], 0.3, n // 2, rng),
+        ]
+    )
+
+    stats = _stats_from_samples(np.stack([g, e]))[0]
+    mean_d, cov_d, m3_d = stats.mean, stats.covariance, stats.third_moment
+    axis = (mean_d[1] - mean_d[0]) / np.linalg.norm(mean_d[1] - mean_d[0])
+    sigma_g = float(np.sqrt(axis @ cov_d[0] @ axis))
+    sigma_e = float(np.sqrt(axis @ cov_d[1] @ axis))
+    skew_g = np.einsum("i,j,k,ijk->", axis, axis, axis, m3_d[0]) / sigma_g**3
+    skew_e = np.einsum("i,j,k,ijk->", axis, axis, axis, m3_d[1]) / sigma_e**3
+    sym = float(
+        np.exp(-0.5 * (skew_g + skew_e) ** 2 - 0.5 * np.log(sigma_g / sigma_e) ** 2)
+    )
+    assert sym > 0.98

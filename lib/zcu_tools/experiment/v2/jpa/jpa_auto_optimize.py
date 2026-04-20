@@ -28,7 +28,7 @@ from zcu_tools.experiment.utils import (
     setup_devices,
 )
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.tracker import KMeansTracker
+from zcu_tools.experiment.v2.tracker import MomentTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
 from zcu_tools.program import SweepCfg
@@ -79,14 +79,14 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
 
-        def measure_fn(ctx: TaskState, update_hook: Callable) -> list[KMeansTracker]:
+        def measure_fn(ctx: TaskState, update_hook: Callable) -> list[MomentTracker]:
             cfg: JPAOptCfg = cast(JPAOptCfg, ctx.cfg)
             setup_devices(cfg, progress=False)
             modules = cfg["modules"]
 
             prog = ModularProgramV2(
                 soccfg,
-                ctx.cfg,
+                cfg,
                 modules=[
                     Reset("reset", modules.get("reset")),
                     Branch("ge", [], Pulse("pi_pulse", modules["pi_pulse"])),
@@ -95,7 +95,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 sweep=[("ge", 2)],
             )
 
-            tracker = KMeansTracker()
+            tracker = MomentTracker()
             prog.acquire(
                 soc,
                 progress=False,

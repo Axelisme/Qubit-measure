@@ -20,7 +20,7 @@ from zcu_tools.experiment.v2.runner import (
     TaskState,
     run_task,
 )
-from zcu_tools.experiment.v2.tracker import KMeansTracker
+from zcu_tools.experiment.v2.tracker import MomentTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
 from zcu_tools.program import SweepCfg
@@ -205,7 +205,7 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
                     ],
                     sweep=[("ge", 2)],
                 )
-                tracker = KMeansTracker()
+                tracker = MomentTracker()
                 prog.acquire(
                     soc,
                     progress=False,

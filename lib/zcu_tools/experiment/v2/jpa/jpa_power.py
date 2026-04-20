@@ -24,7 +24,7 @@ from zcu_tools.experiment.utils import (
     setup_devices,
 )
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.tracker import KMeansTracker
+from zcu_tools.experiment.v2.tracker import MomentTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlotScatter
 from zcu_tools.program import SweepCfg
@@ -65,8 +65,8 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.float64], Any],
-            update_hook: Optional[Callable[[int, list[KMeansTracker]], None]],
-        ) -> list[KMeansTracker]:
+            update_hook: Optional[Callable[[int, list[MomentTracker]], None]],
+        ) -> list[MomentTracker]:
             cfg: PowerCfg = cast(PowerCfg, ctx.cfg)
             setup_devices(cfg, progress=False)
             modules = cfg["modules"]
@@ -84,7 +84,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 sweep=[("ge", 2)],
             )
 
-            tracker = KMeansTracker()
+            tracker = MomentTracker()
             prog.acquire(
                 soc,
                 progress=False,
