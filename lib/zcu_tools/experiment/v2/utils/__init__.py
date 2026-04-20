@@ -1,3 +1,4 @@
+from . import tracker
 from .helper import merge_result_list
 from .round_zcu import (
     round_sweep_dict,
@@ -10,6 +11,8 @@ from .round_zcu import (
 from .snr import estimate_snr, snr_as_signal, wrap_earlystop_check
 
 __all__ = [
+    # module
+    "tracker",
     # helper
     "merge_result_list",
     # round zcu

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from zcu_tools.experiment.v2.tracker import MomentTracker
+from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 
 
 def _direct_moments(points: np.ndarray):

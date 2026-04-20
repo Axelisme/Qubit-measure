@@ -25,7 +25,7 @@ from zcu_tools.experiment.utils import (
     setup_devices,
 )
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.tracker import MomentTracker
+from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg

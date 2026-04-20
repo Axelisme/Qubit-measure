@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from zcu_tools.experiment.v2.tracker import MomentTracker
+from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.experiment.v2.utils.snr import calc_snr, snr_as_signal
 
 
