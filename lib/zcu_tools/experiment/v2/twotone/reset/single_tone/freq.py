@@ -131,14 +131,14 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         real_signals = reset_signal2real(signals)
 
-        freq, freq_err, kappa, _, y_fit, _ = fit_qubit_freq(
+        freq, freq_err, fwhm, _, y_fit, _ = fit_qubit_freq(
             freqs, real_signals, type="lor"
         )
 
         fig, ax = plt.subplots(figsize=config.figsize)
 
         ax.plot(freqs, real_signals, label="signal", marker="o", markersize=3)
-        ax.plot(freqs, y_fit, label=f"fit, κ = {kappa:.1g} MHz")
+        ax.plot(freqs, y_fit, label=f"fit, FWHM = {fwhm:.1g} MHz")
         label = f"f_reset = {freq:.5g} ± {freq_err:.1g} MHz"
         ax.axvline(freq, color="r", ls="--", label=label)
         ax.set_xlabel("Frequency (MHz)")
@@ -149,7 +149,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         fig.tight_layout()
 
-        return freq, kappa, fig
+        return freq, fwhm, fig
 
     def save(
         self,

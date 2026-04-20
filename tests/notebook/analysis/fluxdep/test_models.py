@@ -3,8 +3,8 @@ import numpy as np
 from zcu_tools.notebook.analysis.fluxdep.models import (
     compile_transitions,
     energy2linearform,
-    energy2linearform_nb,
 )
+from zcu_tools.notebook.analysis.fluxdep.njit import energy2linearform_nb
 
 
 def _check_matches(transitions, energies):

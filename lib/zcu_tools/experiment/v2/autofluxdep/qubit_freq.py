@@ -62,8 +62,8 @@ class QubitFreqResult(TypedDict, closed=True):
     fit_detune: NDArray[np.float64]
     fit_freq: NDArray[np.float64]
     fit_freq_err: NDArray[np.float64]
-    fit_kappa: NDArray[np.float64]
-    fit_kappa_err: NDArray[np.float64]
+    fit_fwhm: NDArray[np.float64]
+    fit_fwhm_err: NDArray[np.float64]
     success: NDArray[np.bool_]
 
 
@@ -171,7 +171,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
 
         real_signals = qubitfreq_signal2real(raw_signals)
 
-        detune, freq_err, kappa, kappa_err, fit_signals, _ = fit_qubit_freq(
+        detune, freq_err, fwhm, fwhm_err, fit_signals, _ = fit_qubit_freq(
             self.detunes, real_signals
         )
         fit_freq = center_freq + detune
@@ -194,12 +194,12 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             detune = np.nan
             fit_freq = np.nan
             freq_err = np.nan
-            kappa = np.nan
-            kappa_err = np.nan
+            fwhm = np.nan
+            fwhm_err = np.nan
             success = False
 
         if success:
-            cur_factor = kappa / float(cfg["modules"]["qub_pulse"].gain)
+            cur_factor = fwhm / float(cfg["modules"]["qub_pulse"].gain)
             prev_factor = info.last.get("qfw_factor", cur_factor)
             num_step = max(
                 1, info["flux_idx"] - info.last.get("qubfreq_success_idx", 0)
@@ -210,7 +210,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             info.update(
                 qubit_freq=fit_freq,
                 fit_detune=detune,
-                fit_kappa=kappa,
+                fit_kappa=fwhm,
                 qfw_factor=smooth_factor,
                 qubfreq_success_idx=info["flux_idx"],
             )
@@ -223,8 +223,8 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
                     fit_detune=np.array(detune),
                     fit_freq=np.array(fit_freq),
                     fit_freq_err=np.array(freq_err),
-                    fit_kappa=np.array(kappa),
-                    fit_kappa_err=np.array(kappa_err),
+                    fit_fwhm=np.array(fwhm),
+                    fit_fwhm_err=np.array(fwhm_err),
                     success=np.array(success),
                 )
             )
@@ -236,8 +236,8 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             fit_detune=np.array(np.nan),
             fit_freq=np.array(np.nan),
             fit_freq_err=np.array(np.nan),
-            fit_kappa=np.array(np.nan),
-            fit_kappa_err=np.array(np.nan),
+            fit_fwhm=np.array(np.nan),
+            fit_fwhm_err=np.array(np.nan),
             success=np.array(False),
         )
 

@@ -17,10 +17,13 @@ def fit_rabi(
     float,
     float,
     float,
+    float,
+    float,
+    float,
     NDArray[np.float64],
     tuple[tuple[float, ...], NDArray[np.float64]],
 ]:
-    """Return (pi_x, pi2_x, freq, fit_signals, (pOpt, pCov))"""
+    """Return (pi_x, pi_x_err, pi2_x, pi2_x_err, freq, freq_err, fit_signals, (pOpt, pCov))"""
 
     # choose fitting function
     fixedparams: list[Optional[float]]
@@ -42,16 +45,32 @@ def fit_rabi(
     freq: float = pOpt[2]
     phase: float = pOpt[3] % 360
 
+    var_freq = float(pCov[2, 2])
+    var_phase = float(pCov[3, 3])
+    cov_pf = float(pCov[3, 2])
+    freq_err = float(np.sqrt(max(var_freq, 0.0)))
+
     # derive pi / pi/2 positions from phase
     if phase > 270:
-        pi_x = (1.5 - phase / 360) / freq
-        pi2_x = (1.25 - phase / 360) / freq
+        A_pi, A_pi2 = 1.5, 1.25
     elif phase < 90:
-        pi_x = (0.5 - phase / 360) / freq
-        pi2_x = (0.25 - phase / 360) / freq
+        A_pi, A_pi2 = 0.5, 0.25
     else:
-        pi_x = (1.0 - phase / 360) / freq
-        pi2_x = (0.75 - phase / 360) / freq
+        A_pi, A_pi2 = 1.0, 0.75
+
+    pi_x = (A_pi - phase / 360) / freq
+    pi2_x = (A_pi2 - phase / 360) / freq
+
+    # error propagation: x = (A - phase/360) / freq
+    # dx/dphase = -1/(360*freq),  dx/dfreq = -x/freq
+    def _xerr(x: float) -> float:
+        dphase = -1.0 / (360.0 * freq)
+        dfreq = -x / freq
+        var = dphase**2 * var_phase + dfreq**2 * var_freq + 2 * dphase * dfreq * cov_pf
+        return float(np.sqrt(max(var, 0.0)))
+
+    pi_x_err = _xerr(pi_x)
+    pi2_x_err = _xerr(pi2_x)
 
     # while pi2_x < min_length:
     #     pi2_x += 1.0 / freq
@@ -59,4 +78,13 @@ def fit_rabi(
 
     pOpt = cast(tuple[float, float, float, float, float], tuple(pOpt))
 
-    return float(pi_x), float(pi2_x), float(freq), fit_signals, (pOpt, pCov)
+    return (
+        float(pi_x),
+        pi_x_err,
+        float(pi2_x),
+        pi2_x_err,
+        float(freq),
+        freq_err,
+        fit_signals,
+        (pOpt, pCov),
+    )

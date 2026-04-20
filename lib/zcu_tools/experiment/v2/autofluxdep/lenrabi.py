@@ -59,7 +59,7 @@ def lenrabi_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.f
 
 def auto_fit_lenrabi(
     lengths: NDArray[np.float64], real_signals: NDArray[np.float64]
-) -> tuple[float, float, float, float, NDArray[np.float64]]:
+) -> tuple[float, float, float, float, float, float, float, NDArray[np.float64]]:
     *decay_args, decay_signals, _ = fit_rabi(lengths, real_signals, decay=True)
     *normal_args, normal_signals, _ = fit_rabi(lengths, real_signals, decay=False)
 
@@ -73,9 +73,18 @@ def auto_fit_lenrabi(
         fit_loss = float(normal_loss)
         fit_signals = normal_signals
         fit_params = normal_args
-    pi_len, pi2_len, rabi_freq = fit_params
+    pi_len, pi_len_err, pi2_len, pi2_len_err, rabi_freq, rabi_freq_err = fit_params
 
-    return pi_len, pi2_len, rabi_freq, fit_loss, fit_signals
+    return (
+        pi_len,
+        pi_len_err,
+        pi2_len,
+        pi2_len_err,
+        rabi_freq,
+        rabi_freq_err,
+        fit_loss,
+        fit_signals,
+    )
 
 
 class LenRabiModuleCfg(TypedDict, closed=True):
@@ -196,8 +205,8 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotDict])
             len_sweep, "time", {"soccfg": ctx.env["soccfg"], "gen_ch": rabi_pulse.ch}
         )
 
-        pi_len, pi2_len, rabi_freq, mean_err, fit_signals = auto_fit_lenrabi(
-            self.lengths, real_signals
+        (pi_len, _, pi2_len, _, rabi_freq, _, mean_err, fit_signals) = (
+            auto_fit_lenrabi(self.lengths, real_signals)
         )
 
         success = True

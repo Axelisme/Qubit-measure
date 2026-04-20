@@ -180,7 +180,7 @@ def fit_gauss_decay(
     float,
     float,
     NDArray[np.float64],
-    tuple[tuple[float, float, float, float, float], NDArray[np.float64]],
+    tuple[tuple[float, float, float, float], NDArray[np.float64]],
 ]:
     """return [t2g, t2gerr, fit_signals, (pOpt, pCov)]"""
     pOpt, pCov = fit_gauss(
@@ -189,14 +189,14 @@ def fit_gauss_decay(
 
     fit_signals = gauss_func(xs, *pOpt)
 
-    sigma = pOpt[2]
-    sigma_err: float = np.sqrt(pCov[2, 2])
+    sigma = pOpt[3]
+    sigma_err: float = np.sqrt(pCov[3, 3])
 
     # effective T2
     # f(0) * exp(-1) = f(0) * exp(-t2^2 / (2*sigma^2))
     t2 = np.sqrt(2) * sigma
     t2_err = np.sqrt(2) * sigma_err
 
-    pOpt = (pOpt[0], pOpt[1], pOpt[2], pOpt[3], pOpt[4])
+    pOpt = (pOpt[0], pOpt[1], pOpt[2], pOpt[3])
 
     return t2, t2_err, fit_signals, (pOpt, pCov)

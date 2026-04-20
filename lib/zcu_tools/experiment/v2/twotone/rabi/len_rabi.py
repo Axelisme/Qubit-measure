@@ -190,7 +190,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
     def analyze(
         self, result: Optional[LenRabiResult] = None, *, decay: bool = True
-    ) -> tuple[float, float, float, Figure]:
+    ) -> tuple[float, float, float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -206,7 +206,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         lens = lens[~nan_mask]
         real_signals = real_signals[~nan_mask]
 
-        pi_len, pi2_len, freq, y_fit, _ = fit_rabi(
+        pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, y_fit, _ = fit_rabi(
             lens, real_signals, decay=decay, init_phase=None
         )
 
@@ -215,17 +215,31 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         ax.plot(lens, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(lens, y_fit, label="fit")
-        ax.axvline(pi_len, ls="--", c="red", label=f"pi = {pi_len:.3g} μs")
-        ax.axvline(pi2_len, ls="--", c="red", label=f"pi/2 = {pi2_len:.3g} μs")
+        ax.axvline(
+            pi_len,
+            ls="--",
+            c="red",
+            label=f"pi = {pi_len:.3g} ± {pi_len_err:.2g} μs",
+        )
+        ax.axvspan(pi_len - pi_len_err, pi_len + pi_len_err, color="red", alpha=0.2)
+        ax.axvline(
+            pi2_len,
+            ls="--",
+            c="red",
+            label=f"pi/2 = {pi2_len:.3g} ± {pi2_len_err:.2g} μs",
+        )
+        ax.axvspan(
+            pi2_len - pi2_len_err, pi2_len + pi2_len_err, color="red", alpha=0.2
+        )
         ax.set_xlabel("Pulse length (μs)")
         ax.set_ylabel("Signal Real (a.u.)")
-        ax.set_title(f"Rabi Oscillation (f={freq:.3f} MHz)")
+        ax.set_title(f"Rabi Oscillation (f={freq:.3f} ± {freq_err:.3f} MHz)")
         ax.legend(loc=4)
         ax.grid(True)
 
         fig.tight_layout()
 
-        return pi_len, pi2_len, freq, fig
+        return pi_len, pi_len_err, pi2_len, pi2_len_err, freq, freq_err, fig
 
     def save(
         self,

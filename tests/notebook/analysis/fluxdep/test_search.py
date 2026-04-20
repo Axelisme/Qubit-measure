@@ -1,6 +1,6 @@
 import numpy as np
 
-from zcu_tools.notebook.analysis.fluxdep.fitting import (
+from zcu_tools.notebook.analysis.fluxdep.njit import (
     candidate_breakpoint_search,
     eval_dist_bounded,
     smart_fuzzy_search,

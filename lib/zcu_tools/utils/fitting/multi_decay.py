@@ -122,8 +122,8 @@ def fit_transition_rates(
         lambda *args: model_func(*args).flatten(),
         p0_guess,
         bounds=(
-            [0.0] * 6 + [max(0, p0_g - 0.001), max(0, p0_e - 0.001)],
-            [max_R] * 6 + [min(1, p0_g + 0.001), min(1, p0_e + 0.001)],
+            [0.0] * 6 + [max(0, p0_g - 0.01), max(0, p0_e - 0.001)],
+            [max_R] * 6 + [min(1, p0_g + 0.01), min(1, p0_e + 0.001)],
         ),
     )
     # pOpt = list(p0_guess)

@@ -33,10 +33,12 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from zcu_tools.notebook.analysis.fluxdep.fitting import (  # noqa: E402
-    candidate_breakpoint_search,
-    eval_dist_bounded,
     fit_spectrum,
     search_in_database,
+)
+from zcu_tools.notebook.analysis.fluxdep.njit import (  # noqa: E402
+    candidate_breakpoint_search,
+    eval_dist_bounded,
     smart_fuzzy_search,
 )
 from zcu_tools.simulate.fluxonium import calculate_energy_vs_flux  # noqa: E402

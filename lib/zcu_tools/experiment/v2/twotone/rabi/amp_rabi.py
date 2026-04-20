@@ -84,7 +84,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
 
     def analyze(
         self, result: Optional[AmpRabiResult] = None, skip: int = 0
-    ) -> tuple[float, float, Figure]:
+    ) -> tuple[float, float, float, float, Figure]:
         if result is None:
             result = self.last_result
         assert result is not None, "no result found"
@@ -100,7 +100,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
         else:
             init_phase = 180
 
-        pi_amp, pi2_amp, _, y_fit, _ = fit_rabi(
+        pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, _, _, y_fit, _ = fit_rabi(
             gains, real_signals, decay=False, init_phase=init_phase
         )
 
@@ -109,8 +109,19 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
 
         ax.plot(gains, real_signals, label="meas", ls="-", marker="o", markersize=3)
         ax.plot(gains, y_fit, label="fit")
-        ax.axvline(pi_amp, ls="--", c="red", label=f"pi = {pi_amp:.3g}")
-        ax.axvline(pi2_amp, ls="--", c="red", label=f"pi/2 = {pi2_amp:.3g}")
+        ax.axvline(
+            pi_amp, ls="--", c="red", label=f"pi = {pi_amp:.3g} ± {pi_amp_err:.2g}"
+        )
+        ax.axvspan(pi_amp - pi_amp_err, pi_amp + pi_amp_err, color="red", alpha=0.2)
+        ax.axvline(
+            pi2_amp,
+            ls="--",
+            c="red",
+            label=f"pi/2 = {pi2_amp:.3g} ± {pi2_amp_err:.2g}",
+        )
+        ax.axvspan(
+            pi2_amp - pi2_amp_err, pi2_amp + pi2_amp_err, color="red", alpha=0.2
+        )
         ax.set_xlabel("Pulse gain (a.u.)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.legend(loc=4)
@@ -118,7 +129,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
 
         fig.tight_layout()
 
-        return pi_amp, pi2_amp, fig
+        return pi_amp, pi_amp_err, pi2_amp, pi2_amp_err, fig
 
     def save(
         self,
