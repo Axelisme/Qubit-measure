@@ -25,7 +25,7 @@ from zcu_tools.experiment.utils import (
     setup_devices,
 )
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.tracker import PCATracker
+from zcu_tools.experiment.v2.tracker import KMeansTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
@@ -65,24 +65,8 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
 
         def measure_fn(
             ctx: TaskState[NDArray[np.float64], Any],
-            update_hook: Optional[
-                Callable[
-                    [
-                        int,
-                        tuple[
-                            list[NDArray[np.float64]],
-                            list[NDArray[np.float64]],
-                            list[NDArray[np.float64]],
-                        ],
-                    ],
-                    None,
-                ]
-            ],
-        ) -> tuple[
-            list[NDArray[np.float64]],
-            list[NDArray[np.float64]],
-            list[NDArray[np.float64]],
-        ]:
+            update_hook: Optional[Callable[[int, list[KMeansTracker]], None]],
+        ) -> list[KMeansTracker]:
             cfg: FluxCfg = cast(FluxCfg, ctx.cfg)
             setup_devices(cfg, progress=False)
             modules = cfg["modules"]
@@ -99,16 +83,14 @@ class FluxExp(AbsExperiment[FluxResult, FluxCfg]):
                 ],
                 sweep=[("ge", 2)],
             )
-            tracker = PCATracker()
-            avg_d = prog.acquire(
+            tracker = KMeansTracker()
+            prog.acquire(
                 soc,
                 progress=False,
-                callback=lambda i, avg_d: update_hook(
-                    i, (avg_d, [tracker.covariance], [tracker.rough_median])
-                ),
+                callback=lambda i, avg_d: update_hook(i, [tracker]),
                 statistic_trackers=[tracker],
             )
-            return avg_d, [tracker.covariance], [tracker.rough_median]
+            return [tracker]
 
         with LivePlot1D("JPA Flux value (a.u.)", "Signal Difference") as viewer:
             signals = run_task(

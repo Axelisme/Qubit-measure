@@ -28,7 +28,7 @@ from zcu_tools.experiment.utils import (
     setup_devices,
 )
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.tracker import PCATracker
+from zcu_tools.experiment.v2.tracker import KMeansTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot, instant_plot
 from zcu_tools.program import SweepCfg
@@ -79,13 +79,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
 
-        def measure_fn(
-            ctx: TaskState, update_hook: Callable
-        ) -> tuple[
-            list[NDArray[np.float64]],
-            list[NDArray[np.float64]],
-            list[NDArray[np.float64]],
-        ]:
+        def measure_fn(ctx: TaskState, update_hook: Callable) -> list[KMeansTracker]:
             cfg: JPAOptCfg = cast(JPAOptCfg, ctx.cfg)
             setup_devices(cfg, progress=False)
             modules = cfg["modules"]
@@ -101,16 +95,14 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                 sweep=[("ge", 2)],
             )
 
-            tracker = PCATracker()
-            avg_d = prog.acquire(
+            tracker = KMeansTracker()
+            prog.acquire(
                 soc,
                 progress=False,
-                callback=lambda i, avg_d: update_hook(
-                    i, (avg_d, [tracker.covariance], [tracker.rough_median])
-                ),
+                callback=lambda i, avg_d: update_hook(i, [tracker]),
                 statistic_trackers=[tracker],
             )
-            return avg_d, [tracker.covariance], [tracker.rough_median]
+            return [tracker]
 
         def update_fn(i, ctx: TaskState, _) -> None:
             ctx.env["index"] = i

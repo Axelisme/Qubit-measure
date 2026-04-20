@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing_extensions import TypedDict
 
-from .improve_acquire import AbsStatisticTracker, ImproveAcquireMixin
+from .improve_acquire import TrackerProtocol, ImproveAcquireMixin
 
 
 class SweepCfg(TypedDict, closed=True):
@@ -12,12 +12,11 @@ class SweepCfg(TypedDict, closed=True):
     step: float
 
 
-
 __all__ = [
     # improve acquire
     "ImproveAcquireMixin",
     # sweep
     "SweepCfg",
-    # statistic tracker
-    "AbsStatisticTracker",
+    # tracker
+    "TrackerProtocol",
 ]

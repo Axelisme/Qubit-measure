@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import sys
 import warnings
-from abc import ABC, abstractmethod
 
 import numpy as np
 from qick.qick_asm import AcquireMixin
 from typing_extensions import (
     Callable,
+    Protocol,
     Generic,
     List,
     Optional,
@@ -25,6 +25,7 @@ else:
     T_val = TypeVar("T_val")
 
     class NDArray(np.ndarray, Generic[T_val]): ...
+
 
 CallbackType: TypeAlias = Callable[[int, List[NDArray[np.float64]]], None]
 
@@ -206,8 +207,7 @@ class SingleShotMixin(TypedAcquireMixin):
         return shots
 
 
-class AbsStatisticTracker(ABC):
-    @abstractmethod
+class TrackerProtocol(Protocol):
     def update(self, points: NDArray[np.float64]) -> None:
         """points shape: (*sweep, reps, 2)"""
 
@@ -225,7 +225,7 @@ class StatisticMixin(TypedAcquireMixin):
 
         trackers = self.acquire_params.get("statistic_trackers")
         if trackers is not None:
-            trackers = cast(List[AbsStatisticTracker], trackers)
+            trackers = cast(List[TrackerProtocol], trackers)
             if self.acquire_params["type"] != "accumulated":
                 raise NotImplementedError(
                     "Statistic is not implemented for type other than accumulated"
@@ -260,7 +260,7 @@ class StatisticMixin(TypedAcquireMixin):
     def acquire(
         self,
         *args,
-        statistic_trackers: Optional[List[AbsStatisticTracker]] = None,
+        statistic_trackers: Optional[List[TrackerProtocol]] = None,
         **kwargs,
     ):
         extra_args = kwargs.pop("extra_args", dict())

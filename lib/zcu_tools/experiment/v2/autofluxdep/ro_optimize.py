@@ -12,7 +12,7 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
-from zcu_tools.experiment.v2.tracker import PCATracker
+from zcu_tools.experiment.v2.tracker import KMeansTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.meta_tool import ModuleLibrary
@@ -88,13 +88,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         self.gain_expts = gain_expts
         self.cfg_maker = cfg_maker
 
-        def measure_ro_fn(
-            ctx: TaskState, update_hook: Callable
-        ) -> tuple[
-            list[NDArray[np.float64]],
-            list[NDArray[np.float64]],
-            list[NDArray[np.float64]],
-        ]:
+        def measure_ro_fn(ctx: TaskState, update_hook: Callable) -> list[KMeansTracker]:
             cfg = deepcopy(ctx.cfg)
             modules = cfg["modules"]
 
@@ -122,26 +116,20 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
                     ("gain", gain_sweep),
                 ],
             )
-            tracker = PCATracker()
-            avg_d = prog.acquire(
+            tracker = KMeansTracker()
+            prog.acquire(
                 ctx.env["soc"],
                 progress=False,
-                callback=lambda i, avg_d: update_hook(
-                    i, (avg_d, [tracker.covariance], [tracker.rough_median])
-                ),
+                callback=lambda i, avg_d: update_hook(i, [tracker]),
                 statistic_trackers=[tracker],
             )
-            return avg_d, [tracker.covariance], [tracker.rough_median]
+            return [tracker]
 
         self.freqs = np.linspace(0, 1, freq_expts)  # initial array
         self.gains = np.linspace(0, 1, gain_expts)  # initial array
         self.task = Task[
             T_RootResult,
-            tuple[
-                list[NDArray[np.float64]],
-                list[NDArray[np.float64]],
-                list[NDArray[np.float64]],
-            ],
+            list[KMeansTracker],
             np.float64,
         ](
             measure_fn=measure_ro_fn,
