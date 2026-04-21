@@ -81,7 +81,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                     round_hook=update_hook,
                     g_center=g_center,
                     e_center=e_center,
-                    population_radius=radius,
+                    ge_radius=radius,
                 )
 
             populations = run_task(

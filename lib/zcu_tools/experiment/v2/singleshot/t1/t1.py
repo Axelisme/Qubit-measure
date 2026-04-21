@@ -176,7 +176,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     round_hook=update_hook,
                     g_center=g_center,
                     e_center=e_center,
-                    population_radius=radius,
+                    ge_radius=radius,
                 )
                 if uniform:
                     len_param = sweep2param("length", ctx.cfg["sweep"]["length"])

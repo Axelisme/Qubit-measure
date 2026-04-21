@@ -262,7 +262,7 @@ class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotD
                 round_hook=update_hook,
                 g_center=g_center,
                 e_center=e_center,
-                population_radius=radius,
+                ge_radius=radius,
             )
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]], np.float64](
@@ -361,7 +361,7 @@ class T1WithToneTask(
                 round_hook=update_hook,
                 g_center=g_center,
                 e_center=e_center,
-                population_radius=radius,
+                ge_radius=radius,
             )
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]], np.float64](

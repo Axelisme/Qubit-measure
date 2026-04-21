@@ -143,7 +143,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 round_hook=update_hook,
                 g_center=g_center,
                 e_center=e_center,
-                population_radius=radius,
+                ge_radius=radius,
             )
             if uniform:
                 len_param = sweep2param("length", ctx.cfg["sweep"]["length"])

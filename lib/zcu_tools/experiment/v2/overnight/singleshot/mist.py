@@ -338,7 +338,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
                 round_hook=update_hook,
                 g_center=g_center,
                 e_center=e_center,
-                population_radius=radius,
+                ge_radius=radius,
             )
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]], np.float64](

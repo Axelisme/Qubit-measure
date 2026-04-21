@@ -104,7 +104,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 round_hook=update_hook,
                 g_center=g_center,
                 e_center=e_center,
-                population_radius=radius,
+                ge_radius=radius,
             )
 
         with LivePlot1D(

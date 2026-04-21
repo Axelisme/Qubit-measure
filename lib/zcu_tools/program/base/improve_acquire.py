@@ -5,7 +5,16 @@ import warnings
 import numpy as np
 from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
-from typing_extensions import Callable, List, Optional, Protocol, TypeAlias, Union, cast
+from typing_extensions import (
+    Callable,
+    List,
+    Optional,
+    Protocol,
+    TypeAlias,
+    Union,
+    cast,
+    final,
+)
 
 RoundHookType: TypeAlias = Callable[[int, List[NDArray[np.float64]]], None]
 
@@ -94,15 +103,11 @@ class SingleShotMixin(TypedAcquireMixin):
         *args,
         g_center: Optional[complex] = None,
         e_center: Optional[complex] = None,
-        population_radius: Optional[float] = None,
+        ge_radius: Optional[float] = None,
         **kwargs,
     ):
         extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(
-            g_center=g_center,
-            e_center=e_center,
-            population_radius=population_radius,
-        )
+        extra_args.update(g_center=g_center, e_center=e_center, ge_radius=ge_radius)
 
         return super().acquire(*args, extra_args=extra_args, **kwargs)
 
@@ -111,27 +116,24 @@ class SingleShotMixin(TypedAcquireMixin):
         *args,
         g_center: Optional[complex] = None,
         e_center: Optional[complex] = None,
-        population_radius: Optional[float] = None,
+        ge_radius: Optional[float] = None,
         **kwargs,
     ):
         extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(
-            g_center=g_center,
-            e_center=e_center,
-            population_radius=population_radius,
-        )
+        extra_args.update(g_center=g_center, e_center=e_center, ge_radius=ge_radius)
 
         return super().acquire_decimated(*args, extra_args=extra_args, **kwargs)
 
+    @final
     def _process_accumulated(self, acc_buf) -> List[NDArray[np.float64]]:
         assert self.acquire_params is not None
 
         threshold: Optional[float] = self.acquire_params.get("threshold")
         angle: Optional[float] = self.acquire_params.get("angle")
 
-        ge_radius: Optional[float] = self.acquire_params.get("population_radius")
         g_center: Optional[complex] = self.acquire_params.get("g_center")
         e_center: Optional[complex] = self.acquire_params.get("e_center")
+        ge_radius: Optional[float] = self.acquire_params.get("ge_radius")
 
         remove_offset: bool = self.acquire_params["remove_offset"]
 
@@ -139,7 +141,7 @@ class SingleShotMixin(TypedAcquireMixin):
             d_reps = [np.zeros_like(d) for d in acc_buf]
             if ge_radius is not None:
                 warnings.warn(
-                    "Both threshold and population_radius are set, threshold will be applied and population_radius will be ignored"
+                    "Both threshold and ge_radius are set, threshold will be applied and ge_radius will be ignored"
                 )
             self.shots = self._apply_threshold(acc_buf, threshold, angle, remove_offset)
             for i, ch_shot in enumerate(self.shots):
@@ -149,7 +151,7 @@ class SingleShotMixin(TypedAcquireMixin):
             d_reps = [np.zeros_like(d) for d in acc_buf]
             if g_center is None or e_center is None:
                 raise ValueError(
-                    "g_center and e_center must be provided when population_radius is set"
+                    "g_center and e_center must be provided when ge_radius is set"
                 )
             self.shots = self._apply_classification(
                 acc_buf, g_center, e_center, ge_radius, remove_offset
@@ -170,7 +172,7 @@ class SingleShotMixin(TypedAcquireMixin):
         acc_buf: List[NDArray[np.float64]],
         g_center: complex,
         e_center: complex,
-        population_radius: float,
+        ge_radius: float,
         remove_offset: bool,
     ) -> List[NDArray[np.float64]]:
         shots = []
@@ -181,8 +183,8 @@ class SingleShotMixin(TypedAcquireMixin):
                 avg -= offset
             g_dist = np.abs(avg.dot([1, 1j]) - g_center)
             e_dist = np.abs(avg.dot([1, 1j]) - e_center)
-            g_shot = np.heaviside(population_radius - g_dist, 0)
-            e_shot = np.heaviside(population_radius - e_dist, 0)
+            g_shot = np.heaviside(ge_radius - g_dist, 0)
+            e_shot = np.heaviside(ge_radius - e_dist, 0)
             shots.append(np.stack([g_shot, e_shot], axis=-1))
         return shots
 
@@ -203,9 +205,10 @@ class TrackerMixin(TypedAcquireMixin):
         assert self.acc_buf is not None
         assert self.acquire_params is not None
 
-        trackers = self.acquire_params.get("trackers")
+        trackers = cast(
+            Optional[List[TrackerProtocol]], self.acquire_params.get("trackers")
+        )
         if trackers is not None:
-            trackers = cast(List[TrackerProtocol], trackers)
             if self.acquire_params["type"] != "accumulated":
                 raise NotImplementedError(
                     "Tracker is not implemented for type other than accumulated"
@@ -322,22 +325,22 @@ class RoundHookMixin(TypedAcquireMixin):
         assert acquire_params is not None
 
         # trigger the hook function after each round
-        round_hook: Optional[RoundHookType] = acquire_params["round_hook"]
-        if not_finish and round_hook is not None:
+        round_hook = cast(Optional[RoundHookType], acquire_params.get("round_hook"))
+        if round_hook is not None:
             assert callable(round_hook), "round_hook must be a callable function"
             assert self.rounds_buf is not None
 
             # NOTE: increment the summary to reduce cpu usage
-            round_n = len(self.rounds_buf)
+            round_count = len(self.rounds_buf)
             acquire_type = acquire_params["type"]
             if acquire_type == "accumulated":
                 # avg_d = self._summarize_accumulated(self.rounds_buf)
                 avg_d = self._inc_summarize_accumulated(self.rounds_buf)
-                round_hook(round_n, avg_d)
+                round_hook(round_count, avg_d)
             elif acquire_type == "decimated":
                 # dec_d = self._summarize_decimated(self.rounds_buf)
                 dec_d = self._inc_summarize_decimated(self.rounds_buf)
-                round_hook(round_n, dec_d)
+                round_hook(round_count, dec_d)
             else:
                 raise NotImplementedError(
                     f"Round hook is not implemented for type {acquire_type}"
@@ -347,5 +350,5 @@ class RoundHookMixin(TypedAcquireMixin):
 
 
 class ImproveAcquireMixin(
-    SingleShotMixin, RoundHookMixin, EarlyStopMixin, TrackerMixin
+    RoundHookMixin, TrackerMixin, SingleShotMixin, EarlyStopMixin
 ): ...

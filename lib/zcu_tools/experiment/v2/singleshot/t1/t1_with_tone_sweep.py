@@ -142,7 +142,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 round_hook=update_hook,
                 g_center=g_center,
                 e_center=e_center,
-                population_radius=radius,
+                ge_radius=radius,
             )
 
         fig, axs = make_plot_frame(4, 2, figsize=(12, 10))
