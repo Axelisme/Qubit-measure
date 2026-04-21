@@ -40,7 +40,7 @@ cd Qubit-measure
 git clone https://github.com/openquantumhardware/qick.git
 ```
 
-**注意**: `qick` 庫需要手動安裝，請參考其[官方儲存庫](https://github.com/openquantumhardware/qick.git)。
+**注意**: `qick` 庫需要手動下載，請參考其[官方儲存庫](https://github.com/openquantumhardware/qick.git)。
 
 ### 電腦端
 
