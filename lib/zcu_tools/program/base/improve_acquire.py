@@ -1,33 +1,13 @@
 from __future__ import annotations
 
-import sys
 import warnings
 
 import numpy as np
+from numpy.typing import NDArray
 from qick.qick_asm import AcquireMixin
-from typing_extensions import (
-    Callable,
-    Protocol,
-    Generic,
-    List,
-    Optional,
-    TypeAlias,
-    TypeVar,
-    Union,
-    cast,
-)
+from typing_extensions import Callable, List, Optional, Protocol, TypeAlias, Union, cast
 
-# NOTE: `numpy.typing.NDArray` may be unavailable on Python <=3.8 environments.
-# Usually it is on the xilinx FPGA environment.
-if sys.version_info >= (3, 9):
-    from numpy.typing import NDArray  # type: ignore
-else:
-    T_val = TypeVar("T_val")
-
-    class NDArray(np.ndarray, Generic[T_val]): ...
-
-
-CallbackType: TypeAlias = Callable[[int, List[NDArray[np.float64]]], None]
+RoundHookType: TypeAlias = Callable[[int, List[NDArray[np.float64]]], None]
 
 
 class TypedAcquireMixin(AcquireMixin):
@@ -212,7 +192,7 @@ class TrackerProtocol(Protocol):
         """points shape: (*sweep, reps, 2)"""
 
 
-class StatisticMixin(TypedAcquireMixin):
+class TrackerMixin(TypedAcquireMixin):
     """
     Add statistic information for acquired method to the AcquireMixin class
     """
@@ -223,24 +203,24 @@ class StatisticMixin(TypedAcquireMixin):
         assert self.acc_buf is not None
         assert self.acquire_params is not None
 
-        trackers = self.acquire_params.get("statistic_trackers")
+        trackers = self.acquire_params.get("trackers")
         if trackers is not None:
             trackers = cast(List[TrackerProtocol], trackers)
             if self.acquire_params["type"] != "accumulated":
                 raise NotImplementedError(
-                    "Statistic is not implemented for type other than accumulated"
+                    "Tracker is not implemented for type other than accumulated"
                 )
 
             if self.acquire_params["threshold"] is not None:
                 raise NotImplementedError(
-                    "Statistic is not implemented for thresholded data"
+                    "Tracker is not implemented for thresholded data"
                 )
 
             ro_chs: dict = self.ro_chs  # type: ignore
 
             if len(trackers) != len(self.acc_buf):
                 raise ValueError(
-                    f"Number of statistic trackers ({len(trackers)}) must match number of readout channels ({len(self.acc_buf)})"
+                    f"Number of tracker ({len(trackers)}) must match number of readout channels ({len(self.acc_buf)})"
                 )
 
             assert isinstance(ro_chs, dict)
@@ -260,17 +240,17 @@ class StatisticMixin(TypedAcquireMixin):
     def acquire(
         self,
         *args,
-        statistic_trackers: Optional[List[TrackerProtocol]] = None,
+        trackers: Optional[List[TrackerProtocol]] = None,
         **kwargs,
     ):
         extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(statistic_trackers=statistic_trackers)
+        extra_args.update(trackers=trackers)
         return super().acquire(*args, extra_args=extra_args, **kwargs)
 
 
-class CallbackMixin(StatisticMixin):
+class RoundHookMixin(TypedAcquireMixin):
     """
-    Add callback functionality to the AcquireMixin class
+    Add round hook functionality to the AcquireMixin class
     """
 
     def _reset_inc_summarize(self) -> None:
@@ -317,7 +297,7 @@ class CallbackMixin(StatisticMixin):
         # NOTE: currently, summarize decimated is identical to summarize accumulated
         return self._inc_summarize_accumulated(rounds_buf)
 
-    def acquire(self, *args, callback: Optional[CallbackType] = None, **kwargs):
+    def acquire(self, *args, callback: Optional[RoundHookType] = None, **kwargs):
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(callback=callback)
 
@@ -326,7 +306,7 @@ class CallbackMixin(StatisticMixin):
         return super().acquire(*args, extra_args=extra_args, **kwargs)
 
     def acquire_decimated(
-        self, *args, callback: Optional[CallbackType] = None, **kwargs
+        self, *args, callback: Optional[RoundHookType] = None, **kwargs
     ):
         extra_args = kwargs.pop("extra_args", dict())
         extra_args.update(callback=callback)
@@ -341,10 +321,10 @@ class CallbackMixin(StatisticMixin):
         acquire_params = self.acquire_params
         assert acquire_params is not None
 
-        # trigger the callback function after each round
-        callback: Optional[CallbackType] = acquire_params["callback"]
-        if callback is not None:
-            assert callable(callback), "callback must be a callable function"
+        # trigger the hook function after each round
+        round_hook: Optional[RoundHookType] = acquire_params["callback"]
+        if not_finish and round_hook is not None:
+            assert callable(round_hook), "round_hook must be a callable function"
             assert self.rounds_buf is not None
 
             # NOTE: increment the summary to reduce cpu usage
@@ -353,19 +333,19 @@ class CallbackMixin(StatisticMixin):
             if acquire_type == "accumulated":
                 # avg_d = self._summarize_accumulated(self.rounds_buf)
                 avg_d = self._inc_summarize_accumulated(self.rounds_buf)
-                callback(round_n, avg_d)
+                round_hook(round_n, avg_d)
             elif acquire_type == "decimated":
                 # dec_d = self._summarize_decimated(self.rounds_buf)
                 dec_d = self._inc_summarize_decimated(self.rounds_buf)
-                callback(round_n, dec_d)
+                round_hook(round_n, dec_d)
             else:
                 raise NotImplementedError(
-                    "Callback is not implemented for type other than accumulated or decimated"
+                    f"Round hook is not implemented for type {acquire_type}"
                 )
 
         return not_finish
 
 
 class ImproveAcquireMixin(
-    SingleShotMixin, CallbackMixin, EarlyStopMixin, StatisticMixin
+    SingleShotMixin, RoundHookMixin, EarlyStopMixin, TrackerMixin
 ): ...

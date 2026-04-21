@@ -10,19 +10,19 @@ from scipy.ndimage import gaussian_filter1d
 from typeguard import check_type
 from typing_extensions import (
     Any,
+    Callable,
     NotRequired,
     Optional,
     TypeAlias,
     TypedDict,
-    Callable,
     cast,
 )
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
-from zcu_tools.experiment.v2.utils.tracker import MomentTracker
+from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
+from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -106,7 +106,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 soc,
                 progress=False,
                 callback=lambda i, avg_d: update_hook(i, [tracker]),
-                statistic_trackers=[tracker],
+                trackers=[tracker],
                 **(acquire_kwargs or {}),
             )
             return [tracker]

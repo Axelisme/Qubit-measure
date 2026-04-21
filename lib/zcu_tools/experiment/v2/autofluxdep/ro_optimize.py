@@ -12,8 +12,8 @@ from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
-from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
+from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_sweep
@@ -121,7 +121,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
                 ctx.env["soc"],
                 progress=False,
                 callback=lambda i, avg_d: update_hook(i, [tracker]),
-                statistic_trackers=[tracker],
+                trackers=[tracker],
             )
             return [tracker]
 

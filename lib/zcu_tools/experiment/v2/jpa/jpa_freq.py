@@ -24,8 +24,8 @@ from zcu_tools.experiment.utils import (
     setup_devices,
 )
 from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
-from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
+from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlotScatter
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
@@ -88,7 +88,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 soc,
                 progress=False,
                 callback=lambda i, avg_d: update_hook(i, [tracker]),
-                statistic_trackers=[tracker],
+                trackers=[tracker],
             )
             return [tracker]
 
