@@ -11,7 +11,7 @@ from matplotlib.image import NonUniformImage
 from numpy import float64
 from numpy.typing import NDArray
 from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.utils import setup_devices
@@ -442,7 +442,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         g_filepath, e_filepath = filepath
 
         # Load ground populations
-        g_pop, gains, freqs = load_data(g_filepath, **kwargs)
+        g_pop, gains, freqs, cfg = load_data(g_filepath, return_cfg=True, **kwargs)
         assert freqs is not None
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
         assert g_pop.shape == (len(gains), len(freqs))
@@ -461,7 +461,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         freqs = freqs.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = None
+        self.last_cfg = cast(AcStarkCfg, cfg)
         self.last_result = (gains, freqs, populations)
 
         return gains, freqs, populations

@@ -55,6 +55,7 @@ ModuleDumper.add_representer(dict, ModuleDumper.represent_dict)
 T_ModuleCfg = TypeVar("T_ModuleCfg", bound=ModuleCfg)
 T_WaveformCfg = TypeVar("T_WaveformCfg", bound=WaveformCfg)
 
+
 class ModuleLibrary(SyncFile):
     def __init__(
         self, cfg_path: Optional[Union[str, Path]] = None, readonly: bool = False
@@ -92,14 +93,25 @@ class ModuleLibrary(SyncFile):
                     f"got {type(cfg[key])}"
                 )
 
-        self.waveforms = {
-            name: WaveformCfg.from_dict(wav_cfg, self)
-            for name, wav_cfg in cfg["waveforms"].items()
-        }
-        self.modules = {
-            name: ModuleCfg.from_dict(mod_cfg, self)
-            for name, mod_cfg in cfg["modules"].items()
-        }
+        self.waveforms = {}
+        for name, wav_cfg in cfg["waveforms"].items():
+            try:
+                wav_cfg = WaveformCfg.from_dict(wav_cfg, self)
+            except Exception as e:
+                raise ValueError(
+                    f"Error parsing waveform {name} in module library: \n{e}"
+                ) from e
+            self.waveforms[name] = wav_cfg
+
+        self.modules = {}
+        for name, mod_cfg in cfg["modules"].items():
+            try:
+                mod_cfg = ModuleCfg.from_dict(mod_cfg, self)
+            except Exception as e:
+                raise ValueError(
+                    f"Error parsing module {name} in module library: \n{e}"
+                ) from e
+            self.modules[name] = mod_cfg
 
     def _dump(self, path: str) -> None:
         dump_cfg = dict(waveforms=self.waveforms, modules=self.modules)
