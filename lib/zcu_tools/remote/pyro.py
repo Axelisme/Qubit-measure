@@ -8,13 +8,12 @@ import Pyro4.naming
 from qick import QickConfig
 from typing_extensions import Any, Literal
 
-from zcu_tools.program.bitfiles import get_bitfile
+from zcu_tools.bitfiles import get_bitfile
 
 
 def setup_pyro4() -> None:
     # use dill instead of pickle
     Pyro4.config.SERIALIZER = "pickle"  # type: ignore
-    # Pyro4.config.SERIALIZER = "dill"  # type: ignore
     Pyro4.config.SERIALIZERS_ACCEPTED = set(["pickle"])  # type: ignore
     Pyro4.config.DILL_PROTOCOL_VERSION = 5
     Pyro4.config.PICKLE_PROTOCOL_VERSION = 4  # type: ignore
