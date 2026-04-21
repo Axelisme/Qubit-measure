@@ -121,7 +121,7 @@ class T2EchoExp(AbsExperiment[T2EchoResult, T2EchoCfg]):
             ).acquire(
                 soc,
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 **(acquire_kwargs or {}),
             )
 

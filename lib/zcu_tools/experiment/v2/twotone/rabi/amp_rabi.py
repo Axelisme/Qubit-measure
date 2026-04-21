@@ -66,7 +66,7 @@ class AmpRabiExp(AbsExperiment[AmpRabiResult, AmpRabiCfg]):
                     ).acquire(
                         soc,
                         progress=False,
-                        callback=update_hook,
+                        round_hook=update_hook,
                         **(acquire_kwargs or {}),
                     ),
                     result_shape=(len(gains),),

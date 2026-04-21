@@ -335,7 +335,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             ).acquire(
                 ctx.env["soc"],
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 g_center=g_center,
                 e_center=e_center,
                 population_radius=radius,

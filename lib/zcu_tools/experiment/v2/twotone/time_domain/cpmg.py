@@ -204,7 +204,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 ).acquire(
                     soc,
                     progress=False,
-                    callback=wrap_earlystop_check(
+                    round_hook=wrap_earlystop_check(
                         prog,
                         update_hook,
                         earlystop_snr,

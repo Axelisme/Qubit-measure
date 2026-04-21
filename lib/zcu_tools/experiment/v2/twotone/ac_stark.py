@@ -171,7 +171,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                         ).acquire(
                             soc,
                             progress=False,
-                            callback=wrap_earlystop_check(
+                            round_hook=wrap_earlystop_check(
                                 prog,
                                 update_hook,
                                 earlystop_snr,
@@ -420,7 +420,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
             ).acquire(
                 soc,
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 **(acquire_kwargs or {}),
             )
 

@@ -99,7 +99,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             prog.acquire(
                 soc,
                 progress=False,
-                callback=lambda i, avg_d: update_hook(i, [tracker]),
+                round_hook=lambda i, avg_d: update_hook(i, [tracker]),
                 trackers=[tracker],
             )
             return [tracker]

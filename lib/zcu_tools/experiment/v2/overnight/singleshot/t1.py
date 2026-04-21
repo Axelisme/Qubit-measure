@@ -259,7 +259,7 @@ class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotD
             ).acquire(
                 ctx.env["soc"],
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 g_center=g_center,
                 e_center=e_center,
                 population_radius=radius,
@@ -358,7 +358,7 @@ class T1WithToneTask(
             ).acquire(
                 ctx.env["soc"],
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 g_center=g_center,
                 e_center=e_center,
                 population_radius=radius,

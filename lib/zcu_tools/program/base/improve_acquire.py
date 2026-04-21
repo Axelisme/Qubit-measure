@@ -297,19 +297,19 @@ class RoundHookMixin(TypedAcquireMixin):
         # NOTE: currently, summarize decimated is identical to summarize accumulated
         return self._inc_summarize_accumulated(rounds_buf)
 
-    def acquire(self, *args, callback: Optional[RoundHookType] = None, **kwargs):
+    def acquire(self, *args, round_hook: Optional[RoundHookType] = None, **kwargs):
         extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(callback=callback)
+        extra_args.update(round_hook=round_hook)
 
         self._reset_inc_summarize()
 
         return super().acquire(*args, extra_args=extra_args, **kwargs)
 
     def acquire_decimated(
-        self, *args, callback: Optional[RoundHookType] = None, **kwargs
+        self, *args, round_hook: Optional[RoundHookType] = None, **kwargs
     ):
         extra_args = kwargs.pop("extra_args", dict())
-        extra_args.update(callback=callback)
+        extra_args.update(round_hook=round_hook)
 
         self._reset_inc_summarize()
 
@@ -322,7 +322,7 @@ class RoundHookMixin(TypedAcquireMixin):
         assert acquire_params is not None
 
         # trigger the hook function after each round
-        round_hook: Optional[RoundHookType] = acquire_params["callback"]
+        round_hook: Optional[RoundHookType] = acquire_params["round_hook"]
         if not_finish and round_hook is not None:
             assert callable(round_hook), "round_hook must be a callable function"
             assert self.rounds_buf is not None

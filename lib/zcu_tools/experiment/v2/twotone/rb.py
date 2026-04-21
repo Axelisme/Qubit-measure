@@ -269,7 +269,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
             return prog_cahce[(seed, depth)].acquire(
                 soc,
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 **(acquire_kwargs or {}),
             )
 

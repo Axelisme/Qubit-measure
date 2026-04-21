@@ -127,7 +127,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
             return prog.acquire(
                 ctx.env["soc"],
                 progress=False,
-                callback=wrap_earlystop_check(
+                round_hook=wrap_earlystop_check(
                     prog,
                     update_hook,
                     self.earlystop_snr,

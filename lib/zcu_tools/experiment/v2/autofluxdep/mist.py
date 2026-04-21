@@ -117,7 +117,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
                     Readout("readout", modules["readout"]),
                 ],
                 sweep=[("gain", gain_sweep)],
-            ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
+            ).acquire(ctx.env["soc"], progress=False, round_hook=update_hook)
 
         self.task = Task[T_RootResult, list[NDArray[np.float64]]](
             measure_fn=measure_fn, result_shape=(self.gain_sweep["expts"],)

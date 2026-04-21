@@ -159,7 +159,7 @@ class LenRabiTask(MeasurementTask[LenRabiResult, T_RootResult, LenRabiPlotDict])
             return prog.acquire(
                 ctx.env["soc"],
                 progress=False,
-                callback=wrap_earlystop_check(
+                round_hook=wrap_earlystop_check(
                     prog,
                     update_hook,
                     snr_threshold=self.earlystop_snr,

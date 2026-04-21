@@ -101,7 +101,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
                 ],
                 sweep=[("times", len(times))],
             ).acquire(
-                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
             )
 
         with LivePlot1D(

@@ -122,7 +122,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                     ("length", length_sweep),
                     ("phase", phase_sweep),
                 ],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(soc, progress=False, round_hook=update_hook)
 
         with LivePlot2D("Time (us)", "Phase (deg)") as viewer:
             signals = run_task(

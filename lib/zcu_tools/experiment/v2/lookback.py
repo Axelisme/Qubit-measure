@@ -56,7 +56,7 @@ class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
 
             def measure_fn(ctx, update_hook):
                 return OneToneProgram(soccfg, ctx.cfg).acquire_decimated(
-                    soc, progress=False, callback=update_hook
+                    soc, progress=False, round_hook=update_hook
                 )
 
             signals = run_task(

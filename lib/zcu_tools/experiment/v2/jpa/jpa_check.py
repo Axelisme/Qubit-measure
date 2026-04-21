@@ -95,7 +95,7 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
                     PulseReadout("readout", modules["readout"]),
                 ],
                 sweep=[("freq", freq_sweep)],
-            ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
+            ).acquire(ctx.env["soc"], progress=False, round_hook=update_hook)
 
         with LivePlot1D(
             "Frequency (MHz)", "Magnitude", segment_kwargs=dict(num_lines=2)

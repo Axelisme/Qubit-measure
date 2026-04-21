@@ -110,7 +110,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                             ).acquire(
                                 soc,
                                 progress=False,
-                                callback=update_hook,
+                                round_hook=update_hook,
                                 **(acquire_kwargs or {}),
                             )
                         )
@@ -190,7 +190,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                             ).acquire(
                                 soc,
                                 progress=False,
-                                callback=update_hook,
+                                round_hook=update_hook,
                                 **(acquire_kwargs or {}),
                             )
                         )

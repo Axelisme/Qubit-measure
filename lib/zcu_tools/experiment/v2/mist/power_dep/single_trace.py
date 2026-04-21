@@ -101,7 +101,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                 ],
                 sweep=[("gain", gain_sweep)],
             ).acquire(
-                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
             )
 
         with LivePlot1D("Pulse gain", "MIST") as viewer:

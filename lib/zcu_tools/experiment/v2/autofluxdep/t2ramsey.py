@@ -143,7 +143,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
             return prog.acquire(
                 ctx.env["soc"],
                 progress=False,
-                callback=wrap_earlystop_check(
+                round_hook=wrap_earlystop_check(
                     prog,
                     update_hook,
                     self.earlystop_snr,

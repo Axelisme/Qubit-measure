@@ -120,7 +120,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             prog.acquire(
                 ctx.env["soc"],
                 progress=False,
-                callback=lambda i, avg_d: update_hook(i, [tracker]),
+                round_hook=lambda i, avg_d: update_hook(i, [tracker]),
                 trackers=[tracker],
             )
             return [tracker]

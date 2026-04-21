@@ -145,7 +145,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                 ],
                 sweep=[("times", len(times)), (x_key, x_sweep)],
             ).acquire(
-                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
             )
 
         with LivePlot2D("Times", x_info["name"]) as viewer:

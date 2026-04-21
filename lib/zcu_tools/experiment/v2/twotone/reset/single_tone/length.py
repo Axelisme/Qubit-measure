@@ -105,7 +105,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
             ).acquire(
                 soc,
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 **(acquire_kwargs or {}),
             )
 

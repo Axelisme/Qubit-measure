@@ -90,7 +90,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     PulseReadout("readout", modules["readout"]),
                 ],
                 sweep=[("freq", freq_sweep)],
-            ).acquire(soc, progress=False, callback=update_hook)
+            ).acquire(soc, progress=False, round_hook=update_hook)
 
         # run experiment
         with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:

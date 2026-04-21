@@ -71,7 +71,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             return TwoToneProgram(soccfg, cfg, sweep=[("freq", freq_sweep)]).acquire(
                 soc,
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 **(acquire_kwargs or {}),
             )
 

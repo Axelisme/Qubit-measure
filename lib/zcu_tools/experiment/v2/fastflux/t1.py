@@ -116,7 +116,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     ("length", length_sweep),
                 ],
             ).acquire(
-                soc, progress=False, callback=update_hook, **(acquire_kwargs or {})
+                soc, progress=False, round_hook=update_hook, **(acquire_kwargs or {})
             )
 
         with LivePlot2D("Flux Pulse Gain (a.u.)", "Time (us)") as viewer:

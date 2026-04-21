@@ -153,7 +153,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
             ).acquire(
                 soc,
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 **(acquire_kwargs or {}),
             )
 

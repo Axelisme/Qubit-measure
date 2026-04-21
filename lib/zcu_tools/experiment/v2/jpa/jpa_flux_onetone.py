@@ -85,7 +85,7 @@ class OneToneFluxExp(AbsExperiment[OneToneFluxResult, OneToneFluxCfg]):
                     PulseReadout("readout", modules["readout"]),
                 ],
                 sweep=[("freq", freq_sweep)],
-            ).acquire(ctx.env["soc"], progress=False, callback=update_hook)
+            ).acquire(ctx.env["soc"], progress=False, round_hook=update_hook)
 
         with LivePlot2DwithLine(
             "JPA Flux value (a.u.)",

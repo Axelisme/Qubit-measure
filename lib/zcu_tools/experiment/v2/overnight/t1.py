@@ -185,7 +185,7 @@ class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotD
             ).acquire(
                 ctx.env["soc"],
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 **(acquire_kwargs or {}),
             )
 
@@ -270,7 +270,7 @@ class T1WithToneTask(
             ).acquire(
                 ctx.env["soc"],
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 **(acquire_kwargs or {}),
             )
 

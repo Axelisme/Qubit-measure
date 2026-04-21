@@ -110,7 +110,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
             ).acquire(
                 soc,
                 progress=False,
-                callback=update_hook,
+                round_hook=update_hook,
                 **(acquire_kwargs or {}),
             )
 
