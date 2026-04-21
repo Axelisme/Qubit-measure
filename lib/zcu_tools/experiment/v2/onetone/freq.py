@@ -143,7 +143,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         return (
             float(param_dict["freq"]),
-            float(param_dict["kappa"]),
+            float(param_dict["fwhm"]),
             dict(param_dict),
             fig,
         )

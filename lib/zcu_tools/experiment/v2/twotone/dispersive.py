@@ -143,15 +143,15 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         g_params = model.fit(freqs, g_signals, edelay=edelay)
         e_params = model.fit(freqs, e_signals, edelay=edelay)
 
-        g_freq, g_kappa = g_params["freq"], g_params["kappa"]
-        e_freq, e_kappa = e_params["freq"], e_params["kappa"]
+        g_freq, g_fwhm = g_params["freq"], g_params["fwhm"]
+        e_freq, e_fwhm = e_params["freq"], e_params["fwhm"]
 
         g_fit = np.abs(model.calc_signals(freqs, **g_params))  # type: ignore
         e_fit = np.abs(model.calc_signals(freqs, **e_params))  # type: ignore
 
         # Calculate dispersive shift and average linewidth
         chi = abs(g_freq - e_freq) / 2  # dispersive shift χ/2π
-        avg_kappa = (g_kappa + e_kappa) / 2  # average linewidth κ/2π
+        avg_fwhm = (g_fwhm + e_fwhm) / 2  # average linewidth κ/2π
 
         fig = plt.figure(figsize=(8, 4))
         spec = fig.add_gridspec(2, 3, wspace=0.2)
@@ -160,12 +160,12 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
         ax_e = fig.add_subplot(spec[1, 2])
 
         fig.suptitle(
-            f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {avg_kappa:.1f} MHz"
+            f"Dispersive shift χ/2π = {chi:.3f} MHz, κ/2π = {avg_fwhm:.1f} MHz"
         )
 
         # Plot data and fits
-        label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_kappa:.1f} MHz"
-        label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_kappa:.1f} MHz"
+        label_g = f"Ground: {g_freq:.1f} MHz, κ = {g_fwhm:.1f} MHz"
+        label_e = f"Excited: {e_freq:.1f} MHz, κ = {e_fwhm:.1f} MHz"
         ax_main.scatter(freqs, g_amps, marker=".", c="b")
         ax_main.scatter(freqs, e_amps, marker=".", c="r")
         ax_main.plot(freqs, g_fit, "b-", alpha=0.7, label=label_g)
@@ -218,7 +218,7 @@ class DispersiveExp(AbsExperiment[DispersiveResult, DispersiveCfg]):
 
         # fig.tight_layout()
 
-        return chi, avg_kappa, fig
+        return chi, avg_fwhm, fig
 
     def save(
         self,

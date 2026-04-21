@@ -40,7 +40,7 @@ def calc_Qi(Ql: float, Qc: float) -> float:
 
 class HangerParams(TypedDict):
     freq: float
-    kappa: float
+    fwhm: float
     Ql: float
     Qc: float
     Qi: float
@@ -80,7 +80,7 @@ class HangerModel:
         signals: NDArray[np.complex128],
         edelay: Optional[float] = None,
     ) -> HangerParams:
-        """dict[freq, kappa, Ql, Qc, Qi, phi, a0, edelay, circle_params]"""
+        """dict[freq, fwhm, Ql, Qc, Qi, phi, a0, edelay, circle_params]"""
         if edelay is None:
             edelay = fit_edelay(freqs, signals)
 
@@ -97,7 +97,7 @@ class HangerModel:
 
         return HangerParams(
             freq=freq,
-            kappa=freq / Ql,
+            fwhm=freq / Ql,
             Ql=Ql,
             Qc=Qc,
             Qi=Qi,
@@ -111,7 +111,7 @@ class HangerModel:
     @classmethod
     def visualize_fit(cls, freqs, signals, param_dict: HangerParams) -> Figure:
         freq = param_dict["freq"]
-        kappa = param_dict["kappa"]
+        fwhm = param_dict["fwhm"]
         theta0 = param_dict["theta0"]
         Ql = param_dict["Ql"]
         Qc = param_dict["Qc"]
@@ -135,9 +135,7 @@ class HangerModel:
         ax2 = fig.add_subplot(spec[0, 1])
         ax3 = fig.add_subplot(spec[1, :])
 
-        base_info = (
-            r"$f_r = $" + f"{freq:.1f} MHz\n" + r"$\kappa = $" + f"{kappa:.1f} MHz"
-        )
+        base_info = "freq = " + f"{freq:.1f} MHz\n" + r"$FWHM = $" + f"{fwhm:.1f} MHz"
         Q_info = (
             r"$Q_l = $"
             + f"{Ql:.0f}\n"

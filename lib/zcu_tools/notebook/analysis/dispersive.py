@@ -91,7 +91,7 @@ def search_proper_g(
     # Calculate r_f slider parameters
 
     rf_MHz_slider = widgets.FloatSlider(
-        value=1e3 * bare_rf,
+        value=bare_rf,
         min=1e3 * sp_freqs.min(),
         max=1e3 * sp_freqs.max(),
         step=1e3 * 0.5 * (sp_freqs.max() - sp_freqs.min()) / len(sp_freqs),
@@ -141,14 +141,12 @@ def search_proper_g(
 
     (line_g,) = ax.plot(sp_fluxs[::flux_step], 1e3 * rf_0, "b-", label="Ground state")
     (line_e,) = ax.plot(sp_fluxs[::flux_step], 1e3 * rf_1, "r-", label="Excited state")
-    line_bare = ax.axhline(
-        y=1e3 * bare_rf, color="k", linestyle="--", label="Bare resonator"
-    )
+    line_bare = ax.axhline(y=bare_rf, color="k", linestyle="--", label="Bare resonator")
 
     ax.set_ylim(1e3 * sp_freqs.min(), 1e3 * sp_freqs.max())
     ax.set_xlabel(r"Flux $\Phi_{ext}/\Phi_0$")
     ax.set_ylabel("Frequency (MHz)")
-    ax.set_title(f"g = {1e3 * g_init:.1f} MHz, r_f = {1e3 * bare_rf:.1f} MHz")
+    ax.set_title(f"g = {1e3 * g_init:.1f} MHz, r_f = {bare_rf:.1f} MHz")
     ax.legend(loc="upper right")
 
     # Register callback for slider changes
@@ -201,7 +199,7 @@ def search_proper_g(
 
 def auto_fit_dispersive(
     params: tuple[float, float, float],
-    bare_rf: float,
+    bare_rf_GHz: float,
     sp_fluxs: NDArray[np.float64],
     sp_freqs: NDArray[np.float64],
     sp_signals: NDArray,
@@ -223,11 +221,11 @@ def auto_fit_dispersive(
 
     pbar = tqdm(total=MAX_ITER, desc="Auto fitting g", leave=False)
 
-    def update_pbar(g, r_f):
+    def update_pbar(g, bare_rf_GHz):
         pbar.update(1)
         postfix = f"g = {1e3 * g:.1f} MHz"
         if fit_bare_rf:
-            postfix += f", r_f = {1e3 * r_f:.1f} MHz"
+            postfix += f", r_f = {1e3 * bare_rf_GHz:.1f} MHz"
         pbar.set_postfix_str(postfix)
 
     real_signals = np.abs(sp_signals)
@@ -239,12 +237,12 @@ def auto_fit_dispersive(
     # derive the fitting tolerance
     ftol = np.max(real_signals) * 1e-4
 
-    def loss_fn(g, bare_rf):
-        update_pbar(g, bare_rf)
+    def loss_fn(g, bare_rf_GHz):
+        update_pbar(g, bare_rf_GHz)
 
         # only use 4 states to calculate the ground state dispersive shift for speed
         rf_0, rf_1 = calculate_dispersive_vs_flux(
-            params, sp_fluxs, bare_rf, g, progress=False, res_dim=4
+            params, sp_fluxs, bare_rf_GHz, g, progress=False, res_dim=4
         )
 
         # 用線性插值取得每個 rf_0 對應的 signal
@@ -264,8 +262,8 @@ def auto_fit_dispersive(
     if fit_bare_rf:
         res = minimize(
             lambda p: loss_fn(p[0], p[1]),
-            x0=[g_init, bare_rf],
-            bounds=[g_bound, [bare_rf - 2e-3, bare_rf + 2e-3]],
+            x0=[g_init, bare_rf_GHz],
+            bounds=[g_bound, [bare_rf_GHz - 2e-3, bare_rf_GHz + 2e-3]],
             **fit_kwargs,
         )
         if not isinstance(res, np.ndarray):
@@ -274,7 +272,7 @@ def auto_fit_dispersive(
         return res[0].item(), res[1].item()
     else:
         res = minimize(
-            lambda p: loss_fn(p[0], bare_rf),
+            lambda p: loss_fn(p[0], bare_rf_GHz),
             x0=[g_init],
             bounds=[g_bound],
             **fit_kwargs,

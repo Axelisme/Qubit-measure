@@ -28,7 +28,7 @@ def calc_peak_signals(
 
 class TransmissionParams(TypedDict):
     freq: float
-    kappa: float
+    fwhm: float
     Ql: float
     a0: complex
     edelay: float
@@ -60,7 +60,7 @@ class TransmissionModel:
         signals: NDArray[np.complex128],
         edelay: Optional[float] = None,
     ) -> TransmissionParams:
-        """dict[freq, kappa, Ql, a0, edelay, circle_params]"""
+        """dict[freq, fwhm, Ql, a0, edelay, circle_params]"""
         if edelay is None:
             edelay = fit_edelay(freqs, signals)
 
@@ -73,7 +73,7 @@ class TransmissionModel:
 
         return TransmissionParams(
             freq=freq,
-            kappa=freq / Ql,
+            fwhm=freq / Ql,
             Ql=Ql,
             a0=a0,
             edelay=edelay,
@@ -89,7 +89,7 @@ class TransmissionModel:
         param_dict: TransmissionParams,
     ) -> Figure:
         freq = param_dict["freq"]
-        kappa = param_dict["kappa"]
+        fwhm = param_dict["fwhm"]
         theta0 = param_dict["theta0"]
         Ql = param_dict["Ql"]
         a0 = param_dict["a0"]
@@ -111,9 +111,7 @@ class TransmissionModel:
         ax2 = fig.add_subplot(spec[0, 1])
         ax3 = fig.add_subplot(spec[1, :])
 
-        base_info = (
-            r"$f_r = $" + f"{freq:.1f} MHz\n" + r"$\kappa = $" + f"{kappa:.1f} MHz"
-        )
+        base_info = "freq = " + f"{freq:.1f} MHz\n" + "FWHM = " + f"{fwhm:.1f} MHz"
         Q_info = r"$Q_l = $" + f"{Ql:.0f}"
 
         ax1.plot(norm_signals.real, norm_signals.imag)
