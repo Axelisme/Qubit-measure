@@ -36,7 +36,6 @@ from zcu_tools.experiment.v2.runner import (
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
 from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
-from zcu_tools.liveplot.jupyter import grab_frame_with_instant_plot
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])
@@ -165,7 +164,10 @@ class FluxDepExecutor:
         n_row = int(total_num_axes**0.5)
         n_col = int(np.ceil(total_num_axes / n_row))
         fig, axs = make_plot_frame(
-            n_row, n_col, figsize=(min(14, 3.5 * n_col), min(8, 2.5 * n_row))
+            n_row,
+            n_col,
+            plot_instant=True,
+            figsize=(min(14, 3.5 * n_col), min(8, 2.5 * n_row)),
         )
 
         # collect axes into dict
@@ -232,7 +234,7 @@ class FluxDepExecutor:
 
             if self.record_path is not None:
                 assert writer is not None
-                grab_frame_with_instant_plot(writer)
+                writer.grab_frame()
 
             plotter.refresh()
 

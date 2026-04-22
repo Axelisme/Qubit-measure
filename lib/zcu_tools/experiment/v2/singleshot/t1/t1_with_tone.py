@@ -157,7 +157,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                     **acquire_kwargs,
                 )
 
-        fig, axs = make_plot_frame(1, 2, figsize=(12, 5))
+        fig, axs = make_plot_frame(1, 2, plot_instant=True, figsize=(12, 5))
         axs[0][0].set_ylim(0, 1)
         axs[0][1].set_ylim(0, 1)
 

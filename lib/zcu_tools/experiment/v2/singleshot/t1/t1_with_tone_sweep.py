@@ -145,7 +145,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                 ge_radius=radius,
             )
 
-        fig, axs = make_plot_frame(4, 2, figsize=(12, 10))
+        fig, axs = make_plot_frame(4, 2, plot_instant=True, figsize=(12, 10))
         axs[3][0].set_ylim(0.0, 1.0)
         axs[3][1].set_ylim(0.0, 1.0)
 

@@ -1,9 +1,7 @@
-from .base import AbsLivePlot, DummyPlot, MultiLivePlot
-from .jupyter import (
-    LivePlot1D,
-    LivePlot2D,
-    LivePlot2DwithLine,
-    LivePlotScatter,
-    instant_plot,
-    make_plot_frame,
-)
+from . import backend
+from .backend import make_plot_frame
+from .base import AbsLivePlot, DummyPlot
+from .multi import MultiLivePlot
+from .plot1d import LivePlot1D
+from .plot2d import LivePlot2D, LivePlot2DwithLine
+from .scatter import LivePlotScatter

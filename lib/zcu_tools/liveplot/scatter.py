@@ -3,14 +3,12 @@ from __future__ import annotations
 import numpy as np
 from matplotlib.axes import Axes
 from numpy.typing import NDArray
-from typing_extensions import Any, Optional, cast
+from typing_extensions import Any, Optional, Sequence, Union, cast
 
-from ..base import AbsLivePlot
-from ..segments import Plot1DSegment
-from .base import JupyterMixin
+from .segments import BaseSegmentLivePlot, ScatterSegment
 
 
-class LivePlot1D(JupyterMixin, AbsLivePlot):
+class LivePlotScatter(BaseSegmentLivePlot):
     def __init__(
         self,
         xlabel: str,
@@ -23,9 +21,9 @@ class LivePlot1D(JupyterMixin, AbsLivePlot):
     ) -> None:
         if segment_kwargs is None:
             segment_kwargs = {}
-
+        segment = ScatterSegment(xlabel, ylabel, **segment_kwargs)
         super().__init__(
-            [[Plot1DSegment(xlabel, ylabel, **segment_kwargs)]],
+            [[segment]],
             existed_axes=existed_axes,
             auto_close=auto_close,
             disable=disable,
@@ -34,7 +32,14 @@ class LivePlot1D(JupyterMixin, AbsLivePlot):
     def update(
         self,
         xs: NDArray[np.float64],
-        signals: NDArray[np.float64],
+        ys: NDArray[np.float64],
+        colors: Union[
+            Sequence[str],
+            Sequence[tuple[float, float, float]],
+            Sequence[tuple[float, float, float, float]],
+            NDArray[np.float64],
+            None,
+        ] = None,
         title: Optional[str] = None,
         refresh: bool = True,
     ) -> None:
@@ -44,13 +49,12 @@ class LivePlot1D(JupyterMixin, AbsLivePlot):
         ax = self.get_ax()
         segment = self.get_segment()
 
-        with self.update_lock:
-            segment.update(ax, xs, signals, title)
-            if refresh:
-                self._refresh_while_lock()
+        segment.update(ax, xs, ys, colors, title)
+        if refresh:
+            self.refresh()
 
     def get_ax(self) -> Axes:
         return self.axs[0][0]
 
-    def get_segment(self) -> Plot1DSegment:
-        return cast(Plot1DSegment, self.segments[0][0])
+    def get_segment(self) -> ScatterSegment:
+        return cast(ScatterSegment, self.segments[0][0])

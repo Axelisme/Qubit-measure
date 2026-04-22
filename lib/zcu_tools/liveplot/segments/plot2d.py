@@ -66,8 +66,8 @@ class Plot2DSegment(AbsSegment):
         if self.im is None:
             raise RuntimeError("Image not initialized.")
 
-        dx = 0.5 * (xs[-1] - xs[0]) / (len(xs) - 1)
-        dy = 0.5 * (ys[-1] - ys[0]) / (len(ys) - 1)
+        dx = 0.5 * (xs[-1] - xs[0]) / max(1, (len(xs) - 1))
+        dy = 0.5 * (ys[-1] - ys[0]) / max(1, (len(ys) - 1))
         if self.flip:
             self.im.set_extent((ys[0] - dy, ys[-1] + dy, xs[0] - dx, xs[-1] + dx))
             self.im.set_data(signals)

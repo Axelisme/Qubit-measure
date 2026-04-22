@@ -120,7 +120,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
         modules["stark_pulse2"].set_param("freq", freq_param)
 
-        fig, axs = make_plot_frame(2, 2, figsize=(8, 6))
+        fig, axs = make_plot_frame(2, 2, plot_instant=True, figsize=(8, 6))
 
         def make_plotter2d(ax: Axes) -> LivePlot2D:
             return LivePlot2D(
