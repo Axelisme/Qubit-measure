@@ -88,10 +88,9 @@ class LivePlot2D(JupyterMixin, AbsLivePlot, Generic[Seg2D_T]):
         ax = self.get_ax()
         segment = self.get_segment()
 
-        with self.update_lock:
-            segment.update(ax, xs, ys, signals, title)
-            if refresh:
-                self._refresh_while_lock()
+        segment.update(ax, xs, ys, signals, title)
+        if refresh:
+            self.refresh()
 
     def get_ax(self) -> Axes:
         return self.axs[0][0]
@@ -202,11 +201,10 @@ class LivePlot2DwithLine(JupyterMixin, AbsLivePlot, Generic[Seg2D_T]):
 
         line_xs = xs if self.line_axis == 0 else ys
 
-        with self.update_lock:
-            segment2d.update(ax2d, xs, ys, signals, title)
-            segment1d.update(ax1d, line_xs, line_signals)
-            if refresh:
-                self._refresh_while_lock()
+        segment2d.update(ax2d, xs, ys, signals, title)
+        segment1d.update(ax1d, line_xs, line_signals)
+        if refresh:
+            self.refresh()
 
     def get_ax(self, name: Literal["2d", "1d"]) -> Axes:
         ax_map = ["2d", "1d"]

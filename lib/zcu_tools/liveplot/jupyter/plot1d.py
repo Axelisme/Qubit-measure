@@ -44,10 +44,9 @@ class LivePlot1D(JupyterMixin, AbsLivePlot):
         ax = self.get_ax()
         segment = self.get_segment()
 
-        with self.update_lock:
-            segment.update(ax, xs, signals, title)
-            if refresh:
-                self._refresh_while_lock()
+        segment.update(ax, xs, signals, title)
+        if refresh:
+            self.refresh()
 
     def get_ax(self) -> Axes:
         return self.axs[0][0]

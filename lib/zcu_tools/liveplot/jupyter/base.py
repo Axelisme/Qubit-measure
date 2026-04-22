@@ -122,7 +122,6 @@ class JupyterMixin:
                 )
 
         self.segments = segments
-        self.update_lock = Lock()
         self.disable = disable
         self.auto_close = auto_close
 
@@ -151,15 +150,12 @@ class JupyterMixin:
         if self.disable:
             return
 
-        with self.update_lock:
-            for ax_row, seg_row in zip(self.axs, self.segments):
-                for ax, segment in zip(ax_row, seg_row):
-                    segment.clear(ax)
-            self._refresh_while_lock()
+        for ax_row, seg_row in zip(self.axs, self.segments):
+            for ax, segment in zip(ax_row, seg_row):
+                segment.clear(ax)
+        self.refresh()
 
-    def _refresh_while_lock(self) -> None:
-        assert self.update_lock.locked()
-
+    def refresh(self) -> None:
         if self.disable:
             return
 
@@ -169,13 +165,6 @@ class JupyterMixin:
             )
 
         self.fig.canvas.draw()
-
-    def refresh(self) -> None:
-        if self.disable:
-            return
-
-        with self.update_lock:
-            self._refresh_while_lock()
 
     def __enter__(self: T_JupyterMixin) -> T_JupyterMixin:
         if self.disable:
