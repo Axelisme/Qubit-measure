@@ -32,7 +32,7 @@ class ExperimentManager:
         unit: Literal["A", "V", "K"] = "A",
     ) -> tuple[ModuleLibrary, MetaDict]:
         if label is None:
-            label = self._auto_label(value, unit)
+            label = self.auto_label(value, unit)
 
         flux_dir = self.exp_dir / label
         if (flux_dir / "meta_info.json").exists():
@@ -91,7 +91,7 @@ class ExperimentManager:
     def flux_dir(self) -> Path:
         return self.exp_dir / self.label
 
-    def _auto_label(
+    def auto_label(
         self, value: Optional[float] = None, unit: Literal["A", "V", "K"] = "A"
     ) -> str:
 

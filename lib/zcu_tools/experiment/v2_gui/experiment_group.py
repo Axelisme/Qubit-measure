@@ -4,8 +4,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Protocol, TypedDict
 
-from .fake_backend import FakeRunResult
 from .state import BufferDescriptor, BufferKind, GroupDescriptor
+
+
+@dataclass
+class FakeRunResult:
+    x: list[float]
+    y: list[float]
+    partial: bool
 
 
 class RunRequest(TypedDict, total=False):
@@ -88,7 +94,7 @@ class ExperimentGroup:
                 group_id=self.group_id,
                 title="Run",
                 kind=BufferKind.RUN,
-                payload={"cfg": dict(self.exp_cfg), "log": []},
+                payload={"cfg": dict(self.exp_cfg), "log": [], "comment": ""},
             ),
             BufferDescriptor(
                 buffer_id=self.analyze_buffer_id,
@@ -96,20 +102,6 @@ class ExperimentGroup:
                 title="Analyze",
                 kind=BufferKind.ANALYZE,
                 payload={"analysis": {}},
-            ),
-            BufferDescriptor(
-                buffer_id=self.comment_buffer_id,
-                group_id=self.group_id,
-                title="Comment",
-                kind=BufferKind.COMMENT,
-                payload={"text": ""},
-            ),
-            BufferDescriptor(
-                buffer_id=self.artifact_buffer_id,
-                group_id=self.group_id,
-                title="Artifacts",
-                kind=BufferKind.FILE_TEXT,
-                payload={"path": ""},
             ),
         ]
         for buffer in buffers:
@@ -123,14 +115,6 @@ class ExperimentGroup:
     @property
     def analyze_buffer_id(self) -> str:
         return f"{self.group_id}:analyze"
-
-    @property
-    def comment_buffer_id(self) -> str:
-        return f"{self.group_id}:comment"
-
-    @property
-    def artifact_buffer_id(self) -> str:
-        return f"{self.group_id}:artifact"
 
     def run(
         self,

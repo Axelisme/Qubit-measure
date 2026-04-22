@@ -2,81 +2,158 @@ from __future__ import annotations
 
 import csv
 import json
-import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 import yaml
+from numpy import ndarray
 
+from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device.fake import FakeDevice
+from zcu_tools.experiment.v2.fake import FakeExp
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.meta_tool import ExperimentManager, MetaDict, ModuleLibrary
+from zcu_tools.progress_bar import QtProgressSink
 from zcu_tools.utils import format_dict
 
-from .experiment_group import AnalyzeResult, ExperimentGroup, RunRequest
-from .fake_backend import FakeExperiment, FakeRunResult, FakeSOC
+from .experiment_group import AnalyzeResult, ExperimentGroup, FakeRunResult, RunRequest
 from .state import BufferDescriptor, BufferKind, GuiState
 
 
-class FakeSOCCfg:
+class V2FakeExperimentAdapter:
+    """Bridge `experiment.v2.fake.FakeExp` to GUI experiment port."""
+
     def __init__(self) -> None:
-        self.sample_rates = {"dac": 9.8304e9, "adc": 4.9152e9}
+        self.exp = FakeExp()
 
+    def run(
+        self,
+        soc: Any,
+        soccfg: Any,
+        cfg: Dict[str, Any],
+        on_progress=None,
+        should_cancel=None,
+    ) -> FakeRunResult:
+        import numpy as np
+        from typing_extensions import Any as TypingAny
 
-class FakeDevice:
-    def __init__(self, name: str, info: Dict[str, Any]) -> None:
-        self.name = name
-        self.info = info
+        points = int(cfg.get("sweep_points", 201))
+        center = float(cfg.get("center_mhz", 5.0))
+        width = float(cfg.get("width_mhz", 1.0))
+        delay_s = float(cfg.get("step_delay_s", 0.0))
 
-    def set_field(self, field: str, value: Any) -> None:
-        if field not in self.info:
-            raise KeyError(f"Unknown field: {field}")
-        if field == "power_dBm" and not (-120.0 <= float(value) <= 25.0):
-            raise ValueError("power_dBm out of range")
-        if field == "freq_Hz" and not (1e6 <= float(value) <= 20e9):
-            raise ValueError("freq_Hz out of range")
-        self.info[field] = value
+        freqs = np.linspace(center - width, center + width, points, dtype=np.float64)
+        sigma = max(0.1 * width, 1e-6)
+        progress_sink = QtProgressSink(
+            on_start=lambda total, _desc: on_progress(0, int(total or points))
+            if on_progress is not None
+            else None,
+            on_update_to=lambda n: on_progress(int(n), points)
+            if on_progress is not None
+            else None,
+        )
 
+        def measure_fn(
+            ctx: TaskState[np.ndarray, TypingAny],
+            update_hook,
+        ) -> np.ndarray:
+            import time
 
-class FakeDeviceManager:
-    def __init__(self) -> None:
-        self._devices: Dict[str, FakeDevice] = {
-            "jpa_sgs": FakeDevice(
-                name="jpa_sgs",
-                info={
-                    "type": "RohdeSchwarzSGS100A",
-                    "address": "TCPIP0::192.168.10.89::inst0::INSTR",
-                    "output": "on",
-                    "freq_Hz": 11_800_000_000.0,
-                    "power_dBm": -15.0,
-                },
+            rng = np.random.default_rng(42)
+            values = np.full(points, np.nan + 0j, dtype=np.complex128)
+            partial = False
+            for i, f in enumerate(freqs):
+                if should_cancel is not None and should_cancel():
+                    partial = True
+                    break
+                signal = (
+                    np.exp(-((f - center) ** 2) / (2 * sigma**2))
+                    + 0.1 * rng.normal()
+                    + 1j * 0.1 * rng.normal()
+                )
+                values[i] = complex(signal)
+                update_hook(i + 1, values.copy())
+                if delay_s > 0:
+                    time.sleep(delay_s)
+            ctx.env["partial"] = partial
+            return values
+
+        signals = run_task(
+            task=Task(
+                measure_fn=measure_fn,
+                raw2signal_fn=lambda x: x,
+                result_shape=(points,),
+                pbar_n=points,
+                progress_sink=progress_sink,
             ),
-            "flux_yoko": FakeDevice(
-                name="flux_yoko",
-                info={
-                    "type": "YOKOGS200",
-                    "address": "USB0::FAKE::YOKO::INSTR",
-                    "mode": "current",
-                    "value": 0.0,
-                    "output": "on",
-                },
-            ),
+            init_cfg={},
+        )
+
+        valid_mask = ~np.isnan(np.real(signals))
+        valid_n = int(np.sum(valid_mask))
+        run_freqs = freqs[:valid_n]
+        signals = signals[:valid_n]
+        partial = valid_n < points
+        self.exp.last_cfg = None
+        self.exp.last_result = (run_freqs, signals)
+        y = self._signals_to_real(signals)
+        return FakeRunResult(
+            x=[float(v) for v in run_freqs],
+            y=[float(v) for v in y],
+            partial=partial,
+        )
+
+    def analyze(self, result: Optional[FakeRunResult] = None) -> Dict[str, Any]:
+        if result is None:
+            result = self._last_result()
+        if result is None or not result.x:
+            raise RuntimeError("No run result available to analyze")
+        peak_idx = max(range(len(result.y)), key=lambda i: result.y[i])
+        return {
+            "peak_freq_mhz": result.x[peak_idx],
+            "peak_amp": result.y[peak_idx],
+            "points": len(result.x),
+            "partial": result.partial,
         }
 
-    def get_all_info(self) -> Dict[str, Dict[str, Any]]:
-        return {name: dict(dev.info) for name, dev in self._devices.items()}
+    def save_run(self, filepath: Path, cfg: Dict[str, Any], result: FakeRunResult) -> Path:
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "cfg": cfg,
+            "result": {"x": result.x, "y": result.y, "partial": result.partial},
+        }
+        filepath.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return filepath
 
-    def update_field(
-        self, device_name: str, field: str, value: Any
-    ) -> tuple[bool, str, Any]:
-        if device_name not in self._devices:
-            return False, f"Device not found: {device_name}", None
-        dev = self._devices[device_name]
-        old_value = dev.info.get(field)
-        try:
-            dev.set_field(field, value)
-        except Exception as exc:  # rollback only this field
-            dev.info[field] = old_value
-            return False, str(exc), old_value
-        return True, "ok", dev.info[field]
+    def save_analysis_figure(self, filepath: Path, result: FakeRunResult) -> Path:
+        fig = self.exp.analyze((self._to_float_array(result.x), self._to_complex_array(result.y)))
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(filepath, dpi=120)
+        return filepath
+
+    def _last_result(self) -> Optional[FakeRunResult]:
+        if self.exp.last_result is None:
+            return None
+        freqs, signals = self.exp.last_result
+        y = self._signals_to_real(signals)
+        return FakeRunResult(
+            x=[float(v) for v in freqs],
+            y=[float(v) for v in y],
+            partial=False,
+        )
+
+    def _signals_to_real(self, signals: ndarray) -> ndarray:
+        return abs(signals)
+
+    def _to_float_array(self, values: list[float]) -> ndarray:
+        import numpy as np
+
+        return np.asarray(values, dtype=np.float64)
+
+    def _to_complex_array(self, values: list[float]) -> ndarray:
+        import numpy as np
+
+        return np.asarray(values, dtype=np.complex128)
 
 
 class FakeStorage:
@@ -173,13 +250,25 @@ class GuiController:
 
     def _setup_backend(self, backend: BackendName) -> None:
         if backend == "mock":
-            self.fake_soc = FakeSOC()
-            self.fake_soccfg = FakeSOCCfg()
+            self.soc = None
+            self.soccfg = None
             self.storage = FakeStorage(self.project_root)
-            self.device_manager = FakeDeviceManager()
+            self._ensure_fake_device_registered()
             return
 
         raise NotImplementedError("backend='real' 尚未實作，請先使用 backend='mock'。")
+
+    def _ensure_fake_device_registered(self) -> None:
+        devices = GlobalDeviceManager.get_all_devices()
+        if devices:
+            return
+        fake1 = FakeDevice(address="FAKE::DEVICE1")
+        fake1.set_field("value", 0.0)
+        GlobalDeviceManager.register_device("fakedevice1", fake1)
+
+        fake2 = FakeDevice(address="FAKE::DEVICE2")
+        fake2.set_field("value", 1e-3)
+        GlobalDeviceManager.register_device("fakedevice2", fake2)
 
     def _initialize_context(self) -> None:
         labels = self.exp_manager.list_contexts()
@@ -193,7 +282,7 @@ class GuiController:
         self.create_experiment_group(
             group_id="exp:onetone_mock",
             title="OneTone Mock",
-            experiment=FakeExperiment(),
+            experiment=V2FakeExperimentAdapter(),
         )
         self.state.current_group_id = "exp:onetone_mock"
 
@@ -208,8 +297,8 @@ class GuiController:
             group_id=group_id,
             title=title,
             experiment=experiment,
-            soc=self.fake_soc,
-            soccfg=self.fake_soccfg,
+            soc=self.soc,
+            soccfg=self.soccfg,
             default_cfg=default_cfg,
         )
         group, buffers = model.to_descriptors()
@@ -226,6 +315,39 @@ class GuiController:
         self.storage.set_active_context(label)
         self.module_library, self.meta_dict = self.exp_manager.use_flux(label)
 
+    def create_context(
+        self, label: str, clone_from: Optional[str] = None
+    ) -> tuple[ModuleLibrary, MetaDict]:
+        if clone_from:
+            ml, md = self.exp_manager.new_flux(label=label, clone_from=clone_from)
+        else:
+            ml, md = self.exp_manager.new_flux(label=label)
+        self.storage.set_active_context(label)
+        self.module_library, self.meta_dict = ml, md
+        return ml, md
+
+    def get_supported_label_devices(self) -> list[dict[str, Any]]:
+        supported: list[dict[str, Any]] = []
+        for name, info in GlobalDeviceManager.get_all_info().items():
+            if info.get("type") != "FakeDevice":
+                continue
+            value = info.get("value")
+            if isinstance(value, (int, float)):
+                supported.append({"name": name, "value": float(value)})
+        return supported
+
+    def suggest_auto_label(self, device_name: Optional[str] = None) -> str:
+        devices = self.get_supported_label_devices()
+        if not devices:
+            return self.exp_manager.auto_label()
+        selected = devices[0]
+        if device_name is not None:
+            for item in devices:
+                if item["name"] == device_name:
+                    selected = item
+                    break
+        return self.exp_manager.auto_label(selected["value"])
+
     def active_dir(self) -> Path:
         return self.exp_manager.flux_dir
 
@@ -238,6 +360,15 @@ class GuiController:
         return self.active_dir() / "module_cfg.yaml"
 
     def open_file_buffer(self, path: Path) -> BufferDescriptor:
+        normalized_path = str(path.resolve())
+        for buffer in self.state.buffers.values():
+            if buffer.payload.get("path") == normalized_path:
+                group = self.state.groups.get(buffer.group_id)
+                if group is not None and buffer.buffer_id in group.buffer_ids:
+                    group.current_index = group.buffer_ids.index(buffer.buffer_id)
+                self.state.current_group_id = buffer.group_id
+                return buffer
+
         ext = path.suffix.lower()
         if ext in {".png", ".jpg", ".jpeg"}:
             kind = BufferKind.FILE_IMAGE
@@ -246,16 +377,16 @@ class GuiController:
         else:
             kind = BufferKind.FILE_TEXT
 
-        group_id = f"file:{path.parent.name}"
-        self.state.ensure_group(group_id, f"File:{path.parent.name}")
+        group_id = f"file:{normalized_path}"
+        self.state.ensure_group(group_id, f"File:{path.name}")
 
-        buffer_id = f"buf:file:{uuid.uuid4().hex[:8]}"
+        buffer_id = f"buf:file:{abs(hash(normalized_path))}"
         buffer = BufferDescriptor(
             buffer_id=buffer_id,
             group_id=group_id,
             title=path.name,
             kind=kind,
-            payload={"path": str(path)},
+            payload={"path": normalized_path},
         )
         self.state.add_buffer(buffer)
         self.state.current_group_id = group_id
@@ -298,16 +429,41 @@ class GuiController:
 
     def get_device_rows(self) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
-        for dev_name, info in self.device_manager.get_all_info().items():
+        for dev_name, info in GlobalDeviceManager.get_all_info().items():
             for field, value in info.items():
                 rows.append({"device": dev_name, "field": field, "value": value})
         return rows
 
+    def get_device_infos(self) -> Dict[str, Dict[str, Any]]:
+        return {
+            name: dict(info) for name, info in GlobalDeviceManager.get_all_info().items()
+        }
+
     def update_device_field(
         self, device: str, field: str, value: Any
     ) -> Dict[str, Any]:
-        ok, msg, actual = self.device_manager.update_field(device, field, value)
-        return {"ok": ok, "message": msg, "value": actual}
+        try:
+            dev = GlobalDeviceManager.get_device(device)
+        except Exception as exc:
+            return {"ok": False, "message": str(exc), "value": None}
+        old_info = dev.get_info()
+        old_value = old_info.get(field)
+        try:
+            if hasattr(dev, "set_field"):
+                dev.set_field(field, value)
+            else:
+                raise RuntimeError(
+                    f"Device '{device}' does not support GUI field updates for now."
+                )
+            new_value = dev.get_info().get(field)
+            return {"ok": True, "message": "ok", "value": new_value}
+        except Exception as exc:
+            if hasattr(dev, "set_field"):
+                try:
+                    dev.set_field(field, old_value)
+                except Exception:
+                    pass
+            return {"ok": False, "message": str(exc), "value": old_value}
 
     def get_meta_rows(self) -> List[Dict[str, Any]]:
         self.meta_dict.sync()
@@ -346,6 +502,13 @@ class GuiController:
                 }
             )
         return rows
+
+    def get_library_snapshot(self) -> Dict[str, Dict[str, Any]]:
+        self.module_library.sync()
+        return {
+            "modules": format_dict(self.module_library.modules),
+            "waveforms": format_dict(self.module_library.waveforms),
+        }
 
     def set_library_item(self, name: str, cfg: Dict[str, Any]) -> None:
         if name.startswith("waveform:"):

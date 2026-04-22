@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from zcu_tools.experiment.v2_gui import launch_mock_gui
 
 if __name__ == "__main__":
+    os.environ["ZCU_PROGRESS_BACKEND"] = "qt"
+
     parser = argparse.ArgumentParser(description="Start v2 GUI in fake-only mode")
     parser.add_argument(
         "--backend",

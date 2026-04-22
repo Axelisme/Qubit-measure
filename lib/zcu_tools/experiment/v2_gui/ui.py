@@ -14,10 +14,14 @@ try:
     from PySide6.QtGui import QAction, QPixmap
     from PySide6.QtWidgets import (
         QApplication,
+        QComboBox,
+        QDialog,
+        QDialogButtonBox,
         QFileSystemModel,
         QFormLayout,
         QHBoxLayout,
         QHeaderView,
+        QInputDialog,
         QLabel,
         QLineEdit,
         QListWidget,
@@ -31,6 +35,9 @@ try:
         QTableWidget,
         QTableWidgetItem,
         QTextEdit,
+        QToolBox,
+        QTreeWidget,
+        QTreeWidgetItem,
         QTreeView,
         QVBoxLayout,
         QWidget,
@@ -114,7 +121,7 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(QLabel("flx_dir files"))
         self.file_model = QFileSystemModel(self)
         self.tree = QTreeView(self)
-        self.tree.clicked.connect(self._on_tree_clicked)
+        self.tree.doubleClicked.connect(self._on_tree_clicked)
         self.tree.setModel(self.file_model)
         self.tree.setHeaderHidden(False)
         top_layout.addWidget(self.tree)
@@ -123,8 +130,19 @@ class MainWindow(QMainWindow):
         bottom_layout = QVBoxLayout(bottom)
         bottom_layout.addWidget(QLabel("Context labels"))
         self.context_list = QListWidget(self)
-        self.context_list.itemSelectionChanged.connect(self._on_context_changed)
         bottom_layout.addWidget(self.context_list)
+        context_btns = QWidget(self)
+        context_btns_layout = QHBoxLayout(context_btns)
+        activate_btn = QPushButton("Activate", self)
+        new_btn = QPushButton("New", self)
+        clone_btn = QPushButton("Clone", self)
+        activate_btn.clicked.connect(self._on_activate_context)
+        new_btn.clicked.connect(self._on_new_context)
+        clone_btn.clicked.connect(self._on_clone_context)
+        context_btns_layout.addWidget(activate_btn)
+        context_btns_layout.addWidget(new_btn)
+        context_btns_layout.addWidget(clone_btn)
+        bottom_layout.addWidget(context_btns)
 
         split.addWidget(top)
         split.addWidget(bottom)
@@ -138,7 +156,9 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(panel)
 
         self.group_tabs = QTabBar(self)
+        self.group_tabs.setTabsClosable(True)
         self.group_tabs.currentChanged.connect(self._on_group_changed)
+        self.group_tabs.tabCloseRequested.connect(self._on_group_close_requested)
         layout.addWidget(self.group_tabs)
 
         nav = QWidget(self)
@@ -186,7 +206,10 @@ class MainWindow(QMainWindow):
         self.context_list.clear()
         for label in self.controller.list_contexts():
             self.context_list.addItem(label)
-        self.context_list.setCurrentRow(0)
+        for i in range(self.context_list.count()):
+            if self.context_list.item(i).text() == self.controller.exp_manager.label:
+                self.context_list.setCurrentRow(i)
+                break
 
     def _reload_tree(self) -> None:
         active_dir = self.controller.active_dir()
@@ -227,8 +250,6 @@ class MainWindow(QMainWindow):
             self.buffer_holder.addWidget(self._make_run_buffer_widget())
         elif buffer.kind == BufferKind.ANALYZE:
             self.buffer_holder.addWidget(self._make_analyze_buffer_widget(buffer))
-        elif buffer.kind == BufferKind.COMMENT:
-            self.buffer_holder.addWidget(self._make_comment_buffer_widget(buffer))
         elif buffer.kind == BufferKind.FILE_IMAGE:
             self.buffer_holder.addWidget(self._make_image_view(buffer))
         elif buffer.kind == BufferKind.FILE_CSV:
@@ -281,6 +302,27 @@ class MainWindow(QMainWindow):
         self.run_text.setPlaceholderText("Run logs...")
         lay.addWidget(self.run_text)
 
+        run_buffer = self.controller.state.buffers.get(
+            self.controller._active_group_model().run_buffer_id
+        )
+        self.comment_edit = QPlainTextEdit(self)
+        initial_comment = ""
+        if run_buffer is not None:
+            initial_comment = str(run_buffer.payload.get("comment", ""))
+        self.comment_edit.setPlainText(initial_comment)
+        self.comment_edit.setPlaceholderText("Comment for this experiment run...")
+        lay.addWidget(QLabel("Comment", self))
+        lay.addWidget(self.comment_edit)
+
+        def _save_comment() -> None:
+            if run_buffer is not None:
+                run_buffer.payload["comment"] = self.comment_edit.toPlainText()
+                self.statusBar().showMessage("Comment saved", 2000)
+
+        save_comment_btn = QPushButton("Save Comment", self)
+        save_comment_btn.clicked.connect(_save_comment)
+        lay.addWidget(save_comment_btn)
+
         return w
 
     def _make_analyze_buffer_widget(self, buffer: BufferDescriptor) -> QWidget:
@@ -323,23 +365,6 @@ class MainWindow(QMainWindow):
         btn_lay.addWidget(overwrite_meta_btn)
         lay.addWidget(btns)
 
-        return w
-
-    def _make_comment_buffer_widget(self, buffer: BufferDescriptor) -> QWidget:
-        w = QWidget(self)
-        lay = QVBoxLayout(w)
-        editor = QPlainTextEdit(self)
-        editor.setPlainText(str(buffer.payload.get("text", "")))
-
-        def _save_comment() -> None:
-            buffer.payload["text"] = editor.toPlainText()
-            self.statusBar().showMessage("Comment saved to buffer payload", 2000)
-
-        save_btn = QPushButton("Save Comment", self)
-        save_btn.clicked.connect(_save_comment)
-
-        lay.addWidget(editor)
-        lay.addWidget(save_btn)
         return w
 
     def _make_image_view(self, buffer: BufferDescriptor) -> QWidget:
@@ -473,48 +498,58 @@ class MainWindow(QMainWindow):
     def _build_panel_b(self) -> QWidget:
         w = QWidget(self)
         lay = QVBoxLayout(w)
+        toolbox = QToolBox(self)
+        device_infos = self.controller.get_device_infos()
+        if not device_infos:
+            lay.addWidget(QLabel("No registered devices"))
+            return w
 
-        table = QTableWidget(self)
-        rows = self.controller.get_device_rows()
-        table.setColumnCount(3)
-        table.setHorizontalHeaderLabels(["device", "field", "value"])
-        table.setRowCount(len(rows))
-        for r, row in enumerate(rows):
-            table.setItem(r, 0, QTableWidgetItem(str(row["device"])))
-            table.setItem(r, 1, QTableWidgetItem(str(row["field"])))
-            table.setItem(r, 2, QTableWidgetItem(str(row["value"])))
+        for device_name, info in device_infos.items():
+            panel = QWidget(self)
+            panel_layout = QVBoxLayout(panel)
+            table = QTableWidget(self)
+            editable_fields = [(k, v) for k, v in info.items() if k != "type" and k != "address"]
+            table.setColumnCount(2)
+            table.setHorizontalHeaderLabels(["field", "value"])
+            table.setRowCount(len(editable_fields))
+            for r, (field, value) in enumerate(editable_fields):
+                table.setItem(r, 0, QTableWidgetItem(str(field)))
+                table.setItem(r, 1, QTableWidgetItem(str(value)))
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            panel_layout.addWidget(table)
 
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            def _make_apply(name: str, t: QTableWidget):
+                def _apply() -> None:
+                    for r in range(t.rowCount()):
+                        field_item = t.item(r, 0)
+                        value_item = t.item(r, 1)
+                        if field_item is None or value_item is None:
+                            continue
+                        field = field_item.text()
+                        text_value = value_item.text()
+                        value: Any = text_value
+                        try:
+                            value = float(text_value)
+                        except ValueError:
+                            pass
+                        result = self.controller.update_device_field(name, field, value)
+                        if not result["ok"]:
+                            QMessageBox.warning(
+                                self,
+                                "dev_cfg",
+                                f"{name}.{field} update failed: {result['message']}",
+                            )
+                            return
+                        value_item.setText(str(result["value"]))
+                    self.statusBar().showMessage(f"Applied {name} changes", 2000)
 
-        def _apply_selected() -> None:
-            r = table.currentRow()
-            if r < 0:
-                return
-            device = table.item(r, 0).text()
-            field = table.item(r, 1).text()
-            text_value = table.item(r, 2).text()
-            value: Any = text_value
-            try:
-                value = float(text_value)
-            except ValueError:
-                pass
+                return _apply
 
-            result = self.controller.update_device_field(device, field, value)
-            if result["ok"]:
-                table.item(r, 2).setText(str(result["value"]))
-                self.statusBar().showMessage("Device field applied", 2000)
-            else:
-                table.item(r, 2).setText(str(result["value"]))
-                QMessageBox.warning(
-                    self,
-                    "B panel rollback",
-                    f"Failed: {result['message']}\nOnly this field has been rolled back.",
-                )
-
-        apply_btn = QPushButton("Apply Selected Field", self)
-        apply_btn.clicked.connect(_apply_selected)
-        lay.addWidget(table)
-        lay.addWidget(apply_btn)
+            apply_btn = QPushButton("Apply Table", self)
+            apply_btn.clicked.connect(_make_apply(device_name, table))
+            panel_layout.addWidget(apply_btn)
+            toolbox.addItem(panel, device_name)
+        lay.addWidget(toolbox)
         return w
 
     def _build_panel_c(self) -> QWidget:
@@ -531,6 +566,48 @@ class MainWindow(QMainWindow):
             table.setItem(r, 1, QTableWidgetItem(str(row["value"])))
         table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
+        def _parse_numeric(raw: str) -> Any:
+            text = raw.strip()
+            if not text:
+                raise ValueError("value cannot be empty")
+            try:
+                return int(text)
+            except ValueError:
+                pass
+            try:
+                return float(text)
+            except ValueError:
+                pass
+            try:
+                return complex(text)
+            except ValueError as exc:
+                raise ValueError(
+                    "value must be int, float, or complex"
+                ) from exc
+
+        def _add_row() -> None:
+            key, ok = QInputDialog.getText(self, "Add metadict key", "Key:")
+            if not ok:
+                return
+            key = key.strip()
+            if not key:
+                QMessageBox.warning(self, "metadict", "Key cannot be empty.")
+                return
+            raw_value, ok = QInputDialog.getText(
+                self, "Add metadict value", "Value (int/float/complex):"
+            )
+            if not ok:
+                return
+            try:
+                parsed = _parse_numeric(raw_value)
+            except ValueError as exc:
+                QMessageBox.warning(self, "metadict", str(exc))
+                return
+            r = table.rowCount()
+            table.insertRow(r)
+            table.setItem(r, 0, QTableWidgetItem(key))
+            table.setItem(r, 1, QTableWidgetItem(str(parsed)))
+
         def _apply() -> None:
             updated: dict[str, Any] = {}
             for r in range(table.rowCount()):
@@ -543,9 +620,10 @@ class MainWindow(QMainWindow):
                     continue
                 raw = val_item.text().strip()
                 try:
-                    val: Any = json.loads(raw)
-                except Exception:
-                    val = raw
+                    val = _parse_numeric(raw)
+                except ValueError as exc:
+                    QMessageBox.warning(self, "metadict", f"Row {r + 1}: {exc}")
+                    return
                 updated[key] = val
 
             self.controller.replace_meta_dict(updated)
@@ -554,149 +632,143 @@ class MainWindow(QMainWindow):
                 f"MetaDict updated and saved: {path.name}", 2500
             )
 
+        add_btn = QPushButton("Add", self)
+        add_btn.clicked.connect(_add_row)
         apply_btn = QPushButton("Apply Meta Changes", self)
         apply_btn.clicked.connect(_apply)
         lay.addWidget(table)
+        lay.addWidget(add_btn)
         lay.addWidget(apply_btn)
         return w
 
     def _build_panel_d(self) -> QWidget:
         w = QWidget(self)
         lay = QVBoxLayout(w)
+        tree = QTreeWidget(self)
+        tree.setHeaderLabels(["name", "value"])
+        snapshot = self.controller.get_library_snapshot()
 
-        def _make_library_table(rows: list[dict[str, Any]]) -> QTableWidget:
-            table = QTableWidget(self)
-            table.setColumnCount(2)
-            table.setHorizontalHeaderLabels(["name", "cfg(json)"])
-            table.setRowCount(len(rows))
-            for r, row in enumerate(rows):
-                table.setItem(r, 0, QTableWidgetItem(str(row["name"])))
-                table.setItem(r, 1, QTableWidgetItem(json.dumps(row["cfg"])))
-            table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-            return table
-
-        all_rows = self.controller.get_library_rows()
-        module_rows = [
-            {
-                "name": str(row["name"]).split(":", 1)[1],
-                "cfg": row["cfg"],
-            }
-            for row in all_rows
-            if str(row["name"]).startswith("module:")
-        ]
-        waveform_rows = [
-            {
-                "name": str(row["name"]).split(":", 1)[1],
-                "cfg": row["cfg"],
-            }
-            for row in all_rows
-            if str(row["name"]).startswith("waveform:")
-        ]
-
-        lay.addWidget(QLabel("modules", self))
-        module_table = _make_library_table(module_rows)
-        lay.addWidget(module_table)
-        add_module_btn = QPushButton("Add Module Row", self)
-
-        def _add_module_row() -> None:
-            r = module_table.rowCount()
-            module_table.insertRow(r)
-            module_table.setItem(r, 0, QTableWidgetItem(""))
-            module_table.setItem(r, 1, QTableWidgetItem("{}"))
-
-        add_module_btn.clicked.connect(_add_module_row)
-        lay.addWidget(add_module_btn)
-
-        lay.addWidget(QLabel("waveforms", self))
-        waveform_table = _make_library_table(waveform_rows)
-        lay.addWidget(waveform_table)
-        add_waveform_btn = QPushButton("Add Waveform Row", self)
-
-        def _add_waveform_row() -> None:
-            r = waveform_table.rowCount()
-            waveform_table.insertRow(r)
-            waveform_table.setItem(r, 0, QTableWidgetItem(""))
-            waveform_table.setItem(r, 1, QTableWidgetItem("{}"))
-
-        add_waveform_btn.clicked.connect(_add_waveform_row)
-        lay.addWidget(add_waveform_btn)
-
-        def _apply() -> None:
-            updated: dict[str, dict[str, Any]] = {}
-
-            for r in range(module_table.rowCount()):
-                name_item = module_table.item(r, 0)
-                cfg_item = module_table.item(r, 1)
-                if name_item is None or cfg_item is None:
-                    continue
-                name = name_item.text().strip()
-                cfg_text = cfg_item.text().strip()
-                if not name:
-                    continue
-                try:
-                    cfg = json.loads(cfg_text)
-                except Exception as exc:
-                    QMessageBox.warning(
-                        self, "D panel", f"Module row {r + 1} JSON parse failed: {exc}"
-                    )
-                    return
-                if not isinstance(cfg, dict):
-                    QMessageBox.warning(
-                        self, "D panel", f"Module row {r + 1} cfg must be a JSON object"
-                    )
-                    return
-                updated[f"module:{name}"] = cfg
-
-            for r in range(waveform_table.rowCount()):
-                name_item = waveform_table.item(r, 0)
-                cfg_item = waveform_table.item(r, 1)
-                if name_item is None or cfg_item is None:
-                    continue
-                name = name_item.text().strip()
-                cfg_text = cfg_item.text().strip()
-                if not name:
-                    continue
-                try:
-                    cfg = json.loads(cfg_text)
-                except Exception as exc:
-                    QMessageBox.warning(
-                        self,
-                        "D panel",
-                        f"Waveform row {r + 1} JSON parse failed: {exc}",
-                    )
-                    return
-                if not isinstance(cfg, dict):
-                    QMessageBox.warning(
-                        self,
-                        "D panel",
-                        f"Waveform row {r + 1} cfg must be a JSON object",
-                    )
-                    return
-                updated[f"waveform:{name}"] = cfg
-
-            try:
-                self.controller.replace_library_items(updated)
-            except Exception as exc:
-                QMessageBox.warning(self, "D panel", str(exc))
+        def _populate(parent: QTreeWidgetItem, key: str, value: Any) -> None:
+            item = QTreeWidgetItem([str(key), ""])
+            parent.addChild(item)
+            if isinstance(value, dict):
+                for sub_key, sub_val in value.items():
+                    _populate(item, str(sub_key), sub_val)
                 return
-            path = self.controller.save_module_library()
-            self.statusBar().showMessage(
-                f"Library updated and saved: {path.name}", 2500
-            )
+            if isinstance(value, list):
+                for i, sub_val in enumerate(value):
+                    _populate(item, f"[{i}]", sub_val)
+                return
+            item.setText(1, str(value))
 
-        apply_btn = QPushButton("Apply Library Changes", self)
-        apply_btn.clicked.connect(_apply)
-        lay.addWidget(apply_btn)
+        root_modules = QTreeWidgetItem(["modules", ""])
+        root_waveforms = QTreeWidgetItem(["waveforms", ""])
+        tree.addTopLevelItem(root_modules)
+        tree.addTopLevelItem(root_waveforms)
+
+        for name, cfg in snapshot.get("modules", {}).items():
+            _populate(root_modules, name, cfg)
+        for name, cfg in snapshot.get("waveforms", {}).items():
+            _populate(root_waveforms, name, cfg)
+        tree.expandToDepth(1)
+        lay.addWidget(tree)
         return w
 
-    def _on_context_changed(self) -> None:
+    def _on_activate_context(self) -> None:
         item = self.context_list.currentItem()
         if item is None:
             return
         self.controller.set_context(item.text())
         self._reload_tree()
         self._reload_right_panels()
-        self.statusBar().showMessage(f"Switched context: {item.text()}", 2000)
+        self.statusBar().showMessage(f"Activated context: {item.text()}", 2000)
+
+    def _prompt_context_label(self, title: str) -> Optional[tuple[str, Optional[str]]]:
+        devices = self.controller.get_supported_label_devices()
+        selected_device_name: Optional[str] = None
+        default_text = self.controller.suggest_auto_label()
+
+        if not devices:
+            text, ok = QInputDialog.getText(
+                self,
+                title,
+                "Context label:",
+                text=default_text,
+            )
+            if not ok:
+                return None
+            return text.strip(), selected_device_name
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+        device_combo = QComboBox(dialog)
+        for dev in devices:
+            device_combo.addItem(f"{dev['name']} ({dev['value']})", dev["name"])
+        label_edit = QLineEdit(default_text, dialog)
+        form.addRow("Device", device_combo)
+        form.addRow("Context label", label_edit)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=dialog
+        )
+        layout.addWidget(buttons)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        def _refresh_default_label() -> None:
+            nonlocal selected_device_name
+            selected_device_name = device_combo.currentData()
+            label_edit.setText(self.controller.suggest_auto_label(selected_device_name))
+
+        device_combo.currentIndexChanged.connect(_refresh_default_label)
+
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return label_edit.text().strip(), selected_device_name
+
+    def _on_new_context(self) -> None:
+        result = self._prompt_context_label("New Flux Context")
+        if result is None:
+            return
+        label, _ = result
+        if not label:
+            QMessageBox.warning(self, "New context", "Context label cannot be empty.")
+            return
+        try:
+            self.controller.create_context(label=label)
+        except Exception as exc:
+            QMessageBox.warning(self, "New context", str(exc))
+            return
+        self._load_contexts()
+        self._reload_tree()
+        self._reload_right_panels()
+        self.statusBar().showMessage(f"Created context: {label}", 2500)
+
+    def _on_clone_context(self) -> None:
+        src_item = self.context_list.currentItem()
+        if src_item is None:
+            QMessageBox.information(self, "Clone context", "Please select a source context.")
+            return
+        result = self._prompt_context_label("Clone Flux Context")
+        if result is None:
+            return
+        label, _ = result
+        if not label:
+            QMessageBox.warning(self, "Clone context", "Context label cannot be empty.")
+            return
+        try:
+            self.controller.create_context(label=label, clone_from=src_item.text())
+        except Exception as exc:
+            QMessageBox.warning(self, "Clone context", str(exc))
+            return
+        self._load_contexts()
+        self._reload_tree()
+        self._reload_right_panels()
+        self.statusBar().showMessage(
+            f"Cloned context from {src_item.text()} to {label}", 2500
+        )
 
     def _on_tree_clicked(self, index) -> None:
         path = Path(self.file_model.filePath(index))
@@ -711,6 +783,32 @@ class MainWindow(QMainWindow):
             return
         self.controller.state.set_current_group(keys[index])
         self._render_current_buffer()
+
+    def _on_group_close_requested(self, index: int) -> None:
+        keys = list(self.controller.state.groups.keys())
+        if index < 0 or index >= len(keys):
+            return
+        group_id = keys[index]
+
+        if group_id in self.controller.group_models:
+            QMessageBox.information(
+                self,
+                "Close tab",
+                "Experiment tabs are fixed in this phase and cannot be closed.",
+            )
+            return
+
+        group = self.controller.state.groups.get(group_id)
+        if group is None:
+            return
+
+        for buffer_id in list(group.buffer_ids):
+            self.controller.state.buffers.pop(buffer_id, None)
+        self.controller.state.groups.pop(group_id, None)
+
+        remaining = list(self.controller.state.groups.keys())
+        self.controller.state.current_group_id = remaining[0] if remaining else None
+        self._reload_groups()
 
     def _step_buffer(self, step: int) -> None:
         group = self.controller.state.current_group()
@@ -750,8 +848,11 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _on_stop_clicked(self) -> None:
-        self.cancel_event.set()
-        self.progress_label.setText("Stopping...")
+        QMessageBox.information(
+            self,
+            "Stop",
+            "FakeExp uses its native run flow. GUI stop is not implemented in this phase.",
+        )
 
     def _on_run_progress(self, current: int, total: int) -> None:
         pct = int(100 * current / max(total, 1))

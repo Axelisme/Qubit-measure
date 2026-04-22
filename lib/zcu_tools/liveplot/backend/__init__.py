@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import warnings
 from types import ModuleType
 
@@ -7,14 +8,16 @@ import matplotlib as mpl
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from . import fallback, jupyter
+from . import fallback, jupyter, pyside6
 
 
 def auto_select_backend() -> ModuleType:
     backend = mpl.get_backend().lower()
     if "nbagg" in backend:
         return jupyter
-    if any([name in backend for name in ["inline", "qtagg"]]):
+    if "qtagg" in backend:
+        return pyside6
+    if "inline" in backend:
         return fallback
     else:
         warnings.warn(
@@ -44,6 +47,7 @@ __all__ = [
     # module
     "jupyter",
     "fallback",
+    "pyside6",
     # functions
     "make_plot_frame",
     "refresh_figure",
