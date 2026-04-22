@@ -35,12 +35,8 @@ from zcu_tools.experiment.v2.runner import (
     run_with_retries,
 )
 from zcu_tools.experiment.v2.utils import merge_result_list
-from zcu_tools.liveplot import (
-    AbsLivePlot,
-    MultiLivePlot,
-    grab_frame_with_instant_plot,
-    make_plot_frame,
-)
+from zcu_tools.liveplot import AbsLivePlot, MultiLivePlot, make_plot_frame
+from zcu_tools.liveplot.jupyter import grab_frame_with_instant_plot
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
 
 T_PlotDict = TypeVar("T_PlotDict", bound=Mapping[str, AbsLivePlot])

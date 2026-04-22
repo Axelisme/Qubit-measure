@@ -19,8 +19,20 @@ from ..segments import AbsSegment
 T_JupyterMixin = TypeVar("T_JupyterMixin", bound="JupyterMixin")
 
 
+def is_jupyter_backend() -> bool:
+    backend = mpl.get_backend().lower()
+    return (
+        backend.startswith("module://ipykernel.")
+        or backend in {"widget", "nbagg", "inline", "module://ipympl.backend_nbagg"}
+        or "ipympl" in backend
+    )
+
+
 def instant_plot(fig: Figure) -> None:
     # this ensures the figure is rendered in Jupyter notebooks right now and can be updated later
+    if not is_jupyter_backend():
+        return
+
     canvas = fig.canvas
 
     if not hasattr(canvas, "toolbar_visible"):

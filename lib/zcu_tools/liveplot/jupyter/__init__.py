@@ -2,6 +2,7 @@ from .base import (
     JupyterMixin,
     grab_frame_with_instant_plot,
     instant_plot,
+    is_jupyter_backend,
     make_plot_frame,
 )
 from .plot1d import LivePlot1D
@@ -14,6 +15,7 @@ __all__ = [
     "instant_plot",
     "make_plot_frame",
     "grab_frame_with_instant_plot",
+    "is_jupyter_backend",
     # plot1d
     "LivePlot1D",
     # plot2d
