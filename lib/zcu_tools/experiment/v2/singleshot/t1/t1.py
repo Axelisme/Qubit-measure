@@ -95,7 +95,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             lengths = sweep2array(lengths, "time", {"soccfg": soccfg}, allow_array=True)
             lengths = np.unique(lengths)
 
-        fig, axs = make_plot_frame(1, 2, figsize=(12, 5))
+        fig, axs = make_plot_frame(1, 2, plot_instant=True, figsize=(12, 5))
         axs[0][0].set_ylim(0, 1)
         axs[0][1].set_ylim(0, 1)
 

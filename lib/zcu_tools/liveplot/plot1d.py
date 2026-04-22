@@ -5,12 +5,10 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from typing_extensions import Any, Optional, cast
 
-from ..base import AbsLivePlot
-from ..segments import Plot1DSegment
-from .base import JupyterMixin
+from .segments import BaseSegmentLivePlot, Plot1DSegment
 
 
-class LivePlot1D(JupyterMixin, AbsLivePlot):
+class LivePlot1D(BaseSegmentLivePlot):
     def __init__(
         self,
         xlabel: str,

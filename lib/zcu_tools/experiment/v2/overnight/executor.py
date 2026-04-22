@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections import OrderedDict, defaultdict
 from abc import abstractmethod
+from collections import OrderedDict, defaultdict
 from pathlib import Path
 
 import matplotlib
@@ -152,7 +152,10 @@ class OvernightExecutor:
         n_row = int(total_num_axes**0.5)
         n_col = int(np.ceil(total_num_axes / n_row))
         fig, axs = make_plot_frame(
-            n_row, n_col, figsize=(min(14, 3.5 * n_col), min(8, 2.5 * n_row))
+            n_row,
+            n_col,
+            plot_instant=True,
+            figsize=(min(14, 3.5 * n_col), min(8, 2.5 * n_row)),
         )
 
         # collect axes into dict

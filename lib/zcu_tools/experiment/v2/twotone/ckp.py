@@ -157,7 +157,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                 **(acquire_kwargs or {}),
             )
 
-        fig, axs = make_plot_frame(1, 2, figsize=(10, 4))
+        fig, axs = make_plot_frame(1, 2, plot_instant=True, figsize=(10, 4))
 
         with MultiLivePlot(
             fig,

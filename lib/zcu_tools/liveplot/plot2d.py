@@ -14,14 +14,17 @@ from typing_extensions import (
     overload,
 )
 
-from ..base import AbsLivePlot
-from ..segments import Plot1DSegment, Plot2DSegment, PlotNonUniform2DSegment
-from .base import JupyterMixin
+from .segments import (
+    BaseSegmentLivePlot,
+    Plot1DSegment,
+    Plot2DSegment,
+    PlotNonUniform2DSegment,
+)
 
 Seg2D_T = TypeVar("Seg2D_T", Plot2DSegment, PlotNonUniform2DSegment)
 
 
-class LivePlot2D(JupyterMixin, AbsLivePlot, Generic[Seg2D_T]):
+class LivePlot2D(BaseSegmentLivePlot, Generic[Seg2D_T]):
     @overload
     def __init__(
         self: LivePlot2D[Plot2DSegment],
@@ -99,7 +102,7 @@ class LivePlot2D(JupyterMixin, AbsLivePlot, Generic[Seg2D_T]):
         return cast(Seg2D_T, self.segments[0][0])
 
 
-class LivePlot2DwithLine(JupyterMixin, AbsLivePlot, Generic[Seg2D_T]):
+class LivePlot2DwithLine(BaseSegmentLivePlot, Generic[Seg2D_T]):
     @overload
     def __init__(
         self: LivePlot2DwithLine[Plot2DSegment],

@@ -115,7 +115,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
                 ge_radius=radius,
             )
 
-        fig, axs = make_plot_frame(3, 1, figsize=(12, 6))
+        fig, axs = make_plot_frame(3, 1, plot_instant=True, figsize=(12, 6))
 
         with MultiLivePlot(
             fig,

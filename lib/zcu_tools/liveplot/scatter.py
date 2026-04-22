@@ -5,12 +5,10 @@ from matplotlib.axes import Axes
 from numpy.typing import NDArray
 from typing_extensions import Any, Optional, Sequence, Union, cast
 
-from ..base import AbsLivePlot
-from ..segments import ScatterSegment
-from .base import JupyterMixin
+from .segments import BaseSegmentLivePlot, ScatterSegment
 
 
-class LivePlotScatter(JupyterMixin, AbsLivePlot):
+class LivePlotScatter(BaseSegmentLivePlot):
     def __init__(
         self,
         xlabel: str,
