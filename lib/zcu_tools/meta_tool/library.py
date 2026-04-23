@@ -5,10 +5,10 @@ from pathlib import Path
 
 import yaml
 from pydantic import BaseModel
-from typing_extensions import Any, Optional, TypeVar, Union, cast
+from typing_extensions import Any, Mapping, Optional, TypeVar, Union, cast
 from yaml.nodes import MappingNode
 
-from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.program.v2 import ModuleCfg, WaveformCfg
 from zcu_tools.utils import deepupdate, format_dict
 
@@ -130,7 +130,10 @@ class ModuleLibrary(SyncFile):
 
         # derive device configuration from global device manager
         dev_cfg = GlobalDeviceManager.get_all_info()
-        deepupdate(dev_cfg, exp_cfg.get("dev", {}), behavior="force")
+        for name, patch in exp_cfg.get("dev", {}).items():
+            if name not in dev_cfg:
+                raise KeyError(f"Device {name} not found in global device manager.")
+            dev_cfg[name].update(**patch)
         exp_cfg["dev"] = dev_cfg
 
         modules: dict[str, Union[str, dict, ModuleCfg]] = exp_cfg.get("modules", {})

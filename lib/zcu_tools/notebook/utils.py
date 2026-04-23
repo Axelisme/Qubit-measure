@@ -154,8 +154,12 @@ def savefig(fig: Figure, filepath: str, close_after: bool = True, **kwargs) -> N
 
 
 def dump_device_info(path: Union[str, Path]) -> None:
+    info_snapshot = {
+        name: info.to_dict()
+        for name, info in GlobalDeviceManager.get_all_info().items()
+    }
     with open(str(path), "w") as f:
-        json.dump(GlobalDeviceManager.get_all_info(), f, indent=2)
+        json.dump(info_snapshot, f, indent=2)
 
 
 def reconnect_devices(dev_info: Mapping[str, DeviceInfo]) -> ResourceManager:
@@ -163,11 +167,12 @@ def reconnect_devices(dev_info: Mapping[str, DeviceInfo]) -> ResourceManager:
 
     resource_manager = ResourceManager()
     for name, info in dev_info.items():
-        device_type = info["type"]
+        device_type = info.type if isinstance(info, DeviceInfo) else info["type"]
+        address = info.address if isinstance(info, DeviceInfo) else info["address"]
         if device_type == "YOKOGS200":
-            device = YOKOGS200(info["address"], resource_manager)
+            device = YOKOGS200(address, resource_manager)
         elif device_type == "RohdeSchwarzSGS100A":
-            device = RohdeSchwarzSGS100A(info["address"], resource_manager)
+            device = RohdeSchwarzSGS100A(address, resource_manager)
         else:
             raise ValueError(f"Not supported device type: {device_type}")
         GlobalDeviceManager.register_device(name, device)

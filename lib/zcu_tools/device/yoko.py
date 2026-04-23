@@ -5,7 +5,6 @@ import warnings
 
 import numpy as np
 from tqdm.auto import tqdm
-from typeguard import check_type
 from typing_extensions import Literal, Optional
 
 from .base import BaseDevice, DeviceInfo
@@ -22,15 +21,17 @@ STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
 MODE_MAPS_INV = {v: k for k, v in MODE_MAPS.items()}
 
 
-class YOKOGS200Info(DeviceInfo, closed=True):
-    type: Literal["YOKOGS200"]
-    output: Literal["on", "off"]
-    mode: Literal["voltage", "current"]
-    value: float
-    rampstep: float
+class YOKOGS200Info(DeviceInfo):
+    type: Literal["YOKOGS200"] = "YOKOGS200"
+    output: Literal["on", "off"] = "off"
+    mode: Literal["voltage", "current"] = "voltage"
+    value: float = 0.0
+    rampstep: float = DEFAULT_RAMPSTEP["voltage"]
 
 
 class YOKOGS200(BaseDevice):
+    info_model = YOKOGS200Info
+
     # Initializes session for device.
     # address: address of device, rm: VISA resource manager
     def __init__(self, address: str, rm) -> None:
@@ -220,22 +221,20 @@ class YOKOGS200(BaseDevice):
     # ==========================================================================#
 
     def _setup(self, cfg: YOKOGS200Info, /, progress: bool = True) -> None:
-        cfg = check_type(cfg, YOKOGS200Info)  # runtime check
-
-        if self.get_output() != "on" and cfg["output"] == "on":
+        if self.get_output() != "on" and cfg.output == "on":
             warnings.warn("YOKOGS200 output is off, did you forget to turn it on?")
 
         cur_mode = self.get_mode()
 
-        if cfg["mode"] != cur_mode:
+        if cfg.mode != cur_mode:
             raise RuntimeError(
-                f"Current mode: {cur_mode} in device {self.address}, but cfg requires: {cfg['mode']} mode, "
+                f"Current mode: {cur_mode} in device {self.address}, but cfg requires: {cfg.mode} mode, "
                 "YOKOGS200 does not support implicit setup mode to prevent sudden current/voltage change, "
                 "Please change the device mode manually before calling setup, "
                 "Remember to turn value to zero before changing mode"
             )
 
-        value = cfg["value"]
+        value = cfg.value
         if cur_mode == "current":
             self.set_current(value, progress=progress)
         elif cur_mode == "voltage":
@@ -243,16 +242,13 @@ class YOKOGS200(BaseDevice):
         else:
             raise ValueError(f"Unknown mode {cur_mode} in device {self.address}")
 
-        self._rampstep = cfg["rampstep"]
+        self._rampstep = cfg.rampstep
 
     def get_info(self) -> YOKOGS200Info:
         return YOKOGS200Info(
-            {
-                "type": "YOKOGS200",
-                "address": self.address,
-                "output": self.get_output(),
-                "mode": self.get_mode(),
-                "value": self._get_level(),
-                "rampstep": self._rampstep,
-            }
+            address=self.address,
+            output=self.get_output(),
+            mode=self.get_mode(),
+            value=self._get_level(),
+            rampstep=self._rampstep,
         )

@@ -52,7 +52,7 @@ def format_dict(obj: Mapping[str, Any]) -> dict[str, Any]:
         if hasattr(v, "to_dict") and callable(v.to_dict):
             v = v.to_dict()  # work for pydantic model
         if hasattr(v, "model_dump") and callable(v.model_dump):
-            v = v.model_dump()  # work for pydantic model
+            v = v.model_dump(mode="python")  # work for pydantic model
         if hasattr(v, "tolist") and callable(v.tolist):
             v = v.tolist()  # work for numpy array
         if hasattr(v, "item") and callable(v.item):

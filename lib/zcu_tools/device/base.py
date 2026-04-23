@@ -3,23 +3,44 @@ from __future__ import annotations
 import sys
 from abc import ABC, abstractmethod
 
-from typing_extensions import TYPE_CHECKING, Any, NotRequired, TypedDict
+from pydantic import BaseModel, ConfigDict
+from typing_extensions import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from pyvisa import ResourceManager
 
 
-class DeviceInfo(TypedDict, extra_items=Any):
-    type: str
-    address: str
+class DeviceInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    label: NotRequired[str]
+    address: str
+    type: str
+    label: Optional[str] = None
+
+    def update(self, **kwargs: Any) -> None:
+        protected_fields = {"type", "address"}
+        for key in kwargs:
+            if key in protected_fields:
+                raise ValueError(
+                    f"Cannot update protected field '{key}' in DeviceInfo."
+                )
+            if key not in type(self).model_fields:
+                raise ValueError(
+                    f"Unknown field '{key}' for {self.__class__.__name__}."
+                )
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def to_dict(self) -> dict[str, Any]:
+        return self.model_dump(mode="python", by_alias=True, exclude_none=True)
 
 
 class BaseDevice(ABC):
     """
     Base class for all devices.
     """
+
+    info_model: type[DeviceInfo] = DeviceInfo
 
     def __init__(self, address: str, rm: ResourceManager) -> None:
         self.address = address
@@ -70,15 +91,17 @@ class BaseDevice(ABC):
         Setup the device with the given configuration.
         """
         # sanity checks
-        if cfg["type"] != self.__class__.__name__:
+        if cfg.type != self.__class__.__name__:
             raise RuntimeError(
-                f"Trying to setup device of type {self.__class__.__name__} with cfg of type {cfg['type']}"
+                f"Trying to setup device of type {self.__class__.__name__} with cfg of type {cfg.type}"
             )
 
-        if cfg["address"] != self.address:
+        if cfg.address != self.address:
             raise RuntimeError(
-                f"Trying to setup device at address {self.address} with cfg for address {cfg['address']}"
+                f"Trying to setup device at address {self.address} with cfg for address {cfg.address}"
             )
+
+        cfg = self.info_model.model_validate(cfg.model_dump(mode="python"))
 
         # private method to setup
         self._setup(cfg, progress=progress)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing_extensions import TYPE_CHECKING, Any, Literal, Mapping, Optional, cast
+from typing_extensions import TYPE_CHECKING, Literal, Mapping, cast
 
 from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.experiment.cfg_model import ExpCfgModel
@@ -18,7 +18,7 @@ def get_labeled_device_cfg(
     """Get the device configuration with the given label."""
     match_list = []
     for name, dev_cfg in devs_cfg.items():
-        if dev_cfg.get("label") == label:
+        if dev_cfg.label == label:
             match_list.append(name)
     if len(match_list) == 0:
         raise ValueError(f"Device with label '{label}' not found in dev configuration.")
@@ -37,12 +37,12 @@ def set_flux_in_dev_cfg(
 
     flux_cfg = get_labeled_device_cfg(devs_cfg, label)
 
-    if flux_cfg["type"] == "YOKOGS200":
+    if flux_cfg.type == "YOKOGS200":
         flux_cfg = cast("YOKOGS200Info", flux_cfg)
-        flux_cfg["value"] = value
+        flux_cfg.value = value
     else:
         raise NotImplementedError(
-            f"Flux device type {flux_cfg['type']} not supported yet"
+            f"Flux device type {flux_cfg.type} not supported yet"
         )
 
 
@@ -53,11 +53,11 @@ def set_freq_in_dev_cfg(
 
     rf_cfg = get_labeled_device_cfg(devs_cfg, label)
 
-    if rf_cfg["type"] == "RohdeSchwarzSGS100A":
+    if rf_cfg.type == "RohdeSchwarzSGS100A":
         rf_cfg = cast("RohdeSchwarzSGS100AInfo", rf_cfg)
-        rf_cfg["freq_Hz"] = freq_Hz
+        rf_cfg.freq_Hz = freq_Hz
     else:
-        raise NotImplementedError(f"RF device type {rf_cfg['type']} not supported yet")
+        raise NotImplementedError(f"RF device type {rf_cfg.type} not supported yet")
 
 
 def set_power_in_dev_cfg(
@@ -67,11 +67,11 @@ def set_power_in_dev_cfg(
 
     rf_cfg = get_labeled_device_cfg(devs_cfg, label)
 
-    if rf_cfg["type"] == "RohdeSchwarzSGS100A":
+    if rf_cfg.type == "RohdeSchwarzSGS100A":
         rf_cfg = cast("RohdeSchwarzSGS100AInfo", rf_cfg)
-        rf_cfg["power_dBm"] = power_dBm
+        rf_cfg.power_dBm = power_dBm
     else:
-        raise NotImplementedError(f"RF device type {rf_cfg['type']} not supported yet")
+        raise NotImplementedError(f"RF device type {rf_cfg.type} not supported yet")
 
 
 def set_output_in_dev_cfg(
@@ -83,11 +83,11 @@ def set_output_in_dev_cfg(
 
     rf_cfg = get_labeled_device_cfg(devs_cfg, label)
 
-    if rf_cfg["type"] == "RohdeSchwarzSGS100A":
+    if rf_cfg.type == "RohdeSchwarzSGS100A":
         rf_cfg = cast("RohdeSchwarzSGS100AInfo", rf_cfg)
-        rf_cfg["output"] = output
+        rf_cfg.output = output
     else:
-        raise NotImplementedError(f"RF device type {rf_cfg['type']} not supported yet")
+        raise NotImplementedError(f"RF device type {rf_cfg.type} not supported yet")
 
 
 def setup_devices(cfg: ExpCfgModel, *, progress: bool = False) -> None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typeguard import check_type
 from typing_extensions import Literal
 
 from .base import BaseDevice, DeviceInfo
@@ -11,15 +10,17 @@ STATUS_MAP = {"on": "1", "off": "0"}
 STATUS_MAP_INV = {v: k for k, v in STATUS_MAP.items()}
 
 
-class RohdeSchwarzSGS100AInfo(DeviceInfo, closed=True):
-    type: Literal["RohdeSchwarzSGS100A"]
-    output: Literal["on", "off"]
-    IQ: Literal["on", "off"]
-    freq_Hz: float
-    power_dBm: float
+class RohdeSchwarzSGS100AInfo(DeviceInfo):
+    type: Literal["RohdeSchwarzSGS100A"] = "RohdeSchwarzSGS100A"
+    output: Literal["on", "off"] = "off"
+    IQ: Literal["on", "off"] = "off"
+    freq_Hz: float = 1e9
+    power_dBm: float = -120.0
 
 
 class RohdeSchwarzSGS100A(BaseDevice):
+    info_model = RohdeSchwarzSGS100AInfo
+
     def get_output(self) -> Literal["on", "off"]:
         return STATUS_MAP_INV[self.query(":OUTPut?")]  # type: ignore
 
@@ -77,21 +78,16 @@ class RohdeSchwarzSGS100A(BaseDevice):
     # ==========================================================================#
 
     def _setup(self, cfg: RohdeSchwarzSGS100AInfo, /, progress: bool = True) -> None:
-        cfg = check_type(cfg, RohdeSchwarzSGS100AInfo)  # runtime check
-
-        self.set_output(cfg["output"])
-        self.set_IQ_state(cfg["IQ"])
-        self.set_frequency(cfg["freq_Hz"])
-        self.set_power(cfg["power_dBm"])
+        self.set_output(cfg.output)
+        self.set_IQ_state(cfg.IQ)
+        self.set_frequency(cfg.freq_Hz)
+        self.set_power(cfg.power_dBm)
 
     def get_info(self) -> RohdeSchwarzSGS100AInfo:
         return RohdeSchwarzSGS100AInfo(
-            {
-                "type": "RohdeSchwarzSGS100A",
-                "address": self.address,
-                "output": self.get_output(),
-                "IQ": self.get_IQ_state(),
-                "freq_Hz": self.get_frequency(),
-                "power_dBm": self.get_power(),
-            }
+            address=self.address,
+            output=self.get_output(),
+            IQ=self.get_IQ_state(),
+            freq_Hz=self.get_frequency(),
+            power_dBm=self.get_power(),
         )
