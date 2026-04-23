@@ -7,28 +7,37 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter1d
-from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D
-from zcu_tools.program.v2 import ModularProgramCfg, OneToneProgram
-from zcu_tools.program.v2.modules import PulseCfg, PulseReadoutCfg, ResetCfg
+from zcu_tools.program.v2 import (
+    ModularProgramV2,
+    ProgramV2Cfg,
+    Pulse,
+    PulseCfg,
+    PulseReadoutCfg,
+    Readout,
+    Reset,
+    ResetCfg,
+)
 from zcu_tools.utils.datasaver import load_data, save_data
 
 LookbackResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class LookbackModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class LookbackModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     readout: PulseReadoutCfg
 
 
-class LookbackCfg(ModularProgramCfg, TaskCfg):
+class LookbackCfg(ProgramV2Cfg, ExpCfgModel):
     modules: LookbackModuleCfg
 
 
@@ -37,43 +46,46 @@ def lookback_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 
 
 class LookbackExp(AbsExperiment[LookbackResult, LookbackCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> LookbackResult:
-        _cfg = check_type(deepcopy(cfg), LookbackCfg)
-        setup_devices(_cfg, progress=True)
+    def run(self, soc, soccfg, cfg: LookbackCfg) -> LookbackResult:
+        setup_devices(cfg, progress=True)
 
-        if _cfg.setdefault("reps", 1) != 1:
+        if cfg.reps != 1:
             warnings.warn("reps is not 1 in config, this will be ignored.")
-            _cfg["reps"] = 1
+            cfg.reps = 1
 
-        prog = OneToneProgram(soccfg, _cfg)
-        Ts = (
-            prog.get_time_axis(ro_index=0)
-            + _cfg["modules"]["readout"].ro_cfg.trig_offset
+        modules = cfg.modules
+
+        prog = ModularProgramV2(
+            soccfg,
+            cfg,
+            [
+                Reset("reset", cfg=modules.reset),
+                Pulse("init_pulse", cfg=modules.init_pulse, tag="init_pulse"),
+                Readout("readout", cfg=modules.readout),
+            ],
         )
+        Ts = prog.get_time_axis(ro_index=0) + cfg.modules.readout.ro_cfg.trig_offset
         assert isinstance(Ts, np.ndarray)
 
+        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
+            return prog.acquire_decimated(soc, progress=False, round_hook=update_hook)
+
         with LivePlot1D("Time (us)", "Amplitude") as viewer:
-
-            def measure_fn(ctx, update_hook):
-                return OneToneProgram(soccfg, ctx.cfg).acquire_decimated(
-                    soc, progress=False, round_hook=update_hook
-                )
-
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: raw[0].dot([1, 1j]),
                     result_shape=(len(Ts),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     Ts, lookback_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (Ts, signals)
 
         return Ts, signals

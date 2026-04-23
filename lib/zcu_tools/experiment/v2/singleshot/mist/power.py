@@ -6,26 +6,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -41,16 +34,20 @@ from ..util import calc_populations
 PowerResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class PowerModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class PowerModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class PowerCfg(ModularProgramCfg, TaskCfg):
+class PowerSweepCfg(BaseModel):
+    gain: SweepCfg
+
+
+class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: PowerSweepCfg
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
@@ -58,44 +55,43 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: PowerCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> PowerResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        _cfg = check_type(deepcopy(cfg), PowerCfg)  # prevent in-place modification
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        cfg = deepcopy(cfg)
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
         gains = sweep2array(
-            _cfg["sweep"]["gain"],
+            cfg.sweep.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
-        gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-        modules["probe_pulse"].set_param("gain", gain_param)
+        gain_param = sweep2param("gain", cfg.sweep.gain)
+        modules.probe_pulse.set_param("gain", gain_param)
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any],
+            ctx: TaskState[NDArray[np.float64], Any, PowerCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: PowerCfg = cast(PowerCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            gain_sweep = cfg["sweep"]["gain"]
+            gain_sweep = cfg.sweep.gain
             gain_param = sweep2param("gain", gain_sweep)
-            modules["probe_pulse"].set_param("gain", gain_param)
+            modules.probe_pulse.set_param("gain", gain_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse(name="init_pulse", cfg=modules.get("init_pulse")),
-                    Pulse(name="probe_pulse", cfg=modules["probe_pulse"]),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse(name="init_pulse", cfg=modules.init_pulse),
+                    Pulse(name="probe_pulse", cfg=modules.probe_pulse),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("gain", gain_sweep)],
             ).acquire(
@@ -129,14 +125,14 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                     dtype=np.float64,
                     pbar_n=1,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     gains, calc_populations(ctx.root_data).T
                 ),
             )
 
         # record the last result
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = (gains, signals)
 
         return gains, signals
@@ -214,7 +210,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         gains = gains.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = cast(PowerCfg, cfg)
+        self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, populations)
 
         return gains, populations

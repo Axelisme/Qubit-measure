@@ -4,18 +4,14 @@ import logging
 import time
 
 from tqdm.auto import tqdm
-from typing_extensions import Optional, Sequence, TypeVar
+from typing_extensions import Optional
 
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .base import AbsTask
-from .state import Result, TaskState
+from .state import T_Cfg, T_ChildResult, T_Result, T_RootResult, TaskState
 
 logger = logging.getLogger(__name__)
-
-T_RootResult = TypeVar("T_RootResult", bound=Result)
-T_ChildResult = TypeVar("T_ChildResult", bound=Result)
-T_Result = TypeVar("T_Result", bound=Result)
 
 
 def run_with_retries(
@@ -36,23 +32,27 @@ def run_with_retries(
             else:
                 logger.warning(
                     "run_with_retries: attempt %d/%d failed, retrying: %s",
-                    attempt + 1, retry_time, e,
+                    attempt + 1,
+                    retry_time,
+                    e,
                 )
                 task.cleanup()
-                task.init(state, dynamic_pbar=dynamic_pbar)
+                task.init(dynamic_pbar=dynamic_pbar)
                 continue
         break
 
 
-class ReTryIfFail(AbsTask[T_Result, T_RootResult]):
-    def __init__(self, task: AbsTask[T_Result, T_RootResult], max_retries: int) -> None:
+class ReTryIfFail(AbsTask[T_Result, T_RootResult, T_Cfg]):
+    def __init__(
+        self, task: AbsTask[T_Result, T_RootResult, T_Cfg], max_retries: int
+    ) -> None:
         self.task = task
         self.max_retries = max_retries
         self.dynamic_pbar: bool = False
 
-    def init(self, state, dynamic_pbar: bool = False) -> None:
+    def init(self, dynamic_pbar: bool = False) -> None:
         self.dynamic_pbar = dynamic_pbar
-        self.task.init(state, dynamic_pbar=dynamic_pbar)
+        self.task.init(dynamic_pbar=dynamic_pbar)
 
     def run(self, state) -> None:
         run_with_retries(
@@ -69,12 +69,12 @@ class ReTryIfFail(AbsTask[T_Result, T_RootResult]):
         return self.task.get_default_result()
 
 
-class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult]):
+class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
     def __init__(
         self,
         name: str,
         num_times: int,
-        task: AbsTask[T_ChildResult, T_RootResult],
+        task: AbsTask[T_ChildResult, T_RootResult, T_Cfg],
         interval: float = 0.0,
     ) -> None:
         self.name = name
@@ -100,21 +100,15 @@ class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult]):
             ),
         )
 
-    def init(
-        self,
-        state: TaskState[list[T_ChildResult], T_RootResult],
-        dynamic_pbar: bool = False,
-    ) -> None:
+    def init(self, dynamic_pbar: bool = False) -> None:
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
             self.iter_pbar, self.time_pbar = self.make_pbar(leave=True)
 
-        state.env["repeat_idx"] = 0
+        self.task.init(dynamic_pbar=dynamic_pbar)
 
-        self.task.init(state.child(0), dynamic_pbar=dynamic_pbar)
-
-    def run(self, state: TaskState[list[T_ChildResult], T_RootResult]) -> None:
+    def run(self, state: TaskState[list[T_ChildResult], T_RootResult, T_Cfg]) -> None:
         if self.dynamic_pbar:
             self.iter_pbar, self.time_pbar = self.make_pbar(leave=False)
         else:

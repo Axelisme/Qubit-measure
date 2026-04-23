@@ -1,43 +1,36 @@
 from __future__ import annotations
 
-from pathlib import Path
 from copy import deepcopy
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from scipy.ndimage import gaussian_filter
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    Callable,
-    cast,
-)
+from pydantic import BaseModel
 from qick.asm_v2 import QickSweep1D
+from scipy.ndimage import gaussian_filter
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
+    BathReset,
+    BathResetCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
     ReadoutCfg,
     Reset,
-    BathReset,
     ResetCfg,
     sweep2param,
-    BathResetCfg,
 )
 from zcu_tools.utils.datasaver import load_data, save_data
 
@@ -46,16 +39,21 @@ FreqGainResult: TypeAlias = tuple[
 ]
 
 
-class FreqGainModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class FreqGainModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     tested_reset: BathResetCfg
     readout: ReadoutCfg
 
 
-class FreqGainCfg(ModularProgramCfg, TaskCfg):
+class FreqGainSweepCfg(BaseModel):
+    gain: SweepCfg
+    freq: SweepCfg
+
+
+class FreqGainCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FreqGainModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: FreqGainSweepCfg
 
 
 def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -69,36 +67,36 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: FreqGainCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqGainResult:
-        _cfg = check_type(deepcopy(cfg), FreqGainCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        reset_cfg = modules["tested_reset"]
+        reset_cfg = modules.tested_reset
         gains = sweep2array(
-            _cfg["sweep"]["gain"],
+            cfg.sweep.gain,
             "gain",
             {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            cfg.sweep.freq,
             "freq",
             {"soccfg": soccfg, "gen_ch": reset_cfg.cavity_tone_cfg.ch},
         )
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState[NDArray[np.complex128], Any, FreqGainCfg],
+            update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
-            cfg = cast(FreqGainCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            tested_reset = modules["tested_reset"]
+            tested_reset = modules.tested_reset
 
-            gain_sweep = cfg["sweep"]["gain"]
-            freq_sweep = cfg["sweep"]["freq"]
+            gain_sweep = cfg.sweep.gain
+            freq_sweep = cfg.sweep.freq
             gain_param = sweep2param("gain", gain_sweep)
             freq_param = sweep2param("freq", freq_sweep)
             tested_reset.set_param("res_gain", gain_param)
@@ -111,10 +109,10 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", modules.get("init_pulse")),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
                     BathReset("tested_reset", tested_reset),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[
                     ("phase", 4),  # 0, 90, 180, 270 degrees
@@ -133,16 +131,16 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(4, len(gains), len(freqs)),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, gains, bathreset_signal2real(ctx.root_data).T
                 ),
             )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (gains, freqs, signals)
 
         return gains, freqs, signals
@@ -286,7 +284,7 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
             [deg0_signals, deg90_signals, deg180_signals, deg270_signals], axis=0
         ).astype(np.complex128)
 
-        self.last_cfg = cast(FreqGainCfg, cfg)
+        self.last_cfg = FreqGainCfg.validate_or_warn(cfg, source=str(deg0_filepath))
         self.last_result = (gains, freqs, signals)
 
         return gains, freqs, signals

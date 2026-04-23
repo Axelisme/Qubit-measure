@@ -45,6 +45,8 @@ def test_set_value_type_mismatch_rejected():
 def test_trigger_update_calls_hook():
     calls = []
     root = {"x": np.zeros(2)}
-    s = TaskState(root_data=root, cfg={}, on_update=lambda snap: calls.append(snap.path))
+    s = TaskState(
+        root_data=root, cfg={}, on_update=lambda snap: calls.append(snap.path)
+    )
     s.child("x").set_value(np.array([1.0, 2.0]))
     assert calls == [("x",)]

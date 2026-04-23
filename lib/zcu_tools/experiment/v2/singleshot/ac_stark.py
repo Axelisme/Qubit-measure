@@ -10,24 +10,20 @@ from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy import float64
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
+from pydantic import BaseModel
+from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import (
-    LivePlot1D,
-    LivePlot2D,
-    MultiLivePlot,
-    make_plot_frame,
-)
+from zcu_tools.liveplot import LivePlot1D, LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -73,17 +69,22 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_freqs)
 
 
-class AcStarkModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class AcStarkModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     stark_pulse1: PulseCfg
     stark_pulse2: PulseCfg
     readout: ReadoutCfg
 
 
-class AcStarkCfg(ModularProgramCfg, TaskCfg):
+class AcStarkSweepCfg(BaseModel):
+    gain: SweepCfg
+    freq: SweepCfg
+
+
+class AcStarkCfg(ProgramV2Cfg, ExpCfgModel):
     modules: AcStarkModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: AcStarkSweepCfg
 
 
 class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
@@ -91,22 +92,22 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: AcStarkCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> AcStarkResult:
-        _cfg = check_type(deepcopy(cfg), AcStarkCfg)  # prevent in-place modification
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        cfg = deepcopy(cfg)
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        gain_sweep = _cfg["sweep"]["gain"]
+        gain_sweep = cfg.sweep.gain
 
         # uniform in square space
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["stark_pulse2"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.stark_pulse2.ch},
         )
         gains = np.sqrt(
             np.linspace(
@@ -114,11 +115,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
             )
         )
         gains = sweep2array(
-            gains, "gain", {"soccfg": soccfg, "gen_ch": modules["stark_pulse1"].ch}
+            gains, "gain", {"soccfg": soccfg, "gen_ch": modules.stark_pulse1.ch}
         )
 
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        modules["stark_pulse2"].set_param("freq", freq_param)
+        freq_param = sweep2param("freq", cfg.sweep.freq)
+        modules.stark_pulse2.set_param("freq", freq_param)
 
         fig, axs = make_plot_frame(2, 2, plot_instant=True, figsize=(8, 6))
 
@@ -158,11 +159,11 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         ) as viewer:
 
             def update_fn(i, ctx, gain) -> None:
-                ctx.cfg["modules"]["stark_pulse1"].set_param("gain", gain)
-                ctx.env_dict["idx"] = i
+                ctx.cfg.modules.stark_pulse1.set_param("gain", gain)
+                ctx.env["idx"] = i
 
             def plot_fn(ctx) -> None:
-                i = ctx.env_dict["idx"]
+                i = ctx.env["idx"]
 
                 populations = calc_populations(np.asarray(ctx.root_data))
 
@@ -181,21 +182,21 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
 
                 viewer.refresh()
 
-            def measure_fn(ctx, update_hook) -> list[NDArray[float64]]:
-                modules = ctx.cfg["modules"]
+            def measure_fn(
+                ctx: TaskState[NDArray[np.float64], Any, AcStarkCfg], update_hook
+            ) -> list[NDArray[float64]]:
+                modules = ctx.cfg.modules
                 return ModularProgramV2(
                     soccfg,
                     ctx.cfg,
                     modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("init_pulse", modules.get("init_pulse")),
-                        Pulse(
-                            "stark_pulse1", modules["stark_pulse1"], block_mode=False
-                        ),
-                        Pulse("stark_pulse2", modules["stark_pulse2"]),
-                        Readout("readout", modules["readout"]),
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
+                        Pulse("stark_pulse1", modules.stark_pulse1, block_mode=False),
+                        Pulse("stark_pulse2", modules.stark_pulse2),
+                        Readout("readout", modules.readout),
                     ],
-                    sweep=[("freq", ctx.cfg["sweep"]["freq"])],
+                    sweep=[("freq", ctx.cfg.sweep.freq)],
                 ).acquire(
                     soc,
                     progress=False,
@@ -217,14 +218,14 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
                     gains.tolist(),
                     before_each=update_fn,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=plot_fn,
             )
             signals = np.asarray(signals)
         plt.close(fig)
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = (gains, freqs, signals)
 
         return gains, freqs, signals
@@ -461,7 +462,7 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         freqs = freqs.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = cast(AcStarkCfg, cfg)
+        self.last_cfg = AcStarkCfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (gains, freqs, populations)
 
         return gains, freqs, populations

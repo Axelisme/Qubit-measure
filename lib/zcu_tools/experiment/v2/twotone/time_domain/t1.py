@@ -7,23 +7,21 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter
-from typeguard import check_type
 from typing_extensions import (
     Any,
     Callable,
-    NotRequired,
     Optional,
     TypeAlias,
-    TypedDict,
     Union,
-    cast,
 )
 
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.program import SweepCfg
@@ -31,8 +29,8 @@ from zcu_tools.program.v2 import (
     Delay,
     DelayAuto,
     LoadValue,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -53,15 +51,19 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # (times, signals)
 
 
-class T1ModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class T1ModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1Cfg(ModularProgramCfg, TaskCfg):
+class T1SweepCfg(BaseModel):
+    length: Union[SweepCfg, list[float]]
+
+
+class T1Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1ModuleCfg
-    sweep: dict[str, Union[SweepCfg, NDArray[np.float64]]]
+    sweep: T1SweepCfg
 
 
 class T1Exp(AbsExperiment[T1Result, T1Cfg]):
@@ -75,13 +77,12 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: T1Cfg,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1Result:
-        _cfg = check_type(deepcopy(cfg), T1Cfg)
-        setup_devices(_cfg, progress=True)
+        setup_devices(cfg, progress=True)
 
-        length_sweep: Union[SweepCfg, NDArray[np.float64]] = _cfg["sweep"]["length"]  # type: ignore
+        length_sweep = cfg.sweep.length
 
         if isinstance(length_sweep, dict):
             lengths = (
@@ -102,16 +103,19 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
             [soccfg.cycles2us(int(cycle)) for cycle in length_cycles], dtype=np.float64
         )
 
-        def measure_fn(ctx: TaskState, update_hook: Optional[Callable]):
-            cfg = cast(T1Cfg, ctx.cfg)
-            modules = cfg["modules"]
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, T1Cfg],
+            update_hook: Optional[Callable],
+        ):
+            cfg = ctx.cfg
+            modules = cfg.modules
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Reset("reset", modules.reset),
+                    Pulse("pi_pulse", modules.pi_pulse),
                     LoadValue(
                         "load_t1_delay",
                         values=list(length_cycles),
@@ -119,7 +123,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                         val_reg="t1_delay_cycle",
                     ),
                     DelayAuto("t1_delay", t="t1_delay_cycle"),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("length_idx", len(length_cycles))],
             ).acquire(
@@ -131,16 +135,16 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(lengths),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, t1_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (lengths, signals)
 
         return lengths, signals
@@ -149,53 +153,56 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: T1Cfg,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1Result:
-        _cfg = check_type(deepcopy(cfg), T1Cfg)
-        setup_devices(_cfg, progress=True)
+        setup_devices(cfg, progress=True)
 
-        lengths = sweep2array(_cfg["sweep"]["length"], "time", {"soccfg": soccfg})
+        lengths = sweep2array(cfg.sweep.length, "time", {"soccfg": soccfg})
 
         with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
         ) as viewer:
+
+            def measure_fn(
+                ctx: TaskState[NDArray[np.complex128], Any, T1Cfg],
+                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            ) -> list[NDArray[np.float64]]:
+                modules = ctx.cfg.modules
+                length_sweep = ctx.cfg.sweep.length
+                assert isinstance(length_sweep, dict), "uniform mode requires SweepCfg"
+                length_param = sweep2param("length", length_sweep)
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset("reset", modules.reset),
+                        Pulse("pi_pulse", modules.pi_pulse),
+                        Delay("t1_delay", length_param),
+                        Readout("readout", modules.readout),
+                    ],
+                    sweep=[("length", length_sweep)],
+                ).acquire(
+                    soc,
+                    progress=False,
+                    round_hook=update_hook,
+                    **(acquire_kwargs or {}),
+                )
+
             signals = run_task(
                 task=Task(
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (length_sweep := ctx.cfg["sweep"]["length"])
-                        and (length_param := sweep2param("length", length_sweep))
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    Pulse("pi_pulse", modules["pi_pulse"]),
-                                    Delay("t1_delay", length_param),
-                                    Readout("readout", modules["readout"]),
-                                ],
-                                sweep=[("length", length_sweep)],
-                            ).acquire(
-                                soc,
-                                progress=False,
-                                round_hook=update_hook,
-                                **(acquire_kwargs or {}),
-                            )
-                        )
-                    ),
+                    measure_fn=measure_fn,
                     result_shape=(len(lengths),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, t1_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (lengths, signals)
 
         return lengths, signals
@@ -204,12 +211,11 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: T1Cfg,
         *,
         uniform: bool = True,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1Result:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
         if uniform:
             return self._run_uniform(soc, soccfg, cfg, acquire_kwargs=acquire_kwargs)
         else:
@@ -281,7 +287,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> T1Result:
-        signals, Ts, _ = load_data(filepath, **kwargs)
+        signals, Ts, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1
         assert Ts.shape == signals.shape
@@ -291,22 +297,26 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = T1Cfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (Ts, signals)
 
         return Ts, signals
 
 
-class T1WithToneModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class T1WithToneModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     test_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1WithToneCfg(ModularProgramCfg, TaskCfg):
+class T1WithToneSweepAxisCfg(BaseModel):
+    length: SweepCfg
+
+
+class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1WithToneModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: T1WithToneSweepAxisCfg
 
 
 class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
@@ -314,23 +324,21 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: T1WithToneCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1Result:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = check_type(deepcopy(cfg), T1WithToneCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
         lengths = sweep2array(
-            _cfg["sweep"]["length"],
+            cfg.sweep.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["test_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
         )
 
-        length_param = sweep2param("length", _cfg["sweep"]["length"])
-        modules["test_pulse"].set_param("length", length_param)
+        length_param = sweep2param("length", cfg.sweep.length)
+        modules.test_pulse.set_param("length", length_param)
 
         with LivePlot1D(
             "Time (us)", "Amplitude", segment_kwargs={"title": "T1 relaxation"}
@@ -341,12 +349,12 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
                         soccfg,
                         ctx.cfg,
                         modules=[
-                            Reset("reset", modules.get("reset")),
-                            Pulse(name="pi_pulse", cfg=modules["pi_pulse"]),
-                            Pulse(name="test_pulse", cfg=modules["test_pulse"]),
-                            Readout("readout", modules["readout"]),
+                            Reset("reset", modules.reset),
+                            Pulse(name="pi_pulse", cfg=modules.pi_pulse),
+                            Pulse(name="test_pulse", cfg=modules.test_pulse),
+                            Readout("readout", modules.readout),
                         ],
-                        sweep=[("length", ctx.cfg["sweep"]["length"])],
+                        sweep=[("length", ctx.cfg.sweep.length)],
                     ).acquire(
                         soc,
                         progress=False,
@@ -354,16 +362,16 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
                         **(acquire_kwargs or {}),
                     ),
                     result_shape=(len(lengths),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, t1_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (lengths, signals)
 
         return lengths, signals
@@ -434,7 +442,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> T1Result:
-        signals, Ts, _ = load_data(filepath, **kwargs)
+        signals, Ts, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1
         assert Ts.shape == signals.shape
@@ -444,7 +452,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = T1WithToneCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (Ts, signals)
 
         return Ts, signals
@@ -460,9 +468,14 @@ def t1_sweep_tone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.flo
     return rotate2real(signals).real
 
 
-class T1WithToneSweepCfg(ModularProgramCfg, TaskCfg):
+class T1WithToneSweepSweepCfg(BaseModel):
+    gain: SweepCfg
+    length: SweepCfg
+
+
+class T1WithToneSweepCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1WithToneModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: T1WithToneSweepSweepCfg
 
 
 class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg]):
@@ -470,68 +483,74 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: T1WithToneSweepCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1WithToneSweepResult:
-        _cfg = check_type(deepcopy(cfg), T1WithToneSweepCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        gain_sweep: Union[SweepCfg, NDArray[np.float64]] = _cfg["sweep"]["gain"]  # type: ignore
+        gain_sweep: Union[SweepCfg, NDArray[np.float64]] = cfg.sweep.gain
 
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["test_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
             allow_array=True,
         )
         lengths = sweep2array(
-            _cfg["sweep"]["length"],
+            cfg.sweep.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["test_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.test_pulse.ch},
         )
 
-        length_param = sweep2param("length", _cfg["sweep"]["length"])
-        modules["test_pulse"].set_param("length", length_param)
+        length_param = sweep2param("length", cfg.sweep.length)
+        modules.test_pulse.set_param("length", length_param)
 
         with LivePlot2DwithLine(
             "gain", "Time (us)", line_axis=1, num_lines=5
         ) as viewer:
+
+            def measure_fn(
+                ctx: TaskState[NDArray[np.complex128], Any, T1WithToneSweepCfg],
+                update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            ) -> list[NDArray[np.float64]]:
+                return ModularProgramV2(
+                    soccfg,
+                    ctx.cfg,
+                    modules=[
+                        Reset(
+                            "reset",
+                            ctx.cfg.modules.reset,
+                        ),
+                        Pulse(name="pi_pulse", cfg=ctx.cfg.modules.pi_pulse),
+                        Pulse(
+                            name="test_pulse",
+                            cfg=ctx.cfg.modules.test_pulse,
+                        ),
+                        Readout("readout", cfg=ctx.cfg.modules.readout),
+                    ],
+                    sweep=[("length", ctx.cfg.sweep.length)],
+                ).acquire(
+                    soc,
+                    progress=False,
+                    round_hook=update_hook,
+                    **(acquire_kwargs or {}),
+                )
+
             signals = run_task(
                 task=Task(
-                    measure_fn=lambda ctx, update_hook: ModularProgramV2(
-                        soccfg,
-                        ctx.cfg,
-                        modules=[
-                            Reset(
-                                "reset",
-                                ctx.cfg["modules"].get("reset"),
-                            ),
-                            Pulse(name="pi_pulse", cfg=ctx.cfg["modules"]["pi_pulse"]),
-                            Pulse(
-                                name="test_pulse",
-                                cfg=ctx.cfg["modules"]["test_pulse"],
-                            ),
-                            Readout("readout", cfg=ctx.cfg["modules"]["readout"]),
-                        ],
-                        sweep=[("length", ctx.cfg["sweep"]["length"])],
-                    ).acquire(
-                        soc,
-                        progress=False,
-                        round_hook=update_hook,
-                        **(acquire_kwargs or {}),
-                    ),
+                    measure_fn=measure_fn,
                     result_shape=(len(lengths),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ).scan(
                     "gain",
                     gains.tolist(),
-                    before_each=lambda _, ctx, gain: ctx.cfg["modules"][
-                        "test_pulse"
-                    ].set_param("gain", gain),
+                    before_each=lambda _, ctx, gain: (
+                        ctx.cfg.modules.test_pulse.set_param("gain", gain)
+                    ),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     gains, lengths, t1_sweep_tone_signal2real(np.asarray(ctx.root_data))
                 ),
@@ -539,7 +558,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (gains, lengths, signals)
 
         return gains, lengths, signals
@@ -631,7 +650,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         )
 
     def load(self, filepath: str, **kwargs) -> T1WithToneSweepResult:
-        signals, gains, Ts = load_data(filepath, **kwargs)
+        signals, gains, Ts, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert gains is not None and Ts is not None
         assert len(gains.shape) == 1 and len(Ts.shape) == 1
         assert signals.shape == (len(Ts), len(gains))
@@ -643,7 +662,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = T1WithToneSweepCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, Ts, signals)
 
         return gains, Ts, signals

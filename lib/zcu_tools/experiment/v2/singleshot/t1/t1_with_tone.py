@@ -7,27 +7,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -46,17 +39,21 @@ from .util import measure_with_sweep
 T1WithToneResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class T1WithToneModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class T1WithToneModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1WithToneCfg(ModularProgramCfg, TaskCfg):
+class T1WithToneSweepCfg(BaseModel):
+    length: SweepCfg
+
+
+class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1WithToneModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: T1WithToneSweepCfg
 
 
 class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
@@ -64,25 +61,24 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: T1WithToneCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
         uniform: bool = False,
     ) -> T1WithToneResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = check_type(deepcopy(cfg), T1WithToneCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        cfg = deepcopy(cfg)
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        length_sweep = _cfg["sweep"]["length"]
+        length_sweep = cfg.sweep.length
 
         if uniform:
             assert isinstance(length_sweep, dict)
             lengths = sweep2array(
                 length_sweep,
                 "time",
-                {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
+                {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
             )
         else:
             if isinstance(length_sweep, dict):
@@ -97,41 +93,41 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
             lengths = sweep2array(
                 lengths,
                 "time",
-                {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
+                {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
                 allow_array=True,
             )
             lengths = np.unique(lengths)
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any],
+            ctx: TaskState[NDArray[np.float64], Any, T1WithToneCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: T1WithToneCfg = cast(T1WithToneCfg, ctx.cfg)
+            cfg = ctx.cfg
 
             def prog_maker(cfg, length_param) -> ModularProgramV2:
-                _cfg = cast(T1WithToneCfg, deepcopy(cfg))
-                modules = _cfg["modules"]
+                _cfg = deepcopy(cfg)
+                modules = _cfg.modules
 
-                modules["probe_pulse"].set_param("length", length_param)
+                modules.probe_pulse.set_param("length", length_param)
 
                 return ModularProgramV2(
                     soccfg,
                     _cfg,
                     modules=[
-                        Reset("reset", modules.get("reset")),
-                        Pulse("init_pulse", modules.get("init_pulse")),
+                        Reset("reset", modules.reset),
+                        Pulse("init_pulse", modules.init_pulse),
                         Branch(
                             "ge",
-                            Pulse("probe_pulse_g", modules["probe_pulse"]),
+                            Pulse("probe_pulse_g", modules.probe_pulse),
                             [
-                                Pulse("pi_pulse", modules["pi_pulse"]),
-                                Pulse("probe_pulse", modules["probe_pulse"]),
+                                Pulse("pi_pulse", modules.pi_pulse),
+                                Pulse("probe_pulse", modules.probe_pulse),
                             ],
                         ),
-                        Readout("readout", modules["readout"]),
+                        Readout("readout", modules.readout),
                     ],
                     sweep=(
-                        [("length", _cfg["sweep"]["length"]), ("ge", 2)]
+                        [("length", _cfg.sweep.length), ("ge", 2)]
                         if uniform
                         else [("ge", 2)]
                     ),
@@ -146,7 +142,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                 ge_radius=radius,
             )
             if uniform:
-                len_param = sweep2param("length", ctx.cfg["sweep"]["length"])
+                len_param = sweep2param("length", ctx.cfg.sweep.length)
                 return prog_maker(cfg, len_param).acquire(**acquire_kwargs)
             else:
                 return measure_with_sweep(
@@ -211,15 +207,15 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(lengths), 2, 2),
                     dtype=np.float64,
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=plot_fn,
             )
         plt.close(fig)
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = (lengths, populations)
 
         return lengths, populations
@@ -336,7 +332,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         g_filepath, e_filepath = filepath
 
         # Load ground populations
-        g_pop, g_Ts, _ = load_data(g_filepath, **kwargs)
+        g_pop, g_Ts, _, cfg = load_data(g_filepath, return_cfg=True, **kwargs)
         assert g_pop.shape == (len(g_Ts), 2)
 
         # Load excited populations
@@ -353,7 +349,7 @@ class T1WithToneExp(AbsExperiment[T1WithToneResult, T1WithToneCfg]):
         Ts = Ts.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = None
+        self.last_cfg = T1WithToneCfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (Ts, populations)
 
         return Ts, populations

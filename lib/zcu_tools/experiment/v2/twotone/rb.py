@@ -7,29 +7,27 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
+from pydantic import BaseModel
 from typing_extensions import (
     Any,
     Callable,
     Literal,
-    NotRequired,
     Optional,
     TypeAlias,
-    TypedDict,
     Union,
-    cast,
 )
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -177,58 +175,57 @@ def rb_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(mean_signals).real
 
 
-class RB_ModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    I_pulse: NotRequired[PulseCfg]
+class RBModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    I_pulse: Optional[PulseCfg] = None
     X90_pulse: PulseCfg
     X180_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class RB_SweepCfg(TypedDict, closed=True):
-    depth: Union[SweepCfg, NDArray]
+class RBSweepCfg(BaseModel):
+    depth: Union[SweepCfg, list[int]]
 
 
-class RB_Cfg(ModularProgramCfg, TaskCfg):
-    modules: RB_ModuleCfg
-    sweep: RB_SweepCfg
+class RBCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: RBModuleCfg
+    sweep: RBSweepCfg
     seed: int
     n_seeds: int
 
 
-class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
+class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: RBCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> RB_Result:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "depth")
-        _cfg = check_type(deepcopy(cfg), RB_Cfg)
-        setup_devices(_cfg, progress=True)
+        cfg = deepcopy(cfg)
+        setup_devices(cfg, progress=True)
 
-        rounds = _cfg["rounds"]
-        _cfg["rounds"] = 1  # implement by task scan
+        rounds = cfg.rounds
+        cfg.rounds = 1  # implement by task scan
 
-        depths = sweep2array(_cfg["sweep"]["depth"], allow_array=True).astype(np.int64)
+        depths = sweep2array(cfg.sweep.depth, allow_array=True).astype(np.int64)
 
         max_depth = int(np.max(depths))
 
-        ss = np.random.SeedSequence(_cfg["seed"])
+        ss = np.random.SeedSequence(cfg.seed)
         entropys = np.array(
-            [child.entropy for child in ss.spawn(_cfg["n_seeds"])], dtype=np.int64
+            [child.entropy for child in ss.spawn(cfg.n_seeds)], dtype=np.int64
         )
 
         prog_cahce: dict[tuple[int, int], ModularProgramV2] = {}
 
         def measure_fn(
-            ctx: TaskState,
+            ctx: TaskState[NDArray[np.complex128], Any, RBCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg = cast(RB_Cfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
             seed: int = ctx.env["seed"]
             depth: int = ctx.env["depth"]
@@ -236,9 +233,9 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
             if (seed, depth) not in prog_cahce:
                 gate_seq = reduce_gate_seq(ctx.env["clifford_seq"])
 
-                Id_pulse = modules.get("I_pulse")
-                X90_pulse = modules["X90_pulse"]
-                X180_pulse = modules["X180_pulse"]
+                Id_pulse = modules.I_pulse
+                X90_pulse = modules.X90_pulse
+                X180_pulse = modules.X180_pulse
                 MX90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 180.0)
                 Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90.0)
                 Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90.0)
@@ -248,7 +245,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                     soccfg,
                     cfg,
                     modules=[
-                        Reset("reset", modules.get("reset")),
+                        Reset("reset", modules.reset),
                         ScanWith("gate_idx", gate_seq, val_reg="gate_idx").add_content(
                             Branch(
                                 "basic_gate",
@@ -262,7 +259,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                                 compare_by="gate_idx",
                             )
                         ),
-                        Readout("readout", modules["readout"]),
+                        Readout("readout", modules.readout),
                     ],
                 )
 
@@ -319,7 +316,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
                 .scan("depth", depths.tolist(), before_each=update_seq_depth)
                 .scan("rounds", list(range(rounds)), before_each=lambda *_: None)
                 .scan("seed", entropys.tolist(), before_each=update_seq_seed),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     depths.astype(np.float64),
                     rb_signal2real(average_signals(ctx.root_data)),
@@ -327,7 +324,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
             )
             signals2D = average_signals(signals)  # shape: (n_seeds, n_depths)
 
-        self.last_cfg = cast(RB_Cfg, deepcopy(cfg))
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (entropys, depths, signals2D)
 
         return entropys, depths, signals2D
@@ -429,7 +426,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> RB_Result:
-        signals, entropys, depths = load_data(filepath, **kwargs)
+        signals, entropys, depths, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert depths is not None
         assert len(entropys.shape) == 1 and len(depths.shape) == 1
         assert signals.shape == (len(depths), len(entropys))
@@ -440,7 +437,7 @@ class RB_Exp(AbsExperiment[RB_Result, RB_Cfg]):
         depths = depths.astype(np.int64)
         signals2D = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = RBCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (sub_seeds, depths, signals2D)
 
         return sub_seeds, depths, signals2D

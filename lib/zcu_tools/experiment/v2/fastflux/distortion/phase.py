@@ -6,27 +6,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Join,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -49,17 +42,22 @@ def phase_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class PhaseModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class PhaseModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     flux_pulse: PulseCfg
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class PhaseCfg(ModularProgramCfg, TaskCfg):
+class PhaseSweepCfg(BaseModel):
+    length: SweepCfg
+    phase: SweepCfg
+
+
+class PhaseCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PhaseModuleCfg
     readout_t: float
-    sweep: dict[str, SweepCfg]
+    sweep: PhaseSweepCfg
 
 
 class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
@@ -67,18 +65,17 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: PhaseCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> PhaseResult:
-        _cfg = check_type(deepcopy(cfg), PhaseCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        length_sweep = _cfg["sweep"]["length"]
-        phase_sweep = _cfg["sweep"]["phase"]
+        length_sweep = cfg.sweep.length
+        phase_sweep = cfg.sweep.phase
 
-        pi2_pulse = modules["pi2_pulse"]
+        pi2_pulse = modules.pi2_pulse
 
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         phases = sweep2array(
@@ -86,14 +83,14 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
+            ctx: TaskState[NDArray[np.complex128], Any, PhaseCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: PhaseCfg = cast(PhaseCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            length_sweep = cfg["sweep"]["length"]
-            phase_sweep = cfg["sweep"]["phase"]
+            length_sweep = cfg.sweep.length
+            phase_sweep = cfg.sweep.phase
             length_param = sweep2param("length", length_sweep)
             phase_param = sweep2param("phase", phase_sweep)
 
@@ -101,22 +98,20 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
+                    Reset("reset", modules.reset),
                     Join(
-                        Pulse("flux_pulse", modules["flux_pulse"]),
+                        Pulse("flux_pulse", modules.flux_pulse),
                         [
                             SoftDelay("wait_time", delay=length_param),
-                            Pulse("pi2_pulse1", modules["pi2_pulse"]),
+                            Pulse("pi2_pulse1", modules.pi2_pulse),
                             Pulse(
                                 name="pi2_pulse2",
-                                cfg=modules["pi2_pulse"].with_updates(
-                                    phase=phase_param
-                                ),
+                                cfg=modules.pi2_pulse.with_updates(phase=phase_param),
                             ),
                         ],
-                        SoftDelay("readout_t", cfg["readout_t"]),
+                        SoftDelay("readout_t", cfg.readout_t),
                     ),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[
                     ("length", length_sweep),
@@ -129,16 +124,16 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(lengths), len(phases)),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, phases, phase_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (lengths, phases, signals)
 
         return lengths, phases, signals
@@ -149,10 +144,10 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         if cfg is None:
             cfg = self.last_cfg
         assert cfg is not None, "No config found"
-        modules = cfg["modules"]
+        modules = cfg.modules
 
-        flux_pulse = modules["flux_pulse"]
-        pi2_len = float(modules["pi2_pulse"].waveform.length)
+        flux_pulse = modules.flux_pulse
+        pi2_len = float(modules.pi2_pulse.waveform.length)
 
         if result is None:
             result = self.last_result

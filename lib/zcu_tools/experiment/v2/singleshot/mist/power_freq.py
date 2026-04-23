@@ -7,26 +7,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -44,16 +37,21 @@ FreqPowerResult: TypeAlias = tuple[
 ]
 
 
-class FreqPowerModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class FreqPowerModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class FreqPowerCfg(ModularProgramCfg, TaskCfg):
+class FreqPowerSweepCfg(BaseModel):
+    freq: SweepCfg
+    gain: SweepCfg
+
+
+class FreqPowerCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FreqPowerModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: FreqPowerSweepCfg
 
 
 class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
@@ -61,49 +59,49 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: FreqPowerCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> FreqPowerResult:
-        _cfg = check_type(deepcopy(cfg), FreqPowerCfg)  # prevent in-place modification
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        cfg = deepcopy(cfg)
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        freq_sweep = _cfg["sweep"]["freq"]
-        gain_sweep = _cfg["sweep"]["gain"]
+        freq_sweep = cfg.sweep.freq
+        gain_sweep = cfg.sweep.gain
 
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
             allow_array=True,
         )
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any],
+            ctx: TaskState[NDArray[np.float64], Any, FreqPowerCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: FreqPowerCfg = cast(FreqPowerCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            freq_sweep = cfg["sweep"]["freq"]
+            freq_sweep = cfg.sweep.freq
             freq_param = sweep2param("freq", freq_sweep)
-            modules["probe_pulse"].set_param("freq", freq_param)
+            modules.probe_pulse.set_param("freq", freq_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", modules.get("init_pulse")),
-                    Pulse("probe_pulse", modules["probe_pulse"]),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    Pulse("probe_pulse", modules.probe_pulse),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("freq", freq_sweep)],
             ).acquire(
@@ -166,17 +164,17 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
                 ).scan(
                     "gain",
                     gains.tolist(),
-                    before_each=lambda i, ctx, gain: ctx.cfg["modules"][
-                        "probe_pulse"
-                    ].set_param("gain", gain),
+                    before_each=lambda i, ctx, gain: (
+                        ctx.cfg.modules.probe_pulse.set_param("gain", gain)
+                    ),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=plot_fn,
             )
             signals = np.asarray(signals)
 
         # record the last result
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = (gains, freqs, signals)
 
         return self.last_result
@@ -288,7 +286,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         g_filepath, e_filepath = filepath
 
         # Load ground populations
-        g_pop, gains, freqs = load_data(g_filepath, **kwargs)
+        g_pop, gains, freqs, cfg = load_data(g_filepath, return_cfg=True, **kwargs)
         assert freqs is not None
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
         assert g_pop.shape == (len(gains), len(freqs))
@@ -308,7 +306,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         freqs = freqs.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = None
+        self.last_cfg = FreqPowerCfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (gains, freqs, populations)
 
         return gains, freqs, populations

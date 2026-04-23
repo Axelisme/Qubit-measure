@@ -18,10 +18,10 @@ from typing_extensions import (
     Optional,
     Self,
     Sequence,
-    TypedDict,
     TypeVar,
 )
 
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
     BatchTask,
@@ -40,8 +40,12 @@ T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
+class OvernightCfg(ExpCfgModel):
+    pass
+
+
 class MeasurementTask(
-    AbsTask[T_Result, T_RootResult],
+    AbsTask[T_Result, T_RootResult, OvernightCfg],
     Generic[T_Result, T_RootResult, T_PlotDict],
 ):
     @abstractmethod
@@ -78,16 +82,13 @@ class MeasurementTask(
     ) -> None: ...
 
 
-class OvernightCfg(TypedDict): ...
-
-
-class OvernightBatchTask(BatchTask[str, Result, list[dict[str, Result]]]):
+class OvernightBatchTask(BatchTask[str, Result, list[dict[str, Result]], OvernightCfg]):
     def __init__(self, tasks, retry_time: int = 0) -> None:
         self.retry_time = retry_time
 
         super().__init__(tasks)
 
-    def run(self, ctx: TaskState[Result, T_RootResult]) -> None:
+    def run(self, ctx: TaskState[Result, T_RootResult, OvernightCfg]) -> None:
         if self.dynamic_pbar:
             self.task_pbar = self.make_pbar(leave=False)
         else:
@@ -174,7 +175,11 @@ class OvernightExecutor:
 
     def make_plotter(
         self,
-    ) -> tuple[Figure, MultiLivePlot[tuple[str, str]], Callable[[TaskState], None]]:
+    ) -> tuple[
+        Figure,
+        MultiLivePlot[tuple[str, str]],
+        Callable[[TaskState[Result, list[dict[str, Result]], OvernightCfg]], None],
+    ]:
         fig, axs_map = self.make_ax_layout()
 
         plotters_map = {
@@ -189,7 +194,9 @@ class OvernightExecutor:
 
         plotter = MultiLivePlot(fig, flatten_dict(plotters_map))
 
-        def plot_fn(ctx: TaskState) -> None:
+        def plot_fn(
+            ctx: TaskState[Result, list[dict[str, Result]], OvernightCfg],
+        ) -> None:
             if len(ctx.path) < 2:
                 cur_tasks = list(self.measurements.keys())
             else:

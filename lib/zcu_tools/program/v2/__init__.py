@@ -1,6 +1,6 @@
 from . import modules, utils
 from .base import MyProgramV2, ProgramV2Cfg
-from .modular import ModularProgramCfg, ModularProgramV2
+from .modular import ModularProgramV2
 from .modules import (
     BathReset,
     BathResetCfg,

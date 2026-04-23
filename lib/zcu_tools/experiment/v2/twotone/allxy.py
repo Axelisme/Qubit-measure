@@ -3,30 +3,28 @@ from __future__ import annotations
 from copy import deepcopy
 
 import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 import numpy as np
+from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from scipy.optimize import curve_fit
-from typeguard import check_type
 from typing_extensions import (
     Any,
     Callable,
-    NotRequired,
     Optional,
     TypeAlias,
-    TypedDict,
-    cast,
 )
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
     Branch,
     LoadValue,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -118,40 +116,39 @@ def allxy_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 # ------------------------------------------------------------------------------
 
 
-class AllXY_ModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    I_pulse: NotRequired[PulseCfg]
+class AllXYModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    I_pulse: Optional[PulseCfg] = None
     X180_pulse: PulseCfg
     X90_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class AllXY_Cfg(ModularProgramCfg, TaskCfg):
-    modules: AllXY_ModuleCfg
+class AllXYCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: AllXYModuleCfg
 
 
-class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
+class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
     def run(
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: AllXYCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> AllXY_Result:
-        _cfg = check_type(deepcopy(cfg), AllXY_Cfg)
-        setup_devices(_cfg, progress=True)
+        setup_devices(cfg, progress=True)
 
         def measure_fn(
-            ctx: TaskState,
+            ctx: TaskState[NDArray[np.complex128], Any, AllXYCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg = cast(AllXY_Cfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            I_pulse = modules.get("I_pulse")
-            X180_pulse = modules["X180_pulse"]
-            X90_pulse = modules["X90_pulse"]
+            I_pulse = modules.I_pulse
+            X180_pulse = modules.X180_pulse
+            X90_pulse = modules.X90_pulse
             Y180_pulse = X180_pulse.with_updates(phase=X180_pulse.phase + 90)
             Y90_pulse = X90_pulse.with_updates(phase=X90_pulse.phase + 90)
 
@@ -174,7 +171,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
+                    Reset("reset", modules.reset),
                     LoadValue(
                         "load_gate1_idx",
                         values=ALLXY_GATE1_IDX,
@@ -190,7 +187,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                         use_existed=True,
                     ),
                     make_branch("gate2", compare_by="gate_idx"),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("allxy_idx", len(ALLXY_SEQUENCE))],
             ).acquire(
@@ -218,9 +215,9 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(ALLXY_SEQUENCE),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     np.arange(len(ALLXY_SEQUENCE), dtype=np.float64),
                     allxy_signal2real(ctx.root_data),
@@ -228,7 +225,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
             )
 
         # Cache results
-        self.last_cfg = cast(AllXY_Cfg, deepcopy(cfg))
+        self.last_cfg = deepcopy(cfg)
         self.last_result = signals
 
         return signals
@@ -377,7 +374,7 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXY_Cfg]):
 
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = cast(AllXY_Cfg, deepcopy(cfg))
+        self.last_cfg = AllXYCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = signals
 
         return signals

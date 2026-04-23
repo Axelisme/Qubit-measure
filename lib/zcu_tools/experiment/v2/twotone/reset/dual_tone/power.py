@@ -6,19 +6,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter
-from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -37,16 +38,21 @@ PowerResult: TypeAlias = tuple[
 ]
 
 
-class PowerModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class PowerModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     tested_reset: TwoPulseResetCfg
     readout: ReadoutCfg
 
 
-class PowerCfg(ModularProgramCfg, TaskCfg):
+class PowerSweepCfg(BaseModel):
+    gain1: SweepCfg
+    gain2: SweepCfg
+
+
+class PowerCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: PowerSweepCfg
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
@@ -54,32 +60,31 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: PowerCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> PowerResult:
-        _cfg = check_type(deepcopy(cfg), PowerCfg)
-        setup_devices(_cfg, progress=True)
+        setup_devices(cfg, progress=True)
 
         # Check that reset pulse is dual pulse type
-        modules = _cfg["modules"]
+        modules = cfg.modules
 
-        reset_cfg = modules["tested_reset"]
+        reset_cfg = modules.tested_reset
         gains1 = sweep2array(
-            _cfg["sweep"]["gain1"],
+            cfg.sweep.gain1,
             "gain",
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse1_cfg.ch},
         )
         gains2 = sweep2array(
-            _cfg["sweep"]["gain2"],
+            cfg.sweep.gain2,
             "gain",
             {"soccfg": soccfg, "gen_ch": reset_cfg.pulse2_cfg.ch},
         )
 
-        gain1_param = sweep2param("gain1", _cfg["sweep"]["gain1"])
-        gain2_param = sweep2param("gain2", _cfg["sweep"]["gain2"])
-        modules["tested_reset"].set_param("gain1", gain1_param)
-        modules["tested_reset"].set_param("gain2", gain2_param)
+        gain1_param = sweep2param("gain1", cfg.sweep.gain1)
+        gain2_param = sweep2param("gain2", cfg.sweep.gain2)
+        modules.tested_reset.set_param("gain1", gain1_param)
+        modules.tested_reset.set_param("gain2", gain2_param)
 
         def dual_reset_gain_signal2real(signals: NDArray) -> np.ndarray:
             # Choose reference point based on sweep direction (use minimum power point)
@@ -87,46 +92,44 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             ref_j = 0 if gains2[0] < gains2[-1] else -1
             return np.abs(signals - signals[ref_i, ref_j])
 
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, PowerCfg],
+            update_hook: Optional[Callable],
+        ) -> list[NDArray[np.float64]]:
+            cfg = ctx.cfg
+            modules = cfg.modules
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                sweep=[("gain1", cfg.sweep.gain1), ("gain2", cfg.sweep.gain2)],
+                modules=[
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    TwoPulseReset("tested_reset", modules.tested_reset),
+                    Readout("readout", modules.readout),
+                ],
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                **(acquire_kwargs or {}),
+            )
+
         with LivePlot2D("Gain1 (a.u.)", "Gain2 (a.u.)") as viewer:
             signals = run_task(
                 task=Task(
-                    pbar_n=_cfg["rounds"],
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and (
-                            ModularProgramV2(
-                                soccfg,
-                                ctx.cfg,
-                                sweep=[
-                                    ("gain1", ctx.cfg["sweep"]["gain1"]),
-                                    ("gain2", ctx.cfg["sweep"]["gain2"]),
-                                ],
-                                modules=[
-                                    Reset("reset", modules.get("reset")),
-                                    Pulse("init_pulse", modules.get("init_pulse")),
-                                    TwoPulseReset(
-                                        "tested_reset", modules["tested_reset"]
-                                    ),
-                                    Readout("readout", modules["readout"]),
-                                ],
-                            ).acquire(
-                                soc,
-                                progress=False,
-                                round_hook=update_hook,
-                                **(acquire_kwargs or {}),
-                            )
-                        )
-                    ),
+                    pbar_n=cfg.rounds,
+                    measure_fn=measure_fn,
                     result_shape=(len(gains1), len(gains2)),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     gains1, gains2, dual_reset_gain_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (gains1, gains2, signals)
 
         return gains1, gains2, signals
@@ -209,7 +212,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PowerResult:
-        signals, gains1, gains2 = load_data(filepath, **kwargs)
+        signals, gains1, gains2, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert gains1 is not None and gains2 is not None
         assert len(gains1.shape) == 1 and len(gains2.shape) == 1
         assert signals.shape == (len(gains2), len(gains1))
@@ -220,7 +223,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         gains2 = gains2.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains1, gains2, signals)
 
         return gains1, gains2, signals

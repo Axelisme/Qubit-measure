@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from typing_extensions import Any, Generic, Mapping, Optional, TypeVar
+from typing_extensions import Generic, Optional, TypeVar
+
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 T_Result = TypeVar("T_Result")
-T_Config = TypeVar("T_Config", bound=Mapping[str, Any])
+T_Config = TypeVar("T_Config", bound=ExpCfgModel)
 
 
 class AbsExperiment(Generic[T_Result, T_Config], ABC):

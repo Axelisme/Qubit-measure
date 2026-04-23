@@ -8,7 +8,7 @@ from tqdm.auto import tqdm
 from typing_extensions import Any, Callable, Generic, Optional, Sequence, Type, TypeVar
 
 from .base import AbsTask
-from .state import Result, TaskState
+from .state import T_Cfg, T_RootResult, TaskState
 
 logger = logging.getLogger(__name__)
 
@@ -19,18 +19,17 @@ def default_raw2signal_fn(raw: Sequence[NDArray[np.float64]]) -> NDArray[np.comp
 
 T_Raw = TypeVar("T_Raw")
 T_DType = TypeVar("T_DType", bound=np.number, default=np.complex128)
-T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
 class Task(
-    AbsTask[NDArray[T_DType], T_RootResult],
-    Generic[T_RootResult, T_Raw, T_DType],
+    AbsTask[NDArray[T_DType], T_RootResult, T_Cfg],
+    Generic[T_RootResult, T_Raw, T_Cfg, T_DType],
 ):
     def __init__(
         self,
         measure_fn: Callable[
             [
-                TaskState[NDArray[T_DType], T_RootResult],
+                TaskState[NDArray[T_DType], T_RootResult, T_Cfg],
                 Callable[[int, T_Raw], Any],
             ],
             T_Raw,
@@ -65,30 +64,20 @@ class Task(
             disable=total == 1,
         )
 
-    def init(
-        self,
-        state: TaskState[NDArray[T_DType], T_RootResult],
-        dynamic_pbar: bool = False,
-    ) -> None:
-        del state  # kept for AbsTask.init contract
+    def init(self, dynamic_pbar: bool = False) -> None:
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
             self.avg_pbar = self.make_pbar(leave=True)
 
-    def run(self, state: TaskState[NDArray[T_DType], T_RootResult]) -> None:
+    def run(self, state: TaskState[NDArray[T_DType], T_RootResult, T_Cfg]) -> None:
         if self.dynamic_pbar:
             self.avg_pbar = self.make_pbar(leave=False)
         else:
             assert self.avg_pbar is not None
             self.avg_pbar.reset()
 
-        logger.debug(
-            "Task.run: path=%s, pbar_n=%s, cfg_keys=%s",
-            state.path,
-            self.pbar_n,
-            list(state.cfg.keys()),
-        )
+        logger.debug("Task.run: path=%s, pbar_n=%s", state.path, self.pbar_n)
 
         def update_hook(ir: int, raw: T_Raw) -> None:
             assert self.avg_pbar is not None

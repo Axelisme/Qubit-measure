@@ -2,37 +2,41 @@ from __future__ import annotations
 
 import logging
 
+from pydantic import BaseModel, ConfigDict
 from qick import QickConfig
 from qick.asm_v2 import AveragerProgramV2
-from typing_extensions import Any, Mapping, TypedDict, cast
 
 from zcu_tools.program.base import ImproveAcquireMixin
 
-from .modules.registry import PulseRegistry
 from .macro import ImproveAsmV2
+from .modules.registry import PulseRegistry
 
 logger = logging.getLogger(__name__)
 
 
-class ProgramV2Cfg(TypedDict):
-    reps: int
-    rounds: int
-    relax_delay: float
+class ProgramV2Cfg(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    reps: int = 1
+    rounds: int = 1
+    initial_delay: float = 0.0
+    relax_delay: float = 0.0
 
 
 class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2):
-    def __init__(self, soccfg: QickConfig, cfg: Mapping[str, Any], **kwargs) -> None:
-        _cfg = cast(ProgramV2Cfg, cfg)
+    def __init__(self, soccfg: QickConfig, cfg: ProgramV2Cfg, **kwargs) -> None:
 
         # v2 program need to pass reps and final_delay to init
+        self.cfg_model = cfg
         self.pulse_registry = PulseRegistry()
+
         super().__init__(
             soccfg,
-            cfg=dict(_cfg),
-            reps=_cfg["reps"],
-            initial_delay=0.0,
+            cfg=cfg.model_dump(mode="python"),
+            reps=cfg.reps,
+            initial_delay=cfg.initial_delay,
             final_wait=0.0,
-            final_delay=_cfg["relax_delay"],
+            final_delay=cfg.relax_delay,
             **kwargs,
         )
 
@@ -56,10 +60,15 @@ class MyProgramV2(ImproveAcquireMixin, ImproveAsmV2, AveragerProgramV2):
     def acquire(self, *args, **kwargs):
         logger.debug(
             "MyProgramV2.acquire: reps=%s, rounds=%s",
-            self.cfg["reps"],
-            self.cfg["rounds"],
+            self.cfg_model.reps,
+            self.cfg_model.rounds,
         )
-        return super().acquire(*args, rounds=self.cfg["rounds"], **kwargs)
+        return super().acquire(*args, rounds=self.cfg_model.rounds, **kwargs)
 
     def acquire_decimated(self, *args, **kwargs):
-        return super().acquire_decimated(*args, rounds=self.cfg["rounds"], **kwargs)
+        logger.debug(
+            "MyProgramV2.acquire_decimated: reps=%s, rounds=%s",
+            self.cfg_model.reps,
+            self.cfg_model.rounds,
+        )
+        return super().acquire_decimated(*args, rounds=self.cfg_model.rounds, **kwargs)

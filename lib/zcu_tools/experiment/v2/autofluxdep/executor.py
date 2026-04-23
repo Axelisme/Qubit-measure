@@ -13,18 +13,10 @@ from matplotlib.animation import FFMpegWriter
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typing_extensions import (
-    Any,
-    Callable,
-    Generic,
-    Mapping,
-    Optional,
-    Self,
-    TypedDict,
-    TypeVar,
-)
+from typing_extensions import Any, Callable, Generic, Mapping, Optional, Self, TypeVar
 
 from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
 from zcu_tools.experiment.v2.runner import (
     AbsTask,
@@ -45,8 +37,13 @@ T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
+class FluxDepCfg(ExpCfgModel):
+    dev: dict[str, DeviceInfo] = ...
+
+
 class MeasurementTask(
-    AbsTask[T_Result, T_RootResult], Generic[T_Result, T_RootResult, T_PlotDict]
+    AbsTask[T_Result, T_RootResult, FluxDepCfg],
+    Generic[T_Result, T_RootResult, T_PlotDict],
 ):
     @abstractmethod
     def num_axes(self) -> dict[str, int]: ...
@@ -70,10 +67,6 @@ class MeasurementTask(
     ) -> None: ...
 
 
-class FluxDepCfg(TypedDict):
-    dev: dict[str, DeviceInfo]
-
-
 class FluxDepInfoDict(UserDict):
     def __init__(self, initialdata: Optional[Mapping[str, Any]] = None) -> None:
         self.first_info: dict[str, Any] = {}
@@ -94,7 +87,7 @@ class FluxDepInfoDict(UserDict):
         self.last_info[key] = deepcopy(item)
 
 
-class FluxDepBatchTask(BatchTask[str, T_Result, T_RootResult]):
+class FluxDepBatchTask(BatchTask[str, T_Result, T_RootResult, FluxDepCfg]):
     def __init__(self, tasks, retry_time: int = 0) -> None:
         self.retry_time = retry_time
 
@@ -276,9 +269,9 @@ class FluxDepExecutor:
             info["cur_m"] = predictor.predict_matrix_element(flux)
             info["m_ratio"] = info["cur_m"] / info.first["cur_m"]
 
-            set_flux_in_dev_cfg(ctx.cfg["dev"], flux, label="flux_dev")
+            set_flux_in_dev_cfg(ctx.cfg.dev, flux, label="flux_dev")
 
-        set_flux_in_dev_cfg(cfg["dev"], self.flux_values[0], label="flux_dev")
+        set_flux_in_dev_cfg(cfg.dev, self.flux_values[0], label="flux_dev")
         setup_devices(cfg, progress=True)
 
         fig, plotter, plot_fn, writer = self.make_plotter()

@@ -6,27 +6,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Join,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -69,17 +62,22 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_freqs)
 
 
-class FreqModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class FreqModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     flux_pulse: PulseCfg
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class FreqCfg(ModularProgramCfg, TaskCfg):
+class FreqSweepCfg(BaseModel):
+    length: SweepCfg
+    freq: SweepCfg
+
+
+class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FreqModuleCfg
     readout_t: float
-    sweep: dict[str, SweepCfg]
+    sweep: FreqSweepCfg
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
@@ -87,18 +85,17 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: FreqCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqResult:
-        _cfg = check_type(deepcopy(cfg), FreqCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        length_sweep = _cfg["sweep"]["length"]
-        freq_sweep = _cfg["sweep"]["freq"]
+        length_sweep = cfg.sweep.length
+        freq_sweep = cfg.sweep.freq
 
-        qub_pulse = modules["qub_pulse"]
+        qub_pulse = modules.qub_pulse
 
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
         freqs = sweep2array(
@@ -106,33 +103,33 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            ctx: TaskState[NDArray[np.complex128], Any, FreqCfg],
+            update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
             cfg: FreqCfg = cast(FreqCfg, ctx.cfg)
-            modules = cfg["modules"]
+            modules = cfg.modules
 
-            length_sweep = cfg["sweep"]["length"]
-            freq_sweep = cfg["sweep"]["freq"]
+            length_sweep = cfg.sweep.length
+            freq_sweep = cfg.sweep.freq
 
             length_params = sweep2param("length", length_sweep)
             freq_params = sweep2param("freq", freq_sweep)
-            modules["qub_pulse"].set_param("freq", freq_params)
+            modules.qub_pulse.set_param("freq", freq_params)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
+                    Reset("reset", modules.reset),
                     Join(
-                        Pulse("flux_pulse", modules["flux_pulse"]),
+                        Pulse("flux_pulse", modules.flux_pulse),
                         [
                             SoftDelay("wait_time", delay=length_params),
-                            Pulse("qub_pulse", modules["qub_pulse"]),
+                            Pulse("qub_pulse", modules.qub_pulse),
                         ],
-                        SoftDelay("readout_t", cfg["readout_t"]),
+                        SoftDelay("readout_t", cfg.readout_t),
                     ),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[
                     ("length", length_sweep),
@@ -147,16 +144,16 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(lengths), len(freqs)),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, freqs, freq_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (lengths, freqs, signals)
 
         return lengths, freqs, signals
@@ -167,11 +164,10 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         if cfg is None:
             cfg = self.last_cfg
         assert cfg is not None, "No config found"
-        _cfg = check_type(deepcopy(cfg), FreqCfg)
-        modules = _cfg["modules"]
+        modules = cfg.modules
 
-        flux_pulse = modules["flux_pulse"]
-        qub_len = float(modules["qub_pulse"].waveform.length)
+        flux_pulse = modules.flux_pulse
+        qub_len = float(modules.qub_pulse.waveform.length)
 
         if result is None:
             result = self.last_result

@@ -6,20 +6,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     BathReset,
     BathResetCfg,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -40,16 +41,20 @@ def bathreset_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     return rotate2real(signals).real
 
 
-class PhaseModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class PhaseModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     tested_reset: BathResetCfg
     readout: ReadoutCfg
 
 
-class PhaseCfg(ModularProgramCfg, TaskCfg):
+class PhaseSweepCfg(BaseModel):
+    phase: SweepCfg
+
+
+class PhaseCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PhaseModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: PhaseSweepCfg
 
 
 class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
@@ -57,60 +62,63 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: PhaseCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> PhaseResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "phase")
-        _cfg = check_type(deepcopy(cfg), PhaseCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
         phases = sweep2array(
-            _cfg["sweep"]["phase"],
+            cfg.sweep.phase,
             "phase",
             {
                 "soccfg": soccfg,
-                "gen_ch": modules["tested_reset"].pi2_cfg.ch,
+                "gen_ch": modules.tested_reset.pi2_cfg.ch,
             },
         )
 
-        phase_param = sweep2param("phase", _cfg["sweep"]["phase"])
-        modules["tested_reset"].set_param("pi2_phase", phase_param)
+        phase_param = sweep2param("phase", cfg.sweep.phase)
+        modules.tested_reset.set_param("pi2_phase", phase_param)
+
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, PhaseCfg],
+            update_hook: Optional[Callable],
+        ) -> list[NDArray[np.float64]]:
+            cfg = ctx.cfg
+            modules = cfg.modules
+            return ModularProgramV2(
+                soccfg,
+                cfg,
+                sweep=[("phase", cfg.sweep.phase)],
+                modules=[
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    BathReset("tested_reset", modules.tested_reset),
+                    Readout("readout", modules.readout),
+                ],
+            ).acquire(
+                soc,
+                progress=False,
+                round_hook=update_hook,
+                **(acquire_kwargs or {}),
+            )
 
         with LivePlot1D("Phase (deg)", "Signal (a.u.)") as viewer:
             signals = run_task(
                 task=Task(
-                    pbar_n=_cfg["rounds"],
-                    measure_fn=lambda ctx, update_hook: (
-                        (modules := ctx.cfg["modules"])
-                        and ModularProgramV2(
-                            soccfg,
-                            ctx.cfg,
-                            sweep=[("phase", ctx.cfg["sweep"]["phase"])],
-                            modules=[
-                                Reset("reset", modules.get("reset")),
-                                Pulse("init_pulse", modules.get("init_pulse")),
-                                BathReset("tested_reset", modules["tested_reset"]),
-                                Readout("readout", modules["readout"]),
-                            ],
-                        ).acquire(
-                            soc,
-                            progress=False,
-                            round_hook=update_hook,
-                            **(acquire_kwargs or {}),
-                        )
-                    ),
+                    pbar_n=cfg.rounds,
+                    measure_fn=measure_fn,
                     result_shape=(len(phases),),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     phases, bathreset_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (phases, signals)
 
         return phases, signals
@@ -187,7 +195,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PhaseResult:
-        signals, phases, _ = load_data(filepath, **kwargs)
+        signals, phases, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert phases is not None
         assert len(phases.shape) == 1 and len(signals.shape) == 1
         assert phases.shape == signals.shape
@@ -195,7 +203,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         phases = phases.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = PhaseCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (phases, signals)
 
         return phases, signals

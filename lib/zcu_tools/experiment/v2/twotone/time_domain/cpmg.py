@@ -8,31 +8,29 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter1d
-from typeguard import check_type
 from typing_extensions import (
     Any,
     Callable,
-    NotRequired,
     Optional,
     Sequence,
     TypeAlias,
-    TypedDict,
     Union,
-    cast,
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -61,19 +59,19 @@ CPMG_Result: TypeAlias = tuple[
 ]
 
 
-class CPMG_ModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class CPMG_ModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi2_pulse: PulseCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class CPMG_SweepCfg(TypedDict, closed=True):
+class CPMG_SweepCfg(BaseModel):
     times: Union[SweepCfg, Sequence[int]]
     length: SweepCfg
 
 
-class CPMG_Cfg(ModularProgramCfg, TaskCfg):
+class CPMG_Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: CPMG_ModuleCfg
     sweep: CPMG_SweepCfg
     length_range: Union[list[tuple[float, float]], tuple[float, float]]
@@ -85,26 +83,25 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: CPMG_Cfg,
         *,
         detune_ratio: float = 0.0,
         earlystop_snr: Optional[float] = None,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> CPMG_Result:
-        _cfg = check_type(deepcopy(cfg), CPMG_Cfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        pi2_pulse = modules["pi2_pulse"]
-        pi_pulse = modules["pi_pulse"]
+        pi2_pulse = modules.pi2_pulse
+        pi_pulse = modules.pi_pulse
 
-        time_sweep = _cfg["sweep"]["times"]
+        time_sweep = cfg.sweep.times
         times = sweep2array(time_sweep, allow_array=True)
         if not np.allclose(times, np.round(times)):
             raise ValueError("Times must be integers")
         times = times.astype(np.int64)
 
-        length_ranges = _cfg["length_range"]
+        length_ranges = cfg.length_range
         if isinstance(length_ranges, tuple):
             ranges = np.zeros((len(times), 2), dtype=np.float64)
             ranges[:, 0] = length_ranges[0]
@@ -119,7 +116,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     make_sweep(
                         start=length_ranges[i, 0],
                         stop=length_ranges[i, 1],
-                        expts=_cfg["length_expts"],
+                        expts=cfg.length_expts,
                     ),
                     "time",
                     {"soccfg": soccfg, "scaler": 1 / (2 * t)},
@@ -127,7 +124,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                 for i, t in enumerate(times)
             ]
         )
-        length_idxs = np.arange(_cfg["length_expts"], dtype=np.int64)
+        length_idxs = np.arange(cfg.length_expts, dtype=np.int64)
 
         if np.min(times) <= 0:
             raise ValueError("times should be larger than 0")
@@ -149,20 +146,20 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             ax1d = viewer.get_ax("1d")
 
             def measure_fn(
-                ctx: TaskState[NDArray[np.complex128], Any],
+                ctx: TaskState[NDArray[np.complex128], Any, CPMG_Cfg],
                 update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
             ) -> list[NDArray[np.float64]]:
-                cfg = cast(CPMG_Cfg, ctx.cfg)
-                modules = cfg["modules"]
+                cfg = ctx.cfg
+                modules = cfg.modules
 
                 assert update_hook is not None
 
                 time = ctx.env["time"]
-                pi2_pulse = modules["pi2_pulse"]
-                pi_pulse = modules["pi_pulse"]
+                pi2_pulse = modules.pi2_pulse
+                pi_pulse = modules.pi_pulse
                 dpulse_len = pi_pulse.waveform.length - pi2_pulse.waveform.length
 
-                length_sweep = cfg["sweep"]["length"]
+                length_sweep = cfg.sweep.length
                 length_param = sweep2param("length", length_sweep)
                 detune_param = (
                     360
@@ -180,7 +177,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                         soccfg,
                         cfg,
                         modules=[
-                            Reset("reset", modules.get("reset")),
+                            Reset("reset", modules.reset),
                             Pulse("pi2_pulse1", pi2_pulse, block_mode=False),
                             Delay("first_delay", interval - 0.5 * dpulse_len),
                             Repeat("pi_loop", time - 1).add_content(
@@ -197,7 +194,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                                     phase=pi2_pulse.phase + detune_param
                                 ),
                             ),
-                            Readout("readout", modules["readout"]),
+                            Readout("readout", modules.readout),
                         ],
                         sweep=[("length", length_sweep)],
                     )
@@ -214,21 +211,23 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
                     **(acquire_kwargs or {}),
                 )
 
-            def update_fn(i: int, ctx: TaskState, time: float) -> None:
+            def update_fn(
+                i: int, ctx: TaskState[Any, Any, CPMG_Cfg], time: float
+            ) -> None:
                 ctx.env.update(time=int(time), length_idx=i)
-                ctx.cfg["sweep"]["length"] = make_sweep(
+                ctx.cfg.sweep.length = make_sweep(
                     start=length_ranges[i, 0],
                     stop=length_ranges[i, 1],
-                    expts=ctx.cfg["length_expts"],
+                    expts=ctx.cfg.length_expts,
                 )
 
             signals = run_task(
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(length_idxs),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ).scan("times", times.tolist(), before_each=update_fn),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     times.astype(np.float64),
                     lengths[ctx.env["length_idx"]],
@@ -238,7 +237,7 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (times, lengths, signals)
 
         return times, lengths, signals

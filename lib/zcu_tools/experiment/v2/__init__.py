@@ -1,6 +1,6 @@
 from . import autofluxdep, fastflux, jpa, mist, onetone, overnight, singleshot, twotone
-from .fake import FakeExp
-from .lookback import LookbackExp
+from .fake import FakeCfg, FakeExp
+from .lookback import LookbackCfg, LookbackExp
 
 __all__ = [
     # modules
@@ -14,6 +14,8 @@ __all__ = [
     "fastflux",
     # lookback
     "LookbackExp",
+    "LookbackCfg",
     # fake
     "FakeExp",
+    "FakeCfg",
 ]

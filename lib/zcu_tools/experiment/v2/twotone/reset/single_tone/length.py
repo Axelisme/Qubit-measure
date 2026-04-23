@@ -6,26 +6,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     PulseReset,
@@ -47,16 +40,20 @@ def reset_length_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.floa
     return rotate2real(signals).real
 
 
-class LengthModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class LengthModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     tested_reset: PulseResetCfg
     readout: ReadoutCfg
 
 
-class LengthCfg(ModularProgramCfg, TaskCfg):
+class LengthSweepCfg(BaseModel):
+    length: SweepCfg
+
+
+class LengthCfg(ProgramV2Cfg, ExpCfgModel):
     modules: LengthModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: LengthSweepCfg
 
 
 class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
@@ -64,43 +61,42 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: LengthCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LengthResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = check_type(deepcopy(cfg), LengthCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        length_sweep = _cfg["sweep"]["length"]
+        length_sweep = cfg.sweep.length
 
-        pulse_cfg = modules["tested_reset"].pulse_cfg
+        pulse_cfg = modules.tested_reset.pulse_cfg
 
         lengths = sweep2array(
             length_sweep, "time", dict(soccfg=soccfg, gen_ch=pulse_cfg.ch)
         )
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState[NDArray[np.complex128], Any, LengthCfg],
+            update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
-            cfg = cast(LengthCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            length_sweep = cfg["sweep"]["length"]
+            length_sweep = cfg.sweep.length
             length_param = sweep2param("length", length_sweep)
 
-            modules["tested_reset"].set_param("length", length_param)
+            modules.tested_reset.set_param("length", length_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 sweep=[("length", length_sweep)],
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", modules.get("init_pulse")),
-                    PulseReset("tested_reset", modules["tested_reset"]),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    PulseReset("tested_reset", modules.tested_reset),
+                    Readout("readout", modules.readout),
                 ],
             ).acquire(
                 soc,
@@ -114,16 +110,16 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(lengths),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, reset_length_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (lengths, signals)
 
         return lengths, signals
@@ -177,7 +173,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> LengthResult:
-        signals, lens, _ = load_data(filepath, **kwargs)
+        signals, lens, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert lens is not None
         assert len(lens.shape) == 1 and len(signals.shape) == 1
         assert lens.shape == signals.shape
@@ -187,7 +183,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         lens = lens.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = LengthCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (lens, signals)
 
         return lens, signals

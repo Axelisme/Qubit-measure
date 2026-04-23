@@ -5,29 +5,21 @@ from copy import deepcopy
 import numpy as np
 import plotly.graph_objects as go
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    Mapping,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.analysis.fluxdep import add_secondary_xaxis
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -59,17 +51,22 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return mist_signals
 
 
-class FluxDepModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class FluxDepModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class FluxDepCfg(ModularProgramCfg, TaskCfg):
+class FluxDepSweepCfg(BaseModel):
+    flux: SweepCfg
+    gain: SweepCfg
+
+
+class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FluxDepModuleCfg
-    dev: Mapping[str, DeviceInfo]
-    sweep: dict[str, SweepCfg]
+    dev: Mapping[str, DeviceInfo] = ...
+    sweep: FluxDepSweepCfg
 
 
 class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
@@ -77,43 +74,42 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: FluxDepCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FluxDepResult:
-        _cfg = check_type(deepcopy(cfg), FluxDepCfg)
-        modules = _cfg["modules"]
+        modules = cfg.modules
 
         # predict sweep points
-        values = sweep2array(_cfg["sweep"]["flux"], allow_array=True)
+        values = sweep2array(cfg.sweep.flux, allow_array=True)
         gains = sweep2array(
-            _cfg["sweep"]["gain"],
+            cfg.sweep.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
+            ctx: TaskState[NDArray[np.complex128], Any, FluxDepCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: FluxDepCfg = cast(FluxDepCfg, ctx.cfg)
+            cfg = ctx.cfg
             setup_devices(cfg, progress=False)
-            modules = cfg["modules"]
+            modules = cfg.modules
 
             assert update_hook is not None
 
-            gain_sweep = cfg["sweep"]["gain"]
+            gain_sweep = cfg.sweep.gain
             gain_param = sweep2param("gain", gain_sweep)
-            modules["probe_pulse"].set_param("gain", gain_param)
+            modules.probe_pulse.set_param("gain", gain_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", modules.get("init_pulse")),
-                    Pulse("probe_pulse", modules["probe_pulse"]),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    Pulse("probe_pulse", modules.probe_pulse),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("gain", gain_sweep)],
             ).acquire(
@@ -131,15 +127,15 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(gains),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ).scan(
                     "flux",
                     values.tolist(),
                     before_each=lambda _, ctx, value: set_flux_in_dev_cfg(
-                        ctx.cfg["dev"], value
+                        ctx.cfg.dev, value
                     ),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     values, gains, mist_signal2real(np.asarray(ctx.root_data))
                 ),
@@ -147,7 +143,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (values, gains, signals)
 
         return values, gains, signals
@@ -234,7 +230,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FluxDepResult:
-        signals, values, gains = load_data(filepath, **kwargs)
+        signals, values, gains, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert values is not None and gains is not None
         assert len(values.shape) == 1 and len(gains.shape) == 1
         assert signals.shape == (len(values), len(gains))
@@ -243,7 +239,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (values, gains, signals)
 
         return values, gains, signals

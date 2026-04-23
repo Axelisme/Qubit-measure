@@ -6,16 +6,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
+from pydantic import BaseModel
 from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
-from zcu_tools.program.v2 import Pulse, TwoToneCfg, TwoToneProgram, sweep2param
+from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
+from zcu_tools.program.v2.twotone import TwoToneModuleCfg
 from zcu_tools.utils.datasaver import load_data, save_data
 
 from .util import calc_populations
@@ -24,8 +26,13 @@ from .util import calc_populations
 LenRabiResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class LenRabiCfg(TwoToneCfg, TaskCfg):
-    sweep: dict[str, SweepCfg]
+class LenRabiSweepCfg(BaseModel):
+    length: SweepCfg
+
+
+class LenRabiCfg(TwoToneCfg, ExpCfgModel):
+    modules: TwoToneModuleCfg
+    sweep: LenRabiSweepCfg
 
 
 class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
@@ -33,28 +40,26 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: LenRabiCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> LenRabiResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = check_type(deepcopy(cfg), LenRabiCfg)  # avoid in-place modification
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        assert modules["qub_pulse"].waveform.style in ["const", "flat_top"], (
+        assert modules.qub_pulse.waveform.style in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
 
         lengths = sweep2array(
-            _cfg["sweep"]["length"],
+            cfg.sweep.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
-        length_param = sweep2param("length", _cfg["sweep"]["length"])
-        modules["qub_pulse"].set_param("length", length_param)
+        length_param = sweep2param("length", cfg.sweep.length)
+        modules.qub_pulse.set_param("length", length_param)
 
         with LivePlot1D(
             "Length (us)",
@@ -70,11 +75,13 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         ) as viewer:
             viewer.get_ax().set_ylim(0.0, 1.0)
 
-            def measure_fn(ctx, update_hook):
+            def measure_fn(
+                ctx: TaskState[NDArray[np.float64], Any, LenRabiCfg], update_hook
+            ):
                 return TwoToneProgram(
                     soccfg,
                     ctx.cfg,
-                    sweep=[("length", ctx.cfg["sweep"]["length"])],
+                    sweep=[("length", ctx.cfg.sweep.length)],
                 ).acquire(
                     soc,
                     progress=False,
@@ -92,14 +99,14 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                     dtype=np.float64,
                     pbar_n=1,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, calc_populations(ctx.root_data).T
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = (lengths, populations)
 
         return lengths, populations
@@ -169,7 +176,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> LenRabiResult:
-        populations, lens, _ = load_data(filepath, **kwargs)
+        populations, lens, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert lens is not None
 
         lens = lens.astype(np.float64)
@@ -177,7 +184,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
 
         lens = lens * 1e6  # s -> us
 
-        self.last_cfg = None
+        self.last_cfg = LenRabiCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (lens, populations)
 
         return lens, populations

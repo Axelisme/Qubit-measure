@@ -7,29 +7,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Literal,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Literal, Optional, TypeAlias, cast
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
 from zcu_tools.experiment.utils.single_shot import GE_FitResult, singleshot_ge_analysis
-from zcu_tools.experiment.v2.runner import (
-    Task,
-    TaskCfg,
-    TaskState,
-    run_task,
-)
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -175,48 +163,46 @@ def optimize_ge_radius(
 GE_Result: TypeAlias = NDArray[np.complex128]
 
 
-class GEModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class GEModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class GE_Cfg(ModularProgramCfg, TaskCfg):
+class GE_Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: GEModuleCfg
     shots: int
-    rounds: NotRequired[int]  # will be overwritten to 1
-    reps: NotRequired[int]  # will be overwritten by shots
 
 
 class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> GE_Result:
-        _cfg = check_type(deepcopy(cfg), GE_Cfg)  # avoid in-place modification
-        setup_devices(_cfg, progress=True)
+    def run(self, soc, soccfg, cfg: GE_Cfg) -> GE_Result:
+        cfg = deepcopy(cfg)
+        setup_devices(cfg, progress=True)
 
         # Validate and setup configuration
-        if _cfg.setdefault("rounds", 1) != 1:
+        if cfg.rounds != 1:
             warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
-            _cfg["rounds"] = 1
+            cfg.rounds = 1
 
-        if _cfg.setdefault("reps", 1) != 1:
+        if cfg.reps != 1:
             warnings.warn("reps will be overwritten by singleshot measurement shots")
-        _cfg["reps"] = _cfg["shots"]
+        cfg.reps = cfg.shots
 
-        def measure_fn(ctx: TaskState, _):
-            modules = ctx.cfg["modules"]
+        def measure_fn(ctx: TaskState[NDArray[np.complex128], Any, GE_Cfg], _):
+            modules = ctx.cfg.modules
             probe_cfg = None
             if ctx.env["with_probe"]:
-                probe_cfg = modules["probe_pulse"]
+                probe_cfg = modules.probe_pulse
 
             prog = ModularProgramV2(
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", modules.get("init_pulse")),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
                     Pulse("probe_pulse", probe_cfg),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
             )
             prog.acquire(soc, progress=True)
@@ -239,7 +225,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
             task=Task(
                 measure_fn=measure_fn,
                 raw2signal_fn=raw2signal_fn,
-                result_shape=(_cfg["shots"],),
+                result_shape=(cfg.shots,),
                 pbar_n=1,
             ).scan(
                 "w/o probe pulse",
@@ -248,12 +234,12 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
                     with_probe=with_probe
                 ),
             ),
-            init_cfg=_cfg,
+            init_cfg=cfg,
         )
         signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = signals
 
         return signals
@@ -420,7 +406,7 @@ class GE_Exp(AbsExperiment[GE_Result, GE_Cfg]):
 
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = cast(GE_Cfg, cfg)
+        self.last_cfg = GE_Cfg.validate_or_warn(cfg, source=filepath)
         self.last_result = signals.T
 
         return signals

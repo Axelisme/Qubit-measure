@@ -27,6 +27,7 @@ def inductive_spectral_density(
         2 * EL * (1 / np.tanh(0.5 * np.abs(therm_ratio))) / (1 + np.exp(-therm_ratio))
     )
 
+
 def calc_ind_dipole(
     params: tuple[float, float, float],
     phi_elements: NDArray[np.complex128],

@@ -10,20 +10,15 @@ from typing_extensions import (
     Callable,
     Generic,
     Mapping,
-    MutableMapping,
-    NotRequired,
     Optional,
     Sequence,
-    TypedDict,
     TypeVar,
-    cast,
 )
 
-from zcu_tools.device import DeviceInfo
 from zcu_tools.utils.debug import print_traceback
 from zcu_tools.utils.func_tools import min_interval
 
-from .state import Result, TaskState
+from .state import Result, T_Cfg, TaskState
 
 if TYPE_CHECKING:
     from .repeat import RepeatOverTime, ReTryIfFail
@@ -35,24 +30,16 @@ T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
 
 
-class TaskCfg(TypedDict, closed=False):
-    dev: NotRequired[dict[str, DeviceInfo]]
-
-
-class AbsTask(ABC, Generic[T_Result, T_RootResult]):
-    def init(
-        self,
-        state: TaskState[T_Result, T_RootResult],
-        dynamic_pbar: bool = False,
-    ) -> None:
-        """Initialize the task with the current state.
+class AbsTask(ABC, Generic[T_Result, T_RootResult, T_Cfg]):
+    def init(self, dynamic_pbar: bool = False) -> None:
+        """Initialize the task.
 
         If dynamic_pbar is True, the progress bar will only show up in the run() method.
         NOTE: This method may be called multiple times during the task execution.
         """
 
     @abstractmethod
-    def run(self, state: TaskState[T_Result, T_RootResult]) -> None:
+    def run(self, state: TaskState[T_Result, T_RootResult, T_Cfg]) -> None:
         """Run the task with the current state."""
 
     def cleanup(self) -> None: ...
@@ -65,9 +52,9 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult]):
         name: str,
         values: Sequence[T_Value],
         before_each: Callable[
-            [int, TaskState[list[T_Result], T_RootResult], T_Value], Any
+            [int, TaskState[list[T_Result], T_RootResult, T_Cfg], T_Value], Any
         ],
-    ) -> Scan[T_Result, T_RootResult]:
+    ) -> Scan[T_Result, T_RootResult, T_Cfg]:
         """Scan a task over a sequence of values."""
         from .soft import Scan
 
@@ -75,13 +62,15 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult]):
 
     def repeat(
         self, name: str, times: int, interval: float = 0.0
-    ) -> RepeatOverTime[T_Result, T_RootResult]:
+    ) -> RepeatOverTime[T_Result, T_RootResult, T_Cfg]:
         """Repeat a task over a fixed number of times at a fixed interval."""
         from .repeat import RepeatOverTime
 
         return RepeatOverTime(name, times, task=self, interval=interval)
 
-    def auto_retry(self, max_retries: int) -> ReTryIfFail[T_Result, T_RootResult]:
+    def auto_retry(
+        self, max_retries: int
+    ) -> ReTryIfFail[T_Result, T_RootResult, T_Cfg]:
         """Automatically retry a task if it fails."""
         from .repeat import ReTryIfFail
 
@@ -89,10 +78,10 @@ class AbsTask(ABC, Generic[T_Result, T_RootResult]):
 
 
 def run_task(
-    task: AbsTask[T_Result, T_Result],
-    init_cfg: Mapping[str, Any],
-    env_dict: Optional[MutableMapping[str, Any]] = None,
-    on_update: Optional[Callable[[TaskState[Any, T_Result]], Any]] = None,
+    task: AbsTask[T_Result, T_Result, T_Cfg],
+    init_cfg: T_Cfg,
+    env_dict: Optional[dict[str, Any]] = None,
+    on_update: Optional[Callable[[TaskState[Any, T_Result, T_Cfg]], Any]] = None,
     update_interval: Optional[float] = 0.1,
 ) -> T_Result:
     """Run a task with a fresh TaskState.
@@ -101,7 +90,7 @@ def run_task(
     - Initializes the result via `task.get_default_result()`.
     - Wraps `on_update` with a min-interval throttler.
     """
-    cfg = cast(MutableMapping[str, Any], deepcopy(init_cfg))
+    cfg = deepcopy(init_cfg)
     init_result = task.get_default_result()
 
     if env_dict is None:
@@ -109,20 +98,23 @@ def run_task(
 
     on_update = min_interval(on_update, update_interval)
 
-    state: TaskState[T_Result, T_Result] = TaskState(
+    state: TaskState[T_Result, T_Result, T_Cfg] = TaskState(
         root_data=init_result,
         cfg=cfg,
         env=env_dict,
         on_update=on_update,
     )
 
+    cfg_keys = list(cfg.keys()) if isinstance(cfg, Mapping) else [type(cfg).__name__]
     logger.debug(
         "run_task: task=%s, cfg_keys=%s, env_keys=%s",
-        type(task).__name__, list(cfg.keys()), list(env_dict.keys()),
+        type(task).__name__,
+        cfg_keys,
+        list(env_dict.keys()),
     )
 
     try:
-        task.init(state, dynamic_pbar=False)
+        task.init(dynamic_pbar=False)
         logger.debug("run_task: init done, starting run")
         task.run(state)
         logger.debug("run_task: run done, cleanup")

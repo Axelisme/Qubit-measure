@@ -6,32 +6,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    Mapping,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import (
-    format_sweep1D,
-    set_output_in_dev_cfg,
-    setup_devices,
-)
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import set_output_in_dev_cfg, setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     PulseReadout,
     PulseReadoutCfg,
     Reset,
@@ -49,53 +37,56 @@ def check_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class CheckModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class CheckModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     readout: PulseReadoutCfg
 
 
-class CheckCfg(ModularProgramCfg, TaskCfg):
+class CheckSweepCfg(BaseModel):
+    freq: SweepCfg
+
+
+class CheckCfg(ProgramV2Cfg, ExpCfgModel):
     modules: CheckModuleCfg
-    dev: Mapping[str, DeviceInfo]
-    sweep: dict[str, SweepCfg]
+    dev: Mapping[str, DeviceInfo] = ...
+    sweep: CheckSweepCfg
 
 
 class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
     OUTPUT_MAP = {0: "off", 1: "on"}
 
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> CheckResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        _cfg = check_type(deepcopy(cfg), CheckCfg)
-        modules = _cfg["modules"]
+    def run(self, soc, soccfg, cfg: CheckCfg) -> CheckResult:
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
         outputs = np.array([0, 1])
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["readout"].pulse_cfg.ch},
+            {"soccfg": soccfg, "gen_ch": modules.readout.pulse_cfg.ch},
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
+            ctx: TaskState[NDArray[np.complex128], Any, CheckCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: CheckCfg = cast(CheckCfg, ctx.cfg)
+            cfg = ctx.cfg
             setup_devices(cfg, progress=False)
-            modules = cfg["modules"]
+            modules = cfg.modules
 
-            freq_sweep = cfg["sweep"]["freq"]
+            freq_sweep = cfg.sweep.freq
             freq_param = sweep2param("freq", freq_sweep)
-            modules["readout"].set_param("freq", freq_param)
+            modules.readout.set_param("freq", freq_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    PulseReadout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    PulseReadout("readout", modules.readout),
                 ],
                 sweep=[("freq", freq_sweep)],
-            ).acquire(ctx.env["soc"], progress=False, round_hook=update_hook)
+            ).acquire(soc, progress=False, round_hook=update_hook)
 
         with LivePlot1D(
             "Frequency (MHz)", "Magnitude", segment_kwargs=dict(num_lines=2)
@@ -104,27 +95,28 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(freqs),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ).scan(
                     "JPA on/off",
                     outputs.tolist(),
-                    before_each=lambda i, ctx, output: set_output_in_dev_cfg(
-                        ctx.cfg["dev"],
-                        self.OUTPUT_MAP[output],  # type: ignore
-                        label="jpa_rf_dev",
+                    before_each=lambda _, ctx, output: (
+                        (dev := ctx.cfg.dev) is not None
+                        and set_output_in_dev_cfg(
+                            dev,
+                            self.OUTPUT_MAP[output],  # type: ignore
+                            label="jpa_rf_dev",
+                        )
                     ),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, check_signal2real(np.asarray(ctx.root_data))
                 ),
             )
             signals = np.asarray(signals)
 
-        # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (outputs, freqs, signals)
-
         return outputs, freqs, signals
 
     def analyze(self, result: Optional[CheckResult] = None) -> Figure:
@@ -133,7 +125,6 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         assert result is not None, "no result found"
 
         outputs, freqs, signals2D = result
-
         real_signals = check_signal2real(signals2D)
 
         fig, ax = plt.subplots(figsize=config.figsize)
@@ -151,7 +142,6 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         ax.set_ylabel("Signal Magnitude (a.u.)")
         ax.legend()
         ax.grid(True)
-
         return fig
 
     def save(
@@ -167,7 +157,6 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         assert result is not None, "no result found"
 
         outputs, freqs, signals2D = result
-
         save_data(
             filepath=filepath,
             x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
@@ -179,18 +168,16 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> CheckResult:
-        signals2D, freqs, outputs = load_data(filepath, **kwargs)
+        signals2D, freqs, outputs, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert freqs is not None and outputs is not None
         assert len(freqs.shape) == 1 and len(outputs.shape) == 1
         assert signals2D.shape == (len(outputs), len(freqs))
 
         freqs = freqs * 1e-6  # Hz -> MHz
-
         outputs = outputs.astype(np.float64)
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = CheckCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (outputs, freqs, signals2D)
-
         return outputs, freqs, signals2D

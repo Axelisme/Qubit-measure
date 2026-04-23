@@ -6,27 +6,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter1d
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -49,21 +42,21 @@ def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class T1ModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class T1ModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     flux_pulse: PulseCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1SweepDict(TypedDict, closed=True):
+class T1SweepCfg(BaseModel):
     gain: SweepCfg
     length: SweepCfg
 
 
-class T1Cfg(ModularProgramCfg, TaskCfg):
+class T1Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1ModuleCfg
-    sweep: T1SweepDict
+    sweep: T1SweepCfg
 
 
 class T1Exp(AbsExperiment[T1Result, T1Cfg]):
@@ -71,45 +64,44 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: T1Cfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> T1Result:
-        _cfg = check_type(deepcopy(cfg), T1Cfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        gain_sweep = _cfg["sweep"]["gain"]
-        length_sweep = _cfg["sweep"]["length"]
+        gain_sweep = cfg.sweep.gain
+        length_sweep = cfg.sweep.length
 
         # uniform in square space
-        lf_ch = modules["flux_pulse"].ch
+        lf_ch = modules.flux_pulse.ch
         gains = sweep2array(gain_sweep, "gain", {"soccfg": soccfg, "gen_ch": lf_ch})
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg, "gen_ch": lf_ch})
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
+            ctx: TaskState[NDArray[np.complex128], Any, T1Cfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
             cfg: T1Cfg = cast(T1Cfg, ctx.cfg)
-            modules = cfg["modules"]
+            modules = cfg.modules
 
-            gain_sweep = cfg["sweep"]["gain"]
-            length_sweep = cfg["sweep"]["length"]
+            gain_sweep = cfg.sweep.gain
+            length_sweep = cfg.sweep.length
 
             gain_param = sweep2param("gain", gain_sweep)
             length_param = sweep2param("length", length_sweep)
-            modules["flux_pulse"].set_param("gain", gain_param)
-            modules["flux_pulse"].set_param("length", length_param)
+            modules.flux_pulse.set_param("gain", gain_param)
+            modules.flux_pulse.set_param("length", length_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("pi_pulse", modules["pi_pulse"]),
-                    Pulse("flux_pulse", modules["flux_pulse"]),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse("pi_pulse", modules.pi_pulse),
+                    Pulse("flux_pulse", modules.flux_pulse),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[
                     ("gain", gain_sweep),
@@ -124,16 +116,16 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(gains), len(lengths)),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     gains, lengths, t1_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (gains, lengths, signals)
 
         return gains, lengths, signals

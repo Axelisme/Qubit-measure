@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from copy import deepcopy
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -8,14 +9,15 @@ from numpy.typing import NDArray
 from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D, make_plot_frame
 
 # (freqs, signals)
 FakeResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class FakeCfg(TaskCfg): ...
+class FakeCfg(ExpCfgModel): ...
 
 
 def fake_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -23,15 +25,14 @@ def fake_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 
 
 class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
-    def run(self) -> FakeResult:
+    def run(self, cfg: FakeCfg) -> FakeResult:
         # Predicted frequency points (before mapping to ADC domain)
         freqs = np.linspace(4.5, 5.5, 201)  # MHz
 
         round_n = 100
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
-            update_hook: Optional[Callable[[int, NDArray[np.complex128]], None]],
+            ctx: TaskState, update_hook: Optional[Callable]
         ) -> NDArray[np.complex128]:
             signal_buffer = []
             for i in range(round_n):
@@ -59,14 +60,14 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
                     result_shape=(len(freqs),),
                     pbar_n=round_n,
                 ),
-                init_cfg=FakeCfg(),
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, fake_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = FakeCfg()
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (freqs, signals)
 
         return freqs, signals

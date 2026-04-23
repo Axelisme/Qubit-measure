@@ -7,27 +7,20 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
 from zcu_tools.experiment import AbsExperiment, config
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Join,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -49,22 +42,22 @@ def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class MistModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class MistModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     flux_pulse: PulseCfg
     mist_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MistSweepDict(TypedDict, closed=True):
+class MistSweepCfg(BaseModel):
     flux_gain: SweepCfg
     mist_gain: SweepCfg
 
 
-class MistCfg(ModularProgramCfg, TaskCfg):
+class MistCfg(ProgramV2Cfg, ExpCfgModel):
     modules: MistModuleCfg
-    sweep: MistSweepDict
+    sweep: MistSweepCfg
 
 
 class MistExp(AbsExperiment[MistResult, MistCfg]):
@@ -72,54 +65,53 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: MistCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> MistResult:
-        _cfg = check_type(deepcopy(cfg), MistCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        flux_gain_sweep = _cfg["sweep"]["flux_gain"]
-        mist_gain_sweep = _cfg["sweep"]["mist_gain"]
+        flux_gain_sweep = cfg.sweep.flux_gain
+        mist_gain_sweep = cfg.sweep.mist_gain
 
         flux_gains = sweep2array(
             flux_gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["flux_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.flux_pulse.ch},
         )
         mist_gains = sweep2array(
             mist_gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["mist_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.mist_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
+            ctx: TaskState[NDArray[np.complex128], Any, MistCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
             cfg: MistCfg = cast(MistCfg, ctx.cfg)
-            modules = cfg["modules"]
+            modules = cfg.modules
 
-            flux_gain_sweep = cfg["sweep"]["flux_gain"]
-            mist_gain_sweep = cfg["sweep"]["mist_gain"]
+            flux_gain_sweep = cfg.sweep.flux_gain
+            mist_gain_sweep = cfg.sweep.mist_gain
 
             flux_gain_param = sweep2param("flux_gain", flux_gain_sweep)
             mist_gain_param = sweep2param("mist_gain", mist_gain_sweep)
-            modules["flux_pulse"].set_param("gain", flux_gain_param)
-            modules["mist_pulse"].set_param("gain", mist_gain_param)
+            modules.flux_pulse.set_param("gain", flux_gain_param)
+            modules.mist_pulse.set_param("gain", mist_gain_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", modules.get("init_pulse")),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
                     Join(
-                        Pulse("flux_pulse", modules["flux_pulse"]),
-                        Pulse("mist_pulse", modules["mist_pulse"]),
+                        Pulse("flux_pulse", modules.flux_pulse),
+                        Pulse("mist_pulse", modules.mist_pulse),
                     ),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[
                     ("flux_gain", flux_gain_sweep),
@@ -134,16 +126,16 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(flux_gains), len(mist_gains)),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     flux_gains, mist_gains, mist_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (flux_gains, mist_gains, signals)
 
         return flux_gains, mist_gains, signals

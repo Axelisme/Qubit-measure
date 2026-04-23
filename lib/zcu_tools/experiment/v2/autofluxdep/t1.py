@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
+from pydantic import BaseModel
+from typing_extensions import Callable, Optional, TypedDict
 
-from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
+from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.meta_tool import ModuleLibrary
@@ -18,8 +17,8 @@ from zcu_tools.notebook.utils import make_comment, make_sweep
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -34,7 +33,7 @@ from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
 
-from .executor import FluxDepInfoDict, MeasurementTask, T_RootResult
+from .executor import FluxDepCfg, FluxDepInfoDict, MeasurementTask, T_RootResult
 
 
 def t1_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -55,21 +54,24 @@ def t1_fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
     return np.array(list(map(t1_signal2real, signals)), dtype=np.float64)
 
 
-class T1ModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class T1ModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1CfgTemplate(ModularProgramCfg, TaskCfg):
+class T1CfgTemplate(ProgramV2Cfg, ExpCfgModel):
     modules: T1ModuleCfg
     sweep_range: tuple[float, float]
 
 
-class T1Cfg(ModularProgramCfg, TaskCfg):
+class T1SweepCfg(BaseModel):
+    length: SweepCfg
+
+
+class T1Cfg(ProgramV2Cfg, FluxDepCfg):
     modules: T1ModuleCfg
-    dev: dict[str, DeviceInfo]
-    sweep: dict[str, SweepCfg]
+    sweep: T1SweepCfg
 
 
 class T1Result(TypedDict, closed=True):
@@ -90,8 +92,8 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         self,
         num_expts: int,
         cfg_maker: Callable[
-            [TaskState[T1Result, T_RootResult], ModuleLibrary],
-            Optional[dict[str, Any]],
+            [TaskState[T1Result, T_RootResult, FluxDepCfg], ModuleLibrary],
+            Optional[T1CfgTemplate],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -100,27 +102,27 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         self.earlystop_snr = earlystop_snr
 
         def measure_t1_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
+            ctx: TaskState[NDArray[np.complex128], T_RootResult, T1Cfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: T1Cfg = cast(T1Cfg, ctx.cfg)
-            modules = ctx.cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
             setup_devices(cfg, progress=False)
 
             assert update_hook is not None
 
-            length_sweep = cfg["sweep"]["length"]
+            length_sweep = cfg.sweep.length
 
             length_param = sweep2param("length", length_sweep)
             prog = ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("pi_pulse", modules["pi_pulse"]),
+                    Reset("reset", modules.reset),
+                    Pulse("pi_pulse", modules.pi_pulse),
                     Delay("t1_delay", delay=length_param),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("length", length_sweep)],
             )
@@ -136,16 +138,15 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
             )
 
         self.lengths = np.linspace(0, 1, num_expts)
-        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]], T1Cfg](
             measure_fn=measure_t1_fn,
             result_shape=(num_expts,),
         )
 
-    def init(self, ctx: TaskState[T1Result, T_RootResult], dynamic_pbar=False) -> None:
-        self.init_cfg = deepcopy(ctx.cfg)
-        self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+    def init(self, dynamic_pbar=False) -> None:
+        self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[T1Result, T_RootResult]) -> None:
+    def run(self, ctx: TaskState[T1Result, T_RootResult, FluxDepCfg]) -> None:
         info: FluxDepInfoDict = ctx.env["info"]
 
         cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
@@ -153,22 +154,20 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         if cfg_temp is None:
             return  # skip this task
 
-        cfg_temp = check_type(cfg_temp, T1CfgTemplate)
-
-        len_sweep = make_sweep(*cfg_temp["sweep_range"], self.num_expts)
+        len_sweep = make_sweep(*cfg_temp.sweep_range, self.num_expts)
         self.lengths = sweep2array(len_sweep, "time", {"soccfg": ctx.env["soccfg"]})
 
-        cfg_temp = dict(cfg_temp)
-        del cfg_temp["sweep_range"]
+        cfg = cfg_temp.model_dump(mode="python")
+        del cfg["sweep_range"]
         deepupdate(
-            cfg_temp,
-            {"dev": ctx.cfg["dev"], "sweep": {"length": len_sweep}},
+            cfg,
+            {"dev": ctx.cfg.dev, "sweep": {"length": len_sweep}},
             behavior="force",
         )
-        cfg = check_type(cfg_temp, T1Cfg)
+        cfg = T1Cfg.model_validate(cfg)
 
-        self.task.set_pbar_n(cfg["rounds"])
-        self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
+        self.task.set_pbar_n(cfg.rounds)
+        self.task.run(ctx.child("raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
@@ -248,6 +247,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
         np.savez_compressed(filepath, flux_values=flux_values, **result)
 
         x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
+        cfg = {}
 
         # signals
         save_data(
@@ -263,7 +263,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=make_comment(self.init_cfg, comment),
+            comment=make_comment(cfg, comment),
             tag=prefix_tag + "/signals",
         )
 
@@ -281,7 +281,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
                 "unit": "s",
                 "values": result["length"].T * 1e-6,
             },
-            comment=make_comment(self.init_cfg, comment),
+            comment=make_comment(cfg, comment),
             tag=prefix_tag + "/length",
         )
 
@@ -290,7 +290,7 @@ class T1Task(MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
             filepath=str(filepath.with_name(filepath.name + "_t1")),
             x_info=x_info,
             z_info={"name": "T1", "unit": "s", "values": result["t1"] * 1e-6},
-            comment=make_comment(self.init_cfg, comment),
+            comment=make_comment(cfg, comment),
             tag=prefix_tag + "/t1",
         )
 

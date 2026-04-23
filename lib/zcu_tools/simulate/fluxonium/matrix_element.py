@@ -138,6 +138,7 @@ def calculate_system_n_oper_vs_flux(
 
     return sweep, sweep["n_oper"]
 
+
 def calculate_phi_oper(
     params: tuple[float, float, float],
     flux: float,

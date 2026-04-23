@@ -31,6 +31,7 @@ def charge_spectral_density(
         / (1 + np.exp(-therm_ratio))
     )
 
+
 def calc_cap_dipole(
     params: tuple[float, float, float],
     n_elements: NDArray[np.complex128],

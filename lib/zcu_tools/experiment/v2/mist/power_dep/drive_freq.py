@@ -7,26 +7,19 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -51,16 +44,21 @@ def drivefreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64
     return np.abs(mist_signals)
 
 
-class DriveFreqModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class DriveFreqModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class DriveFreqCfg(ModularProgramCfg, TaskCfg):
+class DriveFreqSweepCfg(BaseModel):
+    freq: SweepCfg
+    gain: SweepCfg
+
+
+class DriveFreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules: DriveFreqModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: DriveFreqSweepCfg
 
 
 class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
@@ -68,19 +66,17 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: DriveFreqCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> DriveFreqResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        _cfg = check_type(deepcopy(cfg), DriveFreqCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        freq_sweep = _cfg["sweep"]["freq"]
-        gain_sweep = _cfg["sweep"]["gain"]
+        freq_sweep = cfg.sweep.freq
+        gain_sweep = cfg.sweep.gain
 
-        probe_pulse = modules["probe_pulse"]
+        probe_pulse = modules.probe_pulse
         freqs = sweep2array(
             freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": probe_pulse.ch}
         )
@@ -89,27 +85,27 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
+            ctx: TaskState[NDArray[np.complex128], Any, DriveFreqCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: DriveFreqCfg = cast(DriveFreqCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            freq_sweep = cfg["sweep"]["freq"]
-            gain_sweep = cfg["sweep"]["gain"]
+            freq_sweep = cfg.sweep.freq
+            gain_sweep = cfg.sweep.gain
             freq_param = sweep2param("freq", freq_sweep)
             gain_param = sweep2param("gain", gain_sweep)
-            modules["probe_pulse"].set_param("freq", freq_param)
-            modules["probe_pulse"].set_param("gain", gain_param)
+            modules.probe_pulse.set_param("freq", freq_param)
+            modules.probe_pulse.set_param("gain", gain_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", modules.get("init_pulse")),
-                    Pulse("probe_pulse", modules["probe_pulse"]),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    Pulse("probe_pulse", modules.probe_pulse),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("freq", freq_sweep), ("gain", gain_sweep)],
             ).acquire(
@@ -121,16 +117,16 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(freqs), len(gains)),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, gains, drivefreq_signal2real(ctx.root_data)
                 ),
             )
 
         # record the last result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (freqs, gains, signals)
 
         return freqs, gains, signals
@@ -194,7 +190,7 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = cast(DriveFreqCfg, cfg)
+        self.last_cfg = DriveFreqCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (freqs, gains, signals)
 
         return freqs, gains, signals

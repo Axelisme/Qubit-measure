@@ -7,15 +7,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
+from pydantic import BaseModel
+from typing_extensions import Any, Optional, TypeAlias, cast
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -31,42 +32,44 @@ from .util import classify_result, plot_with_classified
 CheckResult: TypeAlias = NDArray[np.complex128]
 
 
-class CheckModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
-    probe_pulse: NotRequired[PulseCfg]
+class CheckModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
+    probe_pulse: Optional[PulseCfg] = None
     readout: ReadoutCfg
 
 
-class CheckCfg(ModularProgramCfg, TaskCfg):
+class CheckCfg(ProgramV2Cfg, ExpCfgModel):
     modules: CheckModuleCfg
     shots: int
 
 
 class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> CheckResult:
+    def run(self, soc, soccfg, cfg: CheckCfg) -> CheckResult:
+        cfg = deepcopy(cfg)
         # Validate and setup configuration
-        if cfg.setdefault("rounds", 1) != 1:
+        if cfg.rounds != 1:
             warnings.warn("rounds will be overwritten to 1 for singleshot measurement")
-            cfg["rounds"] = 1
+            cfg.rounds = 1
 
-        if cfg.get("reps", 1) != 1:
+        if cfg.reps != 1:
             warnings.warn("reps will be overwritten by singleshot measurement shots")
-        cfg["reps"] = cfg["shots"]
+        cfg.reps = cfg.shots
 
-        _cfg = check_type(deepcopy(cfg), CheckCfg)  # avoid in-place modification
-        setup_devices(_cfg, progress=True)
+        setup_devices(cfg, progress=True)
 
-        def measure_fn(ctx: TaskState, _) -> NDArray[np.float64]:
-            modules = ctx.cfg["modules"]
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, CheckCfg], _
+        ) -> NDArray[np.float64]:
+            modules = ctx.cfg.modules
             prog = ModularProgramV2(
                 soccfg,
                 ctx.cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", modules.get("init_pulse")),
-                    Pulse("probe_pulse", modules.get("probe_pulse")),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    Pulse("probe_pulse", modules.probe_pulse),
+                    Readout("readout", modules.readout),
                 ],
             )
             prog.acquire(soc, progress=True)
@@ -87,14 +90,14 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
             task=Task(
                 measure_fn=measure_fn,
                 raw2signal_fn=raw2signal_fn,
-                result_shape=(_cfg["shots"],),
+                result_shape=(cfg.shots,),
                 pbar_n=1,
             ),
-            init_cfg=_cfg,
+            init_cfg=cfg,
         )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = signals
 
         return signals
@@ -158,10 +161,10 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> CheckResult:
-        signals, _, _ = load_data(filepath, **kwargs)
+        signals, _, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         signals = cast(CheckResult, signals)
 
-        self.last_cfg = None
+        self.last_cfg = CheckCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = signals
 
         return signals

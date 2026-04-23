@@ -9,25 +9,19 @@ from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias, cast
 
+from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import (
     set_flux_in_dev_cfg,
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
     setup_devices,
 )
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlotScatter, MultiLivePlot
@@ -35,8 +29,8 @@ from zcu_tools.liveplot.backend.jupyter import instant_plot
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -53,26 +47,29 @@ JPAOptimizeResult: TypeAlias = tuple[
 ]
 
 
-class JPAOptModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class JPAOptModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class JPAOptCfg(ModularProgramCfg, TaskCfg):
+class JPAOptSweepCfg(BaseModel):
+    jpa_flux: SweepCfg
+    jpa_freq: SweepCfg
+    jpa_power: SweepCfg
+
+
+class JPAOptCfg(ProgramV2Cfg, ExpCfgModel):
     modules: JPAOptModuleCfg
-    sweep: dict[str, SweepCfg]
+    dev: Mapping[str, DeviceInfo] = ...
+    sweep: JPAOptSweepCfg
 
 
 class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
-    def run(
-        self, soc, soccfg, cfg: dict[str, Any], num_points: int
-    ) -> JPAOptimizeResult:
-        _cfg = check_type(deepcopy(cfg), JPAOptCfg)
-
-        flux_sweep = _cfg["sweep"]["jpa_flux"]
-        freq_sweep = _cfg["sweep"]["jpa_freq"]
-        gain_sweep = _cfg["sweep"]["jpa_power"]
+    def run(self, soc, soccfg, cfg: JPAOptCfg, num_points: int) -> JPAOptimizeResult:
+        flux_sweep = cfg.sweep.jpa_flux
+        freq_sweep = cfg.sweep.jpa_freq
+        gain_sweep = cfg.sweep.jpa_power
 
         optimizer = JPAOptimizer(flux_sweep, freq_sweep, gain_sweep, num_points)
 
@@ -80,18 +77,20 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         params = np.full((num_points, 3), np.nan, dtype=np.float64)
         phases = np.zeros(num_points, dtype=np.int32)
 
-        def measure_fn(ctx: TaskState, update_hook: Callable) -> list[MomentTracker]:
-            cfg: JPAOptCfg = cast(JPAOptCfg, ctx.cfg)
+        def measure_fn(
+            ctx: TaskState[NDArray[np.float64], Any, JPAOptCfg], update_hook: Callable
+        ) -> list[MomentTracker]:
+            cfg = ctx.cfg
             setup_devices(cfg, progress=False)
-            modules = cfg["modules"]
+            modules = cfg.modules
 
             prog = ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Branch("ge", [], Pulse("pi_pulse", modules["pi_pulse"])),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("ge", 2)],
             )
@@ -105,7 +104,7 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             )
             return [tracker]
 
-        def update_fn(i, ctx: TaskState, _) -> None:
+        def update_fn(i, ctx: TaskState[Any, Any, JPAOptCfg], _) -> None:
             ctx.env["index"] = i
 
             last_snr = None
@@ -120,9 +119,11 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             params[i, :] = cur_params
             phases[i] = optimizer.phase
 
-            set_flux_in_dev_cfg(ctx.cfg["dev"], params[i, 0], label="jpa_flux_dev")
-            set_freq_in_dev_cfg(ctx.cfg["dev"], 1e6 * params[i, 1], label="jpa_rf_dev")
-            set_power_in_dev_cfg(ctx.cfg["dev"], params[i, 2], label="jpa_rf_dev")
+            dev = ctx.cfg.dev
+            assert dev is not None, "JPA auto optimize requires cfg.dev"
+            set_flux_in_dev_cfg(dev, params[i, 0], label="jpa_flux_dev")
+            set_freq_in_dev_cfg(dev, 1e6 * params[i, 1], label="jpa_rf_dev")
+            set_power_in_dev_cfg(dev, params[i, 2], label="jpa_rf_dev")
 
         # initialize figure and axes
         figsize = (8, 5)
@@ -187,20 +188,20 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     dtype=np.float64,
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ).scan(
                     "Iteration",
                     list(range(num_points)),
                     before_each=update_fn,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=plot_fn,
             )
             signals = np.asarray(results)
 
         plt.close(fig)
 
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (params, phases, signals)
 
         return params, phases, signals

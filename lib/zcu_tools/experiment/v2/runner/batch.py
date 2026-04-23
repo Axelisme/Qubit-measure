@@ -6,20 +6,16 @@ from tqdm.auto import tqdm
 from typing_extensions import Hashable, Mapping, Optional, TypeVar
 
 from .base import AbsTask
-from .state import Result
+from .state import T_Cfg, T_ChildResult, T_RootResult
 
 logger = logging.getLogger(__name__)
 
 T_Key = TypeVar("T_Key", bound=Hashable)
 
-T_RootResult = TypeVar("T_RootResult", bound=Result)
-T_ChildResult = TypeVar("T_ChildResult", bound=Result)
 
-
-class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult]):
+class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult, T_Cfg]):
     def __init__(
-        self,
-        tasks: Mapping[T_Key, AbsTask[T_ChildResult, T_RootResult]],
+        self, tasks: Mapping[T_Key, AbsTask[T_ChildResult, T_RootResult, T_Cfg]]
     ) -> None:
         self.tasks = tasks
 
@@ -29,7 +25,7 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult]):
     def make_pbar(self, leave: bool) -> tqdm:
         return tqdm(total=len(self.tasks), smoothing=0, leave=leave)
 
-    def init(self, state, dynamic_pbar: bool = False) -> None:
+    def init(self, dynamic_pbar: bool = False) -> None:
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
@@ -37,7 +33,7 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult]):
 
         # force dynamic pbar for each task
         for name, task in self.tasks.items():
-            task.init(state.child(name), dynamic_pbar=True)
+            task.init(dynamic_pbar=True)
 
     def run(self, state) -> None:
         if self.dynamic_pbar:

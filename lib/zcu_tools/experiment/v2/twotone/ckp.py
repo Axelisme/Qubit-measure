@@ -7,28 +7,26 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
+from pydantic import BaseModel
 from typing_extensions import (
     Any,
     Callable,
-    NotRequired,
     Optional,
     TypeAlias,
-    TypedDict,
-    cast,
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
     Join,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -79,17 +77,22 @@ def get_resonance_freq(
     return np.array(s_xs), np.array(s_freqs)
 
 
-class CKP_ModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class CKPModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     res_pulse: PulseCfg
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class CKP_Cfg(ModularProgramCfg, TaskCfg):
-    modules: CKP_ModuleCfg
-    sweep: dict[str, SweepCfg]
+class CKPSweepCfg(BaseModel):
+    res_freq: SweepCfg
+    qub_freq: SweepCfg
+
+
+class CKP_Cfg(ProgramV2Cfg, ExpCfgModel):
+    modules: CKPModuleCfg
+    sweep: CKPSweepCfg
 
 
 class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
@@ -97,58 +100,57 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: CKP_Cfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> CKP_Result:
-        _cfg = check_type(deepcopy(cfg), CKP_Cfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        res_freq_sweep = _cfg["sweep"]["res_freq"]
-        qub_freq_sweep = _cfg["sweep"]["qub_freq"]
+        res_freq_sweep = cfg.sweep.res_freq
+        qub_freq_sweep = cfg.sweep.qub_freq
 
         res_freqs = sweep2array(
             res_freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["res_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.res_pulse.ch},
         )
         qub_freqs = sweep2array(
             qub_freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], NDArray[np.complex128]],
+            ctx: TaskState[NDArray[np.complex128], NDArray[np.complex128], CKP_Cfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: CKP_Cfg = cast(CKP_Cfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            res_freq_sweep = cfg["sweep"]["res_freq"]
-            qub_freq_sweep = cfg["sweep"]["qub_freq"]
+            res_freq_sweep = cfg.sweep.res_freq
+            qub_freq_sweep = cfg.sweep.qub_freq
             res_freq_param = sweep2param("res_freq", res_freq_sweep)
             qub_freq_param = sweep2param("qub_freq", qub_freq_sweep)
-            modules["res_pulse"].set_param("freq", res_freq_param)
-            modules["qub_pulse"].set_param("freq", qub_freq_param)
+            modules.res_pulse.set_param("freq", res_freq_param)
+            modules.qub_pulse.set_param("freq", qub_freq_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Branch("ge", [], Pulse("pi_pulse", modules["pi_pulse"])),
+                    Reset("reset", modules.reset),
+                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
                     Join(
-                        Pulse("res_pulse", modules["res_pulse"]),
-                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Pulse("res_pulse", modules.res_pulse),
+                        Pulse("qub_pulse", modules.qub_pulse),
                     ),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[
                     ("ge", 2),
-                    ("res_freq", cfg["sweep"]["res_freq"]),
-                    ("qub_freq", cfg["sweep"]["qub_freq"]),
+                    ("res_freq", cfg.sweep.res_freq),
+                    ("qub_freq", cfg.sweep.qub_freq),
                 ],
             ).acquire(
                 soc,
@@ -178,7 +180,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         ) as viewer:
 
             def plot_fn(
-                ctx: TaskState[NDArray[np.complex128], NDArray[np.complex128]],
+                ctx: TaskState[NDArray[np.complex128], NDArray[np.complex128], CKP_Cfg],
             ) -> None:
                 real_signal = ckp_signal2real(ctx.root_data)
 
@@ -194,15 +196,15 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(2, len(res_freqs), len(qub_freqs)),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=plot_fn,
             )
         plt.close(fig)
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (res_freqs, qub_freqs, signals)
 
         return res_freqs, qub_freqs, signals
@@ -358,7 +360,9 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
     def load(self, filepath: list[str], **kwargs) -> CKP_Result:
         g_filepath, e_filepath = filepath
 
-        g_signals, res_freqs, qub_freqs = load_data(g_filepath, **kwargs)
+        g_signals, res_freqs, qub_freqs, cfg = load_data(
+            g_filepath, return_cfg=True, **kwargs
+        )
         assert qub_freqs is not None
         assert len(res_freqs.shape) == 1 and len(qub_freqs.shape) == 1
         assert g_signals.shape == (len(res_freqs), len(qub_freqs))
@@ -374,7 +378,7 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         qub_freqs = qub_freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = CKP_Cfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (res_freqs, qub_freqs, signals)
 
         return res_freqs, qub_freqs, signals

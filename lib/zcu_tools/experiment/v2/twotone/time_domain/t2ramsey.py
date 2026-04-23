@@ -6,19 +6,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, NotRequired, Optional, TypeAlias, TypedDict, cast
+from pydantic import BaseModel
+from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -39,15 +40,19 @@ def t2ramsey_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
 T2RamseyResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.complex128]]
 
 
-class T2RamseyModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class T2RamseyModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi2_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T2RamseyCfg(ModularProgramCfg, TaskCfg):
+class T2RamseySweepCfg(BaseModel):
+    length: SweepCfg
+
+
+class T2RamseyCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T2RamseyModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: T2RamseySweepCfg
 
 
 class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
@@ -55,39 +60,41 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: T2RamseyCfg,
         *,
         detune: float = 0.0,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> tuple[T2RamseyResult, float]:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = check_type(deepcopy(cfg), T2RamseyCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        length_sweep = _cfg["sweep"]["length"]
+        length_sweep = cfg.sweep.length
         lengths = sweep2array(length_sweep, "time", {"soccfg": soccfg})
 
         # calculate true scanned detune based on rounding lengths
         if detune != 0.0:
             detune_lengths = sweep2array(
-                cfg["sweep"]["length"],
+                cfg.sweep.length,
                 "phase",
                 {
                     "soccfg": soccfg,
-                    "gen_ch": modules["pi2_pulse"].ch,
+                    "gen_ch": modules.pi2_pulse.ch,
                     "scaler": 360 * detune,
                 },
             )
             mask = lengths > 0
             detune_ratio = np.mean(detune_lengths[mask] / lengths[mask]).item()
             true_detune = detune * detune_ratio
+        else:
+            true_detune = 0.0
 
-        def measure_fn(ctx, update_hook):
-            cfg: T2RamseyCfg = cast(T2RamseyCfg, ctx.cfg)
-            modules = cfg["modules"]
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, T2RamseyCfg], update_hook
+        ):
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            length_sweep = cfg["sweep"]["length"]
+            length_sweep = cfg.sweep.length
             length_param = sweep2param("length", length_sweep)
             detune_param = 360 * detune * length_param
 
@@ -95,16 +102,16 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("pi2_pulse1", modules["pi2_pulse"]),
+                    Reset("reset", modules.reset),
+                    Pulse("pi2_pulse1", modules.pi2_pulse),
                     Delay("t2_delay", delay=length_param),
                     Pulse(
                         name="pi2_pulse2",
-                        cfg=modules["pi2_pulse"].with_updates(
-                            phase=modules["pi2_pulse"].phase + detune_param
+                        cfg=modules.pi2_pulse.with_updates(
+                            phase=modules.pi2_pulse.phase + detune_param
                         ),
                     ),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("length", length_sweep)],
             ).acquire(
@@ -122,16 +129,16 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(lengths),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, t2ramsey_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (lengths, signals)
 
         return (lengths, signals), true_detune
@@ -199,7 +206,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> T2RamseyResult:
-        signals, Ts, _ = load_data(filepath, **kwargs)
+        signals, Ts, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1
         assert Ts.shape == signals.shape
@@ -209,7 +216,7 @@ class T2RamseyExp(AbsExperiment[T2RamseyResult, T2RamseyCfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = T2RamseyCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (Ts, signals)
 
         return Ts, signals

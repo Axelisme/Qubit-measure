@@ -17,7 +17,9 @@ def test_scan_before_each_called_per_value_in_order():
     calls = []
     sub = _mock_subtask()
     values = [10, 20, 30]
-    scan = Scan("sw", values, before_each=lambda i, s, v: calls.append((i, v)), task=sub)
+    scan = Scan(
+        "sw", values, before_each=lambda i, s, v: calls.append((i, v)), task=sub
+    )
 
     root = scan.get_default_result()
     state = TaskState(root_data=root, cfg={})

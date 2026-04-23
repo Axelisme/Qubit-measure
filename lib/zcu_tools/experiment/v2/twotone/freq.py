@@ -6,12 +6,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
+from pydantic import BaseModel
 from typing_extensions import Any, Literal, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
@@ -27,8 +28,12 @@ def qubfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals))
 
 
-class FreqCfg(TwoToneCfg, TaskCfg):
-    sweep: dict[str, SweepCfg]
+class FreqSweepCfg(BaseModel):
+    freq: SweepCfg
+
+
+class FreqCfg(TwoToneCfg, ExpCfgModel):
+    sweep: FreqSweepCfg
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
@@ -36,31 +41,29 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: FreqCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        _cfg = check_type(deepcopy(cfg), FreqCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
         # predicted sweep points before FPGA coercion
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
         # bind sweep parameter as *QickParam* so it is executed by FPGA
-        freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-        modules["qub_pulse"].set_param("freq", freq_param)
+        freq_param = sweep2param("freq", cfg.sweep.freq)
+        modules.qub_pulse.set_param("freq", freq_param)
 
         with LivePlot1D("Frequency (MHz)", "Amplitude") as viewer:
             signals = run_task(
                 task=Task(
                     measure_fn=lambda ctx, update_hook: TwoToneProgram(
-                        soccfg, ctx.cfg, sweep=[("freq", ctx.cfg["sweep"]["freq"])]
+                        soccfg, ctx.cfg, sweep=[("freq", ctx.cfg.sweep.freq)]
                     ).acquire(
                         soc,
                         progress=False,
@@ -68,16 +71,16 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                         **(acquire_kwargs or {}),
                     ),
                     result_shape=(len(freqs),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, qubfreq_signal2real(ctx.root_data)
                 ),
             )
 
         # cache
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (freqs, signals)
 
         return freqs, signals
@@ -147,7 +150,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FreqResult:
-        signals, freqs, _ = load_data(filepath, **kwargs)
+        signals, freqs, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert freqs is not None
         assert len(freqs.shape) == 1 and len(signals.shape) == 1
         assert freqs.shape == signals.shape
@@ -155,7 +158,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs = freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (freqs, signals)
 
         return freqs, signals

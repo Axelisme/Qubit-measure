@@ -38,7 +38,9 @@ class KMeansTracker(TrackerProtocol):
     BATCH_SIZE = 256
 
     def __init__(
-        self, max_cluster_num: int = 3, share_axis: Optional[int | tuple[int, ...]] = None
+        self,
+        max_cluster_num: int = 3,
+        share_axis: Optional[int | tuple[int, ...]] = None,
     ) -> None:
         if max_cluster_num < 1:
             raise ValueError("max_cluster_num must be >= 1")
@@ -61,7 +63,9 @@ class KMeansTracker(TrackerProtocol):
         if self.share_axis is None:
             return ()
 
-        axes = (self.share_axis,) if isinstance(self.share_axis, int) else self.share_axis
+        axes = (
+            (self.share_axis,) if isinstance(self.share_axis, int) else self.share_axis
+        )
         norm_axes: list[int] = []
         for axis in axes:
             axis_i = int(axis)
@@ -77,7 +81,9 @@ class KMeansTracker(TrackerProtocol):
     def _init_state(self, leading_shape: tuple[int, ...]) -> None:
         leading_ndim = len(leading_shape)
         self._share_axis_norm = self._normalize_share_axis(leading_ndim)
-        self._group_axes = tuple(i for i in range(leading_ndim) if i not in self._share_axis_norm)
+        self._group_axes = tuple(
+            i for i in range(leading_ndim) if i not in self._share_axis_norm
+        )
         self._group_shape = tuple(leading_shape[i] for i in self._group_axes)
         self._group_count = int(np.prod(self._group_shape)) if self._group_shape else 1
 
@@ -99,7 +105,9 @@ class KMeansTracker(TrackerProtocol):
         ]
 
     @staticmethod
-    def _batch_moments(points: NDArray[np.float64]) -> tuple[int, NDArray[np.float64], NDArray[np.float64]]:
+    def _batch_moments(
+        points: NDArray[np.float64],
+    ) -> tuple[int, NDArray[np.float64], NDArray[np.float64]]:
         n = points.shape[0]
         mean = np.mean(points, axis=0)
         centered = points - mean[None, :]
@@ -107,7 +115,9 @@ class KMeansTracker(TrackerProtocol):
         return n, mean.astype(np.float64, copy=False), M2.astype(np.float64, copy=False)
 
     @staticmethod
-    def _select_seed_centers(points: NDArray[np.float64], num_centers: int) -> NDArray[np.float64]:
+    def _select_seed_centers(
+        points: NDArray[np.float64], num_centers: int
+    ) -> NDArray[np.float64]:
         if num_centers <= 0:
             return np.zeros((0, 2), dtype=np.float64)
         centers = np.empty((num_centers, 2), dtype=np.float64)
@@ -116,7 +126,9 @@ class KMeansTracker(TrackerProtocol):
         for i in range(1, num_centers):
             idx = int(np.argmax(min_dist2))
             centers[i] = points[idx]
-            min_dist2 = np.minimum(min_dist2, np.sum((points - centers[i]) ** 2, axis=1))
+            min_dist2 = np.minimum(
+                min_dist2, np.sum((points - centers[i]) ** 2, axis=1)
+            )
         return centers
 
     def _expand_clusters(self, g: int, points: NDArray[np.float64]) -> None:
@@ -128,13 +140,16 @@ class KMeansTracker(TrackerProtocol):
 
         if active == 0:
             n_init = min(self.max_cluster_num, points.shape[0])
-            self._cluster_means[g, :n_init, :] = self._select_seed_centers(points, n_init)
+            self._cluster_means[g, :n_init, :] = self._select_seed_centers(
+                points, n_init
+            )
             self._cluster_counts[g] = n_init
             active = n_init
 
         while active < self.max_cluster_num:
             dist2 = np.sum(
-                (points[:, None, :] - self._cluster_means[g, :active, :][None, :, :]) ** 2,
+                (points[:, None, :] - self._cluster_means[g, :active, :][None, :, :])
+                ** 2,
                 axis=-1,
             )
             min_dist2 = np.min(dist2, axis=1)
@@ -173,7 +188,9 @@ class KMeansTracker(TrackerProtocol):
             n_old = self._cluster_sizes[g, k]
             mean_old = self._cluster_means[g, k]
             M2_old = self._cluster_M2[g, k]
-            n_new, mean_new, M2_new = _merge_moments2(n_old, mean_old, M2_old, n_b, mean_b, M2_b)
+            n_new, mean_new, M2_new = _merge_moments2(
+                n_old, mean_old, M2_old, n_b, mean_b, M2_b
+            )
             self._cluster_sizes[g, k] = n_new
             self._cluster_means[g, k] = mean_new
             self._cluster_M2[g, k] = M2_new
@@ -194,7 +211,9 @@ class KMeansTracker(TrackerProtocol):
             )
 
         leading_ndim = len(leading_shape)
-        shared_axes = tuple(i for i in range(leading_ndim) if i in self._share_axis_norm)
+        shared_axes = tuple(
+            i for i in range(leading_ndim) if i in self._share_axis_norm
+        )
         permute = (*self._group_axes, *shared_axes, leading_ndim, leading_ndim + 1)
 
         for chunk in self._iter_chunks(points):
@@ -203,7 +222,9 @@ class KMeansTracker(TrackerProtocol):
             shared_shape = tuple(leading_shape[i] for i in shared_axes)
             reshaped = reshaped.reshape(
                 int(np.prod(group_shape)) if group_shape else 1,
-                int(np.prod(shared_shape)) * reshaped.shape[-2] if shared_shape else reshaped.shape[-2],
+                int(np.prod(shared_shape)) * reshaped.shape[-2]
+                if shared_shape
+                else reshaped.shape[-2],
                 2,
             )
             for g in range(reshaped.shape[0]):
@@ -212,7 +233,9 @@ class KMeansTracker(TrackerProtocol):
 
     def _require_state(
         self,
-    ) -> tuple[NDArray[np.int32], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
+    ) -> tuple[
+        NDArray[np.int32], NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
+    ]:
         if (
             self._cluster_counts is None
             or self._cluster_sizes is None
@@ -220,7 +243,12 @@ class KMeansTracker(TrackerProtocol):
             or self._cluster_M2 is None
         ):
             raise ValueError("Cluster statistics are not available yet")
-        return self._cluster_counts, self._cluster_sizes, self._cluster_means, self._cluster_M2
+        return (
+            self._cluster_counts,
+            self._cluster_sizes,
+            self._cluster_means,
+            self._cluster_M2,
+        )
 
     def _reshape_count(self, arr: NDArray[np.int32]) -> NDArray[np.int32]:
         return arr.reshape((*self._group_shape, *arr.shape[1:]))

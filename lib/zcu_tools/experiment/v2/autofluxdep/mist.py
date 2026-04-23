@@ -1,24 +1,23 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
+from pydantic import BaseModel
+from typing_extensions import Callable, Optional, TypedDict
 
-from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
+from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -31,7 +30,7 @@ from zcu_tools.utils import deepupdate
 from zcu_tools.utils.datasaver import save_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from .executor import MeasurementTask, T_RootResult
+from .executor import FluxDepCfg, MeasurementTask, T_RootResult
 
 
 def mist_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -54,21 +53,24 @@ def mist_fluxdep_signal2real(
     return mist_signals
 
 
-class MistModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class MistModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     mist_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MistCfgTemplate(ModularProgramCfg, TaskCfg):
+class MistCfgTemplate(ProgramV2Cfg, ExpCfgModel):
     modules: MistModuleCfg
 
 
-class MistCfg(ModularProgramCfg, TaskCfg):
+class MistSweepCfg(BaseModel):
+    gain: SweepCfg
+
+
+class MistCfg(ProgramV2Cfg, FluxDepCfg):
     modules: MistModuleCfg
-    dev: dict[str, DeviceInfo]
-    sweep: dict[str, SweepCfg]
+    sweep: MistSweepCfg
 
 
 class MistResult(TypedDict, closed=True):
@@ -85,8 +87,8 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         self,
         gain_sweep: SweepCfg,
         cfg_maker: Callable[
-            [TaskState[MistResult, T_RootResult], ModuleLibrary],
-            Optional[dict[str, Any]],
+            [TaskState[MistResult, T_RootResult, FluxDepCfg], ModuleLibrary],
+            Optional[MistCfgTemplate],
         ],
     ) -> None:
         self.gain_sweep = gain_sweep
@@ -95,66 +97,62 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         self.gains = sweep2array(gain_sweep)  # initial array, may be rounded later
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            ctx: TaskState[NDArray[np.complex128], T_RootResult, MistCfg],
+            update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
-            cfg: MistCfg = cast(MistCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
             setup_devices(cfg, progress=False)
 
-            gain_sweep = cfg["sweep"]["gain"]
+            gain_sweep = cfg.sweep.gain
             gain_param = sweep2param("gain", gain_sweep)
-            modules["mist_pulse"].set_param("gain", gain_param)
+            modules.mist_pulse.set_param("gain", gain_param)
 
             return ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("pi_pulse", modules.get("pi_pulse")),
-                    Pulse("mist_pulse", modules["mist_pulse"]),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse("pi_pulse", modules.pi_pulse),
+                    Pulse("mist_pulse", modules.mist_pulse),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("gain", gain_sweep)],
             ).acquire(ctx.env["soc"], progress=False, round_hook=update_hook)
 
-        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]], MistCfg](
             measure_fn=measure_fn, result_shape=(self.gain_sweep["expts"],)
         )
 
-    def init(
-        self, ctx: TaskState[MistResult, T_RootResult], dynamic_pbar=False
-    ) -> None:
-        self.init_cfg = deepcopy(ctx.cfg)
-        self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+    def init(self, dynamic_pbar=False) -> None:
+        self.task.init(dynamic_pbar=dynamic_pbar)
 
-    def run(self, ctx: TaskState[MistResult, T_RootResult]) -> None:
+    def run(self, ctx: TaskState[MistResult, T_RootResult, FluxDepCfg]) -> None:
         cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
 
         if cfg_temp is None:
             return  # skip this task
 
-        cfg_temp = check_type(cfg_temp, MistCfgTemplate)
-
+        cfg = cfg_temp.model_dump(mode="python")
         deepupdate(
-            cast(dict, cfg_temp),
-            {"dev": ctx.cfg["dev"], "sweep": {"gain": self.gain_sweep}},
+            cfg,
+            {"dev": ctx.cfg.dev, "sweep": {"gain": self.gain_sweep}},
             behavior="force",
         )
-        cfg = check_type(cfg_temp, MistCfg)
+        cfg = MistCfg.model_validate(cfg)
 
         self.gains = sweep2array(
-            cfg["sweep"]["gain"],
+            cfg.sweep.gain,
             "gain",
             {
                 "soccfg": ctx.env["soccfg"],
-                "gen_ch": cfg["modules"]["mist_pulse"].ch,
+                "gen_ch": cfg.modules.mist_pulse.ch,
             },
         )
 
-        self.task.set_pbar_n(cfg["rounds"])
-        self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
+        self.task.set_pbar_n(cfg.rounds)
+        self.task.run(ctx.child("raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
@@ -206,6 +204,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         )
 
         x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
+        cfg = {}
 
         # raw_signals: (flux, gains)
         save_data(
@@ -217,7 +216,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=make_comment(self.init_cfg, comment),
+            comment=make_comment(cfg, comment),
             tag=prefix_tag + "/signals",
         )
 

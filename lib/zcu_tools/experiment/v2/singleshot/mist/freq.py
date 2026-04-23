@@ -6,26 +6,24 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
+from pydantic import BaseModel
 from typing_extensions import (
     Any,
     Callable,
-    NotRequired,
     Optional,
     TypeAlias,
-    TypedDict,
-    cast,
 )
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -41,16 +39,20 @@ from ..util import calc_populations
 FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class FreqModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class FreqModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class FreqCfg(ModularProgramCfg, TaskCfg):
+class FreqSweepCfg(BaseModel):
+    freq: SweepCfg
+
+
+class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FreqModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: FreqSweepCfg
 
 
 class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
@@ -58,41 +60,40 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: FreqCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> FreqResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        _cfg = check_type(deepcopy(cfg), FreqCfg)  # prevent in-place modification
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        cfg = deepcopy(cfg)
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any],
+            ctx: TaskState[NDArray[np.float64], Any, FreqCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: FreqCfg = cast(FreqCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            freq_sweep = cfg["sweep"]["freq"]
+            freq_sweep = cfg.sweep.freq
             freq_param = sweep2param("freq", freq_sweep)
-            modules["probe_pulse"].set_param("freq", freq_param)
+            modules.probe_pulse.set_param("freq", freq_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", modules.get("init_pulse")),
-                    Pulse("probe_pulse", modules["probe_pulse"]),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    Pulse("probe_pulse", modules.probe_pulse),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("freq", freq_sweep)],
             ).acquire(
@@ -126,14 +127,14 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
                     dtype=np.float64,
                     pbar_n=1,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, calc_populations(ctx.root_data).T
                 ),
             )
 
         # record the last result
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = (freqs, signals)
 
         return freqs, signals
@@ -195,11 +196,12 @@ class FreqDepExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FreqResult:
-        populations, freqs, _ = load_data(filepath, **kwargs)
+        populations, freqs, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
 
         freqs = 1e-6 * freqs  # Hz to MHz
+        populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = None
+        self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (freqs, populations)
 
         return freqs, populations

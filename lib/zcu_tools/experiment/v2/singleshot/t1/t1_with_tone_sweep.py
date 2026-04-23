@@ -8,23 +8,14 @@ import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from tqdm.auto import tqdm
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    Sequence,
-    TypeAlias,
-    TypedDict,
-    Union,
-    cast,
-)
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import (
@@ -36,8 +27,8 @@ from zcu_tools.liveplot import (
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -55,18 +46,20 @@ T1WithToneSweepResult: TypeAlias = tuple[
 ]
 
 
-class T1WithToneSweepModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class T1WithToneSweepModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1WithToneSweepSweepCfg(TypedDict, extra_items=Union[Sequence, SweepCfg]):
+class T1WithToneSweepSweepCfg(BaseModel):
     length: SweepCfg
+    gain: Optional[SweepCfg] = None
+    freq: Optional[SweepCfg] = None
 
 
-class T1WithToneSweepCfg(ModularProgramCfg, TaskCfg):
+class T1WithToneSweepCfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1WithToneSweepModuleCfg
     sweep: T1WithToneSweepSweepCfg
 
@@ -76,23 +69,24 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: T1WithToneSweepCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> T1WithToneSweepResult:
-        _cfg = check_type(deepcopy(cfg), T1WithToneSweepCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        cfg = deepcopy(cfg)
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        length_sweep = _cfg["sweep"]["length"]
-        sweep_keys = [k for k in _cfg["sweep"] if k != "length"]
+        length_sweep = cfg.sweep.length
+        sweep_dict = cfg.sweep.model_dump(exclude_none=True)
+        sweep_keys = [k for k in sweep_dict if k != "length"]
         if len(sweep_keys) != 1:
             raise ValueError(
                 f"Expected exactly one sweep key besides 'length', got {sweep_keys!r}"
             )
         sweep_name = sweep_keys[0]
-        x_sweep = _cfg["sweep"][sweep_name]
+        x_sweep = sweep_dict[sweep_name]
 
         if sweep_name not in ["gain", "freq"]:
             raise ValueError(f"Unsupported sweep key: {sweep_name}")
@@ -100,40 +94,40 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         xs = sweep2array(
             x_sweep,
             sweep_name,  # type: ignore
-            round_info={"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
+            round_info={"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
             allow_array=True,
         )
         lengths = sweep2array(
             length_sweep,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["probe_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.probe_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any],
+            ctx: TaskState[NDArray[np.float64], Any, T1WithToneSweepCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: T1WithToneSweepCfg = cast(T1WithToneSweepCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            length_sweep = cfg["sweep"]["length"]
+            length_sweep = cfg.sweep.length
             length_param = sweep2param("length", length_sweep)
-            modules["probe_pulse"].set_param("length", length_param)
+            modules.probe_pulse.set_param("length", length_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
+                    Reset("reset", modules.reset),
                     Branch(
                         "ge",
-                        Pulse("probe_pulse_g", modules["probe_pulse"]),
+                        Pulse("probe_pulse_g", modules.probe_pulse),
                         [
-                            Pulse("pi_pulse", modules["pi_pulse"]),
-                            Pulse("probe_pulse", modules["probe_pulse"]),
+                            Pulse("pi_pulse", modules.pi_pulse),
+                            Pulse("probe_pulse", modules.probe_pulse),
                         ],
                     ),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("ge", 2), ("length", length_sweep)],
             ).acquire(
@@ -188,11 +182,11 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         ) as viewer:
 
             def update_fn(i, ctx, value) -> None:
-                ctx.cfg["modules"]["probe_pulse"].set_param(sweep_name, value)
-                ctx.env_dict["idx"] = i
+                ctx.cfg.modules.probe_pulse.set_param(sweep_name, value)
+                ctx.env["idx"] = i
 
             def plot_fn(ctx) -> None:
-                i = ctx.env_dict["idx"]
+                i = ctx.env["idx"]
 
                 populations = calc_populations(np.asarray(ctx.root_data))
 
@@ -229,20 +223,20 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(2, len(lengths), 2),
                     dtype=np.float64,
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ).scan(
                     sweep_name,
                     xs.tolist(),
                     before_each=update_fn,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=plot_fn,
             )
             populations = np.asarray(populations)
         plt.close(fig)
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = (xs, lengths, populations)
 
         return xs, lengths, populations
@@ -435,7 +429,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         gg_filepath, ge_filepath, eg_filepath, ee_filepath = filepath
 
         # Load ground populations
-        gg_pop, xs, Ts = load_data(gg_filepath, **kwargs)
+        gg_pop, xs, Ts, cfg = load_data(gg_filepath, return_cfg=True, **kwargs)
         assert Ts is not None
         assert len(xs.shape) == 1 and len(Ts.shape) == 1
         assert gg_pop.shape == (len(xs), len(Ts))
@@ -471,7 +465,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         Ts = Ts.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = None
+        self.last_cfg = T1WithToneSweepCfg.validate_or_warn(cfg, source=gg_filepath)
         self.last_result = (xs, Ts, populations)
 
         return xs, Ts, populations

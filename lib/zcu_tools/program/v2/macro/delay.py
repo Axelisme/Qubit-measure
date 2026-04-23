@@ -28,7 +28,11 @@ class DelayRegAuto(TimedMacro):
         if isinstance(auto_t_reg, Integral):
             insts.append(
                 AsmInst(
-                    inst={"CMD": "TIME", "C_OP": "inc_ref", "LIT": f"#{int(auto_t_reg)}"},
+                    inst={
+                        "CMD": "TIME",
+                        "C_OP": "inc_ref",
+                        "LIT": f"#{int(auto_t_reg)}",
+                    },
                     addr_inc=1,
                 )
             )

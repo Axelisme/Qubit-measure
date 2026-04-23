@@ -4,26 +4,19 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     PulseReadout,
     PulseReadoutCfg,
     Reset,
@@ -42,35 +35,43 @@ def gaindep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rescale(minus_background(np.abs(signals), axis=1), axis=1)
 
 
-class PowerDepModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class PowerDepModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     readout: PulseReadoutCfg
 
 
-class PowerDepCfg(ModularProgramCfg, TaskCfg):
+class PowerDepSweepCfg(BaseModel):
+    gain: SweepCfg
+    freq: SweepCfg
+
+
+class PowerDepCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PowerDepModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: PowerDepSweepCfg
 
 
 class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
     def run(
-        self, soc, soccfg, cfg: dict[str, Any], *, earlystop_snr: Optional[float] = None
+        self, soc, soccfg, cfg: PowerDepCfg, *, earlystop_snr: Optional[float] = None
     ) -> PowerDepResult:
-        _cfg = check_type(deepcopy(cfg), PowerDepCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        gain_sweep = _cfg["sweep"]["gain"]
+        gain_sweep = cfg.sweep.gain
 
-        readout_cfg = modules["readout"]
+        readout_cfg = modules.readout
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": readout_cfg.pulse_cfg.ch},
+            {
+                "soccfg": soccfg,
+                "gen_ch": readout_cfg.pulse_cfg.ch,
+                "ro_ch": readout_cfg.ro_cfg.ro_ch,
+            },
             allow_array=True,
         )
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            cfg.sweep.freq,
             "freq",
             {
                 "soccfg": soccfg,
@@ -80,25 +81,24 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            ctx: TaskState[Any, Any, PowerDepCfg], update_hook: Optional[Callable]
         ) -> list[NDArray[np.float64]]:
-            cfg: PowerDepCfg = cast(PowerDepCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
             assert update_hook is not None
 
-            freq_sweep = cfg["sweep"]["freq"]
+            freq_sweep = cfg.sweep.freq
             freq_param = sweep2param("freq", freq_sweep)
-            modules["readout"].set_param("freq", freq_param)
+            modules.readout.set_param("freq", freq_param)
 
             return (
                 prog := ModularProgramV2(
                     soccfg,
                     cfg,
                     modules=[
-                        Reset("reset", modules.get("reset")),
-                        PulseReadout("readout", modules["readout"]),
+                        Reset("reset", modules.reset),
+                        PulseReadout("readout", modules.readout),
                     ],
                     sweep=[("freq", freq_sweep)],
                 )
@@ -124,15 +124,15 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(freqs),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ).scan(
                     "gain",
                     gains.tolist(),
-                    before_each=lambda _, ctx, gain: ctx.cfg["modules"][
-                        "readout"
-                    ].set_param("gain", gain),
+                    before_each=lambda _, ctx, gain: ctx.cfg.modules.readout.set_param(
+                        "gain", gain
+                    ),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     gains, freqs, gaindep_signal2real(np.asarray(ctx.root_data))
                 ),
@@ -140,7 +140,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (gains, freqs, signals)
 
         return gains, freqs, signals

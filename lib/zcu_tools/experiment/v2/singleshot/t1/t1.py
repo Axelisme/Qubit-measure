@@ -7,29 +7,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from qick.asm_v2 import QickParam
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    Union,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Optional, TypeAlias, Union
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
     Delay,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -48,15 +40,19 @@ from .util import measure_with_sweep
 T1Result: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class T1ModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class T1ModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class T1Cfg(ModularProgramCfg, TaskCfg):
+class T1SweepCfg(BaseModel):
+    length: SweepCfg
+
+
+class T1Cfg(ProgramV2Cfg, ExpCfgModel):
     modules: T1ModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: T1SweepCfg
 
 
 class T1Exp(AbsExperiment[T1Result, T1Cfg]):
@@ -70,17 +66,16 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: T1Cfg,
         g_center: complex,
         e_center: complex,
         radius: float,
         uniform: bool = False,
     ) -> T1Result:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
-        _cfg = check_type(deepcopy(cfg), T1Cfg)
-        setup_devices(_cfg, progress=True)
+        cfg = deepcopy(cfg)
+        setup_devices(cfg, progress=True)
 
-        length_sweep = _cfg["sweep"]["length"]
+        length_sweep = cfg.sweep.length
 
         if uniform:
             assert isinstance(length_sweep, dict)
@@ -143,12 +138,14 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
 
                 viewer.refresh()
 
-            def measure_fn(ctx: TaskState, update_hook):
+            def measure_fn(
+                ctx: TaskState[NDArray[np.float64], Any, T1Cfg], update_hook
+            ):
                 def prog_maker(cfg, t1_delay):
-                    cfg = cast(T1Cfg, deepcopy(cfg))
-                    modules = cfg["modules"]
+                    cfg = deepcopy(cfg)
+                    modules = cfg.modules
                     fpga_sweep: list[tuple[str, Union[int, SweepCfg]]] = (
-                        [("length", cfg["sweep"]["length"]), ("ge", 2)]
+                        [("length", cfg.sweep.length), ("ge", 2)]
                         if uniform
                         else [("ge", 2)]
                     )
@@ -156,16 +153,16 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                         soccfg,
                         cfg,
                         modules=[
-                            Reset("reset", modules.get("reset")),
+                            Reset("reset", modules.reset),
                             Branch(
                                 "ge",
                                 [],
                                 [
-                                    Pulse("pi_pulse", modules["pi_pulse"]),
+                                    Pulse("pi_pulse", modules.pi_pulse),
                                     Delay("t1_delay", delay=t1_delay),
                                 ],
                             ),
-                            Readout("readout", modules["readout"]),
+                            Readout("readout", modules.readout),
                         ],
                         sweep=fpga_sweep,
                     )
@@ -179,10 +176,8 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     ge_radius=radius,
                 )
                 if uniform:
-                    len_param = sweep2param("length", ctx.cfg["sweep"]["length"])
-                    return prog_maker(cast(T1Cfg, ctx.cfg), len_param).acquire(
-                        **acquire_kwargs
-                    )
+                    len_param = sweep2param("length", ctx.cfg.sweep.length)
+                    return prog_maker(ctx.cfg, len_param).acquire(**acquire_kwargs)
                 else:
                     return measure_with_sweep(
                         ctx,
@@ -198,15 +193,15 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
                     raw2signal_fn=lambda raw: raw[0][0],
                     result_shape=(len(lengths), 2, 2),
                     dtype=np.float64,
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=plot_fn,
             )
         plt.close(fig)
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = (lengths, populations)
 
         return lengths, populations
@@ -320,7 +315,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         g_filepath, e_filepath = filepath
 
         # Load ground populations
-        g_pop, g_Ts, _ = load_data(g_filepath, **kwargs)
+        g_pop, g_Ts, _, cfg = load_data(g_filepath, return_cfg=True, **kwargs)
         assert g_pop.shape == (len(g_Ts), 2)
 
         # Load excited populations
@@ -337,7 +332,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         Ts = Ts.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = None
+        self.last_cfg = T1Cfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (Ts, populations)
 
         return Ts, populations

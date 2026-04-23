@@ -6,26 +6,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -41,17 +34,21 @@ from ..util import calc_populations
 PreFreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class PreFreqModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class PreFreqModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     init_pulse: PulseCfg
-    pi_pulse: NotRequired[PulseCfg]
+    pi_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class PreFreqCfg(ModularProgramCfg, TaskCfg):
+class PreFreqSweepCfg(BaseModel):
+    freq: SweepCfg
+
+
+class PreFreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules: PreFreqModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: PreFreqSweepCfg
 
 
 class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
@@ -59,42 +56,41 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: PreFreqCfg,
         g_center: complex,
         e_center: complex,
         radius: float,
     ) -> PreFreqResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "freq")
-        _cfg = check_type(deepcopy(cfg), PreFreqCfg)  # prevent in-place modification
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        cfg = deepcopy(cfg)
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["init_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.init_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any],
+            ctx: TaskState[NDArray[np.float64], Any, PreFreqCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: PreFreqCfg = cast(PreFreqCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            freq_sweep = cfg["sweep"]["freq"]
+            freq_sweep = cfg.sweep.freq
             freq_param = sweep2param("freq", freq_sweep)
-            modules["init_pulse"].set_param("freq", freq_param)
+            modules.init_pulse.set_param("freq", freq_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", modules["init_pulse"]),
-                    Pulse("pi_pulse", modules.get("pi_pulse")),
-                    Pulse("probe_pulse", modules["probe_pulse"]),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", modules.init_pulse),
+                    Pulse("pi_pulse", modules.pi_pulse),
+                    Pulse("probe_pulse", modules.probe_pulse),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("freq", freq_sweep)],
             ).acquire(
@@ -128,14 +124,14 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
                     dtype=np.float64,
                     pbar_n=1,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     freqs, calc_populations(ctx.root_data).T
                 ),
             )
 
         # record the last result
-        self.last_cfg = _cfg
+        self.last_cfg = cfg
         self.last_result = (freqs, signals)
 
         return freqs, signals
@@ -197,11 +193,12 @@ class PreFreqExp(AbsExperiment[PreFreqResult, PreFreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PreFreqResult:
-        populations, freqs, _ = load_data(filepath, **kwargs)
+        populations, freqs, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
 
         freqs = freqs / 1e6  # convert to MHz
+        populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = None
+        self.last_cfg = PreFreqCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (freqs, populations)
 
         return freqs, populations

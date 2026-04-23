@@ -6,27 +6,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Join,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -48,16 +41,21 @@ def twotone_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class TwoToneModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class TwoToneModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     flux_pulse: PulseCfg
     qub_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class TwotoneCfg(ModularProgramCfg, TaskCfg):
+class TwoToneSweepCfg(BaseModel):
+    gain: SweepCfg
+    freq: SweepCfg
+
+
+class TwotoneCfg(ProgramV2Cfg, ExpCfgModel):
     modules: TwoToneModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: TwoToneSweepCfg
 
 
 class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
@@ -65,51 +63,50 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: TwotoneCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> TwoToneResult:
-        _cfg = check_type(deepcopy(cfg), TwotoneCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
         # uniform in square space
         gains = sweep2array(
-            _cfg["sweep"]["gain"],
+            cfg.sweep.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["flux_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.flux_pulse.ch},
         )
         freqs = sweep2array(
-            _cfg["sweep"]["freq"],
+            cfg.sweep.freq,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
+            ctx: TaskState[NDArray[np.complex128], Any, TwotoneCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: TwotoneCfg = cast(TwotoneCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            gain_sweep = cfg["sweep"]["gain"]
-            freq_sweep = cfg["sweep"]["freq"]
+            gain_sweep = cfg.sweep.gain
+            freq_sweep = cfg.sweep.freq
 
-            gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-            freq_param = sweep2param("freq", _cfg["sweep"]["freq"])
-            modules["flux_pulse"].set_param("gain", gain_param)
-            modules["qub_pulse"].set_param("freq", freq_param)
+            gain_param = sweep2param("gain", gain_sweep)
+            freq_param = sweep2param("freq", freq_sweep)
+            modules.flux_pulse.set_param("gain", gain_param)
+            modules.qub_pulse.set_param("freq", freq_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
+                    Reset("reset", modules.reset),
                     Join(
-                        Pulse("flux_pulse", modules["flux_pulse"]),
-                        Pulse("qub_pulse", modules["qub_pulse"]),
+                        Pulse("flux_pulse", modules.flux_pulse),
+                        Pulse("qub_pulse", modules.qub_pulse),
                     ),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[
                     ("gain", gain_sweep),
@@ -124,16 +121,16 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(gains), len(freqs)),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     gains, freqs, twotone_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (gains, freqs, signals)
 
         return gains, freqs, signals

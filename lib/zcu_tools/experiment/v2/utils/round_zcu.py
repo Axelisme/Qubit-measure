@@ -129,6 +129,7 @@ def apply_round(
     else:
         raise ValueError(f"Invalid round type: {round_type}")
 
+
 def round_sweep_dict(sweep: SweepCfg, *args, **kwargs) -> SweepCfg:
     expts = sweep["expts"]
     span = sweep["stop"] - sweep["start"]

@@ -4,29 +4,21 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    Mapping,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Callable, Mapping, Optional, TypeAlias, cast
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import InteractiveLines
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     PulseReadout,
     PulseReadoutCfg,
     Reset,
@@ -44,24 +36,27 @@ def fluxdep_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(signals)
 
 
-class FluxDepModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class FluxDepModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     readout: PulseReadoutCfg
 
 
-class FluxDepCfg(ModularProgramCfg, TaskCfg):
+class FluxDepSweepCfg(BaseModel):
+    freq: SweepCfg
+    flux: SweepCfg
+
+
+class FluxDepCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FluxDepModuleCfg
-    dev: Mapping[str, DeviceInfo]
-    sweep: dict[str, SweepCfg]
+    dev: Mapping[str, DeviceInfo] = ...
+    sweep: FluxDepSweepCfg
 
 
 class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FluxDepResult:
-        _cfg = check_type(deepcopy(cfg), FluxDepCfg)
-        modules = _cfg["modules"]
-
-        freq_sweep = _cfg["sweep"]["freq"]
-        flux_sweep = _cfg["sweep"]["flux"]
+    def run(self, soc, soccfg, cfg: FluxDepCfg) -> FluxDepResult:
+        modules = cfg.modules
+        freq_sweep = cfg.sweep.freq
+        flux_sweep = cfg.sweep.flux
 
         dev_values = sweep2array(flux_sweep, allow_array=True)
         freqs = sweep2array(
@@ -69,29 +64,28 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             "freq",
             {
                 "soccfg": soccfg,
-                "gen_ch": modules["readout"].pulse_cfg.ch,
-                "ro_ch": modules["readout"].ro_cfg.ro_ch,
+                "gen_ch": modules.readout.pulse_cfg.ch,
+                "ro_ch": modules.readout.ro_cfg.ro_ch,
             },
         )
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
-            update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
+            ctx: TaskState, update_hook: Optional[Callable]
         ) -> list[NDArray[np.float64]]:
-            cfg: FluxDepCfg = cast(FluxDepCfg, ctx.cfg)
+            cfg = cast(FluxDepCfg, ctx.cfg)
             setup_devices(cfg, progress=False)
-            modules = cfg["modules"]
+            modules = cfg.modules
 
-            freq_sweep = cfg["sweep"]["freq"]
+            freq_sweep = cfg.sweep.freq
             freq_param = sweep2param("freq", freq_sweep)
-            modules["readout"].set_param("freq", freq_param)
+            modules.readout.set_param("freq", freq_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    PulseReadout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    PulseReadout("readout", modules.readout),
                 ],
                 sweep=[("freq", freq_sweep)],
             ).acquire(soc, progress=False, round_hook=update_hook)
@@ -103,15 +97,15 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(freqs),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ).scan(
                     "flux",
                     dev_values.tolist(),
                     before_each=lambda i, ctx, flux: set_flux_in_dev_cfg(
-                        ctx.cfg["dev"], flux
+                        ctx.cfg.dev, flux
                     ),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     dev_values,
                     freqs,
@@ -121,7 +115,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
             signals = np.asarray(signals)
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (dev_values, freqs, signals)
 
         return dev_values, freqs, signals
@@ -184,7 +178,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = cast(FluxDepCfg, cfg)
+        self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (values, freqs, signals2D)
 
         return values, freqs, signals2D

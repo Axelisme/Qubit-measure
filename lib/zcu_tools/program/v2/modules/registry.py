@@ -58,7 +58,9 @@ class PulseRegistry:
             return sorted_dict
 
         cfg_dict = cfg.to_dict()
-        filter_cfg = {k: cfg_dict.get(k) for k in PulseRegistry.HASH_KEYS if k in cfg_dict}
+        filter_cfg = {
+            k: cfg_dict.get(k) for k in PulseRegistry.HASH_KEYS if k in cfg_dict
+        }
         cfg_json = json.dumps(sort_dict(filter_cfg), separators=(",", ":"))
         hash_name = hashlib.sha256(cfg_json.encode("utf-8")).hexdigest()
 
@@ -70,7 +72,11 @@ class PulseRegistry:
         if pulse_name in self._pulses:
             logger.debug(
                 "PulseRegistry: reuse '%s' (module=%s, ch=%s, phase=%s, gain=%s)",
-                pulse_name, name, cfg.ch, cfg.phase, cfg.gain,
+                pulse_name,
+                name,
+                cfg.ch,
+                cfg.phase,
+                cfg.gain,
             )
             return False
 
@@ -79,9 +85,14 @@ class PulseRegistry:
         logger.debug(
             "PulseRegistry: new '%s' (module=%s, ch=%s, freq=%s, phase=%s, gain=%s, "
             "style=%s, len=%s)",
-            pulse_name, name, cfg.ch, cfg.freq,
-            cfg.phase, cfg.gain,
-            waveform.style, waveform.length,
+            pulse_name,
+            name,
+            cfg.ch,
+            cfg.freq,
+            cfg.phase,
+            cfg.gain,
+            waveform.style,
+            waveform.length,
         )
 
         return True

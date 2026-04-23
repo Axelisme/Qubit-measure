@@ -1,4 +1,4 @@
-from .base import AbsTask, TaskCfg, run_task
+from .base import AbsTask, run_task
 from .batch import BatchTask
 from .repeat import run_with_retries
 from .state import Result, TaskState
@@ -10,7 +10,6 @@ __all__ = [
     "TaskState",
     # base
     "AbsTask",
-    "TaskCfg",
     "run_task",
     # batch
     "BatchTask",

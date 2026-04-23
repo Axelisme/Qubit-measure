@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing_extensions import TYPE_CHECKING, Any, Literal, Mapping, cast, Optional
+from typing_extensions import TYPE_CHECKING, Any, Literal, Mapping, Optional, cast
 
-from zcu_tools.device import GlobalDeviceManager
+from zcu_tools.device import DeviceInfo, GlobalDeviceManager
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 if TYPE_CHECKING:
-    from zcu_tools.device import DeviceInfo
     from zcu_tools.device.sgs100a import RohdeSchwarzSGS100AInfo
     from zcu_tools.device.yoko import YOKOGS200Info
 
@@ -90,11 +90,10 @@ def set_output_in_dev_cfg(
         raise NotImplementedError(f"RF device type {rf_cfg['type']} not supported yet")
 
 
-def setup_devices(cfg: Mapping[str, Any], *, progress: bool = False) -> None:
+def setup_devices(cfg: ExpCfgModel, *, progress: bool = False) -> None:
     """Apply device setup when the experiment config contains a dev section."""
 
-    dev_cfg = cast(Optional[Mapping[str, "DeviceInfo"]], cfg.get("dev"))
-    if dev_cfg is None:
+    if cfg.dev is None:
         return
 
-    GlobalDeviceManager.setup_devices(dev_cfg, progress=progress)
+    GlobalDeviceManager.setup_devices(cfg.dev, progress=progress)

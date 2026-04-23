@@ -4,12 +4,13 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, Optional, TypeAlias, Callable, cast
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task, TaskState
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.program import SweepCfg
@@ -26,8 +27,13 @@ def gain_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return np.abs(minus_background(signals, axis=1))
 
 
-class PowerCfg(TwoToneCfg, TaskCfg):
-    sweep: dict[str, SweepCfg]
+class PowerSweepCfg(BaseModel):
+    gain: SweepCfg
+    freq: SweepCfg
+
+
+class PowerCfg(TwoToneCfg, ExpCfgModel):
+    sweep: PowerSweepCfg
 
 
 class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
@@ -35,38 +41,38 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: PowerCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> PowerResult:
-        _cfg = check_type(deepcopy(cfg), PowerCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        gain_sweep = _cfg["sweep"]["gain"]
-        freq_sweep = _cfg["sweep"]["freq"]
+        gain_sweep = cfg.sweep.gain
+        freq_sweep = cfg.sweep.freq
 
         gains = sweep2array(
             gain_sweep,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
             allow_array=True,
         )
         freqs = sweep2array(
             freq_sweep,
             "freq",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState[NDArray[np.complex128], Any, PowerCfg],
+            update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
-            cfg = cast(PowerCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            freq_sweep = cfg["sweep"]["freq"]
+            freq_sweep = cfg.sweep.freq
             freq_param = sweep2param("freq", freq_sweep)
-            modules["qub_pulse"].set_param("freq", freq_param)
+            modules.qub_pulse.set_param("freq", freq_param)
 
             return TwoToneProgram(soccfg, cfg, sweep=[("freq", freq_sweep)]).acquire(
                 soc,
@@ -82,15 +88,15 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(freqs),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ).scan(
                     "gain",
                     gains.tolist(),
-                    before_each=lambda i, ctx, gain: ctx.cfg["modules"][
-                        "qub_pulse"
-                    ].set_param("gain", gain),
+                    before_each=lambda i, ctx, gain: (
+                        ctx.cfg.modules.qub_pulse.set_param("gain", gain)
+                    ),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     gains, freqs, gain_signal2real(np.asarray(ctx.root_data))
                 ),
@@ -98,7 +104,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (gains, freqs, signals)
 
         return gains, freqs, signals
@@ -136,7 +142,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PowerResult:
-        signals2D, freqs, gains = load_data(filepath, **kwargs)
+        signals2D, freqs, gains, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert freqs is not None and gains is not None
         assert len(freqs.shape) == 1 and len(gains.shape) == 1
         assert signals2D.shape == (len(gains), len(freqs))
@@ -147,7 +153,7 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, freqs, signals2D)
 
         return gains, freqs, signals2D

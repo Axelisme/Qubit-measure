@@ -4,13 +4,14 @@ from copy import deepcopy
 
 import numpy as np
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, Mapping, Optional, TypeAlias, cast
+from pydantic import BaseModel
+from typing_extensions import Any, Mapping, Optional, TypeAlias
 
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.notebook.analysis.fluxdep.interactive import (
@@ -31,9 +32,14 @@ def freqflux_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]
     return np.abs(minus_background(signals, axis=1))
 
 
-class FreqFluxCfg(TwoToneCfg, TaskCfg):
-    dev: Mapping[str, DeviceInfo]
-    sweep: dict[str, SweepCfg]
+class FreqFluxSweepCfg(BaseModel):
+    flux: SweepCfg
+    freq: SweepCfg
+
+
+class FreqFluxCfg(TwoToneCfg, ExpCfgModel):
+    dev: Optional[Mapping[str, DeviceInfo]] = None
+    sweep: FreqFluxSweepCfg
 
 
 class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
@@ -41,32 +47,33 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: FreqFluxCfg,
         *,
         fail_retry: int = 0,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> FreqFluxResult:
-        _cfg = check_type(deepcopy(cfg), FreqFluxCfg)
-        modules = _cfg["modules"]
+        modules = cfg.modules
 
-        value_sweep = _cfg["sweep"]["flux"]
-        freq_sweep = _cfg["sweep"]["freq"]
+        value_sweep = cfg.sweep.flux
+        freq_sweep = cfg.sweep.freq
 
         dev_values = sweep2array(value_sweep, allow_array=True)
         freqs = sweep2array(
-            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch}
+            freq_sweep, "freq", {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch}
         )
 
         # Frequency is swept by FPGA (hard sweep)
         freq_param = sweep2param("freq", freq_sweep)
-        modules["qub_pulse"].set_param("freq", freq_param)
+        modules.qub_pulse.set_param("freq", freq_param)
 
-        def measure_fn(ctx, update_hook):
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, FreqFluxCfg], update_hook
+        ):
             setup_devices(ctx.cfg, progress=False)
             return TwoToneProgram(
                 soccfg,
                 ctx.cfg,
-                sweep=[("freq", ctx.cfg["sweep"]["freq"])],
+                sweep=[("freq", ctx.cfg.sweep.freq)],
             ).acquire(
                 soc,
                 progress=False,
@@ -81,17 +88,18 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(freqs),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 )
                 .auto_retry(max_retries=fail_retry)
                 .scan(
                     "flux",
                     dev_values.tolist(),
-                    before_each=lambda _, ctx, flux: set_flux_in_dev_cfg(
-                        ctx.cfg["dev"], flux
+                    before_each=lambda _, ctx, flux: (
+                        ctx.cfg.dev is not None
+                        and set_flux_in_dev_cfg(ctx.cfg.dev, flux)
                     ),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     dev_values, freqs, freqflux_signal2real(np.asarray(ctx.root_data))
                 ),
@@ -99,7 +107,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
             signals = np.asarray(signals)
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (dev_values, freqs, signals)
 
         return dev_values, freqs, signals
@@ -174,7 +182,7 @@ class FreqFluxExp(AbsExperiment[FreqFluxResult, FreqFluxCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = cast(FreqFluxCfg, cfg)
+        self.last_cfg = FreqFluxCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (values, freqs, signals2D)
 
         return values, freqs, signals2D

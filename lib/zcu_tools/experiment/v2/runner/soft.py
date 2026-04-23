@@ -6,24 +6,22 @@ from tqdm.auto import tqdm
 from typing_extensions import Any, Callable, Optional, Sequence, TypeVar, Union
 
 from .base import AbsTask
-from .state import Result, TaskState
+from .state import T_Cfg, T_ChildResult, T_RootResult, TaskState
 
 logger = logging.getLogger(__name__)
 
 T_Value = TypeVar("T_Value", bound=Union[int, float, complex])
-T_RootResult = TypeVar("T_RootResult", bound=Result)
-T_ChildResult = TypeVar("T_ChildResult", bound=Result)
 
 
-class Scan(AbsTask[list[T_ChildResult], T_RootResult]):
+class Scan(AbsTask[list[T_ChildResult], T_RootResult, T_Cfg]):
     def __init__(
         self,
         name: str,
         values: Sequence[T_Value],
         before_each: Callable[
-            [int, TaskState[list[T_ChildResult], T_RootResult], T_Value], Any
+            [int, TaskState[list[T_ChildResult], T_RootResult, T_Cfg], T_Value], Any
         ],
-        task: AbsTask[T_ChildResult, T_RootResult],
+        task: AbsTask[T_ChildResult, T_RootResult, T_Cfg],
     ) -> None:
         self.sweep_values = list(values)
         self.sweep_name = name
@@ -41,23 +39,15 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult]):
             leave=leave,
         )
 
-    def init(
-        self,
-        state: TaskState[list[T_ChildResult], T_RootResult],
-        dynamic_pbar: bool = False,
-    ) -> None:
+    def init(self, dynamic_pbar: bool = False) -> None:
         self.dynamic_pbar = dynamic_pbar
 
         if not dynamic_pbar:
             self.sweep_pbar = self.make_pbar(leave=True)
 
-        # Pre-update cfg for the first value
-        if len(self.sweep_values) > 0:
-            self.before_each_fn(0, state, self.sweep_values[0])
+        self.sub_task.init(dynamic_pbar=dynamic_pbar)
 
-        self.sub_task.init(state.child(0), dynamic_pbar=dynamic_pbar)
-
-    def run(self, state: TaskState[list[T_ChildResult], T_RootResult]) -> None:
+    def run(self, state: TaskState[list[T_ChildResult], T_RootResult, T_Cfg]) -> None:
         if self.dynamic_pbar:
             self.sweep_pbar = self.make_pbar(leave=False)
         else:
@@ -66,12 +56,20 @@ class Scan(AbsTask[list[T_ChildResult], T_RootResult]):
 
         logger.debug(
             "Scan.run: name='%s', n_values=%d, path=%s",
-            self.sweep_name, len(self.sweep_values), state.path,
+            self.sweep_name,
+            len(self.sweep_values),
+            state.path,
         )
 
         for i, v in enumerate(self.sweep_values):
             self.before_each_fn(i, state, v)
-            logger.debug("Scan '%s' step %d/%d, value=%s", self.sweep_name, i + 1, len(self.sweep_values), v)
+            logger.debug(
+                "Scan '%s' step %d/%d, value=%s",
+                self.sweep_name,
+                i + 1,
+                len(self.sweep_values),
+                v,
+            )
 
             self.sub_task.run(state.child(i))
 

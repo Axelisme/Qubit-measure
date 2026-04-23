@@ -4,6 +4,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import yaml
+from pydantic import BaseModel
 from typing_extensions import Any, Optional, TypeVar, Union, cast
 from yaml.nodes import MappingNode
 
@@ -15,12 +16,12 @@ from .syncfile import SyncFile, auto_sync
 
 
 class ModuleDumper(yaml.SafeDumper):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.last_indent_level = 0
 
     # --- 邏輯 1：縮排減少時插入空白行 ---
-    def write_line_break(self, data=None):
+    def write_line_break(self, data=None) -> None:
         current_indent_level = len(self.indents)
         super().write_line_break(data)
         if current_indent_level < self.last_indent_level and current_indent_level > 0:
@@ -54,6 +55,7 @@ ModuleDumper.add_representer(dict, ModuleDumper.represent_dict)
 
 T_ModuleCfg = TypeVar("T_ModuleCfg", bound=ModuleCfg)
 T_WaveformCfg = TypeVar("T_WaveformCfg", bound=WaveformCfg)
+T_CfgModel = TypeVar("T_CfgModel", bound=BaseModel)
 
 
 class ModuleLibrary(SyncFile):
@@ -120,7 +122,9 @@ class ModuleLibrary(SyncFile):
         with open(path, "w") as f:
             yaml.dump(dump_cfg, f, Dumper=ModuleDumper, sort_keys=False)
 
-    def make_cfg(self, exp_cfg: dict[str, Any], **kwargs) -> dict[str, Any]:
+    def make_cfg(
+        self, exp_cfg: dict[str, Any], cfg_model: type[T_CfgModel], **kwargs
+    ) -> T_CfgModel:
         exp_cfg = deepcopy(exp_cfg)
         deepupdate(exp_cfg, kwargs, behavior="force")
 
@@ -133,11 +137,7 @@ class ModuleLibrary(SyncFile):
         for name, sub_cfg in modules.items():
             modules[name] = ModuleCfg.from_raw(sub_cfg, self)
 
-        exp_cfg.setdefault("relax_delay", 0.0)
-        exp_cfg.setdefault("rounds", 1)
-        exp_cfg.setdefault("reps", 1)
-
-        return exp_cfg
+        return cfg_model.model_validate(exp_cfg)
 
     @auto_sync("write")
     def register_waveform(

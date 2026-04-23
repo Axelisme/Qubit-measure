@@ -27,6 +27,7 @@ def freq2omega(
     """GHz -> rad/ns"""
     return 2 * np.pi * freqs  # type: ignore
 
+
 @overload
 def convert_eV_to_Hz(val: float) -> float: ...
 
@@ -40,6 +41,7 @@ def convert_eV_to_Hz(
 ) -> Union[float, NDArray[np.float64]]:
     """Convert a value in electron volts to Hz."""
     return val * sp.e / sp.h
+
 
 @overload
 def calc_therm_ratio(omega: float, T: float) -> float: ...

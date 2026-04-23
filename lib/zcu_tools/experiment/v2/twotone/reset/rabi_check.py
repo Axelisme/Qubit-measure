@@ -6,27 +6,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -46,17 +39,21 @@ def reset_rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float6
     return rotate2real(signals).real
 
 
-class RabiCheckModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class RabiCheckModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     rabi_pulse: PulseCfg
     tested_reset: ResetCfg
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class RabiCheckCfg(ModularProgramCfg, TaskCfg):
+class RabiCheckSweepCfg(BaseModel):
+    gain: SweepCfg
+
+
+class RabiCheckCfg(ProgramV2Cfg, ExpCfgModel):
     modules: RabiCheckModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: RabiCheckSweepCfg
 
 
 class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
@@ -64,51 +61,50 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: RabiCheckCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> RabiCheckResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        _cfg = check_type(deepcopy(cfg), RabiCheckCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
         gains = sweep2array(
-            _cfg["sweep"]["gain"],
+            cfg.sweep.gain,
             "gain",
-            {"soccfg": soccfg, "gen_ch": modules["rabi_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.rabi_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState[NDArray[np.complex128], Any, RabiCheckCfg],
+            update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
-            cfg = cast(RabiCheckCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
             # Attach gain sweep to initialization pulse
-            gain_param = sweep2param("gain", _cfg["sweep"]["gain"])
-            modules["rabi_pulse"].set_param("gain", gain_param)
+            gain_param = sweep2param("gain", cfg.sweep.gain)
+            modules.rabi_pulse.set_param("gain", gain_param)
 
             return ModularProgramV2(
                 soccfg,
                 cfg,
                 sweep=[
                     ("w/o_reset", 3),
-                    ("gain", cfg["sweep"]["gain"]),
+                    ("gain", cfg.sweep.gain),
                 ],
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("rabi_pulse", modules["rabi_pulse"]),
+                    Reset("reset", modules.reset),
+                    Pulse("rabi_pulse", modules.rabi_pulse),
                     Branch(
                         "w/o_reset",
                         [],
-                        Reset("tested_reset_1", modules["tested_reset"]),
+                        Reset("tested_reset_1", modules.tested_reset),
                         [
-                            Reset("tested_reset_2", modules["tested_reset"]),
-                            Pulse("pi_pulse", modules["pi_pulse"]),
+                            Reset("tested_reset_2", modules.tested_reset),
+                            Pulse("pi_pulse", modules.pi_pulse),
                         ],
                     ),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
             ).acquire(
                 soc,
@@ -124,16 +120,16 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(3, len(gains)),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     gains, reset_rabi_signal2real(ctx.root_data)
                 ),
             )
 
         # Cache results
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (gains, signals)
 
         return gains, signals
@@ -184,7 +180,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> RabiCheckResult:
-        signals, gains, y_values = load_data(filepath, **kwargs)
+        signals, gains, y_values, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert gains is not None and y_values is not None
         assert len(gains.shape) == 1 and len(y_values.shape) == 1
         assert signals.shape == (len(y_values), len(gains))
@@ -192,7 +188,7 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = RabiCheckCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, signals)
 
         return gains, signals

@@ -5,17 +5,13 @@ import logging
 import numpy as np
 from numpy.typing import NDArray
 from qick import QickConfig
-from typing_extensions import Any, Mapping, Optional, Sequence, Union, cast
+from typing_extensions import Optional, Sequence, Union
 
 from ..base import SweepCfg
 from .base import MyProgramV2, ProgramV2Cfg
-from .modules import Module, ModuleCfg
+from .modules import Module
 
 logger = logging.getLogger(__name__)
-
-
-class ModularProgramCfg(ProgramV2Cfg):
-    modules: Mapping[str, ModuleCfg]
 
 
 class ModularProgramV2(MyProgramV2):
@@ -26,13 +22,11 @@ class ModularProgramV2(MyProgramV2):
     def __init__(
         self,
         soccfg: QickConfig,
-        cfg: Mapping[str, Any],
+        cfg: ProgramV2Cfg,
         modules: Sequence[Module],
         sweep: Optional[list[tuple[str, Union[SweepCfg, int]]]] = None,
         **kwargs,
     ) -> None:
-        _cfg = cast(ModularProgramCfg, cfg)
-
         self.modules = modules
         self.sweep_dict = sweep
         self._dmem_buffer = []
@@ -41,13 +35,13 @@ class ModularProgramV2(MyProgramV2):
         logger.debug(
             "ModularProgramV2.__init__: %d modules, reps=%s, relax_delay=%s",
             len(modules),
-            _cfg["reps"],
-            _cfg["relax_delay"],
+            cfg.reps,
+            cfg.relax_delay,
         )
 
-        super().__init__(soccfg, _cfg, **kwargs)
+        super().__init__(soccfg, cfg, **kwargs)
 
-    def _initialize(self, cfg: ModularProgramCfg) -> None:
+    def _initialize(self, cfg: ProgramV2Cfg) -> None:
         super()._initialize(cfg)
 
         # add v2 sweep loops
@@ -64,10 +58,10 @@ class ModularProgramV2(MyProgramV2):
 
         logger.debug(
             "ModularProgramV2._initialize: registered %d unique pulses",
-            len(self.pulse_registry._pulses)
+            len(self.pulse_registry._pulses),
         )
 
-    def _body(self, cfg: ModularProgramCfg) -> None:
+    def _body(self, cfg: ProgramV2Cfg) -> None:
 
         t = 0.0
         for module in self.modules:
@@ -115,15 +109,13 @@ class BaseCustomProgramV2(ModularProgramV2):
     def __init__(
         self,
         soccfg: QickConfig,
-        cfg: Mapping[str, Any],
+        cfg: ProgramV2Cfg,
         sweep: Optional[list[tuple[str, Union[SweepCfg, int]]]] = None,
         **kwargs,
     ) -> None:
-        _cfg = cast(ModularProgramCfg, cfg)
-
         super().__init__(
-            soccfg, _cfg, modules=self.make_modules(_cfg), sweep=sweep, **kwargs
+            soccfg, cfg, modules=self.make_modules(cfg), sweep=sweep, **kwargs
         )
 
-    def make_modules(self, cfg: ModularProgramCfg) -> Sequence[Module]:
+    def make_modules(self, cfg: ProgramV2Cfg) -> Sequence[Module]:
         return []

@@ -6,32 +6,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import (
-    Any,
-    Callable,
-    NotRequired,
-    Optional,
-    TypeAlias,
-    TypedDict,
-    cast,
-)
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import (
-    format_sweep1D,
-    set_freq_in_dev_cfg,
-    setup_devices,
-)
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import set_freq_in_dev_cfg, setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
 from zcu_tools.liveplot import LivePlotScatter
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -44,32 +33,33 @@ from zcu_tools.utils.datasaver import load_data, save_data
 FreqResult: TypeAlias = tuple[NDArray[np.float64], NDArray[np.float64]]
 
 
-class FreqModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class FreqModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     pi_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class FreqCfg(ModularProgramCfg, TaskCfg):
+class FreqSweepCfg(BaseModel):
+    jpa_freq: SweepCfg
+
+
+class FreqCfg(ProgramV2Cfg, ExpCfgModel):
     modules: FreqModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: FreqSweepCfg
 
 
 class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
-    def run(self, soc, soccfg, cfg: dict[str, Any]) -> FreqResult:
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "jpa_freq")
-        _cfg = check_type(deepcopy(cfg), FreqCfg)
-
-        jpa_freqs = sweep2array(_cfg["sweep"]["jpa_freq"], allow_array=True)
+    def run(self, soc, soccfg, cfg: FreqCfg) -> FreqResult:
+        jpa_freqs = sweep2array(cfg.sweep.jpa_freq, allow_array=True)
         np.random.shuffle(jpa_freqs[1:-1])  # randomize permutation
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.float64], Any],
+            ctx: TaskState[NDArray[np.float64], Any, FreqCfg],
             update_hook: Optional[Callable[[int, list[MomentTracker]], None]],
         ) -> list[MomentTracker]:
-            cfg: FreqCfg = cast(FreqCfg, ctx.cfg)
+            cfg = ctx.cfg
             setup_devices(cfg, progress=False)
-            modules = cfg["modules"]
+            modules = cfg.modules
 
             assert update_hook is not None
 
@@ -77,9 +67,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Branch("ge", [], Pulse("pi_pulse", modules["pi_pulse"])),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Branch("ge", [], Pulse("pi_pulse", modules.pi_pulse)),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("ge", 2)],
             )
@@ -87,7 +77,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
             prog.acquire(
                 soc,
                 progress=False,
-                round_hook=lambda i, avg_d: update_hook(i, [tracker]),
+                round_hook=lambda i, _avg_d: update_hook(i, [tracker]),
                 trackers=[tracker],
             )
             return [tracker]
@@ -98,23 +88,22 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
                     measure_fn=measure_fn,
                     raw2signal_fn=lambda raw: snr_as_signal(raw, ge_axis=0),
                     dtype=np.float64,
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ).scan(
                     "JPA Frequency",
                     jpa_freqs.tolist(),
-                    before_each=lambda i, ctx, freq: set_freq_in_dev_cfg(
-                        ctx.cfg["dev"], freq * 1e6, label="jpa_rf_dev"
+                    before_each=lambda _, ctx, freq: (
+                        (dev := ctx.cfg.dev) is not None
+                        and set_freq_in_dev_cfg(dev, freq * 1e6, label="jpa_rf_dev")
                     ),
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(jpa_freqs, np.abs(ctx.root_data)),
             )
             signals = np.asarray(signals)
 
-        # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (jpa_freqs, signals)
-
         return jpa_freqs, signals
 
     def analyze(self, result: Optional[FreqResult] = None) -> tuple[float, Figure]:
@@ -169,7 +158,7 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FreqResult:
-        signals, jpa_freqs, _ = load_data(filepath, **kwargs)
+        signals, jpa_freqs, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert jpa_freqs is not None
         assert len(jpa_freqs.shape) == 1 and len(signals.shape) == 1
         assert jpa_freqs.shape == signals.shape
@@ -177,9 +166,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         jpa_freqs = jpa_freqs * 1e-6  # Hz -> MHz
 
         jpa_freqs = jpa_freqs.astype(np.float64)
-        signals = signals.astype(np.complex128)
+        signals = signals.astype(np.float64)
 
-        self.last_cfg = None
+        self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (jpa_freqs, signals)
 
         return jpa_freqs, signals

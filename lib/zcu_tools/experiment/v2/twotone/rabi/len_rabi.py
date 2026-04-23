@@ -6,12 +6,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, Callable, Optional, TypeAlias, cast
+from pydantic import BaseModel
+from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.cfg_model import ExpCfgModel
+from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program import SweepCfg
@@ -28,8 +29,12 @@ def rabi_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real
 
 
-class LenRabiCfg(TwoToneCfg, TaskCfg):
-    sweep: dict[str, SweepCfg]
+class LenRabiSweepCfg(BaseModel):
+    length: SweepCfg
+
+
+class LenRabiCfg(TwoToneCfg, ExpCfgModel):
+    sweep: LenRabiSweepCfg
 
 
 class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
@@ -37,33 +42,33 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: LenRabiCfg,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LenRabiResult:
-        _cfg = check_type(deepcopy(cfg), LenRabiCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        assert modules["qub_pulse"].waveform.style in ["const", "flat_top"], (
+        assert modules.qub_pulse.waveform.style in ["const", "flat_top"], (
             "This method only supports const and flat_top pulse style"
         )
 
         # initial values, may be rounded later
         lengths = sweep2array(
-            _cfg["sweep"]["length"],
+            cfg.sweep.length,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState[NDArray[np.complex128], Any, LenRabiCfg],
+            update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
-            cfg = cast(LenRabiCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            length_sweep = cfg["sweep"]["length"]
+            length_sweep = cfg.sweep.length
             length_param = sweep2param("length", length_sweep)
-            modules["qub_pulse"].set_param("length", length_param)
+            modules.qub_pulse.set_param("length", length_param)
 
             return TwoToneProgram(
                 soccfg, cfg, sweep=[("length", length_sweep)]
@@ -79,16 +84,16 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(lengths),),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     lengths, rabi_signal2real(ctx.root_data)
                 ),
             )
 
         # record last cfg and result
-        self.last_cfg = _cfg
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (lengths, signals)
 
         return lengths, signals
@@ -97,32 +102,34 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: LenRabiCfg,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LenRabiResult:
-        _cfg = check_type(deepcopy(cfg), LenRabiCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        rounds = _cfg["rounds"]
-        _cfg["rounds"] = 1  # we'll handle the rounds in the task loop
+        rounds = cfg.rounds
+        _cfg = cfg.model_copy(deep=True)
+        _cfg.rounds = 1  # we'll handle the rounds in the task loop
 
-        length_sweep = _cfg["sweep"]["length"]
+        length_sweep = _cfg.sweep.length
 
         lengths = sweep2array(
             length_sweep,
             "time",
-            {"soccfg": soccfg, "gen_ch": modules["qub_pulse"].ch},
+            {"soccfg": soccfg, "gen_ch": modules.qub_pulse.ch},
         )
         lengths = np.unique(lengths)  # remove duplicates
 
         prog_cache: dict[float, TwoToneProgram] = {}
 
-        def measure_fn(ctx: TaskState, update_hook):
-            cfg = cast(LenRabiCfg, ctx.cfg)
-            modules = cfg["modules"]
+        def measure_fn(
+            ctx: TaskState[NDArray[np.complex128], Any, LenRabiCfg], update_hook
+        ):
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            length = float(modules["qub_pulse"].waveform.length)
+            length = float(modules.qub_pulse.waveform.length)
 
             if length not in prog_cache:
                 prog_cache[length] = TwoToneProgram(soccfg, cfg)
@@ -146,9 +153,9 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
                 .scan(
                     "length",
                     lengths.tolist(),
-                    before_each=lambda _, ctx, length: ctx.cfg["modules"][
-                        "qub_pulse"
-                    ].set_param("length", length),
+                    before_each=lambda _, ctx, length: (
+                        ctx.cfg.modules.qub_pulse.set_param("length", length)
+                    ),
                 )
                 .scan(
                     "round",  # implement round loop here
@@ -163,7 +170,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             signals = average_round(signals)
 
         # record last cfg and result
-        self.last_cfg = check_type(deepcopy(cfg), LenRabiCfg)
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (lengths, signals)
 
         return lengths, signals
@@ -172,14 +179,12 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: LenRabiCfg,
         *,
         acquire_kwargs: Optional[dict[str, Any]] = None,
     ) -> LenRabiResult:
-        modules = cfg["modules"]
-        qub_waveform = modules["qub_pulse"].waveform
-
-        cfg["sweep"] = format_sweep1D(cfg["sweep"], "length")
+        modules = cfg.modules
+        qub_waveform = modules.qub_pulse.waveform
 
         if qub_waveform.style in ["const", "flat_top"]:
             # use hard sweep for flat top pulse
@@ -228,9 +233,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
             c="red",
             label=f"pi/2 = {pi2_len:.3g} ± {pi2_len_err:.2g} μs",
         )
-        ax.axvspan(
-            pi2_len - pi2_len_err, pi2_len + pi2_len_err, color="red", alpha=0.2
-        )
+        ax.axvspan(pi2_len - pi2_len_err, pi2_len + pi2_len_err, color="red", alpha=0.2)
         ax.set_xlabel("Pulse length (μs)")
         ax.set_ylabel("Signal Real (a.u.)")
         ax.set_title(f"Rabi Oscillation (f={freq:.3f} ± {freq_err:.3f} MHz)")
@@ -264,7 +267,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> LenRabiResult:
-        signals, lens, _ = load_data(filepath, **kwargs)
+        signals, lens, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert lens is not None
         assert len(lens.shape) == 1 and len(signals.shape) == 1
         assert lens.shape == signals.shape
@@ -274,7 +277,7 @@ class LenRabiExp(AbsExperiment[LenRabiResult, LenRabiCfg]):
         lens = lens.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = LenRabiCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (lens, signals)
 
         return lens, signals

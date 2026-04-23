@@ -6,19 +6,20 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter
-from typeguard import check_type
-from typing_extensions import Any, Callable, NotRequired, Optional, TypedDict, cast
+from typing_extensions import Any, Callable, Optional, TypedDict
 
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import format_sweep1D, setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
+from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
 from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -30,7 +31,7 @@ from zcu_tools.program.v2 import (
 from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from ..executor import MeasurementTask, T_RootResult
+from ..executor import MeasurementTask, OvernightCfg, T_RootResult
 from .util import calc_populations
 
 
@@ -46,16 +47,20 @@ class MistPlotDict(TypedDict, closed=True):
     current: LivePlot1D
 
 
-class MistModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
-    init_pulse: NotRequired[PulseCfg]
+class MistModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
+    init_pulse: Optional[PulseCfg] = None
     probe_pulse: PulseCfg
     readout: ReadoutCfg
 
 
-class MistCfg(ModularProgramCfg, TaskCfg):
+class MistSweepCfg(BaseModel):
+    gain: SweepCfg
+
+
+class MistCfg(ProgramV2Cfg, ExpCfgModel):
     modules: MistModuleCfg
-    sweep: dict[str, SweepCfg]
+    sweep: MistSweepCfg
 
 
 class MistOvernightAnalyzer:
@@ -292,7 +297,10 @@ class MistOvernightAnalyzer:
         populations = np.stack([g_pops, e_pops], axis=-1)  # (iters, gains, 2)
         gains = np.tile(gains, reps=(len(iters), 1))
 
-        self.cfg = cast(MistCfg, cfg)
+        validated_cfg = MistCfg.validate_or_warn(
+            cfg, source=f"overnight mist {g_filepath}"
+        )
+        self.cfg = validated_cfg
         self.result = MistResult(gains=gains, populations=populations)
 
         return self.result
@@ -303,33 +311,34 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         self, cfg: dict[str, Any], g_center: complex, e_center: complex, radius: float
     ) -> None:
         cfg["sweep"] = format_sweep1D(cfg["sweep"], "gain")
-        _cfg = check_type(deepcopy(cfg), MistCfg)
+        _cfg = MistCfg.model_validate(deepcopy(cfg))
         self.cfg = _cfg
+        self._init_cfg = _cfg.model_copy(deep=True)
 
-        setup_devices(_cfg, progress=True)
+        setup_devices(self.cfg, progress=True)
 
         # initial values, may be rounded later
-        self.gains = sweep2array(_cfg["sweep"]["gain"])
+        self.gains = sweep2array(self.cfg.sweep.gain)
 
         def measure_mist_fn(
-            ctx: TaskState[NDArray[np.float64], Any],
+            ctx: TaskState[NDArray[np.float64], T_RootResult, MistCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: MistCfg = cast(MistCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            gain_sweep = cfg["sweep"]["gain"]
+            gain_sweep = cfg.sweep.gain
             gain_param = sweep2param("gain", gain_sweep)
-            modules["probe_pulse"].set_param("gain", gain_param)
+            modules.probe_pulse.set_param("gain", gain_param)
 
             return ModularProgramV2(
                 ctx.env["soccfg"],
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
-                    Pulse("init_pulse", cfg=modules.get("init_pulse")),
-                    Pulse("probe_pulse", cfg=modules["probe_pulse"]),
-                    Readout("readout", modules["readout"]),
+                    Reset("reset", modules.reset),
+                    Pulse("init_pulse", cfg=modules.init_pulse),
+                    Pulse("probe_pulse", cfg=modules.probe_pulse),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("gain", gain_sweep)],
             ).acquire(
@@ -341,28 +350,30 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
                 ge_radius=radius,
             )
 
-        self.task = Task[T_RootResult, list[NDArray[np.float64]], np.float64](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]], MistCfg, np.float64](
             measure_fn=measure_mist_fn,
             raw2signal_fn=lambda raw: raw[0][0],
             result_shape=(len(self.gains), 2),
             dtype=np.float64,
-            pbar_n=_cfg["rounds"],
+            pbar_n=self.cfg.rounds,
         )
 
     def init(
-        self, ctx: TaskState[MistResult, T_RootResult], dynamic_pbar: bool = False
+        self,
+        ctx: TaskState[MistResult, T_RootResult, OvernightCfg],
+        dynamic_pbar: bool = False,
     ) -> None:
         self.gains = sweep2array(
             self.gains,
             "gain",
             {
                 "soccfg": ctx.env["soccfg"],
-                "gen_ch": self.cfg["modules"]["probe_pulse"].ch,
+                "gen_ch": self.cfg.modules.probe_pulse.ch,
             },
         )
         self.task.init(ctx.child("populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
 
-    def run(self, ctx: TaskState[MistResult, T_RootResult]) -> None:
+    def run(self, ctx: TaskState[MistResult, T_RootResult, OvernightCfg]) -> None:
         self.task.run(ctx.child("populations", new_cfg=self.cfg))  # type: ignore
 
         with MinIntervalFunc.force_execute():
@@ -454,5 +465,5 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         MistOvernightAnalyzer().analyze(result=result, **kwargs)
 
     def save(self, filepath, iters, result, comment, prefix_tag) -> None:
-        comment = make_comment(self.cfg, comment)  # type: ignore
+        comment = make_comment(self._init_cfg.model_dump(mode="python"), comment)
         MistOvernightAnalyzer.save(filepath, iters, result, comment, prefix_tag)

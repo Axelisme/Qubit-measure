@@ -6,29 +6,27 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
+from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter1d
-from typeguard import check_type
 from typing_extensions import (
     Any,
     Callable,
     Literal,
-    NotRequired,
     Optional,
     TypeAlias,
-    TypedDict,
-    cast,
 )
 
 from zcu_tools.experiment import AbsExperiment
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState, run_task
+from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     LoadValue,
-    ModularProgramCfg,
     ModularProgramV2,
+    ProgramV2Cfg,
     Pulse,
     PulseCfg,
     Readout,
@@ -42,7 +40,7 @@ from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.process import rotate2real
 
 # (times, values, signals)
-ZigZagSweepResult: TypeAlias = tuple[
+ZigZagScanResult: TypeAlias = tuple[
     NDArray[np.int64], NDArray[np.float64], NDArray[np.complex128]
 ]
 
@@ -51,25 +49,25 @@ def zigzag_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
     return rotate2real(signals).real  # type: ignore
 
 
-class ZigZagModuleCfg(TypedDict, closed=True):
-    reset: NotRequired[ResetCfg]
+class ZigZagScanModuleCfg(BaseModel):
+    reset: Optional[ResetCfg] = None
     X90_pulse: PulseCfg
-    X180_pulse: NotRequired[PulseCfg]
+    X180_pulse: Optional[PulseCfg] = None
     readout: ReadoutCfg
 
 
-class ZigZagSweepCfg(TypedDict):
-    gain: NotRequired[SweepCfg]
-    freq: NotRequired[SweepCfg]
+class ZigZagScanSweepCfg(BaseModel):
+    gain: Optional[SweepCfg] = None
+    freq: Optional[SweepCfg] = None
 
 
-class ZigZagCfg(ModularProgramCfg, TaskCfg):
-    modules: ZigZagModuleCfg
-    sweep: ZigZagSweepCfg
+class ZigZagScanCfg(ProgramV2Cfg, ExpCfgModel):
+    modules: ZigZagScanModuleCfg
+    sweep: ZigZagScanSweepCfg
     n_times: int
 
 
-class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
+class ZigZagScanExp(AbsExperiment[ZigZagScanResult, ZigZagScanCfg]):
     SWEEP_MAP = {
         "gain": {"name": "Gain (a.u.)", "param_key": "gain"},
         "freq": {"name": "Frequency (MHz)", "param_key": "freq"},
@@ -79,27 +77,27 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         self,
         soc,
         soccfg,
-        cfg: dict[str, Any],
+        cfg: ZigZagScanCfg,
         *,
         repeat_on: Literal["X90_pulse", "X180_pulse"] = "X180_pulse",
         acquire_kwargs: Optional[dict[str, Any]] = None,
-    ) -> ZigZagSweepResult:
-        _cfg = check_type(deepcopy(cfg), ZigZagCfg)
-        setup_devices(_cfg, progress=True)
-        modules = _cfg["modules"]
+    ) -> ZigZagScanResult:
+        setup_devices(cfg, progress=True)
+        modules = cfg.modules
 
-        times = np.arange(_cfg["n_times"])
+        times = np.arange(cfg.n_times)
 
-        if len(_cfg["sweep"]) != 1:
+        sweep_items = {k: v for k, v in cfg.sweep.model_dump().items() if v is not None}
+        if len(sweep_items) != 1:
             raise ValueError("Expected exactly one sweep key")
 
-        x_key = next(k for k in _cfg["sweep"])
-        x_sweep = _cfg["sweep"][x_key]
-        if x_key not in ZigZagSweepExp.SWEEP_MAP:
+        x_key, x_sweep = next(iter(sweep_items.items()))
+        assert x_sweep is not None
+        if x_key not in ZigZagScanExp.SWEEP_MAP:
             raise ValueError(f"Unsupported sweep key: {x_key}")
-        x_info = ZigZagSweepExp.SWEEP_MAP[x_key]
+        x_info = ZigZagScanExp.SWEEP_MAP[x_key]
 
-        repeat_pulse = modules.get(repeat_on)
+        repeat_pulse = getattr(modules, repeat_on)
         if repeat_pulse is None:
             raise ValueError(f"Repeat on pulse {repeat_on} not found")
 
@@ -110,17 +108,19 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         )
 
         def measure_fn(
-            ctx: TaskState, update_hook: Optional[Callable]
+            ctx: TaskState[NDArray[np.complex128], Any, ZigZagScanCfg],
+            update_hook: Optional[Callable],
         ) -> list[NDArray[np.float64]]:
-            cfg = cast(ZigZagCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
-            X90_pulse = deepcopy(modules["X90_pulse"])
-            repeat_pulse = modules.get(repeat_on)
+            X90_pulse = deepcopy(modules.X90_pulse)
+            repeat_pulse = getattr(modules, repeat_on)
             if repeat_pulse is None:
                 raise ValueError(f"Repeat on pulse {repeat_on} not found")
 
-            x_sweep = cfg["sweep"][x_key]
+            x_sweep = getattr(cfg.sweep, x_key)
+            assert x_sweep is not None
             x_param = sweep2param(x_info["param_key"], x_sweep)
             repeat_pulse.set_param(x_info["param_key"], x_param)
 
@@ -130,7 +130,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                 soccfg,
                 cfg,
                 modules=[
-                    Reset("reset", modules.get("reset")),
+                    Reset("reset", modules.reset),
                     Pulse("X90_pulse", X90_pulse),
                     LoadValue(
                         "load_repeat_count",
@@ -141,7 +141,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                     Repeat("zigzag_loop", n="repeat_count").add_content(
                         Pulse(f"loop_{repeat_on}", repeat_pulse)
                     ),
-                    Readout("readout", modules["readout"]),
+                    Readout("readout", modules.readout),
                 ],
                 sweep=[("times", len(times)), (x_key, x_sweep)],
             ).acquire(
@@ -153,9 +153,9 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
                 task=Task(
                     measure_fn=measure_fn,
                     result_shape=(len(times), len(values)),
-                    pbar_n=_cfg["rounds"],
+                    pbar_n=cfg.rounds,
                 ),
-                init_cfg=_cfg,
+                init_cfg=cfg,
                 on_update=lambda ctx: viewer.update(
                     times.astype(np.float64),
                     values,
@@ -165,14 +165,14 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
             signals = np.asarray(signals, dtype=np.complex128)
 
         # record last cfg and result
-        self.last_cfg = cast(ZigZagCfg, deepcopy(cfg))
+        self.last_cfg = deepcopy(cfg)
         self.last_result = (times, values, signals)
 
         return times, values, signals
 
     def analyze(
         self,
-        result: Optional[ZigZagSweepResult] = None,
+        result: Optional[ZigZagScanResult] = None,
         find_range: tuple[Optional[float], Optional[float]] = (None, None),
     ) -> tuple[float, Figure]:
         if result is None:
@@ -225,9 +225,9 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
     def save(
         self,
         filepath: str,
-        result: Optional[ZigZagSweepResult] = None,
+        result: Optional[ZigZagScanResult] = None,
         comment: Optional[str] = None,
-        tag: str = "twotone/ge/zigzag_sweep",
+        tag: str = "twotone/ge/zigzag_scan",
         **kwargs,
     ) -> None:
         if result is None:
@@ -248,8 +248,8 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
             **kwargs,
         )
 
-    def load(self, filepath: str, **kwargs) -> ZigZagSweepResult:
-        signals, times, values = load_data(filepath, **kwargs)
+    def load(self, filepath: str, **kwargs) -> ZigZagScanResult:
+        signals, times, values, cfg = load_data(filepath, return_cfg=True, **kwargs)
         assert times is not None and values is not None
         assert len(times.shape) == 1 and len(values.shape) == 1
         assert signals.shape == (len(values), len(times))
@@ -260,7 +260,7 @@ class ZigZagSweepExp(AbsExperiment[ZigZagSweepResult, ZigZagCfg]):
         values = values.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = None
+        self.last_cfg = ZigZagScanCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (times, values, signals)
 
         return times, values, signals

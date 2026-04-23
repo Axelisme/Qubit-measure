@@ -3,26 +3,30 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field
 from numbers import Number
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
 from typing_extensions import (
-    Any,
     Callable,
     Generic,
     Hashable,
     Mapping,
-    MutableMapping,
     Optional,
     Sequence,
     TypeAlias,
     TypeVar,
     Union,
     cast,
+    overload,
 )
+
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 
 Result: TypeAlias = Union[Sequence["Result"], Mapping[Any, "Result"], NDArray]
 
+T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
+T_ChildCfg = TypeVar("T_ChildCfg", bound=ExpCfgModel)
 
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
@@ -30,7 +34,7 @@ T_ChildResult = TypeVar("T_ChildResult", bound=Result)
 
 
 @dataclass
-class TaskState(Generic[T_Result, T_RootResult]):
+class TaskState(Generic[T_Result, T_RootResult, T_Cfg]):
     """State object passed to tasks in runner.
 
     - `root_data` holds the full result tree for the entire task hierarchy.
@@ -41,20 +45,33 @@ class TaskState(Generic[T_Result, T_RootResult]):
     """
 
     root_data: T_RootResult
-    cfg: MutableMapping[str, Any]
-    env: MutableMapping[str, Any] = field(default_factory=dict)
-    on_update: Optional[Callable[["TaskState[Result, T_RootResult]"], Any]] = None
+    cfg: T_Cfg
+    env: dict[str, Any] = field(default_factory=dict)
+    on_update: Optional[Callable[["TaskState[Result, T_RootResult, Any]"], Any]] = None
     path: tuple[Union[int, Hashable], ...] = field(default_factory=tuple)
 
     # ------------------------------------------------------------------
     # Navigation helpers
     # ------------------------------------------------------------------
 
+    @overload
+    def child(
+        self, addr: Union[int, Hashable], new_cfg: None = None
+    ) -> "TaskState[T_ChildResult, T_RootResult, T_Cfg]": ...
+
+    @overload
+    def child(
+        self, addr: Union[int, Hashable], new_cfg: T_ChildCfg
+    ) -> "TaskState[T_ChildResult, T_RootResult, T_ChildCfg]": ...
+
     def child(
         self,
         addr: Union[int, Hashable],
-        new_cfg: Optional[Mapping[str, Any]] = None,
-    ) -> "TaskState[T_ChildResult, T_RootResult]":
+        new_cfg: Optional[T_ChildCfg] = None,
+    ) -> Union[
+        TaskState[T_ChildResult, T_RootResult, T_Cfg],
+        TaskState[T_ChildResult, T_RootResult, T_ChildCfg],
+    ]:
         """Return a new TaskState pointing to a child result.
 
         Strategy A: `cfg` is deep-copied when `new_cfg` is None, so that
@@ -121,10 +138,7 @@ class TaskState(Generic[T_Result, T_RootResult]):
     def _trigger_update(self) -> None:
         if self.on_update is not None:
             # Expose a read-only view of the root result to the callback.
-            snapshot = TaskState[Result, T_RootResult](
-                root_data=self.root_data,
-                cfg=self.cfg,
-                env=self.env,
-                path=self.path,
+            snapshot = TaskState[Result, T_RootResult, T_Cfg](
+                root_data=self.root_data, cfg=self.cfg, env=self.env, path=self.path
             )
             self.on_update(snapshot)

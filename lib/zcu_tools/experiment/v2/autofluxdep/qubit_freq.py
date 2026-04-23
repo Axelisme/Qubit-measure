@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
-from typeguard import check_type
-from typing_extensions import Any, Callable, Optional, TypedDict, cast
+from pydantic import BaseModel
+from typing_extensions import Callable, Optional, TypedDict, cast
 
-from zcu_tools.device import DeviceInfo
+from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import setup_devices
-from zcu_tools.experiment.v2.runner import Task, TaskCfg, TaskState
+from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
@@ -25,7 +24,7 @@ from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.math import IDWInterpolation
 from zcu_tools.utils.process import rotate2real
 
-from .executor import FluxDepInfoDict, MeasurementTask, T_RootResult
+from .executor import FluxDepCfg, FluxDepInfoDict, MeasurementTask, T_RootResult
 
 
 def qubitfreq_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
@@ -48,12 +47,15 @@ def qubitfreq_fluxdep_signal2real(
     return np.array(list(map(qubitfreq_signal2real, signals)), dtype=np.float64)
 
 
-class QubitFreqCfgTemplate(TwoToneCfg, TaskCfg): ...
+class QubitFreqCfgTemplate(TwoToneCfg, ExpCfgModel): ...
 
 
-class QubitFreqCfg(TwoToneCfg, TaskCfg):
-    dev: dict[str, DeviceInfo]
-    sweep: dict[str, SweepCfg]
+class QubitFreqSweepCfg(BaseModel):
+    detune: SweepCfg
+
+
+class QubitFreqCfg(TwoToneCfg, FluxDepCfg):
+    sweep: QubitFreqSweepCfg
 
 
 class QubitFreqResult(TypedDict, closed=True):
@@ -77,8 +79,8 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         self,
         detune_sweep: SweepCfg,
         cfg_maker: Callable[
-            [TaskState[QubitFreqResult, T_RootResult], ModuleLibrary],
-            Optional[dict[str, Any]],
+            [TaskState[QubitFreqResult, T_RootResult, FluxDepCfg], ModuleLibrary],
+            Optional[QubitFreqCfgTemplate],
         ],
         earlystop_snr: Optional[float] = None,
     ) -> None:
@@ -90,21 +92,21 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         self.detunes = sweep2array(self.detune_sweep)
 
         def measure_fn(
-            ctx: TaskState[NDArray[np.complex128], Any],
+            ctx: TaskState[NDArray[np.complex128], T_RootResult, QubitFreqCfg],
             update_hook: Optional[Callable[[int, list[NDArray[np.float64]]], None]],
         ) -> list[NDArray[np.float64]]:
-            cfg: QubitFreqCfg = cast(QubitFreqCfg, ctx.cfg)
-            modules = cfg["modules"]
+            cfg = ctx.cfg
+            modules = cfg.modules
 
             setup_devices(cfg, progress=False)
 
             assert update_hook is not None
 
-            detune_sweep = cfg["sweep"]["detune"]
+            detune_sweep = cfg.sweep.detune
             detune_param = sweep2param("detune", detune_sweep)
-            modules["qub_pulse"].set_param(
+            modules.qub_pulse.set_param(
                 "freq",
-                modules["qub_pulse"].freq + detune_param,
+                modules.qub_pulse.freq + detune_param,
             )
 
             return (
@@ -122,19 +124,16 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
                 ),
             )
 
-        self.task = Task[T_RootResult, list[NDArray[np.float64]]](
+        self.task = Task[T_RootResult, list[NDArray[np.float64]], QubitFreqCfg](
             measure_fn=measure_fn, result_shape=(self.detune_sweep["expts"],)
         )
 
-    def init(
-        self, ctx: TaskState[QubitFreqResult, T_RootResult], dynamic_pbar=False
-    ) -> None:
-        self.init_cfg = deepcopy(ctx.cfg)
-        self.task.init(ctx.child("raw_signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+    def init(self, dynamic_pbar=False) -> None:
+        self.task.init(dynamic_pbar=dynamic_pbar)
 
         self.freq_err_pred = IDWInterpolation()
 
-    def run(self, ctx: TaskState[QubitFreqResult, T_RootResult]) -> None:
+    def run(self, ctx: TaskState[QubitFreqResult, T_RootResult, FluxDepCfg]) -> None:
         predictor: FluxoniumPredictor = ctx.env["predictor"]
         info: FluxDepInfoDict = ctx.env["info"]
 
@@ -145,26 +144,26 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         cfg_temp = self.cfg_maker(ctx, ctx.env["ml"])
         if cfg_temp is None:
             return  # skip this task
-        cfg_temp = check_type(cfg_temp, QubitFreqCfgTemplate)
 
+        cfg = cfg_temp.model_dump(mode="python")
         deepupdate(
-            cast(dict, cfg_temp),
-            {"dev": ctx.cfg["dev"], "sweep": {"detune": self.detune_sweep}},
+            cfg,
+            {"dev": ctx.cfg.dev, "sweep": {"detune": self.detune_sweep}},
             behavior="force",
         )
-        cfg = check_type(cfg_temp, QubitFreqCfg)
-        modules = cfg["modules"]
+        cfg = QubitFreqCfg.model_validate(cfg)
+        modules = cfg.modules
 
-        center_freq = cast(float, modules["qub_pulse"].freq)
+        center_freq = cast(float, modules.qub_pulse.freq)
 
         self.detunes = sweep2array(
-            cfg["sweep"]["detune"],
+            cfg.sweep.detune,
             "freq",
-            {"soccfg": ctx.env["soccfg"], "gen_ch": modules["qub_pulse"].ch},
+            {"soccfg": ctx.env["soccfg"], "gen_ch": modules.qub_pulse.ch},
         )
 
-        self.task.set_pbar_n(cfg["rounds"])
-        self.task.run(ctx.child("raw_signals", new_cfg=cfg))  # type: ignore
+        self.task.set_pbar_n(cfg.rounds)
+        self.task.run(ctx.child("raw_signals", new_cfg=cfg))
 
         raw_signals = ctx.value["raw_signals"]
         assert isinstance(raw_signals, np.ndarray)
@@ -199,7 +198,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             success = False
 
         if success:
-            cur_factor = fwhm / float(cfg["modules"]["qub_pulse"].gain)
+            cur_factor = fwhm / float(cfg.modules.qub_pulse.gain)
             prev_factor = info.last.get("qfw_factor", cur_factor)
             num_step = max(
                 1, info["flux_idx"] - info.last.get("qubfreq_success_idx", 0)
@@ -288,6 +287,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         )
 
         x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
+        cfg = {}
 
         # signals
         save_data(
@@ -299,7 +299,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=make_comment(self.init_cfg, comment),
+            comment=make_comment(cfg, comment),
             tag=prefix_tag + "/signals",
         )
 
@@ -312,7 +312,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
                 "unit": "Hz",
                 "values": result["predict_freq"] * 1e6,
             },
-            comment=make_comment(self.init_cfg, comment),
+            comment=make_comment(cfg, comment),
             tag=prefix_tag + "/predict_freq",
         )
 
@@ -325,7 +325,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
                 "unit": "Hz",
                 "values": result["fit_freq"] * 1e6,
             },
-            comment=make_comment(self.init_cfg, comment),
+            comment=make_comment(cfg, comment),
             tag=prefix_tag + "/fit_freq",
         )
 
@@ -334,7 +334,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             filepath=str(filepath.with_name(filepath.name + "_success")),
             x_info=x_info,
             z_info={"name": "Success", "unit": "bool", "values": result["success"]},
-            comment=make_comment(self.init_cfg, comment),
+            comment=make_comment(cfg, comment),
             tag=prefix_tag + "/success",
         )
 
