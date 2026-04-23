@@ -25,7 +25,7 @@ def fake_signal2real(signals: NDArray[np.complex128]) -> NDArray[np.float64]:
 class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
     def run(self) -> FakeResult:
         # Predicted frequency points (before mapping to ADC domain)
-        freqs = np.linspace(4.5, 5.5, 201)  # MHz
+        freqs = np.linspace(4.5, 5.5, 201, dtype=np.float64)  # MHz
 
         round_n = 100
 

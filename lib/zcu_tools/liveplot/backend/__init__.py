@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import warnings
 from types import ModuleType
 
@@ -8,21 +7,23 @@ import matplotlib as mpl
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from . import fallback, jupyter, pyside6
-
 
 def auto_select_backend() -> ModuleType:
     backend = mpl.get_backend().lower()
     if "nbagg" in backend:
+        from . import jupyter
         return jupyter
     if "qtagg" in backend:
+        from . import pyside6
         return pyside6
     if "inline" in backend:
+        from . import fallback
         return fallback
     else:
         warnings.warn(
             f"Auto-selected backend for matplotlib is '{backend}', which may not be fully supported."
         )
+        from . import fallback
         return fallback
 
 
@@ -44,10 +45,6 @@ def close_figure(fig: Figure) -> None:
 
 
 __all__ = [
-    # module
-    "jupyter",
-    "fallback",
-    "pyside6",
     # functions
     "make_plot_frame",
     "refresh_figure",

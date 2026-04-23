@@ -3,6 +3,7 @@ from __future__ import annotations
 from matplotlib.figure import Figure
 from typing_extensions import Generic, Hashable, TypeVar
 
+from .backend import refresh_figure
 from .base import AbsLivePlot
 
 PlotKey_T = TypeVar("PlotKey_T", bound=Hashable)
@@ -36,7 +37,7 @@ class MultiLivePlot(AbsLivePlot, Generic[PlotKey_T]):
             self.refresh()
 
     def refresh(self) -> None:
-        self.fig.canvas.draw()
+        refresh_figure(self.fig)
 
     def __enter__(self) -> MultiLivePlot[PlotKey_T]:
         for plotter in self.plotters.values():

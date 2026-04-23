@@ -1,30 +1,33 @@
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Optional, cast
 
-import yaml
+import numpy as np
 from numpy import ndarray
 
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.v2.fake import FakeExp
-from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.meta_tool import ExperimentManager, MetaDict, ModuleLibrary
-from zcu_tools.progress_bar import QtProgressSink
 from zcu_tools.utils import format_dict
 
-from .experiment_group import AnalyzeResult, ExperimentGroup, FakeRunResult, RunRequest
+from .experiment_group import (
+    AnalyzeResult,
+    ExperimentGroup,
+    ExperimentPort,
+    FakeRunResult,
+    RunRequest,
+)
 from .state import BufferDescriptor, BufferKind, GuiState
 
 
-class V2FakeExperimentAdapter:
-    """Bridge `experiment.v2.fake.FakeExp` to GUI experiment port."""
+class ExperimentAdapter:
+    """Bridge `FakeExp` to `ExperimentPort` used by GUI."""
 
-    def __init__(self) -> None:
-        self.exp = FakeExp()
+    def __init__(self, exp: FakeExp) -> None:
+        self.exp = exp
 
     def run(
         self,
@@ -34,73 +37,14 @@ class V2FakeExperimentAdapter:
         on_progress=None,
         should_cancel=None,
     ) -> FakeRunResult:
-        import numpy as np
-        from typing_extensions import Any as TypingAny
-
-        points = int(cfg.get("sweep_points", 201))
-        center = float(cfg.get("center_mhz", 5.0))
-        width = float(cfg.get("width_mhz", 1.0))
-        delay_s = float(cfg.get("step_delay_s", 0.0))
-
-        freqs = np.linspace(center - width, center + width, points, dtype=np.float64)
-        sigma = max(0.1 * width, 1e-6)
-        progress_sink = QtProgressSink(
-            on_start=lambda total, _desc: on_progress(0, int(total or points))
-            if on_progress is not None
-            else None,
-            on_update_to=lambda n: on_progress(int(n), points)
-            if on_progress is not None
-            else None,
-        )
-
-        def measure_fn(
-            ctx: TaskState[np.ndarray, TypingAny],
-            update_hook,
-        ) -> np.ndarray:
-            import time
-
-            rng = np.random.default_rng(42)
-            values = np.full(points, np.nan + 0j, dtype=np.complex128)
-            partial = False
-            for i, f in enumerate(freqs):
-                if should_cancel is not None and should_cancel():
-                    partial = True
-                    break
-                signal = (
-                    np.exp(-((f - center) ** 2) / (2 * sigma**2))
-                    + 0.1 * rng.normal()
-                    + 1j * 0.1 * rng.normal()
-                )
-                values[i] = complex(signal)
-                update_hook(i + 1, values.copy())
-                if delay_s > 0:
-                    time.sleep(delay_s)
-            ctx.env["partial"] = partial
-            return values
-
-        signals = run_task(
-            task=Task(
-                measure_fn=measure_fn,
-                raw2signal_fn=lambda x: x,
-                result_shape=(points,),
-                pbar_n=points,
-                progress_sink=progress_sink,
-            ),
-            init_cfg={},
-        )
-
-        valid_mask = ~np.isnan(np.real(signals))
-        valid_n = int(np.sum(valid_mask))
-        run_freqs = freqs[:valid_n]
-        signals = signals[:valid_n]
-        partial = valid_n < points
-        self.exp.last_cfg = None
-        self.exp.last_result = (run_freqs, signals)
+        freqs, signals = self.exp.run()
         y = self._signals_to_real(signals)
+        if on_progress is not None:
+            on_progress(len(y), len(y))
         return FakeRunResult(
-            x=[float(v) for v in run_freqs],
+            x=[float(v) for v in freqs],
             y=[float(v) for v in y],
-            partial=partial,
+            partial=False,
         )
 
     def analyze(self, result: Optional[FakeRunResult] = None) -> Dict[str, Any]:
@@ -126,7 +70,10 @@ class V2FakeExperimentAdapter:
         return filepath
 
     def save_analysis_figure(self, filepath: Path, result: FakeRunResult) -> Path:
-        fig = self.exp.analyze((self._to_float_array(result.x), self._to_complex_array(result.y)))
+        source = self.exp.last_result
+        if source is None:
+            source = (self._to_float_array(result.x), self._to_complex_array(result.y))
+        fig = self.exp.analyze(source)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(filepath, dpi=120)
         return filepath
@@ -143,7 +90,7 @@ class V2FakeExperimentAdapter:
         )
 
     def _signals_to_real(self, signals: ndarray) -> ndarray:
-        return abs(signals)
+        return np.abs(signals)
 
     def _to_float_array(self, values: list[float]) -> ndarray:
         import numpy as np
@@ -156,107 +103,21 @@ class V2FakeExperimentAdapter:
         return np.asarray(values, dtype=np.complex128)
 
 
-class FakeStorage:
+class GuiController:
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root
-        self.base = project_root / "result" / "mock_gui"
-        self.contexts = ["20260411", "20260412", "20260413"]
-        self.active_label = self.contexts[0]
-        self._ensure_demo_files()
-
-    @property
-    def active_dir(self) -> Path:
-        return self.base / "exps" / self.active_label
-
-    def list_contexts(self) -> list[str]:
-        return list(self.contexts)
-
-    def set_active_context(self, label: str) -> None:
-        if label not in self.contexts:
-            self.contexts.append(label)
-        self.active_label = label
-        self._ensure_context_files(self.active_dir)
-
-    def _ensure_demo_files(self) -> None:
-        for label in self.contexts:
-            self._ensure_context_files(self.base / "exps" / label)
-
-    def _ensure_context_files(self, context_dir: Path) -> None:
-        context_dir.mkdir(parents=True, exist_ok=True)
-        image_path = context_dir / "demo_plot.png"
-        json_path = context_dir / "meta_info.json"
-        yaml_path = context_dir / "module_cfg.yaml"
-        csv_path = context_dir / "samples.csv"
-
-        if not image_path.exists():
-            import numpy as np
-            from matplotlib import pyplot as plt
-
-            fig, ax = plt.subplots(figsize=(4, 3))
-            x = np.linspace(0, 1, 100)
-            ax.plot(x, np.sin(6 * np.pi * x))
-            ax.set_title("Mock Plot")
-            fig.tight_layout()
-            fig.savefig(image_path, dpi=110)
-            plt.close(fig)
-
-        if not json_path.exists():
-            json_path.write_text(
-                json.dumps({"r_f": 6812.3, "q_f": 5120.2}, indent=2), encoding="utf-8"
-            )
-
-        yaml_payload = {"waveforms": {}, "modules": {}}
-        rewrite_yaml = True
-        if yaml_path.exists():
-            try:
-                existing = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-            except Exception:
-                existing = None
-            if (
-                isinstance(existing, dict)
-                and isinstance(existing.get("waveforms"), dict)
-                and isinstance(existing.get("modules"), dict)
-            ):
-                rewrite_yaml = False
-
-        if rewrite_yaml:
-            yaml_path.write_text(
-                yaml.safe_dump(yaml_payload, sort_keys=False), encoding="utf-8"
-            )
-
-        if not csv_path.exists():
-            with csv_path.open("w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["calibrated mA", "Freq (MHz)", "T1 (us)"])
-                writer.writerow([0.0, 5120.2, 34.1])
-                writer.writerow([1.8, 5088.6, 29.3])
-
-
-BackendName = Literal["mock", "real"]
-
-
-class GuiController:
-    def __init__(self, project_root: Path, backend: BackendName = "mock") -> None:
-        self.project_root = project_root
-        self.backend: BackendName = backend
         self.state = GuiState()
         self.group_models: Dict[str, ExperimentGroup] = {}
 
-        self._setup_backend(backend)
-        self.exp_manager = ExperimentManager(self.storage.base / "exps")
+        self.soc = None
+        self.soccfg = None
+        self._ensure_fake_device_registered()
+        self.exp_manager = ExperimentManager(
+            self.project_root / "result" / "mock_gui" / "exps"
+        )
         self.meta_dict: MetaDict
         self.module_library: ModuleLibrary
         self._initialize_context()
-
-    def _setup_backend(self, backend: BackendName) -> None:
-        if backend == "mock":
-            self.soc = None
-            self.soccfg = None
-            self.storage = FakeStorage(self.project_root)
-            self._ensure_fake_device_registered()
-            return
-
-        raise NotImplementedError("backend='real' 尚未實作，請先使用 backend='mock'。")
 
     def _ensure_fake_device_registered(self) -> None:
         devices = GlobalDeviceManager.get_all_devices()
@@ -273,7 +134,7 @@ class GuiController:
     def _initialize_context(self) -> None:
         labels = self.exp_manager.list_contexts()
         if not labels:
-            default_label = self.storage.contexts[0]
+            default_label = "20260411"
             self.exp_manager.new_flux(label=default_label)
             labels = self.exp_manager.list_contexts()
         self.set_context(labels[0])
@@ -282,7 +143,7 @@ class GuiController:
         self.create_experiment_group(
             group_id="exp:onetone_mock",
             title="OneTone Mock",
-            experiment=V2FakeExperimentAdapter(),
+            experiment=ExperimentAdapter(FakeExp()),
         )
         self.state.current_group_id = "exp:onetone_mock"
 
@@ -290,7 +151,7 @@ class GuiController:
         self,
         group_id: str,
         title: str,
-        experiment: FakeExperiment,
+        experiment: ExperimentPort,
         default_cfg: Optional[RunRequest] = None,
     ) -> ExperimentGroup:
         model = ExperimentGroup.create(
@@ -312,7 +173,6 @@ class GuiController:
         return self.exp_manager.list_contexts()
 
     def set_context(self, label: str) -> None:
-        self.storage.set_active_context(label)
         self.module_library, self.meta_dict = self.exp_manager.use_flux(label)
 
     def create_context(
@@ -322,7 +182,6 @@ class GuiController:
             ml, md = self.exp_manager.new_flux(label=label, clone_from=clone_from)
         else:
             ml, md = self.exp_manager.new_flux(label=label)
-        self.storage.set_active_context(label)
         self.module_library, self.meta_dict = ml, md
         return ml, md
 
@@ -448,9 +307,10 @@ class GuiController:
             return {"ok": False, "message": str(exc), "value": None}
         old_info = dev.get_info()
         old_value = old_info.get(field)
+        setter = cast(Optional[Any], getattr(dev, "set_field", None))
         try:
-            if hasattr(dev, "set_field"):
-                dev.set_field(field, value)
+            if callable(setter):
+                setter(field, value)
             else:
                 raise RuntimeError(
                     f"Device '{device}' does not support GUI field updates for now."
@@ -458,9 +318,9 @@ class GuiController:
             new_value = dev.get_info().get(field)
             return {"ok": True, "message": "ok", "value": new_value}
         except Exception as exc:
-            if hasattr(dev, "set_field"):
+            if callable(setter):
                 try:
-                    dev.set_field(field, old_value)
+                    setter(field, old_value)
                 except Exception:
                     pass
             return {"ok": False, "message": str(exc), "value": old_value}
@@ -558,12 +418,12 @@ class GuiController:
 
     def save_run_payload(self) -> Path:
         model = self._active_group_model()
-        dst = self.storage.active_dir / "mock_run_result.json"
+        dst = self.active_dir() / "mock_run_result.json"
         return model.save_run(dst)
 
     def save_analysis_figure(self) -> Path:
         model = self._active_group_model()
-        dst = self.storage.active_dir / "mock_analysis.png"
+        dst = self.active_dir() / "mock_analysis.png"
         path = model.save_analysis_figure(dst)
 
         analyze_buffer = self.state.buffers.get(model.analyze_buffer_id)

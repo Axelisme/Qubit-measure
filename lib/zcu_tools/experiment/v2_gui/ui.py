@@ -47,6 +47,15 @@ except ImportError as exc:  # pragma: no cover
         "PySide6 is required for GUI mode. Install it first, e.g. `uv add pyside6`."
     ) from exc
 
+try:
+    from zcu_tools.liveplot.backend.pyside6 import clear_plot_host, set_plot_host
+except Exception:  # pragma: no cover
+    def set_plot_host(*args, **kwargs) -> None:
+        return None
+
+    def clear_plot_host() -> None:
+        return None
+
 
 class RunWorker(QThread):
     progress = Signal(int, int)
@@ -77,7 +86,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"ZCU GUI (v2_gui) - backend={backend}")
         self.resize(1600, 920)
 
-        self.controller = GuiController(project_root, backend=backend)
+        self.controller = GuiController(project_root)
         self.controller.bootstrap_groups()
 
         self.worker: Optional[RunWorker] = None
@@ -296,6 +305,12 @@ class MainWindow(QMainWindow):
         btn_lay.addWidget(analyze_btn)
         btn_lay.addWidget(save_btn)
         lay.addWidget(btns)
+
+        self.liveplot_host = QWidget(self)
+        host_layout = QVBoxLayout(self.liveplot_host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
+        host_layout.addWidget(QLabel("Live plot will be shown here during run.", self))
+        lay.addWidget(self.liveplot_host)
 
         self.run_text = QTextEdit(self)
         self.run_text.setReadOnly(True)
@@ -840,6 +855,9 @@ class MainWindow(QMainWindow):
         self.cancel_event.clear()
         self.progress.setValue(0)
         self.progress_label.setText("Running")
+        if hasattr(self, "liveplot_host"):
+            clear_plot_host()
+            set_plot_host(self.liveplot_host)
 
         self.worker = RunWorker(self.controller, self.cancel_event)
         self.worker.progress.connect(self._on_run_progress)
@@ -861,12 +879,14 @@ class MainWindow(QMainWindow):
 
     def _on_run_completed(self, payload: dict) -> None:
         self.progress.setValue(100)
+        clear_plot_host()
         suffix = " (partial)" if payload.get("partial") else ""
         self.progress_label.setText(f"Run completed{suffix}")
         if hasattr(self, "run_text"):
             self.run_text.append(json.dumps(payload))
 
     def _on_run_failed(self, message: str) -> None:
+        clear_plot_host()
         self.progress_label.setText("Run failed")
         QMessageBox.warning(self, "Run failed", message)
 
