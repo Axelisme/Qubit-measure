@@ -2,17 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Protocol, TypedDict
+from typing import Any, Callable, Dict, Optional, TypedDict
 
+from .adapters.base import ExperimentAdapterBase
 from .state import BufferDescriptor, BufferKind, GroupDescriptor
-
-
-@dataclass
-class FakeRunResult:
-    x: list[float]
-    y: list[float]
-    partial: bool
-
 
 class RunRequest(TypedDict, total=False):
     sweep_points: int
@@ -21,60 +14,27 @@ class RunRequest(TypedDict, total=False):
     width_mhz: float
 
 
-class AnalyzeResult(TypedDict, total=False):
-    peak_freq_mhz: float
-    peak_amp: float
-    points: int
-    partial: bool
-    figure_path: str
-
-
-class ExperimentPort(Protocol):
-    def run(
-        self,
-        soc: Any,
-        soccfg: Any,
-        cfg: Dict[str, Any],
-        on_progress: Optional[Callable[[int, int], None]] = None,
-        should_cancel: Optional[Callable[[], bool]] = None,
-    ) -> FakeRunResult: ...
-
-    def analyze(self, result: Optional[FakeRunResult] = None) -> Dict[str, Any]: ...
-
-    def save_run(
-        self, filepath: Path, cfg: Dict[str, Any], result: FakeRunResult
-    ) -> Path: ...
-
-    def save_analysis_figure(self, filepath: Path, result: FakeRunResult) -> Path: ...
-
-
 @dataclass
 class ExperimentGroup:
     group_id: str
     title: str
-    experiment: ExperimentPort
+    experiment: ExperimentAdapterBase[Dict[str, Any]]
     soc: Any
     soccfg: Any
     exp_cfg: Dict[str, Any] = field(default_factory=dict)
-    last_result: Optional[FakeRunResult] = None
-    last_analysis: Optional[AnalyzeResult] = None
+    last_analysis: Optional[Dict[str, Any]] = None
 
     @classmethod
     def create(
         cls,
         group_id: str,
         title: str,
-        experiment: ExperimentPort,
+        experiment: ExperimentAdapterBase[Dict[str, Any]],
         soc: Any,
         soccfg: Any,
         default_cfg: Optional[RunRequest] = None,
     ) -> "ExperimentGroup":
-        cfg: Dict[str, Any] = {
-            "sweep_points": 101,
-            "step_delay_s": 0.02,
-            "center_mhz": 6812.3,
-            "width_mhz": 10.0,
-        }
+        cfg: Dict[str, Any] = dict(experiment.build_default_config())
         if default_cfg:
             cfg.update(default_cfg)
         return cls(
@@ -120,37 +80,25 @@ class ExperimentGroup:
         self,
         on_progress: Optional[Callable[[int, int], None]] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
-    ) -> FakeRunResult:
-        result = self.experiment.run(
+    ) -> None:
+        self.experiment.run(
             self.soc,
             self.soccfg,
             dict(self.exp_cfg),
             on_progress=on_progress,
             should_cancel=should_cancel,
         )
-        self.last_result = result
-        return result
 
-    def analyze(self) -> AnalyzeResult:
-        analysis = self.experiment.analyze(self.last_result)
-        parsed: AnalyzeResult = {
-            "peak_freq_mhz": float(analysis["peak_freq_mhz"]),
-            "peak_amp": float(analysis["peak_amp"]),
-            "points": int(analysis["points"]),
-            "partial": bool(analysis["partial"]),
-        }
-        self.last_analysis = parsed
-        return parsed
+    def analyze(self) -> Dict[str, Any]:
+        analysis = dict(self.experiment.analyze())
+        self.last_analysis = analysis
+        return analysis
 
     def save_run(self, path: Path) -> Path:
-        if self.last_result is None:
-            raise RuntimeError("No run result to save")
-        return self.experiment.save_run(path, self.exp_cfg, self.last_result)
+        return self.experiment.save_run(path, self.exp_cfg)
 
     def save_analysis_figure(self, path: Path) -> Path:
-        if self.last_result is None:
-            raise RuntimeError("No run result for analysis figure")
-        saved = self.experiment.save_analysis_figure(path, self.last_result)
+        saved = self.experiment.save_analysis_figure(path)
         if self.last_analysis is not None:
             self.last_analysis["figure_path"] = str(saved)
         return saved

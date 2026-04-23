@@ -4,144 +4,52 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 
-import numpy as np
-from numpy import ndarray
-
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.v2.fake import FakeExp
 from zcu_tools.experiment.v2.runner import task_manager
 from zcu_tools.meta_tool import ExperimentManager, MetaDict, ModuleLibrary
-from zcu_tools.progress_bar import progress_backend_scope, qt_progress_callbacks_scope
 from zcu_tools.utils import format_dict
 
+from .adapters import ConfigFieldSchema, ExperimentAdapterBase, FakeExperimentAdapter
 from .experiment_group import (
-    AnalyzeResult,
     ExperimentGroup,
-    ExperimentPort,
-    FakeRunResult,
     RunRequest,
 )
-from .state import BufferDescriptor, BufferKind, GuiState
-
-class ExperimentAdapter:
-    """Bridge `FakeExp` to `ExperimentPort` used by GUI."""
-
-    def __init__(self, exp: FakeExp, scope_name: str = "v2_gui_run") -> None:
-        self.exp = exp
-        self.scope_name = scope_name
-
-    def run(
-        self,
-        soc: Any,
-        soccfg: Any,
-        cfg: Dict[str, Any],
-        on_progress=None,
-        should_cancel=None,
-    ) -> FakeRunResult:
-        total_ref = {"total": 0}
-        progress_seen = {"value": False}
-
-        def _on_task_pbar_start(total: Optional[int], desc: str) -> None:
-            del desc
-            total_ref["total"] = int(total or 0)
-
-        def _on_task_pbar_update(n: int) -> None:
-            if on_progress is None:
-                return
-            progress_seen["value"] = True
-            total = total_ref["total"] if total_ref["total"] > 0 else max(n, 1)
-            on_progress(int(n), int(total))
-
-        with task_manager.scope(self.scope_name) as scope:
-            if should_cancel is not None and should_cancel():
-                task_manager.cancel_current()
-            with progress_backend_scope("qt"):
-                with qt_progress_callbacks_scope(
-                    on_start=_on_task_pbar_start,
-                    on_update_to=_on_task_pbar_update,
-                ):
-                    freqs, signals = self.exp.run()
-        y = self._signals_to_real(signals)
-        if on_progress is not None and not progress_seen["value"]:
-            on_progress(len(y), len(y))
-        return FakeRunResult(
-            x=[float(v) for v in freqs],
-            y=[float(v) for v in y],
-            partial=scope.stop_event.is_set(),
-        )
-
-    def analyze(self, result: Optional[FakeRunResult] = None) -> Dict[str, Any]:
-        if result is None:
-            result = self._last_result()
-        if result is None or not result.x:
-            raise RuntimeError("No run result available to analyze")
-        peak_idx = max(range(len(result.y)), key=lambda i: result.y[i])
-        return {
-            "peak_freq_mhz": result.x[peak_idx],
-            "peak_amp": result.y[peak_idx],
-            "points": len(result.x),
-            "partial": result.partial,
-        }
-
-    def save_run(self, filepath: Path, cfg: Dict[str, Any], result: FakeRunResult) -> Path:
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "cfg": cfg,
-            "result": {"x": result.x, "y": result.y, "partial": result.partial},
-        }
-        filepath.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        return filepath
-
-    def save_analysis_figure(self, filepath: Path, result: FakeRunResult) -> Path:
-        source = self.exp.last_result
-        if source is None:
-            source = (self._to_float_array(result.x), self._to_complex_array(result.y))
-        fig = self.exp.analyze(source)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(filepath, dpi=120)
-        return filepath
-
-    def _last_result(self) -> Optional[FakeRunResult]:
-        if self.exp.last_result is None:
-            return None
-        freqs, signals = self.exp.last_result
-        y = self._signals_to_real(signals)
-        return FakeRunResult(
-            x=[float(v) for v in freqs],
-            y=[float(v) for v in y],
-            partial=False,
-        )
-
-    def _signals_to_real(self, signals: ndarray) -> ndarray:
-        return np.abs(signals)
-
-    def _to_float_array(self, values: list[float]) -> ndarray:
-        import numpy as np
-
-        return np.asarray(values, dtype=np.float64)
-
-    def _to_complex_array(self, values: list[float]) -> ndarray:
-        import numpy as np
-
-        return np.asarray(values, dtype=np.complex128)
-
+from .state import AppState, BufferDescriptor, BufferKind
 
 class GuiController:
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root
-        self.state = GuiState()
-        self.group_models: Dict[str, ExperimentGroup] = {}
+        self.app_state = AppState(project_root=project_root)
+        self.state = self.app_state.gui
 
-        self.soc = None
-        self.soccfg = None
+        self.app_state.soc = None
+        self.app_state.soccfg = None
         self._ensure_fake_device_registered()
-        self.exp_manager = ExperimentManager(
+        manager = ExperimentManager(
             self.project_root / "result" / "mock_gui" / "exps"
         )
-        self.meta_dict: MetaDict
-        self.module_library: ModuleLibrary
+        self.app_state.attach_manager(manager)
         self._initialize_context()
+
+    @property
+    def exp_manager(self) -> ExperimentManager:
+        if self.app_state.exp_manager is None:
+            raise RuntimeError("ExperimentManager not initialized")
+        return self.app_state.exp_manager
+
+    @property
+    def meta_dict(self) -> MetaDict:
+        if self.app_state.meta_dict is None:
+            raise RuntimeError("MetaDict is not available")
+        return self.app_state.meta_dict
+
+    @property
+    def module_library(self) -> ModuleLibrary:
+        if self.app_state.module_library is None:
+            raise RuntimeError("ModuleLibrary is not available")
+        return self.app_state.module_library
 
     def _ensure_fake_device_registered(self) -> None:
         devices = GlobalDeviceManager.get_all_devices()
@@ -168,7 +76,7 @@ class GuiController:
         self.create_experiment_group(
             group_id=group_id,
             title="OneTone Mock",
-            experiment=ExperimentAdapter(FakeExp(), scope_name=group_id),
+            experiment=FakeExperimentAdapter(FakeExp(), scope_name=group_id),
         )
         self.state.current_group_id = group_id
 
@@ -176,29 +84,27 @@ class GuiController:
         self,
         group_id: str,
         title: str,
-        experiment: ExperimentPort,
+        experiment: ExperimentAdapterBase[Dict[str, Any]],
         default_cfg: Optional[RunRequest] = None,
     ) -> ExperimentGroup:
         model = ExperimentGroup.create(
             group_id=group_id,
             title=title,
             experiment=experiment,
-            soc=self.soc,
-            soccfg=self.soccfg,
+            soc=self.app_state.soc,
+            soccfg=self.app_state.soccfg,
             default_cfg=default_cfg,
         )
         group, buffers = model.to_descriptors()
-        self.state.groups[group.group_id] = group
-        for buffer in buffers:
-            self.state.buffers[buffer.buffer_id] = buffer
-        self.group_models[group.group_id] = model
+        self.app_state.add_experiment_group(group, buffers, model)
         return model
 
     def list_contexts(self) -> List[str]:
         return self.exp_manager.list_contexts()
 
     def set_context(self, label: str) -> None:
-        self.module_library, self.meta_dict = self.exp_manager.use_flux(label)
+        ml, md = self.exp_manager.use_flux(label)
+        self.app_state.set_context_resources(ml, md)
 
     def create_context(
         self, label: str, clone_from: Optional[str] = None
@@ -207,7 +113,7 @@ class GuiController:
             ml, md = self.exp_manager.new_flux(label=label, clone_from=clone_from)
         else:
             ml, md = self.exp_manager.new_flux(label=label)
-        self.module_library, self.meta_dict = ml, md
+        self.app_state.set_context_resources(ml, md)
         return ml, md
 
     def get_supported_label_devices(self) -> list[dict[str, Any]]:
@@ -277,25 +183,17 @@ class GuiController:
         return buffer
 
     def _active_group_model(self) -> ExperimentGroup:
-        group = self.state.current_group()
-        if group is not None:
-            model = self.group_models.get(group.group_id)
-            if model is not None:
-                return model
-        if self.group_models:
-            return next(iter(self.group_models.values()))
-        raise RuntimeError("No experiment group available")
+        return cast(ExperimentGroup, self.app_state.active_group_model())
+
+    def get_exp_cfg_schema(self) -> list[ConfigFieldSchema]:
+        return self._active_group_model().experiment.get_config_schema()
 
     @property
     def exp_cfg(self) -> Dict[str, Any]:
         return self._active_group_model().exp_cfg
 
     @property
-    def last_run_result(self) -> Optional[FakeRunResult]:
-        return self._active_group_model().last_result
-
-    @property
-    def last_analysis(self) -> Optional[AnalyzeResult]:
+    def last_analysis(self) -> Optional[Dict[str, Any]]:
         return self._active_group_model().last_analysis
 
     def get_exp_cfg_text(self) -> str:
@@ -305,6 +203,9 @@ class GuiController:
         cfg = json.loads(text)
         if not isinstance(cfg, dict):
             raise ValueError("exp_cfg must be a JSON object")
+        self.update_exp_cfg(cfg)
+
+    def update_exp_cfg(self, cfg: Dict[str, Any]) -> None:
         model = self._active_group_model()
         model.exp_cfg = cfg
         run_buffer = self.state.buffers.get(model.run_buffer_id)
@@ -411,14 +312,13 @@ class GuiController:
             self.set_library_item(name, cfg)
         self.module_library.sync()
 
-    def run_mock_experiment(self, on_progress, should_cancel) -> FakeRunResult:
+    def run_mock_experiment(self, on_progress, should_cancel) -> None:
         model = self._active_group_model()
-        result = model.run(on_progress=on_progress, should_cancel=should_cancel)
+        model.run(on_progress=on_progress, should_cancel=should_cancel)
 
         run_buffer = self.state.buffers.get(model.run_buffer_id)
         if run_buffer is not None:
             run_buffer.payload["cfg"] = dict(model.exp_cfg)
-        return result
 
     def request_stop_active_run(self) -> bool:
         model = self._active_group_model()
@@ -460,18 +360,11 @@ class GuiController:
         return path
 
     def apply_analysis_to_context(self) -> tuple[Path, Path]:
-        if self.last_analysis is None:
+        model = self._active_group_model()
+        if model.last_analysis is None:
             raise RuntimeError("No analysis result available")
-
-        peak_raw = self.last_analysis.get("peak_freq_mhz")
-        if peak_raw is None:
-            raise RuntimeError("Analysis result missing 'peak_freq_mhz'")
-
-        peak = float(peak_raw)
-        self.set_meta_value("r_f", peak)
-
-        self.module_library.sync()
-        if "readout_rf" in self.module_library.modules:
-            self.module_library.update_module("readout_rf", {"freq": peak})
-
-        return self.save_meta_dict(), self.save_module_library()
+        return model.experiment.apply_analysis_to_context(
+            dict(model.last_analysis),
+            self.meta_dict,
+            self.module_library,
+        )

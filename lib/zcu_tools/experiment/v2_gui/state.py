@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from zcu_tools.meta_tool import ExperimentManager, MetaDict, ModuleLibrary
+
 
 class BufferKind(str, Enum):
     RUN = "run"
@@ -79,3 +81,45 @@ class GuiState:
         if buf_id is None:
             return None
         return self.buffers.get(buf_id)
+
+
+@dataclass
+class AppState:
+    project_root: Any
+    gui: GuiState = field(default_factory=GuiState)
+    group_models: Dict[str, Any] = field(default_factory=dict)
+    soc: Any = None
+    soccfg: Any = None
+    exp_manager: Optional[ExperimentManager] = None
+    module_library: Optional[ModuleLibrary] = None
+    meta_dict: Optional[MetaDict] = None
+
+    def attach_manager(self, manager: ExperimentManager) -> None:
+        self.exp_manager = manager
+
+    def set_context_resources(self, ml: ModuleLibrary, md: MetaDict) -> None:
+        self.module_library = ml
+        self.meta_dict = md
+
+    def add_experiment_group(
+        self,
+        group: GroupDescriptor,
+        buffers: list[BufferDescriptor],
+        model: Any,
+    ) -> None:
+        self.gui.groups[group.group_id] = group
+        for buffer in buffers:
+            self.gui.buffers[buffer.buffer_id] = buffer
+        self.group_models[group.group_id] = model
+        if self.gui.current_group_id is None:
+            self.gui.current_group_id = group.group_id
+
+    def active_group_model(self) -> Any:
+        group = self.gui.current_group()
+        if group is not None:
+            model = self.group_models.get(group.group_id)
+            if model is not None:
+                return model
+        if self.group_models:
+            return next(iter(self.group_models.values()))
+        raise RuntimeError("No experiment group available")
