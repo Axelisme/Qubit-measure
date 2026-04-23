@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: .venv
+    display_name: zcu-tools
     language: python
     name: python3
   language_info:
@@ -49,7 +49,7 @@ from zcu_tools.utils.fitting.resonance import (
 ```
 
 ```python
-chip_name = "Q3_2D[2]"
+chip_name = "Q12_2D[5]"
 qub_name = "Q1"
 
 result_dir = Path(f"../../result/{chip_name}/{qub_name}")
@@ -94,7 +94,7 @@ print(f"bare rf = {bare_rf}", "GHz")
 ```python
 from zcu_tools.experiment.v2.onetone import FluxDepExp
 
-onetone_path = r"../../Database\Q3_2D[2]\Q1\2026\03\Data_0316\R1_flux_6.hdf5"
+onetone_path = r"../../Database/Q12_2D[5]/Q1/R1_flux_1.hdf5"
 
 sp_dev_values, sp_freqs, sp_signals = FluxDepExp().load(onetone_path)
 sp_freqs *= 1e-3  # MHz to GHz
@@ -127,6 +127,7 @@ norm_phases = phases
 norm_phases = gaussian_filter1d(norm_phases, phases.shape[1] // 10, axis=1)
 norm_phases = np.diff(norm_phases, axis=1, prepend=norm_phases[:, :1])
 norm_phases = np.abs(norm_phases)
+norm_phases /= np.max(norm_phases, axis=1, keepdims=True)
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4))
 ax1.set_title("Signal Magnitude")
@@ -159,7 +160,7 @@ plt.close(fig)
 ```
 
 ```python
-best_g = 0.05
+best_g = 0.05  # GHz
 ```
 
 ```python
@@ -188,6 +189,11 @@ best_g, best_rf = zd.auto_fit_dispersive(
 if best_rf is not None:
     bare_rf = best_rf
 best_g, bare_rf
+```
+
+```python
+best_g = 0.06834219285137985
+bare_rf = 5.349831026722171
 ```
 
 ```python
@@ -226,8 +232,4 @@ fig.write_image(f"{image_dir}/{figname}.png", format="png", width=800, height=40
 
 ```python
 zp.update_result(str(param_path), dict(dispersive=dict(g=best_g, bare_rf=bare_rf)))
-```
-
-```python
-
 ```

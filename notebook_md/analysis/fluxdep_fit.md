@@ -9,7 +9,7 @@ jupyter:
       format_version: '1.3'
       jupytext_version: 1.19.1
   kernelspec:
-    display_name: .venv
+    display_name: zcu-tools
     language: python
     name: python3
   language_info:
@@ -40,7 +40,7 @@ import zcu_tools.experiment.v2 as ze
 ```
 
 ```python
-chip_name = "Q3_2D[2]"
+chip_name = "Q12_2D[5]"
 qub_name = "Q1"
 
 flux_half = None
@@ -59,7 +59,8 @@ os.makedirs(web_dir, exist_ok=True)
 loadpath = f"{result_dir}/params.json"
 result = zp.load_result(loadpath)
 fluxdep_result = result.get("fluxdep_fit")
-assert fluxdep_result is not None, "No fluxdep_fit result found in the loaded data."
+if fluxdep_result is None:
+    raise ValueError(f"No fluxdep_fit result found in {loadpath}.")
 
 flux_half = fluxdep_result["flux_half"]
 flux_period = fluxdep_result["flux_period"]
@@ -70,7 +71,7 @@ flux_period = fluxdep_result["flux_period"]
 
 ```python
 # spect_path = r"..\..\Database\Si001\2025\10\Data_1028\Si001_flux_1.hdf5"
-spect_path = r"..\..\Database\Q3_2D[2]\Q1\2026\03\Data_0318\Q1_flux_1.hdf5"
+spect_path = r"../../Database/Q12_2D[5]/Q1/Q1_flux_1.hdf5"
 # spect_path = r"..\..\Database\Q3_2D[2]\Q1\2026\03\Data_0316\R1_flux_6.hdf5"
 
 # exp = ze.onetone.FluxDepExp()
@@ -192,8 +193,8 @@ transitions = zp.TransitionDict(
     {
         "transitions": [(0, 1), (0, 2), (1, 2), (1, 3)],
         # "red side": [(0, 1)],
-        "mirror": [(0, 1), (0, 2), (1, 2), (1, 3)],
-        "r_f": 7.4445,  # GHz
+        "mirror": [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3)],
+        "r_f": 5.351,  # GHz
         "sample_f": 9.584640,  # GHz
         # "sample_f": 6.881280,
     }
