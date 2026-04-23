@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from contextlib import contextmanager
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, Optional, TypeVar, cast
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -116,6 +116,10 @@ def _clear_host_widgets(layout: QVBoxLayout) -> None:
             continue
         widget = item.widget()
         if widget is not None:
+            if isinstance(widget, FigureCanvasQTAgg):
+                for fig_id, canvas in list(_FIGURE_CANVAS_MAP.items()):
+                    if canvas is widget:
+                        _FIGURE_CANVAS_MAP.pop(fig_id, None)
             widget.setParent(None)
             widget.deleteLater()
 
@@ -136,6 +140,19 @@ def _attach_figure_to_host(fig: Figure) -> bool:
     layout.addWidget(canvas)
     canvas.draw_idle()
     _FIGURE_CANVAS_MAP[id(fig)] = canvas
+    return True
+
+
+def _is_hosted_figure(fig: Figure) -> bool:
+    canvas = _FIGURE_CANVAS_MAP.get(id(fig))
+    if canvas is None:
+        return False
+    parent = canvas.parentWidget()
+    if parent is None:
+        return False
+    parent_layout = parent.layout()
+    if isinstance(parent_layout, QVBoxLayout):
+        return parent_layout.indexOf(canvas) >= 0
     return True
 
 
@@ -164,11 +181,16 @@ def refresh_figure(fig: Figure) -> None:
 
 
 def close_figure(fig: Figure) -> None:
-    def _close() -> None:
-        canvas = _FIGURE_CANVAS_MAP.pop(id(fig), None)
+    def _really_close(target: Figure) -> None:
+        canvas = _FIGURE_CANVAS_MAP.pop(id(target), None)
         if canvas is not None:
             canvas.setParent(None)
             canvas.deleteLater()
-        plt.close(fig)
+        plt.close(target)
+
+    def _close() -> None:
+        if _is_hosted_figure(fig):
+            return
+        _really_close(fig)
 
     _run_in_gui_thread(_close)

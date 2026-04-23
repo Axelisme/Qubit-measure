@@ -102,7 +102,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         layout = QHBoxLayout(root)
 
-        main_split = QSplitter(Qt.Horizontal, self)
+        main_split = QSplitter(Qt.Orientation.Horizontal, self)
         layout.addWidget(main_split)
 
         left = self._build_left_panel()
@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
         panel = QWidget(self)
         layout = QVBoxLayout(panel)
 
-        split = QSplitter(Qt.Vertical, self)
+        split = QSplitter(Qt.Orientation.Vertical, self)
 
         top = QWidget(self)
         top_layout = QVBoxLayout(top)
@@ -241,6 +241,8 @@ class MainWindow(QMainWindow):
     def _clear_layout(self, layout: QVBoxLayout) -> None:
         while layout.count():
             item = layout.takeAt(0)
+            if item is None:
+                continue
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
@@ -306,15 +308,11 @@ class MainWindow(QMainWindow):
         lay.addWidget(btns)
 
         self.liveplot_host = QWidget(self)
+        self.liveplot_host.setMinimumHeight(320)
         host_layout = QVBoxLayout(self.liveplot_host)
         host_layout.setContentsMargins(0, 0, 0, 0)
-        host_layout.addWidget(QLabel("Live plot will be shown here during run.", self))
+        host_layout.addStretch(1)
         lay.addWidget(self.liveplot_host)
-
-        self.run_text = QTextEdit(self)
-        self.run_text.setReadOnly(True)
-        self.run_text.setPlaceholderText("Run logs...")
-        lay.addWidget(self.run_text)
 
         run_buffer = self.controller.state.buffers.get(
             self.controller._active_group_model().run_buffer_id
@@ -361,7 +359,9 @@ class MainWindow(QMainWindow):
                     image_label.setText(f"Failed to load analysis image: {figure_path}")
                 else:
                     image_label.setPixmap(
-                        pix.scaledToWidth(760, Qt.SmoothTransformation)
+                        pix.scaledToWidth(
+                            760, Qt.TransformationMode.SmoothTransformation
+                        )
                     )
             else:
                 image_label.setText(f"Analysis image not found: {figure_path}")
@@ -398,7 +398,9 @@ class MainWindow(QMainWindow):
         if pix.isNull():
             label.setText(f"Failed to load image: {path}")
         else:
-            label.setPixmap(pix.scaledToWidth(760, Qt.SmoothTransformation))
+            label.setPixmap(
+                pix.scaledToWidth(760, Qt.TransformationMode.SmoothTransformation)
+            )
         lay.addWidget(label)
         return w
 
@@ -454,9 +456,10 @@ class MainWindow(QMainWindow):
                     table.setItem(r, c, QTableWidgetItem(value))
 
         def _save_csv() -> None:
-            headers = [
-                table.horizontalHeaderItem(c).text() for c in range(table.columnCount())
-            ]
+            headers: list[str] = []
+            for c in range(table.columnCount()):
+                item = table.horizontalHeaderItem(c)
+                headers.append(item.text() if item is not None else "")
             out_rows = [headers]
             for r in range(table.rowCount()):
                 out_row = []
@@ -529,7 +532,7 @@ class MainWindow(QMainWindow):
             for r, (field, value) in enumerate(editable_fields):
                 table.setItem(r, 0, QTableWidgetItem(str(field)))
                 table.setItem(r, 1, QTableWidgetItem(str(value)))
-            table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
             panel_layout.addWidget(table)
 
             def _make_apply(name: str, t: QTableWidget):
@@ -578,7 +581,7 @@ class MainWindow(QMainWindow):
         for r, row in enumerate(rows):
             table.setItem(r, 0, QTableWidgetItem(str(row["key"])))
             table.setItem(r, 1, QTableWidgetItem(str(row["value"])))
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         def _parse_numeric(raw: str) -> Any:
             text = raw.strip()
@@ -725,7 +728,9 @@ class MainWindow(QMainWindow):
         form.addRow("Context label", label_edit)
         layout.addLayout(form)
         buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=dialog
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
         )
         layout.addWidget(buttons)
         buttons.accepted.connect(dialog.accept)
@@ -738,7 +743,7 @@ class MainWindow(QMainWindow):
 
         device_combo.currentIndexChanged.connect(_refresh_default_label)
 
-        if dialog.exec() != QDialog.Accepted:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return None
         return label_edit.text().strip(), selected_device_name
 
@@ -880,14 +885,10 @@ class MainWindow(QMainWindow):
 
     def _on_run_completed(self, payload: dict) -> None:
         self.progress.setValue(100)
-        clear_plot_host()
         suffix = " (partial)" if payload.get("partial") else ""
         self.progress_label.setText(f"Run completed{suffix}")
-        if hasattr(self, "run_text"):
-            self.run_text.append(json.dumps(payload))
 
     def _on_run_failed(self, message: str) -> None:
-        clear_plot_host()
         self.progress_label.setText("Run failed")
         QMessageBox.warning(self, "Run failed", message)
 

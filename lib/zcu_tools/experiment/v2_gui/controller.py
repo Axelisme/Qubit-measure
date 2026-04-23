@@ -418,9 +418,6 @@ class GuiController:
         run_buffer = self.state.buffers.get(model.run_buffer_id)
         if run_buffer is not None:
             run_buffer.payload["cfg"] = dict(model.exp_cfg)
-            run_buffer.payload["log"] = [
-                json.dumps({"points": len(result.x), "partial": result.partial})
-            ]
         return result
 
     def request_stop_active_run(self) -> bool:
