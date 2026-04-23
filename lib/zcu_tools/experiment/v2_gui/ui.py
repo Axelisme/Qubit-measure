@@ -56,7 +56,6 @@ except Exception:  # pragma: no cover
     def clear_plot_host() -> None:
         return None
 
-
 class RunWorker(QThread):
     progress = Signal(int, int)
     completed = Signal(dict)
@@ -866,11 +865,13 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _on_stop_clicked(self) -> None:
-        QMessageBox.information(
-            self,
-            "Stop",
-            "FakeExp uses its native run flow. GUI stop is not implemented in this phase.",
-        )
+        self.cancel_event.set()
+        stopped = self.controller.request_stop_active_run()
+        if stopped:
+            self.progress_label.setText("Stopping...")
+            self.statusBar().showMessage("Stop requested", 2000)
+        else:
+            QMessageBox.information(self, "Stop", "No active run scope to stop.")
 
     def _on_run_progress(self, current: int, total: int) -> None:
         pct = int(100 * current / max(total, 1))

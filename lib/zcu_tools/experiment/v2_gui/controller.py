@@ -10,7 +10,9 @@ from numpy import ndarray
 from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.device.fake import FakeDevice
 from zcu_tools.experiment.v2.fake import FakeExp
+from zcu_tools.experiment.v2.runner import task_manager
 from zcu_tools.meta_tool import ExperimentManager, MetaDict, ModuleLibrary
+from zcu_tools.progress_bar import progress_backend_scope, qt_progress_callbacks_scope
 from zcu_tools.utils import format_dict
 
 from .experiment_group import (
@@ -22,12 +24,12 @@ from .experiment_group import (
 )
 from .state import BufferDescriptor, BufferKind, GuiState
 
-
 class ExperimentAdapter:
     """Bridge `FakeExp` to `ExperimentPort` used by GUI."""
 
-    def __init__(self, exp: FakeExp) -> None:
+    def __init__(self, exp: FakeExp, scope_name: str = "v2_gui_run") -> None:
         self.exp = exp
+        self.scope_name = scope_name
 
     def run(
         self,
@@ -37,14 +39,36 @@ class ExperimentAdapter:
         on_progress=None,
         should_cancel=None,
     ) -> FakeRunResult:
-        freqs, signals = self.exp.run()
+        total_ref = {"total": 0}
+        progress_seen = {"value": False}
+
+        def _on_task_pbar_start(total: Optional[int], desc: str) -> None:
+            del desc
+            total_ref["total"] = int(total or 0)
+
+        def _on_task_pbar_update(n: int) -> None:
+            if on_progress is None:
+                return
+            progress_seen["value"] = True
+            total = total_ref["total"] if total_ref["total"] > 0 else max(n, 1)
+            on_progress(int(n), int(total))
+
+        with task_manager.scope(self.scope_name) as scope:
+            if should_cancel is not None and should_cancel():
+                task_manager.cancel_current()
+            with progress_backend_scope("qt"):
+                with qt_progress_callbacks_scope(
+                    on_start=_on_task_pbar_start,
+                    on_update_to=_on_task_pbar_update,
+                ):
+                    freqs, signals = self.exp.run()
         y = self._signals_to_real(signals)
-        if on_progress is not None:
+        if on_progress is not None and not progress_seen["value"]:
             on_progress(len(y), len(y))
         return FakeRunResult(
             x=[float(v) for v in freqs],
             y=[float(v) for v in y],
-            partial=False,
+            partial=scope.stop_event.is_set(),
         )
 
     def analyze(self, result: Optional[FakeRunResult] = None) -> Dict[str, Any]:
@@ -140,12 +164,13 @@ class GuiController:
         self.set_context(labels[0])
 
     def bootstrap_groups(self) -> None:
+        group_id = "exp:onetone_mock"
         self.create_experiment_group(
-            group_id="exp:onetone_mock",
+            group_id=group_id,
             title="OneTone Mock",
-            experiment=ExperimentAdapter(FakeExp()),
+            experiment=ExperimentAdapter(FakeExp(), scope_name=group_id),
         )
-        self.state.current_group_id = "exp:onetone_mock"
+        self.state.current_group_id = group_id
 
     def create_experiment_group(
         self,
@@ -397,6 +422,10 @@ class GuiController:
                 json.dumps({"points": len(result.x), "partial": result.partial})
             ]
         return result
+
+    def request_stop_active_run(self) -> bool:
+        model = self._active_group_model()
+        return task_manager.cancel_scope(model.group_id)
 
     def analyze_last_result(self) -> Dict[str, Any]:
         model = self._active_group_model()

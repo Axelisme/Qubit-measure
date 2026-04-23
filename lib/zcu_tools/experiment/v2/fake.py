@@ -47,7 +47,7 @@ class FakeExp(AbsExperiment[FakeResult, FakeCfg]):
                 if update_hook is not None:
                     update_hook(i, np.mean(signal_buffer, axis=0))
 
-                time.sleep(0.01)  # Simulate time delay for measurement
+                time.sleep(0.1)  # Simulate time delay for measurement
             return np.mean(signal_buffer, axis=0)
 
         # run experiment

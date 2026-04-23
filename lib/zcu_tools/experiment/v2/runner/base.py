@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
 import logging
+import threading
+import uuid
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from dataclasses import dataclass, field
 
 from typing_extensions import (
     TYPE_CHECKING,
@@ -33,6 +38,101 @@ logger = logging.getLogger(__name__)
 
 T_Result = TypeVar("T_Result", bound=Result)
 T_RootResult = TypeVar("T_RootResult", bound=Result)
+
+
+class TaskCancelled(Exception):
+    """Raised when current run scope requests a graceful stop."""
+
+
+@dataclass
+class _RunScope:
+    id: str
+    name: str
+    stop_event: threading.Event = field(default_factory=threading.Event)
+    tasks: list[Any] = field(default_factory=list)
+    programs: list[Any] = field(default_factory=list)
+
+
+class RunTaskManager:
+    """Manage scoped stop signals for task execution."""
+
+    def __init__(self) -> None:
+        self._active_scopes: dict[str, _RunScope] = {}
+        self._lock = threading.RLock()
+        self._current_scope: ContextVar[Optional[_RunScope]] = ContextVar(
+            "runner_current_scope", default=None
+        )
+
+    @contextmanager
+    def scope(self, name: str):
+        scope = _RunScope(id=uuid.uuid4().hex, name=name)
+        token: Token[Optional[_RunScope]]
+        with self._lock:
+            self._active_scopes[scope.id] = scope
+        token = self._current_scope.set(scope)
+        try:
+            yield scope
+        finally:
+            self._current_scope.reset(token)
+            with self._lock:
+                self._active_scopes.pop(scope.id, None)
+
+    def current_scope(self) -> Optional[_RunScope]:
+        return self._current_scope.get()
+
+    def register_task(self, task: Any) -> None:
+        scope = self.current_scope()
+        if scope is None:
+            return
+        with self._lock:
+            if task not in scope.tasks:
+                scope.tasks.append(task)
+
+    def register_program(self, program: Any) -> None:
+        scope = self.current_scope()
+        if scope is None:
+            return
+        with self._lock:
+            if program not in scope.programs:
+                scope.programs.append(program)
+
+    def cancel_scope(self, name: str) -> bool:
+        matched = False
+        with self._lock:
+            scopes = [scope for scope in self._active_scopes.values() if scope.name == name]
+        for scope in scopes:
+            self._cancel_scope(scope)
+            matched = True
+        return matched
+
+    def cancel_current(self) -> bool:
+        scope = self.current_scope()
+        if scope is None:
+            return False
+        self._cancel_scope(scope)
+        return True
+
+    def is_stop_requested(self) -> bool:
+        scope = self.current_scope()
+        return bool(scope is not None and scope.stop_event.is_set())
+
+    def check_cancelled(self) -> None:
+        if self.is_stop_requested():
+            raise TaskCancelled("Run cancelled by RunTaskManager flag")
+
+    def _cancel_scope(self, scope: _RunScope) -> None:
+        scope.stop_event.set()
+        programs = list(scope.programs)
+        for prog in programs:
+            set_early_stop = getattr(prog, "set_early_stop", None)
+            if callable(set_early_stop):
+                try:
+                    set_early_stop(silent=True)
+                except Exception:
+                    continue
+
+
+task_manager = RunTaskManager()
 
 
 class TaskCfg(TypedDict, closed=False):
@@ -107,13 +207,19 @@ def run_task(
     if env_dict is None:
         env_dict = dict()
 
-    on_update = min_interval(on_update, update_interval)
+    throttled_update = min_interval(on_update, update_interval)
+
+    def guarded_update(state: TaskState[Any, T_Result]) -> Any:
+        task_manager.check_cancelled()
+        if throttled_update is not None:
+            return throttled_update(state)
+        return None
 
     state: TaskState[T_Result, T_Result] = TaskState(
         root_data=init_result,
         cfg=cfg,
         env=env_dict,
-        on_update=on_update,
+        on_update=guarded_update,
     )
 
     logger.debug(
@@ -122,12 +228,17 @@ def run_task(
     )
 
     try:
+        task_manager.register_task(task)
         task.init(state, dynamic_pbar=False)
         logger.debug("run_task: init done, starting run")
         task.run(state)
         logger.debug("run_task: run done, cleanup")
     except KeyboardInterrupt:
+        env_dict["task_cancelled"] = True
         logger.warning("run_task: KeyboardInterrupt, early stopping")
+    except TaskCancelled:
+        env_dict["task_cancelled"] = True
+        logger.warning("run_task: TaskCancelled, early stopping")
     except Exception:
         logger.exception("run_task: error during measurement")
         print_traceback()

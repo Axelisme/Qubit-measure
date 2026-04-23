@@ -5,7 +5,7 @@ import logging
 from tqdm.auto import tqdm
 from typing_extensions import Hashable, Mapping, Optional, TypeVar
 
-from .base import AbsTask
+from .base import AbsTask, task_manager
 from .state import Result
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ class BatchTask(AbsTask[dict[T_Key, T_ChildResult], T_RootResult]):
         logger.debug("BatchTask.run: %d tasks", len(self.tasks))
 
         for name, task in self.tasks.items():
+            task_manager.check_cancelled()
             self.task_pbar.set_description(desc=f"Task [{str(name)}]")
             logger.debug("BatchTask.run: starting task '%s'", name)
 

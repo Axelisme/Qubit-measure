@@ -8,7 +8,7 @@ from typing_extensions import Optional, Sequence, TypeVar
 
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
-from .base import AbsTask
+from .base import AbsTask, TaskCancelled, task_manager
 from .state import Result, TaskState
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,10 @@ def run_with_retries(
 ) -> None:
     for attempt in range(retry_time + 1):
         try:
+            task_manager.check_cancelled()
             task.run(state)
+        except TaskCancelled:
+            raise
         except Exception as e:
             if attempt == retry_time:
                 if raise_error:
@@ -126,7 +129,9 @@ class RepeatOverTime(AbsTask[list[T_ChildResult], T_RootResult]):
         start_t = time.time() - 2 * self.interval
 
         for i in range(self.num_times):
+            task_manager.check_cancelled()
             while time.time() - start_t < self.interval:
+                task_manager.check_cancelled()
                 pass_time = round(time.time() - start_t, 1)
                 self.time_pbar.update(pass_time - self.time_pbar.n)  # type: ignore[arg-type]
 

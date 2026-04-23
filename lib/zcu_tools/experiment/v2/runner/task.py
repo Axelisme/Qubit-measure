@@ -8,7 +8,7 @@ from typing_extensions import Any, Callable, Generic, Optional, Sequence, Type, 
 
 from zcu_tools.progress_bar import ProgressSink, make_progress_sink
 
-from .base import AbsTask
+from .base import AbsTask, task_manager
 from .state import Result, TaskState
 
 logger = logging.getLogger(__name__)
@@ -85,9 +85,11 @@ class Task(
         )
 
         def update_hook(ir: int, raw: T_Raw) -> None:
+            task_manager.check_cancelled()
             self.progress_sink.update_to(ir)
             state.set_value(self.raw2signal_fn(raw))
 
+        task_manager.check_cancelled()
         signal = self.raw2signal_fn(self.measure_fn(state, update_hook))
 
         if self.pbar_n is not None:
