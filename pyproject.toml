@@ -43,7 +43,8 @@ gdrive = [
     "google-auth-oauthlib",
     "python-dotenv",
 ]
-all = ["zcu_tools[client,design,gdrive]"]
+gui = ["pyside6"]
+all = ["zcu_tools[client,design,gdrive,gui]"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
