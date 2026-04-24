@@ -12,7 +12,7 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -201,6 +201,10 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         gains1, gains2, signals = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Power1", "unit": "a.u.", "values": gains1},
@@ -212,7 +216,9 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PowerResult:
-        signals, gains1, gains2, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, gains1, gains2, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert gains1 is not None and gains2 is not None
         assert len(gains1.shape) == 1 and len(gains2.shape) == 1
         assert signals.shape == (len(gains2), len(gains1))
@@ -223,7 +229,13 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         gains2 = gains2.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains1, gains2, signals)
 
         return gains1, gains2, signals

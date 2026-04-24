@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from datetime import datetime
 
 import numpy as np
@@ -211,18 +212,17 @@ def load_local_data(
     return z_data, x_data, y_data
 
 
-def load_local_cfg(filepath: str) -> dict[str, Any]:
-    import json
-
+def load_comment(filepath: str) -> Optional[str]:
     import h5py
 
     filepath = format_ext(filepath)
 
-    with h5py.File(filepath, "r") as file:
-        cfg = json.loads(file.attrs["comment"])  # type: ignore
-    assert isinstance(cfg, dict)
-
-    return cfg
+    try:
+        with h5py.File(filepath, "r") as file:
+            return str(file.attrs["comment"])
+    except Exception as e:
+        warnings.warn(f"Failed to load comment from {filepath}: {e}")
+        return None
 
 
 def upload_to_server(filepath: str, server_ip: str, port: int) -> bool:
@@ -318,12 +318,12 @@ def load_data(
     *,
     server_ip: Optional[str] = None,
     port: int = 4999,
-    return_cfg: Literal[True],
+    return_comment: Literal[True],
 ) -> tuple[
     NDArray[np.complex128],
     NDArray[np.float64],
     Optional[NDArray[np.float64]],
-    dict[str, Any],
+    Optional[str],
 ]: ...
 
 
@@ -333,7 +333,7 @@ def load_data(
     *,
     server_ip: Optional[str] = None,
     port: int = 4999,
-    return_cfg: Literal[False],
+    return_comment: Literal[False],
 ) -> tuple[
     NDArray[np.complex128], NDArray[np.float64], Optional[NDArray[np.float64]]
 ]: ...
@@ -344,7 +344,7 @@ def load_data(
     *,
     server_ip: Optional[str] = None,
     port: int = 4999,
-    return_cfg: bool = False,
+    return_comment: bool = False,
 ):
     """
     Load data either locally or from a remote server.
@@ -361,8 +361,8 @@ def load_data(
         if not os.path.exists(filepath):
             download_from_server(filepath, server_ip, port)
     z_data, x_data, y_data = load_local_data(filepath)
-    if return_cfg:
-        cfg = load_local_cfg(filepath)
-        return z_data, x_data, y_data, cfg
+    if return_comment:
+        comment = load_comment(filepath)
+        return z_data, x_data, y_data, comment
 
     return z_data, x_data, y_data

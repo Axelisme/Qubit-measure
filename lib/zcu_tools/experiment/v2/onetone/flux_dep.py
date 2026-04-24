@@ -10,7 +10,12 @@ from typing_extensions import Callable, Mapping, Optional, TypeAlias, cast
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
+from zcu_tools.experiment.utils import (
+    make_comment,
+    parse_comment,
+    set_flux_in_dev_cfg,
+    setup_devices,
+)
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -156,6 +161,10 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
         values, freqs, signals2D = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Flux device value", "unit": "a.u.", "values": values},
@@ -167,7 +176,9 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FluxDepResult:
-        signals2D, values, freqs, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals2D, values, freqs, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert freqs is not None
         assert len(freqs.shape) == 1 and len(values.shape) == 1
         assert signals2D.shape == (len(values), len(freqs))
@@ -178,7 +189,13 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (values, freqs, signals2D)
 
         return values, freqs, signals2D

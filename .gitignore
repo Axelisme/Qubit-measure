@@ -33,6 +33,7 @@ qiskit-metal/
 *.csv
 *.log
 *.json
+*.npz
 
 # Jupytext generated files
 /notebook/

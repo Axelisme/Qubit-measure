@@ -12,7 +12,12 @@ from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import set_output_in_dev_cfg, setup_devices
+from zcu_tools.experiment.utils import (
+    make_comment,
+    parse_comment,
+    set_output_in_dev_cfg,
+    setup_devices,
+)
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -156,7 +161,12 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
             result = self.last_result
         assert result is not None, "no result found"
 
+        cfg = self.last_cfg
+        assert cfg is not None
+
         outputs, freqs, signals2D = result
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
@@ -168,7 +178,9 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> CheckResult:
-        signals2D, freqs, outputs, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals2D, freqs, outputs, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert freqs is not None and outputs is not None
         assert len(freqs.shape) == 1 and len(outputs.shape) == 1
         assert signals2D.shape == (len(outputs), len(freqs))
@@ -178,6 +190,10 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = CheckCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                self.last_cfg = CheckCfg.validate_or_warn(cfg, source=filepath)
+
         self.last_result = (outputs, freqs, signals2D)
         return outputs, freqs, signals2D

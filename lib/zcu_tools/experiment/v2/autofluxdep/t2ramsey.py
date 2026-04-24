@@ -8,12 +8,12 @@ from pydantic import BaseModel
 from typing_extensions import Callable, Optional, TypedDict
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.meta_tool import ModuleLibrary
-from zcu_tools.notebook.utils import make_comment, make_sweep
+from zcu_tools.notebook.utils import make_sweep
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
@@ -107,6 +107,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
         self.detune_ratio = detune_ratio
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
+        self.last_cfg = None
 
         def measure_ramsey_fn(
             ctx: TaskState[NDArray[np.complex128], T_RootResult, T2RamseyCfg],
@@ -181,6 +182,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
         )
         cfg["activate_detune"] = self.detune_ratio / len_sweep["step"]
         cfg = T2RamseyCfg.model_validate(cfg)
+        self.last_cfg = cfg
 
         self.task.set_pbar_n(cfg.rounds)
         self.task.run(ctx.child("raw_signals", new_cfg=cfg))
@@ -270,11 +272,13 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
 
     def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
+        cfg = self.last_cfg
+        assert cfg is not None
 
         np.savez_compressed(filepath, flux_values=flux_values, **result)
 
         x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
-        cfg = {}
+        comment = make_comment(cfg, comment)
 
         # signals
         save_data(
@@ -290,7 +294,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=make_comment(cfg, comment),
+            comment=comment,
             tag=prefix_tag + "/signals",
         )
 
@@ -308,7 +312,7 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
                 "unit": "s",
                 "values": result["length"].T * 1e-6,
             },
-            comment=make_comment(cfg, comment),
+            comment=comment,
             tag=prefix_tag + "/length",
         )
 
@@ -317,12 +321,14 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
             filepath=str(filepath.with_name(filepath.name + "_t2r")),
             x_info=x_info,
             z_info={"name": "T2 Ramsey", "unit": "s", "values": result["t2r"] * 1e-6},
-            comment=make_comment(cfg, comment),
+            comment=comment,
             tag=prefix_tag + "/t2r",
         )
 
     @classmethod
     def load(cls, filepath: str, **kwargs) -> dict:
+        _filepath = Path(filepath)
+
         data = np.load(filepath)
 
         flux_values = data["flux_values"]
@@ -330,23 +336,23 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
         t2r_detune_err = data["t2r_detune_err"]
         success = data["success"]
 
-        signals_stored, flux_sig, len_idxs = load_data(
-            str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs
+        signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
+        signals_stored, flux_sig, len_idxs, comment = load_data(
+            signal_path, return_comment=True, **kwargs
         )
+
         assert flux_sig is not None and len_idxs is not None
         assert np.array_equal(flux_values, flux_sig)
         assert signals_stored.shape == (len(len_idxs), len(flux_values))
 
-        length_stored, flux_len, _ = load_data(
-            str(Path(filepath).with_name(Path(filepath).name + "_length")), **kwargs
-        )
+        length_path = str(_filepath.with_name(_filepath.name + "_length"))
+        length_stored, flux_len, _ = load_data(length_path, **kwargs)
         assert flux_len is not None
         assert length_stored.shape == (len(flux_len), len(len_idxs))
         assert np.array_equal(flux_values, flux_len)
 
-        t2r_stored, flux_t2r, _ = load_data(
-            str(Path(filepath).with_name(Path(filepath).name + "_t2r")), **kwargs
-        )
+        t2r_path = str(_filepath.with_name(_filepath.name + "_t2r"))
+        t2r_stored, flux_t2r, _ = load_data(t2r_path, **kwargs)
         assert flux_t2r is not None
         assert t2r_stored.shape == (len(flux_t2r),)
         assert np.array_equal(flux_values, flux_t2r)
@@ -358,6 +364,9 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
         t2r_detune = data["t2r_detune"].astype(np.float64)
         t2r_detune_err = t2r_detune_err.astype(np.float64)
         success = success.astype(np.bool_)
+        last_cfg = None
+        if comment is not None:
+            last_cfg, _, _ = parse_comment(comment)
 
         return {
             "raw_signals": raw_signals,
@@ -369,4 +378,5 @@ class T2RamseyTask(MeasurementTask[T2RamseyResult, T_RootResult, T2RamseyPlotDic
             "success": success,
             "flux_values": flux_values,
             "lengths": length_stored[0],
+            "last_cfg": last_cfg,
         }

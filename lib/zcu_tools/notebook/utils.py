@@ -3,19 +3,16 @@ from __future__ import annotations
 import gc
 import json
 import os
-import time
-from copy import deepcopy
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-from typing_extensions import TYPE_CHECKING, Any, Mapping, Optional, Union
+from typing_extensions import TYPE_CHECKING, Mapping, Optional, Union
 
 from zcu_tools.device import DeviceInfo, GlobalDeviceManager
 from zcu_tools.device.sgs100a import RohdeSchwarzSGS100A
 from zcu_tools.device.yoko import YOKOGS200
 from zcu_tools.program import SweepCfg
-from zcu_tools.utils import format_dict
 
 if TYPE_CHECKING:
     try:
@@ -122,27 +119,6 @@ def get_ip_address(iface: str) -> str:
             )
         except OSError:
             raise OSError(f"Interface {iface} not found or has no IPv4 address.")
-
-
-def make_comment(cfg: Mapping[str, Any], comment: Optional[str] = None) -> str:
-    """
-    Generate a formatted comment string from a configuration dictionary.
-
-    Args:
-        cfg (dict): Configuration dictionary to be converted to a string.
-        prepend (str, optional): Additional string to prepend to the comment. Defaults to "".
-
-    Returns:
-        str: A formatted comment string.
-    """
-
-    cfg = format_dict(cfg)
-    if comment is not None:
-        cfg["comment"] = comment
-
-    cfg["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
-
-    return json.dumps(cfg, indent=2)
 
 
 def savefig(fig: Figure, filepath: str, close_after: bool = True, **kwargs) -> None:

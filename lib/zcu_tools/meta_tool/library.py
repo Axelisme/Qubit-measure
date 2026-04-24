@@ -5,12 +5,12 @@ from pathlib import Path
 
 import yaml
 from pydantic import BaseModel
-from typing_extensions import Any, Mapping, Optional, TypeVar, Union, cast
+from typing_extensions import Any, Optional, TypeVar, Union, cast
 from yaml.nodes import MappingNode
 
-from zcu_tools.device import DeviceInfo, GlobalDeviceManager
+from zcu_tools.device import GlobalDeviceManager
 from zcu_tools.program.v2 import ModuleCfg, WaveformCfg
-from zcu_tools.utils import deepupdate, format_dict
+from zcu_tools.utils import deepupdate, format_obj
 
 from .syncfile import SyncFile, auto_sync
 
@@ -116,8 +116,11 @@ class ModuleLibrary(SyncFile):
             self.modules[name] = mod_cfg
 
     def _dump(self, path: str) -> None:
-        dump_cfg = dict(waveforms=self.waveforms, modules=self.modules)
-        dump_cfg = format_dict(dump_cfg)
+        dump_cfg = dict(
+            waveforms=self.waveforms,
+            modules=self.modules,
+        )
+        dump_cfg = format_obj(dump_cfg)
 
         with open(path, "w") as f:
             yaml.dump(dump_cfg, f, Dumper=ModuleDumper, sort_keys=False)

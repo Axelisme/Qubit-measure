@@ -11,7 +11,12 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
+from zcu_tools.experiment.utils import (
+    format_sweep1D,
+    make_comment,
+    parse_comment,
+    setup_devices,
+)
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -185,6 +190,10 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
 
         phases, signals = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Phase", "unit": "deg", "values": phases},
@@ -195,7 +204,7 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PhaseResult:
-        signals, phases, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, phases, _, comment = load_data(filepath, return_comment=True, **kwargs)
         assert phases is not None
         assert len(phases.shape) == 1 and len(signals.shape) == 1
         assert phases.shape == signals.shape
@@ -203,7 +212,13 @@ class PhaseExp(AbsExperiment[PhaseResult, PhaseCfg]):
         phases = phases.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = PhaseCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = PhaseCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (phases, signals)
 
         return phases, signals

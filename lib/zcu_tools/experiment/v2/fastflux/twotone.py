@@ -11,7 +11,7 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -175,6 +175,10 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
 
         gains, freqs, signals2D = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Flux Pulse Gain", "unit": "a.u.", "values": gains},
@@ -186,7 +190,7 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> TwoToneResult:
-        signals2D, gains, freqs = load_data(filepath, **kwargs)
+        signals2D, gains, freqs, comment = load_data(filepath, return_comment=True, **kwargs)
         assert freqs is not None
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
         assert signals2D.shape == (len(gains), len(freqs))
@@ -197,7 +201,10 @@ class TwoToneExp(AbsExperiment[TwoToneResult, TwotoneCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = None
+        if comment is not None:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                self.last_cfg = TwotoneCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, freqs, signals2D)
 
         return gains, freqs, signals2D

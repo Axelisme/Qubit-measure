@@ -12,7 +12,7 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
@@ -254,6 +254,10 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
 
         gains, freqs, populations = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=str(_filepath.with_name(_filepath.name + "_g_population")),
             x_info={"name": "Drive gain", "unit": "a.u.", "values": gains},
@@ -286,7 +290,7 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         g_filepath, e_filepath = filepath
 
         # Load ground populations
-        g_pop, gains, freqs, cfg = load_data(g_filepath, return_cfg=True, **kwargs)
+        g_pop, gains, freqs, comment = load_data(g_filepath, return_comment=True, **kwargs)
         assert freqs is not None
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
         assert g_pop.shape == (len(gains), len(freqs))
@@ -306,7 +310,13 @@ class FreqPowerExp(AbsExperiment[FreqPowerResult, FreqPowerCfg]):
         freqs = freqs.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = FreqPowerCfg.validate_or_warn(cfg, source=g_filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = FreqPowerCfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (gains, freqs, populations)
 
         return gains, freqs, populations

@@ -8,12 +8,11 @@ from pydantic import BaseModel
 from typing_extensions import Callable, Optional, TypedDict
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
-from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -27,7 +26,7 @@ from zcu_tools.program.v2 import (
     sweep2param,
 )
 from zcu_tools.utils import deepupdate
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.func_tools import MinIntervalFunc
 
 from .executor import FluxDepCfg, MeasurementTask, T_RootResult
@@ -93,6 +92,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
     ) -> None:
         self.gain_sweep = gain_sweep
         self.cfg_maker = cfg_maker
+        self.last_cfg = None
 
         self.gains = sweep2array(gain_sweep)  # initial array, may be rounded later
 
@@ -141,6 +141,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             behavior="force",
         )
         cfg = MistCfg.model_validate(cfg)
+        self.last_cfg = cfg
 
         self.gains = sweep2array(
             cfg.sweep.gain,
@@ -198,13 +199,15 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
 
     def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
+        cfg = self.last_cfg
+        assert cfg is not None
 
         np.savez_compressed(
             filepath, flux_values=flux_values, gains=self.gains, **result
         )
 
         x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
-        cfg = {}
+        comment = make_comment(cfg, comment)
 
         # raw_signals: (flux, gains)
         save_data(
@@ -216,12 +219,13 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=make_comment(cfg, comment),
+            comment=comment,
             tag=prefix_tag + "/signals",
         )
 
     @classmethod
     def load(cls, filepath: str, **kwargs) -> dict:
+        _filepath = Path(filepath)
         data = np.load(filepath)
 
         flux_values = data["flux_values"]
@@ -234,10 +238,16 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
 
         raw_signals = raw_signals.astype(np.complex128)
         success = np.asarray(success, dtype=np.bool_)
+        signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
+        _, _, _, comment = load_data(signal_path, return_comment=True, **kwargs)
+        last_cfg = None
+        if comment is not None:
+            last_cfg, _, _ = parse_comment(comment)
 
         return {
             "raw_signals": raw_signals,
             "success": success,
             "flux_values": flux_values,
             "gains": gains,
+            "last_cfg": last_cfg,
         }

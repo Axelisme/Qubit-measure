@@ -12,7 +12,7 @@ from typing_extensions import Any, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
@@ -174,6 +174,10 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
 
         lengths, signals = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Readout Length", "unit": "s", "values": lengths * 1e-6},
@@ -184,7 +188,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> LengthResult:
-        signals, lengths, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, lengths, _, comment = load_data(filepath, return_comment=True, **kwargs)
         assert lengths is not None
         assert len(lengths.shape) == 1 and len(signals.shape) == 1
         assert lengths.shape == signals.shape
@@ -194,7 +198,13 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         lengths = lengths.astype(np.float64)
         signals = signals.astype(np.float64)
 
-        self.last_cfg = LengthCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = LengthCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (lengths, signals)
 
         return lengths, signals

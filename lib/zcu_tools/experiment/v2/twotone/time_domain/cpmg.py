@@ -21,7 +21,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -326,9 +326,16 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         _filepath = Path(filepath)
 
         times, lengths, signals2D = result
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
 
         np.savez_compressed(
-            _filepath, times=times, lengths=lengths, signals2D=signals2D
+            _filepath,
+            times=times,
+            lengths=lengths,
+            signals2D=signals2D,
+            comment=np.asarray(comment),
         )
 
         float_times = times.astype(np.float64)
@@ -361,12 +368,18 @@ class CPMG_Exp(AbsExperiment[CPMG_Result, CPMG_Cfg]):
         times = data["times"]
         lengths = data["lengths"]
         signals2D = data["signals2D"]
+        comment = None
+        if "comment" in data:
+            comment = str(data["comment"].tolist())
 
         times = times.astype(np.int64)
         lengths = lengths.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = None
+        if comment is not None:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                self.last_cfg = CPMG_Cfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (times, lengths, signals2D)
 
         return times, lengths, signals2D

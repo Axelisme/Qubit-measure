@@ -12,7 +12,7 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -170,6 +170,10 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
 
         freqs, gains, signals = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Pulse frequency", "unit": "Hz", "values": 1e6 * freqs},
@@ -181,7 +185,7 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> DriveFreqResult:
-        signals, freqs, gains, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, freqs, gains, comment = load_data(filepath, return_comment=True, **kwargs)
         assert gains is not None
         assert len(freqs.shape) == 1 and len(gains.shape) == 1
         assert signals.shape == (len(gains), len(freqs))
@@ -190,7 +194,13 @@ class DriveFreqExp(AbsExperiment[DriveFreqResult, DriveFreqCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = DriveFreqCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = DriveFreqCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (freqs, gains, signals)
 
         return freqs, gains, signals

@@ -12,7 +12,7 @@ from typing_extensions import Any, Optional, TypeAlias, cast
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -151,6 +151,10 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
 
         shots = np.arange(signals.shape[0])
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "shot", "unit": "point", "values": shots},
@@ -161,10 +165,16 @@ class CheckExp(AbsExperiment[CheckResult, CheckCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> CheckResult:
-        signals, _, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, _, _, comment = load_data(filepath, return_comment=True, **kwargs)
         signals = cast(CheckResult, signals)
 
-        self.last_cfg = CheckCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = CheckCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = signals
 
         return signals

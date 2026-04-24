@@ -20,7 +20,7 @@ from typing_extensions import (
 import zcu_tools.utils.fitting as ft
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
@@ -277,6 +277,10 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         assert result is not None, "no result found"
 
         Ts, signals = result
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
@@ -287,7 +291,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> T1Result:
-        signals, Ts, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, Ts, _, comment = load_data(filepath, return_comment=True, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1
         assert Ts.shape == signals.shape
@@ -297,7 +301,13 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = T1Cfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = T1Cfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (Ts, signals)
 
         return Ts, signals
@@ -432,6 +442,10 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         assert result is not None, "no result found"
 
         Ts, signals = result
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
@@ -442,7 +456,7 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> T1Result:
-        signals, Ts, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, Ts, _, comment = load_data(filepath, return_comment=True, **kwargs)
         assert Ts is not None
         assert len(Ts.shape) == 1 and len(signals.shape) == 1
         assert Ts.shape == signals.shape
@@ -452,7 +466,13 @@ class T1WithToneExp(AbsExperiment[T1Result, T1WithToneCfg]):
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = T1WithToneCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = T1WithToneCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (Ts, signals)
 
         return Ts, signals
@@ -639,6 +659,10 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         assert result is not None, "no result found"
 
         gains, Ts, signals = result
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Readout Gain", "unit": "a.u.", "values": gains},
@@ -650,7 +674,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         )
 
     def load(self, filepath: str, **kwargs) -> T1WithToneSweepResult:
-        signals, gains, Ts, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, gains, Ts, comment = load_data(filepath, return_comment=True, **kwargs)
         assert gains is not None and Ts is not None
         assert len(gains.shape) == 1 and len(Ts.shape) == 1
         assert signals.shape == (len(Ts), len(gains))
@@ -662,7 +686,13 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         Ts = Ts.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = T1WithToneSweepCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = T1WithToneSweepCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, Ts, signals)
 
         return gains, Ts, signals

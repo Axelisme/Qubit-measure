@@ -8,12 +8,11 @@ from pydantic import BaseModel
 from typing_extensions import Callable, Optional, TypedDict, cast
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot1D, LivePlot2DwithLine
 from zcu_tools.meta_tool import ModuleLibrary
-from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import TwoToneCfg, TwoToneProgram, sweep2param
 from zcu_tools.simulate.fluxonium import FluxoniumPredictor
@@ -87,6 +86,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         self.detune_sweep = detune_sweep
         self.cfg_maker = cfg_maker
         self.earlystop_snr = earlystop_snr
+        self.last_cfg = None
 
         # initial array, may be rounded later
         self.detunes = sweep2array(self.detune_sweep)
@@ -152,6 +152,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             behavior="force",
         )
         cfg = QubitFreqCfg.model_validate(cfg)
+        self.last_cfg = cfg
         modules = cfg.modules
 
         center_freq = cast(float, modules.qub_pulse.freq)
@@ -281,13 +282,15 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
 
     def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
+        cfg = self.last_cfg
+        assert cfg is not None
 
         np.savez_compressed(
             filepath, flux_values=flux_values, detunes=self.detunes, **result
         )
 
         x_info = {"name": "Flux value", "unit": "a.u.", "values": flux_values}
-        cfg = {}
+        comment = make_comment(cfg, comment)
 
         # signals
         save_data(
@@ -299,7 +302,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
                 "unit": "a.u.",
                 "values": result["raw_signals"].T,
             },
-            comment=make_comment(cfg, comment),
+            comment=comment,
             tag=prefix_tag + "/signals",
         )
 
@@ -312,7 +315,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
                 "unit": "Hz",
                 "values": result["predict_freq"] * 1e6,
             },
-            comment=make_comment(cfg, comment),
+            comment=comment,
             tag=prefix_tag + "/predict_freq",
         )
 
@@ -325,7 +328,7 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
                 "unit": "Hz",
                 "values": result["fit_freq"] * 1e6,
             },
-            comment=make_comment(cfg, comment),
+            comment=comment,
             tag=prefix_tag + "/fit_freq",
         )
 
@@ -334,12 +337,14 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             filepath=str(filepath.with_name(filepath.name + "_success")),
             x_info=x_info,
             z_info={"name": "Success", "unit": "bool", "values": result["success"]},
-            comment=make_comment(cfg, comment),
+            comment=comment,
             tag=prefix_tag + "/success",
         )
 
     @classmethod
     def load(cls, filepath: str, **kwargs) -> dict:
+        _filepath = Path(filepath)
+
         data = np.load(filepath)
 
         flux_values: NDArray[np.float64] = data["flux_values"]
@@ -349,24 +354,23 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         fit_kappa: NDArray[np.float64] = data["fit_kappa"]
         fit_kappa_err: NDArray[np.float64] = data["fit_kappa_err"]
 
-        signals_stored, flux_sig, detunes_sig = load_data(
-            str(Path(filepath).with_name(Path(filepath).name + "_signals")), **kwargs
+        signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
+        signals_stored, flux_sig, detunes_sig, comment = load_data(
+            signal_path, return_comment=True, **kwargs
         )
         assert flux_sig is not None and detunes_sig is not None
         assert np.array_equal(flux_values, flux_sig)
         assert np.array_equal(detunes, detunes_sig)
         assert signals_stored.shape == (len(detunes), len(flux_values))
 
-        predict_freq_data, flux_predict, _ = load_data(
-            str(Path(filepath).with_name(Path(filepath).name + "_predict_freq")),
-            **kwargs,
-        )
-        fit_freq_data, flux_fit, _ = load_data(
-            str(Path(filepath).with_name(Path(filepath).name + "_fit_freq")), **kwargs
-        )
-        success_data, flux_success, _ = load_data(
-            str(Path(filepath).with_name(Path(filepath).name + "_success")), **kwargs
-        )
+        predict_freq_path = str(_filepath.with_name(_filepath.name + "_predict_freq"))
+        predict_freq_data, flux_predict, _ = load_data(predict_freq_path, **kwargs)
+
+        fit_freq_path = str(_filepath.with_name(_filepath.name + "_fit_freq"))
+        fit_freq_data, flux_fit, _ = load_data(fit_freq_path, **kwargs)
+
+        success_path = str(_filepath.with_name(_filepath.name + "_success"))
+        success_data, flux_success, _ = load_data(success_path, **kwargs)
 
         assert (
             flux_predict is not None
@@ -391,6 +395,9 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
         fit_kappa = np.asarray(fit_kappa, dtype=np.float64)
         fit_kappa_err = np.asarray(fit_kappa_err, dtype=np.float64)
         success = success_data.astype(np.bool_)
+        last_cfg = None
+        if comment is not None:
+            last_cfg, _, _ = parse_comment(comment)
 
         return {
             "raw_signals": raw_signals,
@@ -401,4 +408,5 @@ class QubitFreqTask(MeasurementTask[QubitFreqResult, T_RootResult, FreqPlotDict]
             "fit_kappa": fit_kappa,
             "fit_kappa_err": fit_kappa_err,
             "success": success,
+            "last_cfg": last_cfg,
         }

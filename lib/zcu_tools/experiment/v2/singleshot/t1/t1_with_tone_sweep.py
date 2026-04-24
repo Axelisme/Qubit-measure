@@ -14,16 +14,11 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.singleshot.util import calc_populations
 from zcu_tools.experiment.v2.utils import sweep2array
-from zcu_tools.liveplot import (
-    LivePlot1D,
-    LivePlot2D,
-    MultiLivePlot,
-    make_plot_frame,
-)
+from zcu_tools.liveplot import LivePlot1D, LivePlot2D, MultiLivePlot, make_plot_frame
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Branch,
@@ -369,7 +364,12 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
             result = self.last_result
         assert result is not None, "no result found"
 
+        cfg = self.last_cfg
+        assert cfg is not None
+
         xs, Ts, populations = result
+        comment = make_comment(cfg, comment)
+
         _filepath = Path(filepath)
 
         save_data(
@@ -429,7 +429,7 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         gg_filepath, ge_filepath, eg_filepath, ee_filepath = filepath
 
         # Load ground populations
-        gg_pop, xs, Ts, cfg = load_data(gg_filepath, return_cfg=True, **kwargs)
+        gg_pop, xs, Ts, comment = load_data(gg_filepath, return_comment=True, **kwargs)
         assert Ts is not None
         assert len(xs.shape) == 1 and len(Ts.shape) == 1
         assert gg_pop.shape == (len(xs), len(Ts))
@@ -465,7 +465,12 @@ class T1WithToneSweepExp(AbsExperiment[T1WithToneSweepResult, T1WithToneSweepCfg
         Ts = Ts.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = T1WithToneSweepCfg.validate_or_warn(cfg, source=gg_filepath)
+        if comment is not None:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                self.last_cfg = T1WithToneSweepCfg.validate_or_warn(
+                    cfg, source=gg_filepath
+                )
         self.last_result = (xs, Ts, populations)
 
         return xs, Ts, populations

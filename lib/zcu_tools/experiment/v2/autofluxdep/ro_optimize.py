@@ -10,7 +10,7 @@ from scipy.ndimage import gaussian_filter
 from typing_extensions import Callable, Optional, TypedDict
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import snr_as_signal, sweep2array
 from zcu_tools.experiment.v2.utils.tracker import MomentTracker
@@ -91,6 +91,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         self.freq_expts = freq_expts
         self.gain_expts = gain_expts
         self.cfg_maker = cfg_maker
+        self.last_cfg = None
 
         def measure_ro_fn(
             ctx: TaskState[NDArray[np.float64], T_RootResult, RO_OptCfg],
@@ -165,6 +166,7 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             behavior="force",
         )
         cfg = RO_OptCfg.model_validate(cfg)
+        self.last_cfg = cfg
         modules = cfg.modules
 
         self.freqs = sweep2array(
@@ -259,8 +261,13 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
 
     def save(self, filepath, flux_values, result, comment, prefix_tag) -> None:
         filepath = Path(filepath)
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
 
-        np.savez_compressed(filepath, flux_values=flux_values, **result)
+        np.savez_compressed(
+            filepath, flux_values=flux_values, comment=np.asarray(comment), **result
+        )
 
     @classmethod
     def load(cls, filepath: str, **kwargs) -> dict:
@@ -272,6 +279,12 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
         gains = data["gains"]
         best_freq = data["best_freq"]
         best_gain = data["best_gain"]
+        comment = None
+        if "comment" in data:
+            comment = str(data["comment"].tolist())
+        last_cfg = None
+        if comment is not None:
+            last_cfg, _, _ = parse_comment(comment)
 
         return {
             "flux_values": flux_values,
@@ -280,4 +293,5 @@ class RO_OptTask(MeasurementTask[RO_OptResult, T_RootResult, RO_OptPlotDict]):
             "gains": gains,
             "best_freq": best_freq,
             "best_gain": best_gain,
+            "last_cfg": last_cfg,
         }

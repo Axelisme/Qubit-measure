@@ -11,7 +11,12 @@ from typing_extensions import Any, Callable, Mapping, Optional, TypeAlias, cast
 from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import set_flux_in_dev_cfg, setup_devices
+from zcu_tools.experiment.utils import (
+    make_comment,
+    parse_comment,
+    set_flux_in_dev_cfg,
+    setup_devices,
+)
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -219,6 +224,10 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
 
         values, gains, signals = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Flux value", "unit": "a.u.", "values": values},
@@ -230,7 +239,7 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FluxDepResult:
-        signals, values, gains, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, values, gains, comment = load_data(filepath, return_comment=True, **kwargs)
         assert values is not None and gains is not None
         assert len(values.shape) == 1 and len(gains.shape) == 1
         assert signals.shape == (len(values), len(gains))
@@ -239,7 +248,13 @@ class FluxDepExp(AbsExperiment[FluxDepResult, FluxDepCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = FluxDepCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (values, gains, signals)
 
         return values, gains, signals

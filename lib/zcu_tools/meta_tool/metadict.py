@@ -8,7 +8,7 @@ from pprint import pformat
 
 from typing_extensions import Any, Optional, Self, Union
 
-from zcu_tools.utils import format_dict
+from zcu_tools.utils import format_obj
 
 from .syncfile import SyncFile, auto_sync
 
@@ -66,7 +66,7 @@ class MetaDict(SyncFile):
     def _dump(self, path: str, force=True) -> None:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
-        data_to_dump = format_dict(self._data)
+        data_to_dump = format_obj(self._data)
 
         mode = "w" if force else "x"
 

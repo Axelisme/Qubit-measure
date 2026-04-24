@@ -12,7 +12,7 @@ from typing_extensions import Any, Optional, TypeAlias, Union
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, MultiLivePlot, make_plot_frame
@@ -290,6 +290,10 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         _filepath = Path(filepath)
 
         # initial in g
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=str(_filepath.with_name(_filepath.stem + "_initg")),
             x_info={"name": "Time", "unit": "s", "values": Ts * 1e-6},
@@ -315,7 +319,7 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         g_filepath, e_filepath = filepath
 
         # Load ground populations
-        g_pop, g_Ts, _, cfg = load_data(g_filepath, return_cfg=True, **kwargs)
+        g_pop, g_Ts, _, comment = load_data(g_filepath, return_comment=True, **kwargs)
         assert g_pop.shape == (len(g_Ts), 2)
 
         # Load excited populations
@@ -332,7 +336,13 @@ class T1Exp(AbsExperiment[T1Result, T1Cfg]):
         Ts = Ts.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = T1Cfg.validate_or_warn(cfg, source=g_filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = T1Cfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (Ts, populations)
 
         return Ts, populations

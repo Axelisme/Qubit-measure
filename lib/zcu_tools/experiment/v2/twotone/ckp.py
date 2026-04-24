@@ -17,7 +17,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, MultiLivePlot, make_plot_frame
@@ -329,6 +329,10 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         _filepath = Path(filepath)
 
         # ground
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=str(_filepath.with_name(_filepath.name + "_ground")),
             x_info={
@@ -360,8 +364,8 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
     def load(self, filepath: list[str], **kwargs) -> CKP_Result:
         g_filepath, e_filepath = filepath
 
-        g_signals, res_freqs, qub_freqs, cfg = load_data(
-            g_filepath, return_cfg=True, **kwargs
+        g_signals, res_freqs, qub_freqs, comment = load_data(
+            g_filepath, return_comment=True, **kwargs
         )
         assert qub_freqs is not None
         assert len(res_freqs.shape) == 1 and len(qub_freqs.shape) == 1
@@ -378,7 +382,13 @@ class CKP_Exp(AbsExperiment[CKP_Result, CKP_Cfg]):
         qub_freqs = qub_freqs.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = CKP_Cfg.validate_or_warn(cfg, source=g_filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = CKP_Cfg.validate_or_warn(cfg, source=g_filepath)
         self.last_result = (res_freqs, qub_freqs, signals)
 
         return res_freqs, qub_freqs, signals

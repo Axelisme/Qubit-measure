@@ -19,7 +19,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -407,6 +407,10 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
         )
 
         entropys, depths, signals2D = result
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={
@@ -426,7 +430,7 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> RB_Result:
-        signals, entropys, depths, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, entropys, depths, comment = load_data(filepath, return_comment=True, **kwargs)
         assert depths is not None
         assert len(entropys.shape) == 1 and len(depths.shape) == 1
         assert signals.shape == (len(depths), len(entropys))
@@ -437,7 +441,13 @@ class RB_Exp(AbsExperiment[RB_Result, RBCfg]):
         depths = depths.astype(np.int64)
         signals2D = signals.astype(np.complex128)
 
-        self.last_cfg = RBCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = RBCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (sub_seeds, depths, signals2D)
 
         return sub_seeds, depths, signals2D

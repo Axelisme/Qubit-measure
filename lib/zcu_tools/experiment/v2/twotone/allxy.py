@@ -17,7 +17,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -357,6 +357,10 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
         gate_idxs = np.arange(len(ALLXY_SEQUENCE))
         signals = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Gate Pair Index", "unit": "", "values": gate_idxs},
@@ -367,14 +371,20 @@ class AllXY_Exp(AbsExperiment[AllXY_Result, AllXYCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> AllXY_Result:
-        signals, gate_idxs, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, gate_idxs, _, comment = load_data(filepath, return_comment=True, **kwargs)
         assert len(gate_idxs.shape) == 1 and len(signals.shape) == 1
         assert len(gate_idxs) == len(ALLXY_SEQUENCE)
         assert signals.shape == gate_idxs.shape
 
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = AllXYCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = AllXYCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = signals
 
         return signals

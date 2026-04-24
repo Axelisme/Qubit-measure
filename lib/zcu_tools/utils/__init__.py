@@ -47,24 +47,22 @@ def deepupdate(
             conflict_handler(d, u, k)
 
 
-def format_dict(obj: Mapping[str, Any]) -> dict[str, Any]:
-    def _format_value(v: Any) -> Any:
-        if hasattr(v, "to_dict") and callable(v.to_dict):
-            v = v.to_dict()  # work for pydantic model
-        if hasattr(v, "model_dump") and callable(v.model_dump):
-            v = v.model_dump(mode="python")  # work for pydantic model
-        if hasattr(v, "tolist") and callable(v.tolist):
-            v = v.tolist()  # work for numpy array
-        if hasattr(v, "item") and callable(v.item):
-            v = v.item()  # work for numpy scalar
+def format_obj(obj: Any) -> Any:
+    if hasattr(obj, "to_dict") and callable(obj.to_dict):
+        obj = obj.to_dict()  # work for pydantic model
+    if hasattr(obj, "model_dump") and callable(obj.model_dump):
+        obj = obj.model_dump(mode="python")  # work for pydantic model
+    if hasattr(obj, "tolist") and callable(obj.tolist):
+        obj = obj.tolist()  # work for numpy array
+    if hasattr(obj, "item") and callable(obj.item):
+        obj = obj.item()  # work for numpy scalar
 
-        if isinstance(v, dict):
-            v = {k: _format_value(v) for k, v in v.items()}
-        if isinstance(v, list):
-            v = [_format_value(v) for v in v]
-        return v
+    if isinstance(obj, dict):
+        obj = {k: format_obj(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        obj = [format_obj(v) for v in obj]
 
-    return {k: _format_value(v) for k, v in obj.items()}
+    return obj
 
 
 __all__ = [
@@ -77,5 +75,5 @@ __all__ = [
     "deepupdate",
     # datasaver
     "datasaver",
-    "format_dict",
+    "format_obj",
 ]

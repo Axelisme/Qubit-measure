@@ -14,7 +14,7 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -201,6 +201,10 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
         _filepath = Path(filepath)
 
         # 0 signals
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=str(_filepath.with_name(_filepath.name + "_0deg")),
             x_info={"name": "Cavity drive Gain", "unit": "a.u.", "values": gains},
@@ -247,8 +251,8 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
     def load(self, filepath: list[str], **kwargs) -> FreqGainResult:
         deg0_filepath, deg90_filepath, deg180_filepath, deg270_filepath = filepath
 
-        deg0_signals, gains, freqs, cfg = load_data(
-            deg0_filepath, return_cfg=True, **kwargs
+        deg0_signals, gains, freqs, comment = load_data(
+            deg0_filepath, return_comment=True, **kwargs
         )
         assert gains is not None and freqs is not None
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
@@ -284,7 +288,13 @@ class FreqGainExp(AbsExperiment[FreqGainResult, FreqGainCfg]):
             [deg0_signals, deg90_signals, deg180_signals, deg270_signals], axis=0
         ).astype(np.complex128)
 
-        self.last_cfg = FreqGainCfg.validate_or_warn(cfg, source=str(deg0_filepath))
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = FreqGainCfg.validate_or_warn(cfg, source=str(deg0_filepath))
         self.last_result = (gains, freqs, signals)
 
         return gains, freqs, signals

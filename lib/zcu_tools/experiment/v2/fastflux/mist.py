@@ -12,7 +12,7 @@ from typing_extensions import Any, Callable, Optional, TypeAlias, cast
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D
@@ -187,6 +187,10 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
 
         flux_gains, mist_gains, signals2D = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Flux Pulse Gain", "unit": "a.u.", "values": flux_gains},
@@ -198,7 +202,7 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> MistResult:
-        signals2D, flux_gains, mist_gains = load_data(filepath, **kwargs)
+        signals2D, flux_gains, mist_gains, comment = load_data(filepath, return_comment=True, **kwargs)
         assert mist_gains is not None
         assert len(flux_gains.shape) == 1 and len(mist_gains.shape) == 1
         assert signals2D.shape == (len(flux_gains), len(mist_gains))
@@ -207,7 +211,10 @@ class MistExp(AbsExperiment[MistResult, MistCfg]):
         mist_gains = mist_gains.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = None
+        if comment is not None:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                self.last_cfg = MistCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (flux_gains, mist_gains, signals2D)
 
         return flux_gains, mist_gains, signals2D

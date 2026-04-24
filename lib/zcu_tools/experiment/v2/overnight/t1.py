@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
 from matplotlib.figure import Figure
 from numpy.typing import NDArray
 from pydantic import BaseModel
-from typing_extensions import Any, Callable, Optional, TypedDict
+from typing_extensions import Any, Callable, Generic, Optional, TypedDict, TypeVar, cast
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2DwithLine
-from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     Delay,
@@ -28,7 +26,7 @@ from zcu_tools.program.v2 import (
     ResetCfg,
     sweep2param,
 )
-from zcu_tools.utils.datasaver import save_data
+from zcu_tools.utils.datasaver import load_data, save_data
 from zcu_tools.utils.fitting import fit_decay
 from zcu_tools.utils.func_tools import MinIntervalFunc
 from zcu_tools.utils.process import rotate2real
@@ -63,8 +61,13 @@ class T1PlotDict(TypedDict, closed=True):
     t1: LivePlot2DwithLine
 
 
-class T1PlotAndSaveMixin:
-    _init_cfg: ExpCfgModel
+T_Cfg = TypeVar("T_Cfg", bound=ExpCfgModel)
+
+
+class T1PlotAndSaveMixin(Generic[T_Cfg]):
+    def __init__(self, cfg: T_Cfg, cfg_model: type[T_Cfg]) -> None:
+        self.cfg: T_Cfg = cfg.model_copy(deep=True)
+        self.cfg_model = cfg_model
 
     def num_axes(self) -> dict[str, int]:
         return dict(t1=2)
@@ -93,8 +96,7 @@ class T1PlotAndSaveMixin:
         filepath = Path(filepath)
 
         x_info = {"name": "Iteration", "unit": "a.u.", "values": iters}
-
-        comment = make_comment(self._init_cfg.to_dict(), comment)
+        comment = make_comment(self.cfg, comment)
 
         lengths = result["lengths"][0]
 
@@ -107,6 +109,25 @@ class T1PlotAndSaveMixin:
             comment=comment,
             tag=prefix_tag + "/signals",
         )
+
+    def load(self, filepath: str, **kwargs) -> T1Result:
+        signals, lengths, _, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
+        assert lengths is not None
+        assert len(lengths.shape) == 1 and len(signals.shape) == 1
+        assert lengths.shape == signals.shape
+
+        lengths = lengths * 1e-6  # s -> us
+
+        if comment is not None:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                self.cfg = cast(
+                    T_Cfg, self.cfg_model.validate_or_warn(cfg, source=filepath)
+                )
+
+        return T1Result(lengths=lengths, signals=signals)
 
     def analyze(
         self, _name: str, iters: NDArray[np.int64], result: T1Result, fig: Figure
@@ -156,12 +177,13 @@ class T1Cfg(ProgramV2Cfg, ExpCfgModel):
     sweep: T1SweepCfg
 
 
-class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotDict]):
+class T1Task(
+    T1PlotAndSaveMixin[T1Cfg], MeasurementTask[T1Result, T_RootResult, T1PlotDict]
+):
     def __init__(
         self, cfg: T1Cfg, *, acquire_kwargs: Optional[dict[str, Any]] = None
     ) -> None:
-        self.cfg = cfg
-        self._init_cfg = cfg.model_copy(deep=True)
+        super().__init__(cfg, T1Cfg)
 
         setup_devices(self.cfg, progress=True)
 
@@ -201,13 +223,14 @@ class T1Task(T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotD
             pbar_n=self.cfg.rounds,
         )
 
-    def init(self, ctx, dynamic_pbar=False) -> None:
-        self.lengths = sweep2array(self.lengths, "time", {"soccfg": ctx.env["soccfg"]})
-
-        self.task.init(ctx.child("signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
+    def init(self, dynamic_pbar=False) -> None:
+        self.task.init(dynamic_pbar=dynamic_pbar)
 
     def run(self, ctx: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
-        self.task.run(ctx.child("signals", new_cfg=self.cfg))  # type: ignore
+        self.lengths = sweep2array(self.lengths, "time", {"soccfg": ctx.env["soccfg"]})
+        self.last_cfg = self.cfg
+
+        self.task.run(ctx.child("signals", new_cfg=self.cfg))
 
         with MinIntervalFunc.force_execute():
             ctx.set_value(
@@ -244,13 +267,13 @@ class T1WithToneCfg(ProgramV2Cfg, ExpCfgModel):
 
 
 class T1WithToneTask(
-    T1PlotAndSaveMixin, MeasurementTask[T1Result, T_RootResult, T1PlotDict]
+    T1PlotAndSaveMixin[T1WithToneCfg],
+    MeasurementTask[T1Result, T_RootResult, T1PlotDict],
 ):
     def __init__(
         self, cfg: T1WithToneCfg, *, acquire_kwargs: Optional[dict[str, Any]] = None
     ) -> None:
-        self.cfg = cfg
-        self._init_cfg = cfg.model_copy(deep=True)
+        super().__init__(cfg, T1WithToneCfg)
 
         # initial values, may be rounded later
         self.lengths = sweep2array(self.cfg.sweep.length)
@@ -289,9 +312,10 @@ class T1WithToneTask(
             pbar_n=self.cfg.rounds,
         )
 
-    def init(
-        self, ctx: TaskState[T1Result, T_RootResult, OvernightCfg], dynamic_pbar=False
-    ) -> None:
+    def init(self, dynamic_pbar=False) -> None:
+        self.task.init(dynamic_pbar=dynamic_pbar)
+
+    def run(self, ctx: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
         self.lengths = sweep2array(
             self.lengths,
             "time",
@@ -300,11 +324,9 @@ class T1WithToneTask(
                 "gen_ch": self.cfg.modules.probe_pulse.ch,
             },
         )
+        self.last_cfg = self.cfg
 
-        self.task.init(ctx.child("signals"), dynamic_pbar=dynamic_pbar)  # type: ignore
-
-    def run(self, ctx: TaskState[T1Result, T_RootResult, OvernightCfg]) -> None:
-        self.task.run(ctx.child("signals", new_cfg=self.cfg))  # type: ignore
+        self.task.run(ctx.child("signals", new_cfg=self.cfg))
 
         ctx.set_value(
             T1Result(

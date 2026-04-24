@@ -8,14 +8,13 @@ from matplotlib.image import NonUniformImage
 from numpy.typing import NDArray
 from pydantic import BaseModel
 from scipy.ndimage import gaussian_filter
-from typing_extensions import Any, Callable, Optional, TypedDict
+from typing_extensions import Callable, Optional, TypedDict
 
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D, LivePlot2D
-from zcu_tools.notebook.utils import make_comment
 from zcu_tools.program import SweepCfg
 from zcu_tools.program.v2 import (
     ModularProgramV2,
@@ -241,8 +240,18 @@ class MistOvernightAnalyzer:
         ax_o.legend(fontsize=8)
 
     @classmethod
-    def save(cls, filepath: str, iters, result, comment, prefix_tag) -> None:
+    def save(
+        cls,
+        filepath: str,
+        iters,
+        result,
+        cfg: MistCfg,
+        comment: Optional[str],
+        prefix_tag: str,
+    ) -> None:
         _filepath = Path(filepath)
+
+        comment = make_comment(cfg, comment)
 
         x_info = {"name": "Iteration", "unit": "a.u.", "values": iters}
 
@@ -280,7 +289,9 @@ class MistOvernightAnalyzer:
     def load(self, filepath: list[str], **kwargs) -> MistResult:
         g_filepath, e_filepath = filepath
 
-        g_pops, iters, gains, cfg = load_data(g_filepath, return_cfg=True, **kwargs)
+        g_pops, iters, gains, comment = load_data(
+            g_filepath, return_comment=True, **kwargs
+        )
         assert gains is not None
         assert g_pops.shape == (len(iters), len(gains))
 
@@ -297,10 +308,10 @@ class MistOvernightAnalyzer:
         populations = np.stack([g_pops, e_pops], axis=-1)  # (iters, gains, 2)
         gains = np.tile(gains, reps=(len(iters), 1))
 
-        validated_cfg = MistCfg.validate_or_warn(
-            cfg, source=f"overnight mist {g_filepath}"
-        )
-        self.cfg = validated_cfg
+        if comment is not None:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                self.cfg = MistCfg.validate_or_warn(cfg, source=g_filepath)
         self.result = MistResult(gains=gains, populations=populations)
 
         return self.result
@@ -311,7 +322,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         self, cfg: MistCfg, g_center: complex, e_center: complex, radius: float
     ) -> None:
         self.cfg = cfg
-        self._init_cfg = cfg.model_copy(deep=True)
+        self.last_cfg = cfg.model_copy(deep=True)
 
         setup_devices(self.cfg, progress=True)
 
@@ -356,11 +367,10 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
             pbar_n=self.cfg.rounds,
         )
 
-    def init(
-        self,
-        ctx: TaskState[MistResult, T_RootResult, OvernightCfg],
-        dynamic_pbar: bool = False,
-    ) -> None:
+    def init(self, dynamic_pbar: bool = False) -> None:
+        self.task.init(dynamic_pbar=dynamic_pbar)
+
+    def run(self, ctx: TaskState[MistResult, T_RootResult, OvernightCfg]) -> None:
         self.gains = sweep2array(
             self.gains,
             "gain",
@@ -369,10 +379,7 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
                 "gen_ch": self.cfg.modules.probe_pulse.ch,
             },
         )
-        self.task.init(ctx.child("populations"), dynamic_pbar=dynamic_pbar)  # type: ignore
-
-    def run(self, ctx: TaskState[MistResult, T_RootResult, OvernightCfg]) -> None:
-        self.task.run(ctx.child("populations", new_cfg=self.cfg))  # type: ignore
+        self.task.run(ctx.child("populations", new_cfg=self.cfg))
 
         with MinIntervalFunc.force_execute():
             ctx.set_value(
@@ -463,5 +470,6 @@ class MistTask(MeasurementTask[MistResult, T_RootResult, MistPlotDict]):
         MistOvernightAnalyzer().analyze(result=result, **kwargs)
 
     def save(self, filepath, iters, result, comment, prefix_tag) -> None:
-        comment = make_comment(self._init_cfg.to_dict(), comment)
-        MistOvernightAnalyzer.save(filepath, iters, result, comment, prefix_tag)
+        cfg = self.last_cfg
+        assert cfg is not None
+        MistOvernightAnalyzer.save(filepath, iters, result, cfg, comment, prefix_tag)

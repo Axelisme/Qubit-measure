@@ -341,13 +341,13 @@ class AutoOptExp(AbsExperiment[AutoOptResult, AutoOptCfg]):
 
         params_data, _, _ = load_data(
             filepath=str(_filepath.with_name(_filepath.name + "_params")),
-            return_cfg=False,
+            return_comment=False,
             **kwargs,
         )
 
         signals_data, _, _ = load_data(
             filepath=str(_filepath.with_name(_filepath.name + "_signals")),
-            return_cfg=False,
+            return_comment=False,
             **kwargs,
         )
 

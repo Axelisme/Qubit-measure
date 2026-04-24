@@ -11,7 +11,7 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -194,6 +194,10 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
 
         gains, populations = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Drive gain", "unit": "a.u.", "values": gains},
@@ -205,12 +209,18 @@ class PowerExp(AbsExperiment[PowerResult, PowerCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PowerResult:
-        populations, gains, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        populations, gains, _, comment = load_data(filepath, return_comment=True, **kwargs)
 
         gains = gains.astype(np.float64)
         populations = np.real(populations).astype(np.float64)
 
-        self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = PowerCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, populations)
 
         return gains, populations

@@ -12,7 +12,12 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import format_sweep1D, setup_devices
+from zcu_tools.experiment.utils import (
+    format_sweep1D,
+    make_comment,
+    parse_comment,
+    setup_devices,
+)
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -187,6 +192,10 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
 
         lens, signals = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Length", "unit": "s", "values": lens * 1e-6},
@@ -197,7 +206,7 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> LengthResult:
-        signals, lens, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, lens, _, comment = load_data(filepath, return_comment=True, **kwargs)
         assert lens is not None
         assert len(lens.shape) == 1 and len(signals.shape) == 1
         assert lens.shape == signals.shape
@@ -207,7 +216,13 @@ class LengthExp(AbsExperiment[LengthResult, LengthCfg]):
         lens = lens.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = LengthCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = LengthCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (lens, signals)
 
         return lens, signals

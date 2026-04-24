@@ -16,6 +16,8 @@ from zcu_tools.device import DeviceInfo
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
 from zcu_tools.experiment.utils import (
+    make_comment,
+    parse_comment,
     set_flux_in_dev_cfg,
     set_freq_in_dev_cfg,
     set_power_in_dev_cfg,
@@ -307,6 +309,10 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
             "values": np.arange(params.shape[0]),
         }
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=str(_filepath.with_name(_filepath.name + "_params")),
             x_info=x_info,
@@ -339,32 +345,23 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         _filepath = Path(filepath)
 
         # Load params (iterations x 3)
-        params_data, iters, param_types = load_data(
-            str(_filepath.with_name(_filepath.name + "_params")),
-            **kwargs,
-            return_cfg=False,
-        )
+        param_path = str(_filepath.with_name(_filepath.name + "_params"))
+        params_data, iters, param_types, comment = load_data(param_path, return_comment=True, **kwargs)
         assert iters is not None and param_types is not None
         assert len(iters.shape) == 1 and len(param_types.shape) == 1
         assert params_data.shape == (len(param_types), len(iters))
 
         params = params_data.T  # transpose back (num_points, 3)
 
-        phases, iters_ph, _ = load_data(
-            str(_filepath.with_name(_filepath.name + "_phases")),
-            **kwargs,
-            return_cfg=False,
-        )
+        phase_path = str(_filepath.with_name(_filepath.name + "_phases"))
+        phases, iters_ph, _ = load_data(phase_path, **kwargs)
         assert iters_ph is not None
         assert len(iters_ph.shape) == 1
         assert phases.shape[0] == params.shape[0]
 
         # Load signals
-        signals, iters_sig, _ = load_data(
-            str(_filepath.with_name(_filepath.name + "_signals")),
-            **kwargs,
-            return_cfg=False,
-        )
+        signal_path = str(_filepath.with_name(_filepath.name + "_signals"))
+        signals, iters_sig, _ = load_data(signal_path, **kwargs)
         assert iters_sig is not None
         assert len(signals.shape) == 1
         assert signals.shape[0] == params.shape[0]
@@ -373,7 +370,10 @@ class AutoOptimizeExp(AbsExperiment[JPAOptimizeResult, JPAOptCfg]):
         params = params.astype(np.float64)
         signals = signals.astype(np.float64)
 
-        self.last_cfg = None
+        if comment is not None:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                self.last_cfg = JPAOptCfg.validate_or_warn(cfg, source=param_path)
         self.last_result = (params, phases, signals)
 
         return params, phases, signals

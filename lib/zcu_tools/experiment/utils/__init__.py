@@ -1,3 +1,4 @@
+from .comment import make_comment, parse_comment
 from .device import (
     get_labeled_device_cfg,
     set_flux_in_dev_cfg,
@@ -18,4 +19,7 @@ __all__ = [
     "setup_devices",
     # sweep
     "format_sweep1D",
+    # comment
+    "make_comment",
+    "parse_comment",
 ]

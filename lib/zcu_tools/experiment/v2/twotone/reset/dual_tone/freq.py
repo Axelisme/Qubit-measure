@@ -12,7 +12,7 @@ from typing_extensions import Any, Callable, Literal, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot2D, LivePlot2DwithLine
@@ -292,6 +292,10 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
 
         freqs1, freqs2, signals = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Frequency1", "unit": "Hz", "values": freqs1 * 1e6},
@@ -303,7 +307,9 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> FreqResult:
-        signals, freqs1, freqs2, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, freqs1, freqs2, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert freqs1 is not None and freqs2 is not None
         assert len(freqs1.shape) == 1 and len(freqs2.shape) == 1
         assert signals.shape == (len(freqs2), len(freqs1))
@@ -316,7 +322,13 @@ class FreqExp(AbsExperiment[FreqResult, FreqCfg]):
         freqs2 = freqs2.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = FreqCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (freqs1, freqs2, signals)
 
         return freqs1, freqs2, signals

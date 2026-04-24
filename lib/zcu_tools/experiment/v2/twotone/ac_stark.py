@@ -17,7 +17,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import (
     round_zcu_gain,
@@ -310,6 +310,10 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
 
         gains, freqs, signals2D = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Stark Pulse Gain", "unit": "a.u.", "values": gains},
@@ -321,7 +325,9 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> AcStarkResult:
-        signals2D, gains, freqs, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals2D, gains, freqs, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert freqs is not None
         assert len(gains.shape) == 1 and len(freqs.shape) == 1
         assert signals2D.shape == (len(gains), len(freqs))
@@ -332,7 +338,13 @@ class AcStarkExp(AbsExperiment[AcStarkResult, AcStarkCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = AcStarkCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = AcStarkCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, freqs, signals2D)
 
         return gains, freqs, signals2D
@@ -537,6 +549,10 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
 
         gains, lens, signals2D = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Stark Pulse Gain", "unit": "a.u.", "values": gains},
@@ -548,7 +564,7 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> AcStarkResult:
-        signals2D, gains, lens, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals2D, gains, lens, comment = load_data(filepath, return_comment=True, **kwargs)
         assert gains is not None and lens is not None
         assert len(gains.shape) == 1 and len(lens.shape) == 1
         assert signals2D.shape == (len(lens), len(gains))
@@ -560,7 +576,13 @@ class AcStarkRamseyExp(AbsExperiment[AcStarkResult, AcStarkRamseyCfg]):
         lens = lens.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = AcStarkRamseyCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = AcStarkRamseyCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, lens, signals2D)
 
         return gains, lens, signals2D

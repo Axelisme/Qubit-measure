@@ -15,7 +15,7 @@ from typing_extensions import (
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.liveplot import LivePlot1D
 from zcu_tools.program.v2 import (
@@ -144,6 +144,10 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
 
         times = times.astype(np.float64)
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Times", "unit": "a.u.", "values": times},
@@ -154,7 +158,7 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> ZigZagResult:
-        signals, times, _, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, times, _, comment = load_data(filepath, return_comment=True, **kwargs)
         assert times is not None
         assert len(times.shape) == 1 and len(signals.shape) == 1
         assert times.shape == signals.shape
@@ -162,7 +166,13 @@ class ZigZagExp(AbsExperiment[ZigZagResult, ZigZagCfg]):
         times = times.astype(np.int64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = ZigZagCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = ZigZagCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (times, signals)
 
         return times, signals

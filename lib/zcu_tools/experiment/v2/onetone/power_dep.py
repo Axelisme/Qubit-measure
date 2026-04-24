@@ -9,7 +9,7 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array, wrap_earlystop_check
 from zcu_tools.liveplot import LivePlot2DwithLine
@@ -165,6 +165,10 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
 
         gains, freqs, signals2D = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Frequency", "unit": "Hz", "values": freqs * 1e6},
@@ -176,7 +180,7 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> PowerDepResult:
-        signals2D, freqs, gains = load_data(filepath, **kwargs)
+        signals2D, freqs, gains, comment = load_data(filepath, return_comment=True, **kwargs)
         assert freqs is not None and gains is not None
         assert len(freqs.shape) == 1 and len(gains.shape) == 1
         assert signals2D.shape == (len(gains), len(freqs))
@@ -187,7 +191,10 @@ class PowerDepExp(AbsExperiment[PowerDepResult, PowerDepCfg]):
         freqs = freqs.astype(np.float64)
         signals2D = signals2D.astype(np.complex128)
 
-        self.last_cfg = None
+        if comment is not None:
+            cfg, _, _ = parse_comment(comment)
+            if cfg is not None:
+                self.last_cfg = PowerDepCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, freqs, signals2D)
 
         return gains, freqs, signals2D

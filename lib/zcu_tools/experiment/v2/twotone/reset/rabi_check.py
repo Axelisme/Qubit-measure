@@ -11,7 +11,7 @@ from typing_extensions import Any, Callable, Optional, TypeAlias
 
 from zcu_tools.experiment import AbsExperiment, config
 from zcu_tools.experiment.cfg_model import ExpCfgModel
-from zcu_tools.experiment.utils import setup_devices
+from zcu_tools.experiment.utils import make_comment, parse_comment, setup_devices
 from zcu_tools.experiment.v2.runner import Task, TaskState, run_task
 from zcu_tools.experiment.v2.utils import sweep2array
 from zcu_tools.liveplot import LivePlot1D
@@ -169,6 +169,10 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
 
         gains, signals = result
 
+        cfg = self.last_cfg
+        assert cfg is not None
+        comment = make_comment(cfg, comment)
+
         save_data(
             filepath=filepath,
             x_info={"name": "Amplitude", "unit": "a.u.", "values": gains},
@@ -180,7 +184,9 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         )
 
     def load(self, filepath: str, **kwargs) -> RabiCheckResult:
-        signals, gains, y_values, cfg = load_data(filepath, return_cfg=True, **kwargs)
+        signals, gains, y_values, comment = load_data(
+            filepath, return_comment=True, **kwargs
+        )
         assert gains is not None and y_values is not None
         assert len(gains.shape) == 1 and len(y_values.shape) == 1
         assert signals.shape == (len(y_values), len(gains))
@@ -188,7 +194,13 @@ class RabiCheckExp(AbsExperiment[RabiCheckResult, RabiCheckCfg]):
         gains = gains.astype(np.float64)
         signals = signals.astype(np.complex128)
 
-        self.last_cfg = RabiCheckCfg.validate_or_warn(cfg, source=filepath)
+        if comment is not None:
+
+            cfg, _, _ = parse_comment(comment)
+
+            if cfg is not None:
+
+                self.last_cfg = RabiCheckCfg.validate_or_warn(cfg, source=filepath)
         self.last_result = (gains, signals)
 
         return gains, signals
