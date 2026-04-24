@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import sys
 from abc import ABC, abstractmethod
-from copy import deepcopy
 
-from typing_extensions import TYPE_CHECKING, Any, Optional, Self
+from typing_extensions import TYPE_CHECKING, Optional, Self
 
 from zcu_tools.config import ConfigBase
 
